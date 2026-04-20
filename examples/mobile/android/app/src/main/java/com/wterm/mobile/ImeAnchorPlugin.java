@@ -1,0 +1,409 @@
+package com.wterm.mobile;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.Spannable;
+import android.text.TextWatcher;
+import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputConnectionWrapper;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.FrameLayout;
+import androidx.appcompat.widget.AppCompatEditText;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+@CapacitorPlugin(name = "ImeAnchor")
+public class ImeAnchorPlugin extends Plugin {
+    private static final String TAG = "ImeAnchor";
+
+    private ImeAnchorEditText imeEditText;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean suppressTextChange = false;
+    private boolean pendingShowRequest = false;
+    private boolean suppressCommitFallback = false;
+
+    @Override
+    public void load() {
+        super.load();
+        Log.d(TAG, "load()");
+        getActivity().runOnUiThread(this::ensureImeAnchor);
+    }
+
+    @PluginMethod
+    public void show(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Log.i(TAG, "show()");
+            ensureImeAnchor();
+            pendingShowRequest = true;
+            requestFocusAndShowKeyboard();
+            call.resolve(buildState("show"));
+        });
+    }
+
+    @PluginMethod
+    public void hide(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Log.i(TAG, "hide()");
+            pendingShowRequest = false;
+            hideKeyboard();
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void blur(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Log.i(TAG, "blur()");
+            pendingShowRequest = false;
+            if (imeEditText != null) {
+                imeEditText.clearFocus();
+            }
+            hideKeyboard();
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void getState(PluginCall call) {
+        getActivity().runOnUiThread(() -> call.resolve(buildState("getState")));
+    }
+
+    @PluginMethod
+    public void debugEmitInput(PluginCall call) {
+        String text = call.getString("text", "");
+        Log.i(TAG, "debugEmitInput(): text=" + text);
+        JSObject payload = new JSObject();
+        payload.put("text", text);
+        notifyListeners("input", payload);
+        call.resolve(buildState("debugEmitInput"));
+    }
+
+    private void ensureImeAnchor() {
+        if (imeEditText != null) {
+            Log.i(TAG, "ensureImeAnchor(): reuse existing anchor");
+            return;
+        }
+
+        FrameLayout rootView = getActivity().findViewById(android.R.id.content);
+        if (rootView == null) {
+            Log.w(TAG, "ensureImeAnchor(): rootView is null");
+            return;
+        }
+
+        imeEditText = new ImeAnchorEditText(getContext());
+        imeEditText.setPlugin(this);
+        imeEditText.setBackground(null);
+        imeEditText.setTextColor(0x00000000);
+        imeEditText.setHintTextColor(0x00000000);
+        imeEditText.setCursorVisible(false);
+        imeEditText.setIncludeFontPadding(false);
+        imeEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        imeEditText.setImeOptions(
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | EditorInfo.IME_FLAG_NO_FULLSCREEN
+                | EditorInfo.IME_FLAG_NAVIGATE_NEXT
+        );
+        imeEditText.setInputType(
+            InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        );
+        imeEditText.setSingleLine(false);
+        imeEditText.setMinLines(1);
+        imeEditText.setMaxLines(1);
+        imeEditText.setAlpha(0.01f);
+        imeEditText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        imeEditText.setFocusable(true);
+        imeEditText.setFocusableInTouchMode(true);
+        imeEditText.setShowSoftInputOnFocus(true);
+        imeEditText.setOnFocusChangeListener((view, hasFocus) ->
+            Log.i(
+                TAG,
+                "imeEditText focus=" + hasFocus
+                    + " windowFocus=" + view.hasWindowFocus()
+                    + " attached=" + view.isAttachedToWindow()
+            )
+        );
+
+        imeEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                handleEditableChanged(editable);
+            }
+        });
+
+        FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+            dpToPx(140),
+            dpToPx(36)
+        );
+        layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        layoutParams.bottomMargin = dpToPx(12);
+        rootView.addView(imeEditText, layoutParams);
+        Log.i(TAG, "ensureImeAnchor(): anchor attached");
+    }
+
+    private void handleEditableChanged(Editable editable) {
+        if (suppressTextChange || imeEditText == null) {
+            return;
+        }
+
+        if (hasComposingText(editable)) {
+            Log.i(TAG, "handleEditableChanged(): composing length=" + editable.length());
+            return;
+        }
+
+        String committed = editable.toString();
+        if (committed.isEmpty()) {
+            return;
+        }
+
+        if (suppressCommitFallback) {
+            Log.i(TAG, "handleEditableChanged(): skip fallback committed=" + committed);
+            return;
+        }
+
+        emitInputText(committed, "editableFallback");
+    }
+
+    void emitBackspace(int count) {
+        Log.i(TAG, "emitBackspace(): count=" + count);
+        JSObject payload = new JSObject();
+        payload.put("count", Math.max(1, count));
+        notifyListeners("backspace", payload);
+    }
+
+    void emitInputText(String text, String source) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+
+        Log.i(TAG, "emitInputText(): source=" + source + " text=" + text);
+        JSObject payload = new JSObject();
+        payload.put("text", text);
+        notifyListeners("input", payload);
+
+        if (imeEditText != null && imeEditText.getText() != null) {
+            suppressCommitFallback = true;
+            suppressTextChange = true;
+            imeEditText.getText().clear();
+            suppressTextChange = false;
+            suppressCommitFallback = false;
+        }
+    }
+
+    private boolean hasComposingText(Editable editable) {
+        if (!(editable instanceof Spannable)) {
+            return false;
+        }
+        Spannable spannable = editable;
+        return BaseInputConnectionCompat.getComposingSpanStart(spannable) >= 0
+            || BaseInputConnectionCompat.getComposingSpanEnd(spannable) >= 0;
+    }
+
+    private void requestFocusAndShowKeyboard() {
+        if (imeEditText == null) {
+            Log.w(TAG, "requestFocusAndShowKeyboard(): imeEditText is null");
+            return;
+        }
+
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            View webView = getBridge().getWebView();
+            Log.i(TAG, "requestFocusAndShowKeyboard(): clearing webview focus hasFocus=" + webView.hasFocus());
+            webView.clearFocus();
+        }
+
+        imeEditText.requestFocusFromTouch();
+        boolean focusGranted = imeEditText.requestFocus();
+        imeEditText.setSelection(imeEditText.getText() == null ? 0 : imeEditText.getText().length());
+        Log.i(
+            TAG,
+            "requestFocusAndShowKeyboard(): focusGranted=" + focusGranted
+                + " hasFocus=" + imeEditText.hasFocus()
+                + " windowFocus=" + imeEditText.hasWindowFocus()
+                + " attached=" + imeEditText.isAttachedToWindow()
+                + " token=" + (imeEditText.getWindowToken() != null)
+        );
+        imeEditText.post(this::showKeyboardWithInsetsController);
+    }
+
+    private void hideKeyboard() {
+        if (imeEditText == null) {
+            Log.w(TAG, "hideKeyboard(): imeEditText is null");
+            return;
+        }
+        InputMethodManager imm =
+            (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            boolean hidden = imm.hideSoftInputFromWindow(imeEditText.getWindowToken(), 0);
+            Log.i(TAG, "hideKeyboard(): hidden=" + hidden + " token=" + (imeEditText.getWindowToken() != null));
+        } else {
+            Log.w(TAG, "hideKeyboard(): InputMethodManager is null");
+        }
+    }
+
+    private void showKeyboardWithInsetsController() {
+        if (imeEditText == null || !pendingShowRequest) {
+            Log.i(TAG, "showKeyboardWithInsetsController(): skip pending=" + pendingShowRequest);
+            return;
+        }
+
+        if (!imeEditText.hasWindowFocus()) {
+            Log.i(TAG, "showKeyboardWithInsetsController(): waiting for window focus");
+            imeEditText.postDelayed(this::showKeyboardWithInsetsController, 32);
+            return;
+        }
+
+        imeEditText.requestFocus();
+        imeEditText.setSelection(imeEditText.getText() == null ? 0 : imeEditText.getText().length());
+        InputMethodManager imm =
+            (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm == null) {
+            Log.w(TAG, "showKeyboardWithInsetsController(): InputMethodManager is null");
+            return;
+        }
+
+        imm.restartInput(imeEditText);
+        boolean shown = imm.showSoftInput(imeEditText, 0);
+        Log.i(
+            TAG,
+            "showKeyboardWithInsetsController(): shown=" + shown
+                + " hasFocus=" + imeEditText.hasFocus()
+                + " windowFocus=" + imeEditText.hasWindowFocus()
+                + " token=" + (imeEditText.getWindowToken() != null)
+        );
+
+        mainHandler.postDelayed(() -> {
+            if (imeEditText == null || !pendingShowRequest) {
+                return;
+            }
+            imm.restartInput(imeEditText);
+            boolean retryShown = imm.showSoftInput(imeEditText, 0);
+            Log.i(
+                TAG,
+                "showKeyboardWithInsetsController(retry): shown=" + retryShown
+                    + " hasFocus=" + imeEditText.hasFocus()
+                    + " windowFocus=" + imeEditText.hasWindowFocus()
+                    + " token=" + (imeEditText.getWindowToken() != null)
+            );
+        }, 96);
+    }
+
+    private JSObject buildState(String source) {
+        JSObject state = new JSObject();
+        state.put("source", source);
+        state.put("pendingShowRequest", pendingShowRequest);
+        state.put("hasAnchor", imeEditText != null);
+        state.put("hasFocus", imeEditText != null && imeEditText.hasFocus());
+        state.put("hasWindowFocus", imeEditText != null && imeEditText.hasWindowFocus());
+        state.put("isAttached", imeEditText != null && imeEditText.isAttachedToWindow());
+        state.put("hasWindowToken", imeEditText != null && imeEditText.getWindowToken() != null);
+        state.put("textLength", imeEditText != null && imeEditText.getText() != null ? imeEditText.getText().length() : 0);
+        return state;
+    }
+
+    private int dpToPx(int dp) {
+        return Math.round(
+            TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP,
+                dp,
+                getContext().getResources().getDisplayMetrics()
+            )
+        );
+    }
+
+    private static class ImeAnchorEditText extends AppCompatEditText {
+        private ImeAnchorPlugin plugin;
+
+        ImeAnchorEditText(Context context) {
+            super(context);
+        }
+
+        void setPlugin(ImeAnchorPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        @Override
+        public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+            Log.i(TAG, "onCreateInputConnection()");
+            InputConnection target = super.onCreateInputConnection(outAttrs);
+            if (target == null) {
+                Log.w(TAG, "onCreateInputConnection(): target is null");
+                return null;
+            }
+
+            return new InputConnectionWrapper(target, true) {
+                @Override
+                public boolean deleteSurroundingText(int beforeLength, int afterLength) {
+                    Editable editable = getText();
+                    if (plugin != null && beforeLength > 0 && afterLength == 0 && (editable == null || editable.length() == 0)) {
+                        plugin.emitBackspace(beforeLength);
+                        return true;
+                    }
+                    return super.deleteSurroundingText(beforeLength, afterLength);
+                }
+
+                @Override
+                public boolean sendKeyEvent(KeyEvent event) {
+                    if (plugin != null
+                        && event.getAction() == KeyEvent.ACTION_DOWN
+                        && event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+                        Editable editable = getText();
+                        if (editable == null || editable.length() == 0) {
+                            plugin.emitBackspace(1);
+                            return true;
+                        }
+                    }
+                    return super.sendKeyEvent(event);
+                }
+
+                @Override
+                public boolean commitText(CharSequence text, int newCursorPosition) {
+                    if (plugin != null && text != null && text.length() > 0) {
+                        plugin.emitInputText(text.toString(), "commitText");
+                        return true;
+                    }
+                    return super.commitText(text, newCursorPosition);
+                }
+
+            };
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean hasWindowFocus) {
+            super.onWindowFocusChanged(hasWindowFocus);
+            if (hasWindowFocus && plugin != null && plugin.pendingShowRequest) {
+                Log.i(TAG, "ImeAnchorEditText.onWindowFocusChanged(): scheduling show");
+                post(plugin::showKeyboardWithInsetsController);
+            }
+        }
+    }
+
+    private static class BaseInputConnectionCompat {
+        static int getComposingSpanStart(Spannable text) {
+            return android.view.inputmethod.BaseInputConnection.getComposingSpanStart(text);
+        }
+
+        static int getComposingSpanEnd(Spannable text) {
+            return android.view.inputmethod.BaseInputConnection.getComposingSpanEnd(text);
+        }
+    }
+}
