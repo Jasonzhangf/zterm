@@ -5,6 +5,7 @@ export interface PaneSlotDefinition {
   title: string;
   subtitle: string;
   badge?: string;
+  widthWeight?: number;
   render: () => ReactNode;
 }
 
@@ -30,33 +31,33 @@ const frameStyle: CSSProperties = {
 
 const headerStyle: CSSProperties = {
   display: 'flex',
-  gap: '10px',
+  gap: '8px',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-  background: 'rgba(255, 255, 255, 0.02)',
+  background: 'rgba(255, 255, 255, 0.018)',
 };
 
 const indexStyle: CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
   minWidth: '28px',
-  height: '28px',
+  height: '24px',
   borderRadius: '999px',
   background: 'rgba(61, 126, 255, 0.18)',
   color: '#cfe0ff',
   fontWeight: 700,
-  fontSize: '11px',
+  fontSize: '10px',
 };
 
 const bodyStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  padding: '14px',
+  padding: '12px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '14px',
+  gap: '10px',
 };
 
 function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
@@ -68,11 +69,11 @@ function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
       }}
     >
       <div style={headerStyle}>
-        <div style={{ minWidth: 0, display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+        <div style={{ minWidth: 0, display: 'flex', gap: '8px', alignItems: 'center', flex: 1 }}>
           <span style={indexStyle}>{String(index + 1).padStart(2, '0')}</span>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: '15px', lineHeight: 1.2 }}>{slot.title}</h2>
-            <p style={{ margin: '3px 0 0', color: '#97a4b5', lineHeight: 1.35, fontSize: '12px' }}>{slot.subtitle}</p>
+            <h2 style={{ margin: 0, fontSize: '14px', lineHeight: 1.2 }}>{slot.title}</h2>
+            <p style={{ margin: '2px 0 0', color: '#8393a8', lineHeight: 1.3, fontSize: '11px' }}>{slot.subtitle}</p>
           </div>
         </div>
         {slot.badge ? (
@@ -80,10 +81,10 @@ function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
             style={{
               flexShrink: 0,
               borderRadius: '999px',
-              padding: '5px 10px',
+              padding: '4px 8px',
               background: 'rgba(59, 204, 160, 0.14)',
               color: '#7ff1cc',
-              fontSize: '11px',
+              fontSize: '10px',
               fontWeight: 700,
             }}
           >
@@ -99,6 +100,7 @@ function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
 
 export function PaneStage({ columns, slots }: PaneStageProps) {
   const visibleSlots = slots.slice(0, columns);
+  const template = visibleSlots.map((slot) => `${slot.widthWeight || 1}fr`).join(' ');
 
   return (
     <main
@@ -106,12 +108,12 @@ export function PaneStage({ columns, slots }: PaneStageProps) {
         flex: 1,
         minHeight: 0,
         display: 'grid',
-        gridTemplateColumns: `repeat(${visibleSlots.length}, minmax(0, 1fr))`,
+        gridTemplateColumns: template,
         gap: 0,
         overflow: 'hidden',
-        borderRadius: '24px',
+        borderRadius: '18px',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        background: 'rgba(8, 10, 15, 0.78)',
+        background: 'rgba(8, 10, 15, 0.9)',
       }}
     >
       {visibleSlots.map((slot, index) => (

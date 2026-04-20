@@ -23,6 +23,10 @@
   - `+` 可进入 new connection tab
   - tab 可关闭
   - 当前阶段仍是 `single runtime · multi tabs`
+- 版式已进入 terminal-first 收口：
+  - Terminal 列宽显著大于左 rail
+  - 顶部 chrome / shell tabs / pane header 已压缩
+  - Terminal pane 内不再叠第二层假 tabs/toolbars
 
 ## 当前范围
 
@@ -39,6 +43,7 @@
 - 右侧 details 作为 inspector，而不是主阅读区
 - tab strip 要尽量承载当前 target / inspector 的真实状态，而不是静态占位文案
 - shell tabs 当前只保证“多个 open target + 单个 live runtime”的真实闭环；不宣称并发多 websocket / 多 live session
+- 桌面排版优先级高于额外壳层装饰：一旦壳层和主终端阅读区域冲突，先压缩 chrome / tab / meta 区，保证 terminal surface 最大化
 - 可构建的 `.app` 或 unpacked 可执行目录
 - 基于 shared truth 的连接配置流程：
   - saved hosts

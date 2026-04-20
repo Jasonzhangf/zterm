@@ -103,3 +103,4 @@
 - 2026-04-20 Mac 壳层已开始按 Tabby 官方特征收口：紧凑顶部 chrome、tab strip、左侧 profile rail、terminal-first 主画布都已落到 packaged `.app`；但布局真源仍保持 shared 的单行多列 + 垂直分屏
 - 2026-04-20 Mac 2-col 壳层继续收口：顶部 tab strip 已从静态文案改为真实 target / inspector 状态 tabs，并可直接切 `Terminal ↔ Inspector`；右侧 Details 也已改成 inspector summary + compact form
 - 2026-04-20 Mac shell 已进入最小真实 open tabs：saved target 可开成 tab、`+` 可进入 new connection tab、tab 可关闭；当前真边界明确为 `single runtime · multi tabs`
+- 2026-04-20 Mac 壳层排版已做第一轮 terminal-first 收口：列宽不再等分，Terminal 主列明显更宽；顶部 chrome / shell tabs / terminal 内二级 tabs 已压缩

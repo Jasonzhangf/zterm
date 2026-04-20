@@ -41,9 +41,7 @@ export function ConnectionsSlot({
         <div className="slot-card-header compact">
           <div>
             <div className="slot-card-title">Profiles</div>
-            <div className="slot-card-copy">
-              参考 Tabby 的左侧会话栏，但继续使用 Android 的 server-first 连接真源。
-            </div>
+            <div className="slot-card-copy">Server-first</div>
           </div>
           <button className="primary-button" type="button" onClick={onCreateHost}>
             +
@@ -81,9 +79,6 @@ export function ConnectionsSlot({
                   {host.pinned ? <span className="meta-badge">Pinned</span> : null}
                 </div>
                 <div className="list-row-copy">{formatBridgeEndpoint(host)} · {getResolvedSessionName(host)}</div>
-                {host.autoCommand ? (
-                  <div className="list-row-meta">Auto command · {host.autoCommand}</div>
-                ) : null}
               </button>
 
               <div className="list-row-actions">

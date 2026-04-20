@@ -29,6 +29,10 @@
       - 可以同时维护多个 open target descriptor
       - 但 app-level bridge websocket/runtime 同时只服务一个 active target
       - 切 tab 时如 target 变更，则切换 active target 并重连
+    - 列宽遵守 terminal-first：
+      - connections rail 更窄
+      - terminal 主列更宽
+      - inspector 次于 terminal，不与 terminal 等权
   - 单行多列 + 垂直分屏布局
   - Connections / Details / Terminal 三个 pane 的统一编排
 

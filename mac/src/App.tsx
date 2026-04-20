@@ -281,6 +281,7 @@ export default function App() {
         title: 'Connections',
         subtitle: 'Server groups, saved targets, and shared connection entry.',
         badge: 'Server-first list',
+        widthWeight: layout.columns >= 3 ? 0.82 : 0.88,
         render: () => (
           <ConnectionsSlot
             hosts={hosts}
@@ -306,6 +307,7 @@ export default function App() {
         title: 'Terminal',
         subtitle: 'Primary stage now renders live bridge snapshots instead of mock text.',
         badge: 'Main execution pane',
+        widthWeight: layout.columns >= 3 ? 1.58 : 1.42,
         render: () => (
           <TerminalSlot
             host={selectedHost}
@@ -322,6 +324,7 @@ export default function App() {
         title: 'Details',
         subtitle: 'Connection properties flow shared from Android truth source.',
         badge: isEditing ? 'Editing pane' : 'Inspector',
+        widthWeight: 1.02,
         render: () => (
           <DetailsSlot
             host={editorMode === 'create' ? undefined : selectedHost}

@@ -13,7 +13,6 @@ interface TerminalSlotProps {
 export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResize, onDisconnect }: TerminalSlotProps) {
   const activeTarget = session.activeTarget;
   const hasLiveTerminal = Boolean(activeTarget);
-  const terminalTitle = session.title || activeTarget?.sessionName || host?.sessionName || host?.name || 'Terminal';
   const targetLabel = activeTarget
     ? formatBridgeSessionTarget(activeTarget)
     : host
@@ -23,22 +22,10 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
 
   return (
     <div className="slot-stack terminal-slot-shell">
-      <div className="terminal-shell-header">
-        <div className="terminal-tabs">
-          <span className="terminal-tab active">{terminalTitle}</span>
-          <span className="terminal-tab">{targetLabel}</span>
-          <span className="terminal-tab ghost">{session.status}</span>
-        </div>
-        <div className="terminal-toolbar">
-          <span className="terminal-tool-pill">search</span>
-          <span className="terminal-tool-pill">split-ready</span>
-          <span className="terminal-tool-pill">live render</span>
-        </div>
-      </div>
-
       <div className="terminal-meta-bar">
         <div className="terminal-meta-copy">
           <span className={`terminal-status-pill ${session.status}`}>{session.status.toUpperCase()}</span>
+          <span className="terminal-target-label">{targetLabel}</span>
           <span>
             {activeTarget
               ? `Live target: ${activeTarget.name || activeTarget.sessionName}`
@@ -50,8 +37,8 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
           <span>{`buffer lines: ${session.buffer.lines.length}`}</span>
           <span>
             {isDetailsVisible
-              ? 'Inspector currently occupies the secondary column.'
-              : 'Primary shell stays one-row multi-column with vertical split panes.'}
+              ? 'Inspector occupies secondary column.'
+              : 'Terminal remains primary visual column.'}
           </span>
         </div>
         {hasLiveTerminal ? (
