@@ -30,6 +30,7 @@ import {
   DEFAULT_DAEMON_SESSION_NAME,
   WTERM_CONFIG_DISPLAY_PATH,
 } from '../lib/mobile-config';
+import { reconcileAbsoluteScrollbackRange } from '../lib/scrollback-buffer';
 import { getWtermHomeDir, resolveDaemonRuntimeConfig } from './daemon-config';
 
 interface TmuxConnectPayload {
@@ -67,6 +68,8 @@ interface SessionMirror {
   cols: number;
   rows: number;
   lastScrollbackCount: number;
+  scrollbackBaseIndex: number;
+  scrollbackNextIndex: number;
   capturedStartIndex: number;
   capturedScrollbackLines: string[];
   lastOutputAt: number;
@@ -338,6 +341,8 @@ function createMirror(sessionName: string): SessionMirror {
     cols: 80,
     rows: 24,
     lastScrollbackCount: -1,
+    scrollbackBaseIndex: 0,
+    scrollbackNextIndex: 0,
     capturedStartIndex: 0,
     capturedScrollbackLines: [],
     lastOutputAt: 0,
@@ -421,6 +426,8 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
   mirror.capturedScrollbackLines = [];
   mirror.capturedStartIndex = 0;
   mirror.lastScrollbackCount = -1;
+  mirror.scrollbackBaseIndex = 0;
+  mirror.scrollbackNextIndex = 0;
   mirrors.delete(mirror.key);
 }
 
@@ -515,10 +522,19 @@ function refreshMirrorCapturedScrollback(mirror: SessionMirror) {
   }
 
   const currentScrollbackCount = bridge.getScrollbackCount();
+  const absoluteRange = reconcileAbsoluteScrollbackRange({
+    lastScrollbackCount: mirror.lastScrollbackCount,
+    nextIndex: mirror.scrollbackNextIndex,
+  }, currentScrollbackCount);
   const capturedLines = captureTmuxLines(mirror.sessionName, MAX_CAPTURED_SCROLLBACK_LINES + bridge.getRows());
   const totalCapturedScrollback = Math.max(0, capturedLines.length - bridge.getRows());
-  mirror.capturedScrollbackLines = totalCapturedScrollback > 0 ? capturedLines.slice(0, totalCapturedScrollback) : [];
-  mirror.capturedStartIndex = Math.max(0, currentScrollbackCount - totalCapturedScrollback);
+  const capturedCount = Math.min(totalCapturedScrollback, currentScrollbackCount);
+  mirror.capturedScrollbackLines = capturedCount > 0
+    ? capturedLines.slice(Math.max(0, totalCapturedScrollback - capturedCount), totalCapturedScrollback)
+    : [];
+  mirror.scrollbackBaseIndex = absoluteRange.startIndex;
+  mirror.scrollbackNextIndex = absoluteRange.nextIndex;
+  mirror.capturedStartIndex = absoluteRange.startIndex + Math.max(0, currentScrollbackCount - capturedCount);
   mirror.lastScrollbackCount = currentScrollbackCount;
 }
 
@@ -725,13 +741,20 @@ function buildViewportUpdate(bridge: WasmBridge): TerminalViewportUpdate {
   };
 }
 
-function syncMirrorScrollbackAppend(mirror: SessionMirror, startIndex: number, lines: string[]) {
-  const expectedNextIndex = mirror.capturedStartIndex + mirror.capturedScrollbackLines.length;
+function syncMirrorScrollbackAppend(
+  mirror: SessionMirror,
+  startIndex: number,
+  lines: string[],
+  currentScrollbackCount: number,
+) {
+  const expectedNextIndex = mirror.scrollbackNextIndex;
   if (startIndex !== expectedNextIndex) {
     return false;
   }
 
   mirror.capturedScrollbackLines.push(...lines);
+  mirror.scrollbackNextIndex = startIndex + lines.length;
+  mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - Math.max(0, currentScrollbackCount));
   if (mirror.capturedScrollbackLines.length > MAX_CAPTURED_SCROLLBACK_LINES) {
     const trimCount = mirror.capturedScrollbackLines.length - MAX_CAPTURED_SCROLLBACK_LINES;
     mirror.capturedScrollbackLines.splice(0, trimCount);
@@ -766,10 +789,14 @@ function flushMirrorUpdates(mirror: SessionMirror) {
 
   const newScrollbackLines = currentScrollbackCount - mirror.lastScrollbackCount;
   if (newScrollbackLines > 0) {
-    const startIndex = currentScrollbackCount - newScrollbackLines;
-    const appended = readScrollbackRangeByOldestIndex(bridge, startIndex, currentScrollbackCount);
+    const startIndex = mirror.scrollbackNextIndex;
+    const appended = readScrollbackRangeByOldestIndex(
+      bridge,
+      currentScrollbackCount - newScrollbackLines,
+      currentScrollbackCount,
+    );
     if (appended.length > 0) {
-      if (syncMirrorScrollbackAppend(mirror, startIndex, appended)) {
+      if (syncMirrorScrollbackAppend(mirror, startIndex, appended, currentScrollbackCount)) {
         broadcastMirrorScrollbackAppend(mirror, appended, startIndex);
       } else {
         refreshMirrorCapturedScrollback(mirror);
@@ -818,7 +845,6 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.state = 'connecting';
   mirror.title = mirror.sessionName;
   mirror.lastScrollbackCount = -1;
-  mirror.capturedStartIndex = 0;
   mirror.capturedScrollbackLines = [];
   clearMirrorFlushTimer(mirror);
 
@@ -895,10 +921,12 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
         cursor: mirror.bridge.getCursor(),
         cursorKeysApp: mirror.bridge.cursorKeysApp(),
         scrollbackLines: [],
-        scrollbackStartIndex: 0,
+        scrollbackStartIndex: mirror.scrollbackNextIndex,
       };
       mirror.lastScrollbackCount = mirror.bridge.getScrollbackCount();
-      mirror.capturedStartIndex = mirror.lastScrollbackCount;
+      mirror.scrollbackNextIndex = Math.max(mirror.scrollbackNextIndex, mirror.lastScrollbackCount);
+      mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - mirror.lastScrollbackCount);
+      mirror.capturedStartIndex = mirror.scrollbackNextIndex;
       mirror.capturedScrollbackLines = [];
       mirror.bridge.clearDirty();
       for (const sessionId of mirror.subscribers) {
@@ -908,7 +936,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
         }
         session.title = mirror.title;
         session.sessionName = mirror.sessionName;
-        session.backfillCursor = 0;
+        session.backfillCursor = mirror.scrollbackNextIndex;
         if (session.state !== 'connected') {
           session.state = 'connected';
           sendMessage(session, { type: 'connected', payload: { sessionId: session.id } });
@@ -980,7 +1008,6 @@ function handleResize(session: ClientSession, cols: number, rows: number) {
   mirror.ptyProcess.resize(cols, rows);
   mirror.bridge.resize(cols, rows);
   mirror.lastScrollbackCount = -1;
-  mirror.capturedStartIndex = 0;
   mirror.capturedScrollbackLines = [];
   clearMirrorFlushTimer(mirror);
   refreshMirrorCapturedScrollback(mirror);

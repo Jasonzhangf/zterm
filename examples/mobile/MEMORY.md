@@ -52,6 +52,7 @@
 - [2026-04-20] mobile 发热要优先区分网络 vs CPU/IO：若流量不大但 `Chrome_IOThread` / `RenderThread` 高，占优先级最高的真源通常是“空 viewport 刷包”或“每帧 localStorage 持久化大 buffer”
 - [2026-04-20] websocket reconnect 的 onopen 也必须显式同步 `stream-mode`；否则 active session 会短暂留在 idle/backfill 频率，肉眼看起来像秒级延迟
 - [2026-04-20] terminal 手势滚动锁应是 latch：一旦进入历史阅读态，直到真实输入发生前都不应自动恢复 bottom-follow；“滚回底部”本身不等于解锁
+- [2026-04-20] scrollback 的 `startIndex` 必须是 mirror 生命周期内单调递增的绝对行号；client 当前只会持有一个连续区间，若 merge 后出现 gap，必须丢弃断开的旧前缀，只保留“最新连续尾段”，再靠 backfill 补历史，不能把稀疏索引压成连续数组
 - [2026-04-20] `examples/mobile/evidence/` 是本地证据仓，不应把整批历史截图/日志直接推到 GitHub 主线；Git 中只保留 `README.md` 说明目录与取证规则
 
 ## Patterns & Learnings

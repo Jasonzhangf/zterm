@@ -20,6 +20,7 @@ import { STORAGE_KEYS } from '../lib/types';
 import { buildBridgeUrl } from '../lib/bridge-url';
 import { getResolvedSessionName } from '../lib/connection-target';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import { mergeIndexedScrollbackRanges } from '../lib/scrollback-buffer';
 
 const SESSION_STATUS_EVENT = 'wterm-mobile:session-status';
 
@@ -119,44 +120,6 @@ function cellsToLine(cells: TerminalCell[]) {
     line += cell.char >= 32 ? String.fromCodePoint(cell.char) : ' ';
   }
   return line.replace(/\s+$/u, '');
-}
-
-function mergeIndexedScrollbackLines(
-  currentLines: string[],
-  currentStartIndex: number | undefined,
-  incomingLines: string[],
-  incomingStartIndex: number | undefined,
-) {
-  if (incomingLines.length === 0) {
-    return {
-      lines: currentLines,
-      scrollbackStartIndex: currentStartIndex,
-    };
-  }
-
-  if (incomingStartIndex === undefined) {
-    return {
-      lines: incomingLines,
-      scrollbackStartIndex: undefined,
-    };
-  }
-
-  if (currentLines.length === 0 || currentStartIndex === undefined) {
-    return {
-      lines: incomingLines,
-      scrollbackStartIndex: incomingStartIndex,
-    };
-  }
-
-  const merged = new Map<number, string>();
-  currentLines.forEach((line, index) => merged.set(currentStartIndex + index, line));
-  incomingLines.forEach((line, index) => merged.set(incomingStartIndex + index, line));
-
-  const orderedIndexes = [...merged.keys()].sort((left, right) => left - right);
-  return {
-    lines: orderedIndexes.map((index) => merged.get(index) || ''),
-    scrollbackStartIndex: orderedIndexes[0],
-  };
 }
 
 function mergeSnapshotIntoBufferLines(snapshot: TerminalSnapshot, cacheLines: number) {
@@ -291,14 +254,15 @@ function sessionReducer(state: SessionManagerState, action: SessionAction): Sess
             nextScrollbackStartIndex = action.update.startIndex;
             kind = 'replace';
           } else {
-            const merged = mergeIndexedScrollbackLines(
-              currentScrollback,
-              session.scrollbackStartIndex,
-              action.update.lines,
-              action.update.startIndex,
-            );
+            const merged = mergeIndexedScrollbackRanges({
+              lines: currentScrollback,
+              startIndex: session.scrollbackStartIndex,
+            }, {
+              lines: action.update.lines,
+              startIndex: action.update.startIndex,
+            });
             nextScrollback = merged.lines;
-            nextScrollbackStartIndex = merged.scrollbackStartIndex;
+            nextScrollbackStartIndex = merged.startIndex;
             kind = action.update.mode === 'prepend' ? 'prepend' : 'append';
           }
 
