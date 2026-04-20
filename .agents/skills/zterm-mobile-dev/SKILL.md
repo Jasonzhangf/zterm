@@ -88,6 +88,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.9 连接模型拆分规则
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
+- 若 `bridgeHost` 已显式写成 `ws://host:port` / `wss://host:port`，Android / Mac / shared storage 都必须把这个 endpoint 当成 display / preset id / effective port 的唯一真源；表单也要同步把 `Bridge Port` 刷成同一个端口，禁止出现双端口假象
 
 ### 2.10 daemon 收敛规则
 - server 侧启动入口要收敛成单一 daemon CLI，默认监听地址/端口由统一配置真源决定（当前 `0.0.0.0:3333`）
@@ -130,6 +131,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - future Mac 复用 shared app-layer 的页面、会话、存储和 layout primitives；平台壳只补窗口 / 菜单 / 快捷键 / 原生输入差异
 - 触发信号：一旦需求里出现 pad / foldable / split-screen / Mac / 多 pane / 多 active tab，就先回到 `0001-cross-platform-layout-profile.md` 冻结设计，再进入实现
 - Jason 当前新增冻结：统一布局默认是一行多列，不以上下堆叠多 pane 作为主方案
+- 桌面 packaged/dev 验证若需要重开 `ZTerm.app`，必须先退出旧实例，再打开新实例；不要直接 `open -n` 叠多个 app 进程污染证据
 
 ## 三、开发闭环流程
 
@@ -593,6 +595,14 @@ android/
 - **触发信号**: 手机明显发热，但网络流量不大
 - **动作**: 先抓 `adb shell dumpsys cpuinfo`、`top -H -p <pid>`、`dumpsys gfxinfo`；重点看 `Chrome_IOThread` / `RenderThread` / `Slow issue draw commands`
 - **高频真源**: 1) server 端空刷 viewport（例如把 `cursor.visible` 当变化条件导致每 96ms 发包） 2) client 端每帧 `localStorage.setItem(JSON.stringify(buffer/snapshot))` 3) 全量 scrollback DOM + 常驻 blur
+
+### 模式: Electron 桌面壳验证分层
+- **适用场景**: future Mac / Win 壳移植 Android app-layer 流程
+- **动作**: `.app` 只验证 build/package/window/stage 可执行；表单交互与回显优先走浏览器 dev server（同一 renderer 代码）做细粒度验证，再回到桌面壳做 smoke
+
+### 模式: tmux discovery 不等于 live connect
+- **触发信号**: UI 能列出 tmux sessions，但用户仍反馈“无法连接”
+- **动作**: 检查客户端是否真的走了 Android 同构协议：`ws open -> send connect(payload) -> send stream-mode(active)`；仅有 `list-sessions` 只能证明 bridge 可达，不能证明 session 已 attach
 
 ---
 

@@ -58,6 +58,10 @@
 - [2026-04-20] `android/evidence/` 是本地证据仓，不应把整批历史截图/日志直接推到 GitHub 主线；Git 中只保留 `README.md` 说明目录与取证规则
 - [2026-04-20] 跨尺寸布局真源必须统一成**一个 layout profile + pane stage**：phone / tablet / foldable / split-screen / future Mac 共用同一编排决策，页面语义不随平台分叉
 - [2026-04-20] Jason 补充冻结：大屏统一效果默认应是一行多列、列与列之间垂直分屏；不要把上下堆叠多 pane 当成主方案。future Mac 也沿同一单行多列编排复用 shared app-layer
+- [2026-04-20] 当 Mac 需要移植 Android 连接配置流时，优先下沉纯逻辑到 `packages/shared/connection/*` 与 `packages/shared/react/*`（Host / BridgeSettings / tmux discovery / localStorage hook），而不是在桌面端复制一套 ad hoc 表单/存储实现
+- [2026-04-20] tmux session discovery 不是 live connect：桌面端如果只做 `list-sessions`，用户会看到“能找到 session 但连不上”。真正连接必须显式复用 Android 的 websocket 协议：`open ws -> send connect(payload) -> send stream-mode(active)`
+- [2026-04-20] 若 `bridgeHost` 已是显式 `ws://host:port` / `wss://host:port`，shared truth 必须把这个显式 endpoint 当成 display/preset key/store port 的真源；不要再额外拼接独立 `bridgePort`，否则会制造双端口假象并污染 remembered server key
+- [2026-04-20] endpoint 归一不能只修 Mac；Android 的 `bridge-settings / bridge-url / connection-target / storage hooks / Connection Properties` 也要直接复用同一个 shared truth，否则桌面和移动端会再次在显式 `ws://host:port` 场景下分叉
 
 ## Patterns & Learnings
 
@@ -78,3 +82,4 @@
 - Android WebView 的整页回弹不要只在终端容器上修；要把 body/root/WebView 三层都关掉，把滚动权限只留给 terminal buffer 容器
 - 终端发热先查运行态 debug overlay / 高频 metrics setState / console spam；这些比布局本身更容易在手机上造成明显发热
 - terminal 持久化不要把 `remoteSnapshot` / `outputHistory` 这种高频变化大对象每帧写进 localStorage；恢复态优先保留按行 `bufferLines`，真正的 viewport/cursor 靠 reconnect 后服务端刷新
+- Electron 打包壳与交互验证要分层：`.app` 负责验证 build/package/window 可执行；细粒度表单交互更适合走浏览器 dev server（同一 renderer 代码），再回到 `.app` 验证桌面壳仍可启动

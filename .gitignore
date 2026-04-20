@@ -19,3 +19,8 @@ android/evidence/**
 android/native/android/.gradle/
 android/native/android/local.properties
 android/native/android/**/build/
+mac/node_modules/
+mac/dist/
+mac/dist-electron/
+mac/out/
+mac/*.tsbuildinfo

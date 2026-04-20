@@ -1,0 +1,20 @@
+{
+  "name": "zterm",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "pnpm --filter @zterm/android dev",
+    "build": "pnpm --filter @zterm/android build",
+    "type-check": "pnpm --filter @zterm/android type-check",
+    "dev:mac": "pnpm --filter @zterm/mac dev",
+    "build:mac": "pnpm --filter @zterm/mac build",
+    "package:mac": "pnpm --filter @zterm/mac package",
+    "build:android": "pnpm --filter @zterm/android build:android",
+    "sync:android": "pnpm --filter @zterm/android sync:android",
+    "daemon": "pnpm --filter @zterm/android daemon",
+    "daemon:start": "pnpm --filter @zterm/android daemon:start",
+    "daemon:status": "pnpm --filter @zterm/android daemon:status",
+    "daemon:stop": "pnpm --filter @zterm/android daemon:stop"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

@@ -17,3 +17,7 @@ Application repo for the Android client and future Mac / Windows clients.
 ## Android app
 
 See `android/README.md` for build, install, and daemon commands.
+
+## Mac app
+
+See `mac/README.md` for the minimal executable package workflow.

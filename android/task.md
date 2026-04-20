@@ -62,9 +62,11 @@
 - [x] T1 冻结唯一 layout profile 决策文档（`docs/decisions/0001-cross-platform-layout-profile.md`）
 - [x] T2 更新 `spec / architecture / dev-workflow / ui-slices / SKILL`
 - [x] T3 建立 task board / CACHE / MEMORY 的统一口径
-- [ ] T4 抽 layout profile resolver + pane stage 真正进入代码（`mobile-14.1`）
+- [x] T4 抽 layout profile resolver + pane stage 真正进入代码（`mobile-14.1`）
 - [ ] T5 验证 phone / tablet / foldable / split-screen / future Mac 的布局切换口径（`mobile-14.3`）
 - [ ] T6 基于 shared pane stage 推进 future Mac 壳（`mobile-14.2` / `mobile-14.3`）
+- [x] T7 构建 Mac 最小可执行包（`mobile-14.4`）
+- [x] T8 把 Android 连接配置流程移植到 Mac（shared connection model / storage / details form）
 
 ## 当前状态
 
@@ -90,3 +92,11 @@
 - 2026-04-20 当前重点：scrollback/buffer 要改成“绝对行号 + 最新连续尾段”模型；带 gap 的旧 buffer 不能再被压扁拼接，否则会同时破坏补历史和阅读锚点
 - 2026-04-20 新需求进入队列：悬浮球内加入预输入编辑器（输入框 + 快捷列表 + 剪贴板 + 发送/加号），以及 tab 长按重排 / 双击改名
 - 2026-04-20 已创建 `mobile-14` / `mobile-14.1` / `mobile-14.2` / `mobile-14.3`：跨尺寸布局 / Mac 共享壳真源统一完成；Jason 已补充冻结为“默认一行多列 + 垂直分屏”
+- 2026-04-20 已创建 `mobile-14.4`：Mac 先做最小可执行包（Electron + Vite + React），先打通 build/package/window/stage 再逐步接功能
+- 2026-04-20 `mobile-14.1` 已完成：shared layout resolver + PaneStage 已抽到 `packages/shared/`
+- 2026-04-20 `mobile-14.4` 已完成：`/Volumes/extension/code/zterm/mac/out/mac-arm64/ZTerm.app` 可启动，已验证 shared pane stage 和真实 page slot
+- 2026-04-20 `mobile-14.2` 已完成当前目标：Android 的 Host / BridgeSettings / tmux session discovery / localStorage 真源已下沉到 `packages/shared/`，Mac 已接入真实 Connections / Details / Terminal 编排；浏览器验证已确认“填表 -> Save -> 列表/Terminal/Remembered Servers 回显”
+- 2026-04-20 `mobile-14.3` 当前已推进到 Mac live render：shared websocket `connect + stream-mode(active)`、terminal buffer reducer、shared TerminalView 都已接入；浏览器 mock bridge 已看到 `connected + snapshot` 文本
+- 2026-04-20 shared bridge endpoint 已归一：`bridgeHost` 若显式带 `ws://host:port`，display / preset id / stored effective port 都以显式 URL 为真源，避免 `ws://127.0.0.1:4333:3334333` 这类双端口假象
+- 2026-04-20 packaged `ZTerm.app` 已按单实例规则复验：先 quit 旧实例，再 open 新包；窗口已显示最新标题 `Shared connection flow + live terminal render`
+- 2026-04-20 Android 连接配置 endpoint 也已回收至 shared 真源：`bridge-settings / bridge-url / connection-target / useHostStorage / useBridgeSettingsStorage` 现在直接复用 `@zterm/shared`，Connection Properties 输入 `ws://host:port` 时会同步刷新 `Bridge Port`
