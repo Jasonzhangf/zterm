@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   PaneStage,
   buildServerPresetId,
+  formatBridgeSessionTarget,
   resolveLayoutProfile,
   setDefaultBridgeServer,
   upsertBridgeServer,
@@ -183,22 +184,39 @@ export default function App() {
     return baseSlots;
   }, [baseSlots, isEditing, layout.columns]);
 
+  const shellTitle = selectedHost ? selectedHost.name : 'ZTerm';
+  const shellSubtitle = selectedHost
+    ? formatBridgeSessionTarget(selectedHost)
+    : 'Tabby-inspired Mac shell · shared connection flow';
+
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div>
-          <div className="eyebrow">ZTERM · MAC MINIMAL PACKAGE</div>
-          <h1>Shared connection flow + live terminal render</h1>
-          <p>
-            Default to one row with vertical split panes. This stage now reuses Android’s saved
-            host / bridge / tmux-session flow and renders bridge terminal snapshots in the Mac pane.
-          </p>
+      <header className="window-chrome">
+        <div className="traffic-lights" aria-hidden="true">
+          <span className="traffic-light red" />
+          <span className="traffic-light yellow" />
+          <span className="traffic-light green" />
         </div>
-        <div className="profile-badge">
-          <span>{layout.profile}</span>
-          <strong>{layout.columns} col</strong>
+
+        <div className="chrome-title-group">
+          <div className="chrome-eyebrow">ZTERM · MAC DESKTOP</div>
+          <div className="chrome-title">{shellTitle}</div>
+          <div className="chrome-subtitle">{shellSubtitle}</div>
+        </div>
+
+        <div className="chrome-tools">
+          <span className="chrome-tool-pill">{layout.profile}</span>
+          <span className="chrome-tool-pill">{layout.columns} col</span>
+          <span className="chrome-tool-pill">vertical split</span>
         </div>
       </header>
+
+      <div className="workspace-tabstrip" role="tablist" aria-label="workspace shell">
+        <div className="workspace-tab active">Terminal</div>
+        <div className="workspace-tab">Connections</div>
+        {layout.columns >= 3 ? <div className="workspace-tab">Inspector</div> : null}
+        <div className="workspace-tab ghost">One row · multi-column</div>
+      </div>
 
       {!isLoaded ? (
         <div className="loading-state">Loading saved connections…</div>

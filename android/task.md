@@ -100,3 +100,4 @@
 - 2026-04-20 shared bridge endpoint 已归一：`bridgeHost` 若显式带 `ws://host:port`，display / preset id / stored effective port 都以显式 URL 为真源，避免 `ws://127.0.0.1:4333:3334333` 这类双端口假象
 - 2026-04-20 packaged `ZTerm.app` 已按单实例规则复验：先 quit 旧实例，再 open 新包；窗口已显示最新标题 `Shared connection flow + live terminal render`
 - 2026-04-20 Android 连接配置 endpoint 也已回收至 shared 真源：`bridge-settings / bridge-url / connection-target / useHostStorage / useBridgeSettingsStorage` 现在直接复用 `@zterm/shared`，Connection Properties 输入 `ws://host:port` 时会同步刷新 `Bridge Port`
+- 2026-04-20 Mac 壳层已开始按 Tabby 官方特征收口：紧凑顶部 chrome、tab strip、左侧 profile rail、terminal-first 主画布都已落到 packaged `.app`；但布局真源仍保持 shared 的单行多列 + 垂直分屏

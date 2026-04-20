@@ -35,25 +35,25 @@ export function ConnectionsSlot({
 
   return (
     <div className="slot-stack">
-      <div className="slot-card">
-        <div className="slot-card-header">
+      <div className="slot-card sidebar-summary-card">
+        <div className="slot-card-header compact">
           <div>
-            <div className="slot-card-title">Grouped by server</div>
+            <div className="slot-card-title">Profiles</div>
             <div className="slot-card-copy">
-              沿用 Android 的 server-first 连接语义。Mac 只改列数，不改连接模型。
+              参考 Tabby 的左侧会话栏，但继续使用 Android 的 server-first 连接真源。
             </div>
           </div>
           <button className="primary-button" type="button" onClick={onCreateHost}>
-            New Connection
+            +
           </button>
         </div>
 
         {serverGroups.length > 0 ? (
-          <div className="server-chip-list">
+          <div className="sidebar-server-list">
             {serverGroups.map((group) => (
-              <div className="server-chip" key={group.endpoint}>
+              <div className="sidebar-server-item" key={group.endpoint}>
                 <strong>{group.endpoint}</strong>
-                <span>
+                <span className="sidebar-server-meta">
                   {group.total} connection{group.total > 1 ? 's' : ''}
                   {group.pinned > 0 ? ` · ${group.pinned} pinned` : ''}
                 </span>
@@ -69,7 +69,7 @@ export function ConnectionsSlot({
         {hosts.map((host) => {
           const active = host.id === selectedHostId;
           return (
-            <div className={`list-row ${active ? 'active' : ''}`} key={host.id}>
+            <div className={`list-row sidebar-list-row ${active ? 'active' : ''}`} key={host.id}>
               <button className="list-row-main" type="button" onClick={() => onSelectHost(host.id)}>
                 <div className="list-row-title-line">
                   <div className="list-row-title">{host.name}</div>
@@ -85,14 +85,11 @@ export function ConnectionsSlot({
               </button>
 
               <div className="list-row-actions">
-                <button className="ghost-button" type="button" onClick={() => onSelectHost(host.id)}>
-                  Open
-                </button>
                 <button className="ghost-button" type="button" onClick={() => onEditHost(host.id)}>
-                  Edit
+                  ⋯
                 </button>
                 <button className="danger-button" type="button" onClick={() => onDeleteHost(host.id)}>
-                  Delete
+                  ×
                 </button>
               </div>
             </div>

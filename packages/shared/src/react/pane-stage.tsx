@@ -25,35 +25,38 @@ const frameStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  background: 'linear-gradient(180deg, rgba(18, 24, 38, 0.96) 0%, rgba(13, 18, 29, 0.96) 100%)',
+  background: 'linear-gradient(180deg, rgba(15, 20, 31, 0.98) 0%, rgba(10, 14, 24, 0.98) 100%)',
 };
 
 const headerStyle: CSSProperties = {
   display: 'flex',
-  gap: '14px',
-  alignItems: 'flex-start',
-  padding: '20px 20px 16px',
+  gap: '10px',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '12px 14px',
   borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+  background: 'rgba(255, 255, 255, 0.02)',
 };
 
 const indexStyle: CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
-  minWidth: '40px',
-  height: '40px',
-  borderRadius: '12px',
-  background: 'rgba(61, 126, 255, 0.14)',
-  color: '#9fcbff',
+  minWidth: '28px',
+  height: '28px',
+  borderRadius: '999px',
+  background: 'rgba(61, 126, 255, 0.18)',
+  color: '#cfe0ff',
   fontWeight: 700,
+  fontSize: '11px',
 };
 
 const bodyStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  padding: '18px',
+  padding: '14px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '16px',
+  gap: '14px',
 };
 
 function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
@@ -65,31 +68,31 @@ function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
       }}
     >
       <div style={headerStyle}>
-        <span style={indexStyle}>{String(index + 1).padStart(2, '0')}</span>
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0, fontSize: '18px' }}>{slot.title}</h2>
-          <p style={{ margin: '6px 0 0', color: '#97a4b5', lineHeight: 1.45 }}>{slot.subtitle}</p>
+        <div style={{ minWidth: 0, display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+          <span style={indexStyle}>{String(index + 1).padStart(2, '0')}</span>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: '15px', lineHeight: 1.2 }}>{slot.title}</h2>
+            <p style={{ margin: '3px 0 0', color: '#97a4b5', lineHeight: 1.35, fontSize: '12px' }}>{slot.subtitle}</p>
+          </div>
         </div>
-      </div>
-
-      <div style={bodyStyle}>
         {slot.badge ? (
           <div
             style={{
-              alignSelf: 'flex-start',
+              flexShrink: 0,
               borderRadius: '999px',
-              padding: '6px 12px',
-              background: 'rgba(59, 204, 160, 0.16)',
+              padding: '5px 10px',
+              background: 'rgba(59, 204, 160, 0.14)',
               color: '#7ff1cc',
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 700,
             }}
           >
             {slot.badge}
           </div>
         ) : null}
-        {children}
       </div>
+
+      <div style={bodyStyle}>{children}</div>
     </section>
   );
 }

@@ -23,10 +23,17 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
 
   return (
     <div className="slot-stack terminal-slot-shell">
-      <div className="terminal-tabs">
-        <span className="terminal-tab active">{terminalTitle}</span>
-        <span className="terminal-tab">{targetLabel}</span>
-        <span className="terminal-tab ghost">{session.status}</span>
+      <div className="terminal-shell-header">
+        <div className="terminal-tabs">
+          <span className="terminal-tab active">{terminalTitle}</span>
+          <span className="terminal-tab">{targetLabel}</span>
+          <span className="terminal-tab ghost">{session.status}</span>
+        </div>
+        <div className="terminal-toolbar">
+          <span className="terminal-tool-pill">search</span>
+          <span className="terminal-tool-pill">split-ready</span>
+          <span className="terminal-tool-pill">live render</span>
+        </div>
       </div>
 
       <div className="terminal-meta-bar">
@@ -43,8 +50,8 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
           <span>{`buffer lines: ${session.buffer.lines.length}`}</span>
           <span>
             {isDetailsVisible
-              ? 'Secondary column is temporarily occupied by details while editing.'
-              : 'Primary layout stays one-row multi-column with vertical split panes.'}
+              ? 'Inspector currently occupies the secondary column.'
+              : 'Primary shell stays one-row multi-column with vertical split panes.'}
           </span>
         </div>
         {hasLiveTerminal ? (

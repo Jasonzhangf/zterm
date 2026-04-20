@@ -20,6 +20,10 @@
 - Renderer App
   - React 根组件
   - 最小 stage 页面
+  - Tabby-inspired desktop shell：
+    - compact window chrome
+    - workspace/tab strip
+    - 左 rail + 主 terminal + 右 inspector
   - 单行多列 + 垂直分屏布局
   - Connections / Details / Terminal 三个 pane 的统一编排
 
@@ -55,6 +59,11 @@
   - 默认一行多列
   - pane 之间垂直分屏
   - 不以上下堆叠多 pane 作为主方案
+
+- Tabby 只作为桌面壳层参考，不作为布局真源：
+  - 可以借用紧凑 chrome、顶部 tab strip、左侧会话栏、主终端优先的视觉组织
+  - 不照搬其任意自由分屏 / desktop-only 交互模型
+  - 真正的 pane 编排仍由 shared `layout profile + PaneStage` 决定
 
 - Mac 第一阶段只先做桌面壳上的 stage：
   - 窄窗：单列
