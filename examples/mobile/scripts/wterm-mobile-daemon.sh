@@ -7,13 +7,38 @@ import os, sys
 print(os.path.realpath(sys.argv[1]))
 PY
 )"
+WORKSPACE_DIR="$(python3 - "$ROOT_DIR" <<'PY'
+import os, sys
+print(os.path.realpath(os.path.join(sys.argv[1], '..', '..')))
+PY
+)"
 NODE_BIN="$(command -v node)"
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+PNPM_BIN="$(command -v pnpm || true)"
 LOG_DIR="${HOME}/.wterm/logs"
 WTERM_HOME="${HOME}/.wterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
+CLI_RUNNER="${WTERM_BIN_DIR}/wterm-daemon-cli"
 LAUNCH_RUNNER="${WTERM_BIN_DIR}/wterm-daemon-launchd-run"
 LAUNCH_AGENT_LABEL="com.wterm.mobile.daemon"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+AUTH_TOKEN_MASKED=""
+
+refresh_masked_auth_token() {
+  AUTH_TOKEN_MASKED=""
+  if [[ -z "${AUTH_TOKEN:-}" ]]; then
+    return 0
+  fi
+
+  local token_len
+  token_len=${#AUTH_TOKEN}
+  if (( token_len <= 6 )); then
+    AUTH_TOKEN_MASKED="${AUTH_TOKEN}"
+  else
+    AUTH_TOKEN_MASKED="${AUTH_TOKEN:0:3}***${AUTH_TOKEN: -3}"
+  fi
+}
+
 read_config() {
   cd "$ROOT_DIR"
   "$NODE_BIN" --import tsx <<'EOF'
@@ -26,6 +51,7 @@ const config = resolveDaemonRuntimeConfig();
 console.log(`HOST=${config.host}`);
 console.log(`PORT=${config.port}`);
 console.log(`SESSION_NAME=${config.sessionName}`);
+console.log(`AUTH_TOKEN=${JSON.stringify(config.authToken)}`);
 console.log(`AUTH_SOURCE=${config.authSource}`);
 console.log(`CONFIG_FOUND=${config.configFound ? '1' : '0'}`);
 console.log(`CONFIG_DISPLAY_PATH=${WTERM_CONFIG_DISPLAY_PATH}`);
@@ -33,10 +59,195 @@ EOF
 }
 
 eval "$(read_config)"
+refresh_masked_auth_token
+
+resolve_pnpm_binary() {
+  if [[ -n "$PNPM_BIN" ]]; then
+    echo "$PNPM_BIN"
+    return 0
+  fi
+
+  for candidate in /opt/homebrew/bin/pnpm /usr/local/bin/pnpm; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_runtime_ready() {
+  local pnpm_path core_dist
+  core_dist="${WORKSPACE_DIR}/packages/@wterm/core/dist/index.js"
+  if [[ -f "$core_dist" ]]; then
+    :
+  else
+    pnpm_path="$(resolve_pnpm_binary || true)"
+    if [[ -z "$pnpm_path" ]]; then
+      echo "pnpm not found. Install pnpm before starting wterm daemon."
+      return 1
+    fi
+
+    echo "Preparing @wterm/core runtime artifacts..."
+    "$pnpm_path" --dir "$WORKSPACE_DIR" --filter @wterm/core build
+  fi
+
+  cd "$ROOT_DIR"
+  "$NODE_BIN" --import tsx ./scripts/prepare-runtime.ts
+}
+
+generate_auth_token() {
+  "$NODE_BIN" --input-type=module <<'EOF'
+import { randomBytes } from 'node:crypto';
+console.log(randomBytes(24).toString('base64url'));
+EOF
+}
+
+write_daemon_config() {
+  local next_host="$1"
+  local next_port="$2"
+  local next_auth_token="$3"
+  local next_cache_lines="$4"
+  local next_session_name="$5"
+
+  mkdir -p "$WTERM_HOME"
+  export WTERM_INSTALL_HOST="$next_host"
+  export WTERM_INSTALL_PORT="$next_port"
+  export WTERM_INSTALL_AUTH_TOKEN="$next_auth_token"
+  export WTERM_INSTALL_CACHE_LINES="$next_cache_lines"
+  export WTERM_INSTALL_SESSION_NAME="$next_session_name"
+  export WTERM_INSTALL_CONFIG_PATH="${WTERM_HOME}/config.json"
+
+  "$NODE_BIN" --input-type=module <<'EOF'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const configPath = process.env.WTERM_INSTALL_CONFIG_PATH;
+const host = process.env.WTERM_INSTALL_HOST;
+const port = Number.parseInt(process.env.WTERM_INSTALL_PORT || '', 10);
+const authToken = process.env.WTERM_INSTALL_AUTH_TOKEN || '';
+const terminalCacheLines = Number.parseInt(process.env.WTERM_INSTALL_CACHE_LINES || '', 10);
+const sessionName = process.env.WTERM_INSTALL_SESSION_NAME || '';
+
+let current = {};
+try {
+  current = JSON.parse(readFileSync(configPath, 'utf8'));
+} catch (error) {
+  if (error?.code !== 'ENOENT') {
+    throw error;
+  }
+}
+
+if (!current || typeof current !== 'object' || Array.isArray(current)) {
+  current = {};
+}
+
+const next = {
+  ...current,
+  mobile: {
+    ...(current.mobile && typeof current.mobile === 'object' && !Array.isArray(current.mobile) ? current.mobile : {}),
+    daemon: {
+      ...(
+        current.mobile?.daemon &&
+        typeof current.mobile.daemon === 'object' &&
+        !Array.isArray(current.mobile.daemon)
+          ? current.mobile.daemon
+          : {}
+      ),
+      host,
+      port,
+      authToken,
+      terminalCacheLines,
+      sessionName,
+    },
+  },
+};
+
+mkdirSync(dirname(configPath), { recursive: true });
+writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`);
+EOF
+}
+
+prompt_with_default() {
+  local prompt="$1"
+  local default_value="$2"
+  local current=""
+  read -r -p "$prompt [$default_value]: " current
+  if [[ -z "$current" ]]; then
+    printf '%s\n' "$default_value"
+    return 0
+  fi
+  printf '%s\n' "$current"
+}
+
+interactive_install() {
+  local default_host default_port default_cache_lines default_session_name next_host next_port next_auth_token next_cache_lines next_session_name
+  default_host="${HOST}"
+  default_port="${PORT}"
+  default_cache_lines="${WTERM_MOBILE_TERMINAL_CACHE_LINES:-3000}"
+  default_session_name="${SESSION_NAME}"
+  if [[ -f "${WTERM_HOME}/config.json" ]]; then
+    default_cache_lines="$("$NODE_BIN" --input-type=module <<'EOF'
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+const path = join(homedir(), '.wterm', 'config.json');
+try {
+  const json = JSON.parse(readFileSync(path, 'utf8'));
+  const value = json?.mobile?.daemon?.terminalCacheLines;
+  console.log(Number.isFinite(value) ? value : 3000);
+} catch {
+  console.log(3000);
+}
+EOF
+)"
+  fi
+
+  echo "wterm daemon interactive install"
+  echo "All config will be written to ${WTERM_HOME}/config.json"
+  echo
+
+  next_host="$(prompt_with_default 'Daemon host' "$default_host")"
+  next_port="$(prompt_with_default 'Daemon port' "$default_port")"
+  next_cache_lines="$(prompt_with_default 'Terminal cache lines' "$default_cache_lines")"
+  next_session_name="$(prompt_with_default 'Daemon session name' "$default_session_name")"
+
+  if [[ -n "${AUTH_TOKEN:-}" ]]; then
+    echo "Existing auth token: ${AUTH_TOKEN_MASKED}"
+  else
+    echo "No existing auth token found."
+  fi
+
+  read -r -s -p "Daemon auth token [leave blank to keep existing / auto-generate]: " next_auth_token
+  echo
+  if [[ -z "$next_auth_token" ]]; then
+    if [[ -n "${AUTH_TOKEN:-}" ]]; then
+      next_auth_token="$AUTH_TOKEN"
+    else
+      next_auth_token="$(generate_auth_token)"
+      echo "Generated auth token: $next_auth_token"
+    fi
+  fi
+
+  write_daemon_config "$next_host" "$next_port" "$next_auth_token" "$next_cache_lines" "$next_session_name"
+  eval "$(read_config)"
+  refresh_masked_auth_token
+
+  echo "Saved daemon config -> ${CONFIG_DISPLAY_PATH}"
+  echo "host=${HOST}"
+  echo "port=${PORT}"
+  echo "session=${SESSION_NAME}"
+  echo "auth=${AUTH_TOKEN_MASKED:-set}"
+  echo
+
+  install_service
+}
 
 usage() {
   cat <<'EOF'
 Usage:
+  ./scripts/wterm-mobile-daemon.sh install
   ./scripts/wterm-mobile-daemon.sh run
   ./scripts/wterm-mobile-daemon.sh start
   ./scripts/wterm-mobile-daemon.sh status
@@ -45,9 +256,10 @@ Usage:
   ./scripts/wterm-mobile-daemon.sh install-service
   ./scripts/wterm-mobile-daemon.sh uninstall-service
   ./scripts/wterm-mobile-daemon.sh service-status
-  wterm daemon start|stop|restart|status|install-service|uninstall-service|service-status
+  wterm daemon install|start|stop|restart|status|install-service|uninstall-service|service-status
 
 Behavior:
+  - `install` interactively configures auth/host/port under ~/.wterm/config.json and then installs autostart
   - `run` keeps daemon in foreground (for launchd autostart)
   - start/stop/restart manage launchd service if installed, otherwise fallback to tmux daemon session
   - host / port / auth token are read from ~/.wterm/config.json
@@ -84,8 +296,8 @@ wait_for_service_ready() {
 
 run_foreground() {
   mkdir -p "$LOG_DIR"
+  ensure_runtime_ready
   cd "$ROOT_DIR"
-  chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
   exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" WTERM_MOBILE_HOST="$HOST" WTERM_MOBILE_PORT="$PORT" WTERM_MOBILE_AUTH_TOKEN="${WTERM_MOBILE_AUTH_TOKEN:-}" "$NODE_BIN" --import tsx src/server/server.ts
 }
 
@@ -146,8 +358,8 @@ start_tmux() {
     return 0
   fi
 
+  ensure_runtime_ready
   cd "$ROOT_DIR"
-  chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 
   tmux new-session -d -s "$SESSION_NAME" \
     "cd '$ROOT_DIR' && env -u TMUX -u TMUX_PANE HOST='$HOST' PORT='$PORT' WTERM_MOBILE_HOST='$HOST' WTERM_MOBILE_PORT='$PORT' WTERM_MOBILE_AUTH_TOKEN='${WTERM_MOBILE_AUTH_TOKEN:-}' '$NODE_BIN' --import tsx src/server/server.ts >>'$log_file' 2>&1"
@@ -176,9 +388,7 @@ write_launch_agent() {
   cat > "$LAUNCH_RUNNER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-cd "${ROOT_DIR}"
-chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" --import tsx src/server/server.ts
+exec "${CLI_RUNNER}" run
 EOF
   chmod +x "$LAUNCH_RUNNER"
   cat > "$LAUNCH_AGENT_PATH" <<EOF
@@ -219,6 +429,7 @@ start_service() {
   if service_loaded; then
     launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   else
+    launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
     launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
     launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
@@ -236,6 +447,7 @@ stop_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
 
   echo "wterm-mobile autostart service stopped: label=${LAUNCH_AGENT_LABEL}"
 }
@@ -252,6 +464,7 @@ restart_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
   launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   wait_for_service_ready || true
@@ -259,11 +472,13 @@ restart_service() {
 }
 
 install_service() {
+  ensure_runtime_ready
   stop_tmux >/dev/null 2>&1 || true
   write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
   launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   echo "wterm-mobile autostart service installed"
@@ -276,6 +491,7 @@ uninstall_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
   rm -f "$LAUNCH_AGENT_PATH"
   echo "wterm-mobile autostart service uninstalled"
   echo "plist=${LAUNCH_AGENT_PATH}"
@@ -313,6 +529,7 @@ if [[ "$cmd" == "--" ]]; then
 fi
 
 case "$cmd" in
+  install) interactive_install ;;
   run) run_foreground ;;
   start) start ;;
   status) status ;;

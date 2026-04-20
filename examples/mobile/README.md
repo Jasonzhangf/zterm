@@ -57,10 +57,15 @@ cd examples/mobile && npx cap sync android
 
 ```bash
 pnpm --filter @wterm/mobile daemon:install-global
-wterm daemon restart
-# 或
+wterm daemon install
 wterm daemon status
 ```
+
+`wterm daemon install` 会：
+
+1. 交互式询问 host / port / auth token / cache lines / session name  
+2. 把配置统一写入 `~/.wterm/config.json`  
+3. 自动安装并启动开机自启动服务
 
 ## 当前终端增强能力
 

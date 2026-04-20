@@ -128,7 +128,8 @@
 - Connections 列表页新增入口位于安全区内的浮动按钮
 - live session/tab/header 中必须能看出当前 `server + session` 组合
 - 服务器端必须能通过单一 daemon CLI 在本地后台启动，默认监听端口由统一配置决定（当前为 `3333`）
-- 全局 daemon CLI 入口为 `wterm daemon ...`，并支持 `start / stop / restart / status / install-service / uninstall-service / service-status`
+- 全局 daemon CLI 入口为 `wterm daemon ...`，并支持 `install / start / stop / restart / status / install-service / uninstall-service / service-status`
+- `wterm daemon install` 必须走交互式配置：询问 host / port / auth token，并统一写入 `~/.wterm/config.json` 后再安装开机启动
 - `wterm daemon start / restart / install-service` 必须等待 daemon 端口真正 ready，再回报成功；不能只以 launchd 已加载为准
 - websocket bridge 必须做双向保活：client 定时 ping 并校验 pong 超时，server 也要做 ws heartbeat；任一侧丢心跳后都应自动回收并进入重连，不允许死连接长期占住 session
 - daemon 初始快照失败时不能崩进程；`capture-pane` 失败只允许降级快照，不允许把整个 bridge 打挂
