@@ -102,3 +102,4 @@
 - 2026-04-20 Android 连接配置 endpoint 也已回收至 shared 真源：`bridge-settings / bridge-url / connection-target / useHostStorage / useBridgeSettingsStorage` 现在直接复用 `@zterm/shared`，Connection Properties 输入 `ws://host:port` 时会同步刷新 `Bridge Port`
 - 2026-04-20 Mac 壳层已开始按 Tabby 官方特征收口：紧凑顶部 chrome、tab strip、左侧 profile rail、terminal-first 主画布都已落到 packaged `.app`；但布局真源仍保持 shared 的单行多列 + 垂直分屏
 - 2026-04-20 Mac 2-col 壳层继续收口：顶部 tab strip 已从静态文案改为真实 target / inspector 状态 tabs，并可直接切 `Terminal ↔ Inspector`；右侧 Details 也已改成 inspector summary + compact form
+- 2026-04-20 Mac shell 已进入最小真实 open tabs：saved target 可开成 tab、`+` 可进入 new connection tab、tab 可关闭；当前真边界明确为 `single runtime · multi tabs`

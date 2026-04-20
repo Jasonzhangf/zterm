@@ -25,6 +25,10 @@
     - workspace/tab strip（真实映射当前 target / inspector 状态）
     - 左 rail + 主 terminal + 右 inspector
     - 2-col 时由 shell tabs 在 `Terminal` / `Inspector` 之间切 secondary column
+    - open target tabs 当前采用 `single runtime · multi tabs`：
+      - 可以同时维护多个 open target descriptor
+      - 但 app-level bridge websocket/runtime 同时只服务一个 active target
+      - 切 tab 时如 target 变更，则切换 active target 并重连
   - 单行多列 + 垂直分屏布局
   - Connections / Details / Terminal 三个 pane 的统一编排
 

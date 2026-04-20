@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PaneStage,
   buildServerPresetId,
+  formatBridgeEndpoint,
   formatBridgeSessionTarget,
   resolveLayoutProfile,
   setDefaultBridgeServer,
@@ -16,6 +17,13 @@ import { useBridgeTerminalSession } from './lib/use-bridge-terminal';
 import { ConnectionsSlot } from './pages/ConnectionsSlot';
 import { DetailsSlot } from './pages/DetailsSlot';
 import { TerminalSlot } from './pages/TerminalSlot';
+
+interface WorkspaceTargetTab {
+  id: string;
+  title: string;
+  target: EditableHost;
+  persistedHostId?: string;
+}
 
 function useWindowWidth() {
   const [width, setWidth] = useState(() =>
@@ -32,6 +40,40 @@ function useWindowWidth() {
   return width;
 }
 
+function toEditableHost(host: Host | EditableHost): EditableHost {
+  return {
+    name: host.name,
+    bridgeHost: host.bridgeHost,
+    bridgePort: host.bridgePort,
+    sessionName: host.sessionName,
+    authToken: host.authToken,
+    authType: host.authType,
+    password: host.password,
+    privateKey: host.privateKey,
+    tags: host.tags,
+    pinned: host.pinned,
+    lastConnected: host.lastConnected,
+    autoCommand: host.autoCommand,
+  };
+}
+
+function buildWorkspaceTargetKey(host: Pick<EditableHost, 'bridgeHost' | 'bridgePort' | 'sessionName' | 'name'>) {
+  return [
+    formatBridgeEndpoint({ bridgeHost: host.bridgeHost, bridgePort: host.bridgePort }).toLowerCase(),
+    (host.sessionName?.trim() || host.name?.trim() || '').toLowerCase(),
+  ].join('::');
+}
+
+function buildWorkspaceTab(host: Host | EditableHost, persistedHostId?: string): WorkspaceTargetTab {
+  const target = toEditableHost(host);
+  return {
+    id: buildWorkspaceTargetKey(target),
+    title: target.sessionName.trim() || target.name.trim() || 'Terminal',
+    target,
+    persistedHostId,
+  };
+}
+
 export default function App() {
   const width = useWindowWidth();
   const layout = useMemo(() => resolveLayoutProfile({ width }), [width]);
@@ -40,6 +82,8 @@ export default function App() {
   const terminalSession = useBridgeTerminalSession();
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<'closed' | 'create' | 'edit'>('closed');
+  const [openTabs, setOpenTabs] = useState<WorkspaceTargetTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   useEffect(() => {
     if (hosts.length === 0) {
@@ -61,8 +105,79 @@ export default function App() {
   );
   const isEditing = editorMode !== 'closed';
 
+  const switchToTabTarget = useCallback((tab: WorkspaceTargetTab) => {
+    setActiveTabId(tab.id);
+    if (tab.persistedHostId) {
+      setSelectedHostId(tab.persistedHostId);
+    }
+
+    const activeRuntimeKey = terminalSession.state.activeTarget
+      ? buildWorkspaceTargetKey(terminalSession.state.activeTarget)
+      : '';
+
+    if (activeRuntimeKey !== tab.id) {
+      terminalSession.connect(tab.target);
+    }
+  }, [terminalSession]);
+
+  const upsertWorkspaceTab = useCallback((host: Host | EditableHost, persistedHostId?: string) => {
+    const nextTab = buildWorkspaceTab(host, persistedHostId);
+    setOpenTabs((current) => {
+      const existing = current.find((tab) => tab.id === nextTab.id);
+      if (!existing) {
+        return [...current, nextTab];
+      }
+      return current.map((tab) => (tab.id === nextTab.id ? { ...tab, ...nextTab } : tab));
+    });
+    setActiveTabId(nextTab.id);
+    return nextTab;
+  }, []);
+
+  useEffect(() => {
+    if (hosts.length === 0) {
+      setOpenTabs([]);
+      return;
+    }
+
+    setOpenTabs((current) => {
+      const synced = current
+        .map((tab) => {
+          if (!tab.persistedHostId) {
+            return tab;
+          }
+          const host = hosts.find((item) => item.id === tab.persistedHostId);
+          return host ? buildWorkspaceTab(host, host.id) : null;
+        })
+        .filter((tab): tab is WorkspaceTargetTab => tab !== null);
+
+      if (synced.length > 0) {
+        return synced;
+      }
+
+      const first = hosts[0];
+      return [buildWorkspaceTab(first, first.id)];
+    });
+  }, [hosts]);
+
+  useEffect(() => {
+    if (openTabs.length === 0) {
+      setActiveTabId(null);
+      return;
+    }
+
+    if (!activeTabId || !openTabs.some((tab) => tab.id === activeTabId)) {
+      setActiveTabId(openTabs[0].id);
+    }
+  }, [activeTabId, openTabs]);
+
+  const activeWorkspaceTab = useMemo(
+    () => openTabs.find((tab) => tab.id === activeTabId) || null,
+    [activeTabId, openTabs],
+  );
+
   const handleSaveHost = (hostData: EditableHost) => {
     let nextHost: Host | undefined;
+    const previousTabId = editorMode === 'edit' && selectedHost ? buildWorkspaceTargetKey(selectedHost) : null;
 
     if (editorMode === 'edit' && selectedHost) {
       updateHost(selectedHost.id, hostData);
@@ -84,12 +199,24 @@ export default function App() {
 
     if (nextHost) {
       setSelectedHostId(nextHost.id);
+      const nextTab = buildWorkspaceTab(nextHost, nextHost.id);
+      setOpenTabs((current) => {
+        const filtered = current.filter(
+          (tab) => tab.persistedHostId !== nextHost?.id && (!previousTabId || tab.id !== previousTabId),
+        );
+        return [...filtered, nextTab];
+      });
+      if (!activeTabId || activeTabId === previousTabId) {
+        setActiveTabId(nextTab.id);
+      }
     }
     setEditorMode('closed');
   };
 
   const handleDeleteHost = (hostId: string) => {
     const currentIndex = hosts.findIndex((host) => host.id === hostId);
+    const removedTabs = openTabs.filter((tab) => tab.persistedHostId === hostId).map((tab) => tab.id);
+
     deleteHost(hostId);
     if (selectedHostId === hostId) {
       const fallback = hosts[currentIndex + 1] || hosts[currentIndex - 1];
@@ -98,7 +225,54 @@ export default function App() {
     if (editorMode !== 'closed' && selectedHostId === hostId) {
       setEditorMode('closed');
     }
+
+    setOpenTabs((current) => current.filter((tab) => tab.persistedHostId !== hostId));
+
+    if (removedTabs.includes(activeTabId || '')) {
+      const fallback = openTabs.find((tab) => tab.persistedHostId !== hostId) || null;
+      if (!fallback) {
+        terminalSession.disconnect();
+        setActiveTabId(null);
+      } else {
+        switchToTabTarget(fallback);
+      }
+    }
   };
+
+  const handleOpenHost = useCallback((hostId: string) => {
+    const host = hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return;
+    }
+    setSelectedHostId(host.id);
+    setEditorMode('closed');
+    const nextTab = upsertWorkspaceTab(host, host.id);
+    switchToTabTarget(nextTab);
+  }, [hosts, switchToTabTarget, upsertWorkspaceTab]);
+
+  const handleConnectRequested = useCallback((hostData: EditableHost) => {
+    const persistedHostId = editorMode === 'edit' && selectedHost ? selectedHost.id : undefined;
+    const nextTab = upsertWorkspaceTab(hostData, persistedHostId);
+    switchToTabTarget(nextTab);
+  }, [editorMode, selectedHost, switchToTabTarget, upsertWorkspaceTab]);
+
+  const handleCloseTab = useCallback((tabId: string) => {
+    const remaining = openTabs.filter((tab) => tab.id !== tabId);
+    setOpenTabs(remaining);
+
+    if (activeTabId !== tabId) {
+      return;
+    }
+
+    const fallback = remaining[remaining.length - 1] || null;
+    if (!fallback) {
+      setActiveTabId(null);
+      terminalSession.disconnect();
+      return;
+    }
+
+    switchToTabTarget(fallback);
+  }, [activeTabId, openTabs, switchToTabTarget, terminalSession]);
 
   const baseSlots = useMemo<PaneSlotDefinition[]>(
     () => [
@@ -117,6 +291,7 @@ export default function App() {
                 setEditorMode('closed');
               }
             }}
+            onOpenHost={handleOpenHost}
             onCreateHost={() => setEditorMode('create')}
             onEditHost={(hostId) => {
               setSelectedHostId(hostId);
@@ -155,13 +330,15 @@ export default function App() {
             isEditing={isEditing}
             onSave={handleSaveHost}
             onCancel={() => setEditorMode('closed')}
-            onConnectRequested={terminalSession.connect}
+            onConnectRequested={handleConnectRequested}
           />
         ),
       },
     ],
     [
+      handleConnectRequested,
       handleDeleteHost,
+      handleOpenHost,
       hosts,
       isEditing,
       layout.columns,
@@ -188,9 +365,6 @@ export default function App() {
   const shellSubtitle = selectedHost
     ? formatBridgeSessionTarget(selectedHost)
     : 'Tabby-inspired Mac shell · shared connection flow';
-  const activeTerminalLabel = terminalSession.state.activeTarget
-    ? terminalSession.state.activeTarget.sessionName || terminalSession.state.activeTarget.name
-    : selectedHost?.sessionName || selectedHost?.name || 'Terminal';
   const inspectorTabLabel = editorMode === 'create'
     ? 'New connection'
     : isEditing && selectedHost
@@ -199,7 +373,7 @@ export default function App() {
         ? `Inspector · ${selectedHost.name}`
         : 'Inspector';
 
-  const handleShellTabSelect = (tab: 'connections' | 'terminal' | 'inspector') => {
+  const handleShellTabSelect = (tab: 'connections' | 'inspector') => {
     if (tab === 'inspector') {
       if (selectedHost) {
         setEditorMode((current) => (current === 'closed' ? 'edit' : current));
@@ -242,12 +416,43 @@ export default function App() {
         >
           Connections · {hosts.length}
         </button>
-        <button
-          className={`workspace-tab ${layout.columns >= 2 && !isEditing ? 'active' : ''}`}
-          type="button"
-          onClick={() => handleShellTabSelect('terminal')}
-        >
-          {activeTerminalLabel}
+        {openTabs.map((tab) => {
+          const isActive = !isEditing && activeTabId === tab.id;
+          const runtimeMatches = terminalSession.state.activeTarget
+            ? buildWorkspaceTargetKey(terminalSession.state.activeTarget) === tab.id
+            : false;
+          const runtimeState = runtimeMatches ? terminalSession.state.status : 'idle';
+
+          return (
+            <div
+              key={tab.id}
+              className={`workspace-tab tab-with-close ${isActive ? 'active' : ''}`}
+              role="presentation"
+            >
+              <button
+                className="workspace-tab-trigger"
+                type="button"
+                onClick={() => {
+                  setEditorMode('closed');
+                  switchToTabTarget(tab);
+                }}
+              >
+                <span className={`tab-runtime-dot ${runtimeState}`} />
+                <span>{tab.title}</span>
+              </button>
+              <button
+                className="workspace-tab-close"
+                type="button"
+                onClick={() => handleCloseTab(tab.id)}
+                aria-label={`Close ${tab.title}`}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+        <button className="workspace-tab add-tab" type="button" onClick={() => setEditorMode('create')}>
+          +
         </button>
         <button
           className={`workspace-tab ${isEditing ? 'active' : ''}`}
@@ -257,7 +462,7 @@ export default function App() {
           {inspectorTabLabel}
         </button>
         <div className="workspace-tab ghost">
-          {layout.columns >= 3 ? 'Connections · Terminal · Inspector' : 'One row · multi-column'}
+          {layout.columns >= 3 ? 'Connections · Tabs · Inspector' : 'single runtime · multi tabs'}
         </div>
       </div>
 

@@ -18,6 +18,11 @@
 - 壳层视觉参考 Tabby：更紧凑的桌面终端 chrome、左侧 profile rail、顶部 tab strip、主终端画布优先
 - 顶部 tab strip 已进入真实状态映射：会反映当前 connection / terminal target / inspector 状态，2-col 下可直接切 Terminal / Inspector
 - 右侧 Details 已收成轻量 inspector：优先展示 target/session/bridge 概要，再展开连接表单
+- 顶部已支持最小真实 open target tabs：
+  - saved target 可开成 tab
+  - `+` 可进入 new connection tab
+  - tab 可关闭
+  - 当前阶段仍是 `single runtime · multi tabs`
 
 ## 当前范围
 
@@ -29,10 +34,11 @@
 - Tabby-inspired 壳层特征：
   - 紧凑顶部 window chrome
   - 左侧连接 / profile rail
-  - 顶部 tab strip
-  - 主 terminal 画布优先
-  - 右侧 details 作为 inspector，而不是主阅读区
-  - tab strip 要尽量承载当前 target / inspector 的真实状态，而不是静态占位文案
+- 顶部 tab strip
+- 主 terminal 画布优先
+- 右侧 details 作为 inspector，而不是主阅读区
+- tab strip 要尽量承载当前 target / inspector 的真实状态，而不是静态占位文案
+- shell tabs 当前只保证“多个 open target + 单个 live runtime”的真实闭环；不宣称并发多 websocket / 多 live session
 - 可构建的 `.app` 或 unpacked 可执行目录
 - 基于 shared truth 的连接配置流程：
   - saved hosts
@@ -73,3 +79,8 @@
 9. 在 2-col 场景下，顶部 shell tabs 至少要能切换：
    - Connections + Terminal
    - Connections + Inspector
+10. 顶部 tabs 的最小能力验收：
+   - 可以打开 saved target 成为 tab
+   - 可以 `+` 新建 tab
+   - 可以关闭当前 tab
+   - active tab 与当前 live runtime 的 target 对应关系明确

@@ -133,6 +133,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Jason 当前新增冻结：统一布局默认是一行多列，不以上下堆叠多 pane 作为主方案
 - 桌面 packaged/dev 验证若需要重开 `ZTerm.app`，必须先退出旧实例，再打开新实例；不要直接 `open -n` 叠多个 app 进程污染证据
 - 若参考 Tabby 一类桌面终端，借用的是紧凑 chrome / 顶部状态 tab strip / 左侧 profile rail / 右侧 inspector 的壳层组织；tab strip 至少要承载真实 target / inspector 状态，不能只是静态装饰
+- 若桌面端继续推进多 tab，当前最小真边界应优先写成 `single runtime · multi tabs`：可以维护多个 open target tab，但同一时刻只允许一个 live websocket/runtime；不要把“可切换 tabs”误报成“并发多 live sessions”
 
 ## 三、开发闭环流程
 

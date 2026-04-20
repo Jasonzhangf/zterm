@@ -4,6 +4,7 @@ interface ConnectionsSlotProps {
   hosts: Host[];
   selectedHostId: string | null;
   onSelectHost: (hostId: string) => void;
+  onOpenHost: (hostId: string) => void;
   onCreateHost: () => void;
   onEditHost: (hostId: string) => void;
   onDeleteHost: (hostId: string) => void;
@@ -27,6 +28,7 @@ export function ConnectionsSlot({
   hosts,
   selectedHostId,
   onSelectHost,
+  onOpenHost,
   onCreateHost,
   onEditHost,
   onDeleteHost,
@@ -85,6 +87,9 @@ export function ConnectionsSlot({
               </button>
 
               <div className="list-row-actions">
+                <button className="ghost-button" type="button" onClick={() => onOpenHost(host.id)}>
+                  ↗
+                </button>
                 <button className="ghost-button" type="button" onClick={() => onEditHost(host.id)}>
                   ⋯
                 </button>

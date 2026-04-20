@@ -21,3 +21,5 @@
 - [2026-04-20] 若 Mac 界面需要参考 Tabby，正确借用的是“紧凑 chrome + 顶部 tab strip + 左侧 profile rail + 主 terminal 优先”的壳层组织，不是照搬其自由多向分屏；真正的布局真源仍然只能是 shared `PaneStage`
 - [2026-04-20] Tabby 风格的顶部 tab strip 不能只是静态文案；至少要真实映射当前 selected target / inspector 状态，并在 2-col 下承担 Terminal ↔ Inspector 的切换职责
 - [2026-04-20] 右侧 Details 若要更像桌面 terminal client，应先收成 inspector summary（target/session/bridge），再往下展开原 Android 同构表单；这样既保留真源，又减少“整列全是表单”的压迫感
+- [2026-04-20] Mac 顶部 open tabs 当前必须明确写成 `single runtime · multi tabs`：可以有多个 open target tab，但同一时刻只允许一个 app-level websocket/runtime；切 tab 是切 active target，不是假装并发多 live session
+- [2026-04-20] packaged smoke 要覆盖 `+ new tab`、`close tab`、`saved target reopen` 三条路径，否则“真实 tabs”只是在静态 UI 上看起来像 tabs

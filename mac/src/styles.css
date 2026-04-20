@@ -143,6 +143,13 @@ body {
   cursor: pointer;
 }
 
+.workspace-tab.tab-with-close {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+}
+
 .workspace-tab.active {
   color: #f3f7ff;
   background: rgba(14, 19, 30, 0.96);
@@ -153,6 +160,72 @@ body {
   background: transparent;
   color: #788aa3;
   cursor: default;
+}
+
+.workspace-tab.add-tab {
+  padding: 10px 12px;
+  min-width: 40px;
+}
+
+.workspace-tab-trigger,
+.workspace-tab-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.workspace-tab-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+}
+
+.workspace-tab-close {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: #8294ad;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.workspace-tab-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f3f7ff;
+}
+
+.tab-runtime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.tab-runtime-dot.idle {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.tab-runtime-dot.connecting {
+  background: #6aa8ff;
+  box-shadow: 0 0 0 3px rgba(106, 168, 255, 0.14);
+}
+
+.tab-runtime-dot.connected {
+  background: #58d7ad;
+  box-shadow: 0 0 0 3px rgba(88, 215, 173, 0.14);
+}
+
+.tab-runtime-dot.error {
+  background: #ff7b7b;
+  box-shadow: 0 0 0 3px rgba(255, 123, 123, 0.14);
 }
 
 .pane-stage {
