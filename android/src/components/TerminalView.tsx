@@ -6,7 +6,7 @@ interface TerminalViewProps {
   sessionId: string | null;
   initialOutputHistory?: string;
   initialBufferLines?: string[];
-  scrollbackStartIndex?: number;
+  bufferStartIndex?: number;
   bufferUpdateKind?: 'replace' | 'append' | 'prepend' | 'viewport';
   bufferRevision?: number;
   snapshot?: TerminalSnapshot;
@@ -203,7 +203,7 @@ export function TerminalView({
   sessionId,
   initialOutputHistory = '',
   initialBufferLines,
-  scrollbackStartIndex,
+  bufferStartIndex,
   bufferUpdateKind = 'replace',
   bufferRevision = 0,
   snapshot,
@@ -334,13 +334,13 @@ export function TerminalView({
     const intraLineOffset = host.scrollTop - topLineOffset * resolvedLineHeightPx;
     manualScrollAnchorRef.current = {
       absoluteTopLineIndex:
-        scrollbackStartIndex !== undefined
-          ? scrollbackStartIndex + topLineOffset
+        bufferStartIndex !== undefined
+          ? bufferStartIndex + topLineOffset
           : undefined,
       topLineOffset,
       intraLineOffset,
     };
-  }, [resolvedLineHeightPx, scrollbackStartIndex]);
+  }, [bufferStartIndex, resolvedLineHeightPx]);
 
   const setViewMode = useCallback((mode: ViewMode) => {
     viewModeRef.current = mode;
@@ -371,12 +371,12 @@ export function TerminalView({
         scrollTop: host.scrollTop,
         scrollHeight: host.scrollHeight,
         clientHeight: host.clientHeight,
-        bufferStartIndex: scrollbackStartIndex,
+        bufferStartIndex,
         lineHeightPx: resolvedLineHeightPx,
       };
     }
     syncDebugMetrics();
-  }, [resolvedLineHeightPx, scrollbackStartIndex, setViewMode, syncDebugMetrics, syncScrollViewportState, updateManualScrollAnchor]);
+  }, [bufferStartIndex, resolvedLineHeightPx, setViewMode, syncDebugMetrics, syncScrollViewportState, updateManualScrollAnchor]);
 
   useLayoutEffect(() => {
     if (!active) {
@@ -395,7 +395,7 @@ export function TerminalView({
         scrollTop: host.scrollTop,
         clientHeight: host.clientHeight,
         bufferRevision,
-        bufferStartIndex: scrollbackStartIndex,
+        bufferStartIndex,
         lineHeightPx: resolvedLineHeightPx,
       };
       syncScrollViewportState(host);
@@ -413,8 +413,8 @@ export function TerminalView({
       if (anchor) {
         const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
         const nextTopLineOffset =
-          anchor.absoluteTopLineIndex !== undefined && scrollbackStartIndex !== undefined
-            ? Math.max(0, anchor.absoluteTopLineIndex - scrollbackStartIndex)
+          anchor.absoluteTopLineIndex !== undefined && bufferStartIndex !== undefined
+            ? Math.max(0, anchor.absoluteTopLineIndex - bufferStartIndex)
             : anchor.topLineOffset;
         host.scrollTop = Math.min(
           maxScrollTop,
@@ -433,9 +433,9 @@ export function TerminalView({
       const topLineOffset = Math.floor(previous.scrollTop / previousLineHeightPx);
       const intraLineOffset = previous.scrollTop - topLineOffset * previousLineHeightPx;
 
-      if (previous.bufferStartIndex !== undefined && scrollbackStartIndex !== undefined) {
+      if (previous.bufferStartIndex !== undefined && bufferStartIndex !== undefined) {
         const absoluteTopLineIndex = previous.bufferStartIndex + topLineOffset;
-        const nextTopLineOffset = Math.max(0, absoluteTopLineIndex - scrollbackStartIndex);
+        const nextTopLineOffset = Math.max(0, absoluteTopLineIndex - bufferStartIndex);
         host.scrollTop = Math.min(maxScrollTop, Math.max(0, nextTopLineOffset * resolvedLineHeightPx + intraLineOffset));
         return;
       }
@@ -472,7 +472,7 @@ export function TerminalView({
     const layoutChanged =
       previous.lineHeightPx !== resolvedLineHeightPx
       || previous.clientHeight !== host.clientHeight
-      || previous.bufferStartIndex !== scrollbackStartIndex;
+      || previous.bufferStartIndex !== bufferStartIndex;
 
     if (shouldFollowOutput) {
       scrollToBottom();
@@ -489,7 +489,7 @@ export function TerminalView({
     rowHeight,
     setViewMode,
     scrollbackLines.length,
-    scrollbackStartIndex,
+    bufferStartIndex,
     syncDebugMetrics,
     syncScrollViewportState,
     viewportRows.length,
@@ -516,12 +516,12 @@ export function TerminalView({
       scrollTop: host.scrollTop,
       clientHeight: host.clientHeight,
       bufferRevision,
-      bufferStartIndex: scrollbackStartIndex,
+      bufferStartIndex,
       lineHeightPx: resolvedLineHeightPx,
     };
     syncScrollViewportState(host);
     syncDebugMetrics();
-  }, [active, bufferRevision, forceScrollToBottomNonce, resolvedLineHeightPx, scrollbackStartIndex, setViewMode, syncDebugMetrics, syncScrollViewportState]);
+  }, [active, bufferRevision, bufferStartIndex, forceScrollToBottomNonce, resolvedLineHeightPx, setViewMode, syncDebugMetrics, syncScrollViewportState]);
 
   const focusTerminal = useCallback(() => {
     const input = inputRef.current;
@@ -944,7 +944,7 @@ export function TerminalView({
           const absoluteIndex = renderedScrollbackRange.start + index;
           return (
             <div
-              key={`sb-${(scrollbackStartIndex ?? 0) + absoluteIndex}`}
+              key={`sb-${(bufferStartIndex ?? 0) + absoluteIndex}`}
               className="term-row term-scrollback-row"
               style={{ height: resolvedRowHeight || rowHeight, lineHeight: resolvedRowHeight || rowHeight }}
             >

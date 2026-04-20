@@ -77,6 +77,7 @@ interface SessionMirror {
   lastOutputAt: number;
   lastViewportCols: number;
   lastViewportRows: number;
+  lastViewportStartIndex: number;
   lastCursorRow: number;
   lastCursorCol: number;
   lastCursorVisible: boolean;
@@ -356,6 +357,7 @@ function createMirror(sessionName: string): SessionMirror {
     lastOutputAt: 0,
     lastViewportCols: 0,
     lastViewportRows: 0,
+    lastViewportStartIndex: -1,
     lastCursorRow: -1,
     lastCursorCol: -1,
     lastCursorVisible: false,
@@ -645,6 +647,7 @@ function sendSnapshotToClient(session: ClientSession, mirror: SessionMirror, sch
   sendMessage(session, { type: 'snapshot', payload: snapshot });
   mirror.lastViewportCols = snapshot.cols;
   mirror.lastViewportRows = snapshot.rows;
+  mirror.lastViewportStartIndex = snapshot.viewportStartIndex;
   mirror.lastCursorRow = snapshot.cursor.row;
   mirror.lastCursorCol = snapshot.cursor.col;
   mirror.lastCursorVisible = snapshot.cursor.visible;
@@ -729,13 +732,13 @@ function broadcastMirrorScrollbackAppend(mirror: SessionMirror, lines: string[],
   }
 }
 
-function buildViewportUpdate(bridge: WasmBridge, viewportStartIndex: number): TerminalViewportUpdate {
+function buildViewportUpdate(bridge: WasmBridge, viewportStartIndex: number, forceFullRows: boolean): TerminalViewportUpdate {
   const rowsPatch: TerminalViewportRowPatch[] = [];
   const rows = bridge.getRows();
   const cols = bridge.getCols();
 
   for (let row = 0; row < rows; row += 1) {
-    if (!bridge.isDirtyRow(row)) {
+    if (!forceFullRows && !bridge.isDirtyRow(row)) {
       continue;
     }
     const cells: TerminalCell[] = [];
@@ -822,10 +825,13 @@ function flushMirrorUpdates(mirror: SessionMirror) {
     }
   }
 
-  const viewportUpdate = buildViewportUpdate(bridge, mirror.scrollbackNextIndex);
+  const viewportStartIndex = mirror.scrollbackNextIndex;
+  const viewportShifted = viewportStartIndex !== mirror.lastViewportStartIndex;
+  const viewportUpdate = buildViewportUpdate(bridge, viewportStartIndex, viewportShifted);
   const cursorChanged =
     viewportUpdate.cols !== mirror.lastViewportCols ||
     viewportUpdate.rows !== mirror.lastViewportRows ||
+    viewportUpdate.viewportStartIndex !== mirror.lastViewportStartIndex ||
     viewportUpdate.cursor.row !== mirror.lastCursorRow ||
     viewportUpdate.cursor.col !== mirror.lastCursorCol ||
     viewportUpdate.cursor.visible !== mirror.lastCursorVisible ||
@@ -834,6 +840,7 @@ function flushMirrorUpdates(mirror: SessionMirror) {
     broadcastMirrorViewportUpdate(mirror, viewportUpdate);
     mirror.lastViewportCols = viewportUpdate.cols;
     mirror.lastViewportRows = viewportUpdate.rows;
+    mirror.lastViewportStartIndex = viewportUpdate.viewportStartIndex;
     mirror.lastCursorRow = viewportUpdate.cursor.row;
     mirror.lastCursorCol = viewportUpdate.cursor.col;
     mirror.lastCursorVisible = viewportUpdate.cursor.visible;
@@ -979,6 +986,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
       mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - mirror.lastScrollbackCount);
       mirror.capturedStartIndex = mirror.scrollbackNextIndex;
       mirror.capturedScrollbackLines = [];
+      mirror.lastViewportStartIndex = fallbackSnapshot.viewportStartIndex;
       mirror.bridge.clearDirty();
       for (const sessionId of mirror.subscribers) {
         const session = sessions.get(sessionId);

@@ -44,7 +44,7 @@ export type SessionState =
 export interface SessionBufferState {
   lines: string[];                  // authoritative line buffer for this session
   lineStartIndex?: number;          // absolute index for the first line in `lines`
-  scrollbackStartIndex?: number;    // absolute index for the first scrollback line in `lines`
+  scrollbackStartIndex?: number;    // absolute index for the first scrollback line kept in remote snapshot
   updateKind: 'replace' | 'append' | 'prepend' | 'viewport';
   revision: number;
   remoteSnapshot?: TerminalSnapshot;
