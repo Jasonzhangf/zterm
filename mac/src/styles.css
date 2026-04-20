@@ -139,6 +139,8 @@ body {
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+  appearance: none;
+  cursor: pointer;
 }
 
 .workspace-tab.active {
@@ -150,6 +152,7 @@ body {
   margin-left: auto;
   background: transparent;
   color: #788aa3;
+  cursor: default;
 }
 
 .pane-stage {
@@ -280,6 +283,10 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.inspector-summary-card {
+  background: linear-gradient(180deg, rgba(18, 24, 38, 0.88) 0%, rgba(14, 18, 28, 0.88) 100%);
+}
+
 .slot-card-title,
 .detail-title {
   font-size: 16px;
@@ -320,6 +327,62 @@ body {
 .detail-actions.inline .primary-button,
 .detail-actions.inline .ghost-button {
   min-width: 148px;
+}
+
+.inspector-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inspector-metric-card {
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inspector-metric-label {
+  font-size: 11px;
+  color: #91a3ba;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.inspector-metric-card strong {
+  font-size: 14px;
+  color: #eff5ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-metric-copy {
+  color: #9aacbf;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-status-text.idle {
+  color: #d7e1f1;
+}
+
+.inspector-status-text.connecting {
+  color: #dbe8ff;
+}
+
+.inspector-status-text.connected {
+  color: #7ff1cc;
+}
+
+.inspector-status-text.error {
+  color: #ffb3b3;
 }
 
 .status-stack {
@@ -835,4 +898,10 @@ body {
 .terminal-empty-hint {
   color: #9eabc0;
   line-height: 1.6;
+}
+
+@media (max-width: 1180px) {
+  .inspector-metric-grid {
+    grid-template-columns: 1fr;
+  }
 }

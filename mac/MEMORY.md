@@ -19,3 +19,5 @@
 - [2026-04-20] packaged `.app` 做 live connect smoke 时，先把窗口切到 `wide-3col` 让 Details pane 常驻，再在同一实例里直接改 host/token 并点 Connect；这样能避免 2-col 下依赖 Edit 切 pane 造成验证噪音
 - [2026-04-20] Mac Details 表单若手动输入显式 `ws://host:port`，应立刻把 `bridgePort` 同步到同一个端口；否则虽然底层 URL 真相已正确，表单仍会误导用户
 - [2026-04-20] 若 Mac 界面需要参考 Tabby，正确借用的是“紧凑 chrome + 顶部 tab strip + 左侧 profile rail + 主 terminal 优先”的壳层组织，不是照搬其自由多向分屏；真正的布局真源仍然只能是 shared `PaneStage`
+- [2026-04-20] Tabby 风格的顶部 tab strip 不能只是静态文案；至少要真实映射当前 selected target / inspector 状态，并在 2-col 下承担 Terminal ↔ Inspector 的切换职责
+- [2026-04-20] 右侧 Details 若要更像桌面 terminal client，应先收成 inspector summary（target/session/bridge），再往下展开原 Android 同构表单；这样既保留真源，又减少“整列全是表单”的压迫感

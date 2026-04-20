@@ -188,6 +188,29 @@ export default function App() {
   const shellSubtitle = selectedHost
     ? formatBridgeSessionTarget(selectedHost)
     : 'Tabby-inspired Mac shell · shared connection flow';
+  const activeTerminalLabel = terminalSession.state.activeTarget
+    ? terminalSession.state.activeTarget.sessionName || terminalSession.state.activeTarget.name
+    : selectedHost?.sessionName || selectedHost?.name || 'Terminal';
+  const inspectorTabLabel = editorMode === 'create'
+    ? 'New connection'
+    : isEditing && selectedHost
+      ? `Edit ${selectedHost.name}`
+      : selectedHost
+        ? `Inspector · ${selectedHost.name}`
+        : 'Inspector';
+
+  const handleShellTabSelect = (tab: 'connections' | 'terminal' | 'inspector') => {
+    if (tab === 'inspector') {
+      if (selectedHost) {
+        setEditorMode((current) => (current === 'closed' ? 'edit' : current));
+      } else {
+        setEditorMode('create');
+      }
+      return;
+    }
+
+    setEditorMode('closed');
+  };
 
   return (
     <div className="app-shell">
@@ -212,10 +235,30 @@ export default function App() {
       </header>
 
       <div className="workspace-tabstrip" role="tablist" aria-label="workspace shell">
-        <div className="workspace-tab active">Terminal</div>
-        <div className="workspace-tab">Connections</div>
-        {layout.columns >= 3 ? <div className="workspace-tab">Inspector</div> : null}
-        <div className="workspace-tab ghost">One row · multi-column</div>
+        <button
+          className={`workspace-tab ${layout.columns <= 1 && !isEditing ? 'active' : ''}`}
+          type="button"
+          onClick={() => handleShellTabSelect('connections')}
+        >
+          Connections · {hosts.length}
+        </button>
+        <button
+          className={`workspace-tab ${layout.columns >= 2 && !isEditing ? 'active' : ''}`}
+          type="button"
+          onClick={() => handleShellTabSelect('terminal')}
+        >
+          {activeTerminalLabel}
+        </button>
+        <button
+          className={`workspace-tab ${isEditing ? 'active' : ''}`}
+          type="button"
+          onClick={() => handleShellTabSelect('inspector')}
+        >
+          {inspectorTabLabel}
+        </button>
+        <div className="workspace-tab ghost">
+          {layout.columns >= 3 ? 'Connections · Terminal · Inspector' : 'One row · multi-column'}
+        </div>
       </div>
 
       {!isLoaded ? (

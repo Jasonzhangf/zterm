@@ -22,8 +22,9 @@
   - 最小 stage 页面
   - Tabby-inspired desktop shell：
     - compact window chrome
-    - workspace/tab strip
+    - workspace/tab strip（真实映射当前 target / inspector 状态）
     - 左 rail + 主 terminal + 右 inspector
+    - 2-col 时由 shell tabs 在 `Terminal` / `Inspector` 之间切 secondary column
   - 单行多列 + 垂直分屏布局
   - Connections / Details / Terminal 三个 pane 的统一编排
 

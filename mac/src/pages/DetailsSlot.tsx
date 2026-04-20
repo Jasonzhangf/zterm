@@ -236,15 +236,16 @@ export function DetailsSlot({
     }
     return `Connect failed: ${bridgeRuntime.error}`;
   })();
+  const currentSessionLabel = form.sessionName.trim() || form.name.trim() || '未指定';
 
   return (
     <div className="details-slot">
-      <div className="detail-section">
+      <div className="detail-section inspector-summary-card">
         <div className="detail-header">
           <div>
-            <div className="detail-title">{pageTitle}</div>
+            <div className="detail-title">{isEditing ? 'Inspector editing' : 'Inspector'}</div>
             <div className="detail-copy">
-              连接配置流程直接移植自 Android：General / Tmux Session / Connection / Terminal / Appearance。
+              右侧 inspector 保持 Android 同构连接真源，但桌面上优先展示目标概览、状态和快速动作。
             </div>
           </div>
           <div className="detail-actions">
@@ -256,6 +257,24 @@ export function DetailsSlot({
             <button className="primary-button" type="button" onClick={handleSave}>
               Save
             </button>
+          </div>
+        </div>
+
+        <div className="inspector-metric-grid">
+          <div className="inspector-metric-card">
+            <span className="inspector-metric-label">Target</span>
+            <strong>{form.name.trim() || 'New connection'}</strong>
+            <div className="inspector-metric-copy">{formatBridgeEndpoint({ bridgeHost: form.bridgeHost, bridgePort: form.bridgePort })}</div>
+          </div>
+          <div className="inspector-metric-card">
+            <span className="inspector-metric-label">Session</span>
+            <strong>{currentSessionLabel}</strong>
+            <div className="inspector-metric-copy">tmux attach target</div>
+          </div>
+          <div className="inspector-metric-card">
+            <span className="inspector-metric-label">Bridge</span>
+            <strong className={`inspector-status-text ${bridgeRuntime.status}`}>{bridgeRuntime.status.toUpperCase()}</strong>
+            <div className="inspector-metric-copy">{bridgeLine}</div>
           </div>
         </div>
       </div>
