@@ -32,6 +32,7 @@ import {
 } from '../lib/mobile-config';
 import { reconcileAbsoluteScrollbackRange } from '../lib/scrollback-buffer';
 import { getWtermHomeDir, resolveDaemonRuntimeConfig } from './daemon-config';
+import { ensureNodePtySpawnHelpersExecutable } from './node-pty-runtime';
 
 interface TmuxConnectPayload {
   name: string;
@@ -109,6 +110,7 @@ type ServerMessage =
   | { type: 'pong' };
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
+const NODE_PTY_RUNTIME_REPAIR = ensureNodePtySpawnHelpersExecutable();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
 const HOST = DAEMON_CONFIG.host || DEFAULT_DAEMON_HOST;
 
@@ -1255,4 +1257,10 @@ wss.on('listening', () => {
   console.log(`  - auth: ${REQUIRED_AUTH_TOKEN ? `enabled (${DAEMON_CONFIG.authSource})` : 'disabled'}`);
   console.log(`  - config: ${DAEMON_CONFIG.configFound ? WTERM_CONFIG_DISPLAY_PATH : `${WTERM_CONFIG_DISPLAY_PATH} (not found)`}`);
   console.log(`  - terminal cache lines: ${MAX_CAPTURED_SCROLLBACK_LINES}`);
+  if (NODE_PTY_RUNTIME_REPAIR.packageRoot) {
+    console.log(`  - node-pty helpers checked: ${NODE_PTY_RUNTIME_REPAIR.checkedHelpers.length}`);
+    if (NODE_PTY_RUNTIME_REPAIR.repairedHelpers.length > 0) {
+      console.log(`  - node-pty helpers repaired: ${NODE_PTY_RUNTIME_REPAIR.repairedHelpers.length}`);
+    }
+  }
 });
