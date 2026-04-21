@@ -28,18 +28,14 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
           <span className="terminal-target-label">{targetLabel}</span>
           <span>
             {activeTarget
-              ? `Live target: ${activeTarget.name || activeTarget.sessionName}`
+              ? activeTarget.name || activeTarget.sessionName
               : host
-                ? `Selected target: ${host.name}`
-                : 'No active target'}
+                ? host.name
+                : 'No target'}
           </span>
           <span>{`sessionId: ${session.connectedSessionId || '-'}`}</span>
           <span>{`buffer lines: ${session.buffer.lines.length}`}</span>
-          <span>
-            {isDetailsVisible
-              ? 'Inspector occupies secondary column.'
-              : 'Terminal remains primary visual column.'}
-          </span>
+          {isDetailsVisible ? <span>Inspector drawer open</span> : null}
         </div>
         {hasLiveTerminal ? (
           <button className="ghost-button" type="button" onClick={onDisconnect}>

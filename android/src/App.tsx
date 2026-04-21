@@ -9,6 +9,7 @@ import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
+import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
 import { useSessionDraftStorage } from './hooks/useSessionDraftStorage';
 import { useSessionHistoryStorage } from './hooks/useSessionHistoryStorage';
 import { upsertBridgeServer } from './lib/bridge-settings';
@@ -78,6 +79,7 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     renameSession,
     reconnectSession,
     reconnectAllSessions,
+    requestBufferRange,
     getActiveSession,
     sendInput,
     sendImagePaste,
@@ -86,6 +88,7 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   } = useSession();
   const { hosts, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
+  const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
   const { sessionGroups, recordSessionOpen, recordSessionGroupOpen, setSessionGroupSelection, deleteSessionGroup } = useSessionHistoryStorage();
   const [pageState, setPageState] = useState<AppPageState>(() => readPersistedPageState());
@@ -537,10 +540,12 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     if (!value) {
       return;
     }
+    const normalized = value.replace(/\r?\n/g, '\r');
+    const payload = /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
     if (activeSession?.id !== sessionId) {
       switchSession(sessionId);
     }
-    handleTerminalInput(value);
+    handleTerminalInput(payload);
     clearSessionDraft(sessionId);
   }, [activeSession?.id, clearSessionDraft, handleTerminalInput, switchSession]);
 
@@ -650,11 +655,14 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
             onTitleChange={handleTitleChange}
             onResize={handleResize}
             onTerminalInput={handleTerminalInput}
+            onRequestBufferRange={requestBufferRange}
             onImagePaste={sendImagePaste}
             onBufferLinesChange={updateSessionBufferLines}
             quickActions={quickActions}
+            shortcutActions={shortcutActions}
             onQuickActionInput={handleTerminalInput}
             onQuickActionsChange={setQuickActions}
+            onShortcutActionsChange={setShortcutActions}
             sessionDraft={activeSession ? (sessionDrafts[activeSession.id] || '') : ''}
             onSessionDraftChange={(value) => {
               if (!activeSession?.id) {

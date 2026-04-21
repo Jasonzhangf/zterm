@@ -17,11 +17,9 @@ import { extname, join } from 'path';
 import { homedir } from 'os';
 import type {
   PasteImagePayload,
+  TerminalBufferPayload,
   TerminalCell,
-  TerminalScrollbackUpdate,
-  TerminalSnapshot,
-  TerminalViewportRowPatch,
-  TerminalViewportUpdate,
+  TerminalIndexedLine,
 } from '../lib/types';
 import {
   buildDaemonSessionName,
@@ -69,19 +67,13 @@ interface SessionMirror {
   title: string;
   cols: number;
   rows: number;
+  revision: number;
   lastScrollbackCount: number;
   scrollbackBaseIndex: number;
   scrollbackNextIndex: number;
   capturedStartIndex: number;
-  capturedScrollbackLines: string[];
+  capturedScrollbackLines: TerminalCell[][];
   lastOutputAt: number;
-  lastViewportCols: number;
-  lastViewportRows: number;
-  lastViewportStartIndex: number;
-  lastCursorRow: number;
-  lastCursorCol: number;
-  lastCursorVisible: boolean;
-  lastCursorKeysApp: boolean;
   flushTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;
 }
@@ -95,7 +87,7 @@ type ClientMessage =
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
   | { type: 'paste-image'; payload: PasteImagePayload }
-  | { type: 'request-scrollback-range'; payload: { startIndex: number; endIndex: number } }
+  | { type: 'request-buffer-range'; payload: { startIndex: number; endIndex: number } }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
   | { type: 'close' };
@@ -103,9 +95,9 @@ type ClientMessage =
 type ServerMessage =
   | { type: 'connected'; payload: { sessionId: string } }
   | { type: 'sessions'; payload: { sessions: string[] } }
-  | { type: 'snapshot'; payload: TerminalSnapshot }
-  | { type: 'viewport-update'; payload: TerminalViewportUpdate }
-  | { type: 'scrollback-update'; payload: TerminalScrollbackUpdate }
+  | { type: 'buffer-sync'; payload: TerminalBufferPayload }
+  | { type: 'buffer-delta'; payload: TerminalBufferPayload }
+  | { type: 'buffer-range'; payload: TerminalBufferPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
@@ -349,19 +341,13 @@ function createMirror(sessionName: string): SessionMirror {
     title: key,
     cols: 80,
     rows: 24,
+    revision: 0,
     lastScrollbackCount: -1,
     scrollbackBaseIndex: 0,
     scrollbackNextIndex: 0,
     capturedStartIndex: 0,
     capturedScrollbackLines: [],
     lastOutputAt: 0,
-    lastViewportCols: 0,
-    lastViewportRows: 0,
-    lastViewportStartIndex: -1,
-    lastCursorRow: -1,
-    lastCursorCol: -1,
-    lastCursorVisible: false,
-    lastCursorKeysApp: false,
     flushTimer: null,
     subscribers: new Set(),
   };
@@ -451,17 +437,6 @@ function serializeCell(cell: ReturnType<WasmBridge['getCell']>): TerminalCell {
   };
 }
 
-function cellsToLine(cells: TerminalCell[]) {
-  let line = '';
-  for (const cell of cells) {
-    if (cell.width === 0) {
-      continue;
-    }
-    line += cell.char >= 32 ? String.fromCodePoint(cell.char) : ' ';
-  }
-  return line.replace(/\s+$/u, '');
-}
-
 function buildViewport(bridge: WasmBridge) {
   const rows = bridge.getRows();
   const cols = bridge.getCols();
@@ -485,7 +460,7 @@ function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number,
   for (let col = 0; col < lineLen; col += 1) {
     cells.push(serializeCell(bridge.getScrollbackCell(offset, col)));
   }
-  return cellsToLine(cells);
+  return cells;
 }
 
 function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: number, endExclusive: number) {
@@ -496,33 +471,11 @@ function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: nu
 
   const start = Math.max(0, Math.min(startInclusive, totalCount));
   const end = Math.max(start, Math.min(endExclusive, totalCount));
-  const lines: string[] = [];
+  const lines: TerminalCell[][] = [];
   for (let oldestIndex = start; oldestIndex < end; oldestIndex += 1) {
     lines.push(readScrollbackLineByOldestIndex(bridge, totalCount, oldestIndex));
   }
   return lines;
-}
-
-function captureTmuxLines(sessionName: string, limit: number) {
-  const captureLimit = Math.max(0, Math.floor(limit));
-  if (captureLimit <= 0) {
-    return [];
-  }
-
-  try {
-    const result = runTmux(['capture-pane', '-p', '-t', sessionName, '-S', `-${captureLimit}`]);
-    return result.stdout
-      .replace(/\r/g, '')
-      .split('\n')
-      .filter((line, index, source) => !(index === source.length - 1 && line === ''));
-  } catch (error) {
-    console.warn(
-      `[${new Date().toISOString()}] capture-pane fallback for ${sessionName}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return [];
-  }
 }
 
 function refreshMirrorCapturedScrollback(mirror: SessionMirror) {
@@ -539,41 +492,92 @@ function refreshMirrorCapturedScrollback(mirror: SessionMirror) {
     },
     currentScrollbackCount,
   );
-  const capturedLines = captureTmuxLines(mirror.sessionName, MAX_CAPTURED_SCROLLBACK_LINES + bridge.getRows());
-  const totalCapturedScrollback = Math.max(0, capturedLines.length - bridge.getRows());
-  const capturedCount = Math.min(totalCapturedScrollback, currentScrollbackCount);
+
+  const capturedCount = Math.min(MAX_CAPTURED_SCROLLBACK_LINES, currentScrollbackCount);
+  const oldestStartIndex = Math.max(0, currentScrollbackCount - capturedCount);
   mirror.capturedScrollbackLines =
     capturedCount > 0
-      ? capturedLines.slice(Math.max(0, totalCapturedScrollback - capturedCount), totalCapturedScrollback)
+      ? readScrollbackRangeByOldestIndex(bridge, oldestStartIndex, currentScrollbackCount)
       : [];
   mirror.scrollbackBaseIndex = absoluteRange.startIndex;
   mirror.scrollbackNextIndex = absoluteRange.nextIndex;
-  mirror.capturedStartIndex = absoluteRange.startIndex + Math.max(0, currentScrollbackCount - capturedCount);
+  mirror.capturedStartIndex = Math.max(
+    absoluteRange.startIndex,
+    absoluteRange.nextIndex - mirror.capturedScrollbackLines.length,
+  );
   mirror.lastScrollbackCount = currentScrollbackCount;
 }
 
-function buildSnapshotFromMirrorForClient(session: ClientSession, mirror: SessionMirror): TerminalSnapshot | null {
+function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {
+  return lines.map((cells, offset) => ({
+    index: startIndex + offset,
+    cells,
+  }));
+}
+
+function buildBufferPayload(
+  mirror: SessionMirror,
+  lines: TerminalIndexedLine[],
+  startIndex: number,
+  endIndex: number,
+): TerminalBufferPayload | null {
   const bridge = mirror.bridge;
   if (!bridge) {
     return null;
   }
 
+  const cursor = bridge.getCursor();
+  const cols = bridge.getCols();
+  const rows = bridge.getRows();
+  const viewportStartIndex = mirror.scrollbackNextIndex;
+
+  return {
+    revision: mirror.revision,
+    startIndex,
+    endIndex,
+    cols,
+    rows,
+    cursorRow: viewportStartIndex + cursor.row,
+    cursorCol: cursor.col,
+    cursorVisible: cursor.visible,
+    cursorKeysApp: bridge.cursorKeysApp(),
+    lines,
+  };
+}
+
+function buildInitialBufferSyncPayload(session: ClientSession, mirror: SessionMirror): TerminalBufferPayload | null {
+  const bridge = mirror.bridge;
+  if (!bridge) {
+    return null;
+  }
+
+  const viewport = buildViewport(bridge);
   const totalCaptured = mirror.capturedScrollbackLines.length;
   const tailCount = Math.min(totalCaptured, INITIAL_SCROLLBACK_TAIL_LINES);
   const tailLocalStart = totalCaptured - tailCount;
   const tailAbsoluteStart = mirror.capturedStartIndex + tailLocalStart;
+  const indexedLines = [
+    ...toIndexedLines(tailAbsoluteStart, mirror.capturedScrollbackLines.slice(tailLocalStart, totalCaptured)),
+    ...toIndexedLines(mirror.scrollbackNextIndex, viewport),
+  ];
   session.backfillCursor = tailAbsoluteStart;
+  return buildBufferPayload(mirror, indexedLines, tailAbsoluteStart, mirror.scrollbackNextIndex + viewport.length);
+}
 
-  return {
-    cols: bridge.getCols(),
-    rows: bridge.getRows(),
-    viewport: buildViewport(bridge),
-    viewportStartIndex: mirror.scrollbackNextIndex,
-    cursor: bridge.getCursor(),
-    cursorKeysApp: bridge.cursorKeysApp(),
-    scrollbackLines: mirror.capturedScrollbackLines.slice(tailLocalStart, totalCaptured),
-    scrollbackStartIndex: tailCount > 0 ? tailAbsoluteStart : undefined,
-  };
+function buildBackfillRangePayload(
+  mirror: SessionMirror,
+  startAbsolute: number,
+  endAbsolute: number,
+): TerminalBufferPayload | null {
+  const bridge = mirror.bridge;
+  if (!bridge) {
+    return null;
+  }
+
+  const startOffset = Math.max(0, startAbsolute - mirror.capturedStartIndex);
+  const endOffset = Math.max(startOffset, endAbsolute - mirror.capturedStartIndex);
+  const indexedLines = toIndexedLines(startAbsolute, mirror.capturedScrollbackLines.slice(startOffset, endOffset));
+  return buildBufferPayload(mirror, indexedLines, startAbsolute, mirror.scrollbackNextIndex + bridge.getRows());
 }
 
 function scheduleClientBackfill(session: ClientSession) {
@@ -600,21 +604,11 @@ function scheduleClientBackfill(session: ClientSession) {
 
     const endAbsolute = session.backfillCursor;
     const startAbsolute = Math.max(nextMirror.capturedStartIndex, endAbsolute - SCROLLBACK_BACKFILL_CHUNK_LINES);
-    const startOffset = Math.max(0, startAbsolute - nextMirror.capturedStartIndex);
-    const endOffset = Math.max(startOffset, endAbsolute - nextMirror.capturedStartIndex);
-    const lines = nextMirror.capturedScrollbackLines.slice(startOffset, endOffset);
     session.backfillCursor = startAbsolute;
 
-    if (lines.length > 0) {
-      sendMessage(session, {
-        type: 'scrollback-update',
-        payload: {
-          mode: 'prepend',
-          lines,
-          startIndex: startAbsolute,
-          remaining: Math.max(0, startAbsolute - nextMirror.capturedStartIndex),
-        },
-      });
+    const payload = buildBackfillRangePayload(nextMirror, startAbsolute, endAbsolute);
+    if (payload && payload.lines.length > 0) {
+      sendMessage(session, { type: 'buffer-range', payload });
     }
 
     if (session.backfillCursor > nextMirror.capturedStartIndex) {
@@ -630,9 +624,9 @@ function clearIdleSnapshotTimer(session: ClientSession) {
   }
 }
 
-function sendSnapshotToClient(session: ClientSession, mirror: SessionMirror, scheduleBackfill: boolean) {
-  const snapshot = buildSnapshotFromMirrorForClient(session, mirror);
-  if (!snapshot) {
+function sendBufferSyncToClient(session: ClientSession, mirror: SessionMirror, scheduleBackfill: boolean) {
+  const payload = buildInitialBufferSyncPayload(session, mirror);
+  if (!payload) {
     return;
   }
 
@@ -644,21 +638,14 @@ function sendSnapshotToClient(session: ClientSession, mirror: SessionMirror, sch
     sendMessage(session, { type: 'connected', payload: { sessionId: session.id } });
   }
   sendMessage(session, { type: 'title', payload: mirror.title });
-  sendMessage(session, { type: 'snapshot', payload: snapshot });
-  mirror.lastViewportCols = snapshot.cols;
-  mirror.lastViewportRows = snapshot.rows;
-  mirror.lastViewportStartIndex = snapshot.viewportStartIndex;
-  mirror.lastCursorRow = snapshot.cursor.row;
-  mirror.lastCursorCol = snapshot.cursor.col;
-  mirror.lastCursorVisible = snapshot.cursor.visible;
-  mirror.lastCursorKeysApp = snapshot.cursorKeysApp;
+  sendMessage(session, { type: 'buffer-sync', payload });
 
   if (scheduleBackfill) {
     scheduleClientBackfill(session);
   }
 }
 
-function scheduleIdleSnapshot(session: ClientSession) {
+function scheduleIdleBufferSync(session: ClientSession) {
   if (session.streamMode !== 'idle' || session.idleSnapshotTimer || session.state !== 'connected') {
     return;
   }
@@ -672,96 +659,48 @@ function scheduleIdleSnapshot(session: ClientSession) {
     if (!nextMirror || !nextMirror.bridge || nextMirror.state !== 'connected') {
       return;
     }
-    sendSnapshotToClient(session, nextMirror, false);
+    sendBufferSyncToClient(session, nextMirror, false);
   }, IDLE_STREAM_INTERVAL_MS);
 }
 
 function markIdleSessionDirty(session: ClientSession) {
   session.idleDirty = true;
-  scheduleIdleSnapshot(session);
+  scheduleIdleBufferSync(session);
 }
 
-function sendInitialSnapshotToClient(session: ClientSession, mirror: SessionMirror) {
-  sendSnapshotToClient(session, mirror, true);
+function sendInitialBufferSyncToClient(session: ClientSession, mirror: SessionMirror) {
+  sendBufferSyncToClient(session, mirror, true);
 }
 
-function broadcastMirrorSnapshotReset(mirror: SessionMirror) {
+function broadcastMirrorBufferReset(mirror: SessionMirror) {
   for (const sessionId of mirror.subscribers) {
     const session = sessions.get(sessionId);
     if (!session) {
       continue;
     }
     clearClientBackfillTimer(session);
-    sendInitialSnapshotToClient(session, mirror);
+    sendInitialBufferSyncToClient(session, mirror);
   }
 }
 
-function broadcastMirrorViewportUpdate(mirror: SessionMirror, payload: TerminalViewportUpdate) {
+function broadcastMirrorBufferDelta(mirror: SessionMirror, payload: TerminalBufferPayload) {
   for (const sessionId of mirror.subscribers) {
     const session = sessions.get(sessionId);
     if (!session || session.state !== 'connected') {
       continue;
     }
     if (session.streamMode === 'active') {
-      sendMessage(session, { type: 'viewport-update', payload });
+      sendMessage(session, { type: 'buffer-delta', payload });
     } else {
       markIdleSessionDirty(session);
     }
   }
-}
-
-function broadcastMirrorScrollbackAppend(mirror: SessionMirror, lines: string[], startIndex: number) {
-  for (const sessionId of mirror.subscribers) {
-    const session = sessions.get(sessionId);
-    if (!session || session.state !== 'connected') {
-      continue;
-    }
-    if (session.streamMode === 'active') {
-      sendMessage(session, {
-        type: 'scrollback-update',
-        payload: {
-          mode: 'append',
-          lines,
-          startIndex,
-          remaining: session.backfillCursor === null ? 0 : Math.max(0, session.backfillCursor - mirror.capturedStartIndex),
-        },
-      });
-    } else {
-      markIdleSessionDirty(session);
-    }
-  }
-}
-
-function buildViewportUpdate(bridge: WasmBridge, viewportStartIndex: number, forceFullRows: boolean): TerminalViewportUpdate {
-  const rowsPatch: TerminalViewportRowPatch[] = [];
-  const rows = bridge.getRows();
-  const cols = bridge.getCols();
-
-  for (let row = 0; row < rows; row += 1) {
-    if (!forceFullRows && !bridge.isDirtyRow(row)) {
-      continue;
-    }
-    const cells: TerminalCell[] = [];
-    for (let col = 0; col < cols; col += 1) {
-      cells.push(serializeCell(bridge.getCell(row, col)));
-    }
-    rowsPatch.push({ row, cells });
-  }
-
-  return {
-    cols,
-    rows,
-    viewportStartIndex,
-    rowsPatch,
-    cursor: bridge.getCursor(),
-    cursorKeysApp: bridge.cursorKeysApp(),
-  };
 }
 
 function syncMirrorScrollbackAppend(
   mirror: SessionMirror,
   startIndex: number,
-  lines: string[],
+  lines: TerminalCell[][],
   currentScrollbackCount: number,
 ) {
   const expectedNextIndex = mirror.scrollbackNextIndex;
@@ -801,10 +740,12 @@ function flushMirrorUpdates(mirror: SessionMirror) {
   if (mirror.lastScrollbackCount < 0 || currentScrollbackCount < mirror.lastScrollbackCount) {
     refreshMirrorCapturedScrollback(mirror);
     bridge.clearDirty();
-    broadcastMirrorSnapshotReset(mirror);
+    mirror.revision += 1;
+    broadcastMirrorBufferReset(mirror);
     return;
   }
 
+  const appendedLines: TerminalIndexedLine[] = [];
   const newScrollbackLines = currentScrollbackCount - mirror.lastScrollbackCount;
   if (newScrollbackLines > 0) {
     const startIndex = mirror.scrollbackNextIndex;
@@ -815,36 +756,29 @@ function flushMirrorUpdates(mirror: SessionMirror) {
     );
     if (appended.length > 0) {
       if (syncMirrorScrollbackAppend(mirror, startIndex, appended, currentScrollbackCount)) {
-        broadcastMirrorScrollbackAppend(mirror, appended, startIndex);
+        appendedLines.push(...toIndexedLines(startIndex, appended));
       } else {
         refreshMirrorCapturedScrollback(mirror);
         bridge.clearDirty();
-        broadcastMirrorSnapshotReset(mirror);
+        mirror.revision += 1;
+        broadcastMirrorBufferReset(mirror);
         return;
       }
     }
   }
 
   const viewportStartIndex = mirror.scrollbackNextIndex;
-  const viewportShifted = viewportStartIndex !== mirror.lastViewportStartIndex;
-  const viewportUpdate = buildViewportUpdate(bridge, viewportStartIndex, viewportShifted);
-  const cursorChanged =
-    viewportUpdate.cols !== mirror.lastViewportCols ||
-    viewportUpdate.rows !== mirror.lastViewportRows ||
-    viewportUpdate.viewportStartIndex !== mirror.lastViewportStartIndex ||
-    viewportUpdate.cursor.row !== mirror.lastCursorRow ||
-    viewportUpdate.cursor.col !== mirror.lastCursorCol ||
-    viewportUpdate.cursor.visible !== mirror.lastCursorVisible ||
-    viewportUpdate.cursorKeysApp !== mirror.lastCursorKeysApp;
-  if (viewportUpdate.rowsPatch.length > 0 || cursorChanged) {
-    broadcastMirrorViewportUpdate(mirror, viewportUpdate);
-    mirror.lastViewportCols = viewportUpdate.cols;
-    mirror.lastViewportRows = viewportUpdate.rows;
-    mirror.lastViewportStartIndex = viewportUpdate.viewportStartIndex;
-    mirror.lastCursorRow = viewportUpdate.cursor.row;
-    mirror.lastCursorCol = viewportUpdate.cursor.col;
-    mirror.lastCursorVisible = viewportUpdate.cursor.visible;
-    mirror.lastCursorKeysApp = viewportUpdate.cursorKeysApp;
+  const viewport = buildViewport(bridge);
+  const deltaPayload = buildBufferPayload(
+    mirror,
+    [...appendedLines, ...toIndexedLines(viewportStartIndex, viewport)],
+    mirror.capturedStartIndex,
+    viewportStartIndex + viewport.length,
+  );
+  if (deltaPayload && deltaPayload.lines.length > 0) {
+    mirror.revision += 1;
+    deltaPayload.revision = mirror.revision;
+    broadcastMirrorBufferDelta(mirror, deltaPayload);
   }
 
   mirror.lastScrollbackCount = currentScrollbackCount;
@@ -962,32 +896,24 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   try {
     refreshMirrorCapturedScrollback(mirror);
     mirror.bridge.clearDirty();
-    broadcastMirrorSnapshotReset(mirror);
+    mirror.revision += 1;
+    broadcastMirrorBufferReset(mirror);
   } catch (error) {
     console.error(
-      `[${new Date().toISOString()}] initial snapshot failed for ${mirror.sessionName}: ${
+      `[${new Date().toISOString()}] initial buffer sync failed for ${mirror.sessionName}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
 
     try {
-      const fallbackSnapshot: TerminalSnapshot = {
-        cols: mirror.bridge.getCols(),
-        rows: mirror.bridge.getRows(),
-        viewport: buildViewport(mirror.bridge),
-        viewportStartIndex: mirror.scrollbackNextIndex,
-        cursor: mirror.bridge.getCursor(),
-        cursorKeysApp: mirror.bridge.cursorKeysApp(),
-        scrollbackLines: [],
-        scrollbackStartIndex: undefined,
-      };
+      const viewport = buildViewport(mirror.bridge);
       mirror.lastScrollbackCount = mirror.bridge.getScrollbackCount();
       mirror.scrollbackNextIndex = Math.max(mirror.scrollbackNextIndex, mirror.lastScrollbackCount);
       mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - mirror.lastScrollbackCount);
       mirror.capturedStartIndex = mirror.scrollbackNextIndex;
       mirror.capturedScrollbackLines = [];
-      mirror.lastViewportStartIndex = fallbackSnapshot.viewportStartIndex;
       mirror.bridge.clearDirty();
+      mirror.revision += 1;
       for (const sessionId of mirror.subscribers) {
         const session = sessions.get(sessionId);
         if (!session) {
@@ -1001,11 +927,20 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
           sendMessage(session, { type: 'connected', payload: { sessionId: session.id } });
         }
         sendMessage(session, { type: 'title', payload: mirror.title });
-        sendMessage(session, { type: 'snapshot', payload: fallbackSnapshot });
+        const fallbackPayload = buildBufferPayload(
+          mirror,
+          toIndexedLines(mirror.scrollbackNextIndex, viewport),
+          mirror.scrollbackNextIndex,
+          mirror.scrollbackNextIndex + viewport.length,
+        );
+        if (fallbackPayload) {
+          fallbackPayload.revision = mirror.revision;
+          sendMessage(session, { type: 'buffer-sync', payload: fallbackPayload });
+        }
       }
     } catch (fallbackError) {
       console.error(
-        `[${new Date().toISOString()}] fallback snapshot failed for ${mirror.sessionName}: ${
+        `[${new Date().toISOString()}] fallback buffer sync failed for ${mirror.sessionName}: ${
           fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
         }`,
       );
@@ -1057,7 +992,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   sendMessage(session, { type: 'title', payload: mirror.title });
 
   if (mirror.state === 'connected' && mirror.bridge) {
-    sendInitialSnapshotToClient(session, mirror);
+    sendInitialBufferSyncToClient(session, mirror);
     return;
   }
 
@@ -1081,7 +1016,8 @@ function handleResize(session: ClientSession, cols: number, rows: number) {
   clearMirrorFlushTimer(mirror);
   refreshMirrorCapturedScrollback(mirror);
   mirror.bridge.clearDirty();
-  broadcastMirrorSnapshotReset(mirror);
+  mirror.revision += 1;
+  broadcastMirrorBufferReset(mirror);
 }
 
 function handleInput(session: ClientSession, data: string) {
@@ -1099,7 +1035,7 @@ function handleStreamMode(session: ClientSession, mode: 'active' | 'idle') {
     const mirror = getClientMirror(session);
     if (mirror && mirror.bridge && mirror.state === 'connected') {
       clearClientBackfillTimer(session);
-      sendSnapshotToClient(session, mirror, true);
+      sendBufferSyncToClient(session, mirror, true);
     }
     return;
   }
@@ -1107,10 +1043,10 @@ function handleStreamMode(session: ClientSession, mode: 'active' | 'idle') {
   clearClientBackfillTimer(session);
 }
 
-function handleScrollbackRangeRequest(session: ClientSession, startIndex: number, endIndex: number) {
+function handleBufferRangeRequest(session: ClientSession, startIndex: number, endIndex: number) {
   const mirror = getClientMirror(session);
   if (!mirror || mirror.state !== 'connected' || !mirror.bridge) {
-    sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for scrollback sync', code: 'scrollback_not_ready' } });
+    sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for buffer sync', code: 'buffer_not_ready' } });
     return;
   }
 
@@ -1122,19 +1058,10 @@ function handleScrollbackRangeRequest(session: ClientSession, startIndex: number
   const availableEnd = mirror.scrollbackNextIndex;
   const actualStart = Math.max(availableStart, normalizedStart);
   const actualEnd = Math.min(availableEnd, normalizedEnd);
-  const sliceStart = Math.max(0, actualStart - mirror.capturedStartIndex);
-  const sliceEnd = Math.max(sliceStart, actualEnd - mirror.capturedStartIndex);
-  const lines = mirror.capturedScrollbackLines.slice(sliceStart, sliceEnd);
-
-  sendMessage(session, {
-    type: 'scrollback-update',
-    payload: {
-      mode: 'reset',
-      lines,
-      startIndex: actualStart,
-      remaining: Math.max(0, actualStart - availableStart),
-    },
-  });
+  const payload = buildBackfillRangePayload(mirror, actualStart, actualEnd);
+  if (payload) {
+    sendMessage(session, { type: 'buffer-range', payload });
+  }
 }
 
 function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
@@ -1252,8 +1179,8 @@ function handleMessage(session: ClientSession, rawData: RawData) {
     case 'paste-image':
       handlePasteImage(session, message.payload);
       break;
-    case 'request-scrollback-range':
-      handleScrollbackRangeRequest(session, message.payload.startIndex, message.payload.endIndex);
+    case 'request-buffer-range':
+      handleBufferRangeRequest(session, message.payload.startIndex, message.payload.endIndex);
       break;
     case 'resize':
       handleResize(session, message.payload.cols, message.payload.rows);

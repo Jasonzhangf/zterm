@@ -7,6 +7,7 @@ import {
   sortBridgeServers,
   type BridgeSettings,
 } from '../lib/bridge-settings';
+import { APP_BASE_VERSION, APP_BUILD_NUMBER, APP_PACKAGE_NAME, APP_VERSION } from '../lib/app-version';
 import { WTERM_CONFIG_DISPLAY_PATH } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
 import { formatTargetBadge } from '../lib/network-target';
@@ -114,6 +115,44 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
+        <div style={sectionStyle()}>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>About</div>
+          <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
+            Use this version number to confirm the phone is running the latest installed build.
+          </div>
+
+          <div
+            style={{
+              borderRadius: '20px',
+              padding: '16px',
+              backgroundColor: '#f6f8fb',
+              color: mobileTheme.colors.lightText,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Version</div>
+              <div style={{ fontSize: '24px', fontWeight: 800 }}>{APP_VERSION}</div>
+            </div>
+            <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Base</div>
+                <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_BASE_VERSION}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Build</div>
+                <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_BUILD_NUMBER}</div>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Package</div>
+              <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_PACKAGE_NAME}</div>
+            </div>
+          </div>
+        </div>
+
         <div style={sectionStyle()}>
           <div style={{ fontSize: '24px', fontWeight: 800 }}>Terminal Cache</div>
           <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>

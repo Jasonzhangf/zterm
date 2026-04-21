@@ -51,6 +51,7 @@
 - [ ] 快捷键盘与快捷栏
 - [ ] 悬浮球预输入编辑器（输入框 / 快捷列表 / 剪贴板 / 发送 / 加入）
 - [ ] Tab 长按重排、双击重命名
+- [ ] 应用内升级闭环（server manifest / version compare / checksum / Android install prompt / 忽略策略）
 - [ ] 响应式排版分层（手机 / 平板 / 折叠屏 / 分屏 / 多 active tab）→ 已提升为 Epic-004
 
 ## Epic-004 跨尺寸布局与 Mac 共享壳
@@ -91,6 +92,7 @@
 - 2026-04-20 当前重点：手势滚动一旦进入历史阅读态，必须保持锁定到输入发生为止；不能在 buffer 更新/重渲染时被拉回底部
 - 2026-04-20 当前重点：scrollback/buffer 要改成“绝对行号 + 最新连续尾段”模型；带 gap 的旧 buffer 不能再被压扁拼接，否则会同时破坏补历史和阅读锚点
 - 2026-04-20 新需求进入队列：悬浮球内加入预输入编辑器（输入框 + 快捷列表 + 剪贴板 + 发送/加号），以及 tab 长按重排 / 双击改名
+- 2026-04-21 新需求进入队列：应用内升级；唯一真源应是服务器 manifest，客户端只做版本比较 / 下载校验 / 调起系统安装，不做第二套版本真相；提醒策略必须支持「跳过当前版本」与「一直忽略直到用户手动检查」
 - 2026-04-20 已创建 `mobile-14` / `mobile-14.1` / `mobile-14.2` / `mobile-14.3`：跨尺寸布局 / Mac 共享壳真源统一完成；Jason 已补充冻结为“默认一行多列 + 垂直分屏”
 - 2026-04-20 已创建 `mobile-14.4`：Mac 先做最小可执行包（Electron + Vite + React），先打通 build/package/window/stage 再逐步接功能
 - 2026-04-20 `mobile-14.1` 已完成：shared layout resolver + PaneStage 已抽到 `packages/shared/`
@@ -104,3 +106,4 @@
 - 2026-04-20 Mac 2-col 壳层继续收口：顶部 tab strip 已从静态文案改为真实 target / inspector 状态 tabs，并可直接切 `Terminal ↔ Inspector`；右侧 Details 也已改成 inspector summary + compact form
 - 2026-04-20 Mac shell 已进入最小真实 open tabs：saved target 可开成 tab、`+` 可进入 new connection tab、tab 可关闭；当前真边界明确为 `single runtime · multi tabs`
 - 2026-04-20 Mac 壳层排版已做第一轮 terminal-first 收口：列宽不再等分，Terminal 主列明显更宽；顶部 chrome / shell tabs / terminal 内二级 tabs 已压缩
+- 2026-04-20 Jason 新冻结：右侧不是固定抽屉，而是可选比例的 vertical split workspace（类似 iTerm2）；当前 packaged `.app` 已补最小 preset：`1 / 2 / 3` 分列

@@ -6,7 +6,7 @@ import { TerminalCanvas } from '../components/terminal/TerminalCanvas';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { mobileTheme } from '../lib/mobile-ui';
-import type { QuickAction, Session } from '../lib/types';
+import type { QuickAction, Session, TerminalCell, TerminalShortcutAction } from '../lib/types';
 
 type VirtualKeyboardApi = {
   overlaysContent: boolean;
@@ -31,11 +31,14 @@ interface TerminalPageProps {
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
   onTerminalInput?: (data: string) => void;
+  onRequestBufferRange?: (sessionId: string, startIndex: number, endIndex: number) => void;
   onImagePaste?: (file: File) => Promise<void> | void;
-  onBufferLinesChange?: (sessionId: string, lines: string[]) => void;
+  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   quickActions: QuickAction[];
+  shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string) => void;
   onQuickActionsChange?: (actions: QuickAction[]) => void;
+  onShortcutActionsChange?: (actions: TerminalShortcutAction[]) => void;
   sessionDraft: string;
   onSessionDraftChange?: (value: string) => void;
   onSessionDraftSend?: (value: string) => void;
@@ -56,11 +59,14 @@ export function TerminalPage({
   onTitleChange,
   onResize,
   onTerminalInput,
+  onRequestBufferRange,
   onImagePaste,
   onBufferLinesChange,
   quickActions,
+  shortcutActions,
   onQuickActionInput,
   onQuickActionsChange,
+  onShortcutActionsChange,
   sessionDraft,
   onSessionDraftChange,
   onSessionDraftSend,
@@ -339,6 +345,7 @@ export function TerminalPage({
           onTitleChange={onTitleChange}
           onResize={onResize}
           onInput={onTerminalInput}
+          onRequestBufferRange={onRequestBufferRange}
           onBufferLinesChange={onBufferLinesChange}
           focusNonce={focusNonce}
           allowDomFocus={terminalKeyboardRequested}
@@ -353,12 +360,14 @@ export function TerminalPage({
         <div ref={quickBarRef}>
           <TerminalQuickBar
             quickActions={quickActions}
+            shortcutActions={shortcutActions}
             onSendSequence={onQuickActionInput}
             onImagePaste={onImagePaste}
             keyboardVisible={keyboardLayoutActive && keyboardInset > 0}
             keyboardInsetPx={Math.max(keyboardInset, viewportInset)}
             onToggleKeyboard={handleToggleKeyboard}
             onQuickActionsChange={onQuickActionsChange}
+            onShortcutActionsChange={onShortcutActionsChange}
             sessionDraft={sessionDraft}
             onSessionDraftChange={onSessionDraftChange}
             onSessionDraftSend={onSessionDraftSend}

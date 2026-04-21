@@ -1,66 +1,30 @@
 import type {
   SessionBufferState,
+  TerminalBufferPayload,
   TerminalCell,
-  TerminalScrollbackUpdate,
-  TerminalSnapshot,
-  TerminalViewportUpdate,
+  TerminalIndexedLine,
 } from './types';
-import { mergeIndexedScrollbackRanges } from './scrollback-buffer';
 
-function trimOutputHistory(history: string, cacheLines: number) {
-  const lines = history.split('\n');
-  if (lines.length <= cacheLines) {
-    return history;
-  }
-  return lines.slice(lines.length - cacheLines).join('\n');
+function cloneCell(cell: TerminalCell): TerminalCell {
+  return { ...cell };
 }
 
-export function normalizeBufferLines(lines: string[], cacheLines: number) {
-  const normalized = lines.map((line) => (typeof line === 'string' ? line : String(line ?? '')));
-  if (normalized.length <= cacheLines) {
-    return normalized;
-  }
-  return normalized.slice(normalized.length - cacheLines);
+function cloneRow(row: TerminalCell[]): TerminalCell[] {
+  return row.map(cloneCell);
 }
 
-function trimBufferWithLineStart(
-  lines: string[],
-  lineStartIndex: number | undefined,
-  cacheLines: number,
-) {
-  const normalized = lines.map((line) => (typeof line === 'string' ? line : String(line ?? '')));
-  if (normalized.length <= cacheLines) {
-    return {
-      lines: normalized,
-      lineStartIndex,
-    };
-  }
-
-  const trimmedCount = normalized.length - cacheLines;
-  return {
-    lines: normalized.slice(trimmedCount),
-    lineStartIndex: lineStartIndex !== undefined ? lineStartIndex + trimmedCount : undefined,
-  };
+function cloneRows(rows: TerminalCell[][]): TerminalCell[][] {
+  return rows.map(cloneRow);
 }
 
-function resolveSnapshotLineStart(snapshot: TerminalSnapshot) {
-  if (snapshot.scrollbackLines && snapshot.scrollbackLines.length > 0) {
-    return snapshot.scrollbackStartIndex;
-  }
-  return snapshot.viewportStartIndex;
-}
-
-function resolveBufferLineStart(current: SessionBufferState | undefined) {
-  if (!current) {
-    return undefined;
-  }
-  if (current.lineStartIndex !== undefined) {
-    return current.lineStartIndex;
-  }
-  if (current.remoteSnapshot) {
-    return resolveSnapshotLineStart(current.remoteSnapshot);
-  }
-  return current.scrollbackStartIndex;
+function textLineToCells(line: string): TerminalCell[] {
+  return Array.from(line).map((char) => ({
+    char: char.codePointAt(0) || 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+  }));
 }
 
 export function cellsToLine(cells: TerminalCell[]) {
@@ -74,330 +38,217 @@ export function cellsToLine(cells: TerminalCell[]) {
   return line.replace(/\s+$/u, '');
 }
 
-function createBlankCell(): TerminalCell {
-  return {
-    char: 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  };
-}
-
-function applyViewportUpdate(previous: TerminalSnapshot | undefined, update: TerminalViewportUpdate): TerminalSnapshot {
-  const viewport =
-    previous && previous.cols === update.cols && previous.rows === update.rows
-      ? previous.viewport.slice()
-      : Array.from({ length: update.rows }, () =>
-          Array.from({ length: update.cols }, () => createBlankCell()),
-        );
-
-  for (const patch of update.rowsPatch) {
-    if (patch.row < 0 || patch.row >= viewport.length) {
-      continue;
+export function normalizeBufferLines(lines: Array<TerminalCell[] | string>, cacheLines: number) {
+  const normalized = lines.map((line) => {
+    if (Array.isArray(line)) {
+      return cloneRow(line);
     }
-    viewport[patch.row] = patch.cells.map((cell) => ({ ...cell }));
+    return textLineToCells(typeof line === 'string' ? line : String(line ?? ''));
+  });
+
+  if (normalized.length <= cacheLines) {
+    return normalized;
   }
 
-  return {
-    cols: update.cols,
-    rows: update.rows,
-    viewport,
-    viewportStartIndex: update.viewportStartIndex,
-    cursor: update.cursor,
-    cursorKeysApp: update.cursorKeysApp,
-    scrollbackLines: previous?.scrollbackLines,
-    scrollbackStartIndex: previous?.scrollbackStartIndex,
-  };
+  return normalized.slice(normalized.length - cacheLines);
 }
 
-function applyViewportUpdateToLines(
-  current: SessionBufferState,
-  nextSnapshot: TerminalSnapshot,
-  update: TerminalViewportUpdate,
-  cacheLines: number,
-) {
-  if (update.rowsPatch.length === 0) {
+function normalizeIndexedLines(lines: TerminalIndexedLine[]) {
+  return lines
+    .filter((line) => line && Number.isFinite(line.index))
+    .map((line) => ({
+      index: Math.max(0, Math.floor(line.index)),
+      cells: cloneRow(line.cells || []),
+    }))
+    .sort((left, right) => left.index - right.index);
+}
+
+function trimToCacheWindow(startIndex: number, endIndex: number, cacheLines: number) {
+  const normalizedEnd = Math.max(startIndex, endIndex);
+  const normalizedStart = Math.max(0, startIndex);
+  if (normalizedEnd - normalizedStart <= cacheLines) {
     return {
-      lines: current.lines,
-      lineStartIndex: resolveBufferLineStart(current),
+      startIndex: normalizedStart,
+      endIndex: normalizedEnd,
     };
   }
 
-  const previousSnapshot = current.remoteSnapshot;
-  if (!previousSnapshot) {
-    return linesFromSnapshot(nextSnapshot, cacheLines);
-  }
-
-  if (
-    previousSnapshot.rows !== nextSnapshot.rows
-    || previousSnapshot.cols !== nextSnapshot.cols
-    || current.lines.length < nextSnapshot.rows
-  ) {
-    return linesFromSnapshot(nextSnapshot, cacheLines);
-  }
-
-  const lineStartIndex = resolveBufferLineStart(current);
-  if (lineStartIndex === undefined) {
-    return linesFromSnapshot(nextSnapshot, cacheLines);
-  }
-  let nextLines = current.lines;
-
-  for (const patch of update.rowsPatch) {
-    const absoluteLineIndex = update.viewportStartIndex + patch.row;
-    const lineIndex = absoluteLineIndex - lineStartIndex;
-    if (lineIndex < 0 || lineIndex >= current.lines.length) {
-      return linesFromSnapshot(nextSnapshot, cacheLines);
-    }
-
-    const nextLine = cellsToLine(nextSnapshot.viewport[patch.row] || patch.cells);
-    if (nextLines[lineIndex] === nextLine) {
-      continue;
-    }
-
-    if (nextLines === current.lines) {
-      nextLines = current.lines.slice();
-    }
-    nextLines[lineIndex] = nextLine;
-  }
-
   return {
-    lines: nextLines,
-    lineStartIndex,
+    startIndex: Math.max(normalizedStart, normalizedEnd - cacheLines),
+    endIndex: normalizedEnd,
   };
 }
 
-function linesFromSnapshot(snapshot: TerminalSnapshot, cacheLines: number) {
-  const viewportLines = snapshot.viewport.map(cellsToLine);
-  return trimBufferWithLineStart(
-    [...(snapshot.scrollbackLines || []), ...viewportLines],
-    resolveSnapshotLineStart(snapshot),
-    cacheLines,
-  );
+function mapToContiguousRange(linesByIndex: Map<number, TerminalCell[]>, startIndex: number, endIndex: number) {
+  const normalizedStart = Math.max(0, startIndex);
+  const normalizedEnd = Math.max(normalizedStart, endIndex);
+
+  if (normalizedEnd <= normalizedStart) {
+    return {
+      startIndex: normalizedStart,
+      endIndex: normalizedStart,
+      lines: [] as TerminalCell[][],
+    };
+  }
+
+  const lines: TerminalCell[][] = [];
+  let cursor = normalizedEnd - 1;
+  while (cursor >= normalizedStart && linesByIndex.has(cursor)) {
+    lines.unshift(cloneRow(linesByIndex.get(cursor)!));
+    cursor -= 1;
+  }
+
+  const contiguousStart = normalizedEnd - lines.length;
+  return {
+    startIndex: contiguousStart,
+    endIndex: normalizedEnd,
+    lines,
+  };
 }
 
-function nextRevision(current?: SessionBufferState) {
-  return (current?.revision || 0) + 1;
+function bufferToMap(current?: SessionBufferState) {
+  const map = new Map<number, TerminalCell[]>();
+  if (!current) {
+    return map;
+  }
+
+  current.lines.forEach((line, offset) => {
+    map.set(current.startIndex + offset, cloneRow(line));
+  });
+  return map;
+}
+
+function mergeBufferPayload(
+  current: SessionBufferState | undefined,
+  payload: TerminalBufferPayload,
+  cacheLines: number,
+  updateKind: SessionBufferState['updateKind'],
+): SessionBufferState {
+  const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  const targetRange = trimToCacheWindow(
+    Number.isFinite(payload.startIndex) ? Math.max(0, Math.floor(payload.startIndex)) : 0,
+    Number.isFinite(payload.endIndex) ? Math.max(0, Math.floor(payload.endIndex)) : 0,
+    cacheLines,
+  );
+
+  const linesByIndex = bufferToMap(current);
+  for (const line of normalizedLines) {
+    linesByIndex.set(line.index, line.cells);
+  }
+
+  for (const index of [...linesByIndex.keys()]) {
+    if (index < targetRange.startIndex || index >= targetRange.endIndex) {
+      linesByIndex.delete(index);
+    }
+  }
+
+  const contiguous = mapToContiguousRange(linesByIndex, targetRange.startIndex, targetRange.endIndex);
+  const finalRange = trimToCacheWindow(contiguous.startIndex, contiguous.endIndex, cacheLines);
+  const finalLines =
+    contiguous.startIndex === finalRange.startIndex && contiguous.endIndex === finalRange.endIndex
+      ? contiguous.lines
+      : contiguous.lines.slice(Math.max(0, finalRange.startIndex - contiguous.startIndex));
+
+  return {
+    lines: cloneRows(finalLines),
+    startIndex: finalRange.startIndex,
+    endIndex: finalRange.startIndex + finalLines.length,
+    cols: Number.isFinite(payload.cols) ? Math.max(1, Math.floor(payload.cols)) : current?.cols || 80,
+    rows: Number.isFinite(payload.rows) ? Math.max(1, Math.floor(payload.rows)) : current?.rows || 24,
+    cursorRow: Number.isFinite(payload.cursorRow) ? Math.max(0, Math.floor(payload.cursorRow)) : current?.cursorRow || 0,
+    cursorCol: Number.isFinite(payload.cursorCol) ? Math.max(0, Math.floor(payload.cursorCol)) : current?.cursorCol || 0,
+    cursorVisible: Boolean(payload.cursorVisible),
+    cursorKeysApp: Boolean(payload.cursorKeysApp),
+    updateKind,
+    revision: (current?.revision || 0) + 1,
+  };
 }
 
 export function createSessionBufferState(options: {
-  lines?: string[];
-  lineStartIndex?: number;
-  scrollbackStartIndex?: number;
-  remoteSnapshot?: TerminalSnapshot;
+  lines?: Array<TerminalCell[] | string>;
+  startIndex?: number;
+  endIndex?: number;
+  cols?: number;
+  rows?: number;
+  cursorRow?: number;
+  cursorCol?: number;
+  cursorVisible?: boolean;
+  cursorKeysApp?: boolean;
   updateKind?: SessionBufferState['updateKind'];
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
-  const derivedLineStartIndex =
-    options.lineStartIndex
-    ?? (options.remoteSnapshot ? resolveSnapshotLineStart(options.remoteSnapshot) : undefined)
-    ?? options.scrollbackStartIndex;
-  const nextBuffer = trimBufferWithLineStart(options.lines || [], derivedLineStartIndex, options.cacheLines);
+  const lines = normalizeBufferLines(options.lines || [], options.cacheLines);
+  const startIndex = Number.isFinite(options.startIndex) ? Math.max(0, Math.floor(options.startIndex!)) : 0;
+  const endIndex =
+    Number.isFinite(options.endIndex) && Math.floor(options.endIndex!) >= startIndex
+      ? Math.floor(options.endIndex!)
+      : startIndex + lines.length;
+  const trimmed = trimToCacheWindow(startIndex, endIndex, options.cacheLines);
+  const sliceOffset = Math.max(0, trimmed.startIndex - startIndex);
+  const trimmedLines = cloneRows(lines.slice(sliceOffset, sliceOffset + (trimmed.endIndex - trimmed.startIndex)));
+
   return {
-    lines: nextBuffer.lines,
-    lineStartIndex: nextBuffer.lineStartIndex,
-    scrollbackStartIndex: options.scrollbackStartIndex,
-    remoteSnapshot: options.remoteSnapshot,
+    lines: trimmedLines,
+    startIndex: trimmed.startIndex,
+    endIndex: trimmed.startIndex + trimmedLines.length,
+    cols: Math.max(1, Math.floor(options.cols || 80)),
+    rows: Math.max(1, Math.floor(options.rows || 24)),
+    cursorRow: Math.max(0, Math.floor(options.cursorRow ?? Math.max(trimmed.startIndex, trimmed.endIndex - 1))),
+    cursorCol: Math.max(0, Math.floor(options.cursorCol || 0)),
+    cursorVisible: Boolean(options.cursorVisible),
+    cursorKeysApp: Boolean(options.cursorKeysApp),
     updateKind: options.updateKind || 'replace',
     revision: options.revision ?? 0,
   };
 }
 
-export function getSessionBufferScrollbackRange(buffer: SessionBufferState) {
-  const lineStartIndex = resolveBufferLineStart(buffer);
-  const viewportStartIndex = buffer.remoteSnapshot?.viewportStartIndex;
-  if (lineStartIndex === undefined || viewportStartIndex === undefined || viewportStartIndex <= lineStartIndex) {
-    return null;
-  }
-  return {
-    startIndex: lineStartIndex,
-    endIndex: viewportStartIndex,
-  };
-}
-
-export function isScrollbackUpdateContiguous(
-  current: SessionBufferState,
-  update: TerminalScrollbackUpdate,
-) {
-  if (update.mode === 'reset' || update.startIndex === undefined) {
-    return true;
-  }
-
-  const currentRange = getSessionBufferScrollbackRange(current);
-  if (!currentRange) {
-    return false;
-  }
-
-  if (update.mode === 'append') {
-    return update.startIndex === currentRange.endIndex;
-  }
-
-  if (update.mode === 'prepend') {
-    return update.startIndex + update.lines.length === currentRange.startIndex;
-  }
-
-  return true;
-}
-
-export function buildScrollbackRecoveryRange(
-  current: SessionBufferState,
-  update: TerminalScrollbackUpdate,
-  cacheLines: number,
-) {
-  if (update.startIndex === undefined) {
-    return null;
-  }
-
-  const incomingStart = Math.max(0, Math.floor(update.startIndex));
-  const incomingEnd = incomingStart + update.lines.length;
-  const currentRange = getSessionBufferScrollbackRange(current);
-
-  if (!currentRange) {
-    return {
-      startIndex: Math.max(0, incomingEnd - cacheLines),
-      endIndex: incomingEnd,
-    };
-  }
-
-  let startIndex = currentRange.startIndex;
-  let endIndex = currentRange.endIndex;
-
-  if (update.mode === 'prepend') {
-    startIndex = Math.min(currentRange.startIndex, incomingStart);
-  } else {
-    endIndex = Math.max(currentRange.endIndex, incomingEnd);
-  }
-
-  if (endIndex - startIndex > cacheLines) {
-    if (update.mode === 'prepend') {
-      endIndex = startIndex + cacheLines;
-    } else {
-      startIndex = Math.max(0, endIndex - cacheLines);
-    }
-  }
-
-  return {
-    startIndex,
-    endIndex: Math.max(startIndex, endIndex),
-  };
-}
-
-export function sessionBufferToHistory(buffer: SessionBufferState, cacheLines: number) {
-  return trimOutputHistory(buffer.lines.join('\n'), cacheLines);
-}
-
-export function applySnapshotToSessionBuffer(
+export function applyBufferSyncToSessionBuffer(
   current: SessionBufferState | undefined,
-  snapshot: TerminalSnapshot,
+  payload: TerminalBufferPayload,
   cacheLines: number,
-): SessionBufferState {
-  const nextBuffer = linesFromSnapshot(snapshot, cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    lineStartIndex: nextBuffer.lineStartIndex,
-    scrollbackStartIndex: snapshot.scrollbackStartIndex,
-    remoteSnapshot: snapshot,
-    updateKind: 'replace',
-    revision: nextRevision(current),
-  };
+) {
+  return mergeBufferPayload(current, payload, cacheLines, 'replace');
 }
 
-export function applyViewportUpdateToSessionBuffer(
+export function applyBufferDeltaToSessionBuffer(
   current: SessionBufferState,
-  update: TerminalViewportUpdate,
+  payload: TerminalBufferPayload,
   cacheLines: number,
-): SessionBufferState {
-  const currentScrollbackLines = current.remoteSnapshot?.scrollbackLines?.slice() || [];
-  const nextSnapshot = applyViewportUpdate(current.remoteSnapshot, update);
-  nextSnapshot.scrollbackLines = currentScrollbackLines;
-  nextSnapshot.scrollbackStartIndex = current.remoteSnapshot?.scrollbackStartIndex;
-  const nextBuffer = applyViewportUpdateToLines(current, nextSnapshot, update, cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    lineStartIndex: nextBuffer.lineStartIndex,
-    scrollbackStartIndex: nextSnapshot.scrollbackStartIndex,
-    remoteSnapshot: nextSnapshot,
-    updateKind: 'viewport',
-    revision: nextRevision(current),
-  };
+) {
+  return mergeBufferPayload(current, payload, cacheLines, 'delta');
 }
 
-export function applyScrollbackUpdateToSessionBuffer(
+export function applyBufferRangeToSessionBuffer(
   current: SessionBufferState,
-  update: TerminalScrollbackUpdate,
+  payload: TerminalBufferPayload,
   cacheLines: number,
-): SessionBufferState {
-  const currentScrollback = current.remoteSnapshot?.scrollbackLines?.slice() || [];
-
-  let nextScrollback = currentScrollback;
-  let nextScrollbackStartIndex = current.remoteSnapshot?.scrollbackStartIndex;
-  let updateKind: SessionBufferState['updateKind'] = 'append';
-
-  if (update.mode === 'reset') {
-    nextScrollback = update.lines.slice();
-    nextScrollbackStartIndex = update.startIndex;
-    updateKind = 'replace';
-  } else {
-    const merged = mergeIndexedScrollbackRanges(
-      {
-        lines: currentScrollback,
-        startIndex: current.remoteSnapshot?.scrollbackStartIndex,
-      },
-      {
-        lines: update.lines,
-        startIndex: update.startIndex,
-      },
-    );
-    nextScrollback = merged.lines;
-    nextScrollbackStartIndex = merged.startIndex;
-    updateKind = update.mode === 'prepend' ? 'prepend' : 'append';
-  }
-
-  if (update.startIndex === undefined) {
-    if (update.mode === 'prepend') {
-      nextScrollback = [...update.lines, ...currentScrollback];
-      updateKind = 'prepend';
-    } else if (update.mode === 'append') {
-      nextScrollback = [...currentScrollback, ...update.lines];
-      updateKind = 'append';
-    }
-    nextScrollbackStartIndex = undefined;
-  }
-
-  const nextSnapshot = current.remoteSnapshot
-    ? {
-        ...current.remoteSnapshot,
-        scrollbackLines: nextScrollback,
-        scrollbackStartIndex: nextScrollbackStartIndex,
-      }
-    : current.remoteSnapshot;
-  const nextBuffer = nextSnapshot
-    ? linesFromSnapshot(nextSnapshot, cacheLines)
-    : trimBufferWithLineStart(nextScrollback, nextScrollbackStartIndex, cacheLines);
-
-  return {
-    lines: nextBuffer.lines,
-    lineStartIndex: nextBuffer.lineStartIndex,
-    scrollbackStartIndex: nextSnapshot?.scrollbackStartIndex,
-    remoteSnapshot: nextSnapshot,
-    updateKind,
-    revision: nextRevision(current),
-  };
+) {
+  return mergeBufferPayload(current, payload, cacheLines, 'range');
 }
 
 export function replaceSessionBufferLines(
   current: SessionBufferState | undefined,
-  lines: string[],
+  lines: Array<TerminalCell[] | string>,
   cacheLines: number,
 ): SessionBufferState {
-  const nextBuffer = trimBufferWithLineStart(lines, resolveBufferLineStart(current), cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    lineStartIndex: nextBuffer.lineStartIndex,
-    scrollbackStartIndex: current?.remoteSnapshot?.scrollbackStartIndex,
-    remoteSnapshot: current?.remoteSnapshot,
-    updateKind: 'replace',
-    revision: nextRevision(current),
-  };
+  return createSessionBufferState({
+    lines,
+    startIndex: current?.startIndex,
+    endIndex: current?.startIndex !== undefined ? current.startIndex + lines.length : undefined,
+    cols: current?.cols,
+    rows: current?.rows,
+    cursorRow: current?.cursorRow,
+    cursorCol: current?.cursorCol,
+    cursorVisible: current?.cursorVisible,
+    cursorKeysApp: current?.cursorKeysApp,
+    cacheLines,
+  });
+}
+
+export function sessionBufferToHistory(buffer: SessionBufferState, cacheLines: number) {
+  if (buffer.lines.length <= cacheLines) {
+    return buffer.lines.map(cellsToLine).join('\n');
+  }
+  return buffer.lines.slice(-cacheLines).map(cellsToLine).join('\n');
 }

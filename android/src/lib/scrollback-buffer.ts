@@ -1,5 +1,5 @@
-export interface IndexedScrollbackRange {
-  lines: string[];
+export interface IndexedScrollbackRange<TLine = string> {
+  lines: TLine[];
   startIndex?: number;
 }
 
@@ -8,11 +8,7 @@ export interface AbsoluteScrollbackCursorState {
   nextIndex: number;
 }
 
-function normalizeLine(line: unknown) {
-  return typeof line === 'string' ? line : String(line ?? '');
-}
-
-export function toContiguousLatestRange(entries: Array<[index: number, line: string]>): IndexedScrollbackRange {
+export function toContiguousLatestRange<TLine>(entries: Array<[index: number, line: TLine]>): IndexedScrollbackRange<TLine> {
   if (entries.length === 0) {
     return { lines: [], startIndex: undefined };
   }
@@ -35,38 +31,38 @@ export function toContiguousLatestRange(entries: Array<[index: number, line: str
 
   return {
     startIndex: ordered[sliceStart][0],
-    lines: ordered.slice(sliceStart).map(([, line]) => normalizeLine(line)),
+    lines: ordered.slice(sliceStart).map(([, line]) => line),
   };
 }
 
-export function mergeIndexedScrollbackRanges(
-  current: IndexedScrollbackRange,
-  incoming: IndexedScrollbackRange,
-): IndexedScrollbackRange {
+export function mergeIndexedScrollbackRanges<TLine>(
+  current: IndexedScrollbackRange<TLine>,
+  incoming: IndexedScrollbackRange<TLine>,
+): IndexedScrollbackRange<TLine> {
   if (incoming.lines.length === 0) {
     return {
-      lines: current.lines.map(normalizeLine),
+      lines: current.lines.slice(),
       startIndex: current.startIndex,
     };
   }
 
   if (incoming.startIndex === undefined) {
     return {
-      lines: incoming.lines.map(normalizeLine),
+      lines: incoming.lines.slice(),
       startIndex: undefined,
     };
   }
 
   if (current.lines.length === 0 || current.startIndex === undefined) {
     return {
-      lines: incoming.lines.map(normalizeLine),
+      lines: incoming.lines.slice(),
       startIndex: incoming.startIndex,
     };
   }
 
-  const merged = new Map<number, string>();
-  current.lines.forEach((line, offset) => merged.set(current.startIndex! + offset, normalizeLine(line)));
-  incoming.lines.forEach((line, offset) => merged.set(incoming.startIndex! + offset, normalizeLine(line)));
+  const merged = new Map<number, TLine>();
+  current.lines.forEach((line, offset) => merged.set(current.startIndex! + offset, line));
+  incoming.lines.forEach((line, offset) => merged.set(incoming.startIndex! + offset, line));
   return toContiguousLatestRange([...merged.entries()]);
 }
 

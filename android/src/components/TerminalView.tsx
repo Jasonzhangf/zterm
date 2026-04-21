@@ -1,24 +1,28 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import '@jsonstudio/wtermmod-react/css';
-import type { TerminalCell, TerminalSnapshot } from '../lib/types';
+import type { TerminalCell } from '../lib/types';
 
 interface TerminalViewProps {
   sessionId: string | null;
-  initialOutputHistory?: string;
-  initialBufferLines?: string[];
+  initialBufferLines?: TerminalCell[][];
   bufferStartIndex?: number;
-  bufferUpdateKind?: 'replace' | 'append' | 'prepend' | 'viewport';
+  bufferRows?: number;
+  bufferUpdateKind?: 'replace' | 'delta' | 'range';
   bufferRevision?: number;
-  snapshot?: TerminalSnapshot;
+  cursorRow?: number;
+  cursorCol?: number;
+  cursorVisible?: boolean;
+  cursorKeysApp?: boolean;
   active?: boolean;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
   resumeNonce?: number;
   onInput?: (data: string) => void;
+  onRequestBufferRange?: (startIndex: number, endIndex: number) => void;
   onHorizontalSwipeStart?: () => void;
   onHorizontalSwipeMove?: (deltaX: number) => void;
   onHorizontalSwipeEnd?: (deltaX: number, completed: boolean) => void;
-  onBufferLinesChange?: (sessionId: string, lines: string[]) => void;
+  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
   focusNonce?: number;
@@ -63,15 +67,18 @@ const TERMINAL_FONT_STACK = [
   'monospace',
 ].join(', ');
 const ENABLE_DEBUG_OVERLAY = false;
+const XTERM_6X6_STEPS = [0, 95, 135, 175, 215, 255] as const;
+const BUFFER_RANGE_REQUEST_CHUNK_LINES = 160;
+const BUFFER_RANGE_REQUEST_THRESHOLD_LINES = 24;
 
 function colorToCSS(index: number): string | null {
   if (index === DEFAULT_COLOR) return null;
   if (index < 16) return `var(--term-color-${index})`;
   if (index < 232) {
     const n = index - 16;
-    const r = Math.floor(n / 36) * 51;
-    const g = (Math.floor(n / 6) % 6) * 51;
-    const b = (n % 6) * 51;
+    const r = XTERM_6X6_STEPS[Math.floor(n / 36)] ?? 0;
+    const g = XTERM_6X6_STEPS[Math.floor(n / 6) % 6] ?? 0;
+    const b = XTERM_6X6_STEPS[n % 6] ?? 0;
     return `rgb(${r},${g},${b})`;
   }
   const level = (index - 232) * 10 + 8;
@@ -92,18 +99,6 @@ function resolveColors(cell: TerminalCell) {
     fg: colorToCSS(fg) || 'var(--term-fg)',
     bg: colorToCSS(bg) || 'transparent',
   };
-}
-
-function buildFallbackViewport(lines: string[]) {
-  return lines.map((line) =>
-    Array.from(line).map((char) => ({
-      char: char.codePointAt(0) || 32,
-      fg: 256,
-      bg: 256,
-      flags: 0,
-      width: 1,
-    } satisfies TerminalCell)),
-  );
 }
 
 function cellStyle(cell: TerminalCell, rowHeight: string) {
@@ -201,17 +196,21 @@ const ViewportRow = memo(function ViewportRow({
 
 export function TerminalView({
   sessionId,
-  initialOutputHistory = '',
   initialBufferLines,
   bufferStartIndex,
+  bufferRows = DEFAULT_ROWS,
   bufferUpdateKind = 'replace',
   bufferRevision = 0,
-  snapshot,
+  cursorRow,
+  cursorCol,
+  cursorVisible = false,
+  cursorKeysApp = false,
   active = false,
   allowDomFocus = true,
   domInputOffscreen = false,
   resumeNonce = 0,
   onInput,
+  onRequestBufferRange,
   onHorizontalSwipeStart,
   onHorizontalSwipeMove,
   onHorizontalSwipeEnd,
@@ -232,6 +231,7 @@ export function TerminalView({
   const viewModeRef = useRef<ViewMode>('follow');
   const followOutputRef = useRef(true);
   const scrollLockRef = useRef(false);
+  const programmaticScrollRef = useRef(0);
   const userVerticalScrollActiveRef = useRef(false);
   const manualScrollAnchorRef = useRef<{
     absoluteTopLineIndex?: number;
@@ -282,20 +282,11 @@ export function TerminalView({
     visibleRows: DEFAULT_ROWS,
   });
 
-  const fallbackLines = useMemo(() => {
-    if (initialBufferLines?.length) {
-      return initialBufferLines;
-    }
-    return initialOutputHistory ? initialOutputHistory.split('\n') : [];
-  }, [initialBufferLines, initialOutputHistory]);
-
-  const viewportRows = snapshot?.viewport?.length ? snapshot.viewport : buildFallbackViewport(fallbackLines.slice(-DEFAULT_ROWS));
-  const scrollbackLines = fallbackLines.slice(0, Math.max(0, fallbackLines.length - viewportRows.length));
-  const cursor = snapshot?.cursor;
-  const cursorKeysApp = snapshot?.cursorKeysApp ?? false;
+  const bufferLines = useMemo(() => initialBufferLines || [], [initialBufferLines]);
+  const viewportRowCount = Math.max(1, Math.min(bufferRows, Math.max(1, bufferLines.length || DEFAULT_ROWS)));
   const resolvedLineHeightPx = Math.max(1, parseInt(resolvedRowHeight || rowHeight, 10) || parseInt(rowHeight, 10) || 18);
-  const cursorRow = snapshot && cursor?.visible ? cursor.row : null;
-  const cursorCol = snapshot && cursor?.visible ? cursor.col : null;
+  const cursorAbsoluteRow = cursorVisible ? cursorRow ?? null : null;
+  const cursorAbsoluteCol = cursorVisible ? cursorCol ?? null : null;
 
   const syncDebugMetrics = useCallback(() => {
     if (!ENABLE_DEBUG_OVERLAY) {
@@ -307,9 +298,9 @@ export function TerminalView({
     }
     const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
     const nextMetrics = {
-      bufferLines: fallbackLines.length,
-      scrollbackLines: scrollbackLines.length,
-      viewportRows: viewportRows.length,
+      bufferLines: bufferLines.length,
+      scrollbackLines: bufferLines.length,
+      viewportRows: Math.min(bufferLines.length, viewportRowCount),
       scrollHeight: Math.round(host.scrollHeight),
       clientHeight: Math.round(host.clientHeight),
       scrollTop: Math.round(host.scrollTop),
@@ -317,7 +308,7 @@ export function TerminalView({
       followOutput: followOutputRef.current,
     };
     setDebugMetrics(nextMetrics);
-  }, [fallbackLines.length, scrollbackLines.length, viewportRows.length]);
+  }, [bufferLines.length, viewportRowCount]);
 
   const syncScrollViewportState = useCallback((host: HTMLDivElement) => {
     const nextTopLine = Math.max(0, Math.floor(host.scrollTop / resolvedLineHeightPx));
@@ -342,23 +333,39 @@ export function TerminalView({
     };
   }, [bufferStartIndex, resolvedLineHeightPx]);
 
+  const setHostScrollTop = useCallback((host: HTMLDivElement, nextScrollTop: number) => {
+    programmaticScrollRef.current += 1;
+    host.scrollTop = nextScrollTop;
+    window.requestAnimationFrame(() => {
+      programmaticScrollRef.current = Math.max(0, programmaticScrollRef.current - 1);
+    });
+  }, []);
+
   const setViewMode = useCallback((mode: ViewMode) => {
     viewModeRef.current = mode;
     followOutputRef.current = mode === 'follow';
-    scrollLockRef.current = mode !== 'follow';
     if (mode === 'follow') {
+      scrollLockRef.current = false;
       manualScrollAnchorRef.current = null;
     }
   }, []);
 
-  const updateFollowOutputFromHost = useCallback((host: HTMLDivElement) => {
+  const updateFollowOutputFromHost = useCallback((host: HTMLDivElement, reason: 'user' | 'programmatic' = 'programmatic') => {
     const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
     const distanceFromBottom = Math.max(0, maxScrollTop - host.scrollTop);
-    const shouldKeepReading =
-      userVerticalScrollActiveRef.current
-      || viewModeRef.current === 'reading';
+    const lockedReading = scrollLockRef.current || userVerticalScrollActiveRef.current;
 
-    if (distanceFromBottom > FOLLOW_BOTTOM_THRESHOLD_PX || shouldKeepReading && distanceFromBottom > 0) {
+    if (lockedReading) {
+      if (reason === 'user' && distanceFromBottom <= FOLLOW_BOTTOM_THRESHOLD_PX) {
+        setViewMode('follow');
+      } else {
+        setViewMode('reading');
+        updateManualScrollAnchor(host);
+      }
+    } else if (distanceFromBottom > FOLLOW_BOTTOM_THRESHOLD_PX) {
+      if (reason === 'user') {
+        scrollLockRef.current = true;
+      }
       setViewMode('reading');
       updateManualScrollAnchor(host);
     } else {
@@ -402,11 +409,11 @@ export function TerminalView({
       syncDebugMetrics();
     };
     const scrollToBottom = () => {
-      host.scrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+      setHostScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
       manualScrollAnchorRef.current = null;
     };
     const restorePreviousScrollTop = () => {
-      host.scrollTop = Math.min(previous?.scrollTop ?? 0, Math.max(0, host.scrollHeight - host.clientHeight));
+      setHostScrollTop(host, Math.min(previous?.scrollTop ?? 0, Math.max(0, host.scrollHeight - host.clientHeight)));
     };
     const restoreReadingAnchor = () => {
       const anchor = manualScrollAnchorRef.current;
@@ -416,10 +423,10 @@ export function TerminalView({
           anchor.absoluteTopLineIndex !== undefined && bufferStartIndex !== undefined
             ? Math.max(0, anchor.absoluteTopLineIndex - bufferStartIndex)
             : anchor.topLineOffset;
-        host.scrollTop = Math.min(
+        setHostScrollTop(host, Math.min(
           maxScrollTop,
           Math.max(0, nextTopLineOffset * resolvedLineHeightPx + anchor.intraLineOffset),
-        );
+        ));
         return;
       }
 
@@ -436,10 +443,10 @@ export function TerminalView({
       if (previous.bufferStartIndex !== undefined && bufferStartIndex !== undefined) {
         const absoluteTopLineIndex = previous.bufferStartIndex + topLineOffset;
         const nextTopLineOffset = Math.max(0, absoluteTopLineIndex - bufferStartIndex);
-        host.scrollTop = Math.min(maxScrollTop, Math.max(0, nextTopLineOffset * resolvedLineHeightPx + intraLineOffset));
+        setHostScrollTop(host, Math.min(maxScrollTop, Math.max(0, nextTopLineOffset * resolvedLineHeightPx + intraLineOffset)));
         return;
       }
-      host.scrollTop = Math.min(maxScrollTop, Math.max(0, previous.scrollTop));
+      setHostScrollTop(host, Math.min(maxScrollTop, Math.max(0, previous.scrollTop)));
     };
     const activated = !wasActiveRef.current;
 
@@ -461,7 +468,7 @@ export function TerminalView({
     }
 
     if (userVerticalScrollActiveRef.current) {
-      host.scrollTop = Math.min(host.scrollTop, Math.max(0, host.scrollHeight - host.clientHeight));
+      setHostScrollTop(host, Math.min(host.scrollTop, Math.max(0, host.scrollHeight - host.clientHeight)));
       updateManualScrollAnchor(host);
       syncMetrics();
       return;
@@ -487,12 +494,13 @@ export function TerminalView({
     bufferUpdateKind,
     resolvedLineHeightPx,
     rowHeight,
+    setHostScrollTop,
     setViewMode,
-    scrollbackLines.length,
+    bufferLines.length,
     bufferStartIndex,
     syncDebugMetrics,
     syncScrollViewportState,
-    viewportRows.length,
+    viewportRowCount,
   ]);
 
   useEffect(() => {
@@ -510,7 +518,7 @@ export function TerminalView({
     }
 
     setViewMode('follow');
-    host.scrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+    setHostScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
     scrollMetricsRef.current = {
       scrollHeight: host.scrollHeight,
       scrollTop: host.scrollTop,
@@ -521,7 +529,7 @@ export function TerminalView({
     };
     syncScrollViewportState(host);
     syncDebugMetrics();
-  }, [active, bufferRevision, bufferStartIndex, forceScrollToBottomNonce, resolvedLineHeightPx, setViewMode, syncDebugMetrics, syncScrollViewportState]);
+  }, [active, bufferRevision, bufferStartIndex, forceScrollToBottomNonce, resolvedLineHeightPx, setHostScrollTop, setViewMode, syncDebugMetrics, syncScrollViewportState]);
 
   const focusTerminal = useCallback(() => {
     const input = inputRef.current;
@@ -534,6 +542,17 @@ export function TerminalView({
     const end = input.value.length;
     input.setSelectionRange(end, end);
   }, []);
+
+  const forceFollowToBottom = useCallback(() => {
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+    setViewMode('follow');
+    setHostScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
+    syncScrollViewportState(host);
+    syncDebugMetrics();
+  }, [setHostScrollTop, setViewMode, syncDebugMetrics, syncScrollViewportState]);
 
   const syncTerminalMetrics = useCallback(() => {
     const host = containerRef.current;
@@ -624,6 +643,7 @@ export function TerminalView({
       const value = event.data || input.value;
       if (value) {
         skipNextInput = true;
+        forceFollowToBottom();
         onInput?.(value);
       }
       input.value = '';
@@ -640,6 +660,7 @@ export function TerminalView({
         return;
       }
       if (input.value) {
+        forceFollowToBottom();
         onInput?.(input.value.replace(/\n/g, '\r'));
         input.value = '';
         focusTerminal();
@@ -649,6 +670,7 @@ export function TerminalView({
     const handleBeforeInput = (event: InputEvent) => {
       if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') {
         event.preventDefault();
+        forceFollowToBottom();
         onInput?.('\r');
         input.value = '';
       }
@@ -663,6 +685,7 @@ export function TerminalView({
         const code = event.key.toUpperCase().charCodeAt(0);
         if (code >= 64 && code <= 95) {
           event.preventDefault();
+          forceFollowToBottom();
           onInput?.(String.fromCharCode(code - 64));
           return;
         }
@@ -671,6 +694,7 @@ export function TerminalView({
       const arrows = cursorKeysApp ? APP_CURSOR_KEYS : NORMAL_CURSOR_KEYS;
       if (event.key in arrows) {
         event.preventDefault();
+        forceFollowToBottom();
         onInput?.(arrows[event.key as keyof typeof arrows]);
         return;
       }
@@ -678,21 +702,25 @@ export function TerminalView({
       switch (event.key) {
         case 'Enter':
           event.preventDefault();
+          forceFollowToBottom();
           onInput?.('\r');
           input.value = '';
           return;
         case 'Backspace':
           event.preventDefault();
+          forceFollowToBottom();
           onInput?.('\x7f');
           input.value = '';
           return;
         case 'Tab':
           event.preventDefault();
+          forceFollowToBottom();
           onInput?.('\t');
           input.value = '';
           return;
         case 'Escape':
           event.preventDefault();
+          forceFollowToBottom();
           onInput?.('\x1b');
           input.value = '';
           return;
@@ -714,7 +742,7 @@ export function TerminalView({
       input.removeEventListener('input', handleInput);
       input.removeEventListener('keydown', handleKeyDown);
     };
-  }, [cursorKeysApp, focusTerminal, onInput]);
+  }, [cursorKeysApp, focusTerminal, forceFollowToBottom, onInput]);
 
   useEffect(() => {
     lastViewportRef.current = null;
@@ -765,24 +793,54 @@ export function TerminalView({
     return () => observer.disconnect();
   }, [sessionId, syncTerminalMetrics]);
 
-  const renderedScrollbackRange = useMemo(() => {
+  const renderedBufferRange = useMemo(() => {
     const renderStart = Math.max(0, scrollViewportState.topLine - SCROLLBACK_OVERSCAN_ROWS);
     const renderEnd = Math.min(
-      scrollbackLines.length,
+      bufferLines.length,
       scrollViewportState.topLine + scrollViewportState.visibleRows + SCROLLBACK_OVERSCAN_ROWS,
     );
     return {
       start: renderStart,
       end: renderEnd,
     };
-  }, [SCROLLBACK_OVERSCAN_ROWS, scrollViewportState.topLine, scrollViewportState.visibleRows, scrollbackLines.length]);
+  }, [SCROLLBACK_OVERSCAN_ROWS, bufferLines.length, scrollViewportState.topLine, scrollViewportState.visibleRows]);
 
-  const renderedScrollbackLines = useMemo(
-    () => scrollbackLines.slice(renderedScrollbackRange.start, renderedScrollbackRange.end),
-    [renderedScrollbackRange.end, renderedScrollbackRange.start, scrollbackLines],
+  const renderedBufferLines = useMemo(
+    () => bufferLines.slice(renderedBufferRange.start, renderedBufferRange.end),
+    [bufferLines, renderedBufferRange.end, renderedBufferRange.start],
   );
-  const topSpacerHeightPx = renderedScrollbackRange.start * resolvedLineHeightPx;
-  const bottomSpacerHeightPx = Math.max(0, (scrollbackLines.length - renderedScrollbackRange.end) * resolvedLineHeightPx);
+  const topSpacerHeightPx = renderedBufferRange.start * resolvedLineHeightPx;
+  const bottomSpacerHeightPx = Math.max(0, (bufferLines.length - renderedBufferRange.end) * resolvedLineHeightPx);
+
+  const requestOlderHistory = useCallback(() => {
+    if (!onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= 0) {
+      return;
+    }
+
+    const nextEnd = Math.max(0, bufferStartIndex);
+    const nextStart = Math.max(0, nextEnd - BUFFER_RANGE_REQUEST_CHUNK_LINES);
+    if (nextEnd <= nextStart) {
+      return;
+    }
+
+    onRequestBufferRange(nextStart, nextEnd);
+  }, [bufferStartIndex, onRequestBufferRange]);
+
+  useEffect(() => {
+    if (!active || !onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= 0) {
+      return;
+    }
+
+    if (viewModeRef.current !== 'reading') {
+      return;
+    }
+
+    if (scrollViewportState.topLine > BUFFER_RANGE_REQUEST_THRESHOLD_LINES) {
+      return;
+    }
+
+    requestOlderHistory();
+  }, [active, bufferStartIndex, onRequestBufferRange, requestOlderHistory, scrollViewportState.topLine]);
 
   useEffect(() => {
     const handleViewportChange = () => {
@@ -816,7 +874,7 @@ export function TerminalView({
         if (!host) {
           return;
         }
-        updateFollowOutputFromHost(host);
+        updateFollowOutputFromHost(host, programmaticScrollRef.current > 0 ? 'programmatic' : 'user');
       }}
       onTouchStart={(event) => {
         if (event.touches.length !== 1) {
@@ -828,10 +886,6 @@ export function TerminalView({
         if (!host || !touch) {
           touchGestureRef.current.active = false;
           return;
-        }
-        if (host.scrollHeight > host.clientHeight + 1) {
-          setViewMode('reading');
-          updateManualScrollAnchor(host);
         }
         touchGestureRef.current = {
           active: true,
@@ -865,6 +919,7 @@ export function TerminalView({
             gesture.mode = 'vertical';
             gesture.startY = touch.clientY;
             gesture.startScrollTop = host.scrollTop;
+            scrollLockRef.current = true;
             setViewMode('reading');
             updateManualScrollAnchor(host);
           } else {
@@ -876,6 +931,7 @@ export function TerminalView({
 
         if (gesture.mode === 'vertical') {
           if (host.scrollHeight <= host.clientHeight + 1) {
+            requestOlderHistory();
             return;
           }
           const nextDeltaY = touch.clientY - gesture.startY;
@@ -884,11 +940,9 @@ export function TerminalView({
           }
           gesture.moved = true;
           userVerticalScrollActiveRef.current = true;
-          const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
-          host.scrollTop = Math.max(0, Math.min(maxScrollTop, gesture.startScrollTop - nextDeltaY));
-          updateManualScrollAnchor(host);
-          updateFollowOutputFromHost(host);
-          event.preventDefault();
+          if (host.scrollTop <= resolvedLineHeightPx * BUFFER_RANGE_REQUEST_THRESHOLD_LINES) {
+            requestOlderHistory();
+          }
           return;
         }
 
@@ -928,7 +982,7 @@ export function TerminalView({
         overscrollBehaviorY: 'contain',
         overscrollBehaviorX: 'none',
         overflowAnchor: 'none',
-        touchAction: 'none',
+        touchAction: 'pan-y',
         padding: '0',
         borderRadius: '0',
         boxShadow: 'none',
@@ -938,31 +992,23 @@ export function TerminalView({
         ['--term-row-height' as string]: resolvedRowHeight || rowHeight,
       }}
     >
-      <div className="term-grid" data-cursor-source={snapshot ? 'remote' : 'hydrated'}>
+      <div className="term-grid" data-cursor-source="buffer">
         {topSpacerHeightPx > 0 && <div aria-hidden="true" style={{ height: `${topSpacerHeightPx}px` }} />}
-        {renderedScrollbackLines.map((line, index) => {
-          const absoluteIndex = renderedScrollbackRange.start + index;
+        {renderedBufferLines.map((row, rowIndex) => {
+          const absoluteOffset = renderedBufferRange.start + rowIndex;
+          const absoluteRowIndex = (bufferStartIndex ?? 0) + absoluteOffset;
           return (
-            <div
-              key={`sb-${(bufferStartIndex ?? 0) + absoluteIndex}`}
-              className="term-row term-scrollback-row"
-              style={{ height: resolvedRowHeight || rowHeight, lineHeight: resolvedRowHeight || rowHeight }}
-            >
-              {line || ' '}
-            </div>
+          <ViewportRow
+            key={`line-${absoluteRowIndex}`}
+            row={row}
+            rowIndex={absoluteRowIndex}
+            rowHeight={resolvedRowHeight || rowHeight}
+            cursorVisible={cursorAbsoluteRow === absoluteRowIndex}
+            cursorCol={cursorAbsoluteRow === absoluteRowIndex ? cursorAbsoluteCol : null}
+          />
           );
         })}
         {bottomSpacerHeightPx > 0 && <div aria-hidden="true" style={{ height: `${bottomSpacerHeightPx}px` }} />}
-        {viewportRows.map((row, rowIndex) => (
-          <ViewportRow
-            key={`vp-${rowIndex}`}
-            row={row}
-            rowIndex={rowIndex}
-            rowHeight={resolvedRowHeight || rowHeight}
-            cursorVisible={cursorRow === rowIndex}
-            cursorCol={cursorRow === rowIndex ? cursorCol : null}
-          />
-        ))}
       </div>
       {ENABLE_DEBUG_OVERLAY && (
         <div

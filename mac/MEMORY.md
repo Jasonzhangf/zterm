@@ -24,3 +24,4 @@
 - [2026-04-20] Mac 顶部 open tabs 当前必须明确写成 `single runtime · multi tabs`：可以有多个 open target tab，但同一时刻只允许一个 app-level websocket/runtime；切 tab 是切 active target，不是假装并发多 live session
 - [2026-04-20] packaged smoke 要覆盖 `+ new tab`、`close tab`、`saved target reopen` 三条路径，否则“真实 tabs”只是在静态 UI 上看起来像 tabs
 - [2026-04-20] Mac 排版若开始发散成“顶部太厚、terminal 内再套一层 tabs/toolbars、左右等宽”，要立即回到 terminal-first：terminal 列更宽、顶部更薄、pane 内层级更少
+- [2026-04-20] Jason 对桌面终端的最新冻结不是“右侧抽屉”，而是“固定左 rail + 右侧可选多列 vertical split workspace”；split 先做比例 preset（1/2/3），不要先做自由拖拽

@@ -25,6 +25,40 @@ interface WorkspaceTargetTab {
   persistedHostId?: string;
 }
 
+type WorkspaceSplitPreset = 'focus' | 'dual' | 'triple';
+
+interface WorkspaceSplitLayout {
+  id: WorkspaceSplitPreset;
+  label: string;
+  title: string;
+  template: string;
+  panes: Array<'terminal' | 'inspector'>;
+}
+
+const WORKSPACE_SPLIT_LAYOUTS: Record<WorkspaceSplitPreset, WorkspaceSplitLayout> = {
+  focus: {
+    id: 'focus',
+    label: '1',
+    title: 'Focus terminal',
+    template: 'minmax(0, 1fr)',
+    panes: ['terminal'],
+  },
+  dual: {
+    id: 'dual',
+    label: '2',
+    title: 'Terminal + inspector',
+    template: 'minmax(0, 1.55fr) minmax(280px, 0.72fr)',
+    panes: ['terminal', 'inspector'],
+  },
+  triple: {
+    id: 'triple',
+    label: '3',
+    title: 'Split terminal + terminal + inspector',
+    template: 'minmax(0, 1.18fr) minmax(0, 0.92fr) minmax(260px, 0.72fr)',
+    panes: ['terminal', 'terminal', 'inspector'],
+  },
+};
+
 function useWindowWidth() {
   const [width, setWidth] = useState(() =>
     typeof window === 'undefined' ? 0 : window.innerWidth,
@@ -84,6 +118,7 @@ export default function App() {
   const [editorMode, setEditorMode] = useState<'closed' | 'create' | 'edit'>('closed');
   const [openTabs, setOpenTabs] = useState<WorkspaceTargetTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [splitPreset, setSplitPreset] = useState<WorkspaceSplitPreset>('dual');
 
   useEffect(() => {
     if (hosts.length === 0) {
@@ -174,6 +209,7 @@ export default function App() {
     () => openTabs.find((tab) => tab.id === activeTabId) || null,
     [activeTabId, openTabs],
   );
+  const workspaceSplit = WORKSPACE_SPLIT_LAYOUTS[splitPreset];
 
   const handleSaveHost = (hostData: EditableHost) => {
     let nextHost: Host | undefined;
@@ -281,7 +317,8 @@ export default function App() {
         title: 'Connections',
         subtitle: 'Server groups, saved targets, and shared connection entry.',
         badge: 'Server-first list',
-        widthWeight: layout.columns >= 3 ? 0.82 : 0.88,
+        widthWeight: layout.columns >= 3 ? 0.78 : 0.82,
+        hideHeader: true,
         render: () => (
           <ConnectionsSlot
             hosts={hosts}
@@ -307,12 +344,13 @@ export default function App() {
         title: 'Terminal',
         subtitle: 'Primary stage now renders live bridge snapshots instead of mock text.',
         badge: 'Main execution pane',
-        widthWeight: layout.columns >= 3 ? 1.58 : 1.42,
+        widthWeight: layout.columns >= 3 ? 1.78 : 1.88,
+        hideHeader: true,
         render: () => (
           <TerminalSlot
             host={selectedHost}
             session={terminalSession.state}
-            isDetailsVisible={layout.columns === 2 && isEditing}
+            isDetailsVisible={false}
             onInput={terminalSession.sendInput}
             onResize={terminalSession.resizeTerminal}
             onDisconnect={terminalSession.disconnect}
@@ -324,7 +362,8 @@ export default function App() {
         title: 'Details',
         subtitle: 'Connection properties flow shared from Android truth source.',
         badge: isEditing ? 'Editing pane' : 'Inspector',
-        widthWeight: 1.02,
+        widthWeight: 0.92,
+        hideHeader: true,
         render: () => (
           <DetailsSlot
             host={editorMode === 'create' ? undefined : selectedHost}
@@ -337,6 +376,47 @@ export default function App() {
           />
         ),
       },
+      {
+        id: 'workspace',
+        title: 'Workspace',
+        subtitle: 'Terminal-first split workspace.',
+        widthWeight: 1.92,
+        hideHeader: true,
+        render: () => (
+          <div
+            className={`workspace-split-grid workspace-split-${workspaceSplit.id}`}
+            style={{ gridTemplateColumns: workspaceSplit.template }}
+          >
+            {workspaceSplit.panes.map((pane, index) => (
+              <div
+                key={`${pane}-${index}`}
+                className={`workspace-split-pane ${pane} ${index === 0 ? 'primary' : 'secondary'}`}
+              >
+                {pane === 'terminal' ? (
+                  <TerminalSlot
+                    host={selectedHost}
+                    session={terminalSession.state}
+                    isDetailsVisible={false}
+                    onInput={terminalSession.sendInput}
+                    onResize={terminalSession.resizeTerminal}
+                    onDisconnect={index === 0 ? terminalSession.disconnect : () => undefined}
+                  />
+                ) : (
+                  <DetailsSlot
+                    host={editorMode === 'create' ? undefined : selectedHost}
+                    bridgeSettings={settings}
+                    bridgeRuntime={terminalSession.state}
+                    isEditing={isEditing}
+                    onSave={handleSaveHost}
+                    onCancel={() => setEditorMode('closed')}
+                    onConnectRequested={handleConnectRequested}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        ),
+      },
     ],
     [
       handleConnectRequested,
@@ -345,6 +425,7 @@ export default function App() {
       hosts,
       isEditing,
       layout.columns,
+      workspaceSplit,
       selectedHost,
       selectedHostId,
       settings,
@@ -357,38 +438,19 @@ export default function App() {
       return isEditing ? [baseSlots[2]] : [baseSlots[0]];
     }
 
-    if (layout.columns === 2) {
-      return [baseSlots[0], isEditing ? baseSlots[2] : baseSlots[1]];
-    }
-
-    return baseSlots;
+    return [baseSlots[0], baseSlots[3]];
   }, [baseSlots, isEditing, layout.columns]);
+  const columnTemplate = useMemo(() => {
+    if (slots.length === 2) {
+      return '228px minmax(0, 1fr)';
+    }
+    return undefined;
+  }, [slots.length]);
 
   const shellTitle = selectedHost ? selectedHost.name : 'ZTerm';
   const shellSubtitle = selectedHost
     ? formatBridgeSessionTarget(selectedHost)
     : 'Tabby-inspired Mac shell · shared connection flow';
-  const inspectorTabLabel = editorMode === 'create'
-    ? 'New connection'
-    : isEditing && selectedHost
-      ? `Edit ${selectedHost.name}`
-      : selectedHost
-        ? `Inspector · ${selectedHost.name}`
-        : 'Inspector';
-
-  const handleShellTabSelect = (tab: 'connections' | 'inspector') => {
-    if (tab === 'inspector') {
-      if (selectedHost) {
-        setEditorMode((current) => (current === 'closed' ? 'edit' : current));
-      } else {
-        setEditorMode('create');
-      }
-      return;
-    }
-
-    setEditorMode('closed');
-  };
-
   return (
     <div className="app-shell">
       <header className="window-chrome">
@@ -399,15 +461,8 @@ export default function App() {
         </div>
 
         <div className="chrome-title-group">
-          <div className="chrome-eyebrow">ZTERM · MAC DESKTOP</div>
           <div className="chrome-title">{shellTitle}</div>
-          <div className="chrome-subtitle">{shellSubtitle}</div>
-        </div>
-
-        <div className="chrome-tools">
-          <span className="chrome-tool-pill">{layout.profile}</span>
-          <span className="chrome-tool-pill">{layout.columns} col</span>
-          <span className="chrome-tool-pill">vertical split</span>
+          <div className="chrome-subtitle compact">{shellSubtitle}</div>
         </div>
       </header>
 
@@ -415,7 +470,7 @@ export default function App() {
         <button
           className={`workspace-tab ${layout.columns <= 1 && !isEditing ? 'active' : ''}`}
           type="button"
-          onClick={() => handleShellTabSelect('connections')}
+          onClick={() => setEditorMode('closed')}
         >
           Connections · {hosts.length}
         </button>
@@ -457,22 +512,29 @@ export default function App() {
         <button className="workspace-tab add-tab" type="button" onClick={() => setEditorMode('create')}>
           +
         </button>
-        <button
-          className={`workspace-tab ${isEditing ? 'active' : ''}`}
-          type="button"
-          onClick={() => handleShellTabSelect('inspector')}
-        >
-          {inspectorTabLabel}
-        </button>
-        <div className="workspace-tab ghost">
-          {layout.columns >= 3 ? 'Connections · Tabs · Inspector' : 'single runtime · multi tabs'}
-        </div>
+        {layout.columns > 1 ? (
+          <div className="workspace-split-controls" role="toolbar" aria-label="workspace split presets">
+            {(Object.values(WORKSPACE_SPLIT_LAYOUTS) as WorkspaceSplitLayout[]).map((preset) => (
+              <button
+                key={preset.id}
+                className={`workspace-split-button ${splitPreset === preset.id ? 'active' : ''}`}
+                type="button"
+                title={preset.title}
+                onClick={() => setSplitPreset(preset.id)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {!isLoaded ? (
         <div className="loading-state">Loading saved connections…</div>
       ) : (
-        <PaneStage columns={slots.length} slots={slots} />
+        <div className="workspace-stage-shell">
+          <PaneStage columns={slots.length} slots={slots} columnTemplate={columnTemplate} />
+        </div>
       )}
     </div>
   );

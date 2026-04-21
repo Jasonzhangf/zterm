@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { Session } from '../../lib/types';
+import type { Session, TerminalCell } from '../../lib/types';
 import { TerminalView } from '../TerminalView';
 
 interface TerminalCanvasProps {
@@ -9,7 +9,8 @@ interface TerminalCanvasProps {
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
   onInput?: (data: string) => void;
-  onBufferLinesChange?: (sessionId: string, lines: string[]) => void;
+  onRequestBufferRange?: (sessionId: string, startIndex: number, endIndex: number) => void;
+  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   focusNonce?: number;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
@@ -49,10 +50,11 @@ interface SessionTerminalPaneProps {
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
   onInput?: (data: string) => void;
+  onRequestBufferRange?: (startIndex: number, endIndex: number) => void;
   onHorizontalSwipeStart?: () => void;
   onHorizontalSwipeMove?: (deltaX: number) => void;
   onHorizontalSwipeEnd?: (deltaX: number) => void;
-  onBufferLinesChange?: (sessionId: string, lines: string[]) => void;
+  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   focusNonce?: number;
   forceScrollToBottomNonce?: number;
   fontSize: number;
@@ -72,6 +74,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   onTitleChange,
   onResize,
   onInput,
+  onRequestBufferRange,
   onHorizontalSwipeStart,
   onHorizontalSwipeMove,
   onHorizontalSwipeEnd,
@@ -99,18 +102,22 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
     >
       <TerminalView
         sessionId={session.id}
-        initialOutputHistory={session.outputHistory}
         initialBufferLines={session.buffer.lines}
-        bufferStartIndex={session.buffer.lineStartIndex}
+        bufferStartIndex={session.buffer.startIndex}
         bufferUpdateKind={session.buffer.updateKind}
         bufferRevision={session.buffer.revision}
-        snapshot={session.buffer.remoteSnapshot}
+        bufferRows={session.buffer.rows}
+        cursorRow={session.buffer.cursorRow}
+        cursorCol={session.buffer.cursorCol}
+        cursorVisible={session.buffer.cursorVisible}
+        cursorKeysApp={session.buffer.cursorKeysApp}
         active={isActive}
         allowDomFocus={allowDomFocus}
         domInputOffscreen={domInputOffscreen}
         onTitleChange={onTitleChange}
         onResize={onResize}
         onInput={onInput}
+        onRequestBufferRange={onRequestBufferRange}
         onHorizontalSwipeStart={onHorizontalSwipeStart}
         onHorizontalSwipeMove={onHorizontalSwipeMove}
         onHorizontalSwipeEnd={onHorizontalSwipeEnd ? (deltaX) => onHorizontalSwipeEnd(deltaX) : undefined}
@@ -157,6 +164,7 @@ export function TerminalCanvas({
   onTitleChange,
   onResize,
   onInput,
+  onRequestBufferRange,
   onBufferLinesChange,
   focusNonce,
   allowDomFocus = true,
@@ -451,6 +459,11 @@ export function TerminalCanvas({
                 onTitleChange={isActive ? onTitleChange : undefined}
                 onResize={isActive ? onResize : undefined}
                 onInput={isActive ? onInput : undefined}
+                onRequestBufferRange={
+                  isActive && onRequestBufferRange
+                    ? (startIndex, endIndex) => onRequestBufferRange(session.id, startIndex, endIndex)
+                    : undefined
+                }
                 onHorizontalSwipeStart={isActive ? handleHorizontalSwipeStart : undefined}
                 onHorizontalSwipeMove={isActive ? handleHorizontalSwipeMove : undefined}
                 onHorizontalSwipeEnd={isActive ? handleHorizontalSwipeEnd : undefined}

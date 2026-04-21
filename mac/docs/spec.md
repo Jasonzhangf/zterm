@@ -16,7 +16,7 @@
 - 真实 bridge websocket attach 已接入 Mac
 - 共享 terminal render 已能消费 snapshot / viewport-update / scrollback-update
 - 壳层视觉参考 Tabby：更紧凑的桌面终端 chrome、左侧 profile rail、顶部 tab strip、主终端画布优先
-- 顶部 tab strip 已进入真实状态映射：会反映当前 connection / terminal target / inspector 状态，2-col 下可直接切 Terminal / Inspector
+- 顶部 tab strip 已进入真实状态映射：会反映当前 connection / terminal target 状态，并承载右侧 split preset
 - 右侧 Details 已收成轻量 inspector：优先展示 target/session/bridge 概要，再展开连接表单
 - 顶部已支持最小真实 open target tabs：
   - saved target 可开成 tab
@@ -27,6 +27,7 @@
   - Terminal 列宽显著大于左 rail
   - 顶部 chrome / shell tabs / pane header 已压缩
   - Terminal pane 内不再叠第二层假 tabs/toolbars
+  - 左 rail 固定窄列，右侧 workspace 允许按比例切 1 / 2 / 3 个 vertical split panes
 
 ## 当前范围
 
@@ -40,7 +41,8 @@
   - 左侧连接 / profile rail
 - 顶部 tab strip
 - 主 terminal 画布优先
-- 右侧 details 作为 inspector，而不是主阅读区
+- 右侧 details 作为 inspector 视图之一，但不再固定死成唯一第二列
+- 右侧 workspace 需支持按比例切换 multiple vertical panes（类似 iTerm2 的垂直分屏）
 - tab strip 要尽量承载当前 target / inspector 的真实状态，而不是静态占位文案
 - shell tabs 当前只保证“多个 open target + 单个 live runtime”的真实闭环；不宣称并发多 websocket / 多 live session
 - 桌面排版优先级高于额外壳层装饰：一旦壳层和主终端阅读区域冲突，先压缩 chrome / tab / meta 区，保证 terminal surface 最大化
@@ -81,11 +83,16 @@
    - 仍然是一行多列
    - 仍然是垂直分屏
    - 不引入第二套 desktop-only 编排语义
-9. 在 2-col 场景下，顶部 shell tabs 至少要能切换：
-   - Connections + Terminal
-   - Connections + Inspector
+9. 在桌面 workspace 场景下，主舞台必须保持：
+   - 左侧窄 Connections rail
+   - 右侧 split workspace
+   - split workspace 至少支持 `1 / 2 / 3` 个按比例分列的 vertical panes
 10. 顶部 tabs 的最小能力验收：
    - 可以打开 saved target 成为 tab
    - 可以 `+` 新建 tab
    - 可以关闭当前 tab
    - active tab 与当前 live runtime 的 target 对应关系明确
+11. split preset 的最小能力验收：
+   - 可以在 packaged `.app` 中切换 `1 / 2 / 3`
+   - 切换后右侧 workspace 的 pane 数和比例会改变
+   - 仍保持 terminal-first，不出现上下堆叠主方案

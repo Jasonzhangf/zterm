@@ -283,6 +283,7 @@ export function ConnectionsPage({
 
   const selectedGroupCount = selectedServerGroups.length;
   const selectedSessionCount = selectedServerGroups.reduce((sum, entry) => sum + entry.sessionNames.length, 0);
+  const managementMode = expandedGroupIds.length > 0 || selectedGroupCount > 0;
 
   return (
     <div
@@ -298,7 +299,14 @@ export function ConnectionsPage({
         color: mobileTheme.colors.lightText,
       }}
     >
-      <div style={{ padding: `${mobileTheme.safeArea.top} 18px 24px`, display: 'flex', flexDirection: 'column', gap: '22px' }}>
+      <div
+        style={{
+          padding: `${mobileTheme.safeArea.top} 18px ${managementMode ? 168 : 124}px`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '22px',
+        }}
+      >
         <ConnectionsHeader subtitle="Grouped by server IP. Tap to open, long-press to choose sessions." />
 
         {serverGroups.length > 0 && (
@@ -376,7 +384,7 @@ export function ConnectionsPage({
                               ? 'History in this server'
                               : 'Live-only session';
                         return (
-                          <label
+                          <div
                             key={entry.id}
                             style={{
                               width: '100%',
@@ -389,7 +397,7 @@ export function ConnectionsPage({
                               alignItems: 'center',
                               justifyContent: 'space-between',
                               gap: '12px',
-                              cursor: 'pointer',
+                              cursor: 'default',
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
@@ -397,6 +405,7 @@ export function ConnectionsPage({
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => toggleGroupSessionSelection(group, entry.sessionName)}
+                                onClick={(event) => event.stopPropagation()}
                                 style={{ width: '16px', height: '16px', accentColor: mobileTheme.colors.accent, flexShrink: 0 }}
                               />
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
@@ -413,6 +422,7 @@ export function ConnectionsPage({
                               <button
                                 onClick={(event) => {
                                   event.preventDefault();
+                                  event.stopPropagation();
                                   if (entry.liveSession) {
                                     onResumeSession(entry.liveSession.id);
                                     return;
@@ -438,6 +448,7 @@ export function ConnectionsPage({
                                   <button
                                     onClick={(event) => {
                                       event.preventDefault();
+                                      event.stopPropagation();
                                       onEdit(entry.host!);
                                     }}
                                     style={{
@@ -457,6 +468,7 @@ export function ConnectionsPage({
                                   <button
                                     onClick={(event) => {
                                       event.preventDefault();
+                                      event.stopPropagation();
                                       onDelete(entry.host!);
                                     }}
                                     style={{
@@ -476,7 +488,7 @@ export function ConnectionsPage({
                                 </>
                               )}
                             </div>
-                          </label>
+                          </div>
                         );
                       })}
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', paddingTop: '4px' }}>
@@ -638,7 +650,7 @@ export function ConnectionsPage({
         )}
       </div>
 
-      <ConnectionFab onClick={onAddNew} />
+      {!managementMode && <ConnectionFab onClick={onAddNew} />}
       <ConnectionsBottomNav
         activePage="connections"
         onOpenConnections={() => undefined}

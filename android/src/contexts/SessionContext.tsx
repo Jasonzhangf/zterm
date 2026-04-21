@@ -12,9 +12,8 @@ import type {
   SessionBufferState,
   SessionSnapshot,
   SessionState,
-  TerminalScrollbackUpdate,
-  TerminalSnapshot,
-  TerminalViewportUpdate,
+  TerminalBufferPayload,
+  TerminalCell,
 } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
 import { buildBridgeUrl } from '../lib/bridge-url';
@@ -22,15 +21,12 @@ import { getResolvedSessionName } from '../lib/connection-target';
 import { getDefaultTerminalViewportSize } from '../lib/default-terminal-viewport';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import {
-  applyScrollbackUpdateToSessionBuffer,
-  applySnapshotToSessionBuffer,
-  applyViewportUpdateToSessionBuffer,
-  buildScrollbackRecoveryRange,
+  applyBufferDeltaToSessionBuffer,
+  applyBufferRangeToSessionBuffer,
+  applyBufferSyncToSessionBuffer,
   createSessionBufferState,
-  isScrollbackUpdateContiguous,
   normalizeBufferLines,
   replaceSessionBufferLines,
-  sessionBufferToHistory,
 } from '../lib/terminal-buffer';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
@@ -71,10 +67,10 @@ type SessionAction =
   | { type: 'CREATE_SESSION'; session: Session; activate: boolean }
   | { type: 'UPDATE_SESSION'; id: string; updates: Partial<Session> }
   | { type: 'MOVE_SESSION'; id: string; toIndex: number }
-  | { type: 'SET_SESSION_SNAPSHOT'; id: string; snapshot: TerminalSnapshot; cacheLines: number }
-  | { type: 'APPLY_VIEWPORT_UPDATE'; id: string; update: TerminalViewportUpdate; cacheLines: number }
-  | { type: 'APPLY_SCROLLBACK_UPDATE'; id: string; update: TerminalScrollbackUpdate; cacheLines: number }
-  | { type: 'SET_SESSION_BUFFER_LINES'; id: string; lines: string[]; cacheLines: number }
+  | { type: 'SET_SESSION_BUFFER_SYNC'; id: string; payload: TerminalBufferPayload; cacheLines: number }
+  | { type: 'APPLY_SESSION_BUFFER_DELTA'; id: string; payload: TerminalBufferPayload; cacheLines: number }
+  | { type: 'APPLY_SESSION_BUFFER_RANGE'; id: string; payload: TerminalBufferPayload; cacheLines: number }
+  | { type: 'SET_SESSION_BUFFER_LINES'; id: string; lines: Array<TerminalCell[] | string>; cacheLines: number }
   | { type: 'DELETE_SESSION'; id: string }
   | { type: 'SET_ACTIVE_SESSION'; id: string }
   | { type: 'SET_SESSION_STATE'; id: string; state: SessionState }
@@ -121,48 +117,45 @@ function reduceSessionAction(state: SessionManagerState, action: SessionAction):
         sessions: nextSessions,
       };
     }
-    case 'SET_SESSION_SNAPSHOT':
+    case 'SET_SESSION_BUFFER_SYNC':
       return {
         ...state,
         sessions: state.sessions.map((session) => {
           if (session.id !== action.id) {
             return session;
           }
-          const nextBuffer = applySnapshotToSessionBuffer(session.buffer, action.snapshot, action.cacheLines);
+          const nextBuffer = applyBufferSyncToSessionBuffer(session.buffer, action.payload, action.cacheLines);
           return {
             ...session,
             buffer: nextBuffer,
-            outputHistory: sessionBufferToHistory(nextBuffer, action.cacheLines),
           };
         }),
       };
-    case 'APPLY_VIEWPORT_UPDATE':
+    case 'APPLY_SESSION_BUFFER_DELTA':
       return {
         ...state,
         sessions: state.sessions.map((session) => {
           if (session.id !== action.id) {
             return session;
           }
-          const nextBuffer = applyViewportUpdateToSessionBuffer(session.buffer, action.update, action.cacheLines);
+          const nextBuffer = applyBufferDeltaToSessionBuffer(session.buffer, action.payload, action.cacheLines);
           return {
             ...session,
             buffer: nextBuffer,
-            outputHistory: session.outputHistory,
           };
         }),
       };
-    case 'APPLY_SCROLLBACK_UPDATE':
+    case 'APPLY_SESSION_BUFFER_RANGE':
       return {
         ...state,
         sessions: state.sessions.map((session) => {
           if (session.id !== action.id) {
             return session;
           }
-          const nextBuffer = applyScrollbackUpdateToSessionBuffer(session.buffer, action.update, action.cacheLines);
+          const nextBuffer = applyBufferRangeToSessionBuffer(session.buffer, action.payload, action.cacheLines);
           return {
             ...session,
             buffer: nextBuffer,
-            outputHistory: session.outputHistory,
           };
         }),
       };
@@ -176,7 +169,6 @@ function reduceSessionAction(state: SessionManagerState, action: SessionAction):
                 return {
                   ...session,
                   buffer: nextBuffer,
-                  outputHistory: sessionBufferToHistory(nextBuffer, action.cacheLines),
                 };
               })()
             : session,
@@ -229,10 +221,11 @@ interface SessionContextValue {
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  requestBufferRange: (sessionId: string, startIndex: number, endIndex: number) => void;
   sendInput: (data: string) => void;
   sendImagePaste: (file: File) => Promise<void>;
   resizeTerminal: (cols: number, rows: number) => void;
-  updateSessionBufferLines: (sessionId: string, lines: string[]) => void;
+  updateSessionBufferLines: (sessionId: string, lines: Array<TerminalCell[] | string>) => void;
   getActiveSession: () => Session | null;
   getSession: (id: string) => Session | null;
 }
@@ -246,12 +239,11 @@ interface SessionProviderProps {
 interface CreateSessionOptions {
   activate?: boolean;
   customName?: string;
-  outputHistory?: string;
   buffer?: SessionBufferState;
-  bufferLines?: string[];
-  lineStartIndex?: number;
-  scrollbackStartIndex?: number;
-  remoteSnapshot?: TerminalSnapshot;
+  bufferLines?: Array<TerminalCell[] | string>;
+  startIndex?: number;
+  cols?: number;
+  rows?: number;
   createdAt?: number;
   sessionId?: string;
 }
@@ -301,6 +293,86 @@ function fileToBase64(file: File) {
   });
 }
 
+function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
+  if (typeof input === 'string') {
+    return Array.from(input).map((char) => ({
+      char: char.codePointAt(0) || 32,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    }));
+  }
+
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .filter((cell): cell is TerminalCell => Boolean(cell && typeof cell === 'object'))
+    .map((cell) => ({
+      char: typeof cell.char === 'number' ? cell.char : 32,
+      fg: typeof cell.fg === 'number' ? cell.fg : 256,
+      bg: typeof cell.bg === 'number' ? cell.bg : 256,
+      flags: typeof cell.flags === 'number' ? cell.flags : 0,
+      width: typeof cell.width === 'number' ? cell.width : 1,
+    }));
+}
+
+function normalizePersistedTerminalCells(input: unknown): TerminalCell[][] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.map((row) => normalizeTerminalCellRow(row));
+}
+
+function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalBufferPayload {
+  return {
+    revision:
+      typeof input.revision === 'number' && Number.isFinite(input.revision)
+        ? input.revision
+        : 0,
+    startIndex:
+      typeof input.startIndex === 'number' && Number.isFinite(input.startIndex)
+        ? Math.max(0, Math.floor(input.startIndex))
+        : 0,
+    endIndex:
+      typeof input.endIndex === 'number' && Number.isFinite(input.endIndex)
+        ? Math.max(0, Math.floor(input.endIndex))
+        : 0,
+    cols:
+      typeof input.cols === 'number' && Number.isFinite(input.cols)
+        ? Math.max(1, Math.floor(input.cols))
+        : 80,
+    rows:
+      typeof input.rows === 'number' && Number.isFinite(input.rows)
+        ? Math.max(1, Math.floor(input.rows))
+        : 24,
+    cursorRow:
+      typeof input.cursorRow === 'number' && Number.isFinite(input.cursorRow)
+        ? Math.max(0, Math.floor(input.cursorRow))
+        : 0,
+    cursorCol:
+      typeof input.cursorCol === 'number' && Number.isFinite(input.cursorCol)
+        ? Math.max(0, Math.floor(input.cursorCol))
+        : 0,
+    cursorVisible: Boolean(input.cursorVisible),
+    cursorKeysApp: Boolean(input.cursorKeysApp),
+    lines: Array.isArray(input.lines)
+      ? input.lines
+          .filter((line) => line && typeof line === 'object')
+          .map((line) => ({
+            index:
+              typeof line.index === 'number' && Number.isFinite(line.index)
+                ? Math.max(0, Math.floor(line.index))
+                : 0,
+            cells: normalizeTerminalCellRow(line.cells),
+          }))
+      : [],
+  };
+}
+
 function normalizeRestoredSnapshots(input: unknown): SessionSnapshot[] {
   if (!Array.isArray(input)) {
     return [];
@@ -319,58 +391,72 @@ function normalizeRestoredSnapshots(input: unknown): SessionSnapshot[] {
       autoCommand: typeof item.autoCommand === 'string' ? item.autoCommand : undefined,
       customName: typeof item.customName === 'string' ? item.customName : undefined,
       createdAt: typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
-      outputHistory: typeof item.outputHistory === 'string' ? item.outputHistory : '',
       buffer: item.buffer && typeof item.buffer === 'object'
         ? (() => {
+            const legacyBuffer = item.buffer as SessionBufferState & {
+              lineStartIndex?: number;
+              scrollbackStartIndex?: number;
+              remoteSnapshot?: { cols?: number; rows?: number };
+            };
             const updateKind: SessionBufferState['updateKind'] =
-              item.buffer.updateKind === 'append'
-              || item.buffer.updateKind === 'prepend'
-              || item.buffer.updateKind === 'viewport'
-                ? item.buffer.updateKind
+              legacyBuffer.updateKind === 'delta'
+              || legacyBuffer.updateKind === 'range'
+                ? legacyBuffer.updateKind
                 : 'replace';
-            return {
-              lines: Array.isArray(item.buffer.lines)
-                ? item.buffer.lines.filter((line): line is string => typeof line === 'string')
-                : [],
-              lineStartIndex:
-                typeof item.buffer.lineStartIndex === 'number' && Number.isFinite(item.buffer.lineStartIndex)
-                  ? item.buffer.lineStartIndex
-                  : typeof item.buffer.scrollbackStartIndex === 'number' && Number.isFinite(item.buffer.scrollbackStartIndex)
-                    ? item.buffer.scrollbackStartIndex
-                    : undefined,
-              scrollbackStartIndex:
-                typeof item.buffer.scrollbackStartIndex === 'number' && Number.isFinite(item.buffer.scrollbackStartIndex)
-                  ? item.buffer.scrollbackStartIndex
+            return createSessionBufferState({
+              lines: normalizePersistedTerminalCells(legacyBuffer.lines),
+              startIndex:
+                typeof legacyBuffer.startIndex === 'number' && Number.isFinite(legacyBuffer.startIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.startIndex))
+                  : typeof legacyBuffer.lineStartIndex === 'number' && Number.isFinite(legacyBuffer.lineStartIndex)
+                    ? Math.max(0, Math.floor(legacyBuffer.lineStartIndex))
+                    : typeof legacyBuffer.scrollbackStartIndex === 'number' && Number.isFinite(legacyBuffer.scrollbackStartIndex)
+                      ? Math.max(0, Math.floor(legacyBuffer.scrollbackStartIndex))
+                      : 0,
+              endIndex:
+                typeof legacyBuffer.endIndex === 'number' && Number.isFinite(legacyBuffer.endIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.endIndex))
                   : undefined,
+              cols:
+                typeof legacyBuffer.cols === 'number' && Number.isFinite(legacyBuffer.cols)
+                  ? Math.max(1, Math.floor(legacyBuffer.cols))
+                  : legacyBuffer.remoteSnapshot?.cols || 80,
+              rows:
+                typeof legacyBuffer.rows === 'number' && Number.isFinite(legacyBuffer.rows)
+                  ? Math.max(1, Math.floor(legacyBuffer.rows))
+                  : legacyBuffer.remoteSnapshot?.rows || 24,
+              cursorRow:
+                typeof legacyBuffer.cursorRow === 'number' && Number.isFinite(legacyBuffer.cursorRow)
+                  ? Math.max(0, Math.floor(legacyBuffer.cursorRow))
+                  : 0,
+              cursorCol:
+                typeof legacyBuffer.cursorCol === 'number' && Number.isFinite(legacyBuffer.cursorCol)
+                  ? Math.max(0, Math.floor(legacyBuffer.cursorCol))
+                  : 0,
+              cursorVisible: Boolean(legacyBuffer.cursorVisible),
+              cursorKeysApp: Boolean(legacyBuffer.cursorKeysApp),
               updateKind,
               revision:
-                typeof item.buffer.revision === 'number' && Number.isFinite(item.buffer.revision)
-                  ? item.buffer.revision
+                typeof legacyBuffer.revision === 'number' && Number.isFinite(legacyBuffer.revision)
+                  ? legacyBuffer.revision
                   : 0,
-              remoteSnapshot: item.buffer.remoteSnapshot && typeof item.buffer.remoteSnapshot === 'object'
-                ? item.buffer.remoteSnapshot as TerminalSnapshot
-                : undefined,
-            };
+              cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+            });
           })()
         : createSessionBufferState({
             lines: Array.isArray(item.bufferLines)
-              ? item.bufferLines.filter((line): line is string => typeof line === 'string')
+              ? item.bufferLines
               : typeof item.outputHistory === 'string'
                 ? item.outputHistory.split('\n')
                 : [],
-            lineStartIndex:
+            startIndex:
               typeof item.lineStartIndex === 'number' && Number.isFinite(item.lineStartIndex)
                 ? item.lineStartIndex
                 : typeof item.scrollbackStartIndex === 'number' && Number.isFinite(item.scrollbackStartIndex)
                   ? item.scrollbackStartIndex
-                  : undefined,
-            scrollbackStartIndex:
-              typeof item.scrollbackStartIndex === 'number' && Number.isFinite(item.scrollbackStartIndex)
-                ? item.scrollbackStartIndex
-                : undefined,
-            remoteSnapshot: item.remoteSnapshot && typeof item.remoteSnapshot === 'object'
-              ? item.remoteSnapshot as TerminalSnapshot
-              : undefined,
+                  : 0,
+            cols: item.remoteSnapshot?.cols || 80,
+            rows: item.remoteSnapshot?.rows || 24,
             cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
           }),
     }))
@@ -391,8 +477,6 @@ function toSessionSnapshot(session: Session): SessionSnapshot {
     customName: session.customName,
     createdAt: session.createdAt,
     buffer: session.buffer,
-    outputHistory: session.outputHistory,
-    lineStartIndex: session.buffer.lineStartIndex,
   };
 }
 
@@ -699,21 +783,31 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
               dispatch({ type: 'INCREMENT_CONNECTED' });
               setTimeout(() => drainReconnectBucket(hostKey), POST_SUCCESS_NEXT_RETRY_DELAY_MS);
               break;
-            case 'snapshot':
+            case 'buffer-sync':
               clearPendingRangeSync(nextSessionId);
-              enqueueRenderAction({ type: 'SET_SESSION_SNAPSHOT', id: nextSessionId, snapshot: msg.payload, cacheLines: terminalCacheLines });
+              enqueueRenderAction({
+                type: 'SET_SESSION_BUFFER_SYNC',
+                id: nextSessionId,
+                payload: normalizeIncomingBufferPayload(msg.payload),
+                cacheLines: terminalCacheLines,
+              });
               break;
-            case 'viewport-update':
-              enqueueRenderAction({ type: 'APPLY_VIEWPORT_UPDATE', id: nextSessionId, update: msg.payload, cacheLines: terminalCacheLines });
+            case 'buffer-delta':
+              enqueueRenderAction({
+                type: 'APPLY_SESSION_BUFFER_DELTA',
+                id: nextSessionId,
+                payload: normalizeIncomingBufferPayload(msg.payload),
+                cacheLines: terminalCacheLines,
+              });
               break;
-            case 'scrollback-update':
-              if (maybeRecoverScrollbackGap(nextSessionId, msg.payload)) {
-                break;
-              }
-              if (msg.payload.mode === 'reset') {
-                clearPendingRangeSync(nextSessionId);
-              }
-              enqueueRenderAction({ type: 'APPLY_SCROLLBACK_UPDATE', id: nextSessionId, update: msg.payload, cacheLines: terminalCacheLines });
+            case 'buffer-range':
+              clearPendingRangeSync(nextSessionId);
+              enqueueRenderAction({
+                type: 'APPLY_SESSION_BUFFER_RANGE',
+                id: nextSessionId,
+                payload: normalizeIncomingBufferPayload(msg.payload),
+                cacheLines: terminalCacheLines,
+              });
               break;
             case 'title':
               enqueueRenderAction({ type: 'SET_SESSION_TITLE', id: nextSessionId, title: msg.payload });
@@ -894,21 +988,31 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             });
             dispatch({ type: 'INCREMENT_CONNECTED' });
             break;
-          case 'snapshot':
+          case 'buffer-sync':
             clearPendingRangeSync(sessionId);
-            enqueueRenderAction({ type: 'SET_SESSION_SNAPSHOT', id: sessionId, snapshot: msg.payload, cacheLines: terminalCacheLines });
+            enqueueRenderAction({
+              type: 'SET_SESSION_BUFFER_SYNC',
+              id: sessionId,
+              payload: normalizeIncomingBufferPayload(msg.payload),
+              cacheLines: terminalCacheLines,
+            });
             break;
-          case 'viewport-update':
-            enqueueRenderAction({ type: 'APPLY_VIEWPORT_UPDATE', id: sessionId, update: msg.payload, cacheLines: terminalCacheLines });
+          case 'buffer-delta':
+            enqueueRenderAction({
+              type: 'APPLY_SESSION_BUFFER_DELTA',
+              id: sessionId,
+              payload: normalizeIncomingBufferPayload(msg.payload),
+              cacheLines: terminalCacheLines,
+            });
             break;
-          case 'scrollback-update':
-            if (maybeRecoverScrollbackGap(sessionId, msg.payload)) {
-              break;
-            }
-            if (msg.payload.mode === 'reset') {
-              clearPendingRangeSync(sessionId);
-            }
-            enqueueRenderAction({ type: 'APPLY_SCROLLBACK_UPDATE', id: sessionId, update: msg.payload, cacheLines: terminalCacheLines });
+          case 'buffer-range':
+            clearPendingRangeSync(sessionId);
+            enqueueRenderAction({
+              type: 'APPLY_SESSION_BUFFER_RANGE',
+              id: sessionId,
+              payload: normalizeIncomingBufferPayload(msg.payload),
+              cacheLines: terminalCacheLines,
+            });
             break;
           case 'error':
             finalizeFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
@@ -953,12 +1057,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       state: 'connecting',
       hasUnread: false,
       customName: options?.customName?.trim() || undefined,
-      outputHistory: options?.outputHistory || '',
       buffer: options?.buffer || createSessionBufferState({
-        lines: normalizeBufferLines(options?.bufferLines || options?.outputHistory?.split('\n') || [], terminalCacheLines),
-        lineStartIndex: options?.lineStartIndex,
-        scrollbackStartIndex: options?.scrollbackStartIndex,
-        remoteSnapshot: options?.remoteSnapshot,
+        lines: normalizeBufferLines(options?.bufferLines || [], terminalCacheLines),
+        startIndex: options?.startIndex,
+        cols: options?.cols,
+        rows: options?.rows,
         cacheLines: terminalCacheLines,
       }),
       reconnectAttempt: 0,
@@ -1083,43 +1186,32 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     pendingRangeSyncRef.current.delete(sessionId);
   }, []);
 
-  const requestScrollbackRangeSync = useCallback((sessionId: string, startIndex: number, endIndex: number) => {
+  const requestBufferRange = useCallback((sessionId: string, startIndex: number, endIndex: number) => {
     const normalizedStart = Math.max(0, Math.floor(startIndex));
     const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
+    if (normalizedEnd <= normalizedStart) {
+      return;
+    }
+
     const requestKey = `${normalizedStart}:${normalizedEnd}`;
     if (pendingRangeSyncRef.current.get(sessionId) === requestKey) {
       return;
     }
 
+    const ws = wsRefs.current.get(sessionId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
     pendingRangeSyncRef.current.set(sessionId, requestKey);
-    sendMessage(sessionId, {
-      type: 'request-scrollback-range',
+    ws.send(JSON.stringify({
+      type: 'request-buffer-range',
       payload: {
         startIndex: normalizedStart,
         endIndex: normalizedEnd,
       },
-    });
-  }, [sendMessage]);
-
-  const maybeRecoverScrollbackGap = useCallback((sessionId: string, update: TerminalScrollbackUpdate) => {
-    if (update.mode === 'reset') {
-      clearPendingRangeSync(sessionId);
-      return false;
-    }
-
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
-    if (!session || isScrollbackUpdateContiguous(session.buffer, update)) {
-      return false;
-    }
-
-    const recoveryRange = buildScrollbackRecoveryRange(session.buffer, update, terminalCacheLines);
-    if (!recoveryRange) {
-      return false;
-    }
-
-    requestScrollbackRangeSync(sessionId, recoveryRange.startIndex, recoveryRange.endIndex);
-    return true;
-  }, [clearPendingRangeSync, requestScrollbackRangeSync, terminalCacheLines]);
+    }));
+  }, []);
 
   const sendStreamMode = useCallback((sessionId: string, desiredMode: 'active' | 'idle') => {
     const ws = wsRefs.current.get(sessionId);
@@ -1231,7 +1323,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
   }, [sendMessage]);
 
-  const updateSessionBufferLines = useCallback((sessionId: string, lines: string[]) => {
+  const updateSessionBufferLines = useCallback((sessionId: string, lines: Array<TerminalCell[] | string>) => {
     dispatch({ type: 'SET_SESSION_BUFFER_LINES', id: sessionId, lines, cacheLines: terminalCacheLines });
   }, [terminalCacheLines]);
 
@@ -1272,12 +1364,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             sessionId: snapshot.sessionId,
             createdAt: snapshot.createdAt,
             customName: snapshot.customName,
-            outputHistory: snapshot.outputHistory,
             buffer: snapshot.buffer,
             bufferLines: snapshot.bufferLines,
-            lineStartIndex: snapshot.lineStartIndex,
-            scrollbackStartIndex: snapshot.scrollbackStartIndex,
-            remoteSnapshot: snapshot.remoteSnapshot,
+            startIndex: snapshot.lineStartIndex ?? snapshot.scrollbackStartIndex,
+            cols: snapshot.buffer?.cols || snapshot.remoteSnapshot?.cols,
+            rows: snapshot.buffer?.rows || snapshot.remoteSnapshot?.rows,
             activate: snapshot.sessionId === activeSessionId,
           },
         );
@@ -1311,6 +1402,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     reconnectSession,
     reconnectAllSessions,
     sendMessage,
+    requestBufferRange,
     sendInput,
     sendImagePaste,
     resizeTerminal,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildStoredHost,
   getResolvedSessionName,
@@ -51,9 +51,11 @@ function normalizeEditableUpdates(current: Host, updates: Partial<EditableHost>)
 export function useHostStorage() {
   const [hosts, setHosts] = useState<Host[]>(DEFAULT_HOSTS);
   const [isLoaded, setIsLoaded] = useState(false);
+  const hostsRef = useRef<Host[]>(DEFAULT_HOSTS);
 
   useEffect(() => {
     const normalized = loadHosts();
+    hostsRef.current = normalized;
     setHosts(normalized);
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEYS.HOSTS, JSON.stringify(normalized));
@@ -62,14 +64,13 @@ export function useHostStorage() {
   }, []);
 
   const saveHosts = useCallback((updater: Host[] | ((current: Host[]) => Host[])) => {
-    let nextHosts: Host[] = [];
-    setHosts((current) => {
-      nextHosts = typeof updater === 'function' ? updater(current) : updater;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEYS.HOSTS, JSON.stringify(nextHosts));
-      }
-      return nextHosts;
-    });
+    const currentHosts = hostsRef.current;
+    const nextHosts = typeof updater === 'function' ? updater(currentHosts) : updater;
+    hostsRef.current = nextHosts;
+    setHosts(nextHosts);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.HOSTS, JSON.stringify(nextHosts));
+    }
     return nextHosts;
   }, []);
 

@@ -9,6 +9,7 @@ playwright-report/
 android/node_modules/
 android/dist/
 android/.turbo/
+android/.build-meta.json
 android/.beads/*
 !android/.beads/issues.jsonl
 android/CACHE.md

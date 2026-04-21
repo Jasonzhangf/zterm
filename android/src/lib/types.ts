@@ -42,12 +42,17 @@ export type SessionState =
   | 'closed';     // 已关闭
 
 export interface SessionBufferState {
-  lines: string[];                  // authoritative line buffer for this session
-  lineStartIndex?: number;          // absolute index for the first line in `lines`
-  scrollbackStartIndex?: number;    // absolute index for the first scrollback line kept in remote snapshot
-  updateKind: 'replace' | 'append' | 'prepend' | 'viewport';
+  lines: TerminalCell[][];          // authoritative line buffer for this session
+  startIndex: number;               // absolute index for the first line in `lines`
+  endIndex: number;                 // exclusive absolute index for the last line in `lines`
+  cols: number;
+  rows: number;
+  cursorRow: number;                // absolute cursor row
+  cursorCol: number;
+  cursorVisible: boolean;
+  cursorKeysApp: boolean;
+  updateKind: 'replace' | 'delta' | 'range';
   revision: number;
-  remoteSnapshot?: TerminalSnapshot;
 }
 
 export interface Session {
@@ -64,7 +69,6 @@ export interface Session {
   state: SessionState;
   hasUnread: boolean;        // 是否有未读输出
   customName?: string;       // 用户重命名的名称
-  outputHistory?: string;    // persisted/plaintext mirror of buffer.lines
   buffer: SessionBufferState;
   reconnectAttempt?: number;
   lastError?: string;
@@ -92,7 +96,7 @@ export interface TerminalSnapshot {
   viewportStartIndex: number;
   cursor: TerminalCursor;
   cursorKeysApp: boolean;
-  scrollbackLines?: string[];
+  scrollbackLines?: TerminalCell[][];
   scrollbackStartIndex?: number;
 }
 
@@ -112,9 +116,27 @@ export interface TerminalViewportUpdate {
 
 export interface TerminalScrollbackUpdate {
   mode: 'append' | 'prepend' | 'reset';
-  lines: string[];
+  lines: TerminalCell[][];
   startIndex?: number;
   remaining?: number;
+}
+
+export interface TerminalIndexedLine {
+  index: number;
+  cells: TerminalCell[];
+}
+
+export interface TerminalBufferPayload {
+  revision: number;
+  startIndex: number;
+  endIndex: number;
+  cols: number;
+  rows: number;
+  cursorRow: number;
+  cursorCol: number;
+  cursorVisible: boolean;
+  cursorKeysApp: boolean;
+  lines: TerminalIndexedLine[];
 }
 
 export interface PasteImagePayload {
@@ -138,6 +160,14 @@ export interface QuickAction {
   label: string;             // 显示名称，如 "git status"
   sequence: string;          // 保存好的字符串文本，点击后原样注入
   order: number;             // 排序顺序
+}
+
+export interface TerminalShortcutAction {
+  id: string;
+  label: string;
+  sequence: string;
+  order: number;
+  row: 'top-scroll' | 'bottom-scroll';
 }
 
 export type SessionDraftMap = Record<string, string>;
@@ -169,11 +199,11 @@ export interface SessionSnapshot {
   autoCommand?: string;
   customName?: string;
   createdAt: number;
-  outputHistory?: string;    // 终端输出历史（可选）
   buffer?: SessionBufferState;
-  lineStartIndex?: number;
   // legacy persisted fields, kept for migration compatibility
+  outputHistory?: string;
   bufferLines?: string[];
+  lineStartIndex?: number;
   scrollbackStartIndex?: number;
   remoteSnapshot?: TerminalSnapshot;
 }
@@ -222,7 +252,7 @@ export type ClientMessage =
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
   | { type: 'paste-image'; payload: PasteImagePayload }
-  | { type: 'request-scrollback-range'; payload: ScrollbackRangeRequestPayload }
+  | { type: 'request-buffer-range'; payload: ScrollbackRangeRequestPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
   | { type: 'close' };
@@ -231,9 +261,9 @@ export type ServerMessage =
   | { type: 'connected'; payload: { sessionId: string } }
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'data'; payload: string }
-  | { type: 'snapshot'; payload: TerminalSnapshot }
-  | { type: 'viewport-update'; payload: TerminalViewportUpdate }
-  | { type: 'scrollback-update'; payload: TerminalScrollbackUpdate }
+  | { type: 'buffer-sync'; payload: TerminalBufferPayload }
+  | { type: 'buffer-delta'; payload: TerminalBufferPayload }
+  | { type: 'buffer-range'; payload: TerminalBufferPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
@@ -288,6 +318,7 @@ export interface AppState {
   activeSessionId: string | null;
   hosts: Host[];
   quickActions: QuickAction[];
+  shortcutActions: TerminalShortcutAction[];
   webdavConfig: WebDAVConfig | null;
 }
 
@@ -302,6 +333,7 @@ export const STORAGE_KEYS = {
   SESSION_GROUPS: 'zterm:session-groups',
   OPEN_TABS: 'zterm:open-tabs',
   QUICK_ACTIONS: 'zterm:quick-actions',
+  SHORTCUT_ACTIONS: 'zterm:shortcut-actions',
   SESSION_DRAFTS: 'zterm:session-drafts',
   WEBDAV_CONFIG: 'zterm:webdav-config',
   COMMAND_HISTORY: 'zterm:command-history',
@@ -314,6 +346,18 @@ export const STORAGE_KEYS = {
 // ============================================
 
 export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [];
+
+export const DEFAULT_SHORTCUT_ACTIONS: TerminalShortcutAction[] = [
+  { id: 'shortcut-continue', label: '继续', sequence: '继续执行\r', order: 0, row: 'top-scroll' },
+  { id: 'shortcut-esc', label: 'Esc', sequence: '\x1b', order: 1, row: 'top-scroll' },
+  { id: 'shortcut-tab', label: 'Tab', sequence: '\t', order: 2, row: 'top-scroll' },
+  { id: 'shortcut-backspace', label: 'Bksp', sequence: '\x7f', order: 3, row: 'top-scroll' },
+  { id: 'shortcut-enter', label: 'Enter', sequence: '\r', order: 0, row: 'bottom-scroll' },
+  { id: 'shortcut-space', label: 'Space', sequence: ' ', order: 1, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-tab', label: 'S-Tab', sequence: '\x1b[Z', order: 2, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-enter', label: 'S-Enter', sequence: '\n', order: 3, row: 'bottom-scroll' },
+  { id: 'shortcut-paste', label: 'Paste', sequence: '\x16', order: 4, row: 'bottom-scroll' },
+];
 
 export const DEFAULT_WEBDAV_CONFIG: WebDAVConfig = {
   url: '',

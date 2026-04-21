@@ -22,17 +22,18 @@
   - 最小 stage 页面
   - Tabby-inspired desktop shell：
     - compact window chrome
-    - workspace/tab strip（真实映射当前 target / inspector 状态）
-    - 左 rail + 主 terminal + 右 inspector
-    - 2-col 时由 shell tabs 在 `Terminal` / `Inspector` 之间切 secondary column
+    - workspace/tab strip（真实映射当前 target + split preset 状态）
+    - 固定左 rail + 右侧 split workspace
+    - 右侧 split workspace 当前只做 vertical split，不做自由拖拽
+    - split preset 当前最小真源为 `1 / 2 / 3`
     - open target tabs 当前采用 `single runtime · multi tabs`：
       - 可以同时维护多个 open target descriptor
       - 但 app-level bridge websocket/runtime 同时只服务一个 active target
       - 切 tab 时如 target 变更，则切换 active target 并重连
     - 列宽遵守 terminal-first：
       - connections rail 更窄
-      - terminal 主列更宽
-      - inspector 次于 terminal，不与 terminal 等权
+      - 右侧 split workspace 通过比例模板决定各列宽度
+      - inspector 只是 split pane 的一种视图，不与 terminal 等权
   - 单行多列 + 垂直分屏布局
   - Connections / Details / Terminal 三个 pane 的统一编排
 
@@ -71,7 +72,7 @@
 
 - Tabby 只作为桌面壳层参考，不作为布局真源：
   - 可以借用紧凑 chrome、顶部 tab strip、左侧会话栏、主终端优先的视觉组织
-  - 不照搬其任意自由分屏 / desktop-only 交互模型
+  - 不照搬其任意自由拖拽 / desktop-only 交互模型
   - 真正的 pane 编排仍由 shared `layout profile + PaneStage` 决定
 
 - Mac 第一阶段只先做桌面壳上的 stage：
