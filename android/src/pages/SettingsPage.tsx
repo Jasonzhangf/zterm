@@ -53,6 +53,22 @@ function sectionStyle() {
   } as const;
 }
 
+function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
+  const rawHost = targetHost.trim();
+  if (!rawHost) {
+    return '';
+  }
+
+  try {
+    const parsed = rawHost.includes('://') ? new URL(rawHost) : new URL(`ws://${rawHost}`);
+    const protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+    const port = parsed.port || String(targetPort || 3333);
+    return `${protocol}//${parsed.hostname}:${port}/updates/latest.json`;
+  } catch {
+    return '';
+  }
+}
+
 export function SettingsPage({
   settings,
   updatePreferences,
@@ -71,6 +87,13 @@ export function SettingsPage({
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const daemonCommand = useMemo(() => buildDaemonStartCommand(draft), [draft]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
+  const suggestedManifestUrl = useMemo(
+    () => deriveDaemonUpdateManifestUrl(
+      defaultServer?.targetHost || draft.targetHost || '',
+      defaultServer?.targetPort || draft.targetPort || 3333,
+    ),
+    [defaultServer?.targetHost, defaultServer?.targetPort, draft.targetHost, draft.targetPort],
+  );
 
   useEffect(() => {
     setUpdateDraft(updatePreferences);
@@ -208,6 +231,34 @@ export function SettingsPage({
               placeholder="https://server.example.com/zterm/android/stable/latest.json"
               style={inputStyle()}
             />
+            {suggestedManifestUrl ? (
+              <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+                  推荐直接走当前 daemon：{suggestedManifestUrl}
+                </div>
+                <button
+                  onClick={() =>
+                    setUpdateDraft((current) => ({
+                      ...current,
+                      manifestUrl: suggestedManifestUrl,
+                    }))
+                  }
+                  style={{
+                    alignSelf: 'flex-start',
+                    minHeight: '40px',
+                    padding: '0 14px',
+                    borderRadius: '14px',
+                    border: 'none',
+                    backgroundColor: '#eef2f8',
+                    color: mobileTheme.colors.lightText,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  使用当前 daemon 地址
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <label

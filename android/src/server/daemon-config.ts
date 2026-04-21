@@ -10,16 +10,26 @@ import {
 
 export const WTERM_HOME_DIRNAME = '.wterm';
 export const WTERM_CONFIG_FILENAME = 'config.json';
+export const WTERM_UPDATES_DIRNAME = 'updates';
 
 interface WtermConfigFile {
-  zterm?: {
-    android?: {
-      daemon?: {
+  mobile?: {
+    daemon?: {
       host?: unknown;
       port?: unknown;
       authToken?: unknown;
       terminalCacheLines?: unknown;
       sessionName?: unknown;
+    };
+  };
+  zterm?: {
+    android?: {
+      daemon?: {
+        host?: unknown;
+        port?: unknown;
+        authToken?: unknown;
+        terminalCacheLines?: unknown;
+        sessionName?: unknown;
       };
     };
   };
@@ -63,6 +73,10 @@ export function getWtermHomeDir(homeDir: string = homedir()) {
   return join(homeDir, WTERM_HOME_DIRNAME);
 }
 
+export function getWtermUpdatesDir(homeDir: string = homedir()) {
+  return join(getWtermHomeDir(homeDir), WTERM_UPDATES_DIRNAME);
+}
+
 export function readWtermConfigFile(homeDir: string = homedir()) {
   const configPath = getWtermConfigPath(homeDir);
   if (!existsSync(configPath)) {
@@ -100,7 +114,7 @@ export function resolveDaemonRuntimeConfig(options?: {
   const env = options?.env || process.env;
   const homeDir = options?.homeDir || homedir();
   const { config, found, path } = readWtermConfigFile(homeDir);
-  const daemonConfig = config.zterm?.android?.daemon || {};
+  const daemonConfig = config.zterm?.android?.daemon || config.mobile?.daemon || {};
 
   const host =
     asString(env.ZTERM_HOST) ||

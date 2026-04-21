@@ -17,6 +17,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ImeAnchorPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(DeviceClipboardPlugin.class);
         super.onCreate(savedInstanceState);
         Log.i(TAG, "onCreate()");
         if (getBridge() != null && getBridge().getWebView() != null) {

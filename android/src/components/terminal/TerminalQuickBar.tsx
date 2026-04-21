@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
+import { DeviceClipboardPlugin, isNativeClipboardSupported } from '../../plugins/DeviceClipboardPlugin';
 
 const FLOATING_BUBBLE_SIZE = 48;
 const FLOATING_BUBBLE_MARGIN = 10;
 const FLOATING_BUBBLE_LONG_PRESS_MS = 260;
 const QUICK_BAR_SIDE_PADDING = 6;
 const QUICK_BAR_ROW_GAP = 4;
+const FIXED_BUTTON_MIN_WIDTH = 32;
+const FIXED_CLUSTER_PADDING_X = 3;
 const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
 const MAX_CLIPBOARD_HISTORY = 100;
 const FLOATING_BUBBLE_POSITION_STORAGE_KEY = 'zterm:floating-bubble-position';
@@ -14,15 +17,14 @@ const FLOATING_BUBBLE_POSITION_STORAGE_KEY = 'zterm:floating-bubble-position';
 const SHORTCUT_PRESETS: ShortcutPreset[] = [
   { label: '继续', sequence: '继续执行\r', row: 'top-scroll' },
   { label: 'Esc', sequence: '\x1b', row: 'top-scroll' },
-  { label: 'Tab', sequence: '\t', row: 'top-scroll' },
   { label: 'Bksp', sequence: '\x7f', row: 'top-scroll' },
+  { label: 'Paste', sequence: '\x16', row: 'top-scroll' },
+  { label: 'Tab', sequence: '\t', row: 'bottom-scroll' },
   { label: 'Enter', sequence: '\r', row: 'bottom-scroll' },
   { label: 'Space', sequence: ' ', row: 'bottom-scroll' },
-  { label: '↑', sequence: '\x1b[A', row: 'bottom-scroll' },
   { label: '↓', sequence: '\x1b[B', row: 'bottom-scroll' },
   { label: '←', sequence: '\x1b[D', row: 'bottom-scroll' },
   { label: '→', sequence: '\x1b[C', row: 'bottom-scroll' },
-  { label: 'Paste', sequence: '\x16', row: 'bottom-scroll' },
   { label: 'S-Tab', sequence: '\x1b[Z', row: 'bottom-scroll' },
   { label: 'S-Enter', sequence: '\n', row: 'bottom-scroll' },
 ];
@@ -71,11 +73,63 @@ interface DraftShortcutAction extends TerminalShortcutAction {}
 interface ShortcutToken {
   label: string;
   sequence: string;
+  kind?: 'modifier' | 'key' | 'text';
 }
 
 interface ShortcutPreset extends ShortcutToken {
   row?: 'top-scroll' | 'bottom-scroll';
 }
+
+type ShortcutEditorTab = 'keyboard' | 'common';
+
+const SHORTCUT_KEYBOARD_TOKENS: ShortcutToken[] = [
+  { label: 'Ctrl', sequence: '__CTRL__', kind: 'modifier' },
+  { label: 'Option', sequence: '__OPTION__', kind: 'modifier' },
+  { label: 'Command', sequence: '__COMMAND__', kind: 'modifier' },
+  { label: 'Shift', sequence: '__SHIFT__', kind: 'modifier' },
+  { label: 'Tab', sequence: '\t', kind: 'key' },
+  { label: 'Esc', sequence: '\x1b', kind: 'key' },
+  { label: 'Return', sequence: '\r', kind: 'key' },
+  { label: 'Space', sequence: ' ', kind: 'key' },
+  { label: 'Delete', sequence: '\x7f', kind: 'key' },
+  { label: 'F1', sequence: '\x1bOP', kind: 'key' },
+  { label: 'F2', sequence: '\x1bOQ', kind: 'key' },
+  { label: 'F3', sequence: '\x1bOR', kind: 'key' },
+  { label: ',', sequence: ',', kind: 'text' },
+  { label: '.', sequence: '.', kind: 'text' },
+  { label: '/', sequence: '/', kind: 'text' },
+  { label: 'F4', sequence: '\x1bOS', kind: 'key' },
+  { label: 'F5', sequence: '\x1b[15~', kind: 'key' },
+  { label: 'F6', sequence: '\x1b[17~', kind: 'key' },
+  { label: '-', sequence: '-', kind: 'text' },
+  { label: '↑', sequence: '\x1b[A', kind: 'key' },
+  { label: '+', sequence: '+', kind: 'text' },
+  { label: 'F7', sequence: '\x1b[18~', kind: 'key' },
+  { label: 'F8', sequence: '\x1b[19~', kind: 'key' },
+  { label: 'F9', sequence: '\x1b[20~', kind: 'key' },
+  { label: '←', sequence: '\x1b[D', kind: 'key' },
+  { label: '↓', sequence: '\x1b[B', kind: 'key' },
+  { label: '→', sequence: '\x1b[C', kind: 'key' },
+  { label: 'F10', sequence: '\x1b[21~', kind: 'key' },
+  { label: 'F11', sequence: '\x1b[23~', kind: 'key' },
+  { label: 'F12', sequence: '\x1b[24~', kind: 'key' },
+];
+
+const SHORTCUT_COMMON_TOKENS: ShortcutToken[] = [
+  { label: '继续', sequence: '继续执行\r', kind: 'text' },
+  { label: 'Cmd+V', sequence: '\x16', kind: 'key' },
+  { label: 'Bksp', sequence: '\x7f', kind: 'key' },
+  { label: 'Esc', sequence: '\x1b', kind: 'key' },
+  { label: 'Tab', sequence: '\t', kind: 'key' },
+  { label: 'Enter', sequence: '\r', kind: 'key' },
+  { label: 'Space', sequence: ' ', kind: 'key' },
+  { label: 'S-Tab', sequence: '\x1b[Z', kind: 'key' },
+  { label: 'S-Enter', sequence: '\n', kind: 'key' },
+  { label: '↑', sequence: '\x1b[A', kind: 'key' },
+  { label: '↓', sequence: '\x1b[B', kind: 'key' },
+  { label: '←', sequence: '\x1b[D', kind: 'key' },
+  { label: '→', sequence: '\x1b[C', kind: 'key' },
+];
 
 function editorInputStyle() {
   return {
@@ -137,13 +191,12 @@ function normalizeClipboardHistory(input: unknown): string[] {
 
   return input
     .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .slice(0, MAX_CLIPBOARD_HISTORY);
 }
 
 function dedupeClipboardHistory(items: string[]) {
-  return Array.from(new Set(items.map((item) => item.trim()).filter((item) => item.length > 0))).slice(0, MAX_CLIPBOARD_HISTORY);
+  return Array.from(new Set(items.filter((item) => item.length > 0))).slice(0, MAX_CLIPBOARD_HISTORY);
 }
 
 function readStoredBubblePosition() {
@@ -208,6 +261,129 @@ function encodeCtrlKey(letter: string) {
   return String.fromCharCode(code - 64);
 }
 
+function isModifierToken(token: ShortcutToken) {
+  return token.kind === 'modifier';
+}
+
+function buildShortcutSequence(tokens: ShortcutToken[]) {
+  if (tokens.length === 0) {
+    return {
+      sequence: '',
+      preview: '',
+      error: '',
+    };
+  }
+
+  const modifiers = tokens.filter(isModifierToken).map((token) => token.label);
+  const normalTokens = tokens.filter((token) => !isModifierToken(token));
+
+  if (modifiers.length === 0) {
+    return {
+      sequence: normalTokens.map((token) => token.sequence).join(''),
+      preview: normalTokens.map((token) => token.label).join(' + '),
+      error: '',
+    };
+  }
+
+  if (normalTokens.length !== 1) {
+    return {
+      sequence: '',
+      preview: tokens.map((token) => token.label).join(' + '),
+      error: '带修饰键时当前只支持一个目标按键',
+    };
+  }
+
+  const keyToken = normalTokens[0];
+  const hasCtrl = modifiers.includes('Ctrl');
+  const hasShift = modifiers.includes('Shift');
+  const hasCommand = modifiers.includes('Command');
+  const hasOption = modifiers.includes('Option');
+
+  if (hasOption) {
+    return {
+      sequence: '',
+      preview: tokens.map((token) => token.label).join(' + '),
+      error: 'Option 组合暂未接入终端编码',
+    };
+  }
+
+  if (hasCommand && (keyToken.label === 'Cmd+V' || keyToken.label === 'Paste')) {
+    return {
+      sequence: '\x16',
+      preview: 'Command + V',
+      error: '',
+    };
+  }
+
+  if (hasCommand && (keyToken.sequence === 'v' || keyToken.sequence === 'V')) {
+    return {
+      sequence: '\x16',
+      preview: `Command + ${keyToken.label}`,
+      error: '',
+    };
+  }
+
+  if (hasCtrl) {
+    if (keyToken.sequence.length === 1) {
+      const encoded = encodeCtrlKey(keyToken.sequence);
+      if (!encoded) {
+        return {
+          sequence: '',
+          preview: tokens.map((token) => token.label).join(' + '),
+          error: 'Ctrl 当前只支持字母键',
+        };
+      }
+      return {
+        sequence: encoded,
+        preview: `Ctrl + ${keyToken.label}`,
+        error: '',
+      };
+    }
+
+    return {
+      sequence: '',
+      preview: tokens.map((token) => token.label).join(' + '),
+      error: 'Ctrl 当前只支持字母键',
+    };
+  }
+
+  if (hasShift) {
+    if (keyToken.label === 'Tab') {
+      return {
+        sequence: '\x1b[Z',
+        preview: 'Shift + Tab',
+        error: '',
+      };
+    }
+    if (keyToken.label === 'Return' || keyToken.label === 'Enter') {
+      return {
+        sequence: '\n',
+        preview: 'Shift + Enter',
+        error: '',
+      };
+    }
+    if (keyToken.sequence.length === 1) {
+      return {
+        sequence: keyToken.sequence.toUpperCase(),
+        preview: `Shift + ${keyToken.label}`,
+        error: '',
+      };
+    }
+
+    return {
+      sequence: '',
+      preview: tokens.map((token) => token.label).join(' + '),
+      error: 'Shift 当前只支持字母/Enter/Tab',
+    };
+  }
+
+  return {
+    sequence: keyToken.sequence,
+    preview: tokens.map((token) => token.label).join(' + '),
+    error: '',
+  };
+}
+
 export function TerminalQuickBar({
   quickActions,
   shortcutActions,
@@ -236,6 +412,8 @@ export function TerminalQuickBar({
   const [draftShortcutSequence, setDraftShortcutSequence] = useState('');
   const [draftShortcutRow, setDraftShortcutRow] = useState<'top-scroll' | 'bottom-scroll'>('bottom-scroll');
   const [draftShortcutTokens, setDraftShortcutTokens] = useState<ShortcutToken[]>([]);
+  const [shortcutEditorTab, setShortcutEditorTab] = useState<ShortcutEditorTab>('keyboard');
+  const [draftShortcutTextInput, setDraftShortcutTextInput] = useState('');
   const [clipboardHistory, setClipboardHistory] = useState<string[]>([]);
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
@@ -268,6 +446,7 @@ export function TerminalQuickBar({
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
+  const draftShortcutBuild = useMemo(() => buildShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
   const floatingPanelBottomPx = Math.max(124, keyboardInsetPx + 18);
   const floatingBubbleBottomPx = Math.max(72, keyboardInsetPx + 18);
   const editingIndex = editingId ? draftActions.findIndex((action) => action.id === editingId) : -1;
@@ -394,7 +573,7 @@ export function TerminalQuickBar({
   };
 
   const topFixedActions = useMemo(
-    () => BASE_ACTIONS.filter((action) => ['image', 'keyboard'].includes(action.id)),
+    () => BASE_ACTIONS.filter((action) => ['image', 'keyboard', 'up'].includes(action.id)),
     [],
   );
 
@@ -404,7 +583,7 @@ export function TerminalQuickBar({
   );
 
   const bottomFixedActions = useMemo(
-    () => BASE_ACTIONS.filter((action) => ['left', 'up', 'down', 'right'].includes(action.id)),
+    () => BASE_ACTIONS.filter((action) => ['left', 'down', 'right'].includes(action.id)),
     [],
   );
 
@@ -413,7 +592,8 @@ export function TerminalQuickBar({
     [sortedShortcutActions],
   );
 
-  const shortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor', label: '按键', sequence: '' }), []);
+  const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
+  const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
 
   const clearFloatingBubblePressTimer = () => {
     if (floatingBubblePressTimerRef.current) {
@@ -447,7 +627,7 @@ export function TerminalQuickBar({
     gap: `${QUICK_BAR_ROW_GAP}px`,
     flexShrink: 0,
     alignItems: 'center',
-    padding: '2px 4px',
+    padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
     borderRadius: '12px',
     backgroundColor: 'rgba(59, 74, 108, 0.95)',
     border: '1px solid rgba(255,255,255,0.12)',
@@ -511,20 +691,51 @@ export function TerminalQuickBar({
   }, [floatingBubblePosition]);
 
   const captureSystemClipboard = async () => {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-      setClipboardError('当前环境不支持读取系统剪贴板');
-      return;
-    }
-
     try {
       setClipboardBusy(true);
       setClipboardError(null);
-      const text = (await navigator.clipboard.readText()).trim();
-      if (!text) {
+      const text = await (async () => {
+        if (isNativeClipboardSupported()) {
+          const result = await DeviceClipboardPlugin.readText();
+          return typeof result.value === 'string' ? result.value : '';
+        }
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+          throw new Error('当前环境不支持读取系统剪贴板');
+        }
+        return navigator.clipboard.readText();
+      })();
+      if (text.length === 0) {
         setClipboardError('系统剪贴板当前为空');
         return;
       }
       persistClipboardHistory([text, ...clipboardHistory]);
+    } catch (error) {
+      setClipboardError(error instanceof Error ? error.message : '读取系统剪贴板失败');
+    } finally {
+      setClipboardBusy(false);
+    }
+  };
+
+  const handleClipboardPaste = async () => {
+    try {
+      setClipboardBusy(true);
+      setClipboardError(null);
+      const text = await (async () => {
+        if (isNativeClipboardSupported()) {
+          const result = await DeviceClipboardPlugin.readText();
+          return typeof result.value === 'string' ? result.value : '';
+        }
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+          throw new Error('当前环境不支持读取系统剪贴板');
+        }
+        return navigator.clipboard.readText();
+      })();
+      if (text.length === 0) {
+        setClipboardError('系统剪贴板当前为空');
+        return;
+      }
+      persistClipboardHistory([text, ...clipboardHistory]);
+      onSendSequence?.(text);
     } catch (error) {
       setClipboardError(error instanceof Error ? error.message : '读取系统剪贴板失败');
     } finally {
@@ -546,13 +757,16 @@ export function TerminalQuickBar({
   };
 
   const syncDraftShortcutTokens = (tokens: ShortcutToken[]) => {
+    const built = buildShortcutSequence(tokens);
     setDraftShortcutTokens(tokens);
-    setDraftShortcutSequence(tokens.map((token) => token.sequence).join(''));
+    setDraftShortcutSequence(built.sequence);
   };
 
   const openShortcutEditor = (action?: DraftShortcutAction) => {
     setDraftShortcutActions(sortShortcutActions(shortcutActions));
     setFloatingMenuOpen(false);
+    setShortcutEditorTab('keyboard');
+    setDraftShortcutTextInput('');
     if (action) {
       setEditingShortcutId(action.id);
       setDraftShortcutLabel(action.label);
@@ -574,13 +788,16 @@ export function TerminalQuickBar({
     setDraftShortcutSequence('');
     setDraftShortcutRow('bottom-scroll');
     setDraftShortcutTokens([]);
+    setShortcutEditorTab('keyboard');
+    setDraftShortcutTextInput('');
   };
 
   const appendShortcutToken = (token: ShortcutToken, row?: 'top-scroll' | 'bottom-scroll') => {
     setDraftShortcutLabel((current) => current || token.label);
     setDraftShortcutTokens((current) => {
       const next = [...current, token];
-      setDraftShortcutSequence(next.map((item) => item.sequence).join(''));
+      const built = buildShortcutSequence(next);
+      setDraftShortcutSequence(built.sequence);
       return next;
     });
     if (row) {
@@ -591,7 +808,8 @@ export function TerminalQuickBar({
   const removeShortcutToken = (index: number) => {
     setDraftShortcutTokens((current) => {
       const next = current.filter((_, tokenIndex) => tokenIndex !== index);
-      setDraftShortcutSequence(next.map((item) => item.sequence).join(''));
+      const built = buildShortcutSequence(next);
+      setDraftShortcutSequence(built.sequence);
       return next;
     });
   };
@@ -602,12 +820,12 @@ export function TerminalQuickBar({
   };
 
   const saveShortcutForm = () => {
-    const nextSequence = draftShortcutTokens.map((token) => token.sequence).join('');
-    if (!nextSequence) {
+    const nextSequence = draftShortcutBuild.sequence;
+    if (!nextSequence || draftShortcutBuild.error) {
       return;
     }
 
-    const nextLabel = draftShortcutLabel.trim() || draftShortcutTokens.map((token) => token.label).join(' ') || '新按键';
+    const nextLabel = draftShortcutLabel.trim() || draftShortcutBuild.preview || '新按键';
 
     const nextActions = editingShortcutId
       ? draftShortcutActions.map((action) =>
@@ -630,8 +848,17 @@ export function TerminalQuickBar({
     closeShortcutEditor();
   };
 
-  const applyShortcutPreset = (preset: ShortcutPreset) => {
-    appendShortcutToken({ label: preset.label, sequence: preset.sequence }, preset.row);
+  const appendShortcutTextInput = () => {
+    const value = draftShortcutTextInput.trim();
+    if (!value) {
+      return;
+    }
+    appendShortcutToken({
+      label: value,
+      sequence: value,
+      kind: 'text',
+    });
+    setDraftShortcutTextInput('');
   };
 
   const renderBaseActionButton = (action: { id: string; label: string; sequence: string }, options?: { fixed?: boolean; compact?: boolean }) => {
@@ -666,7 +893,11 @@ export function TerminalQuickBar({
             imageInputRef.current?.click();
             return;
           }
-          if (action.id === 'shortcut-editor') {
+          if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
+            void handleClipboardPaste();
+            return;
+          }
+          if (action.id.startsWith('shortcut-editor')) {
             openShortcutEditor();
             return;
           }
@@ -674,8 +905,8 @@ export function TerminalQuickBar({
         }}
         style={{
           minHeight: compact ? '32px' : '34px',
-          minWidth: fixed ? '38px' : action.label.length > 4 ? '58px' : action.label.length > 2 ? '48px' : '34px',
-          padding: fixed ? '0 8px' : '0 10px',
+          minWidth: fixed ? `${FIXED_BUTTON_MIN_WIDTH}px` : action.label.length > 4 ? '58px' : action.label.length > 2 ? '48px' : '34px',
+          padding: fixed ? '0 6px' : '0 10px',
           border: 'none',
           borderRadius: '10px',
           backgroundColor:
@@ -685,7 +916,7 @@ export function TerminalQuickBar({
                 ? 'rgba(22, 28, 41, 0.92)'
                 : 'rgba(31, 38, 53, 0.82)',
           color: action.id === 'keyboard' && keyboardVisible ? mobileTheme.colors.accent : '#fff',
-          fontSize: action.id === 'continue' ? '11px' : action.label.length > 3 ? '11px' : '14px',
+          fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : action.label.length > 3 ? '11px' : '14px',
           fontWeight: 700,
           cursor: 'pointer',
           flexShrink: 0,
@@ -1189,10 +1420,30 @@ export function TerminalQuickBar({
                     下栏
                   </button>
                 </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => setShortcutEditorTab('keyboard')}
+                    style={floatingPillButton(
+                      shortcutEditorTab === 'keyboard' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
+                      shortcutEditorTab === 'keyboard' ? '#1677ff' : mobileTheme.colors.lightText,
+                    )}
+                  >
+                    键盘按键
+                  </button>
+                  <button
+                    onClick={() => setShortcutEditorTab('common')}
+                    style={floatingPillButton(
+                      shortcutEditorTab === 'common' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
+                      shortcutEditorTab === 'common' ? '#1677ff' : mobileTheme.colors.lightText,
+                    )}
+                  >
+                    常用动作
+                  </button>
+                </div>
                 <textarea
-                  value={draftShortcutSequence}
+                  value={draftShortcutBuild.preview || draftShortcutSequence}
                   readOnly
-                  placeholder="点击下方特殊键按钮生成序列"
+                  placeholder="点击下方按钮组合快捷键"
                   style={{
                     ...lightEditorInputStyle(),
                     minHeight: '74px',
@@ -1223,29 +1474,67 @@ export function TerminalQuickBar({
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {SHORTCUT_PRESETS.map((preset) => (
-                    <button
-                      key={`${preset.label}-${preset.row || 'any'}`}
-                      onClick={() => applyShortcutPreset(preset)}
-                      style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
+                {draftShortcutBuild.error ? (
+                  <div style={{ fontSize: '12px', color: mobileTheme.colors.danger, lineHeight: 1.5 }}>
+                    {draftShortcutBuild.error}
+                  </div>
+                ) : null}
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((letter) => (
-                    <button
-                      key={`ctrl-${letter}`}
-                      onClick={() => appendShortcutToken({ label: `Ctrl+${letter}`, sequence: encodeCtrlKey(letter) })}
-                      style={floatingPillButton('#eef2f8', mobileTheme.colors.lightText)}
-                    >
-                      Ctrl+{letter}
-                    </button>
-                  ))}
-                </div>
+                {shortcutEditorTab === 'keyboard' ? (
+                  <>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        value={draftShortcutTextInput}
+                        onChange={(event) => setDraftShortcutTextInput(event.target.value)}
+                        placeholder="输入字母/数字/符号"
+                        style={{
+                          ...lightEditorInputStyle(),
+                          minHeight: '40px',
+                          flex: 1,
+                        }}
+                      />
+                      <button
+                        onClick={appendShortcutTextInput}
+                        style={{
+                          minWidth: '84px',
+                          minHeight: '40px',
+                          border: 'none',
+                          borderRadius: '14px',
+                          backgroundColor: 'rgba(22, 119, 255, 0.12)',
+                          color: '#1677ff',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        加入
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {SHORTCUT_KEYBOARD_TOKENS.map((token) => (
+                        <button
+                          key={`${token.label}-${token.sequence}`}
+                          onClick={() => appendShortcutToken(token)}
+                          style={floatingPillButton(token.kind === 'modifier' ? '#eef2f8' : 'rgba(22, 119, 255, 0.08)', token.kind === 'modifier' ? mobileTheme.colors.lightText : '#1677ff')}
+                        >
+                          {token.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {SHORTCUT_COMMON_TOKENS.map((token) => (
+                      <button
+                        key={`${token.label}-${token.sequence}`}
+                        onClick={() => appendShortcutToken(token)}
+                        style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
+                      >
+                        {token.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
@@ -1265,6 +1554,7 @@ export function TerminalQuickBar({
                   </button>
                   <button
                     onClick={saveShortcutForm}
+                    disabled={!draftShortcutBuild.sequence || Boolean(draftShortcutBuild.error)}
                     style={{
                       flex: 1,
                       minHeight: '44px',
@@ -1273,7 +1563,8 @@ export function TerminalQuickBar({
                       backgroundColor: '#1677ff',
                       color: '#fff',
                       fontWeight: 800,
-                      cursor: 'pointer',
+                      cursor: !draftShortcutBuild.sequence || draftShortcutBuild.error ? 'not-allowed' : 'pointer',
+                      opacity: !draftShortcutBuild.sequence || draftShortcutBuild.error ? 0.55 : 1,
                     }}
                   >
                     {editingShortcutIndex >= 0 ? '应用修改' : '添加快捷按键'}
@@ -1322,26 +1613,16 @@ export function TerminalQuickBar({
                 flexDirection: 'column',
                 gap: '10px',
               }}
+            >
+              <div
+                style={{
+                  borderRadius: '18px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  backgroundColor: 'rgba(14, 19, 31, 0.88)',
+                  boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.02)',
+                  padding: '8px',
+                }}
               >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '16px', fontWeight: 800 }}>预输入</div>
-                </div>
-                <button
-                  onClick={() => openEditor('create')}
-                  style={floatingPillButton('rgba(31,214,122,0.18)', mobileTheme.colors.accent)}
-                >
-                  + 添加
-                </button>
-                <button
-                  onClick={() => openEditor('list')}
-                  style={floatingPillButton('rgba(255,255,255,0.1)', '#fff')}
-                >
-                  管理
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
                 <textarea
                   value={sessionDraft}
                   onChange={(event) => onSessionDraftChange?.(event.target.value)}
@@ -1353,83 +1634,93 @@ export function TerminalQuickBar({
                   }}
                   placeholder="预输入内容，按 session 持久化"
                   style={{
-                    flex: 1,
-                    minHeight: '108px',
-                    maxHeight: '180px',
+                    width: '100%',
+                    minHeight: '148px',
+                    maxHeight: '220px',
                     resize: 'vertical',
-                    padding: '10px 12px',
+                    padding: '12px 14px',
                     borderRadius: '14px',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: 'rgba(255,255,255,0.04)',
                     color: '#fff',
                     fontSize: '14px',
                     whiteSpace: 'pre-wrap',
+                    lineHeight: 1.5,
                   }}
                 />
-                <div style={{ width: '92px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <button
-                    onClick={() => {
-                      const trimmed = sessionDraft.trim();
-                      if (!trimmed) {
-                        return;
-                      }
-                      const nextAction: QuickAction = {
-                        id: createDraftActionId(),
-                        label: trimmed.slice(0, 12) || '新片段',
-                        sequence: sessionDraft,
-                        order: sortedQuickActions.length,
-                      };
-                      onQuickActionsChange?.([...sortedQuickActions, nextAction]);
-                    }}
-                    style={{
-                      flex: 1,
-                      minHeight: '50px',
-                      border: 'none',
-                      borderRadius: '12px',
-                      backgroundColor: 'rgba(255,255,255,0.12)',
-                      color: '#fff',
-                      fontWeight: 700,
-                    }}
-                  >
-                    加为快捷输入
-                  </button>
-                  <button
-                    onClick={() => {
-                      sendSessionDraft();
-                    }}
-                    style={{
-                      flex: 1,
-                      minHeight: '50px',
-                      border: 'none',
-                      borderRadius: '12px',
-                      backgroundColor: 'rgba(31,214,122,0.18)',
-                      color: mobileTheme.colors.accent,
-                      fontWeight: 800,
-                    }}
-                  >
-                    发送
-                  </button>
-                </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
                 <button
-                  onClick={() => setFloatingPanelTab('quick-actions')}
-                  style={floatingPillButton(
-                    floatingPanelTab === 'quick-actions' ? 'rgba(31,214,122,0.18)' : 'rgba(255,255,255,0.08)',
-                    floatingPanelTab === 'quick-actions' ? mobileTheme.colors.accent : '#fff',
-                  )}
+                  onClick={() => {
+                    const trimmed = sessionDraft.trim();
+                    if (!trimmed) {
+                      return;
+                    }
+                    const nextAction: QuickAction = {
+                      id: createDraftActionId(),
+                      label: trimmed.slice(0, 12) || '新片段',
+                      sequence: sessionDraft,
+                      order: sortedQuickActions.length,
+                    };
+                    onQuickActionsChange?.([...sortedQuickActions, nextAction]);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: '40px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(31, 38, 53, 0.82)',
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
                 >
-                  快捷列表
+                  加为快捷输入
                 </button>
                 <button
-                  onClick={() => setFloatingPanelTab('clipboard')}
-                  style={floatingPillButton(
-                    floatingPanelTab === 'clipboard' ? 'rgba(31,214,122,0.18)' : 'rgba(255,255,255,0.08)',
-                    floatingPanelTab === 'clipboard' ? mobileTheme.colors.accent : '#fff',
-                  )}
+                  onClick={() => {
+                    sendSessionDraft();
+                  }}
+                  style={{
+                    width: '88px',
+                    minHeight: '40px',
+                    border: '1px solid rgba(31,214,122,0.18)',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(31,214,122,0.18)',
+                    color: mobileTheme.colors.accent,
+                    fontWeight: 800,
+                  }}
                 >
-                  剪贴板
+                  发送
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '8px', flex: 1, minWidth: 0 }}>
+                  <button
+                    onClick={() => setFloatingPanelTab('quick-actions')}
+                    style={floatingPillButton(
+                      floatingPanelTab === 'quick-actions' ? 'rgba(31,214,122,0.18)' : 'rgba(31, 38, 53, 0.82)',
+                      floatingPanelTab === 'quick-actions' ? mobileTheme.colors.accent : '#fff',
+                    )}
+                  >
+                    快捷列表
+                  </button>
+                  <button
+                    onClick={() => setFloatingPanelTab('clipboard')}
+                    style={floatingPillButton(
+                      floatingPanelTab === 'clipboard' ? 'rgba(31,214,122,0.18)' : 'rgba(31, 38, 53, 0.82)',
+                      floatingPanelTab === 'clipboard' ? mobileTheme.colors.accent : '#fff',
+                    )}
+                  >
+                    剪贴板
+                  </button>
+                </div>
+                <button
+                  onClick={() => openEditor('list')}
+                  style={floatingPillButton('rgba(22, 28, 41, 0.92)', '#fff')}
+                >
+                  管理
                 </button>
               </div>
             </div>
@@ -1583,6 +1874,9 @@ export function TerminalQuickBar({
           <button
             type="button"
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') {
+                return;
+              }
               event.preventDefault();
               blurCurrentTarget(event.currentTarget);
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -1604,6 +1898,9 @@ export function TerminalQuickBar({
               }, FLOATING_BUBBLE_LONG_PRESS_MS);
             }}
             onPointerMove={(event) => {
+              if (event.pointerType === 'touch') {
+                return;
+              }
               const drag = floatingBubbleDragRef.current;
               if (drag.pointerId !== event.pointerId || !drag.active) {
                 return;
@@ -1619,6 +1916,9 @@ export function TerminalQuickBar({
               );
             }}
             onPointerUp={(event) => {
+              if (event.pointerType === 'touch') {
+                return;
+              }
               clearFloatingBubblePressTimer();
               if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
                 if (floatingBubbleDragRef.current.active) {
@@ -1633,6 +1933,9 @@ export function TerminalQuickBar({
               event.currentTarget.releasePointerCapture(event.pointerId);
             }}
             onPointerCancel={(event) => {
+              if (event.pointerType === 'touch') {
+                return;
+              }
               clearFloatingBubblePressTimer();
               floatingBubbleDragRef.current.active = false;
               floatingBubbleDragRef.current.pointerId = -1;
@@ -1647,6 +1950,7 @@ export function TerminalQuickBar({
               setFloatingMenuOpen((current) => !current);
             }}
             onTouchStart={(event) => {
+              event.stopPropagation();
               const touch = event.touches[0];
               if (!touch) {
                 return;
@@ -1675,6 +1979,7 @@ export function TerminalQuickBar({
                 return;
               }
               event.preventDefault();
+              event.stopPropagation();
               drag.moved = true;
               setFloatingBubblePosition(
                 clampFloatingBubblePosition(
@@ -1694,10 +1999,12 @@ export function TerminalQuickBar({
                 }, 180);
               }
               floatingBubbleTouchDragRef.current.active = false;
+              floatingBubbleTouchDragRef.current.moved = false;
             }}
             onTouchCancel={() => {
               clearFloatingBubbleTouchTimer();
               floatingBubbleTouchDragRef.current.active = false;
+              floatingBubbleTouchDragRef.current.moved = false;
             }}
             style={{
               position: 'fixed',
@@ -1729,6 +2036,7 @@ export function TerminalQuickBar({
         <div style={scrollTrackShellStyle}>
           <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
             {topScrollActions.map((action) => renderBaseActionButton(action))}
+            {renderBaseActionButton(topShortcutEditorEntry)}
           </div>
         </div>
       </div>
@@ -1749,7 +2057,7 @@ export function TerminalQuickBar({
         <div style={scrollTrackShellStyle}>
           <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
             {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-            {renderBaseActionButton(shortcutEditorEntry, { compact: true })}
+            {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
           </div>
         </div>
       </div>

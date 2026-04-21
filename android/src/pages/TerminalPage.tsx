@@ -16,6 +16,7 @@ type VirtualKeyboardApi = {
 };
 
 const IME_LAYOUT_THRESHOLD_PX = 96;
+const NETWORK_BANNER_GRACE_MS = 3000;
 
 interface TerminalPageProps {
   sessions: Session[];
@@ -82,6 +83,7 @@ export function TerminalPage({
   const [networkOnline, setNetworkOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine,
   );
+  const [connectionIssueVisible, setConnectionIssueVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [baseViewportHeight, setBaseViewportHeight] = useState(() =>
     typeof window !== 'undefined' ? Math.max(window.innerHeight, window.visualViewport?.height || 0) : 0,
@@ -90,6 +92,7 @@ export function TerminalPage({
   const [quickBarHeight, setQuickBarHeight] = useState(0);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const quickBarRef = useRef<HTMLDivElement | null>(null);
+  const connectionIssueTimerRef = useRef<number | null>(null);
 
   const focusTerminalInput = () => {
     setFocusNonce((value) => value + 1);
@@ -156,6 +159,35 @@ export function TerminalPage({
       window.removeEventListener('offline', syncOnlineState);
     };
   }, []);
+
+  useEffect(() => {
+    const hasIssue = !networkOnline || activeSession?.state === 'reconnecting' || activeSession?.state === 'error';
+
+    if (!hasIssue) {
+      if (connectionIssueTimerRef.current !== null) {
+        window.clearTimeout(connectionIssueTimerRef.current);
+        connectionIssueTimerRef.current = null;
+      }
+      setConnectionIssueVisible(false);
+      return;
+    }
+
+    if (connectionIssueVisible || connectionIssueTimerRef.current !== null) {
+      return;
+    }
+
+    connectionIssueTimerRef.current = window.setTimeout(() => {
+      connectionIssueTimerRef.current = null;
+      setConnectionIssueVisible(true);
+    }, NETWORK_BANNER_GRACE_MS);
+
+    return () => {
+      if (connectionIssueTimerRef.current !== null) {
+        window.clearTimeout(connectionIssueTimerRef.current);
+        connectionIssueTimerRef.current = null;
+      }
+    };
+  }, [activeSession?.state, connectionIssueVisible, networkOnline]);
 
   useEffect(() => {
     const syncViewportHeight = () => {
@@ -232,7 +264,9 @@ export function TerminalPage({
   const imeInset = Math.max(keyboardInset, viewportInset);
   const keyboardLayoutActive = terminalKeyboardRequested && imeInset >= IME_LAYOUT_THRESHOLD_PX;
   const resolvedKeyboardInset = keyboardLayoutActive ? imeInset : 0;
-  const networkBanner = !networkOnline
+  const networkBanner = !connectionIssueVisible
+    ? null
+    : !networkOnline
     ? {
         tone: '#ff6b6b',
         background: 'rgba(109, 24, 33, 0.92)',

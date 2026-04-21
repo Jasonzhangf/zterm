@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { basename, resolve } from 'path';
+import { homedir } from 'os';
 
 const cwd = process.cwd();
 const packageJson = JSON.parse(readFileSync(resolve(cwd, 'package.json'), 'utf-8'));
@@ -12,6 +13,7 @@ const buildMeta = existsSync(buildMetaPath)
 const DEFAULT_APK_PATH = resolve(cwd, 'native/android/app/build/outputs/apk/debug/app-debug.apk');
 const apkPath = process.argv[2] ? resolve(cwd, process.argv[2]) : DEFAULT_APK_PATH;
 const outputDir = resolve(cwd, 'update-dist');
+const daemonUpdatesDir = resolve(homedir(), '.wterm/updates');
 
 function computeVersionCode(version, buildNumber) {
   const semver = String(version)
@@ -62,8 +64,13 @@ const manifest = {
 
 writeFileSync(resolve(outputDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
+mkdirSync(daemonUpdatesDir, { recursive: true });
+copyFileSync(targetApkPath, resolve(daemonUpdatesDir, targetApkName));
+writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
 console.log('[prepare-update-bundle] ready');
 console.log(`- apk: ${targetApkPath}`);
 console.log(`- manifest: ${resolve(outputDir, 'latest.json')}`);
+console.log(`- daemon updates dir: ${daemonUpdatesDir}`);
 console.log(`- versionName: ${versionName}`);
 console.log(`- versionCode: ${versionCode}`);

@@ -11,6 +11,38 @@ function sortShortcutActions(actions: TerminalShortcutAction[]) {
   });
 }
 
+function migrateLegacyQuickBarLayout(actions: TerminalShortcutAction[]) {
+  const hasLegacyTopTab = actions.some((action) => action.id === 'shortcut-tab' && action.row === 'top-scroll');
+  const hasLegacyBottomPaste = actions.some((action) => action.id === 'shortcut-paste' && action.row === 'bottom-scroll');
+
+  if (!hasLegacyTopTab && !hasLegacyBottomPaste) {
+    return actions;
+  }
+
+  const topIds = ['shortcut-continue', 'shortcut-esc', 'shortcut-backspace', 'shortcut-paste'];
+  const bottomIds = ['shortcut-tab', 'shortcut-enter', 'shortcut-space', 'shortcut-shift-tab', 'shortcut-shift-enter'];
+
+  const migrated = actions.map((action) => {
+    if (topIds.includes(action.id)) {
+      return {
+        ...action,
+        row: 'top-scroll' as const,
+        order: topIds.indexOf(action.id),
+      };
+    }
+    if (bottomIds.includes(action.id)) {
+      return {
+        ...action,
+        row: 'bottom-scroll' as const,
+        order: bottomIds.indexOf(action.id),
+      };
+    }
+    return action;
+  });
+
+  return migrated;
+}
+
 function normalizeShortcutActions(input: unknown): TerminalShortcutAction[] {
   if (!Array.isArray(input)) {
     return DEFAULT_SHORTCUT_ACTIONS;
@@ -28,7 +60,7 @@ function normalizeShortcutActions(input: unknown): TerminalShortcutAction[] {
     );
   });
 
-  return filtered.length > 0 ? sortShortcutActions(filtered) : DEFAULT_SHORTCUT_ACTIONS;
+  return filtered.length > 0 ? sortShortcutActions(migrateLegacyQuickBarLayout(filtered)) : DEFAULT_SHORTCUT_ACTIONS;
 }
 
 export function useShortcutActionStorage() {

@@ -12,8 +12,9 @@ import * as pty from 'node-pty';
 import { v4 as uuidv4 } from 'uuid';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs';
-import { extname, join } from 'path';
+import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { basename, extname, join, resolve } from 'path';
 import { homedir } from 'os';
 import type {
   PasteImagePayload,
@@ -29,7 +30,7 @@ import {
   WTERM_CONFIG_DISPLAY_PATH,
 } from '../lib/mobile-config';
 import { reconcileAbsoluteScrollbackRange } from '../lib/scrollback-buffer';
-import { getWtermHomeDir, resolveDaemonRuntimeConfig } from './daemon-config';
+import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
 
 interface TmuxConnectPayload {
   name: string;
@@ -44,6 +45,7 @@ interface TmuxConnectPayload {
 interface ClientSession {
   id: string;
   ws: WebSocket;
+  requestOrigin: string;
   state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   title: string;
   sessionName: string;
@@ -93,7 +95,17 @@ type ClientMessage =
   | { type: 'close' };
 
 type ServerMessage =
-  | { type: 'connected'; payload: { sessionId: string } }
+  | {
+      type: 'connected';
+      payload: {
+        sessionId: string;
+        appUpdate?: {
+          versionCode: number;
+          versionName: string;
+          manifestUrl?: string;
+        };
+      };
+    }
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
   | { type: 'buffer-delta'; payload: TerminalBufferPayload }
@@ -143,8 +155,12 @@ const BACKFILL_INTERVAL_MS = 260;
 const IDLE_BEFORE_BACKFILL_MS = 250;
 const MAX_CAPTURED_SCROLLBACK_LINES = DAEMON_CONFIG.terminalCacheLines;
 const WTERM_HOME_DIR = getWtermHomeDir(homedir());
+const UPDATES_DIR = getWtermUpdatesDir(homedir());
 const UPLOAD_DIR = join(WTERM_HOME_DIR, 'uploads');
 const LOG_DIR = join(WTERM_HOME_DIR, 'logs');
+const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || '', 10);
+const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
+const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
 const WS_HEARTBEAT_INTERVAL_MS = 30000;
 const RECENT_OUTPUT_WINDOW_MS = 900;
 
@@ -186,6 +202,139 @@ function sendMessage(session: ClientSession, message: ServerMessage) {
   if (session.ws.readyState === WebSocket.OPEN) {
     session.ws.send(JSON.stringify(message));
   }
+}
+
+function readLatestUpdateManifest() {
+  const manifestPath = join(UPDATES_DIR, 'latest.json');
+  if (!existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+      versionCode?: number;
+      versionName?: string;
+    };
+  } catch (error) {
+    console.warn(`[${new Date().toISOString()}] failed to parse update manifest: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function resolveRequestOrigin(request: IncomingMessage) {
+  const host = request.headers.host || `${HOST}:${PORT}`;
+  const protocol = 'encrypted' in request.socket && request.socket.encrypted ? 'https' : 'http';
+  return `${protocol}://${host}`;
+}
+
+function buildConnectedPayload(sessionId: string, requestOrOrigin?: IncomingMessage | string) {
+  const latestManifest = readLatestUpdateManifest();
+  const requestOrigin =
+    typeof requestOrOrigin === 'string'
+      ? requestOrOrigin
+      : requestOrOrigin
+        ? resolveRequestOrigin(requestOrOrigin)
+        : `http://${HOST}:${PORT}`;
+  const manifestUrl = `${requestOrigin}/updates/latest.json`;
+
+  return {
+    sessionId,
+    appUpdate:
+      latestManifest && Number.isFinite(latestManifest.versionCode) && latestManifest.versionCode! > 0 && latestManifest.versionName
+        ? {
+            versionCode: latestManifest.versionCode!,
+            versionName: latestManifest.versionName,
+            manifestUrl,
+          }
+        : Number.isFinite(APP_UPDATE_VERSION_CODE) && APP_UPDATE_VERSION_CODE > 0 && APP_UPDATE_VERSION_NAME
+          ? {
+              versionCode: APP_UPDATE_VERSION_CODE,
+              versionName: APP_UPDATE_VERSION_NAME,
+              manifestUrl: APP_UPDATE_MANIFEST_URL || manifestUrl,
+            }
+        : undefined,
+  };
+}
+
+function writeCorsHeaders(response: ServerResponse) {
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function serveJson(response: ServerResponse, payload: unknown, statusCode = 200) {
+  writeCorsHeaders(response);
+  response.statusCode = statusCode;
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  response.end(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function resolveUpdateFilePath(pathname: string) {
+  const relativePath = pathname.replace(/^\/updates\//, '');
+  const safeName = basename(relativePath);
+  const absolutePath = resolve(UPDATES_DIR, safeName);
+  if (!absolutePath.startsWith(resolve(UPDATES_DIR))) {
+    return null;
+  }
+  return absolutePath;
+}
+
+function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
+  writeCorsHeaders(response);
+
+  if (request.method === 'OPTIONS') {
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
+
+  const origin = resolveRequestOrigin(request);
+  const url = new URL(request.url || '/', origin);
+
+  if (url.pathname === '/health') {
+    serveJson(response, {
+      ok: true,
+      wsUrl: `ws://${request.headers.host || `${HOST}:${PORT}`}`,
+      updatesUrl: `${origin}/updates/latest.json`,
+      updatesDir: UPDATES_DIR,
+    });
+    return;
+  }
+
+  if (url.pathname === '/updates/latest.json') {
+    const manifestPath = join(UPDATES_DIR, 'latest.json');
+    if (!existsSync(manifestPath)) {
+      serveJson(response, { message: 'update manifest not found' }, 404);
+      return;
+    }
+
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+      const apkUrl = typeof manifest.apkUrl === 'string' ? manifest.apkUrl : '';
+      if (apkUrl && !/^https?:\/\//.test(apkUrl)) {
+        manifest.apkUrl = `${origin}/updates/${basename(apkUrl)}`;
+      }
+      serveJson(response, manifest);
+    } catch (error) {
+      serveJson(response, { message: `invalid update manifest: ${error instanceof Error ? error.message : String(error)}` }, 500);
+    }
+    return;
+  }
+
+  if (url.pathname.startsWith('/updates/')) {
+    const filePath = resolveUpdateFilePath(url.pathname);
+    if (!filePath || !existsSync(filePath)) {
+      serveJson(response, { message: 'update file not found' }, 404);
+      return;
+    }
+
+    response.statusCode = 200;
+    response.setHeader('Content-Type', filePath.endsWith('.apk') ? 'application/vnd.android.package-archive' : 'application/octet-stream');
+    createReadStream(filePath).pipe(response);
+    return;
+  }
+
+  serveJson(response, { message: 'not found' }, 404);
 }
 
 function runTmux(args: string[]) {
@@ -309,10 +458,11 @@ function clearMirrorFlushTimer(mirror: SessionMirror) {
   }
 }
 
-function createClientSession(ws: WebSocket): ClientSession {
+function createClientSession(ws: WebSocket, requestOrigin: string): ClientSession {
   const session: ClientSession = {
     id: uuidv4(),
     ws,
+    requestOrigin,
     state: 'idle',
     title: 'Terminal',
     sessionName: DEFAULT_SESSION_NAME,
@@ -635,7 +785,7 @@ function sendBufferSyncToClient(session: ClientSession, mirror: SessionMirror, s
   session.idleDirty = false;
   if (session.state !== 'connected') {
     session.state = 'connected';
-    sendMessage(session, { type: 'connected', payload: { sessionId: session.id } });
+    sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
   }
   sendMessage(session, { type: 'title', payload: mirror.title });
   sendMessage(session, { type: 'buffer-sync', payload });
@@ -924,7 +1074,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
         session.backfillCursor = mirror.scrollbackNextIndex;
         if (session.state !== 'connected') {
           session.state = 'connected';
-          sendMessage(session, { type: 'connected', payload: { sessionId: session.id } });
+          sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
         }
         sendMessage(session, { type: 'title', payload: mirror.title });
         const fallbackPayload = buildBufferPayload(
@@ -1197,9 +1347,10 @@ function handleMessage(session: ClientSession, rawData: RawData) {
   }
 }
 
+const server = createServer(handleHttpRequest);
+
 const wss = new WebSocketServer({
-  port: PORT,
-  host: HOST,
+  noServer: true,
   perMessageDeflate: {
     threshold: 256,
     clientNoContextTakeover: true,
@@ -1225,7 +1376,7 @@ wss.on('connection', (ws: WebSocket, request) => {
     return;
   }
 
-  const session = createClientSession(ws);
+  const session = createClientSession(ws, resolveRequestOrigin(request));
   console.log(`[${new Date().toISOString()}] client session ${session.id} created`);
 
   ws.on('pong', () => {
@@ -1276,8 +1427,30 @@ const heartbeatTimer = setInterval(() => {
 
 heartbeatTimer.unref?.();
 
-wss.on('listening', () => {
+wss.on('close', () => {
+  clearInterval(heartbeatTimer);
+});
+
+server.on('upgrade', (request, socket, head) => {
+  const origin = resolveRequestOrigin(request);
+  const pathname = new URL(request.url || '/', origin).pathname;
+
+  if (pathname !== '/' && pathname !== '/ws') {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request);
+  });
+});
+
+server.listen(PORT, HOST, () => {
   console.log(`[${new Date().toISOString()}] zterm tmux bridge listening on ws://${HOST}:${PORT}`);
+  console.log(`  - health: http://${HOST}:${PORT}/health`);
+  console.log(`  - updates manifest: http://${HOST}:${PORT}/updates/latest.json`);
+  console.log(`  - updates dir: ${UPDATES_DIR}`);
   console.log(`  - tmux binary: ${TMUX_BINARY}`);
   console.log(`  - default session: ${DEFAULT_SESSION_NAME}`);
   console.log(`  - active logs: ${LOG_DIR}`);

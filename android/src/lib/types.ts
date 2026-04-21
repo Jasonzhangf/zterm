@@ -360,13 +360,13 @@ export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [];
 export const DEFAULT_SHORTCUT_ACTIONS: TerminalShortcutAction[] = [
   { id: 'shortcut-continue', label: '继续', sequence: '继续执行\r', order: 0, row: 'top-scroll' },
   { id: 'shortcut-esc', label: 'Esc', sequence: '\x1b', order: 1, row: 'top-scroll' },
-  { id: 'shortcut-tab', label: 'Tab', sequence: '\t', order: 2, row: 'top-scroll' },
-  { id: 'shortcut-backspace', label: 'Bksp', sequence: '\x7f', order: 3, row: 'top-scroll' },
-  { id: 'shortcut-enter', label: 'Enter', sequence: '\r', order: 0, row: 'bottom-scroll' },
-  { id: 'shortcut-space', label: 'Space', sequence: ' ', order: 1, row: 'bottom-scroll' },
-  { id: 'shortcut-shift-tab', label: 'S-Tab', sequence: '\x1b[Z', order: 2, row: 'bottom-scroll' },
-  { id: 'shortcut-shift-enter', label: 'S-Enter', sequence: '\n', order: 3, row: 'bottom-scroll' },
-  { id: 'shortcut-paste', label: 'Paste', sequence: '\x16', order: 4, row: 'bottom-scroll' },
+  { id: 'shortcut-backspace', label: 'Bksp', sequence: '\x7f', order: 2, row: 'top-scroll' },
+  { id: 'shortcut-paste', label: 'Paste', sequence: '\x16', order: 3, row: 'top-scroll' },
+  { id: 'shortcut-tab', label: 'Tab', sequence: '\t', order: 0, row: 'bottom-scroll' },
+  { id: 'shortcut-enter', label: 'Enter', sequence: '\r', order: 1, row: 'bottom-scroll' },
+  { id: 'shortcut-space', label: 'Space', sequence: ' ', order: 2, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-tab', label: 'S-Tab', sequence: '\x1b[Z', order: 3, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-enter', label: 'S-Enter', sequence: '\n', order: 4, row: 'bottom-scroll' },
 ];
 
 export const DEFAULT_WEBDAV_CONFIG: WebDAVConfig = {
