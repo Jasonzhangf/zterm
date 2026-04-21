@@ -19,7 +19,8 @@
     "daemon:service-status": "bash ./scripts/zterm-daemon.sh service-status",
     "sync:android": "npx cap sync android",
     "run:android": "npx cap run android",
-    "build:android": "./scripts/build-android-debug.sh"
+    "build:android": "./scripts/build-android-debug.sh",
+    "prepare:update-bundle": "node ./scripts/prepare-update-bundle.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
