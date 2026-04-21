@@ -50,8 +50,8 @@ export function useAppUpdate() {
     [],
   );
 
-  const checkForUpdates = useCallback(async (options?: { manual?: boolean }): Promise<AppUpdateCheckResult> => {
-    const manifestUrl = preferences.manifestUrl.trim();
+  const checkForUpdates = useCallback(async (options?: { manual?: boolean; manifestUrlOverride?: string }): Promise<AppUpdateCheckResult> => {
+    const manifestUrl = (options?.manifestUrlOverride || preferences.manifestUrl).trim();
     if (!manifestUrl) {
       const message = '未配置升级 manifest URL';
       setLastError(message);
@@ -217,4 +217,3 @@ export function useAppUpdate() {
     startUpdate,
   };
 }
-

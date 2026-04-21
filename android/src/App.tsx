@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
+import { useAppUpdate } from './hooks/useAppUpdate';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
@@ -70,6 +71,21 @@ function readPersistedPageState(): AppPageState {
 }
 
 function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
+  const {
+    preferences: appUpdatePreferences,
+    latestManifest,
+    availableManifest,
+    checking: updateChecking,
+    installing: updateInstalling,
+    lastError: updateError,
+    setPreferences: setAppUpdatePreferences,
+    checkForUpdates,
+    dismissAvailableManifest,
+    skipCurrentVersion,
+    ignoreUntilManualCheck,
+    resetIgnorePolicy,
+    startUpdate,
+  } = useAppUpdate();
   const {
     state,
     createSession,
@@ -626,10 +642,24 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
         {pageState.kind === 'settings' && (
           <SettingsPage
             settings={bridgeSettings}
+            updatePreferences={appUpdatePreferences}
+            latestManifest={latestManifest}
+            updateChecking={updateChecking}
+            updateInstalling={updateInstalling}
+            updateError={updateError}
             onSave={(next) => {
               setBridgeSettings(next);
               setPageState(openConnectionsPage());
             }}
+            onUpdatePreferencesChange={setAppUpdatePreferences}
+            onCheckForUpdate={(nextPreferences) => {
+              setAppUpdatePreferences(nextPreferences);
+              void checkForUpdates({ manual: true, manifestUrlOverride: nextPreferences.manifestUrl });
+            }}
+            onInstallUpdate={() => {
+              void startUpdate();
+            }}
+            onResetUpdateIgnorePolicy={resetIgnorePolicy}
             onBack={() => setPageState(openConnectionsPage())}
           />
         )}
@@ -698,6 +728,126 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
           setPickerMode(null);
         }}
       />
+
+      {availableManifest && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 300,
+            backgroundColor: 'rgba(8, 12, 18, 0.48)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+          }}
+        >
+          <div
+            style={{
+              width: 'min(420px, calc(100vw - 24px))',
+              borderRadius: '24px',
+              backgroundColor: '#fff',
+              color: '#111827',
+              boxShadow: '0 24px 70px rgba(0,0,0,0.28)',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '22px', fontWeight: 800 }}>发现新版本</div>
+              <div style={{ marginTop: '6px', fontSize: '14px', lineHeight: 1.6, color: '#5b6478' }}>
+                当前版本与服务器版本不一致，可以下载并调起系统安装。
+              </div>
+            </div>
+
+            <div
+              style={{
+                borderRadius: '18px',
+                backgroundColor: '#f6f8fb',
+                padding: '14px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>Remote: {availableManifest.versionName}</div>
+              <div style={{ fontSize: '13px', color: '#5b6478' }}>versionCode {availableManifest.versionCode}</div>
+              {availableManifest.notes.map((item, index) => (
+                <div key={`${item}-${index}`} style={{ fontSize: '13px', color: '#374151' }}>
+                  - {item}
+                </div>
+              ))}
+            </div>
+
+            {updateError ? (
+              <div style={{ fontSize: '13px', lineHeight: 1.5, color: '#dc2626' }}>
+                {updateError}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'grid', gap: '10px' }}>
+              <button
+                onClick={() => {
+                  void startUpdate(availableManifest);
+                }}
+                disabled={updateInstalling}
+                style={{
+                  minHeight: '46px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  backgroundColor: '#111827',
+                  color: '#fff',
+                  fontWeight: 800,
+                  cursor: updateInstalling ? 'wait' : 'pointer',
+                }}
+              >
+                {updateInstalling ? '准备安装…' : '立即升级'}
+              </button>
+              <button
+                onClick={() => skipCurrentVersion(availableManifest)}
+                style={{
+                  minHeight: '42px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: '#eef2f8',
+                  color: '#111827',
+                  fontWeight: 700,
+                }}
+              >
+                跳过当前版本
+              </button>
+              <button
+                onClick={ignoreUntilManualCheck}
+                style={{
+                  minHeight: '42px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: '#eef2f8',
+                  color: '#111827',
+                  fontWeight: 700,
+                }}
+              >
+                一直忽略，直到手动检查
+              </button>
+              <button
+                onClick={dismissAvailableManifest}
+                style={{
+                  minHeight: '40px',
+                  borderRadius: '14px',
+                  border: '1px solid #d8dee8',
+                  backgroundColor: '#fff',
+                  color: '#5b6478',
+                  fontWeight: 700,
+                }}
+              >
+                先不处理
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
