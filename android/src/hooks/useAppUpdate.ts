@@ -82,25 +82,29 @@ export function useAppUpdate() {
       if (!payload) {
         throw new Error('升级清单格式无效');
       }
+      const resolvedManifest: AppUpdateManifest = {
+        ...payload,
+        apkUrl: new URL(payload.apkUrl, manifestUrl).toString(),
+      };
 
-      setLatestManifest(payload);
-      const updateAvailable = payload.versionCode > APP_VERSION_CODE;
-      const suppressedReason = updateAvailable ? shouldSuppressUpdatePrompt(payload, preferences, options) : 'none';
+      setLatestManifest(resolvedManifest);
+      const updateAvailable = resolvedManifest.versionCode > APP_VERSION_CODE;
+      const suppressedReason = updateAvailable ? shouldSuppressUpdatePrompt(resolvedManifest, preferences, options) : 'none';
 
       setPreferences((current) => ({
         ...current,
         lastCheckedAt: Date.now(),
-        lastSeenVersionCode: payload.versionCode,
+        lastSeenVersionCode: resolvedManifest.versionCode,
       }));
 
       if (updateAvailable && suppressedReason === 'none') {
-        setAvailableManifest(payload);
+        setAvailableManifest(resolvedManifest);
       } else if (!updateAvailable || options?.manual) {
         setAvailableManifest(null);
       }
 
       return {
-        manifest: payload,
+        manifest: resolvedManifest,
         updateAvailable,
         suppressedReason,
       };

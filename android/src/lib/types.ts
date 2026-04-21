@@ -258,7 +258,17 @@ export type ClientMessage =
   | { type: 'close' };
 
 export type ServerMessage =
-  | { type: 'connected'; payload: { sessionId: string } }
+  | {
+      type: 'connected';
+      payload: {
+        sessionId: string;
+        appUpdate?: {
+          versionCode: number;
+          versionName: string;
+          manifestUrl?: string;
+        };
+      };
+    }
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'data'; payload: string }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
