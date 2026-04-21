@@ -79,6 +79,12 @@ interface SessionMirror {
   subscribers: Set<string>;
 }
 
+interface TmuxPaneMetrics {
+  historySize: number;
+  paneRows: number;
+  paneCols: number;
+}
+
 type ClientMessage =
   | { type: 'connect'; payload: TmuxConnectPayload }
   | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
@@ -422,6 +428,89 @@ function listTmuxSessions() {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => Boolean(line) && !HIDDEN_TMUX_SESSIONS.has(line));
+}
+
+function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
+  const result = runTmux(['display-message', '-p', '-t', sessionName, '#{history_size} #{pane_height} #{pane_width}']);
+  const [historyRaw = '0', rowsRaw = '24', colsRaw = '80'] = result.stdout.trim().split(/\s+/u);
+  return {
+    historySize: Math.max(0, Number.parseInt(historyRaw, 10) || 0),
+    paneRows: Math.max(1, Number.parseInt(rowsRaw, 10) || 24),
+    paneCols: Math.max(1, Number.parseInt(colsRaw, 10) || 80),
+  };
+}
+
+function captureTmuxPaneLines(sessionName: string, maxLines: number) {
+  const safeMaxLines = Math.max(1, Math.floor(maxLines));
+  const result = runTmux([
+    'capture-pane',
+    '-p',
+    '-e',
+    '-N',
+    '-t',
+    sessionName,
+    '-S',
+    `-${safeMaxLines}`,
+    '-E',
+    '-1',
+  ]);
+
+  const normalized = result.stdout.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
+  if (!mirror.bridge) {
+    return false;
+  }
+
+  const metrics = readTmuxPaneMetrics(mirror.sessionName);
+  const maxLines = Math.max(metrics.paneRows, MAX_CAPTURED_SCROLLBACK_LINES);
+  const capturedLines = captureTmuxPaneLines(mirror.sessionName, maxLines);
+  if (capturedLines.length === 0) {
+    return false;
+  }
+
+  const scratchBridge = await WasmBridge.load();
+  scratchBridge.init(metrics.paneCols, metrics.paneRows);
+  scratchBridge.writeString(capturedLines.join('\r\n'));
+
+  const viewport = buildViewport(scratchBridge);
+  const scratchScrollbackCount = scratchBridge.getScrollbackCount();
+  const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - viewport.length));
+  const scrollbackStartOldestIndex = Math.max(0, scratchScrollbackCount - scrollbackKeepCount);
+  const scrollbackTail =
+    scrollbackKeepCount > 0
+      ? readScrollbackRangeByOldestIndex(scratchBridge, scrollbackStartOldestIndex, scratchScrollbackCount)
+      : [];
+
+  const totalAvailableLines = Math.max(
+    metrics.paneRows,
+    metrics.historySize,
+    capturedLines.length,
+    scratchScrollbackCount + viewport.length,
+  );
+  const nextViewportStartIndex = Math.max(0, totalAvailableLines - metrics.paneRows);
+  const nextBufferLines = [...scrollbackTail, ...viewport];
+  const nextBufferStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
+
+  mirror.bufferStartIndex = nextBufferStartIndex;
+  mirror.viewportStartIndex = nextViewportStartIndex;
+  mirror.bufferLines = nextBufferLines;
+  mirror.rows = metrics.paneRows;
+  mirror.cols = metrics.paneCols;
+  mirror.lastScrollbackCount = mirror.bridge.getScrollbackCount();
+  trimMirrorBufferToCache(mirror);
+
+  console.log(
+    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync history=${metrics.historySize} captured=${capturedLines.length} scratch=${scratchScrollbackCount + viewport.length} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} viewport=${mirror.viewportStartIndex}`,
+  );
+
+  return true;
 }
 
 function createDetachedTmuxSession(input?: string) {
@@ -1109,7 +1198,11 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   });
 
   try {
-    rebuildMirrorAuthoritativeBuffer(mirror);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+    if (!captured) {
+      rebuildMirrorAuthoritativeBuffer(mirror);
+    }
     mirror.bridge.clearDirty();
     mirror.revision += 1;
     broadcastMirrorBufferReset(mirror);
@@ -1125,7 +1218,10 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
       mirror.bufferLines = [];
       mirror.bufferStartIndex = 0;
       mirror.viewportStartIndex = 0;
-      rebuildMirrorAuthoritativeBuffer(mirror);
+      const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+      if (!captured) {
+        rebuildMirrorAuthoritativeBuffer(mirror);
+      }
       mirror.bridge.clearDirty();
       mirror.revision += 1;
       for (const sessionId of mirror.subscribers) {
@@ -1208,7 +1304,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   await startMirror(mirror, payload.autoCommand);
 }
 
-function handleResize(session: ClientSession, cols: number, rows: number) {
+async function handleResize(session: ClientSession, cols: number, rows: number) {
   session.cols = cols;
   session.rows = rows;
   const mirror = getClientMirror(session);
@@ -1225,7 +1321,10 @@ function handleResize(session: ClientSession, cols: number, rows: number) {
   mirror.bufferStartIndex = 0;
   mirror.viewportStartIndex = 0;
   clearMirrorFlushTimer(mirror);
-  rebuildMirrorAuthoritativeBuffer(mirror);
+  const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+  if (!captured) {
+    rebuildMirrorAuthoritativeBuffer(mirror);
+  }
   mirror.bridge.clearDirty();
   mirror.revision += 1;
   broadcastMirrorBufferReset(mirror);
@@ -1254,17 +1353,24 @@ function handleStreamMode(session: ClientSession, mode: 'active' | 'idle') {
   clearClientBackfillTimer(session);
 }
 
-function handleBufferRangeRequest(session: ClientSession, startIndex: number, endIndex: number) {
+async function handleBufferRangeRequest(session: ClientSession, startIndex: number, endIndex: number) {
   const mirror = getClientMirror(session);
   if (!mirror || mirror.state !== 'connected' || !mirror.bridge) {
     sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for buffer sync', code: 'buffer_not_ready' } });
     return;
   }
 
-  rebuildMirrorAuthoritativeBuffer(mirror);
-
   const normalizedStart = Math.max(0, Math.floor(startIndex));
   const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
+  const needsOlderTruth = normalizedStart < mirror.bufferStartIndex || normalizedEnd > getMirrorAvailableEndIndex(mirror);
+
+  if (needsOlderTruth) {
+    const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+    if (!captured) {
+      rebuildMirrorAuthoritativeBuffer(mirror);
+    }
+  }
+
   const availableStart = mirror.bufferStartIndex;
   const availableEnd = getMirrorAvailableEndIndex(mirror);
   const actualStart = Math.max(availableStart, normalizedStart);
@@ -1391,10 +1497,10 @@ function handleMessage(session: ClientSession, rawData: RawData) {
       handlePasteImage(session, message.payload);
       break;
     case 'request-buffer-range':
-      handleBufferRangeRequest(session, message.payload.startIndex, message.payload.endIndex);
+      void handleBufferRangeRequest(session, message.payload.startIndex, message.payload.endIndex);
       break;
     case 'resize':
-      handleResize(session, message.payload.cols, message.payload.rows);
+      void handleResize(session, message.payload.cols, message.payload.rows);
       break;
     case 'ping':
       sendMessage(session, { type: 'pong' });

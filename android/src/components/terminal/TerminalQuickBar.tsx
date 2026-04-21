@@ -45,7 +45,7 @@ const BASE_ACTIONS = [
   { id: 'shift-tab', label: 'S-Tab', sequence: '\x1b[Z' },
   { id: 'shift-enter', label: 'S-Enter', sequence: '\n' },
   { id: 'paste', label: 'Paste', sequence: '\x16' },
-  { id: 'keyboard', label: 'IME', sequence: '' },
+  { id: 'keyboard', label: '⌨', sequence: '' },
 ];
 
 interface TerminalQuickBarProps {

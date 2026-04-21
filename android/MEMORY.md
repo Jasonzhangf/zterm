@@ -64,6 +64,7 @@
 - [2026-04-20] endpoint 归一不能只修 Mac；Android 的 `bridge-settings / bridge-url / connection-target / storage hooks / Connection Properties` 也要直接复用同一个 shared truth，否则桌面和移动端会再次在显式 `ws://host:port` 场景下分叉
 - [2026-04-21] Jason 明确认可当前快捷栏/按钮视觉方向：后续 mobile UI 默认沿用“简洁、闭合、分区明确”的 capsule/block 设计语言——低噪声配色、清晰边界、成组区域、按钮闭合感优先；新增页面/组件若无特殊原因，应沿这个方向统一
 - [2026-04-21] 升级验证流程冻结：首次装机可用 ADB，但后续新版本默认必须走 app 内建升级链路验证（manifest -> 提示 -> 下载 -> 校验 -> 系统安装）；除非 Jason 明确要求，不再用 ADB 直接覆盖新版本
+- [2026-04-21] tmux pane 真源校验：`display-message '#{history_size}'` 返回的就是 `capture-pane -S -... -E -1` 可见总行数，不要再额外 `+ pane_height`；否则 absolute index 会整体偏移，导致 viewport/buffer 拼接错位
 
 ## Patterns & Learnings
 

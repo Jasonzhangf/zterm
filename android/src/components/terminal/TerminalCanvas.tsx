@@ -27,6 +27,7 @@ const MAX_FONT_SIZE = 16;
 const PINCH_STEP_DIVISOR = 28;
 const SWIPE_COMPLETE_DURATION_MS = 220;
 const SWIPE_RESTORE_DURATION_MS = 180;
+const DEBUG_OVERLAY_STORAGE_KEY = 'zterm:terminal-debug-overlay';
 
 type SwipeDirection = 'prev' | 'next';
 
@@ -61,6 +62,7 @@ interface SessionTerminalPaneProps {
   resumeNonce: number;
   rowHeight: string;
   swipeAnimating: boolean;
+  debugOverlayEnabled: boolean;
 }
 
 const SessionTerminalPane = memo(function SessionTerminalPane({
@@ -85,6 +87,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   resumeNonce,
   rowHeight,
   swipeAnimating,
+  debugOverlayEnabled,
 }: SessionTerminalPaneProps) {
   return (
     <div
@@ -128,6 +131,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
         fontSize={fontSize}
         resumeNonce={resumeNonce}
         rowHeight={rowHeight}
+        debugOverlayEnabled={debugOverlayEnabled}
       />
     </div>
   );
@@ -145,6 +149,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   && prev.resumeNonce === next.resumeNonce
   && prev.rowHeight === next.rowHeight
   && prev.swipeAnimating === next.swipeAnimating
+  && prev.debugOverlayEnabled === next.debugOverlayEnabled
 ));
 
 function clampFontSize(value: number) {
@@ -157,6 +162,18 @@ function getTouchDistance(touchA: { clientX: number; clientY: number }, touchB: 
 
 function getRowHeight(fontSize: number) {
   return `${Math.max(fontSize + 4, Math.ceil(fontSize * 1.5))}px`;
+}
+
+function readStoredDebugOverlayEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return localStorage.getItem(DEBUG_OVERLAY_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 export function TerminalCanvas({
@@ -185,6 +202,7 @@ export function TerminalCanvas({
   const [showScaleIndicator, setShowScaleIndicator] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
+  const [debugOverlayEnabled, setDebugOverlayEnabled] = useState(() => readStoredDebugOverlayEnabled());
 
   const clearSwipeAnimationTimer = () => {
     if (swipeAnimationTimer.current) {
@@ -203,6 +221,16 @@ export function TerminalCanvas({
       window.clearTimeout(indicatorTimeout.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.setItem(DEBUG_OVERLAY_STORAGE_KEY, debugOverlayEnabled ? '1' : '0');
+    } catch {}
+  }, [debugOverlayEnabled]);
 
   useEffect(() => {
     const host = containerRef.current;
@@ -419,6 +447,29 @@ export function TerminalCanvas({
           {fontSize}px
         </div>
       )}
+      <button
+        type="button"
+        onClick={() => setDebugOverlayEnabled((current) => !current)}
+        style={{
+          position: 'absolute',
+          top: '10px',
+          left: '10px',
+          zIndex: 3,
+          minWidth: '42px',
+          height: '32px',
+          padding: '0 10px',
+          borderRadius: '999px',
+          border: debugOverlayEnabled ? '1px solid rgba(255, 176, 32, 0.55)' : '1px solid rgba(255,255,255,0.12)',
+          background: debugOverlayEnabled ? 'rgba(97, 63, 13, 0.92)' : 'rgba(0,0,0,0.66)',
+          color: debugOverlayEnabled ? '#ffcf66' : '#fff',
+          fontSize: '12px',
+          fontWeight: 800,
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        DBG
+      </button>
       {activeSession ? (
         <div
           style={{
@@ -475,6 +526,7 @@ export function TerminalCanvas({
                 resumeNonce={resumeNonce}
                 rowHeight={resolvedRowHeight}
                 swipeAnimating={Boolean(swipeState?.animating)}
+                debugOverlayEnabled={debugOverlayEnabled && isActive}
               />
             );
           })}

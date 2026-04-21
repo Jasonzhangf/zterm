@@ -30,6 +30,7 @@ interface TerminalViewProps {
   forceScrollToBottomNonce?: number;
   fontSize?: number;
   rowHeight?: string;
+  debugOverlayEnabled?: boolean;
 }
 
 const DEFAULT_ROWS = 24;
@@ -67,7 +68,6 @@ const TERMINAL_FONT_STACK = [
   '"Consolas"',
   'monospace',
 ].join(', ');
-const ENABLE_DEBUG_OVERLAY = false;
 const XTERM_6X6_STEPS = [0, 95, 135, 175, 215, 255] as const;
 const BUFFER_RANGE_REQUEST_CHUNK_LINES = 160;
 const BUFFER_RANGE_REQUEST_THRESHOLD_LINES = 24;
@@ -222,7 +222,21 @@ export function TerminalView({
   forceScrollToBottomNonce = 0,
   fontSize = 14,
   rowHeight = '17px',
+  debugOverlayEnabled = false,
 }: TerminalViewProps) {
+  interface RenderProjection {
+    lines: TerminalCell[][];
+    startIndex: number;
+    availableStartIndex: number;
+    updateKind: 'replace' | 'delta' | 'range';
+    revision: number;
+    rows: number;
+    cursorRow: number | null;
+    cursorCol: number | null;
+    cursorVisible: boolean;
+    cursorKeysApp: boolean;
+  }
+
   type ViewMode = 'follow' | 'reading';
   const SCROLLBACK_OVERSCAN_ROWS = 48;
   const FOLLOW_BOTTOM_THRESHOLD_PX = 2;
@@ -267,6 +281,7 @@ export function TerminalView({
     bufferStartIndex?: number;
     lineHeightPx: number;
   } | null>(null);
+  const deferredProjectionRef = useRef<RenderProjection | null>(null);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
   const [debugMetrics, setDebugMetrics] = useState({
     bufferLines: 0,
@@ -277,20 +292,84 @@ export function TerminalView({
     scrollTop: 0,
     maxScrollTop: 0,
     followOutput: true,
+    viewMode: 'follow' as ViewMode,
+    scrollLock: false,
+    bufferStartIndex: 0,
+    bufferEndIndex: 0,
+    availableStartIndex: 0,
+    viewportStartIndex: 0,
+    topLine: 0,
+    lineHeightPx: 0,
   });
   const [scrollViewportState, setScrollViewportState] = useState({
     topLine: 0,
     visibleRows: DEFAULT_ROWS,
   });
 
-  const bufferLines = useMemo(() => initialBufferLines || [], [initialBufferLines]);
-  const viewportRowCount = Math.max(1, Math.min(bufferRows, Math.max(1, bufferLines.length || DEFAULT_ROWS)));
+  const incomingProjection = useMemo<RenderProjection>(() => ({
+    lines: initialBufferLines || [],
+    startIndex: bufferStartIndex ?? 0,
+    availableStartIndex: bufferAvailableStartIndex ?? 0,
+    updateKind: bufferUpdateKind,
+    revision: bufferRevision,
+    rows: bufferRows,
+    cursorRow: cursorVisible ? cursorRow ?? null : null,
+    cursorCol: cursorVisible ? cursorCol ?? null : null,
+    cursorVisible,
+    cursorKeysApp,
+  }), [
+    initialBufferLines,
+    bufferStartIndex,
+    bufferAvailableStartIndex,
+    bufferUpdateKind,
+    bufferRevision,
+    bufferRows,
+    cursorRow,
+    cursorCol,
+    cursorVisible,
+    cursorKeysApp,
+  ]);
+  const [renderProjection, setRenderProjection] = useState<RenderProjection>(incomingProjection);
+  const bufferLines = renderProjection.lines;
+  const renderedBufferStartIndex = renderProjection.startIndex;
+  const renderedAvailableStartIndex = renderProjection.availableStartIndex;
+  const renderedBufferUpdateKind = renderProjection.updateKind;
+  const renderedBufferRevision = renderProjection.revision;
+  const renderedBufferRows = renderProjection.rows;
+  const viewportRowCount = Math.max(1, Math.min(renderedBufferRows, Math.max(1, bufferLines.length || DEFAULT_ROWS)));
   const resolvedLineHeightPx = Math.max(1, parseInt(resolvedRowHeight || rowHeight, 10) || parseInt(rowHeight, 10) || 18);
-  const cursorAbsoluteRow = cursorVisible ? cursorRow ?? null : null;
-  const cursorAbsoluteCol = cursorVisible ? cursorCol ?? null : null;
+  const cursorAbsoluteRow = renderProjection.cursorVisible ? renderProjection.cursorRow : null;
+  const cursorAbsoluteCol = renderProjection.cursorVisible ? renderProjection.cursorCol : null;
+
+  useEffect(() => {
+    const isReadingLocked = viewModeRef.current === 'reading' || scrollLockRef.current;
+    if (active && isReadingLocked && incomingProjection.updateKind === 'delta') {
+      deferredProjectionRef.current = incomingProjection;
+      return;
+    }
+
+    deferredProjectionRef.current = null;
+    setRenderProjection((current) => (
+      current === incomingProjection
+      || (
+        current.revision === incomingProjection.revision
+        && current.startIndex === incomingProjection.startIndex
+        && current.availableStartIndex === incomingProjection.availableStartIndex
+        && current.updateKind === incomingProjection.updateKind
+        && current.rows === incomingProjection.rows
+        && current.cursorRow === incomingProjection.cursorRow
+        && current.cursorCol === incomingProjection.cursorCol
+        && current.cursorVisible === incomingProjection.cursorVisible
+        && current.cursorKeysApp === incomingProjection.cursorKeysApp
+        && current.lines === incomingProjection.lines
+      )
+        ? current
+        : incomingProjection
+    ));
+  }, [active, incomingProjection]);
 
   const syncDebugMetrics = useCallback(() => {
-    if (!ENABLE_DEBUG_OVERLAY) {
+    if (!debugOverlayEnabled) {
       return;
     }
     const host = containerRef.current;
@@ -307,9 +386,17 @@ export function TerminalView({
       scrollTop: Math.round(host.scrollTop),
       maxScrollTop: Math.round(maxScrollTop),
       followOutput: followOutputRef.current,
+      viewMode: viewModeRef.current,
+      scrollLock: scrollLockRef.current,
+      bufferStartIndex: renderedBufferStartIndex,
+      bufferEndIndex: renderedBufferStartIndex + bufferLines.length,
+      availableStartIndex: renderedAvailableStartIndex,
+      viewportStartIndex: renderedBufferStartIndex + Math.max(0, Math.floor(host.scrollTop / resolvedLineHeightPx)),
+      topLine: Math.max(0, Math.floor(host.scrollTop / resolvedLineHeightPx)),
+      lineHeightPx: resolvedLineHeightPx,
     };
     setDebugMetrics(nextMetrics);
-  }, [bufferLines.length, viewportRowCount]);
+  }, [bufferLines.length, debugOverlayEnabled, renderedAvailableStartIndex, renderedBufferStartIndex, resolvedLineHeightPx, viewportRowCount]);
 
   const syncScrollViewportState = useCallback((host: HTMLDivElement) => {
     const nextTopLine = Math.max(0, Math.floor(host.scrollTop / resolvedLineHeightPx));
@@ -326,13 +413,11 @@ export function TerminalView({
     const intraLineOffset = host.scrollTop - topLineOffset * resolvedLineHeightPx;
     manualScrollAnchorRef.current = {
       absoluteTopLineIndex:
-        bufferStartIndex !== undefined
-          ? bufferStartIndex + topLineOffset
-          : undefined,
+        renderedBufferStartIndex + topLineOffset,
       topLineOffset,
       intraLineOffset,
     };
-  }, [bufferStartIndex, resolvedLineHeightPx]);
+  }, [renderedBufferStartIndex, resolvedLineHeightPx]);
 
   const setHostScrollTop = useCallback((host: HTMLDivElement, nextScrollTop: number) => {
     programmaticScrollRef.current += 1;
@@ -346,6 +431,10 @@ export function TerminalView({
     viewModeRef.current = mode;
     followOutputRef.current = mode === 'follow';
     if (mode === 'follow') {
+      if (deferredProjectionRef.current) {
+        setRenderProjection(deferredProjectionRef.current);
+        deferredProjectionRef.current = null;
+      }
       scrollLockRef.current = false;
       manualScrollAnchorRef.current = null;
     }
@@ -363,10 +452,8 @@ export function TerminalView({
         setViewMode('reading');
         updateManualScrollAnchor(host);
       }
-    } else if (distanceFromBottom > FOLLOW_BOTTOM_THRESHOLD_PX) {
-      if (reason === 'user') {
-        scrollLockRef.current = true;
-      }
+    } else if (reason === 'user' && distanceFromBottom > FOLLOW_BOTTOM_THRESHOLD_PX) {
+      scrollLockRef.current = true;
       setViewMode('reading');
       updateManualScrollAnchor(host);
     } else {
@@ -374,17 +461,17 @@ export function TerminalView({
     }
     syncScrollViewportState(host);
     if (scrollMetricsRef.current) {
-      scrollMetricsRef.current = {
-        ...scrollMetricsRef.current,
-        scrollTop: host.scrollTop,
-        scrollHeight: host.scrollHeight,
-        clientHeight: host.clientHeight,
-        bufferStartIndex,
-        lineHeightPx: resolvedLineHeightPx,
-      };
-    }
-    syncDebugMetrics();
-  }, [bufferStartIndex, resolvedLineHeightPx, setViewMode, syncDebugMetrics, syncScrollViewportState, updateManualScrollAnchor]);
+        scrollMetricsRef.current = {
+          ...scrollMetricsRef.current,
+          scrollTop: host.scrollTop,
+          scrollHeight: host.scrollHeight,
+          clientHeight: host.clientHeight,
+          bufferStartIndex: renderedBufferStartIndex,
+          lineHeightPx: resolvedLineHeightPx,
+        };
+      }
+      syncDebugMetrics();
+  }, [renderedBufferStartIndex, resolvedLineHeightPx, setViewMode, syncDebugMetrics, syncScrollViewportState, updateManualScrollAnchor]);
 
   useLayoutEffect(() => {
     if (!active) {
@@ -402,8 +489,8 @@ export function TerminalView({
         scrollHeight: host.scrollHeight,
         scrollTop: host.scrollTop,
         clientHeight: host.clientHeight,
-        bufferRevision,
-        bufferStartIndex,
+        bufferRevision: renderedBufferRevision,
+        bufferStartIndex: renderedBufferStartIndex,
         lineHeightPx: resolvedLineHeightPx,
       };
       syncScrollViewportState(host);
@@ -421,8 +508,8 @@ export function TerminalView({
       if (anchor) {
         const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
         const nextTopLineOffset =
-          anchor.absoluteTopLineIndex !== undefined && bufferStartIndex !== undefined
-            ? Math.max(0, anchor.absoluteTopLineIndex - bufferStartIndex)
+          anchor.absoluteTopLineIndex !== undefined
+            ? Math.max(0, anchor.absoluteTopLineIndex - renderedBufferStartIndex)
             : anchor.topLineOffset;
         setHostScrollTop(host, Math.min(
           maxScrollTop,
@@ -441,9 +528,9 @@ export function TerminalView({
       const topLineOffset = Math.floor(previous.scrollTop / previousLineHeightPx);
       const intraLineOffset = previous.scrollTop - topLineOffset * previousLineHeightPx;
 
-      if (previous.bufferStartIndex !== undefined && bufferStartIndex !== undefined) {
+      if (previous.bufferStartIndex !== undefined) {
         const absoluteTopLineIndex = previous.bufferStartIndex + topLineOffset;
-        const nextTopLineOffset = Math.max(0, absoluteTopLineIndex - bufferStartIndex);
+        const nextTopLineOffset = Math.max(0, absoluteTopLineIndex - renderedBufferStartIndex);
         setHostScrollTop(host, Math.min(maxScrollTop, Math.max(0, nextTopLineOffset * resolvedLineHeightPx + intraLineOffset)));
         return;
       }
@@ -469,29 +556,39 @@ export function TerminalView({
     }
 
     const shouldFollowOutput = viewModeRef.current === 'follow';
-    const bufferChanged = previous.bufferRevision !== bufferRevision;
+    const bufferChanged = previous.bufferRevision !== renderedBufferRevision;
     const layoutChanged =
       previous.lineHeightPx !== resolvedLineHeightPx
       || previous.clientHeight !== host.clientHeight
-      || previous.bufferStartIndex !== bufferStartIndex;
+      || previous.bufferStartIndex !== renderedBufferStartIndex;
+    const userIsActivelyVerticalScrolling =
+      touchGestureRef.current.active && touchGestureRef.current.mode === 'vertical';
+    const needsAnchorRestoreForHistory =
+      renderedBufferUpdateKind === 'range'
+      || previous.bufferStartIndex !== renderedBufferStartIndex;
 
     if (shouldFollowOutput) {
       scrollToBottom();
-    } else if (bufferChanged || layoutChanged) {
+    } else if (userIsActivelyVerticalScrolling) {
+      syncMetrics();
+      return;
+    } else if (layoutChanged || needsAnchorRestoreForHistory) {
+      restoreReadingAnchor();
+    } else if (bufferChanged && renderedBufferUpdateKind === 'replace') {
       restoreReadingAnchor();
     }
 
     syncMetrics();
   }, [
     active,
-    bufferRevision,
-    bufferUpdateKind,
+    renderedBufferRevision,
+    renderedBufferUpdateKind,
     resolvedLineHeightPx,
     rowHeight,
     setHostScrollTop,
     setViewMode,
     bufferLines.length,
-    bufferStartIndex,
+    renderedBufferStartIndex,
     syncDebugMetrics,
     syncScrollViewportState,
     viewportRowCount,
@@ -514,16 +611,16 @@ export function TerminalView({
     setViewMode('follow');
     setHostScrollTop(host, Math.max(0, host.scrollHeight - host.clientHeight));
     scrollMetricsRef.current = {
-      scrollHeight: host.scrollHeight,
-      scrollTop: host.scrollTop,
-      clientHeight: host.clientHeight,
-      bufferRevision,
-      bufferStartIndex,
-      lineHeightPx: resolvedLineHeightPx,
-    };
+        scrollHeight: host.scrollHeight,
+        scrollTop: host.scrollTop,
+        clientHeight: host.clientHeight,
+        bufferRevision: renderedBufferRevision,
+        bufferStartIndex: renderedBufferStartIndex,
+        lineHeightPx: resolvedLineHeightPx,
+      };
     syncScrollViewportState(host);
     syncDebugMetrics();
-  }, [active, bufferRevision, bufferStartIndex, forceScrollToBottomNonce, resolvedLineHeightPx, setHostScrollTop, setViewMode, syncDebugMetrics, syncScrollViewportState]);
+  }, [active, forceScrollToBottomNonce, renderedBufferRevision, renderedBufferStartIndex, resolvedLineHeightPx, setHostScrollTop, setViewMode, syncDebugMetrics, syncScrollViewportState]);
 
   const focusTerminal = useCallback(() => {
     const input = inputRef.current;
@@ -812,22 +909,22 @@ export function TerminalView({
 
   const requestOlderHistory = useCallback(() => {
     const availableStartIndex = typeof bufferAvailableStartIndex === 'number' ? bufferAvailableStartIndex : 0;
-    if (!onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= availableStartIndex) {
+    if (!onRequestBufferRange || renderedBufferStartIndex <= availableStartIndex) {
       return;
     }
 
-    const nextEnd = Math.max(availableStartIndex, bufferStartIndex);
+    const nextEnd = Math.max(availableStartIndex, renderedBufferStartIndex);
     const nextStart = Math.max(availableStartIndex, nextEnd - BUFFER_RANGE_REQUEST_CHUNK_LINES);
     if (nextEnd <= nextStart) {
       return;
     }
 
     onRequestBufferRange(nextStart, nextEnd);
-  }, [bufferAvailableStartIndex, bufferStartIndex, onRequestBufferRange]);
+  }, [bufferAvailableStartIndex, onRequestBufferRange, renderedBufferStartIndex]);
 
   useEffect(() => {
     const availableStartIndex = typeof bufferAvailableStartIndex === 'number' ? bufferAvailableStartIndex : 0;
-    if (!active || !onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= availableStartIndex) {
+    if (!active || !onRequestBufferRange || renderedBufferStartIndex <= availableStartIndex) {
       return;
     }
 
@@ -840,7 +937,7 @@ export function TerminalView({
     }
 
     requestOlderHistory();
-  }, [active, bufferAvailableStartIndex, bufferStartIndex, onRequestBufferRange, requestOlderHistory, scrollViewportState.topLine]);
+  }, [active, bufferAvailableStartIndex, onRequestBufferRange, renderedBufferStartIndex, requestOlderHistory, scrollViewportState.topLine]);
 
   useEffect(() => {
     const handleViewportChange = () => {
@@ -854,6 +951,14 @@ export function TerminalView({
       window.visualViewport?.removeEventListener('resize', handleViewportChange);
     };
   }, [syncTerminalMetrics]);
+
+  useEffect(() => {
+    if (!debugOverlayEnabled || !active) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(syncDebugMetrics);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, debugOverlayEnabled, syncDebugMetrics]);
 
   return (
     <div
@@ -921,6 +1026,10 @@ export function TerminalView({
             onHorizontalSwipeStart?.();
           } else {
             gesture.mode = 'vertical';
+            scrollLockRef.current = true;
+            setViewMode('reading');
+            updateManualScrollAnchor(host);
+            syncScrollViewportState(host);
             return;
           }
         }
@@ -943,16 +1052,40 @@ export function TerminalView({
       }}
       onTouchEnd={() => {
         const gesture = touchGestureRef.current;
+        const host = containerRef.current;
         if (gesture.active && gesture.mode === 'horizontal') {
           const completed = Math.abs(gesture.deltaX) >= 56 && Math.abs(gesture.deltaX) > Math.abs(gesture.deltaY);
           onHorizontalSwipeEnd?.(gesture.deltaX, completed);
+        }
+        if (gesture.active && gesture.mode === 'vertical' && host) {
+          const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+          const distanceFromBottom = Math.max(0, maxScrollTop - host.scrollTop);
+          if (distanceFromBottom <= FOLLOW_BOTTOM_THRESHOLD_PX) {
+            scrollLockRef.current = false;
+            setViewMode('follow');
+          } else {
+            updateManualScrollAnchor(host);
+            syncScrollViewportState(host);
+          }
         }
         touchGestureRef.current.active = false;
       }}
       onTouchCancel={() => {
         const gesture = touchGestureRef.current;
+        const host = containerRef.current;
         if (gesture.active && gesture.mode === 'horizontal') {
           onHorizontalSwipeEnd?.(gesture.deltaX, false);
+        }
+        if (gesture.active && gesture.mode === 'vertical' && host) {
+          const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+          const distanceFromBottom = Math.max(0, maxScrollTop - host.scrollTop);
+          if (distanceFromBottom <= FOLLOW_BOTTOM_THRESHOLD_PX) {
+            scrollLockRef.current = false;
+            setViewMode('follow');
+          } else {
+            updateManualScrollAnchor(host);
+            syncScrollViewportState(host);
+          }
         }
         touchGestureRef.current.active = false;
       }}
@@ -980,7 +1113,7 @@ export function TerminalView({
         {topSpacerHeightPx > 0 && <div aria-hidden="true" style={{ height: `${topSpacerHeightPx}px` }} />}
         {renderedBufferLines.map((row, rowIndex) => {
           const absoluteOffset = renderedBufferRange.start + rowIndex;
-          const absoluteRowIndex = (bufferStartIndex ?? 0) + absoluteOffset;
+          const absoluteRowIndex = renderedBufferStartIndex + absoluteOffset;
           return (
           <ViewportRow
             key={`line-${absoluteRowIndex}`}
@@ -994,7 +1127,7 @@ export function TerminalView({
         })}
         {bottomSpacerHeightPx > 0 && <div aria-hidden="true" style={{ height: `${bottomSpacerHeightPx}px` }} />}
       </div>
-      {ENABLE_DEBUG_OVERLAY && (
+      {debugOverlayEnabled && (
         <div
           style={{
             position: 'absolute',
@@ -1010,9 +1143,10 @@ export function TerminalView({
             pointerEvents: 'none',
             whiteSpace: 'pre-wrap',
             textAlign: 'right',
+            maxWidth: '72vw',
           }}
         >
-          {`lines:${debugMetrics.bufferLines}\nsb:${debugMetrics.scrollbackLines} vp:${debugMetrics.viewportRows}\nscroll:${debugMetrics.scrollTop}/${debugMetrics.maxScrollTop}\nheight:${debugMetrics.clientHeight}/${debugMetrics.scrollHeight}\nfollow:${debugMetrics.followOutput ? '1' : '0'}`}
+          {`mode:${debugMetrics.viewMode} lock:${debugMetrics.scrollLock ? '1' : '0'} follow:${debugMetrics.followOutput ? '1' : '0'}\nscroll:${debugMetrics.scrollTop}/${debugMetrics.maxScrollTop} top:${debugMetrics.topLine}\nheight:${debugMetrics.clientHeight}/${debugMetrics.scrollHeight} lh:${debugMetrics.lineHeightPx}\nbuffer:${debugMetrics.bufferStartIndex}-${debugMetrics.bufferEndIndex} avail:${debugMetrics.availableStartIndex}\nviewport:${debugMetrics.viewportStartIndex} lines:${debugMetrics.bufferLines} vp:${debugMetrics.viewportRows}`}
         </div>
       )}
       <textarea
