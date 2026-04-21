@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   buildDaemonStartCommand,
   getDefaultBridgeServer,
@@ -7,14 +7,24 @@ import {
   sortBridgeServers,
   type BridgeSettings,
 } from '../lib/bridge-settings';
-import { APP_BASE_VERSION, APP_BUILD_NUMBER, APP_PACKAGE_NAME, APP_VERSION } from '../lib/app-version';
+import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-update';
+import { APP_BASE_VERSION, APP_BUILD_NUMBER, APP_PACKAGE_NAME, APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { WTERM_CONFIG_DISPLAY_PATH } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
 import { formatTargetBadge } from '../lib/network-target';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
+  updatePreferences: AppUpdatePreferences;
+  latestManifest: AppUpdateManifest | null;
+  updateChecking: boolean;
+  updateInstalling: boolean;
+  updateError: string | null;
   onSave: (settings: BridgeSettings) => void;
+  onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
+  onCheckForUpdate: () => void;
+  onInstallUpdate: () => void;
+  onResetUpdateIgnorePolicy: () => void;
   onBack: () => void;
 }
 
@@ -43,10 +53,28 @@ function sectionStyle() {
   } as const;
 }
 
-export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
+export function SettingsPage({
+  settings,
+  updatePreferences,
+  latestManifest,
+  updateChecking,
+  updateInstalling,
+  updateError,
+  onSave,
+  onUpdatePreferencesChange,
+  onCheckForUpdate,
+  onInstallUpdate,
+  onResetUpdateIgnorePolicy,
+  onBack,
+}: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
+  const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const daemonCommand = useMemo(() => buildDaemonStartCommand(draft), [draft]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
+
+  useEffect(() => {
+    setUpdateDraft(updatePreferences);
+  }, [updatePreferences]);
 
   return (
     <div
@@ -97,7 +125,10 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
           </div>
         </div>
         <button
-          onClick={() => onSave(draft)}
+          onClick={() => {
+            onSave(draft);
+            onUpdatePreferencesChange(updateDraft);
+          }}
           style={{
             minWidth: '92px',
             height: '56px',
@@ -145,10 +176,171 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
                 <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Build</div>
                 <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_BUILD_NUMBER}</div>
               </div>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Version Code</div>
+                <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_VERSION_CODE}</div>
+              </div>
             </div>
             <div>
               <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Package</div>
               <div style={{ fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{APP_PACKAGE_NAME}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={sectionStyle()}>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>App Update</div>
+          <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
+            服务器只提供 latest.json 与 APK；客户端自己决定是否提醒、下载、校验并调起系统安装。
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Manifest URL</div>
+            <input
+              type="url"
+              value={updateDraft.manifestUrl}
+              onChange={(event) =>
+                setUpdateDraft((current) => ({
+                  ...current,
+                  manifestUrl: event.target.value,
+                }))
+              }
+              placeholder="https://server.example.com/zterm/android/stable/latest.json"
+              style={inputStyle()}
+            />
+          </div>
+
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              fontSize: '15px',
+              fontWeight: 600,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={updateDraft.autoCheckOnLaunch}
+              onChange={(event) =>
+                setUpdateDraft((current) => ({
+                  ...current,
+                  autoCheckOnLaunch: event.target.checked,
+                }))
+              }
+            />
+            启动时自动检查更新
+          </label>
+
+          <div
+            style={{
+              borderRadius: '20px',
+              padding: '16px',
+              backgroundColor: '#f6f8fb',
+              color: mobileTheme.colors.lightText,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Ignore Policy</div>
+              <div style={{ fontSize: '14px', lineHeight: 1.6 }}>
+                {updatePreferences.ignoreUntilManualCheck
+                  ? '当前：一直忽略，直到手动检查'
+                  : updatePreferences.skippedVersionCode
+                    ? `当前：跳过 versionCode ${updatePreferences.skippedVersionCode}`
+                    : '当前：未忽略任何版本'}
+              </div>
+            </div>
+            <button
+              onClick={onResetUpdateIgnorePolicy}
+              style={{
+                alignSelf: 'flex-start',
+                minHeight: '42px',
+                padding: '0 14px',
+                borderRadius: '14px',
+                border: 'none',
+                backgroundColor: '#eef2f8',
+                color: mobileTheme.colors.lightText,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              清除忽略策略
+            </button>
+          </div>
+
+          <div
+            style={{
+              borderRadius: '20px',
+              padding: '16px',
+              backgroundColor: '#f6f8fb',
+              color: mobileTheme.colors.lightText,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.lightMuted }}>Remote Version</div>
+              <div style={{ fontSize: '18px', fontWeight: 800 }}>
+                {latestManifest ? latestManifest.versionName : '未检查'}
+              </div>
+            </div>
+            {latestManifest && (
+              <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+                versionCode {latestManifest.versionCode}
+                {latestManifest.publishedAt ? ` · ${latestManifest.publishedAt}` : ''}
+              </div>
+            )}
+            {latestManifest?.notes?.length ? (
+              <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+                {latestManifest.notes.map((item, index) => (
+                  <div key={`${item}-${index}`}>- {item}</div>
+                ))}
+              </div>
+            ) : null}
+            {updateError ? (
+              <div style={{ color: mobileTheme.colors.danger, fontSize: '13px', lineHeight: 1.5 }}>
+                {updateError}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                onClick={onCheckForUpdate}
+                disabled={updateChecking}
+                style={{
+                  minHeight: '44px',
+                  padding: '0 16px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: mobileTheme.colors.shell,
+                  color: '#fff',
+                  fontWeight: 800,
+                  cursor: updateChecking ? 'wait' : 'pointer',
+                  opacity: updateChecking ? 0.72 : 1,
+                }}
+              >
+                {updateChecking ? '检查中…' : '检查更新'}
+              </button>
+              <button
+                onClick={onInstallUpdate}
+                disabled={!latestManifest || latestManifest.versionCode <= APP_VERSION_CODE || updateInstalling}
+                style={{
+                  minHeight: '44px',
+                  padding: '0 16px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: 'rgba(31,214,122,0.18)',
+                  color: mobileTheme.colors.accent,
+                  fontWeight: 800,
+                  cursor: !latestManifest || latestManifest.versionCode <= APP_VERSION_CODE || updateInstalling ? 'not-allowed' : 'pointer',
+                  opacity: !latestManifest || latestManifest.versionCode <= APP_VERSION_CODE || updateInstalling ? 0.55 : 1,
+                }}
+              >
+                {updateInstalling ? '准备安装…' : '下载并安装'}
+              </button>
             </div>
           </div>
         </div>
