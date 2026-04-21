@@ -7,6 +7,7 @@ interface TerminalViewProps {
   initialBufferLines?: TerminalCell[][];
   bufferStartIndex?: number;
   bufferRows?: number;
+  bufferAvailableStartIndex?: number;
   bufferUpdateKind?: 'replace' | 'delta' | 'range';
   bufferRevision?: number;
   cursorRow?: number;
@@ -199,6 +200,7 @@ export function TerminalView({
   initialBufferLines,
   bufferStartIndex,
   bufferRows = DEFAULT_ROWS,
+  bufferAvailableStartIndex,
   bufferUpdateKind = 'replace',
   bufferRevision = 0,
   cursorRow,
@@ -630,11 +632,11 @@ export function TerminalView({
     }
 
     let composing = false;
-    let skipNextInput = false;
+    let pendingComposedValue: string | null = null;
 
     const handleCompositionStart = () => {
       composing = true;
-      skipNextInput = false;
+      pendingComposedValue = null;
       input.value = '';
     };
 
@@ -642,7 +644,7 @@ export function TerminalView({
       composing = false;
       const value = event.data || input.value;
       if (value) {
-        skipNextInput = true;
+        pendingComposedValue = value;
         forceFollowToBottom();
         onInput?.(value);
       }
@@ -654,14 +656,18 @@ export function TerminalView({
       if (composing) {
         return;
       }
-      if (skipNextInput) {
-        skipNextInput = false;
-        input.value = '';
-        return;
-      }
       if (input.value) {
+        const normalizedValue = input.value.replace(/\n/g, '\r');
+        if (pendingComposedValue !== null) {
+          if (normalizedValue === pendingComposedValue) {
+            pendingComposedValue = null;
+            input.value = '';
+            return;
+          }
+          pendingComposedValue = null;
+        }
         forceFollowToBottom();
-        onInput?.(input.value.replace(/\n/g, '\r'));
+        onInput?.(normalizedValue);
         input.value = '';
         focusTerminal();
       }
@@ -813,21 +819,23 @@ export function TerminalView({
   const bottomSpacerHeightPx = Math.max(0, (bufferLines.length - renderedBufferRange.end) * resolvedLineHeightPx);
 
   const requestOlderHistory = useCallback(() => {
-    if (!onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= 0) {
+    const availableStartIndex = typeof bufferAvailableStartIndex === 'number' ? bufferAvailableStartIndex : 0;
+    if (!onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= availableStartIndex) {
       return;
     }
 
-    const nextEnd = Math.max(0, bufferStartIndex);
-    const nextStart = Math.max(0, nextEnd - BUFFER_RANGE_REQUEST_CHUNK_LINES);
+    const nextEnd = Math.max(availableStartIndex, bufferStartIndex);
+    const nextStart = Math.max(availableStartIndex, nextEnd - BUFFER_RANGE_REQUEST_CHUNK_LINES);
     if (nextEnd <= nextStart) {
       return;
     }
 
     onRequestBufferRange(nextStart, nextEnd);
-  }, [bufferStartIndex, onRequestBufferRange]);
+  }, [bufferAvailableStartIndex, bufferStartIndex, onRequestBufferRange]);
 
   useEffect(() => {
-    if (!active || !onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= 0) {
+    const availableStartIndex = typeof bufferAvailableStartIndex === 'number' ? bufferAvailableStartIndex : 0;
+    if (!active || !onRequestBufferRange || bufferStartIndex === undefined || bufferStartIndex <= availableStartIndex) {
       return;
     }
 
@@ -840,7 +848,7 @@ export function TerminalView({
     }
 
     requestOlderHistory();
-  }, [active, bufferStartIndex, onRequestBufferRange, requestOlderHistory, scrollViewportState.topLine]);
+  }, [active, bufferAvailableStartIndex, bufferStartIndex, onRequestBufferRange, requestOlderHistory, scrollViewportState.topLine]);
 
   useEffect(() => {
     const handleViewportChange = () => {

@@ -155,7 +155,7 @@ function createDraftActionId() {
 function toDraftActions(actions: QuickAction[]): DraftQuickAction[] {
   return actions.map((action) => ({
     ...action,
-    textInput: action.sequence,
+    textInput: action.sequence.replace(/\r/g, '\n'),
   }));
 }
 
@@ -163,7 +163,7 @@ function normalizeDraftActions(actions: DraftQuickAction[]): QuickAction[] {
   return actions.map(({ textInput, ...action }, index) => ({
     ...action,
     order: index,
-    sequence: textInput,
+    sequence: textInput.replace(/\r?\n/g, '\r'),
   }));
 }
 
@@ -565,7 +565,7 @@ export function TerminalQuickBar({
             ...action,
             label: nextLabel,
             textInput: nextTextInput,
-            sequence: nextTextInput,
+            sequence: nextTextInput.replace(/\r?\n/g, '\r'),
           }
         : action,
     );
@@ -869,6 +869,7 @@ export function TerminalQuickBar({
         key={action.id}
         tabIndex={-1}
         onPointerDown={(event) => {
+          event.preventDefault();
           blurCurrentTarget(event.currentTarget);
           if (action.id !== 'keyboard') {
             return;
@@ -1660,7 +1661,7 @@ export function TerminalQuickBar({
                     const nextAction: QuickAction = {
                       id: createDraftActionId(),
                       label: trimmed.slice(0, 12) || '新片段',
-                      sequence: sessionDraft,
+                      sequence: sessionDraft.replace(/\r?\n/g, '\r'),
                       order: sortedQuickActions.length,
                     };
                     onQuickActionsChange?.([...sortedQuickActions, nextAction]);
@@ -1757,7 +1758,7 @@ export function TerminalQuickBar({
                       >
                         <button
                           onClick={() => {
-                            appendToDraft(action.sequence);
+                            appendToDraft(action.sequence.replace(/\r/g, '\n'));
                           }}
                           style={{
                             flex: 1,

@@ -328,27 +328,41 @@ function normalizePersistedTerminalCells(input: unknown): TerminalCell[][] {
 }
 
 function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalBufferPayload {
+  const startIndex =
+    typeof input.startIndex === 'number' && Number.isFinite(input.startIndex)
+      ? Math.max(0, Math.floor(input.startIndex))
+      : 0;
+  const endIndex =
+    typeof input.endIndex === 'number' && Number.isFinite(input.endIndex)
+      ? Math.max(startIndex, Math.floor(input.endIndex))
+      : startIndex;
+  const rows =
+    typeof input.rows === 'number' && Number.isFinite(input.rows)
+      ? Math.max(1, Math.floor(input.rows))
+      : 24;
+  const viewportStartIndex =
+    typeof input.viewportStartIndex === 'number' && Number.isFinite(input.viewportStartIndex)
+      ? Math.max(startIndex, Math.floor(input.viewportStartIndex))
+      : Math.max(startIndex, endIndex - rows);
+  const viewportEndIndex =
+    typeof input.viewportEndIndex === 'number' && Number.isFinite(input.viewportEndIndex)
+      ? Math.max(viewportStartIndex, Math.floor(input.viewportEndIndex))
+      : Math.max(viewportStartIndex, viewportStartIndex + rows);
+
   return {
     revision:
       typeof input.revision === 'number' && Number.isFinite(input.revision)
         ? input.revision
         : 0,
-    startIndex:
-      typeof input.startIndex === 'number' && Number.isFinite(input.startIndex)
-        ? Math.max(0, Math.floor(input.startIndex))
-        : 0,
-    endIndex:
-      typeof input.endIndex === 'number' && Number.isFinite(input.endIndex)
-        ? Math.max(0, Math.floor(input.endIndex))
-        : 0,
+    startIndex,
+    endIndex,
+    viewportStartIndex,
+    viewportEndIndex,
     cols:
       typeof input.cols === 'number' && Number.isFinite(input.cols)
         ? Math.max(1, Math.floor(input.cols))
         : 80,
-    rows:
-      typeof input.rows === 'number' && Number.isFinite(input.rows)
-        ? Math.max(1, Math.floor(input.rows))
-        : 24,
+    rows,
     cursorRow:
       typeof input.cursorRow === 'number' && Number.isFinite(input.cursorRow)
         ? Math.max(0, Math.floor(input.cursorRow))
@@ -417,6 +431,26 @@ function normalizeRestoredSnapshots(input: unknown): SessionSnapshot[] {
                 typeof legacyBuffer.endIndex === 'number' && Number.isFinite(legacyBuffer.endIndex)
                   ? Math.max(0, Math.floor(legacyBuffer.endIndex))
                   : undefined,
+              availableStartIndex:
+                typeof legacyBuffer.availableStartIndex === 'number' && Number.isFinite(legacyBuffer.availableStartIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.availableStartIndex))
+                  : typeof legacyBuffer.startIndex === 'number' && Number.isFinite(legacyBuffer.startIndex)
+                    ? Math.max(0, Math.floor(legacyBuffer.startIndex))
+                    : undefined,
+              availableEndIndex:
+                typeof legacyBuffer.availableEndIndex === 'number' && Number.isFinite(legacyBuffer.availableEndIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.availableEndIndex))
+                  : typeof legacyBuffer.endIndex === 'number' && Number.isFinite(legacyBuffer.endIndex)
+                    ? Math.max(0, Math.floor(legacyBuffer.endIndex))
+                    : undefined,
+              viewportStartIndex:
+                typeof legacyBuffer.viewportStartIndex === 'number' && Number.isFinite(legacyBuffer.viewportStartIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.viewportStartIndex))
+                  : undefined,
+              viewportEndIndex:
+                typeof legacyBuffer.viewportEndIndex === 'number' && Number.isFinite(legacyBuffer.viewportEndIndex)
+                  ? Math.max(0, Math.floor(legacyBuffer.viewportEndIndex))
+                  : undefined,
               cols:
                 typeof legacyBuffer.cols === 'number' && Number.isFinite(legacyBuffer.cols)
                   ? Math.max(1, Math.floor(legacyBuffer.cols))
@@ -457,6 +491,12 @@ function normalizeRestoredSnapshots(input: unknown): SessionSnapshot[] {
                   : 0,
             cols: item.remoteSnapshot?.cols || 80,
             rows: item.remoteSnapshot?.rows || 24,
+            availableStartIndex:
+              typeof item.lineStartIndex === 'number' && Number.isFinite(item.lineStartIndex)
+                ? item.lineStartIndex
+                : typeof item.scrollbackStartIndex === 'number' && Number.isFinite(item.scrollbackStartIndex)
+                  ? item.scrollbackStartIndex
+                  : 0,
             cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
           }),
     }))
@@ -491,6 +531,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const reconnectBucketsRef = useRef<Map<string, ReconnectBucket>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
   const pendingRangeSyncRef = useRef<Map<string, string>>(new Map());
+  const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
   const pendingRenderActionsRef = useRef<SessionAction[]>([]);
   const pendingRenderFrameRef = useRef<number | null>(null);
   const restoreStartedRef = useRef(false);
@@ -780,6 +821,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                   lastError: undefined,
                 },
               });
+              flushPendingInputQueue(nextSessionId);
               dispatch({ type: 'INCREMENT_CONNECTED' });
               setTimeout(() => drainReconnectBucket(hostKey), POST_SUCCESS_NEXT_RETRY_DELAY_MS);
               break;
@@ -1076,6 +1118,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const closeSession = useCallback((id: string) => {
     manualCloseRef.current.add(id);
     pendingRangeSyncRef.current.delete(id);
+    pendingInputQueueRef.current.delete(id);
     clearReconnectForSession(id);
 
     const ws = wsRefs.current.get(id);
@@ -1186,6 +1229,24 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     pendingRangeSyncRef.current.delete(sessionId);
   }, []);
 
+  const flushPendingInputQueue = useCallback((sessionId: string) => {
+    const ws = wsRefs.current.get(sessionId);
+    const queued = pendingInputQueueRef.current.get(sessionId);
+    if (!ws || ws.readyState !== WebSocket.OPEN || !queued || queued.length === 0) {
+      return;
+    }
+
+    pendingInputQueueRef.current.delete(sessionId);
+    for (const payload of queued) {
+      ws.send(JSON.stringify({ type: 'input', payload }));
+    }
+  }, []);
+
+  const enqueuePendingInput = useCallback((sessionId: string, payload: string) => {
+    const current = pendingInputQueueRef.current.get(sessionId) || [];
+    pendingInputQueueRef.current.set(sessionId, [...current, payload]);
+  }, []);
+
   const requestBufferRange = useCallback((sessionId: string, startIndex: number, endIndex: number) => {
     const normalizedStart = Math.max(0, Math.floor(startIndex));
     const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
@@ -1243,10 +1304,18 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       || stateRef.current.sessions.find((session) => session.state === 'connected')?.id
       || stateRef.current.sessions[0]?.id;
 
-    if (targetSessionId) {
-      sendMessage(targetSessionId, { type: 'input', payload: data });
+    if (!targetSessionId) {
+      return;
     }
-  }, [sendMessage]);
+
+    const ws = wsRefs.current.get(targetSessionId);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', payload: data }));
+      return;
+    }
+
+    enqueuePendingInput(targetSessionId, data);
+  }, [enqueuePendingInput]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {

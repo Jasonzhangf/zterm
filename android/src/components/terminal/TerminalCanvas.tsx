@@ -104,6 +104,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
         sessionId={session.id}
         initialBufferLines={session.buffer.lines}
         bufferStartIndex={session.buffer.startIndex}
+        bufferAvailableStartIndex={session.buffer.availableStartIndex}
         bufferUpdateKind={session.buffer.updateKind}
         bufferRevision={session.buffer.revision}
         bufferRows={session.buffer.rows}

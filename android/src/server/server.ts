@@ -71,10 +71,9 @@ interface SessionMirror {
   rows: number;
   revision: number;
   lastScrollbackCount: number;
-  scrollbackBaseIndex: number;
-  scrollbackNextIndex: number;
-  capturedStartIndex: number;
-  capturedScrollbackLines: TerminalCell[][];
+  bufferStartIndex: number;
+  viewportStartIndex: number;
+  bufferLines: TerminalCell[][];
   lastOutputAt: number;
   flushTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;
@@ -493,10 +492,9 @@ function createMirror(sessionName: string): SessionMirror {
     rows: 24,
     revision: 0,
     lastScrollbackCount: -1,
-    scrollbackBaseIndex: 0,
-    scrollbackNextIndex: 0,
-    capturedStartIndex: 0,
-    capturedScrollbackLines: [],
+    bufferStartIndex: 0,
+    viewportStartIndex: 0,
+    bufferLines: [],
     lastOutputAt: 0,
     flushTimer: null,
     subscribers: new Set(),
@@ -569,11 +567,10 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
 
   mirror.subscribers.clear();
   mirror.bridge = null;
-  mirror.capturedScrollbackLines = [];
-  mirror.capturedStartIndex = 0;
+  mirror.bufferLines = [];
+  mirror.bufferStartIndex = 0;
+  mirror.viewportStartIndex = 0;
   mirror.lastScrollbackCount = -1;
-  mirror.scrollbackBaseIndex = 0;
-  mirror.scrollbackNextIndex = 0;
   mirrors.delete(mirror.key);
 }
 
@@ -613,6 +610,33 @@ function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number,
   return cells;
 }
 
+function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (!a || !b) {
+      return false;
+    }
+    if (a.char !== b.char || a.fg !== b.fg || a.bg !== b.bg || a.flags !== b.flags || a.width !== b.width) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getMirrorAvailableEndIndex(mirror: SessionMirror) {
+  return mirror.bufferStartIndex + mirror.bufferLines.length;
+}
+
+function getMirrorViewportEndIndex(mirror: SessionMirror) {
+  return mirror.viewportStartIndex + mirror.rows;
+}
+
 function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: number, endExclusive: number) {
   const totalCount = bridge.getScrollbackCount();
   if (totalCount <= 0 || endExclusive <= startInclusive) {
@@ -628,7 +652,42 @@ function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: nu
   return lines;
 }
 
-function refreshMirrorCapturedScrollback(mirror: SessionMirror) {
+function buildMirrorRangeMap(mirror: SessionMirror) {
+  const linesByIndex = new Map<number, TerminalCell[]>();
+  mirror.bufferLines.forEach((line, offset) => {
+    linesByIndex.set(mirror.bufferStartIndex + offset, line);
+  });
+  return linesByIndex;
+}
+
+function collectContiguousMirrorLines(linesByIndex: Map<number, TerminalCell[]>, startIndex: number, endIndex: number) {
+  const normalizedStart = Math.max(0, startIndex);
+  const normalizedEnd = Math.max(normalizedStart, endIndex);
+  const lines: TerminalCell[][] = [];
+
+  for (let index = normalizedStart; index < normalizedEnd; index += 1) {
+    const row = linesByIndex.get(index);
+    if (!row) {
+      return null;
+    }
+    lines.push(row);
+  }
+
+  return lines;
+}
+
+function trimMirrorBufferToCache(mirror: SessionMirror) {
+  const maxLines = Math.max(mirror.rows, MAX_CAPTURED_SCROLLBACK_LINES);
+  if (mirror.bufferLines.length <= maxLines) {
+    return;
+  }
+
+  const trimCount = mirror.bufferLines.length - maxLines;
+  mirror.bufferLines.splice(0, trimCount);
+  mirror.bufferStartIndex += trimCount;
+}
+
+function rebuildMirrorAuthoritativeBuffer(mirror: SessionMirror) {
   const bridge = mirror.bridge;
   if (!bridge) {
     return;
@@ -638,24 +697,27 @@ function refreshMirrorCapturedScrollback(mirror: SessionMirror) {
   const absoluteRange = reconcileAbsoluteScrollbackRange(
     {
       lastScrollbackCount: mirror.lastScrollbackCount,
-      nextIndex: mirror.scrollbackNextIndex,
+      nextIndex: mirror.viewportStartIndex,
     },
     currentScrollbackCount,
   );
 
-  const capturedCount = Math.min(MAX_CAPTURED_SCROLLBACK_LINES, currentScrollbackCount);
-  const oldestStartIndex = Math.max(0, currentScrollbackCount - capturedCount);
-  mirror.capturedScrollbackLines =
-    capturedCount > 0
-      ? readScrollbackRangeByOldestIndex(bridge, oldestStartIndex, currentScrollbackCount)
+  const viewport = buildViewport(bridge);
+  const maxLines = Math.max(viewport.length, MAX_CAPTURED_SCROLLBACK_LINES);
+  const scrollbackKeepCount = Math.max(0, Math.min(currentScrollbackCount, maxLines - viewport.length));
+  const scrollbackStartOldestIndex = Math.max(0, currentScrollbackCount - scrollbackKeepCount);
+  const scrollbackTail =
+    scrollbackKeepCount > 0
+      ? readScrollbackRangeByOldestIndex(bridge, scrollbackStartOldestIndex, currentScrollbackCount)
       : [];
-  mirror.scrollbackBaseIndex = absoluteRange.startIndex;
-  mirror.scrollbackNextIndex = absoluteRange.nextIndex;
-  mirror.capturedStartIndex = Math.max(
-    absoluteRange.startIndex,
-    absoluteRange.nextIndex - mirror.capturedScrollbackLines.length,
-  );
+
+  mirror.viewportStartIndex = absoluteRange.nextIndex;
+  mirror.bufferStartIndex = Math.max(absoluteRange.startIndex, mirror.viewportStartIndex - scrollbackTail.length);
+  mirror.bufferLines = [...scrollbackTail, ...viewport];
   mirror.lastScrollbackCount = currentScrollbackCount;
+  mirror.rows = bridge.getRows();
+  mirror.cols = bridge.getCols();
+  trimMirrorBufferToCache(mirror);
 }
 
 function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {
@@ -665,11 +727,21 @@ function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIn
   }));
 }
 
+function sliceMirrorIndexedLines(
+  mirror: SessionMirror,
+  startIndex: number,
+  endIndex: number,
+) {
+  const actualStart = Math.max(mirror.bufferStartIndex, Math.floor(startIndex));
+  const actualEnd = Math.max(actualStart, Math.min(getMirrorAvailableEndIndex(mirror), Math.floor(endIndex)));
+  const startOffset = actualStart - mirror.bufferStartIndex;
+  const endOffset = actualEnd - mirror.bufferStartIndex;
+  return toIndexedLines(actualStart, mirror.bufferLines.slice(startOffset, endOffset));
+}
+
 function buildBufferPayload(
   mirror: SessionMirror,
   lines: TerminalIndexedLine[],
-  startIndex: number,
-  endIndex: number,
 ): TerminalBufferPayload | null {
   const bridge = mirror.bridge;
   if (!bridge) {
@@ -677,16 +749,17 @@ function buildBufferPayload(
   }
 
   const cursor = bridge.getCursor();
-  const cols = bridge.getCols();
-  const rows = bridge.getRows();
-  const viewportStartIndex = mirror.scrollbackNextIndex;
+  const viewportStartIndex = mirror.viewportStartIndex;
+  const viewportEndIndex = getMirrorViewportEndIndex(mirror);
 
   return {
     revision: mirror.revision,
-    startIndex,
-    endIndex,
-    cols,
-    rows,
+    startIndex: mirror.bufferStartIndex,
+    endIndex: getMirrorAvailableEndIndex(mirror),
+    viewportStartIndex,
+    viewportEndIndex,
+    cols: bridge.getCols(),
+    rows: bridge.getRows(),
     cursorRow: viewportStartIndex + cursor.row,
     cursorCol: cursor.col,
     cursorVisible: cursor.visible,
@@ -696,22 +769,11 @@ function buildBufferPayload(
 }
 
 function buildInitialBufferSyncPayload(session: ClientSession, mirror: SessionMirror): TerminalBufferPayload | null {
-  const bridge = mirror.bridge;
-  if (!bridge) {
-    return null;
-  }
-
-  const viewport = buildViewport(bridge);
-  const totalCaptured = mirror.capturedScrollbackLines.length;
-  const tailCount = Math.min(totalCaptured, INITIAL_SCROLLBACK_TAIL_LINES);
-  const tailLocalStart = totalCaptured - tailCount;
-  const tailAbsoluteStart = mirror.capturedStartIndex + tailLocalStart;
-  const indexedLines = [
-    ...toIndexedLines(tailAbsoluteStart, mirror.capturedScrollbackLines.slice(tailLocalStart, totalCaptured)),
-    ...toIndexedLines(mirror.scrollbackNextIndex, viewport),
-  ];
-  session.backfillCursor = tailAbsoluteStart;
-  return buildBufferPayload(mirror, indexedLines, tailAbsoluteStart, mirror.scrollbackNextIndex + viewport.length);
+  const totalAvailable = mirror.bufferLines.length;
+  const initialCount = Math.min(totalAvailable, INITIAL_SCROLLBACK_TAIL_LINES + mirror.rows);
+  const startIndex = Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - initialCount);
+  session.backfillCursor = startIndex;
+  return buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, startIndex, getMirrorAvailableEndIndex(mirror)));
 }
 
 function buildBackfillRangePayload(
@@ -719,15 +781,7 @@ function buildBackfillRangePayload(
   startAbsolute: number,
   endAbsolute: number,
 ): TerminalBufferPayload | null {
-  const bridge = mirror.bridge;
-  if (!bridge) {
-    return null;
-  }
-
-  const startOffset = Math.max(0, startAbsolute - mirror.capturedStartIndex);
-  const endOffset = Math.max(startOffset, endAbsolute - mirror.capturedStartIndex);
-  const indexedLines = toIndexedLines(startAbsolute, mirror.capturedScrollbackLines.slice(startOffset, endOffset));
-  return buildBufferPayload(mirror, indexedLines, startAbsolute, mirror.scrollbackNextIndex + bridge.getRows());
+  return buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, startAbsolute, endAbsolute));
 }
 
 function scheduleClientBackfill(session: ClientSession) {
@@ -736,7 +790,7 @@ function scheduleClientBackfill(session: ClientSession) {
     return;
   }
 
-  if (session.backfillTimer || session.backfillCursor <= mirror.capturedStartIndex) {
+  if (session.backfillTimer || session.backfillCursor <= mirror.bufferStartIndex) {
     return;
   }
 
@@ -753,7 +807,7 @@ function scheduleClientBackfill(session: ClientSession) {
     }
 
     const endAbsolute = session.backfillCursor;
-    const startAbsolute = Math.max(nextMirror.capturedStartIndex, endAbsolute - SCROLLBACK_BACKFILL_CHUNK_LINES);
+    const startAbsolute = Math.max(nextMirror.bufferStartIndex, endAbsolute - SCROLLBACK_BACKFILL_CHUNK_LINES);
     session.backfillCursor = startAbsolute;
 
     const payload = buildBackfillRangePayload(nextMirror, startAbsolute, endAbsolute);
@@ -761,7 +815,7 @@ function scheduleClientBackfill(session: ClientSession) {
       sendMessage(session, { type: 'buffer-range', payload });
     }
 
-    if (session.backfillCursor > nextMirror.capturedStartIndex) {
+    if (session.backfillCursor > nextMirror.bufferStartIndex) {
       scheduleClientBackfill(session);
     }
   }, BACKFILL_INTERVAL_MS);
@@ -847,37 +901,6 @@ function broadcastMirrorBufferDelta(mirror: SessionMirror, payload: TerminalBuff
   }
 }
 
-function syncMirrorScrollbackAppend(
-  mirror: SessionMirror,
-  startIndex: number,
-  lines: TerminalCell[][],
-  currentScrollbackCount: number,
-) {
-  const expectedNextIndex = mirror.scrollbackNextIndex;
-  if (startIndex !== expectedNextIndex) {
-    return false;
-  }
-
-  mirror.capturedScrollbackLines.push(...lines);
-  mirror.scrollbackNextIndex = startIndex + lines.length;
-  mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - Math.max(0, currentScrollbackCount));
-  if (mirror.capturedScrollbackLines.length > MAX_CAPTURED_SCROLLBACK_LINES) {
-    const trimCount = mirror.capturedScrollbackLines.length - MAX_CAPTURED_SCROLLBACK_LINES;
-    mirror.capturedScrollbackLines.splice(0, trimCount);
-    mirror.capturedStartIndex += trimCount;
-    mirror.scrollbackBaseIndex += trimCount;
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      if (!session || session.backfillCursor === null) {
-        continue;
-      }
-      session.backfillCursor = Math.max(session.backfillCursor, mirror.capturedStartIndex);
-    }
-  }
-
-  return true;
-}
-
 function flushMirrorUpdates(mirror: SessionMirror) {
   mirror.flushTimer = null;
 
@@ -888,51 +911,91 @@ function flushMirrorUpdates(mirror: SessionMirror) {
 
   const currentScrollbackCount = bridge.getScrollbackCount();
   if (mirror.lastScrollbackCount < 0 || currentScrollbackCount < mirror.lastScrollbackCount) {
-    refreshMirrorCapturedScrollback(mirror);
+    rebuildMirrorAuthoritativeBuffer(mirror);
     bridge.clearDirty();
     mirror.revision += 1;
     broadcastMirrorBufferReset(mirror);
     return;
   }
 
-  const appendedLines: TerminalIndexedLine[] = [];
+  const previousStartIndex = mirror.bufferStartIndex;
+  const previousLines = mirror.bufferLines.slice();
+  const previousEndIndex = previousStartIndex + previousLines.length;
+  const previousViewportStartIndex = mirror.viewportStartIndex;
+
+  const linesByIndex = buildMirrorRangeMap(mirror);
   const newScrollbackLines = currentScrollbackCount - mirror.lastScrollbackCount;
   if (newScrollbackLines > 0) {
-    const startIndex = mirror.scrollbackNextIndex;
     const appended = readScrollbackRangeByOldestIndex(
       bridge,
       currentScrollbackCount - newScrollbackLines,
       currentScrollbackCount,
     );
-    if (appended.length > 0) {
-      if (syncMirrorScrollbackAppend(mirror, startIndex, appended, currentScrollbackCount)) {
-        appendedLines.push(...toIndexedLines(startIndex, appended));
-      } else {
-        refreshMirrorCapturedScrollback(mirror);
-        bridge.clearDirty();
-        mirror.revision += 1;
-        broadcastMirrorBufferReset(mirror);
-        return;
-      }
+    appended.forEach((line, offset) => {
+      linesByIndex.set(previousViewportStartIndex + offset, line);
+    });
+  }
+
+  const nextViewportStartIndex = previousViewportStartIndex + newScrollbackLines;
+  const viewport = buildViewport(bridge);
+  viewport.forEach((line, offset) => {
+    linesByIndex.set(nextViewportStartIndex + offset, line);
+  });
+
+  const nextEndIndex = nextViewportStartIndex + viewport.length;
+  const nextStartIndex = Math.max(0, nextEndIndex - Math.max(viewport.length, MAX_CAPTURED_SCROLLBACK_LINES));
+  for (const index of [...linesByIndex.keys()]) {
+    if (index < nextStartIndex || index >= nextEndIndex) {
+      linesByIndex.delete(index);
     }
   }
 
-  const viewportStartIndex = mirror.scrollbackNextIndex;
-  const viewport = buildViewport(bridge);
-  const deltaPayload = buildBufferPayload(
-    mirror,
-    [...appendedLines, ...toIndexedLines(viewportStartIndex, viewport)],
-    mirror.capturedStartIndex,
-    viewportStartIndex + viewport.length,
-  );
-  if (deltaPayload && deltaPayload.lines.length > 0) {
+  const nextLines = collectContiguousMirrorLines(linesByIndex, nextStartIndex, nextEndIndex);
+  if (!nextLines) {
+    rebuildMirrorAuthoritativeBuffer(mirror);
+    bridge.clearDirty();
     mirror.revision += 1;
-    deltaPayload.revision = mirror.revision;
-    broadcastMirrorBufferDelta(mirror, deltaPayload);
+    broadcastMirrorBufferReset(mirror);
+    return;
   }
 
+  mirror.bufferStartIndex = nextStartIndex;
+  mirror.bufferLines = nextLines;
+  mirror.viewportStartIndex = nextViewportStartIndex;
   mirror.lastScrollbackCount = currentScrollbackCount;
+  mirror.rows = bridge.getRows();
+  mirror.cols = bridge.getCols();
+
+  let earliestChangedIndex: number | null = null;
+  for (let index = nextStartIndex; index < nextEndIndex; index += 1) {
+    const nextRow = mirror.bufferLines[index - nextStartIndex];
+    const previousRow =
+      index >= previousStartIndex && index < previousEndIndex
+        ? previousLines[index - previousStartIndex]
+        : null;
+    if (!previousRow || !rowsEqual(previousRow, nextRow)) {
+      earliestChangedIndex = index;
+      break;
+    }
+  }
+
   bridge.clearDirty();
+
+  if (earliestChangedIndex === null && newScrollbackLines === 0 && previousViewportStartIndex === mirror.viewportStartIndex) {
+    return;
+  }
+
+  mirror.revision += 1;
+  const payload = buildBufferPayload(
+    mirror,
+    earliestChangedIndex === null
+      ? []
+      : sliceMirrorIndexedLines(mirror, earliestChangedIndex, nextEndIndex),
+  );
+  if (payload) {
+    payload.revision = mirror.revision;
+    broadcastMirrorBufferDelta(mirror, payload);
+  }
 }
 
 function computeMirrorFlushInterval(mirror: SessionMirror) {
@@ -986,7 +1049,9 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.state = 'connecting';
   mirror.title = mirror.sessionName;
   mirror.lastScrollbackCount = -1;
-  mirror.capturedScrollbackLines = [];
+  mirror.bufferLines = [];
+  mirror.bufferStartIndex = 0;
+  mirror.viewportStartIndex = 0;
   clearMirrorFlushTimer(mirror);
 
   try {
@@ -1044,7 +1109,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   });
 
   try {
-    refreshMirrorCapturedScrollback(mirror);
+    rebuildMirrorAuthoritativeBuffer(mirror);
     mirror.bridge.clearDirty();
     mirror.revision += 1;
     broadcastMirrorBufferReset(mirror);
@@ -1056,12 +1121,11 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
     );
 
     try {
-      const viewport = buildViewport(mirror.bridge);
-      mirror.lastScrollbackCount = mirror.bridge.getScrollbackCount();
-      mirror.scrollbackNextIndex = Math.max(mirror.scrollbackNextIndex, mirror.lastScrollbackCount);
-      mirror.scrollbackBaseIndex = Math.max(0, mirror.scrollbackNextIndex - mirror.lastScrollbackCount);
-      mirror.capturedStartIndex = mirror.scrollbackNextIndex;
-      mirror.capturedScrollbackLines = [];
+      mirror.lastScrollbackCount = -1;
+      mirror.bufferLines = [];
+      mirror.bufferStartIndex = 0;
+      mirror.viewportStartIndex = 0;
+      rebuildMirrorAuthoritativeBuffer(mirror);
       mirror.bridge.clearDirty();
       mirror.revision += 1;
       for (const sessionId of mirror.subscribers) {
@@ -1071,18 +1135,13 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
         }
         session.title = mirror.title;
         session.sessionName = mirror.sessionName;
-        session.backfillCursor = mirror.scrollbackNextIndex;
+        session.backfillCursor = mirror.bufferStartIndex;
         if (session.state !== 'connected') {
           session.state = 'connected';
           sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
         }
         sendMessage(session, { type: 'title', payload: mirror.title });
-        const fallbackPayload = buildBufferPayload(
-          mirror,
-          toIndexedLines(mirror.scrollbackNextIndex, viewport),
-          mirror.scrollbackNextIndex,
-          mirror.scrollbackNextIndex + viewport.length,
-        );
+        const fallbackPayload = buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror)));
         if (fallbackPayload) {
           fallbackPayload.revision = mirror.revision;
           sendMessage(session, { type: 'buffer-sync', payload: fallbackPayload });
@@ -1162,9 +1221,11 @@ function handleResize(session: ClientSession, cols: number, rows: number) {
   mirror.ptyProcess.resize(cols, rows);
   mirror.bridge.resize(cols, rows);
   mirror.lastScrollbackCount = -1;
-  mirror.capturedScrollbackLines = [];
+  mirror.bufferLines = [];
+  mirror.bufferStartIndex = 0;
+  mirror.viewportStartIndex = 0;
   clearMirrorFlushTimer(mirror);
-  refreshMirrorCapturedScrollback(mirror);
+  rebuildMirrorAuthoritativeBuffer(mirror);
   mirror.bridge.clearDirty();
   mirror.revision += 1;
   broadcastMirrorBufferReset(mirror);
@@ -1200,12 +1261,12 @@ function handleBufferRangeRequest(session: ClientSession, startIndex: number, en
     return;
   }
 
-  refreshMirrorCapturedScrollback(mirror);
+  rebuildMirrorAuthoritativeBuffer(mirror);
 
   const normalizedStart = Math.max(0, Math.floor(startIndex));
   const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
-  const availableStart = mirror.capturedStartIndex;
-  const availableEnd = mirror.scrollbackNextIndex;
+  const availableStart = mirror.bufferStartIndex;
+  const availableEnd = getMirrorAvailableEndIndex(mirror);
   const actualStart = Math.max(availableStart, normalizedStart);
   const actualEnd = Math.min(availableEnd, normalizedEnd);
   const payload = buildBackfillRangePayload(mirror, actualStart, actualEnd);

@@ -42,9 +42,13 @@ export type SessionState =
   | 'closed';     // 已关闭
 
 export interface SessionBufferState {
-  lines: TerminalCell[][];          // authoritative line buffer for this session
-  startIndex: number;               // absolute index for the first line in `lines`
-  endIndex: number;                 // exclusive absolute index for the last line in `lines`
+  lines: TerminalCell[][];          // locally cached contiguous mirror window for this session
+  startIndex: number;               // absolute index for the first locally cached line
+  endIndex: number;                 // exclusive absolute index for the last locally cached line
+  availableStartIndex: number;      // earliest absolute line currently available on daemon truth
+  availableEndIndex: number;        // exclusive absolute end currently available on daemon truth
+  viewportStartIndex: number;       // absolute row index for viewport row 0
+  viewportEndIndex: number;         // exclusive absolute row index for viewport tail
   cols: number;
   rows: number;
   cursorRow: number;                // absolute cursor row
@@ -128,15 +132,17 @@ export interface TerminalIndexedLine {
 
 export interface TerminalBufferPayload {
   revision: number;
-  startIndex: number;
-  endIndex: number;
+  startIndex: number;               // authoritative available window start on daemon
+  endIndex: number;                 // authoritative available window end on daemon (exclusive)
+  viewportStartIndex: number;       // authoritative viewport start absolute row
+  viewportEndIndex: number;         // authoritative viewport end absolute row
   cols: number;
   rows: number;
   cursorRow: number;
   cursorCol: number;
   cursorVisible: boolean;
   cursorKeysApp: boolean;
-  lines: TerminalIndexedLine[];
+  lines: TerminalIndexedLine[];     // concrete rows carried by this message; may be full window or subset
 }
 
 export interface PasteImagePayload {

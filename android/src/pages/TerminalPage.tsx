@@ -395,7 +395,12 @@ export function TerminalPage({
           <TerminalQuickBar
             quickActions={quickActions}
             shortcutActions={shortcutActions}
-            onSendSequence={onQuickActionInput}
+            onSendSequence={(sequence) => {
+              onQuickActionInput?.(sequence);
+              if (terminalKeyboardRequested || keyboardInset > 0) {
+                window.setTimeout(focusTerminalInput, 0);
+              }
+            }}
             onImagePaste={onImagePaste}
             keyboardVisible={keyboardLayoutActive && keyboardInset > 0}
             keyboardInsetPx={Math.max(keyboardInset, viewportInset)}
