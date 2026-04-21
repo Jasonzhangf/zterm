@@ -107,6 +107,12 @@ export function TerminalPage({
     input.setSelectionRange(end, end);
   };
 
+  const keepTerminalInputFocused = () => {
+    window.setTimeout(focusTerminalInput, 0);
+    window.setTimeout(focusTerminalInput, 32);
+    window.setTimeout(focusTerminalInput, 120);
+  };
+
   const handleToggleKeyboard = async () => {
     if (terminalKeyboardRequested || keyboardInset > 0) {
       setTerminalKeyboardRequested(false);
@@ -123,8 +129,7 @@ export function TerminalPage({
     setTerminalKeyboardRequested(true);
     focusTerminalInput();
     if (isAndroid) {
-      window.setTimeout(focusTerminalInput, 32);
-      window.setTimeout(focusTerminalInput, 120);
+      keepTerminalInputFocused();
       return;
     }
 
@@ -398,7 +403,7 @@ export function TerminalPage({
             onSendSequence={(sequence) => {
               onQuickActionInput?.(sequence);
               if (terminalKeyboardRequested || keyboardInset > 0) {
-                window.setTimeout(focusTerminalInput, 0);
+                keepTerminalInputFocused();
               }
             }}
             onImagePaste={onImagePaste}
@@ -409,7 +414,12 @@ export function TerminalPage({
             onShortcutActionsChange={onShortcutActionsChange}
             sessionDraft={sessionDraft}
             onSessionDraftChange={onSessionDraftChange}
-            onSessionDraftSend={onSessionDraftSend}
+            onSessionDraftSend={(value) => {
+              onSessionDraftSend?.(value);
+              if (terminalKeyboardRequested || keyboardInset > 0) {
+                keepTerminalInputFocused();
+              }
+            }}
           />
         </div>
       </div>

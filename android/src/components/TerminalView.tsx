@@ -234,7 +234,6 @@ export function TerminalView({
   const followOutputRef = useRef(true);
   const scrollLockRef = useRef(false);
   const programmaticScrollRef = useRef(0);
-  const userVerticalScrollActiveRef = useRef(false);
   const manualScrollAnchorRef = useRef<{
     absoluteTopLineIndex?: number;
     topLineOffset: number;
@@ -355,7 +354,7 @@ export function TerminalView({
   const updateFollowOutputFromHost = useCallback((host: HTMLDivElement, reason: 'user' | 'programmatic' = 'programmatic') => {
     const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
     const distanceFromBottom = Math.max(0, maxScrollTop - host.scrollTop);
-    const lockedReading = scrollLockRef.current || userVerticalScrollActiveRef.current;
+    const lockedReading = scrollLockRef.current;
 
     if (lockedReading) {
       if (reason === 'user' && distanceFromBottom <= FOLLOW_BOTTOM_THRESHOLD_PX) {
@@ -465,13 +464,6 @@ export function TerminalView({
       } else {
         restoreReadingAnchor();
       }
-      syncMetrics();
-      return;
-    }
-
-    if (userVerticalScrollActiveRef.current) {
-      setHostScrollTop(host, Math.min(host.scrollTop, Math.max(0, host.scrollHeight - host.clientHeight)));
-      updateManualScrollAnchor(host);
       syncMetrics();
       return;
     }
@@ -923,31 +915,17 @@ export function TerminalView({
             return;
           }
 
-          if (Math.abs(deltaY) >= Math.abs(deltaX)) {
-            gesture.mode = 'vertical';
-            gesture.startY = touch.clientY;
-            gesture.startScrollTop = host.scrollTop;
-            scrollLockRef.current = true;
-            setViewMode('reading');
-            updateManualScrollAnchor(host);
-          } else {
+          if (Math.abs(deltaX) > Math.abs(deltaY)) {
             gesture.mode = 'horizontal';
             gesture.startX = touch.clientX;
             onHorizontalSwipeStart?.();
+          } else {
+            gesture.mode = 'vertical';
+            return;
           }
         }
 
         if (gesture.mode === 'vertical') {
-          if (host.scrollHeight <= host.clientHeight + 1) {
-            requestOlderHistory();
-            return;
-          }
-          const nextDeltaY = touch.clientY - gesture.startY;
-          if (!gesture.moved && Math.abs(nextDeltaY) < 2) {
-            return;
-          }
-          gesture.moved = true;
-          userVerticalScrollActiveRef.current = true;
           if (host.scrollTop <= resolvedLineHeightPx * BUFFER_RANGE_REQUEST_THRESHOLD_LINES) {
             requestOlderHistory();
           }
@@ -965,7 +943,6 @@ export function TerminalView({
       }}
       onTouchEnd={() => {
         const gesture = touchGestureRef.current;
-        userVerticalScrollActiveRef.current = false;
         if (gesture.active && gesture.mode === 'horizontal') {
           const completed = Math.abs(gesture.deltaX) >= 56 && Math.abs(gesture.deltaX) > Math.abs(gesture.deltaY);
           onHorizontalSwipeEnd?.(gesture.deltaX, completed);
@@ -974,7 +951,6 @@ export function TerminalView({
       }}
       onTouchCancel={() => {
         const gesture = touchGestureRef.current;
-        userVerticalScrollActiveRef.current = false;
         if (gesture.active && gesture.mode === 'horizontal') {
           onHorizontalSwipeEnd?.(gesture.deltaX, false);
         }

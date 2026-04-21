@@ -8,6 +8,7 @@ const FLOATING_BUBBLE_MARGIN = 10;
 const FLOATING_BUBBLE_LONG_PRESS_MS = 260;
 const QUICK_BAR_SIDE_PADDING = 6;
 const QUICK_BAR_ROW_GAP = 4;
+const QUICK_BAR_FIXED_COLUMNS = 3;
 const FIXED_BUTTON_MIN_WIDTH = 32;
 const FIXED_CLUSTER_PADDING_X = 3;
 const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
@@ -623,7 +624,8 @@ export function TerminalQuickBar({
   };
 
   const fixedClusterStyle = {
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: `repeat(${QUICK_BAR_FIXED_COLUMNS}, minmax(${FIXED_BUTTON_MIN_WIDTH}px, 1fr))`,
     gap: `${QUICK_BAR_ROW_GAP}px`,
     flexShrink: 0,
     alignItems: 'center',
@@ -632,6 +634,7 @@ export function TerminalQuickBar({
     backgroundColor: 'rgba(59, 74, 108, 0.95)',
     border: '1px solid rgba(255,255,255,0.12)',
     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+    width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
   } as const;
 
   const scrollTrackShellStyle = {
@@ -870,11 +873,11 @@ export function TerminalQuickBar({
         tabIndex={-1}
         onPointerDown={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
           if (action.id !== 'keyboard') {
             return;
           }
-          event.preventDefault();
           suppressKeyboardClickRef.current = true;
           onToggleKeyboard?.();
           window.setTimeout(() => {
@@ -882,6 +885,8 @@ export function TerminalQuickBar({
           }, 220);
         }}
         onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
           if (action.id === 'keyboard') {
             if (suppressKeyboardClickRef.current) {
@@ -906,6 +911,7 @@ export function TerminalQuickBar({
         }}
         style={{
           minHeight: compact ? '32px' : '34px',
+          width: fixed ? '100%' : undefined,
           minWidth: fixed ? `${FIXED_BUTTON_MIN_WIDTH}px` : action.label.length > 4 ? '58px' : action.label.length > 2 ? '48px' : '34px',
           padding: fixed ? '0 6px' : '0 10px',
           border: 'none',
@@ -921,6 +927,9 @@ export function TerminalQuickBar({
           fontWeight: 700,
           cursor: 'pointer',
           flexShrink: 0,
+          appearance: 'none',
+          WebkitTapHighlightColor: 'transparent',
+          touchAction: 'manipulation',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -935,13 +944,13 @@ export function TerminalQuickBar({
     <div
       onPointerDownCapture={(event) => {
         event.stopPropagation();
-        if (!(event.target as HTMLElement | null)?.closest('button,input,textarea,label,[data-quickbar-scroll-track="true"]')) {
+        if (!(event.target as HTMLElement | null)?.closest('input,textarea')) {
           event.preventDefault();
         }
       }}
       onTouchStartCapture={(event) => {
         event.stopPropagation();
-        if (!(event.target as HTMLElement | null)?.closest('button,input,textarea,label,[data-quickbar-scroll-track="true"]')) {
+        if (!(event.target as HTMLElement | null)?.closest('input,textarea')) {
           event.preventDefault();
         }
       }}
@@ -1865,7 +1874,7 @@ export function TerminalQuickBar({
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'stretch',
           gap: `${QUICK_BAR_ROW_GAP}px`,
           padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
           marginBottom: `${QUICK_BAR_ROW_GAP}px`,
@@ -2046,7 +2055,7 @@ export function TerminalQuickBar({
         style={{
           minHeight: '40px',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'stretch',
           gap: `${QUICK_BAR_ROW_GAP}px`,
           padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
           backgroundColor: 'rgba(255,255,255,0.02)',
