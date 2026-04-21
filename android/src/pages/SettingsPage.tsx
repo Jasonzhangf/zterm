@@ -22,7 +22,7 @@ interface SettingsPageProps {
   updateError: string | null;
   onSave: (settings: BridgeSettings) => void;
   onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
-  onCheckForUpdate: () => void;
+  onCheckForUpdate: (next: AppUpdatePreferences) => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
   onBack: () => void;
@@ -308,7 +308,7 @@ export function SettingsPage({
             ) : null}
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button
-                onClick={onCheckForUpdate}
+                onClick={() => onCheckForUpdate(updateDraft)}
                 disabled={updateChecking}
                 style={{
                   minHeight: '44px',
