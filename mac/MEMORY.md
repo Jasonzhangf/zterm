@@ -25,3 +25,6 @@
 - [2026-04-20] packaged smoke 要覆盖 `+ new tab`、`close tab`、`saved target reopen` 三条路径，否则“真实 tabs”只是在静态 UI 上看起来像 tabs
 - [2026-04-20] Mac 排版若开始发散成“顶部太厚、terminal 内再套一层 tabs/toolbars、左右等宽”，要立即回到 terminal-first：terminal 列更宽、顶部更薄、pane 内层级更少
 - [2026-04-20] Jason 对桌面终端的最新冻结不是“右侧抽屉”，而是“固定左 rail + 右侧可选多列 vertical split workspace”；split 先做比例 preset（1/2/3），不要先做自由拖拽
+- [2026-04-21] Jason 进一步冻结了 Mac 方向：不要再把左 rail / inspector / demo shell 当主视图；默认应是干净 terminal workspace，无连接时中央 `+`，连接配置按需弹出，宽屏价值优先给 `1 / 2 / 3` 个 vertical terminal panes
+- [2026-04-21] Mac 黑屏排查结论：不是外部 `@jsonstudio/wtermmod-*` 依赖被本地 repo 偷改导致；zterm Mac 当前直接问题是 **本 repo 内 `packages/shared` 仍只消费旧协议 `snapshot / viewport-update / scrollback-update`，而 Android daemon 已切到 `buffer-sync / buffer-delta / buffer-range`**，因此会出现“能列 session，但连接后黑屏”
+- [2026-04-21] Mac shell workspace 打包 smoke 时，要先意识到 renderer 会恢复上次 panes/tabs/connection 布局；如果看到 Split 变灰或默认不是单 pane，先判断是不是 restore-last-state 生效，而不是误判布局代码失效

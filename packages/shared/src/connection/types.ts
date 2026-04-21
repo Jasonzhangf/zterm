@@ -71,6 +71,12 @@ export interface SessionBufferState {
   remoteSnapshot?: TerminalSnapshot;
 }
 
+export interface TerminalRenderBufferProjection {
+  lines: string[];
+  scrollbackStartIndex?: number;
+  revision: number;
+}
+
 export const STORAGE_KEYS = {
   HOSTS: 'zterm:hosts',
   BRIDGE_SETTINGS: 'zterm:bridge-settings',

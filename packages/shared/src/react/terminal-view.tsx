@@ -1,14 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@jsonstudio/wtermmod-react/css';
-import type { TerminalCell, TerminalSnapshot } from '../connection/types';
+import type { TerminalCell, TerminalRenderBufferProjection } from '../connection/types';
 
 interface TerminalViewProps {
   sessionId: string | null;
+  projection?: TerminalRenderBufferProjection;
   initialOutputHistory?: string;
   initialBufferLines?: string[];
   scrollbackStartIndex?: number;
   bufferRevision?: number;
-  snapshot?: TerminalSnapshot;
   active?: boolean;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
@@ -162,11 +162,11 @@ const ViewportRow = memo(function ViewportRow({ row, rowIndex, rowHeight, cursor
 
 export function TerminalView({
   sessionId,
+  projection,
   initialOutputHistory = '',
   initialBufferLines,
   scrollbackStartIndex,
   bufferRevision = 0,
-  snapshot,
   active = false,
   allowDomFocus = true,
   domInputOffscreen = false,
@@ -182,23 +182,35 @@ export function TerminalView({
   const resizeCommitTimerRef = useRef<number | null>(null);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
 
-  const fallbackLines = useMemo(() => {
-    if (initialBufferLines?.length) {
-      return initialBufferLines;
+  const resolvedProjection = useMemo<TerminalRenderBufferProjection>(() => {
+    if (projection) {
+      return projection;
     }
-    return initialOutputHistory ? initialOutputHistory.split('\n') : [];
-  }, [initialBufferLines, initialOutputHistory]);
+    const lines = initialBufferLines?.length
+      ? initialBufferLines
+      : initialOutputHistory
+        ? initialOutputHistory.split('\n')
+        : [];
+    return {
+      lines,
+      scrollbackStartIndex,
+      revision: bufferRevision,
+    };
+  }, [bufferRevision, initialBufferLines, initialOutputHistory, projection, scrollbackStartIndex]);
 
-  const viewportRows = snapshot?.viewport?.length
-    ? snapshot.viewport
-    : buildFallbackViewport(fallbackLines.slice(-DEFAULT_ROWS));
-  const scrollbackLines = snapshot?.scrollbackLines
-    ?? fallbackLines.slice(0, Math.max(0, fallbackLines.length - viewportRows.length));
-  const resolvedScrollbackStartIndex = snapshot?.scrollbackStartIndex ?? scrollbackStartIndex;
-  const cursor = snapshot?.cursor;
-  const cursorRow = snapshot && cursor?.visible ? cursor.row : null;
-  const cursorCol = snapshot && cursor?.visible ? cursor.col : null;
-  const cursorKeysApp = snapshot?.cursorKeysApp ?? false;
+  const bufferLines = useMemo(() => resolvedProjection.lines, [resolvedProjection.lines]);
+  const viewportRows = useMemo(
+    () => buildFallbackViewport(bufferLines.slice(-DEFAULT_ROWS)),
+    [bufferLines],
+  );
+  const scrollbackLines = useMemo(
+    () => bufferLines.slice(0, Math.max(0, bufferLines.length - viewportRows.length)),
+    [bufferLines, viewportRows.length],
+  );
+  const resolvedScrollbackStartIndex = resolvedProjection.scrollbackStartIndex;
+  const cursorRow = null;
+  const cursorCol = null;
+  const cursorKeysApp = false;
 
   const scrollToBottom = useCallback(() => {
     const host = containerRef.current;
@@ -296,7 +308,7 @@ export function TerminalView({
     if (followOutputRef.current) {
       scrollToBottom();
     }
-  }, [active, bufferRevision, scrollToBottom, snapshot, scrollbackLines.length, viewportRows.length]);
+  }, [active, resolvedProjection.revision, scrollToBottom, scrollbackLines.length, viewportRows.length]);
 
   useEffect(() => {
     const host = containerRef.current;
@@ -471,7 +483,7 @@ export function TerminalView({
         ['--term-row-height' as string]: resolvedRowHeight || rowHeight,
       }}
     >
-      <div className="term-grid" data-cursor-source={snapshot ? 'remote' : 'hydrated'}>
+      <div className="term-grid" data-cursor-source="buffer-store">
         {scrollbackLines.map((line, index) => (
           <div
             key={`sb-${(resolvedScrollbackStartIndex ?? 0) + index}`}

@@ -19,23 +19,23 @@
 
 - Renderer App
   - React 根组件
-  - 最小 stage 页面
-  - Tabby-inspired desktop shell：
+  - terminal-first workspace：
     - compact window chrome
-    - workspace/tab strip（真实映射当前 target + split preset 状态）
-    - 固定左 rail + 右侧 split workspace
-    - 右侧 split workspace 当前只做 vertical split，不做自由拖拽
-    - split preset 当前最小真源为 `1 / 2 / 3`
+    - 极薄 workspace/tab strip（真实映射当前 target + split preset 状态）
+    - 默认单工作区；无连接时中央显示 `+`
+    - new/edit connection 走按需 modal / sheet，不常驻占位
+    - workspace 当前只做 vertical split
+    - 默认单 pane；split 时插入新的 column pane，初始均分
+    - pane ratio 支持 drag resize，但不做任意嵌套 / 横向分屏
     - open target tabs 当前采用 `single runtime · multi tabs`：
       - 可以同时维护多个 open target descriptor
-      - 但 app-level bridge websocket/runtime 同时只服务一个 active target
-      - 切 tab 时如 target 变更，则切换 active target 并重连
-    - 列宽遵守 terminal-first：
-      - connections rail 更窄
-      - 右侧 split workspace 通过比例模板决定各列宽度
-      - inspector 只是 split pane 的一种视图，不与 terminal 等权
+      - 每个 pane 内可以挂多个 tabs，空 tab 显示 `+`
+      - 但 app-level bridge websocket/runtime 同时只服务一个 active pane 的 active target
+      - 切 pane / 切 tab 时如 target 变更，则切换 active target 并重连
+    - 低频 profile / export 走顶部菜单，不常驻 rail
+    - 快捷输入 / 剪贴板走 overlay palette，不常驻右栏
   - 单行多列 + 垂直分屏布局
-  - Connections / Details / Terminal 三个 pane 的统一编排
+  - terminal pane 是主真相；连接配置只是进入动作，不是常驻主视图
 
 - Shared Connection Truth
   - `packages/shared/src/connection/*`
@@ -51,6 +51,7 @@
   - `packages/shared/src/connection/terminal-buffer.ts`
   - `packages/shared/src/react/terminal-view.tsx`
   - 统一承载 websocket 协议、buffer reducer、snapshot render
+  - **协议必须与 daemon 同步演进**；客户端若仍只消费 `snapshot / viewport-update / scrollback-update`，而 daemon 已切到 `buffer-sync / buffer-delta / buffer-range`，就会出现“能列 session，但连接后黑屏”
 
 - Mac App-level Bridge Orchestration
   - `mac/src/lib/use-bridge-terminal.ts`
@@ -71,8 +72,8 @@
   - 不以上下堆叠多 pane 作为主方案
 
 - Tabby 只作为桌面壳层参考，不作为布局真源：
-  - 可以借用紧凑 chrome、顶部 tab strip、左侧会话栏、主终端优先的视觉组织
-  - 不照搬其任意自由拖拽 / desktop-only 交互模型
+  - 可以借用紧凑 chrome、顶部 tab strip、主终端优先的视觉组织
+  - 不照搬其左 rail / inspector 常驻 / 自由拖拽布局
   - 真正的 pane 编排仍由 shared `layout profile + PaneStage` 决定
 
 - Mac 第一阶段只先做桌面壳上的 stage：

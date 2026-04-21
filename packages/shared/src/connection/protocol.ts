@@ -27,15 +27,28 @@ export type BridgeClientMessage =
   | { type: 'ping' }
   | { type: 'close' };
 
-export type BridgeServerMessage =
-  | { type: 'connected'; payload: { sessionId: string } }
-  | { type: 'sessions'; payload: { sessions: string[] } }
+export type BridgeBufferMessage =
   | { type: 'data'; payload: string }
   | { type: 'snapshot'; payload: TerminalSnapshot }
   | { type: 'viewport-update'; payload: TerminalViewportUpdate }
-  | { type: 'scrollback-update'; payload: TerminalScrollbackUpdate }
+  | { type: 'scrollback-update'; payload: TerminalScrollbackUpdate };
+
+export type BridgeServerControlMessage =
+  | { type: 'connected'; payload: { sessionId: string } }
+  | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
   | { type: 'pong' };
+
+export type BridgeServerMessage = BridgeBufferMessage | BridgeServerControlMessage;
+
+export function isBridgeBufferMessage(message: BridgeServerMessage): message is BridgeBufferMessage {
+  return (
+    message.type === 'data'
+    || message.type === 'snapshot'
+    || message.type === 'viewport-update'
+    || message.type === 'scrollback-update'
+  );
+}

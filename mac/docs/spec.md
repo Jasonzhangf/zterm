@@ -9,43 +9,39 @@
 - 能启动窗口
 - 能展示 `zterm` 的单行多列 + 垂直分屏布局 stage
 
-当前阶段先证明桌面壳与布局真源成立，并把 Android 已有的连接配置流程接进桌面壳；真正的 tmux live session 仍后置。
-当前阶段已从“最小壳 + 连接配置”推进到：
+当前阶段先证明桌面壳与布局真源成立，并直接收口到 **terminal-first workspace**。  
+桌面端不再以“左 rail + inspector + demo shell”为主，而是以 **干净终端 + 按需连接 + 竖向分屏** 为主。
+
+当前冻结方向：
 
 - 共享连接配置真源已接入 Mac
 - 真实 bridge websocket attach 已接入 Mac
-- 共享 terminal render 已能消费 snapshot / viewport-update / scrollback-update
-- 壳层视觉参考 Tabby：更紧凑的桌面终端 chrome、左侧 profile rail、顶部 tab strip、主终端画布优先
-- 顶部 tab strip 已进入真实状态映射：会反映当前 connection / terminal target 状态，并承载右侧 split preset
-- 右侧 Details 已收成轻量 inspector：优先展示 target/session/bridge 概要，再展开连接表单
-- 顶部已支持最小真实 open target tabs：
-  - saved target 可开成 tab
-  - `+` 可进入 new connection tab
-  - tab 可关闭
-  - 当前阶段仍是 `single runtime · multi tabs`
-- 版式已进入 terminal-first 收口：
-  - Terminal 列宽显著大于左 rail
-  - 顶部 chrome / shell tabs / pane header 已压缩
-  - Terminal pane 内不再叠第二层假 tabs/toolbars
-  - 左 rail 固定窄列，右侧 workspace 允许按比例切 1 / 2 / 3 个 vertical split panes
+- 但桌面 UI 方向重新冻结为：
+  - 默认只显示一个干净 terminal workspace
+  - 无连接时中间显示一个 `+`
+  - 点击 `+` 才进入 new connection / edit connection
+  - 成功连接后主视图应尽量只剩 terminal
+  - 宽屏优先用于 `1 / 2 / 3` 个 **vertical split panes**
+  - 不再把左 rail / inspector / 厚 chrome 当成主视觉
 
 ## 当前范围
 
 - Electron 主进程
 - Vite + React 渲染进程
 - 最小窗口壳
-- 单行多列 + 垂直分屏 stage
-- 基础标题栏 / pane 标题 / profile 标识
-- Tabby-inspired 壳层特征：
-  - 紧凑顶部 window chrome
-  - 左侧连接 / profile rail
-- 顶部 tab strip
-- 主 terminal 画布优先
-- 右侧 details 作为 inspector 视图之一，但不再固定死成唯一第二列
-- 右侧 workspace 需支持按比例切换 multiple vertical panes（类似 iTerm2 的垂直分屏）
-- tab strip 要尽量承载当前 target / inspector 的真实状态，而不是静态占位文案
+- 单工作区 terminal-first stage
+- 基础标题栏 / 极薄 pane 标题
+- 顶部 tab strip（只保留必要状态，不做厚重 shell）
+- 中央空态 `+`
+- 连接配置 sheet / modal（按需出现，不常驻占空间）
+- 主 workspace 默认单 pane；按需 split 成多个 vertical panes
+- split 新增时默认均分，支持拖拽调整比例
+- 每个 pane 默认就是 terminal 视角，尽量避免无关装饰
+- 每个 pane 内支持多个 tabs；workspace 默认恢复上次 panes/tabs/connection 布局
 - shell tabs 当前只保证“多个 open target + 单个 live runtime”的真实闭环；不宣称并发多 websocket / 多 live session
-- 桌面排版优先级高于额外壳层装饰：一旦壳层和主终端阅读区域冲突，先压缩 chrome / tab / meta 区，保证 terminal surface 最大化
+- profiles 为低频菜单动作：保存 / 恢复 / 导出，不常驻侧栏
+- 快捷菜单为 overlay：`快捷输入 / 剪贴板` 两个 tab，不常驻右栏
+- 桌面排版优先级高于额外壳层装饰：一旦壳层和主终端阅读区域冲突，先压缩或移除 chrome / tab / meta 区，保证 terminal surface 最大化
 - 可构建的 `.app` 或 unpacked 可执行目录
 - 基于 shared truth 的连接配置流程：
   - saved hosts
@@ -72,27 +68,26 @@
 1. `pnpm --filter @zterm/mac type-check` 通过
 2. `pnpm --filter @zterm/mac build` 通过
 3. `pnpm --filter @zterm/mac package` 生成最小可执行包或 unpacked `.app`
-4. 应用启动后能看到单行多列 + 垂直分屏 stage
-5. Connections / Details / Terminal 三个 pane 使用同一 shared truth
+4. 应用启动后能看到单工作区 terminal-first stage
+5. 连接配置与 terminal workspace 使用同一 shared truth
 6. Mac renderer 能完成：
    - session discovery
    - `connect + stream-mode(active)`
-   - live terminal snapshot render
+   - live terminal render
 7. 证据落到 `mac/evidence/`
-8. 视觉壳层需体现 Tabby 风格参考，但不能破坏仓库唯一布局真源：
-   - 仍然是一行多列
-   - 仍然是垂直分屏
-   - 不引入第二套 desktop-only 编排语义
-9. 在桌面 workspace 场景下，主舞台必须保持：
-   - 左侧窄 Connections rail
-   - 右侧 split workspace
+8. 宽屏场景下必须优先服务 terminal 视角，而不是 rail / inspector / demo chrome
+9. workspace 最小能力验收：
+   - 无连接时中央可见 `+`
+   - 点击后能进入连接配置
+   - 连接后主视图为 terminal
    - split workspace 至少支持 `1 / 2 / 3` 个按比例分列的 vertical panes
 10. 顶部 tabs 的最小能力验收：
    - 可以打开 saved target 成为 tab
    - 可以 `+` 新建 tab
    - 可以关闭当前 tab
    - active tab 与当前 live runtime 的 target 对应关系明确
-11. split preset 的最小能力验收：
-   - 可以在 packaged `.app` 中切换 `1 / 2 / 3`
-   - 切换后右侧 workspace 的 pane 数和比例会改变
+11. shell 交互的最小能力验收：
+   - 每个 pane 可维护多个 tab
+   - 关闭最后一个 tab 后回到空 `+` tab
+   - packaged `.app` 中可以 split / drag / restore last workspace
    - 仍保持 terminal-first，不出现上下堆叠主方案

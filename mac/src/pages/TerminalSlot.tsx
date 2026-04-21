@@ -1,16 +1,25 @@
-import { TerminalView, formatBridgeSessionTarget, type Host } from '@zterm/shared';
-import type { BridgeTerminalState } from '../lib/use-bridge-terminal';
+import { TerminalView, formatBridgeSessionTarget, type Host, type TerminalRenderBufferProjection } from '@zterm/shared';
+import type { TerminalConnectionState } from '../lib/terminal-runtime';
 
 interface TerminalSlotProps {
   host?: Host;
-  session: BridgeTerminalState;
+  session: TerminalConnectionState;
+  projection: TerminalRenderBufferProjection;
   isDetailsVisible: boolean;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   onDisconnect: () => void;
 }
 
-export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResize, onDisconnect }: TerminalSlotProps) {
+export function TerminalSlot({
+  host,
+  session,
+  projection,
+  isDetailsVisible,
+  onInput,
+  onResize,
+  onDisconnect,
+}: TerminalSlotProps) {
   const activeTarget = session.activeTarget;
   const hasLiveTerminal = Boolean(activeTarget);
   const targetLabel = activeTarget
@@ -34,7 +43,7 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
                 : 'No target'}
           </span>
           <span>{`sessionId: ${session.connectedSessionId || '-'}`}</span>
-          <span>{`buffer lines: ${session.buffer.lines.length}`}</span>
+          <span>{`buffer lines: ${projection.lines.length}`}</span>
           {isDetailsVisible ? <span>Inspector drawer open</span> : null}
         </div>
         {hasLiveTerminal ? (
@@ -51,10 +60,7 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
             <div className="terminal-surface live">
               <TerminalView
                 sessionId={liveSessionId}
-                initialBufferLines={session.buffer.lines}
-                scrollbackStartIndex={session.buffer.scrollbackStartIndex}
-                bufferRevision={session.buffer.revision}
-                snapshot={session.buffer.remoteSnapshot}
+                projection={projection}
                 active
                 onInput={onInput}
                 onResize={onResize}
@@ -65,7 +71,7 @@ export function TerminalSlot({ host, session, isDetailsVisible, onInput, onResiz
           <div className="terminal-empty-state">
             <div className="terminal-empty-title">Terminal render 已接入</div>
             <div className="terminal-empty-copy">
-              现在这里会消费 bridge snapshot / viewport-update / scrollback-update。先从左侧选择连接，再在 Details 里点 Connect。
+              现在这里会消费 canonical buffer projection。先从左侧选择连接，再在 Details 里点 Connect。
             </div>
             {host ? (
               <div className="terminal-empty-hint">当前选中：{formatBridgeSessionTarget(host)}</div>

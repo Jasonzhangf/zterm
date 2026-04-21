@@ -9,13 +9,13 @@ import {
   type EditableHost,
   type Host,
 } from '@zterm/shared';
-import type { BridgeTerminalState } from '../lib/use-bridge-terminal';
+import type { TerminalConnectionState } from '../lib/terminal-runtime';
 
 interface DetailsSlotProps {
   host?: Host;
   draft?: Partial<EditableHost>;
   bridgeSettings: BridgeSettings;
-  bridgeRuntime: BridgeTerminalState;
+  bridgeRuntime: TerminalConnectionState;
   isEditing: boolean;
   onSave: (hostData: EditableHost) => void;
   onCancel: () => void;
@@ -64,6 +64,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+
+function resolveDerivedConnectionName(form: Pick<EditableHost, 'name' | 'sessionName' | 'bridgeHost'>) {
+  return form.name.trim() || form.sessionName.trim() || form.bridgeHost.trim();
+}
+
 function buildTargetKey(host: { bridgeHost: string; bridgePort: number; sessionName?: string; name?: string }) {
   return [
     formatBridgeEndpoint(host).toLowerCase(),
@@ -87,7 +92,6 @@ export function DetailsSlot({
   const [sessionDiscoveryState, setSessionDiscoveryState] =
     useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [sessionDiscoveryError, setSessionDiscoveryError] = useState('');
-  const pageTitle = useMemo(() => (host ? 'Edit Connection' : 'New Connection'), [host]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
   const currentDraftTargetKey = useMemo(() => buildTargetKey(form), [form]);
   const activeRuntimeTargetKey = useMemo(
@@ -132,16 +136,29 @@ export function DetailsSlot({
   };
 
   const handleSave = () => {
-    if (!form.name.trim() || !form.bridgeHost.trim()) {
-      window.alert('请填写必填字段：名称、bridge 主机地址');
+    const bridgeHost = form.bridgeHost.trim();
+    const sessionName = form.sessionName.trim();
+    const resolvedName = resolveDerivedConnectionName({
+      name: form.name,
+      sessionName,
+      bridgeHost,
+    });
+
+    if (!bridgeHost) {
+      window.alert('请填写 bridge 主机地址');
+      return;
+    }
+
+    if (!resolvedName) {
+      window.alert('至少填写 IP，或选择一个 session。');
       return;
     }
 
     onSave({
       ...form,
-      name: form.name.trim(),
-      bridgeHost: form.bridgeHost.trim(),
-      sessionName: form.sessionName.trim(),
+      name: resolvedName,
+      bridgeHost,
+      sessionName,
       authToken: form.authToken?.trim(),
       password: form.authType === 'password' ? form.password : undefined,
       privateKey: form.authType === 'key' ? form.privateKey : undefined,
@@ -178,9 +195,6 @@ export function DetailsSlot({
       });
       setAvailableSessions(sessions);
       setSessionDiscoveryState('done');
-      if (!form.sessionName.trim() && sessions.length === 1) {
-        setForm((current) => ({ ...current, sessionName: sessions[0] }));
-      }
     } catch (error) {
       setAvailableSessions([]);
       setSessionDiscoveryState('error');
@@ -190,7 +204,12 @@ export function DetailsSlot({
 
   const handleConnect = () => {
     const bridgeHost = form.bridgeHost.trim();
-    const sessionName = form.sessionName.trim() || form.name.trim();
+    const sessionName = form.sessionName.trim();
+    const resolvedName = resolveDerivedConnectionName({
+      name: form.name,
+      sessionName,
+      bridgeHost,
+    });
 
     if (!bridgeHost) {
       window.alert('先填写 bridge host，再点击 Connect。');
@@ -198,13 +217,13 @@ export function DetailsSlot({
     }
 
     if (!sessionName) {
-      window.alert('先填写 session name 或 connection name。');
+      window.alert('先选择一个 session，再点击 Connect。');
       return;
     }
 
     onConnectRequested({
       ...form,
-      name: form.name.trim(),
+      name: resolvedName,
       bridgeHost,
       sessionName,
       authToken: form.authToken?.trim(),
@@ -243,9 +262,9 @@ export function DetailsSlot({
       <div className="detail-section inspector-summary-card">
         <div className="detail-header">
           <div>
-            <div className="detail-title">{isEditing ? 'Inspector editing' : 'Inspector'}</div>
+            <div className="detail-title">{host ? 'Edit connection' : 'New connection'}</div>
             <div className="detail-copy">
-              右侧 inspector 保持 Android 同构连接真源，但桌面上优先展示目标概览、状态和快速动作。
+              连接配置继续复用 shared truth；这里只在需要时弹出，不常驻占空间。
             </div>
           </div>
           <div className="detail-actions">
@@ -281,12 +300,12 @@ export function DetailsSlot({
 
       <div className="form-grid">
         <Section title="General" description="Basic identity and grouping for this connection.">
-          <Field label="Name *">
+          <Field label="Name">
             <input
               className="input-control"
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              placeholder="例如：MacStudio"
+              placeholder="可留空，默认用 session / IP"
             />
           </Field>
 

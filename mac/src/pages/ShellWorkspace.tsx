@@ -1,0 +1,926 @@
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  TerminalView,
+  buildServerPresetId,
+  formatBridgeEndpoint,
+  formatBridgeSessionTarget,
+  getResolvedSessionName,
+  setDefaultBridgeServer,
+  upsertBridgeServer,
+  type BridgeSettings,
+  type EditableHost,
+  type Host,
+} from '@zterm/shared';
+import {
+  createTerminalRuntime,
+  useTerminalRuntimeSnapshot,
+  type TerminalRuntimeController,
+} from '../lib/terminal-runtime';
+import { DetailsSlot } from './DetailsSlot';
+import { QuickConnectSheet } from './QuickConnectSheet';
+import {
+  cloneWorkspaceState,
+  createConnectionWorkspaceTab,
+  createEmptyWorkspaceTab,
+  createShellProfile,
+  createWorkspacePane,
+  loadShellProfiles,
+  loadShellWorkspaceState,
+  normalizePaneSizes,
+  normalizeWorkspaceState,
+  saveShellProfiles,
+  saveShellWorkspaceState,
+  type QuickPaletteTab,
+  type ShellProfileRecord,
+  type ShellWorkspacePane,
+  type ShellWorkspaceState,
+  type ShellWorkspaceTab,
+} from '../lib/shell-workspace';
+
+interface ShellWorkspaceProps {
+  hosts: Host[];
+  isLoaded: boolean;
+  bridgeSettings: BridgeSettings;
+  setBridgeSettings: Dispatch<SetStateAction<BridgeSettings>>;
+  addHost: (host: EditableHost) => Host;
+  updateHost: (id: string, updates: Partial<EditableHost>) => void;
+}
+
+interface ConnectionPickerState {
+  paneId: string;
+  mode: 'replace-active' | 'append-tab';
+}
+
+interface ConnectionEditorState {
+  paneId: string;
+  mode: 'replace-active' | 'append-tab';
+  hostId?: string;
+}
+
+interface QuickPaletteItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  value: string;
+}
+
+const MAX_PANES = 3;
+const MIN_PANE_RATIO = 0.18;
+const QUICK_SHORTCUTS: QuickPaletteItem[] = [
+  {
+    id: 'attach-main',
+    title: 'tmux attach -t main',
+    subtitle: '常用 attach 命令',
+    value: 'tmux attach -t main',
+  },
+  {
+    id: 'attach-zterm',
+    title: 'tmux attach -t zterm',
+    subtitle: '切回 zterm 工作会话',
+    value: 'tmux attach -t zterm',
+  },
+  {
+    id: 'cd-zterm',
+    title: 'cd ~/Documents/github/zterm',
+    subtitle: '进入当前项目目录',
+    value: 'cd ~/Documents/github/zterm',
+  },
+  {
+    id: 'pnpm-mac-package',
+    title: 'pnpm --filter @zterm/mac package',
+    subtitle: '本地打包 Mac 包',
+    value: 'pnpm --filter @zterm/mac package',
+  },
+  {
+    id: 'tailscale-status',
+    title: 'tailscale status',
+    subtitle: '检查 Tailscale / bridge 网络状态',
+    value: 'tailscale status',
+  },
+];
+
+function toEditableHost(host: Host | EditableHost): EditableHost {
+  return {
+    name: host.name,
+    bridgeHost: host.bridgeHost,
+    bridgePort: host.bridgePort,
+    sessionName: host.sessionName,
+    authToken: host.authToken,
+    authType: host.authType,
+    password: host.password,
+    privateKey: host.privateKey,
+    tags: host.tags,
+    pinned: host.pinned,
+    lastConnected: host.lastConnected,
+    autoCommand: host.autoCommand,
+  };
+}
+
+function resolveTabTarget(tab: ShellWorkspaceTab | null | undefined, hosts: Host[]) {
+  if (!tab || tab.kind !== 'connection') {
+    return null;
+  }
+  if (tab.persistedHostId) {
+    const persisted = hosts.find((host) => host.id === tab.persistedHostId);
+    if (persisted) {
+      return toEditableHost(persisted);
+    }
+  }
+  return tab.target ? toEditableHost(tab.target) : null;
+}
+
+function updateWorkspacePane(
+  current: ShellWorkspaceState,
+  paneId: string,
+  updater: (pane: ShellWorkspacePane) => ShellWorkspacePane,
+) {
+  const next = cloneWorkspaceState(current);
+  const index = next.panes.findIndex((pane) => pane.id === paneId);
+  if (index === -1) {
+    return current;
+  }
+  next.panes[index] = updater(next.panes[index]);
+  return normalizeWorkspaceState(next);
+}
+
+function resolveActivePane(workspace: ShellWorkspaceState) {
+  return workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? workspace.panes[0] ?? null;
+}
+
+function resolveActiveTab(workspace: ShellWorkspaceState) {
+  const pane = resolveActivePane(workspace);
+  if (!pane) {
+    return null;
+  }
+  return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+}
+
+function formatProfileTime(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp);
+}
+
+function normalizeSizesWithDelta(panes: ShellWorkspacePane[], index: number, deltaRatio: number) {
+  if (index < 0 || index >= panes.length - 1) {
+    return panes;
+  }
+  const next = panes.map((pane) => ({ ...pane }));
+  const left = next[index];
+  const right = next[index + 1];
+  const combined = left.size + right.size;
+  const proposedLeft = Math.min(combined - MIN_PANE_RATIO, Math.max(MIN_PANE_RATIO, left.size + deltaRatio));
+  const proposedRight = combined - proposedLeft;
+  if (proposedRight < MIN_PANE_RATIO) {
+    return panes;
+  }
+  left.size = proposedLeft;
+  right.size = proposedRight;
+  return normalizePaneSizes(next);
+}
+
+function EmptyPane({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button className="shell-empty-pane" type="button" onClick={onOpen}>
+      <span className="shell-empty-plus">+</span>
+      <span className="shell-empty-title">Open connection</span>
+      <span className="shell-empty-copy">默认就是干净 shell，只有需要时再挂连接。</span>
+    </button>
+  );
+}
+
+function PaneTabStatus({
+  tab,
+  runtime,
+}: {
+  tab: ShellWorkspaceTab;
+  runtime: TerminalRuntimeController | null;
+}) {
+  const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
+  const runtimeStatus = tab.kind === 'connection' ? runtimeSnapshot.connection.status : 'idle';
+  return <span className={`shell-tab-dot ${runtimeStatus}`} />;
+}
+
+function PaneSurface({
+  tab,
+  target,
+  runtime,
+  onOpenConnection,
+}: {
+  tab: ShellWorkspaceTab;
+  target: EditableHost | null;
+  runtime: TerminalRuntimeController | null;
+  onOpenConnection: () => void;
+}) {
+  const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
+
+  if (tab.kind === 'empty' || !target) {
+    return <EmptyPane onOpen={onOpenConnection} />;
+  }
+
+  return (
+    <div className="shell-terminal-live">
+      {runtimeSnapshot.connection.error ? <div className="shell-terminal-banner error">{runtimeSnapshot.connection.error}</div> : null}
+      <div className="shell-terminal-statusbar">
+        <span className={`shell-runtime-pill ${runtimeSnapshot.connection.status}`}>{runtimeSnapshot.connection.status}</span>
+        <span>{formatBridgeSessionTarget(target)}</span>
+        <span>{runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(target)}</span>
+      </div>
+      <div className="shell-terminal-canvas">
+        <TerminalView
+          sessionId={runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(target)}
+          projection={runtimeSnapshot.render}
+          active
+          onInput={(data) => runtime?.sendInput(data)}
+          onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function ShellWorkspace({
+  hosts,
+  isLoaded,
+  bridgeSettings,
+  setBridgeSettings,
+  addHost,
+  updateHost,
+}: ShellWorkspaceProps) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const runtimeRegistryRef = useRef(new Map<string, TerminalRuntimeController>());
+  const [workspace, setWorkspace] = useState<ShellWorkspaceState>(() => loadShellWorkspaceState());
+  const [profiles, setProfiles] = useState<ShellProfileRecord[]>(() => loadShellProfiles());
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [connectionPicker, setConnectionPicker] = useState<ConnectionPickerState | null>(null);
+  const [connectionEditor, setConnectionEditor] = useState<ConnectionEditorState | null>(null);
+  const [quickPaletteOpen, setQuickPaletteOpen] = useState(false);
+  const [quickPaletteTab, setQuickPaletteTab] = useState<QuickPaletteTab>('shortcuts');
+  const [quickPaletteQuery, setQuickPaletteQuery] = useState('');
+  const [clipboardText, setClipboardText] = useState('');
+  const [clipboardError, setClipboardError] = useState('');
+  const dragStateRef = useRef<{ index: number; startX: number; sizes: number[] } | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+    setWorkspace((current) =>
+      normalizeWorkspaceState({
+        ...current,
+        panes: current.panes.map((pane) => ({
+          ...pane,
+          tabs: pane.tabs.map((tab) => {
+            if (tab.kind !== 'connection' || !tab.persistedHostId) {
+              return tab;
+            }
+            const host = hosts.find((item) => item.id === tab.persistedHostId);
+            if (!host) {
+              return tab;
+            }
+            const target = toEditableHost(host);
+            return {
+              ...tab,
+              title: getResolvedSessionName(target),
+              target,
+            };
+          }),
+        })),
+      }),
+    );
+  }, [hosts, isLoaded]);
+
+  useEffect(() => {
+    saveShellWorkspaceState(workspace);
+  }, [workspace]);
+
+  useEffect(() => {
+    saveShellProfiles(profiles);
+  }, [profiles]);
+
+  const getRuntimeForTab = useCallback((tabId: string) => {
+    const existing = runtimeRegistryRef.current.get(tabId);
+    if (existing) {
+      return existing;
+    }
+    const created = createTerminalRuntime();
+    runtimeRegistryRef.current.set(tabId, created);
+    return created;
+  }, []);
+
+  const activeTab = useMemo(() => resolveActiveTab(workspace), [workspace]);
+  const activeTarget = useMemo(() => resolveTabTarget(activeTab, hosts), [activeTab, hosts]);
+  const activeRuntime = activeTab && activeTab.kind === 'connection' ? getRuntimeForTab(activeTab.id) : null;
+  const activeRuntimeSnapshot = useTerminalRuntimeSnapshot(activeRuntime);
+
+  useEffect(() => {
+    const activeRuntimeIds = new Set(
+      workspace.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'connection').map((tab) => tab.id)),
+    );
+
+    runtimeRegistryRef.current.forEach((runtime, tabId) => {
+      if (!activeRuntimeIds.has(tabId)) {
+        runtime.dispose();
+        runtimeRegistryRef.current.delete(tabId);
+      }
+    });
+  }, [workspace]);
+
+  useEffect(() => {
+    workspace.panes.forEach((pane) => {
+      pane.tabs.forEach((tab) => {
+        if (tab.kind !== 'connection') {
+          return;
+        }
+        const target = resolveTabTarget(tab, hosts);
+        if (!target) {
+          return;
+        }
+        getRuntimeForTab(tab.id).connect(target);
+      });
+    });
+  }, [getRuntimeForTab, hosts, workspace]);
+
+  useEffect(() => () => {
+    runtimeRegistryRef.current.forEach((runtime) => runtime.dispose());
+    runtimeRegistryRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!quickPaletteOpen || quickPaletteTab !== 'clipboard') {
+      return;
+    }
+    let cancelled = false;
+    setClipboardError('');
+    void navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (!cancelled) {
+          setClipboardText(text);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setClipboardText('');
+          setClipboardError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quickPaletteOpen, quickPaletteTab]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setQuickPaletteOpen((current) => !current);
+      }
+      if (event.key === 'Escape') {
+        setQuickPaletteOpen(false);
+        setConnectionPicker(null);
+        setConnectionEditor(null);
+        setProfileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const persistBridgeServer = useCallback(
+    (hostData: EditableHost) => {
+      setBridgeSettings((current) => {
+        const nextSettings = upsertBridgeServer(current, {
+          name: hostData.name,
+          targetHost: hostData.bridgeHost,
+          targetPort: hostData.bridgePort,
+          authToken: hostData.authToken,
+        });
+        const presetId = buildServerPresetId(hostData.bridgeHost, hostData.bridgePort);
+        return nextSettings.defaultServerId ? nextSettings : setDefaultBridgeServer(nextSettings, presetId);
+      });
+    },
+    [setBridgeSettings],
+  );
+
+  const assignHostToPane = useCallback(
+    (paneId: string, host: Host | EditableHost, mode: 'replace-active' | 'append-tab', persistedHostId?: string) => {
+      const nextTab = createConnectionWorkspaceTab(toEditableHost(host), persistedHostId);
+      setWorkspace((current) => {
+        const next = updateWorkspacePane(current, paneId, (pane) => {
+          const tabIndex = pane.tabs.findIndex((tab) => tab.id === pane.activeTabId);
+          const activeTabInPane = tabIndex >= 0 ? pane.tabs[tabIndex] : pane.tabs[0];
+          const shouldReplace = mode === 'replace-active' && activeTabInPane?.kind === 'empty';
+          const tabs = [...pane.tabs];
+          if (shouldReplace && tabIndex >= 0) {
+            tabs[tabIndex] = nextTab;
+          } else {
+            tabs.push(nextTab);
+          }
+          return {
+            ...pane,
+            tabs,
+            activeTabId: nextTab.id,
+          };
+        });
+        return {
+          ...next,
+          activePaneId: paneId,
+        };
+      });
+      setConnectionPicker(null);
+      setConnectionEditor(null);
+    },
+    [],
+  );
+
+
+  const handleOpenConnection = useCallback(
+    (hostData: EditableHost, persistedHostId?: string) => {
+      if (!connectionPicker) {
+        return;
+      }
+      const hostWithHistory: EditableHost = {
+        ...hostData,
+        lastConnected: Date.now(),
+      };
+      persistBridgeServer(hostData);
+      if (persistedHostId) {
+        const currentHost = hosts.find((host) => host.id === persistedHostId);
+        if (!currentHost) {
+          return;
+        }
+        updateHost(persistedHostId, hostWithHistory);
+        assignHostToPane(
+          connectionPicker.paneId,
+          {
+            ...currentHost,
+            ...hostWithHistory,
+            id: persistedHostId,
+          },
+          connectionPicker.mode,
+          persistedHostId,
+        );
+        return;
+      }
+      const created = addHost(hostWithHistory);
+      assignHostToPane(connectionPicker.paneId, created, connectionPicker.mode, created.id);
+    },
+    [addHost, assignHostToPane, connectionPicker, hosts, persistBridgeServer, updateHost],
+  );
+
+  const handleSaveConnection = useCallback(
+    (hostData: EditableHost) => {
+      if (!connectionEditor) {
+        return;
+      }
+      const hostWithHistory: EditableHost = {
+        ...hostData,
+        lastConnected: Date.now(),
+      };
+      persistBridgeServer(hostData);
+      if (connectionEditor.hostId) {
+        const currentHost = hosts.find((host) => host.id === connectionEditor.hostId);
+        if (!currentHost) {
+          return;
+        }
+        updateHost(connectionEditor.hostId, hostWithHistory);
+        const updatedHost: Host = {
+          ...currentHost,
+          ...hostWithHistory,
+          id: connectionEditor.hostId,
+        };
+        assignHostToPane(connectionEditor.paneId, updatedHost, connectionEditor.mode, connectionEditor.hostId);
+        return;
+      }
+      const created = addHost(hostWithHistory);
+      assignHostToPane(connectionEditor.paneId, created, connectionEditor.mode, created.id);
+    },
+    [addHost, assignHostToPane, connectionEditor, hosts, persistBridgeServer, updateHost],
+  );
+
+  const splitActivePane = useCallback(() => {
+    setWorkspace((current) => {
+      if (current.panes.length >= MAX_PANES) {
+        return current;
+      }
+      const next = cloneWorkspaceState(current);
+      const index = Math.max(0, next.panes.findIndex((pane) => pane.id === next.activePaneId));
+      next.panes.splice(index + 1, 0, createWorkspacePane(1));
+      next.panes = normalizePaneSizes(next.panes);
+      next.activePaneId = next.panes[index + 1].id;
+      return next;
+    });
+  }, []);
+
+  const closePane = useCallback((paneId: string) => {
+    setWorkspace((current) => {
+      if (current.panes.length <= 1) {
+        return current;
+      }
+      const next = cloneWorkspaceState(current);
+      const index = next.panes.findIndex((pane) => pane.id === paneId);
+      if (index === -1) {
+        return current;
+      }
+      next.panes.splice(index, 1);
+      next.panes = normalizePaneSizes(next.panes);
+      if (next.activePaneId === paneId) {
+        next.activePaneId = next.panes[Math.max(0, index - 1)]?.id || next.panes[0].id;
+      }
+      return next;
+    });
+  }, []);
+
+  const setActivePaneTab = useCallback((paneId: string, tabId: string) => {
+    setWorkspace((current) => ({
+      ...updateWorkspacePane(current, paneId, (pane) => ({ ...pane, activeTabId: tabId })),
+      activePaneId: paneId,
+    }));
+  }, []);
+
+  const createEmptyTabInPane = useCallback((paneId: string) => {
+    const newTab = createEmptyWorkspaceTab();
+    setWorkspace((current) => ({
+      ...updateWorkspacePane(current, paneId, (pane) => ({
+        ...pane,
+        tabs: [...pane.tabs, newTab],
+        activeTabId: newTab.id,
+      })),
+      activePaneId: paneId,
+    }));
+  }, []);
+
+  const closeTab = useCallback((paneId: string, tabId: string) => {
+    setWorkspace((current) => {
+      const next = updateWorkspacePane(current, paneId, (pane) => {
+        const remaining = pane.tabs.filter((tab) => tab.id !== tabId);
+        if (remaining.length === 0) {
+          const empty = createEmptyWorkspaceTab();
+          return {
+            ...pane,
+            tabs: [empty],
+            activeTabId: empty.id,
+          };
+        }
+        const nextActiveId = pane.activeTabId === tabId
+          ? remaining[Math.max(0, remaining.length - 1)]!.id
+          : pane.activeTabId;
+        return {
+          ...pane,
+          tabs: remaining,
+          activeTabId: nextActiveId,
+        };
+      });
+      return {
+        ...next,
+        activePaneId: paneId,
+      };
+    });
+  }, []);
+
+  const handleDividerPointerDown = useCallback((index: number, clientX: number) => {
+    dragStateRef.current = {
+      index,
+      startX: clientX,
+      sizes: workspace.panes.map((pane) => pane.size),
+    };
+  }, [workspace.panes]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragStateRef.current || !stageRef.current) {
+        return;
+      }
+      const { index, startX, sizes } = dragStateRef.current;
+      const bounds = stageRef.current.getBoundingClientRect();
+      if (!bounds.width) {
+        return;
+      }
+      const deltaRatio = (event.clientX - startX) / bounds.width;
+      setWorkspace((current) => {
+        const base = current.panes.map((pane, paneIndex) => ({ ...pane, size: sizes[paneIndex] ?? pane.size }));
+        return {
+          ...current,
+          panes: normalizeSizesWithDelta(base, index, deltaRatio),
+        };
+      });
+    };
+
+    const handlePointerUp = () => {
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, []);
+
+
+  const quickPaletteItems = useMemo(() => {
+    const base = quickPaletteTab === 'shortcuts'
+      ? QUICK_SHORTCUTS
+      : clipboardText
+        ? clipboardText
+            .split(/\n+/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .slice(0, 12)
+            .map((line, index) => ({
+              id: `clipboard-${index}`,
+              title: line,
+              subtitle: '来自系统剪贴板',
+              value: line,
+            }))
+        : [];
+    const query = quickPaletteQuery.trim().toLowerCase();
+    return query
+      ? base.filter((item) => `${item.title} ${item.subtitle}`.toLowerCase().includes(query))
+      : base;
+  }, [clipboardText, quickPaletteQuery, quickPaletteTab]);
+
+  const applyQuickPaletteItem = useCallback(
+    async (item: QuickPaletteItem) => {
+      if (activeRuntime && activeRuntimeSnapshot.connection.status === 'connected') {
+        activeRuntime.sendInput(`${item.value}\r`);
+      } else {
+        await navigator.clipboard.writeText(item.value);
+      }
+      setQuickPaletteOpen(false);
+    },
+    [activeRuntime, activeRuntimeSnapshot.connection.status],
+  );
+
+  const exportWorkspaceProfile = useCallback((name: string, targetWorkspace: ShellWorkspaceState) => {
+    const blob = new Blob(
+      [JSON.stringify(createShellProfile(name, targetWorkspace), null, 2)],
+      { type: 'application/json' },
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${name.replace(/\s+/g, '-').toLowerCase() || 'zterm-profile'}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  if (!isLoaded) {
+    return <div className="shell-loading">Loading shell workspace…</div>;
+  }
+
+  return (
+    <div className="shell-workspace-root">
+      <header className="shell-topbar">
+        <div className="shell-topbar-leading" aria-hidden="true">
+          <span className="traffic-light red" />
+          <span className="traffic-light yellow" />
+          <span className="traffic-light green" />
+        </div>
+
+        <div className="shell-topbar-title">
+          <strong>ZTerm</strong>
+          <span>{activeTarget ? formatBridgeSessionTarget(activeTarget) : 'single shell · split on demand'}</span>
+        </div>
+
+        <div className="shell-topbar-actions">
+          <button className="shell-action-button" type="button" onClick={() => setQuickPaletteOpen(true)}>
+            ⌘K
+          </button>
+          <button className="shell-action-button" type="button" onClick={splitActivePane} disabled={workspace.panes.length >= MAX_PANES}>
+            Split
+          </button>
+          <div className="shell-menu-anchor">
+            <button className="shell-action-button" type="button" onClick={() => setProfileMenuOpen((current) => !current)}>
+              Profiles
+            </button>
+            {profileMenuOpen ? (
+              <div className="shell-profile-menu">
+                <button
+                  className="shell-profile-menu-item"
+                  type="button"
+                  onClick={() => {
+                    const name = window.prompt('Profile 名称', `Workspace ${profiles.length + 1}`)?.trim();
+                    if (!name) {
+                      return;
+                    }
+                    setProfiles((current) => {
+                      const existing = current.find((profile) => profile.name === name);
+                      if (existing) {
+                        return current.map((profile) =>
+                          profile.id === existing.id
+                            ? { ...profile, updatedAt: Date.now(), workspace: normalizeWorkspaceState(workspace) }
+                            : profile,
+                        );
+                      }
+                      return [createShellProfile(name, workspace), ...current];
+                    });
+                    setProfileMenuOpen(false);
+                  }}
+                >
+                  Save current workspace
+                </button>
+                <button
+                  className="shell-profile-menu-item"
+                  type="button"
+                  onClick={() => {
+                    const name = window.prompt('导出文件名', 'zterm-workspace')?.trim() || 'zterm-workspace';
+                    exportWorkspaceProfile(name, workspace);
+                    setProfileMenuOpen(false);
+                  }}
+                >
+                  Export current workspace
+                </button>
+                {profiles.length > 0 ? <div className="shell-profile-menu-divider" /> : null}
+                {profiles.length > 0 ? (
+                  profiles.map((profile) => (
+                    <button
+                      className="shell-profile-menu-item profile"
+                      key={profile.id}
+                      type="button"
+                      onClick={() => {
+                        setWorkspace(normalizeWorkspaceState(profile.workspace));
+                        setProfileMenuOpen(false);
+                      }}
+                    >
+                      <span>{profile.name}</span>
+                      <span>{formatProfileTime(profile.updatedAt)}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="shell-profile-menu-empty">还没有保存的 profile</div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      <div className="shell-stage" ref={stageRef}>
+        {workspace.panes.map((pane, paneIndex) => {
+          const paneTarget = resolveTabTarget(
+            pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
+            hosts,
+          );
+          const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
+          const paneRuntime = paneActiveTab.kind === 'connection' ? getRuntimeForTab(paneActiveTab.id) : null;
+
+          return (
+            <Fragment key={pane.id}>
+              <div className={`shell-pane ${pane.id === workspace.activePaneId ? 'active' : ''}`} style={{ flexGrow: pane.size, flexBasis: 0 }}>
+                <div className="shell-pane-tabs">
+                  <div className="shell-pane-tablist">
+                    {pane.tabs.map((tab) => {
+                      const tabRuntime = tab.kind === 'connection' ? getRuntimeForTab(tab.id) : null;
+                      return (
+                        <div
+                          className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}
+                          key={tab.id}
+                        >
+                          <button type="button" onClick={() => setActivePaneTab(pane.id, tab.id)}>
+                            <PaneTabStatus tab={tab} runtime={tabRuntime} />
+                            <span>{tab.kind === 'empty' ? '+' : tab.title}</span>
+                          </button>
+                          {pane.tabs.length > 1 || tab.kind !== 'empty' ? (
+                            <button
+                              className="shell-pane-tab-close"
+                              type="button"
+                              onClick={() => closeTab(pane.id, tab.id)}
+                              aria-label={`Close ${tab.title}`}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="shell-pane-actions">
+                    <button className="shell-pane-icon-button" type="button" onClick={() => createEmptyTabInPane(pane.id)}>
+                      +
+                    </button>
+                    <button className="shell-pane-icon-button" type="button" onClick={() => setConnectionPicker({ paneId: pane.id, mode: 'append-tab' })}>
+                      ⌁
+                    </button>
+                    {workspace.panes.length > 1 ? (
+                      <button className="shell-pane-icon-button" type="button" onClick={() => closePane(pane.id)}>
+                        −
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="shell-pane-body" onClick={() => setWorkspace((current) => ({ ...current, activePaneId: pane.id }))}>
+                  <PaneSurface
+                    tab={paneActiveTab}
+                    target={paneTarget}
+                    runtime={paneRuntime}
+                    onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
+                  />
+                </div>
+              </div>
+
+              {paneIndex < workspace.panes.length - 1 ? (
+                <div
+                  className="shell-pane-divider"
+                  onPointerDown={(event) => handleDividerPointerDown(paneIndex, event.clientX)}
+                  role="separator"
+                  aria-orientation="vertical"
+                >
+                  <span />
+                </div>
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+
+      {connectionPicker ? (
+        <div className="shell-overlay-backdrop" onClick={() => setConnectionPicker(null)}>
+          <QuickConnectSheet
+            bridgeSettings={bridgeSettings}
+            hosts={hosts}
+            onClose={() => setConnectionPicker(null)}
+            onOpen={handleOpenConnection}
+            onOpenAdvanced={() => {
+              setConnectionEditor({ paneId: connectionPicker.paneId, mode: connectionPicker.mode });
+              setConnectionPicker(null);
+            }}
+          />
+        </div>
+      ) : null}
+
+      {connectionEditor ? (
+        <div className="shell-overlay-backdrop" onClick={() => setConnectionEditor(null)}>
+          <div className="shell-overlay-card connection-editor" onClick={(event) => event.stopPropagation()}>
+            <DetailsSlot
+              host={connectionEditor.hostId ? hosts.find((host) => host.id === connectionEditor.hostId) : undefined}
+              bridgeSettings={bridgeSettings}
+              bridgeRuntime={activeRuntimeSnapshot.connection}
+              isEditing
+              onSave={handleSaveConnection}
+              onCancel={() => setConnectionEditor(null)}
+              onConnectRequested={handleSaveConnection}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {quickPaletteOpen ? (
+        <div className="shell-overlay-backdrop palette" onClick={() => setQuickPaletteOpen(false)}>
+          <div className="shell-overlay-card quick-palette" onClick={(event) => event.stopPropagation()}>
+            <div className="shell-overlay-header compact">
+              <div className="shell-quick-tabs">
+                <button
+                  className={quickPaletteTab === 'shortcuts' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setQuickPaletteTab('shortcuts')}
+                >
+                  快捷输入
+                </button>
+                <button
+                  className={quickPaletteTab === 'clipboard' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setQuickPaletteTab('clipboard')}
+                >
+                  剪贴板
+                </button>
+              </div>
+              <input
+                className="shell-search-input"
+                value={quickPaletteQuery}
+                onChange={(event) => setQuickPaletteQuery(event.target.value)}
+                placeholder="搜索命令或剪贴板内容"
+                autoFocus
+              />
+            </div>
+
+            <div className="shell-quick-list">
+              {quickPaletteItems.length > 0 ? (
+                quickPaletteItems.map((item) => (
+                  <button className="shell-quick-item" key={item.id} type="button" onClick={() => void applyQuickPaletteItem(item)}>
+                    <strong>{item.title}</strong>
+                    <span>{item.subtitle}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="shell-quick-empty">
+                  {quickPaletteTab === 'clipboard'
+                    ? clipboardError || '剪贴板当前没有可展示的多行内容。'
+                    : '没有匹配的快捷输入。'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
