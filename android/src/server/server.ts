@@ -996,12 +996,12 @@ function mirrorBufferChanged(
   previousStartIndex: number,
   previousLines: TerminalCell[][],
 ) {
-  return Boolean(findChangedIndexedRange({
+  return findChangedIndexedRange({
     previousStartIndex,
     previousLines,
     nextStartIndex: mirror.bufferStartIndex,
     nextLines: mirror.bufferLines,
-  }));
+  });
 }
 
 function sendBufferSyncToClient(session: ClientSession, mirror: SessionMirror) {
@@ -1110,8 +1110,17 @@ function flushMirrorUpdates(mirror: SessionMirror) {
       }
 
       mirror.revision += 1;
-      if (mirrorBufferChanged(mirror, previousStartIndex, previousLines)) {
-        const payload = buildFullBufferSyncPayload(mirror);
+      const changedRange = mirrorBufferChanged(mirror, previousStartIndex, previousLines);
+      if (changedRange) {
+        const payload = buildBufferPayload(
+          mirror,
+          sliceIndexedLines(
+            mirror.bufferStartIndex,
+            mirror.bufferLines,
+            changedRange.startIndex,
+            changedRange.endIndex,
+          ),
+        );
         if (payload) {
           payload.revision = mirror.revision;
           broadcastMirrorBufferDelta(mirror, payload);

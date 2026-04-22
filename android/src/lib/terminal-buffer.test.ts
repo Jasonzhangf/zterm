@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TerminalBufferPayload, TerminalCell } from './types';
-import { applyBufferSyncToSessionBuffer, createSessionBufferState } from './terminal-buffer';
+import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from './terminal-buffer';
 
 function row(text: string): TerminalCell[] {
   return Array.from(text).map((char) => ({
@@ -32,7 +32,7 @@ function payload(options: {
   };
 }
 
-describe('terminal-buffer replace-only mirror', () => {
+describe('terminal-buffer canonical mirror patching', () => {
   it('builds the initial local mirror directly from the incoming contiguous buffer-sync', () => {
     const next = applyBufferSyncToSessionBuffer(
       undefined,
@@ -152,8 +152,7 @@ describe('terminal-buffer replace-only mirror', () => {
     expect(next.revision).toBe(5);
   });
 
-  it('rejects malformed partial payloads instead of merging locally', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('patches a valid append-only partial payload onto the current contiguous window', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,
       payload({
@@ -181,6 +180,86 @@ describe('terminal-buffer replace-only mirror', () => {
         viewportEndIndex: 107,
         revision: 3,
         lines: [
+          [106, 'G'],
+        ],
+      }),
+      3000,
+    );
+
+    expect(next.startIndex).toBe(101);
+    expect(next.endIndex).toBe(107);
+    expect(next.lines.map(cellsToLine)).toEqual(['b', 'c', 'd', 'e', 'f', 'G']);
+  });
+
+  it('patches a valid middle span partial payload onto the current contiguous window', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 100,
+        endIndex: 106,
+        viewportEndIndex: 106,
+        revision: 2,
+        lines: [
+          [100, 'a'],
+          [101, 'b'],
+          [102, 'c'],
+          [103, 'd'],
+          [104, 'e'],
+          [105, 'f'],
+        ],
+      }),
+      3000,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 100,
+        endIndex: 106,
+        viewportEndIndex: 106,
+        revision: 3,
+        lines: [
+          [102, 'C'],
+          [103, 'D'],
+        ],
+      }),
+      3000,
+    );
+
+    expect(next.lines.map(cellsToLine)).toEqual(['a', 'b', 'C', 'D', 'e', 'f']);
+  });
+
+  it('rejects malformed partial payloads that leave holes outside the local overlap', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 100,
+        endIndex: 106,
+        viewportEndIndex: 106,
+        revision: 2,
+        lines: [
+          [100, 'a'],
+          [101, 'b'],
+          [102, 'c'],
+          [103, 'd'],
+          [104, 'e'],
+          [105, 'f'],
+        ],
+      }),
+      3000,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 98,
+        endIndex: 107,
+        viewportEndIndex: 107,
+        revision: 3,
+        lines: [
+          [98, 'Y'],
+          [99, 'Z'],
           [104, 'E'],
           [105, 'F'],
           [106, 'G'],

@@ -159,23 +159,25 @@ export function createSessionBufferState(options: {
 
 function payloadToContiguousRows(payload: TerminalBufferPayload) {
   const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
+
   if (normalizedLines.length === 0) {
     return {
       ok: true as const,
-      startIndex: Math.max(0, Math.floor(payload.startIndex || 0)),
-      lines: [] as TerminalCell[][],
+      startIndex: expectedStartIndex,
+      endIndex: expectedEndIndex,
+      lines: [] as Array<{ index: number; cells: TerminalCell[] }>,
     };
   }
 
-  const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
   const firstIndex = normalizedLines[0]!.index;
   const lastIndex = normalizedLines[normalizedLines.length - 1]!.index + 1;
 
-  if (firstIndex !== expectedStartIndex || lastIndex !== expectedEndIndex) {
+  if (firstIndex < expectedStartIndex || lastIndex > expectedEndIndex) {
     return {
       ok: false as const,
-      reason: `buffer-sync lines do not match payload window: expected ${expectedStartIndex}-${expectedEndIndex}, got ${firstIndex}-${lastIndex}`,
+      reason: `buffer-sync lines exceed payload window: window ${expectedStartIndex}-${expectedEndIndex}, got ${firstIndex}-${lastIndex}`,
     };
   }
 
@@ -191,7 +193,81 @@ function payloadToContiguousRows(payload: TerminalBufferPayload) {
   return {
     ok: true as const,
     startIndex: expectedStartIndex,
-    lines: normalizedLines.map((line) => cloneRow(line.cells)),
+    endIndex: expectedEndIndex,
+    lines: normalizedLines.map((line) => ({
+      index: line.index,
+      cells: cloneRow(line.cells),
+    })),
+  };
+}
+
+function buildPatchedWindowFromCurrent(
+  current: SessionBufferState | undefined,
+  contiguous: {
+    startIndex: number;
+    endIndex: number;
+    lines: Array<{ index: number; cells: TerminalCell[] }>;
+  },
+) {
+  const nextLength = Math.max(0, contiguous.endIndex - contiguous.startIndex);
+  const incomingCount = contiguous.lines.length;
+
+  if (nextLength === 0) {
+    return {
+      ok: true as const,
+      startIndex: contiguous.startIndex,
+      lines: [] as TerminalCell[][],
+    };
+  }
+
+  if (incomingCount === nextLength) {
+    return {
+      ok: true as const,
+      startIndex: contiguous.startIndex,
+      lines: contiguous.lines.map((line) => cloneRow(line.cells)),
+    };
+  }
+
+  if (!current || current.lines.length === 0) {
+    return {
+      ok: false as const,
+      reason: `buffer-sync partial payload has no local base for window ${contiguous.startIndex}-${contiguous.endIndex}`,
+    };
+  }
+
+  const overlapStart = Math.max(current.startIndex, contiguous.startIndex);
+  const overlapEnd = Math.min(current.endIndex, contiguous.endIndex);
+  if (overlapEnd <= overlapStart) {
+    return {
+      ok: false as const,
+      reason: `buffer-sync partial payload has no overlap with local mirror: local ${current.startIndex}-${current.endIndex}, incoming ${contiguous.startIndex}-${contiguous.endIndex}`,
+    };
+  }
+
+  const nextLines: Array<TerminalCell[] | undefined> = Array.from({ length: nextLength }, () => undefined);
+
+  for (let absoluteIndex = overlapStart; absoluteIndex < overlapEnd; absoluteIndex += 1) {
+    const currentOffset = absoluteIndex - current.startIndex;
+    const nextOffset = absoluteIndex - contiguous.startIndex;
+    nextLines[nextOffset] = cloneRow(current.lines[currentOffset] || []);
+  }
+
+  for (const line of contiguous.lines) {
+    const nextOffset = line.index - contiguous.startIndex;
+    nextLines[nextOffset] = cloneRow(line.cells);
+  }
+
+  if (nextLines.some((line) => line === undefined)) {
+    return {
+      ok: false as const,
+      reason: `buffer-sync partial payload leaves holes in local mirror window ${contiguous.startIndex}-${contiguous.endIndex}`,
+    };
+  }
+
+  return {
+    ok: true as const,
+    startIndex: contiguous.startIndex,
+    lines: nextLines as TerminalCell[][],
   };
 }
 
@@ -221,9 +297,25 @@ export function applyBufferSyncToSessionBuffer(
     });
   }
 
+  const patched = buildPatchedWindowFromCurrent(current, contiguous);
+  if (!patched.ok) {
+    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${patched.reason}`);
+    return current || createSessionBufferState({
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
+      viewportEndIndex: 0,
+      cols: payload.cols,
+      rows: payload.rows,
+      cursorKeysApp: payload.cursorKeysApp,
+      revision,
+      cacheLines,
+    });
+  }
+
   return buildSessionBufferState({
-    lines: contiguous.lines,
-    startIndex: contiguous.startIndex,
+    lines: patched.lines,
+    startIndex: patched.startIndex,
     viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : contiguous.startIndex + contiguous.lines.length,
     cols: payload.cols,
     rows: payload.rows,

@@ -127,13 +127,10 @@ export function findChangedIndexedRange(options: {
   nextStartIndex: number;
   nextLines: TerminalCell[][];
 }) {
-  const previousEndIndex = options.previousStartIndex + options.previousLines.length;
   const nextEndIndex = options.nextStartIndex + options.nextLines.length;
-  const comparisonStart = Math.min(options.previousStartIndex, options.nextStartIndex);
-  const comparisonEnd = Math.max(previousEndIndex, nextEndIndex);
 
   let firstChangedIndex: number | null = null;
-  for (let index = comparisonStart; index < comparisonEnd; index += 1) {
+  for (let index = options.nextStartIndex; index < nextEndIndex; index += 1) {
     const previousOffset = index - options.previousStartIndex;
     const nextOffset = index - options.nextStartIndex;
     const previousRow =
@@ -156,7 +153,7 @@ export function findChangedIndexedRange(options: {
   }
 
   let lastChangedIndex = firstChangedIndex;
-  for (let index = comparisonEnd - 1; index >= firstChangedIndex; index -= 1) {
+  for (let index = nextEndIndex - 1; index >= firstChangedIndex; index -= 1) {
     const previousOffset = index - options.previousStartIndex;
     const nextOffset = index - options.nextStartIndex;
     const previousRow =

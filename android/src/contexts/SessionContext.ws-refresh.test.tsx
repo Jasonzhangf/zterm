@@ -280,8 +280,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('rejects malformed partial websocket buffer-sync payloads instead of merging locally', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('applies valid incremental websocket buffer-sync payloads onto the current mirror window', async () => {
 
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -326,9 +325,66 @@ describe('SessionContext websocket dynamic refresh', () => {
         viewportEndIndex: 107,
         revision: 2,
         lines: [
-          [104, 'LINE-E'],
-          [105, 'LINE-F'],
           [106, 'LINE-G'],
+        ],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-lines').textContent).toContain('line-b|line-c|line-d|line-e|line-f|LINE-G');
+      expect(screen.getByTestId('session-revision').textContent).toBe('2');
+    });
+  });
+
+  it('rejects malformed websocket partial buffer-sync payloads that leave holes outside the local overlap', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 100,
+        endIndex: 106,
+        viewportEndIndex: 106,
+        revision: 1,
+        lines: [
+          [100, 'line-a'],
+          [101, 'line-b'],
+          [102, 'line-c'],
+          [103, 'line-d'],
+          [104, 'line-e'],
+          [105, 'line-f'],
+        ],
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('line-a|line-b|line-c|line-d|line-e|line-f'));
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 98,
+        endIndex: 107,
+        viewportEndIndex: 107,
+        revision: 2,
+        lines: [
+          [98, 'line-y'],
+          [99, 'line-z'],
+          [106, 'line-g'],
         ],
       }),
     });

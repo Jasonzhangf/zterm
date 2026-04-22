@@ -51,8 +51,20 @@ describe('findChangedIndexedRange', () => {
       nextStartIndex: 101,
       nextLines: [row('b'), row('c'), row('d'), row('e')],
     })).toEqual({
-      startIndex: 100,
+      startIndex: 104,
       endIndex: 105,
+    });
+  });
+
+  it('returns the prepended prefix span when the authoritative window expands upward', () => {
+    expect(findChangedIndexedRange({
+      previousStartIndex: 101,
+      previousLines: [row('b'), row('c'), row('d'), row('e')],
+      nextStartIndex: 100,
+      nextLines: [row('a'), row('b'), row('c'), row('d'), row('e')],
+    })).toEqual({
+      startIndex: 100,
+      endIndex: 101,
     });
   });
 
