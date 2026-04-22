@@ -77,7 +77,7 @@ export function getDefaultTerminalViewportSize() {
   }
 
   const shellWidth = Math.min(window.innerWidth || APP_SHELL_MAX_WIDTH_PX, APP_SHELL_MAX_WIDTH_PX);
-  const shellHeight = Math.max(window.innerHeight || 0, window.visualViewport?.height || 0, 640);
+  const shellHeight = Math.max(window.innerHeight || 0, 640);
   const safeAreaTop = getSafeAreaInset('padding-top');
   const safeAreaBottom = getSafeAreaInset('padding-bottom');
   const { cellWidth, rowHeight } = measureTerminalCell();

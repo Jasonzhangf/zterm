@@ -82,331 +82,116 @@ function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
   return true;
 }
 
-function trimRangeToCache(startIndex: number, endIndex: number, cacheLines: number) {
-  const normalizedStart = Math.max(0, Math.floor(startIndex));
-  const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
-  if (normalizedEnd - normalizedStart <= cacheLines) {
+function trimToCache(startIndex: number, lines: TerminalCell[][], cacheLines: number) {
+  const safeStartIndex = Math.max(0, Math.floor(startIndex));
+  const safeCacheLines = Math.max(1, Math.floor(cacheLines || 1));
+  if (lines.length <= safeCacheLines) {
     return {
-      startIndex: normalizedStart,
-      endIndex: normalizedEnd,
+      startIndex: safeStartIndex,
+      lines: cloneRows(lines),
     };
   }
 
+  const trimCount = lines.length - safeCacheLines;
   return {
-    startIndex: Math.max(0, normalizedEnd - cacheLines),
-    endIndex: normalizedEnd,
+    startIndex: safeStartIndex + trimCount,
+    lines: cloneRows(lines.slice(trimCount)),
   };
 }
 
-function buildRangeMap(buffer?: SessionBufferState) {
-  const map = new Map<number, TerminalCell[]>();
-  if (!buffer) {
-    return map;
-  }
-
-  buffer.lines.forEach((line, offset) => {
-    map.set(buffer.startIndex + offset, cloneRow(line));
-  });
-
-  return map;
-}
-
-function isAdjacentOrOverlapping(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) {
-  return rightStart <= leftEnd && rightEnd >= leftStart;
-}
-
-function collectContiguousWindow(linesByIndex: Map<number, TerminalCell[]>, startIndex: number, endIndex: number) {
-  const normalizedStart = Math.max(0, startIndex);
-  const normalizedEnd = Math.max(normalizedStart, endIndex);
-  const lines: TerminalCell[][] = [];
-
-  for (let index = normalizedStart; index < normalizedEnd; index += 1) {
-    const row = linesByIndex.get(index);
-    if (!row) {
-      return null;
-    }
-    lines.push(cloneRow(row));
-  }
+function buildSessionBufferState(options: {
+  lines: TerminalCell[][];
+  startIndex: number;
+  viewportEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
+  revision: number;
+  cacheLines: number;
+}): SessionBufferState {
+  const trimmed = trimToCache(options.startIndex, options.lines, options.cacheLines);
+  const endIndex = trimmed.startIndex + trimmed.lines.length;
 
   return {
-    startIndex: normalizedStart,
-    endIndex: normalizedEnd,
-    lines,
-  };
-}
-
-function contiguousIncomingWindow(lines: TerminalIndexedLine[]) {
-  if (lines.length === 0) {
-    return null;
-  }
-
-  const ordered = normalizeIndexedLines(lines);
-  if (ordered.length === 0) {
-    return null;
-  }
-
-  const startIndex = ordered[0].index;
-  const endIndex = ordered[ordered.length - 1].index + 1;
-  for (let index = 1; index < ordered.length; index += 1) {
-    if (ordered[index].index !== ordered[index - 1].index + 1) {
-      return null;
-    }
-  }
-
-  return {
-    startIndex,
-    endIndex,
-    lines: ordered.map((line) => cloneRow(line.cells)),
-  };
-}
-
-function normalizeAvailableIndices(payload: TerminalBufferPayload) {
-  const availableStartIndex = Number.isFinite(payload.startIndex)
-    ? Math.max(0, Math.floor(payload.startIndex))
-    : 0;
-  const availableEndIndex = Number.isFinite(payload.endIndex)
-    ? Math.max(availableStartIndex, Math.floor(payload.endIndex))
-    : availableStartIndex;
-  const viewportStartIndex = Number.isFinite(payload.viewportStartIndex)
-    ? Math.max(availableStartIndex, Math.floor(payload.viewportStartIndex))
-    : Math.max(availableStartIndex, availableEndIndex - Math.max(1, Math.floor(payload.rows || 24)));
-  const viewportEndIndex = Number.isFinite(payload.viewportEndIndex)
-    ? Math.max(viewportStartIndex, Math.floor(payload.viewportEndIndex))
-    : Math.max(viewportStartIndex, viewportStartIndex + Math.max(1, Math.floor(payload.rows || 24)));
-
-  return {
-    availableStartIndex,
-    availableEndIndex,
-    viewportStartIndex,
-    viewportEndIndex,
-  };
-}
-
-function withMetadata(
-  current: SessionBufferState | undefined,
-  options: {
-    lines: TerminalCell[][];
-    startIndex: number;
-    endIndex: number;
-    payload: TerminalBufferPayload;
-    updateKind: SessionBufferState['updateKind'];
-  },
-): SessionBufferState {
-  const indices = normalizeAvailableIndices(options.payload);
-  return {
-    lines: cloneRows(options.lines),
-    startIndex: options.startIndex,
-    endIndex: options.endIndex,
-    availableStartIndex: indices.availableStartIndex,
-    availableEndIndex: indices.availableEndIndex,
-    viewportStartIndex: indices.viewportStartIndex,
-    viewportEndIndex: indices.viewportEndIndex,
-    cols: Number.isFinite(options.payload.cols) ? Math.max(1, Math.floor(options.payload.cols)) : current?.cols || 80,
-    rows: Number.isFinite(options.payload.rows) ? Math.max(1, Math.floor(options.payload.rows)) : current?.rows || 24,
-    cursorRow: Number.isFinite(options.payload.cursorRow) ? Math.max(0, Math.floor(options.payload.cursorRow)) : current?.cursorRow || 0,
-    cursorCol: Number.isFinite(options.payload.cursorCol) ? Math.max(0, Math.floor(options.payload.cursorCol)) : current?.cursorCol || 0,
-    cursorVisible: Boolean(options.payload.cursorVisible),
-    cursorKeysApp: Boolean(options.payload.cursorKeysApp),
-    updateKind: options.updateKind,
-    revision: (current?.revision || 0) + 1,
-  };
-}
-
-function mergeBufferPayload(
-  current: SessionBufferState | undefined,
-  payload: TerminalBufferPayload,
-  cacheLines: number,
-  updateKind: SessionBufferState['updateKind'],
-): SessionBufferState {
-  const normalizedIncoming = normalizeIndexedLines(payload.lines || []);
-  const contiguousIncoming = contiguousIncomingWindow(normalizedIncoming);
-  const indices = normalizeAvailableIndices(payload);
-  const availableStart = indices.availableStartIndex;
-  const availableEnd = indices.availableEndIndex;
-
-  if (!current || current.lines.length === 0) {
-    const initialLines = contiguousIncoming?.lines || [];
-    const initialStart = contiguousIncoming?.startIndex ?? indices.viewportStartIndex;
-    const initialEnd = contiguousIncoming?.endIndex ?? initialStart;
-    const trimmed = trimRangeToCache(initialStart, initialEnd, cacheLines);
-    const sliceOffset = Math.max(0, trimmed.startIndex - initialStart);
-    const nextLines = initialLines.slice(sliceOffset, sliceOffset + (trimmed.endIndex - trimmed.startIndex));
-    return withMetadata(current, {
-      lines: nextLines,
-      startIndex: trimmed.startIndex,
-      endIndex: trimmed.startIndex + nextLines.length,
-      payload,
-      updateKind,
-    });
-  }
-
-  const currentClampedStart = Math.max(current.startIndex, availableStart);
-  const currentClampedEnd = Math.max(currentClampedStart, Math.min(current.endIndex, availableEnd));
-  const linesByIndex = buildRangeMap(current);
-  for (const index of [...linesByIndex.keys()]) {
-    if (index < availableStart || index >= availableEnd) {
-      linesByIndex.delete(index);
-    }
-  }
-
-  if (normalizedIncoming.length === 0) {
-    const fallbackWindow = collectContiguousWindow(linesByIndex, currentClampedStart, currentClampedEnd) || {
-      startIndex: currentClampedStart,
-      endIndex: currentClampedStart,
-      lines: [],
-    };
-    const trimmed = trimRangeToCache(fallbackWindow.startIndex, fallbackWindow.endIndex, cacheLines);
-    const sliceOffset = Math.max(0, trimmed.startIndex - fallbackWindow.startIndex);
-    const nextLines = fallbackWindow.lines.slice(
-      sliceOffset,
-      sliceOffset + (trimmed.endIndex - trimmed.startIndex),
-    );
-    return withMetadata(current, {
-      lines: nextLines,
-      startIndex: trimmed.startIndex,
-      endIndex: trimmed.startIndex + nextLines.length,
-      payload,
-      updateKind,
-    });
-  }
-
-  normalizedIncoming.forEach((line) => {
-    if (line.index >= availableStart && line.index < availableEnd) {
-      linesByIndex.set(line.index, cloneRow(line.cells));
-    }
-  });
-
-  const incomingStart = Math.max(availableStart, normalizedIncoming[0].index);
-  const incomingEnd = Math.min(availableEnd, normalizedIncoming[normalizedIncoming.length - 1].index + 1);
-
-  let nextStart = currentClampedStart;
-  let nextEnd = currentClampedEnd;
-
-  if (currentClampedEnd <= currentClampedStart) {
-    nextStart = incomingStart;
-    nextEnd = incomingEnd;
-  } else if (isAdjacentOrOverlapping(currentClampedStart, currentClampedEnd, incomingStart, incomingEnd)) {
-    nextStart = Math.min(currentClampedStart, incomingStart);
-    nextEnd = Math.max(currentClampedEnd, incomingEnd);
-  } else if (updateKind === 'replace' && contiguousIncoming) {
-    nextStart = Math.max(availableStart, contiguousIncoming.startIndex);
-    nextEnd = Math.min(availableEnd, contiguousIncoming.endIndex);
-    linesByIndex.clear();
-    contiguousIncoming.lines.forEach((line, offset) => {
-      const lineIndex = contiguousIncoming.startIndex + offset;
-      if (lineIndex >= availableStart && lineIndex < availableEnd) {
-        linesByIndex.set(lineIndex, cloneRow(line));
-      }
-    });
-  } else {
-    nextStart = incomingStart;
-    nextEnd = incomingEnd;
-  }
-
-  nextStart = Math.max(availableStart, nextStart);
-  nextEnd = Math.min(availableEnd, nextEnd);
-
-  let collected = collectContiguousWindow(linesByIndex, nextStart, nextEnd);
-  if (!collected) {
-    const fallback = collectContiguousWindow(linesByIndex, currentClampedStart, currentClampedEnd);
-    if (fallback) {
-      collected = fallback;
-    } else if (contiguousIncoming) {
-      collected = {
-        startIndex: Math.max(availableStart, contiguousIncoming.startIndex),
-        endIndex: Math.min(availableEnd, contiguousIncoming.endIndex),
-        lines: cloneRows(
-          contiguousIncoming.lines.slice(
-            Math.max(0, availableStart - contiguousIncoming.startIndex),
-            Math.max(0, availableEnd - contiguousIncoming.startIndex),
-          ),
-        ),
-      };
-    } else {
-      collected = {
-        startIndex: currentClampedStart,
-        endIndex: currentClampedEnd,
-        lines: cloneRows(
-          current.lines.slice(
-            Math.max(0, currentClampedStart - current.startIndex),
-            Math.max(0, currentClampedEnd - current.startIndex),
-          ),
-        ),
-      };
-    }
-  }
-
-  const trimmed = trimRangeToCache(collected.startIndex, collected.endIndex, cacheLines);
-  const sliceOffset = Math.max(0, trimmed.startIndex - collected.startIndex);
-  const nextLines = collected.lines.slice(sliceOffset, sliceOffset + (trimmed.endIndex - trimmed.startIndex));
-
-  return withMetadata(current, {
-    lines: nextLines,
+    lines: trimmed.lines,
     startIndex: trimmed.startIndex,
-    endIndex: trimmed.startIndex + nextLines.length,
-    payload,
-    updateKind,
-  });
+    endIndex,
+    viewportEndIndex: Math.max(trimmed.startIndex, Math.floor(options.viewportEndIndex)),
+    cols: Math.max(1, Math.floor(options.cols || 80)),
+    rows: Math.max(1, Math.floor(options.rows || 24)),
+    cursorKeysApp: Boolean(options.cursorKeysApp),
+    updateKind: 'replace',
+    revision: Math.max(0, Math.floor(options.revision || 0)),
+  };
 }
 
 export function createSessionBufferState(options: {
   lines?: Array<TerminalCell[] | string>;
   startIndex?: number;
   endIndex?: number;
-  availableStartIndex?: number;
-  availableEndIndex?: number;
-  viewportStartIndex?: number;
   viewportEndIndex?: number;
   cols?: number;
   rows?: number;
-  cursorRow?: number;
-  cursorCol?: number;
-  cursorVisible?: boolean;
   cursorKeysApp?: boolean;
-  updateKind?: SessionBufferState['updateKind'];
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
-  const lines = normalizeBufferLines(options.lines || [], options.cacheLines);
   const startIndex = Number.isFinite(options.startIndex) ? Math.max(0, Math.floor(options.startIndex!)) : 0;
-  const requestedEndIndex =
-    Number.isFinite(options.endIndex) && Math.floor(options.endIndex!) >= startIndex
-      ? Math.floor(options.endIndex!)
-      : startIndex + lines.length;
-  const trimmed = trimRangeToCache(startIndex, requestedEndIndex, options.cacheLines);
-  const sliceOffset = Math.max(0, trimmed.startIndex - startIndex);
-  const trimmedLines = cloneRows(lines.slice(sliceOffset, sliceOffset + (trimmed.endIndex - trimmed.startIndex)));
-  const endIndex = trimmed.startIndex + trimmedLines.length;
-  const availableStartIndex = Number.isFinite(options.availableStartIndex)
-    ? Math.max(0, Math.floor(options.availableStartIndex!))
-    : trimmed.startIndex;
-  const availableEndIndex = Number.isFinite(options.availableEndIndex)
-    ? Math.max(availableStartIndex, Math.floor(options.availableEndIndex!))
-    : endIndex;
-  const rows = Math.max(1, Math.floor(options.rows || 24));
-  const viewportEndIndex = Number.isFinite(options.viewportEndIndex)
-    ? Math.max(0, Math.floor(options.viewportEndIndex!))
-    : endIndex;
-  const viewportStartIndex = Number.isFinite(options.viewportStartIndex)
-    ? Math.max(0, Math.floor(options.viewportStartIndex!))
-    : Math.max(trimmed.startIndex, viewportEndIndex - rows);
+  const normalizedLines = normalizeBufferLines(options.lines || [], options.cacheLines);
+  const requestedEndIndex = Number.isFinite(options.endIndex)
+    ? Math.max(startIndex, Math.floor(options.endIndex!))
+    : startIndex + normalizedLines.length;
+  const expectedLineCount = Math.max(0, requestedEndIndex - startIndex);
+  const lines = normalizedLines.slice(Math.max(0, normalizedLines.length - expectedLineCount));
+  const effectiveStartIndex = Math.max(0, requestedEndIndex - lines.length);
+
+  return buildSessionBufferState({
+    lines,
+    startIndex: effectiveStartIndex,
+    viewportEndIndex: Number.isFinite(options.viewportEndIndex) ? Math.floor(options.viewportEndIndex!) : requestedEndIndex,
+    cols: options.cols || 80,
+    rows: options.rows || 24,
+    cursorKeysApp: Boolean(options.cursorKeysApp),
+    revision: options.revision ?? 0,
+    cacheLines: options.cacheLines,
+  });
+}
+
+function payloadToContiguousRows(payload: TerminalBufferPayload) {
+  const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  if (normalizedLines.length === 0) {
+    return {
+      ok: true as const,
+      startIndex: Math.max(0, Math.floor(payload.startIndex || 0)),
+      lines: [] as TerminalCell[][],
+    };
+  }
+
+  const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
+  const firstIndex = normalizedLines[0]!.index;
+  const lastIndex = normalizedLines[normalizedLines.length - 1]!.index + 1;
+
+  if (firstIndex !== expectedStartIndex || lastIndex !== expectedEndIndex) {
+    return {
+      ok: false as const,
+      reason: `buffer-sync lines do not match payload window: expected ${expectedStartIndex}-${expectedEndIndex}, got ${firstIndex}-${lastIndex}`,
+    };
+  }
+
+  for (let index = 1; index < normalizedLines.length; index += 1) {
+    if (normalizedLines[index]!.index !== normalizedLines[index - 1]!.index + 1) {
+      return {
+        ok: false as const,
+        reason: `buffer-sync lines are not contiguous around ${normalizedLines[index - 1]!.index}-${normalizedLines[index]!.index}`,
+      };
+    }
+  }
 
   return {
-    lines: trimmedLines,
-    startIndex: trimmed.startIndex,
-    endIndex,
-    availableStartIndex,
-    availableEndIndex,
-    viewportStartIndex,
-    viewportEndIndex: Math.max(viewportStartIndex, viewportEndIndex),
-    cols: Math.max(1, Math.floor(options.cols || 80)),
-    rows,
-    cursorRow: Math.max(0, Math.floor(options.cursorRow ?? Math.max(viewportStartIndex, endIndex - 1))),
-    cursorCol: Math.max(0, Math.floor(options.cursorCol || 0)),
-    cursorVisible: Boolean(options.cursorVisible),
-    cursorKeysApp: Boolean(options.cursorKeysApp),
-    updateKind: options.updateKind || 'replace',
-    revision: options.revision ?? 0,
+    ok: true as const,
+    startIndex: expectedStartIndex,
+    lines: normalizedLines.map((line) => cloneRow(line.cells)),
   };
 }
 
@@ -415,44 +200,35 @@ export function applyBufferSyncToSessionBuffer(
   payload: TerminalBufferPayload,
   cacheLines: number,
 ) {
-  return mergeBufferPayload(current, payload, cacheLines, 'replace');
-}
+  const revision = Number.isFinite(payload.revision) ? Math.max(0, Math.floor(payload.revision)) : 0;
+  if (current && revision < current.revision) {
+    return current;
+  }
 
-export function applyBufferDeltaToSessionBuffer(
-  current: SessionBufferState,
-  payload: TerminalBufferPayload,
-  cacheLines: number,
-) {
-  return mergeBufferPayload(current, payload, cacheLines, 'delta');
-}
+  const contiguous = payloadToContiguousRows(payload);
+  if (!contiguous.ok) {
+    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${contiguous.reason}`);
+    return current || createSessionBufferState({
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
+      viewportEndIndex: 0,
+      cols: payload.cols,
+      rows: payload.rows,
+      cursorKeysApp: payload.cursorKeysApp,
+      revision,
+      cacheLines,
+    });
+  }
 
-export function applyBufferRangeToSessionBuffer(
-  current: SessionBufferState,
-  payload: TerminalBufferPayload,
-  cacheLines: number,
-) {
-  return mergeBufferPayload(current, payload, cacheLines, 'range');
-}
-
-export function replaceSessionBufferLines(
-  current: SessionBufferState | undefined,
-  lines: Array<TerminalCell[] | string>,
-  cacheLines: number,
-): SessionBufferState {
-  return createSessionBufferState({
-    lines,
-    startIndex: current?.startIndex,
-    endIndex: current?.startIndex !== undefined ? current.startIndex + lines.length : undefined,
-    availableStartIndex: current?.availableStartIndex,
-    availableEndIndex: current?.availableEndIndex,
-    viewportStartIndex: current?.viewportStartIndex,
-    viewportEndIndex: current?.viewportEndIndex,
-    cols: current?.cols,
-    rows: current?.rows,
-    cursorRow: current?.cursorRow,
-    cursorCol: current?.cursorCol,
-    cursorVisible: current?.cursorVisible,
-    cursorKeysApp: current?.cursorKeysApp,
+  return buildSessionBufferState({
+    lines: contiguous.lines,
+    startIndex: contiguous.startIndex,
+    viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : contiguous.startIndex + contiguous.lines.length,
+    cols: payload.cols,
+    rows: payload.rows,
+    cursorKeysApp: payload.cursorKeysApp,
+    revision,
     cacheLines,
   });
 }
@@ -468,15 +244,9 @@ export function sessionBuffersEqual(left: SessionBufferState, right: SessionBuff
   if (
     left.startIndex !== right.startIndex
     || left.endIndex !== right.endIndex
-    || left.availableStartIndex !== right.availableStartIndex
-    || left.availableEndIndex !== right.availableEndIndex
-    || left.viewportStartIndex !== right.viewportStartIndex
     || left.viewportEndIndex !== right.viewportEndIndex
     || left.cols !== right.cols
     || left.rows !== right.rows
-    || left.cursorRow !== right.cursorRow
-    || left.cursorCol !== right.cursorCol
-    || left.cursorVisible !== right.cursorVisible
     || left.cursorKeysApp !== right.cursorKeysApp
     || left.lines.length !== right.lines.length
   ) {

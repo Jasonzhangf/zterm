@@ -19,7 +19,7 @@
 - Storage：主机配置与运行态持久化
 - Session/Transport：WebSocket、tmux bridge 会话状态
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
-- Client Render State：只管理 `follow/reading + renderTopIndex + viewportRows`
+- Client Render Window：只根据 daemon viewport bottom pointer + 本地 viewportRows 取绝对窗口
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护和发送 canonical buffer
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
@@ -115,42 +115,49 @@ mobile file picker -> websocket paste-image -> daemon temp file
 
 ## Terminal viewport / buffer 规则
 
-- client 不负责 buffer 重排；client 只负责测量当前 viewport / font metrics，并把 `cols / rows` 同步给 daemon
-- daemon / tmux 是 shell 排版真源；同一个 session 的当前宽高以 daemon 当前收到的 viewport 为准
-- keyboard show/hide、pinch zoom、orientation change、container resize 都属于 viewport 变化，不属于 buffer 刷新
-- viewport 变化时只允许：
-  1. 更新 terminal 可见高度
-  2. 重新计算 `cols / rows`
-  3. 同步给 daemon / tmux
-  4. 用新的 viewport 继续渲染当前 buffer
+- client 不负责 shell 排版；client 只负责：
+  1. 连接初始化时上报当前 viewport `cols / rows`
+  2. 把 daemon canonical buffer 镜像到本地
+  3. 用 daemon 给出的 viewport 底部指针渲染最后一屏
+- daemon / tmux 是 shell 排版真源；同一个 session 的 tmux geometry 应按多 client 的**最小 geometry**收敛
+- IME / keyboard show/hide 只允许改变 render container 位置，不属于 tmux geometry change
+- pinch zoom / orientation / real container resize 才属于 geometry 变化候选
 - viewport 变化时不允许：
   - clear terminal
   - replay `outputHistory`
   - 重建 session
   - 本地重排旧 buffer 作为真相
-- reconnect / cold resume 才允许从 daemon 重新拿 snapshot；keyboard 显隐只做 layout refresh
-
+  - 因 IME 动画而持续修改 tmux 高度
 
 ## Terminal canonical buffer ownership
 
 ```text
-daemon canonical buffer
-        ↓
-client mirror buffer
-        ↓
-render state
-        ↓
-DOM scroll container
+tmux truth
+    ↓
+daemon tmux mirror
+    ├─ canonical line buffer (唯一真源)
+    ├─ canonical cursor/view bottom
+    └─ zterm clients min(cols, rows) -> tmux resize
+                ↓
+      client mirror buffer (absolute-indexed)
+                ↓
+render window = [viewportEndIndex - localViewportRows, viewportEndIndex)
+                ↓
+      render container position only
 ```
 
 规则：
 
-- daemon 只更新 / 发送 canonical buffer，不承载显示逻辑
-- cursor 属于 canonical buffer 本身，不走第二路真相
+- daemon 是 tmux 的 mirror，不是 input relay，不是本地 pty output projection
+- daemon 只做两件事：1) mirror tmux truth；2) 按 zterm 已连接 client 的最小 geometry 通知 tmux resize
+- daemon 不改写 tmux 内容语义；它只发送控制（input/attach/resize 等）并读取 tmux truth，不允许在 daemon 侧二次改写/裁剪/重排 tmux 内容来“修显示”
+- daemon canonical line buffer 是 terminal 信息的唯一真源；client/debug/local state 都不得成为第二真源
+- cursor 属于 canonical truth，本轮收敛下优先烘焙进 buffer cells，不走 client overlay 第二真源
 - client mirror buffer 只做 absolute-index merge
-- render state 只决定当前看哪一段，不改 buffer 真相
-- 用户进入 reading 后，live update 只能继续收 buffer，不能改当前 renderTopIndex
-- 只有“回到底部 / 用户输入”能退出 reading
+- client render 只根据绝对窗口渲染，不自行解释 shell 内容
+- 已经进入 canonical buffer 的历史行视为 immutable fact；resize 只影响之后的新输出，不允许回写/重排旧事实
+- geometry 决策只看 zterm 自己的接入端；Termius/iTerm/iSSH 等外部 tmux client 不参与 daemon 的 geometry policy
+- 当前优先目标是“正确最后一屏”；reading / scroll 状态机后置
 
 ## Connection / Session 真源
 

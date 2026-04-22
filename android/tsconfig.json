@@ -23,6 +23,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*", "vite.config.ts"],
+  "include": ["src/**/*", "scripts/**/*.ts", "vite.config.ts"],
   "exclude": ["node_modules", "android"]
 }

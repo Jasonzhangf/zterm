@@ -9,6 +9,8 @@
 - `android/docs/architecture.md`：模块边界、数据流、ownership
 - `android/docs/dev-workflow.md`：执行顺序、验证门禁、证据要求
 - `android/docs/ui-slices.md`：页面级切片与文件 ownership
+- `android/docs/daemon-mirror-test-plan.md`：daemon/tmux mirror 本地验证顺序（当前先 TUI `top` / `vim`，再手机）
+- `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer/render/daemon mirror 门禁
 - `android/task.md`：当前任务板
 - `android/CACHE.md`：短期上下文
 - `android/MEMORY.md`：长期经验

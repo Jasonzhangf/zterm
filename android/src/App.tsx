@@ -14,6 +14,7 @@ import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
 import { useSessionDraftStorage } from './hooks/useSessionDraftStorage';
 import { useSessionHistoryStorage } from './hooks/useSessionHistoryStorage';
 import { upsertBridgeServer } from './lib/bridge-settings';
+import { runtimeDebug } from './lib/runtime-debug';
 import { openConnectionPropertiesPage, openConnectionsPage, openSettingsPage, openTerminalPage, type AppPageState } from './lib/page-state';
 import {
   buildCleanDraft,
@@ -36,6 +37,13 @@ interface AppContentProps {
 }
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
+
+function summarizeResumeSessions(sessions: Array<{ id: string; state: string }>) {
+  return sessions.map((session) => ({
+    id: session.id,
+    state: session.state,
+  }));
+}
 
 function readPersistedPageState(): AppPageState {
   if (typeof window === 'undefined') {
@@ -70,7 +78,7 @@ function readPersistedPageState(): AppPageState {
   return openConnectionsPage();
 }
 
-function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
+export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   const {
     preferences: appUpdatePreferences,
     latestManifest,
@@ -95,8 +103,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     renameSession,
     reconnectSession,
     reconnectAllSessions,
-    requestBufferRange,
-    getActiveSession,
     sendInput,
     sendImagePaste,
     resizeTerminal,
@@ -110,13 +116,14 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
-  const [resumeNonce, setResumeNonce] = useState(0);
-  const [forceScrollToBottomNonce, setForceScrollToBottomNonce] = useState(0);
   const restoredRouteHandledRef = useRef(false);
   const wasHiddenRef = useRef(false);
   const lastResumeAtRef = useRef(0);
 
-  const activeSession = getActiveSession();
+  const activeSession = useMemo(
+    () => state.sessions.find((session) => session.id === state.activeSessionId) || null,
+    [state.activeSessionId, state.sessions],
+  );
   const sessions = state.sessions;
 
   const findReusableSession = useCallback((target: Pick<Host, 'bridgeHost' | 'bridgePort' | 'sessionName'>) => {
@@ -178,14 +185,39 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   }, [pruneDrafts, sessions]);
 
   useEffect(() => {
-    const notifyResume = (reason: string) => {
+    const notifyResume = (reason: string, options?: { force?: boolean }) => {
+      if (sessions.length === 0) {
+        runtimeDebug('app.resume.skip', { reason, force: Boolean(options?.force), why: 'no-sessions' });
+        return;
+      }
+      const hasRecoverableSessions = sessions.some((session) => session.state !== 'connected');
+      if (!options?.force && !hasRecoverableSessions) {
+        runtimeDebug('app.resume.skip', {
+          reason,
+          force: Boolean(options?.force),
+          why: 'all-healthy',
+          sessions: summarizeResumeSessions(sessions),
+        });
+        return;
+      }
       const now = Date.now();
       if (now - lastResumeAtRef.current < 800) {
+        runtimeDebug('app.resume.skip', {
+          reason,
+          force: Boolean(options?.force),
+          why: 'debounced',
+          deltaMs: now - lastResumeAtRef.current,
+          sessions: summarizeResumeSessions(sessions),
+        });
         return;
       }
       lastResumeAtRef.current = now;
+      runtimeDebug('app.resume.fire', {
+        reason,
+        force: Boolean(options?.force),
+        sessions: summarizeResumeSessions(sessions),
+      });
       console.debug('[App] reconnect all sessions ->', reason);
-      setResumeNonce((current) => current + 1);
       reconnectAllSessions();
       window.requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
@@ -194,9 +226,16 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
 
     const markHidden = () => {
       wasHiddenRef.current = true;
+      runtimeDebug('app.visibility.hidden', {
+        visibilityState: document.visibilityState,
+      });
     };
 
     const onVisibilityChange = () => {
+      runtimeDebug('app.visibility.change', {
+        visibilityState: document.visibilityState,
+        wasHidden: wasHiddenRef.current,
+      });
       if (document.visibilityState === 'hidden') {
         markHidden();
         return;
@@ -204,27 +243,33 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
 
       if (document.visibilityState === 'visible' && wasHiddenRef.current) {
         wasHiddenRef.current = false;
-        notifyResume('visibilitychange');
+        notifyResume('visibilitychange', { force: true });
       }
     };
 
     const onFocus = () => {
+      runtimeDebug('app.window.focus', {
+        wasHidden: wasHiddenRef.current,
+      });
       if (wasHiddenRef.current) {
         wasHiddenRef.current = false;
-        notifyResume('focus');
+        notifyResume('focus', { force: true });
       }
     };
 
     const onDocumentResume = () => {
       wasHiddenRef.current = false;
-      notifyResume('resume');
+      runtimeDebug('app.document.resume', {});
+      notifyResume('resume', { force: true });
     };
 
     const onPageShow = () => {
+      runtimeDebug('app.window.pageshow', {});
       notifyResume('pageshow');
     };
 
     const onOnline = () => {
+      runtimeDebug('app.window.online', {});
       notifyResume('online');
     };
 
@@ -243,7 +288,7 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
     };
-  }, [reconnectAllSessions]);
+  }, [reconnectAllSessions, sessions]);
 
   const sortedHosts = useMemo(() => sortHostsForPicker(hosts, pickerTarget), [hosts, pickerTarget]);
 
@@ -493,10 +538,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     }
   }, [bridgeSettings.servers, hosts, openDraftAsSession, recordSessionGroupOpen]);
 
-  const handleTitleChange = useCallback((title: string) => {
-    console.log('[App] Terminal title:', title);
-  }, []);
-
   const handleResize = useCallback((cols: number, rows: number) => {
     console.log('[App] Terminal resize:', cols, rows);
     resizeTerminal(cols, rows);
@@ -528,26 +569,7 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     deleteHost(host.id);
   }, [deleteHost]);
 
-  const handleSwipeSession = useCallback((direction: 'prev' | 'next') => {
-    if (!activeSession || sessions.length < 2) {
-      return;
-    }
-
-    const currentIndex = sessions.findIndex((session) => session.id === activeSession.id);
-    if (currentIndex < 0) {
-      return;
-    }
-
-    const nextIndex =
-      direction === 'next'
-        ? (currentIndex + 1) % sessions.length
-        : (currentIndex - 1 + sessions.length) % sessions.length;
-
-    switchSession(sessions[nextIndex].id);
-  }, [activeSession, sessions, switchSession]);
-
   const handleTerminalInput = useCallback((data: string) => {
-    setForceScrollToBottomNonce(Date.now());
     sendInput(data);
   }, [sendInput]);
 
@@ -667,7 +689,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
           <TerminalPage
             sessions={sessions}
             activeSession={activeSession}
-            resumeNonce={resumeNonce}
             onSwitchSession={switchSession}
             onMoveSession={moveSession}
             onRenameSession={renameSession}
@@ -680,11 +701,8 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
             }}
             onOpenConnections={() => setPageState(openConnectionsPage())}
             onOpenQuickTabPicker={() => openSessionPicker('quick-tab')}
-            onSwipeSession={handleSwipeSession}
-            onTitleChange={handleTitleChange}
             onResize={handleResize}
             onTerminalInput={handleTerminalInput}
-            onRequestBufferRange={requestBufferRange}
             onImagePaste={sendImagePaste}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
@@ -704,7 +722,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
               }
               handleSendSessionDraft(activeSession.id, value);
             }}
-            forceScrollToBottomNonce={forceScrollToBottomNonce}
           />
         )}
       </div>

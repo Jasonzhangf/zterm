@@ -42,20 +42,14 @@ export type SessionState =
   | 'closed';     // 已关闭
 
 export interface SessionBufferState {
-  lines: TerminalCell[][];          // locally cached contiguous mirror window for this session
+  lines: TerminalCell[][];          // latest contiguous mirror window for this session
   startIndex: number;               // absolute index for the first locally cached line
   endIndex: number;                 // exclusive absolute index for the last locally cached line
-  availableStartIndex: number;      // earliest absolute line currently available on daemon truth
-  availableEndIndex: number;        // exclusive absolute end currently available on daemon truth
-  viewportStartIndex: number;       // absolute row index for viewport row 0
   viewportEndIndex: number;         // exclusive absolute row index for viewport tail
   cols: number;
   rows: number;
-  cursorRow: number;                // absolute cursor row
-  cursorCol: number;
-  cursorVisible: boolean;
   cursorKeysApp: boolean;
-  updateKind: 'replace' | 'delta' | 'range';
+  updateKind: 'replace';
   revision: number;
 }
 
@@ -87,44 +81,6 @@ export interface TerminalCell {
   width: number; // 0=continuation, 1=single, 2=double-width lead
 }
 
-export interface TerminalCursor {
-  row: number;
-  col: number;
-  visible: boolean;
-}
-
-export interface TerminalSnapshot {
-  cols: number;
-  rows: number;
-  viewport: TerminalCell[][];
-  viewportStartIndex: number;
-  cursor: TerminalCursor;
-  cursorKeysApp: boolean;
-  scrollbackLines?: TerminalCell[][];
-  scrollbackStartIndex?: number;
-}
-
-export interface TerminalViewportRowPatch {
-  row: number;
-  cells: TerminalCell[];
-}
-
-export interface TerminalViewportUpdate {
-  cols: number;
-  rows: number;
-  viewportStartIndex: number;
-  rowsPatch: TerminalViewportRowPatch[];
-  cursor: TerminalCursor;
-  cursorKeysApp: boolean;
-}
-
-export interface TerminalScrollbackUpdate {
-  mode: 'append' | 'prepend' | 'reset';
-  lines: TerminalCell[][];
-  startIndex?: number;
-  remaining?: number;
-}
-
 export interface TerminalIndexedLine {
   index: number;
   cells: TerminalCell[];
@@ -134,13 +90,9 @@ export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;               // authoritative available window start on daemon
   endIndex: number;                 // authoritative available window end on daemon (exclusive)
-  viewportStartIndex: number;       // authoritative viewport start absolute row
   viewportEndIndex: number;         // authoritative viewport end absolute row
   cols: number;
   rows: number;
-  cursorRow: number;
-  cursorCol: number;
-  cursorVisible: boolean;
   cursorKeysApp: boolean;
   lines: TerminalIndexedLine[];     // concrete rows carried by this message; may be full window or subset
 }
@@ -152,9 +104,11 @@ export interface PasteImagePayload {
   pasteSequence?: string;
 }
 
-export interface ScrollbackRangeRequestPayload {
-  startIndex: number;
-  endIndex: number;
+export interface RuntimeDebugLogEntry {
+  seq: number;
+  ts: string;
+  scope: string;
+  payload?: string;
 }
 
 // ============================================
@@ -188,30 +142,6 @@ export interface WebDAVConfig {
   password?: string;
   enabled: boolean;
   syncInterval: number;      // 同步间隔（毫秒），默认 30分钟
-}
-
-// ============================================
-// Session 快照（用于恢复）
-// ============================================
-
-export interface SessionSnapshot {
-  sessionId: string;
-  hostId: string;
-  connectionName: string;
-  bridgeHost: string;
-  bridgePort: number;
-  sessionName: string;
-  authToken?: string;
-  autoCommand?: string;
-  customName?: string;
-  createdAt: number;
-  buffer?: SessionBufferState;
-  // legacy persisted fields, kept for migration compatibility
-  outputHistory?: string;
-  bufferLines?: string[];
-  lineStartIndex?: number;
-  scrollbackStartIndex?: number;
-  remoteSnapshot?: TerminalSnapshot;
 }
 
 export interface SessionHistoryEntry {
@@ -251,14 +181,13 @@ export interface CommandHistory {
 
 export type ClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
+  | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }
   | { type: 'tmux-create-session'; payload: { sessionName: string } }
   | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
   | { type: 'paste-image'; payload: PasteImagePayload }
-  | { type: 'request-buffer-range'; payload: ScrollbackRangeRequestPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
   | { type: 'close' };
@@ -278,8 +207,6 @@ export type ServerMessage =
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'data'; payload: string }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
-  | { type: 'buffer-delta'; payload: TerminalBufferPayload }
-  | { type: 'buffer-range'; payload: TerminalBufferPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }

@@ -61,6 +61,7 @@ interface TerminalQuickBarProps {
   sessionDraft: string;
   onSessionDraftChange?: (value: string) => void;
   onSessionDraftSend?: (value: string) => void;
+  onMeasuredHeightChange?: (height: number) => void;
 }
 
 interface DraftQuickAction extends QuickAction {
@@ -398,6 +399,7 @@ export function TerminalQuickBar({
   sessionDraft,
   onSessionDraftChange,
   onSessionDraftSend,
+  onMeasuredHeightChange,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
@@ -444,6 +446,7 @@ export function TerminalQuickBar({
     height: FLOATING_BUBBLE_SIZE,
   });
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
@@ -940,8 +943,29 @@ export function TerminalQuickBar({
     );
   };
 
+  useEffect(() => {
+    const host = rootRef.current;
+    if (!host) {
+      return;
+    }
+
+    const syncHeight = () => {
+      onMeasuredHeightChange?.(Math.max(0, Math.round(host.getBoundingClientRect().height || host.offsetHeight || 0)));
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(host);
+    window.addEventListener('resize', syncHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncHeight);
+    };
+  }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
+
   return (
     <div
+      ref={rootRef}
       onPointerDownCapture={(event) => {
         event.stopPropagation();
         if (!(event.target as HTMLElement | null)?.closest('input,textarea')) {

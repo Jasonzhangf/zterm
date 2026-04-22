@@ -121,6 +121,65 @@ export function sliceIndexedLines(
   return toIndexedLines(actualStart, bufferLines.slice(startOffset, endOffset));
 }
 
+export function findChangedIndexedRange(options: {
+  previousStartIndex: number;
+  previousLines: TerminalCell[][];
+  nextStartIndex: number;
+  nextLines: TerminalCell[][];
+}) {
+  const previousEndIndex = options.previousStartIndex + options.previousLines.length;
+  const nextEndIndex = options.nextStartIndex + options.nextLines.length;
+  const comparisonStart = Math.min(options.previousStartIndex, options.nextStartIndex);
+  const comparisonEnd = Math.max(previousEndIndex, nextEndIndex);
+
+  let firstChangedIndex: number | null = null;
+  for (let index = comparisonStart; index < comparisonEnd; index += 1) {
+    const previousOffset = index - options.previousStartIndex;
+    const nextOffset = index - options.nextStartIndex;
+    const previousRow =
+      previousOffset >= 0 && previousOffset < options.previousLines.length
+        ? options.previousLines[previousOffset]
+        : null;
+    const nextRow =
+      nextOffset >= 0 && nextOffset < options.nextLines.length
+        ? options.nextLines[nextOffset]
+        : null;
+
+    if (!rowsEqual(previousRow, nextRow)) {
+      firstChangedIndex = index;
+      break;
+    }
+  }
+
+  if (firstChangedIndex === null) {
+    return null;
+  }
+
+  let lastChangedIndex = firstChangedIndex;
+  for (let index = comparisonEnd - 1; index >= firstChangedIndex; index -= 1) {
+    const previousOffset = index - options.previousStartIndex;
+    const nextOffset = index - options.nextStartIndex;
+    const previousRow =
+      previousOffset >= 0 && previousOffset < options.previousLines.length
+        ? options.previousLines[previousOffset]
+        : null;
+    const nextRow =
+      nextOffset >= 0 && nextOffset < options.nextLines.length
+        ? options.nextLines[nextOffset]
+        : null;
+
+    if (!rowsEqual(previousRow, nextRow)) {
+      lastChangedIndex = index;
+      break;
+    }
+  }
+
+  return {
+    startIndex: firstChangedIndex,
+    endIndex: lastChangedIndex + 1,
+  };
+}
+
 export function resolveCanonicalAvailableLineCount(options: {
   paneRows: number;
   historySize: number;
