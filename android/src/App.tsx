@@ -100,7 +100,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
     sendInput,
     sendImagePaste,
     resizeTerminal,
-    updateSessionBufferLines,
   } = useSession();
   const { hosts, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
@@ -687,7 +686,6 @@ function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
             onTerminalInput={handleTerminalInput}
             onRequestBufferRange={requestBufferRange}
             onImagePaste={sendImagePaste}
-            onBufferLinesChange={updateSessionBufferLines}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
             onQuickActionInput={handleTerminalInput}

@@ -14,7 +14,7 @@ describe('buildBridgeUrl', () => {
       authType: 'password',
       tags: [],
       pinned: false,
-    })).toBe(`ws://192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
+    })).toBe(`ws://192.168.0.130:${DEFAULT_BRIDGE_PORT}/`);
   });
 
   it('preserves explicit ws/wss urls', () => {

@@ -29,8 +29,15 @@ import {
   DEFAULT_DAEMON_SESSION_NAME,
   WTERM_CONFIG_DISPLAY_PATH,
 } from '../lib/mobile-config';
-import { reconcileAbsoluteScrollbackRange } from '../lib/scrollback-buffer';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
+import {
+  cloneRow,
+  paintCursorIntoViewport,
+  resolveCanonicalAvailableLineCount,
+  rowsEqual,
+  sliceIndexedLines,
+  trimCanonicalBufferWindow,
+} from './canonical-buffer';
 
 interface TmuxConnectPayload {
   name: string;
@@ -65,6 +72,7 @@ interface SessionMirror {
   sessionName: string;
   ptyProcess: pty.IPty | null;
   bridge: WasmBridge | null;
+  scratchBridge: WasmBridge | null;
   state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   title: string;
   cols: number;
@@ -74,8 +82,15 @@ interface SessionMirror {
   bufferStartIndex: number;
   viewportStartIndex: number;
   bufferLines: TerminalCell[][];
+  cursorRow: number;
+  cursorCol: number;
+  cursorVisible: boolean;
   lastOutputAt: number;
   flushTimer: ReturnType<typeof setTimeout> | null;
+  flushInFlight: boolean;
+  flushRequestedWhileBusy: boolean;
+  destroyTimer: ReturnType<typeof setTimeout> | null;
+  orphanedAt: number | null;
   subscribers: Set<string>;
 }
 
@@ -150,12 +165,12 @@ const AUTO_COMMAND_DELAY_MS = 180;
 const REQUIRED_AUTH_TOKEN = DAEMON_CONFIG.authToken;
 const INITIAL_SCROLLBACK_TAIL_LINES = 100;
 const SCROLLBACK_BACKFILL_CHUNK_LINES = 100;
-const ACTIVE_STREAM_TURBO_INTERVAL_MS = 34;
-const ACTIVE_STREAM_FAST_INTERVAL_MS = 42;
-const ACTIVE_STREAM_BALANCED_INTERVAL_MS = 55;
-const ACTIVE_STREAM_SLOW_INTERVAL_MS = 80;
-const INACTIVE_STREAM_INTERVAL_MS = 320;
-const IDLE_STREAM_INTERVAL_MS = 1200;
+const ACTIVE_STREAM_TURBO_INTERVAL_MS = 120;
+const ACTIVE_STREAM_FAST_INTERVAL_MS = 160;
+const ACTIVE_STREAM_BALANCED_INTERVAL_MS = 220;
+const ACTIVE_STREAM_SLOW_INTERVAL_MS = 320;
+const INACTIVE_STREAM_INTERVAL_MS = 900;
+const IDLE_STREAM_INTERVAL_MS = 1800;
 const BACKFILL_INTERVAL_MS = 260;
 const IDLE_BEFORE_BACKFILL_MS = 250;
 const MAX_CAPTURED_SCROLLBACK_LINES = DAEMON_CONFIG.terminalCacheLines;
@@ -168,6 +183,8 @@ const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || ''
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
 const WS_HEARTBEAT_INTERVAL_MS = 30000;
 const RECENT_OUTPUT_WINDOW_MS = 900;
+const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
+const ORPHAN_MIRROR_TTL_MS = 2 * 60 * 1000;
 
 const sessions = new Map<string, ClientSession>();
 const mirrors = new Map<string, SessionMirror>();
@@ -430,6 +447,20 @@ function listTmuxSessions() {
     .filter((line) => Boolean(line) && !HIDDEN_TMUX_SESSIONS.has(line));
 }
 
+function readTmuxStatusLineCount() {
+  try {
+    const result = runTmux(['display-message', '-p', '#{?status,1,0}']);
+    return result.stdout.trim() === '1' ? 1 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function resolveRequestedTmuxRows(contentRows: number) {
+  const safeContentRows = Math.max(1, Math.floor(contentRows));
+  return safeContentRows + readTmuxStatusLineCount();
+}
+
 function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
   const result = runTmux(['display-message', '-p', '-t', sessionName, '#{history_size} #{pane_height} #{pane_width}']);
   const [historyRaw = '0', rowsRaw = '24', colsRaw = '80'] = result.stdout.trim().split(/\s+/u);
@@ -471,15 +502,16 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   const metrics = readTmuxPaneMetrics(mirror.sessionName);
   const maxLines = Math.max(metrics.paneRows, MAX_CAPTURED_SCROLLBACK_LINES);
   const capturedLines = captureTmuxPaneLines(mirror.sessionName, maxLines);
-  if (capturedLines.length === 0) {
-    return false;
+
+  const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
+  mirror.scratchBridge = scratchBridge;
+  scratchBridge.init(metrics.paneCols, metrics.paneRows);
+  if (capturedLines.length > 0) {
+    scratchBridge.writeString(capturedLines.join('\r\n'));
   }
 
-  const scratchBridge = await WasmBridge.load();
-  scratchBridge.init(metrics.paneCols, metrics.paneRows);
-  scratchBridge.writeString(capturedLines.join('\r\n'));
-
-  const viewport = buildViewport(scratchBridge);
+  const cursor = mirror.bridge.getCursor();
+  const viewport = paintCursorIntoViewport(buildViewport(scratchBridge), cursor.row, cursor.col, cursor.visible);
   const scratchScrollbackCount = scratchBridge.getScrollbackCount();
   const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - viewport.length));
   const scrollbackStartOldestIndex = Math.max(0, scratchScrollbackCount - scrollbackKeepCount);
@@ -488,26 +520,29 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
       ? readScrollbackRangeByOldestIndex(scratchBridge, scrollbackStartOldestIndex, scratchScrollbackCount)
       : [];
 
-  const totalAvailableLines = Math.max(
-    metrics.paneRows,
-    metrics.historySize,
-    capturedLines.length,
-    scratchScrollbackCount + viewport.length,
-  );
-  const nextViewportStartIndex = Math.max(0, totalAvailableLines - metrics.paneRows);
+  const totalAvailableLines = resolveCanonicalAvailableLineCount({
+    paneRows: metrics.paneRows,
+    historySize: metrics.historySize,
+    capturedLineCount: capturedLines.length,
+    scratchLineCount: scratchScrollbackCount + viewport.length,
+  });
   const nextBufferLines = [...scrollbackTail, ...viewport];
   const nextBufferStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
 
-  mirror.bufferStartIndex = nextBufferStartIndex;
-  mirror.viewportStartIndex = nextViewportStartIndex;
-  mirror.bufferLines = nextBufferLines;
   mirror.rows = metrics.paneRows;
   mirror.cols = metrics.paneCols;
   mirror.lastScrollbackCount = mirror.bridge.getScrollbackCount();
-  trimMirrorBufferToCache(mirror);
+  const trimmed = trimCanonicalBufferWindow(nextBufferStartIndex, nextBufferLines, Math.max(mirror.rows, MAX_CAPTURED_SCROLLBACK_LINES));
+  mirror.bufferStartIndex = trimmed.startIndex;
+  mirror.bufferLines = trimmed.lines;
+  const availableEndIndex = getMirrorAvailableEndIndex(mirror);
+  mirror.viewportStartIndex = Math.max(mirror.bufferStartIndex, availableEndIndex - mirror.rows);
+  mirror.cursorRow = mirror.viewportStartIndex + cursor.row;
+  mirror.cursorCol = cursor.col;
+  mirror.cursorVisible = cursor.visible;
 
   console.log(
-    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync history=${metrics.historySize} captured=${capturedLines.length} scratch=${scratchScrollbackCount + viewport.length} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} viewport=${mirror.viewportStartIndex}`,
+    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync history=${metrics.historySize} captured=${capturedLines.length} scratch=${scratchScrollbackCount + viewport.length} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} viewport=${mirror.viewportStartIndex}`,
   );
 
   return true;
@@ -546,6 +581,35 @@ function clearMirrorFlushTimer(mirror: SessionMirror) {
   }
 }
 
+function clearMirrorDestroyTimer(mirror: SessionMirror) {
+  if (mirror.destroyTimer) {
+    clearTimeout(mirror.destroyTimer);
+    mirror.destroyTimer = null;
+  }
+}
+
+function scheduleMirrorDestroyIfOrphaned(mirror: SessionMirror, reason: string) {
+  if (mirror.state === 'closed' || mirror.subscribers.size > 0) {
+    clearMirrorDestroyTimer(mirror);
+    mirror.orphanedAt = mirror.subscribers.size > 0 ? null : mirror.orphanedAt;
+    return;
+  }
+
+  mirror.orphanedAt = Date.now();
+  clearMirrorDestroyTimer(mirror);
+  mirror.destroyTimer = setTimeout(() => {
+    mirror.destroyTimer = null;
+    if (mirror.state === 'closed' || mirror.subscribers.size > 0) {
+      if (mirror.subscribers.size > 0) {
+        mirror.orphanedAt = null;
+      }
+      return;
+    }
+    destroyMirror(mirror, reason, false);
+  }, ORPHAN_MIRROR_TTL_MS);
+  mirror.destroyTimer.unref?.();
+}
+
 function createClientSession(ws: WebSocket, requestOrigin: string): ClientSession {
   const session: ClientSession = {
     id: uuidv4(),
@@ -575,6 +639,7 @@ function createMirror(sessionName: string): SessionMirror {
     sessionName: key,
     ptyProcess: null,
     bridge: null,
+    scratchBridge: null,
     state: 'idle',
     title: key,
     cols: 80,
@@ -584,8 +649,15 @@ function createMirror(sessionName: string): SessionMirror {
     bufferStartIndex: 0,
     viewportStartIndex: 0,
     bufferLines: [],
+    cursorRow: 0,
+    cursorCol: 0,
+    cursorVisible: false,
     lastOutputAt: 0,
     flushTimer: null,
+    flushInFlight: false,
+    flushRequestedWhileBusy: false,
+    destroyTimer: null,
+    orphanedAt: null,
     subscribers: new Set(),
   };
   mirrors.set(key, mirror);
@@ -609,6 +681,7 @@ function detachClientSession(session: ClientSession, reason: string, notifyClien
   const mirror = getClientMirror(session);
   if (mirror) {
     mirror.subscribers.delete(session.id);
+    scheduleMirrorDestroyIfOrphaned(mirror, 'orphaned mirror reaped after client disconnect');
   }
 
   session.mirrorKey = null;
@@ -629,6 +702,7 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
 
   mirror.state = 'closed';
   clearMirrorFlushTimer(mirror);
+  clearMirrorDestroyTimer(mirror);
 
   if (mirror.ptyProcess) {
     try {
@@ -656,10 +730,15 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
 
   mirror.subscribers.clear();
   mirror.bridge = null;
+  mirror.scratchBridge = null;
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
   mirror.viewportStartIndex = 0;
+  mirror.cursorRow = 0;
+  mirror.cursorCol = 0;
+  mirror.cursorVisible = false;
   mirror.lastScrollbackCount = -1;
+  mirror.orphanedAt = null;
   mirrors.delete(mirror.key);
 }
 
@@ -699,25 +778,6 @@ function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number,
   return cells;
 }
 
-function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index];
-    const b = right[index];
-    if (!a || !b) {
-      return false;
-    }
-    if (a.char !== b.char || a.fg !== b.fg || a.bg !== b.bg || a.flags !== b.flags || a.width !== b.width) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 function getMirrorAvailableEndIndex(mirror: SessionMirror) {
   return mirror.bufferStartIndex + mirror.bufferLines.length;
 }
@@ -741,93 +801,6 @@ function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: nu
   return lines;
 }
 
-function buildMirrorRangeMap(mirror: SessionMirror) {
-  const linesByIndex = new Map<number, TerminalCell[]>();
-  mirror.bufferLines.forEach((line, offset) => {
-    linesByIndex.set(mirror.bufferStartIndex + offset, line);
-  });
-  return linesByIndex;
-}
-
-function collectContiguousMirrorLines(linesByIndex: Map<number, TerminalCell[]>, startIndex: number, endIndex: number) {
-  const normalizedStart = Math.max(0, startIndex);
-  const normalizedEnd = Math.max(normalizedStart, endIndex);
-  const lines: TerminalCell[][] = [];
-
-  for (let index = normalizedStart; index < normalizedEnd; index += 1) {
-    const row = linesByIndex.get(index);
-    if (!row) {
-      return null;
-    }
-    lines.push(row);
-  }
-
-  return lines;
-}
-
-function trimMirrorBufferToCache(mirror: SessionMirror) {
-  const maxLines = Math.max(mirror.rows, MAX_CAPTURED_SCROLLBACK_LINES);
-  if (mirror.bufferLines.length <= maxLines) {
-    return;
-  }
-
-  const trimCount = mirror.bufferLines.length - maxLines;
-  mirror.bufferLines.splice(0, trimCount);
-  mirror.bufferStartIndex += trimCount;
-}
-
-function rebuildMirrorAuthoritativeBuffer(mirror: SessionMirror) {
-  const bridge = mirror.bridge;
-  if (!bridge) {
-    return;
-  }
-
-  const currentScrollbackCount = bridge.getScrollbackCount();
-  const absoluteRange = reconcileAbsoluteScrollbackRange(
-    {
-      lastScrollbackCount: mirror.lastScrollbackCount,
-      nextIndex: mirror.viewportStartIndex,
-    },
-    currentScrollbackCount,
-  );
-
-  const viewport = buildViewport(bridge);
-  const maxLines = Math.max(viewport.length, MAX_CAPTURED_SCROLLBACK_LINES);
-  const scrollbackKeepCount = Math.max(0, Math.min(currentScrollbackCount, maxLines - viewport.length));
-  const scrollbackStartOldestIndex = Math.max(0, currentScrollbackCount - scrollbackKeepCount);
-  const scrollbackTail =
-    scrollbackKeepCount > 0
-      ? readScrollbackRangeByOldestIndex(bridge, scrollbackStartOldestIndex, currentScrollbackCount)
-      : [];
-
-  mirror.viewportStartIndex = absoluteRange.nextIndex;
-  mirror.bufferStartIndex = Math.max(absoluteRange.startIndex, mirror.viewportStartIndex - scrollbackTail.length);
-  mirror.bufferLines = [...scrollbackTail, ...viewport];
-  mirror.lastScrollbackCount = currentScrollbackCount;
-  mirror.rows = bridge.getRows();
-  mirror.cols = bridge.getCols();
-  trimMirrorBufferToCache(mirror);
-}
-
-function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {
-  return lines.map((cells, offset) => ({
-    index: startIndex + offset,
-    cells,
-  }));
-}
-
-function sliceMirrorIndexedLines(
-  mirror: SessionMirror,
-  startIndex: number,
-  endIndex: number,
-) {
-  const actualStart = Math.max(mirror.bufferStartIndex, Math.floor(startIndex));
-  const actualEnd = Math.max(actualStart, Math.min(getMirrorAvailableEndIndex(mirror), Math.floor(endIndex)));
-  const startOffset = actualStart - mirror.bufferStartIndex;
-  const endOffset = actualEnd - mirror.bufferStartIndex;
-  return toIndexedLines(actualStart, mirror.bufferLines.slice(startOffset, endOffset));
-}
-
 function buildBufferPayload(
   mirror: SessionMirror,
   lines: TerminalIndexedLine[],
@@ -836,8 +809,6 @@ function buildBufferPayload(
   if (!bridge) {
     return null;
   }
-
-  const cursor = bridge.getCursor();
   const viewportStartIndex = mirror.viewportStartIndex;
   const viewportEndIndex = getMirrorViewportEndIndex(mirror);
 
@@ -847,13 +818,13 @@ function buildBufferPayload(
     endIndex: getMirrorAvailableEndIndex(mirror),
     viewportStartIndex,
     viewportEndIndex,
-    cols: bridge.getCols(),
-    rows: bridge.getRows(),
-    cursorRow: viewportStartIndex + cursor.row,
-    cursorCol: cursor.col,
-    cursorVisible: cursor.visible,
+    cols: mirror.cols,
+    rows: mirror.rows,
+    cursorRow: mirror.cursorRow,
+    cursorCol: mirror.cursorCol,
+    cursorVisible: mirror.cursorVisible,
     cursorKeysApp: bridge.cursorKeysApp(),
-    lines,
+    lines: lines.map((line) => ({ index: line.index, cells: cloneRow(line.cells) })),
   };
 }
 
@@ -862,7 +833,7 @@ function buildInitialBufferSyncPayload(session: ClientSession, mirror: SessionMi
   const initialCount = Math.min(totalAvailable, INITIAL_SCROLLBACK_TAIL_LINES + mirror.rows);
   const startIndex = Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - initialCount);
   session.backfillCursor = startIndex;
-  return buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, startIndex, getMirrorAvailableEndIndex(mirror)));
+  return buildBufferPayload(mirror, sliceIndexedLines(mirror.bufferStartIndex, mirror.bufferLines, startIndex, getMirrorAvailableEndIndex(mirror)));
 }
 
 function buildBackfillRangePayload(
@@ -870,7 +841,7 @@ function buildBackfillRangePayload(
   startAbsolute: number,
   endAbsolute: number,
 ): TerminalBufferPayload | null {
-  return buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, startAbsolute, endAbsolute));
+  return buildBufferPayload(mirror, sliceIndexedLines(mirror.bufferStartIndex, mirror.bufferLines, startAbsolute, endAbsolute));
 }
 
 function scheduleClientBackfill(session: ClientSession) {
@@ -965,6 +936,33 @@ function sendInitialBufferSyncToClient(session: ClientSession, mirror: SessionMi
   sendBufferSyncToClient(session, mirror, true);
 }
 
+async function resizeConnectedMirror(mirror: SessionMirror, cols: number, rows: number) {
+  if (mirror.state !== 'connected' || !mirror.ptyProcess || !mirror.bridge) {
+    return;
+  }
+
+  const tmuxRows = resolveRequestedTmuxRows(rows);
+  mirror.cols = cols;
+  mirror.rows = rows;
+  mirror.ptyProcess.resize(cols, tmuxRows);
+  mirror.bridge.resize(cols, tmuxRows);
+  mirror.lastScrollbackCount = -1;
+  mirror.bufferLines = [];
+  mirror.bufferStartIndex = 0;
+  mirror.viewportStartIndex = 0;
+  mirror.cursorRow = 0;
+  mirror.cursorCol = 0;
+  mirror.cursorVisible = false;
+  clearMirrorFlushTimer(mirror);
+  const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+  if (!captured) {
+    throw new Error('Failed to capture canonical tmux buffer after resize');
+  }
+  mirror.bridge.clearDirty();
+  mirror.revision += 1;
+  broadcastMirrorBufferReset(mirror);
+}
+
 function broadcastMirrorBufferReset(mirror: SessionMirror) {
   for (const sessionId of mirror.subscribers) {
     const session = sessions.get(sessionId);
@@ -998,93 +996,62 @@ function flushMirrorUpdates(mirror: SessionMirror) {
     return;
   }
 
-  const currentScrollbackCount = bridge.getScrollbackCount();
-  if (mirror.lastScrollbackCount < 0 || currentScrollbackCount < mirror.lastScrollbackCount) {
-    rebuildMirrorAuthoritativeBuffer(mirror);
-    bridge.clearDirty();
-    mirror.revision += 1;
-    broadcastMirrorBufferReset(mirror);
-    return;
-  }
-
+  mirror.flushInFlight = true;
+  mirror.flushRequestedWhileBusy = false;
   const previousStartIndex = mirror.bufferStartIndex;
   const previousLines = mirror.bufferLines.slice();
   const previousEndIndex = previousStartIndex + previousLines.length;
-  const previousViewportStartIndex = mirror.viewportStartIndex;
 
-  const linesByIndex = buildMirrorRangeMap(mirror);
-  const newScrollbackLines = currentScrollbackCount - mirror.lastScrollbackCount;
-  if (newScrollbackLines > 0) {
-    const appended = readScrollbackRangeByOldestIndex(
-      bridge,
-      currentScrollbackCount - newScrollbackLines,
-      currentScrollbackCount,
-    );
-    appended.forEach((line, offset) => {
-      linesByIndex.set(previousViewportStartIndex + offset, line);
+  void captureMirrorAuthoritativeBufferFromTmux(mirror)
+    .then((captured) => {
+      if (!captured) {
+        throw new Error('tmux capture returned no canonical buffer');
+      }
+
+      const nextStartIndex = mirror.bufferStartIndex;
+      const nextEndIndex = getMirrorAvailableEndIndex(mirror);
+
+      let earliestChangedIndex: number | null = null;
+      const comparisonStart = Math.min(previousStartIndex, nextStartIndex);
+      const comparisonEnd = Math.max(previousEndIndex, nextEndIndex);
+      for (let index = comparisonStart; index < comparisonEnd; index += 1) {
+        const previousOffset = index - previousStartIndex;
+        const nextOffset = index - nextStartIndex;
+        const previousRow = previousOffset >= 0 && previousOffset < previousLines.length ? previousLines[previousOffset] : null;
+        const nextRow = nextOffset >= 0 && nextOffset < mirror.bufferLines.length ? mirror.bufferLines[nextOffset] : null;
+        if (!rowsEqual(previousRow, nextRow)) {
+          earliestChangedIndex = index;
+          break;
+        }
+      }
+
+      bridge.clearDirty();
+      mirror.revision += 1;
+      const payload = buildBufferPayload(
+        mirror,
+        earliestChangedIndex === null
+          ? []
+          : sliceIndexedLines(mirror.bufferStartIndex, mirror.bufferLines, Math.max(nextStartIndex, earliestChangedIndex), nextEndIndex),
+      );
+      if (payload) {
+        payload.revision = mirror.revision;
+        broadcastMirrorBufferDelta(mirror, payload);
+      }
+    })
+    .catch((error) => {
+      console.error(
+        `[${new Date().toISOString()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    })
+    .finally(() => {
+      mirror.flushInFlight = false;
+      if (mirror.flushRequestedWhileBusy) {
+        mirror.flushRequestedWhileBusy = false;
+        scheduleMirrorFlush(mirror);
+      }
     });
-  }
-
-  const nextViewportStartIndex = previousViewportStartIndex + newScrollbackLines;
-  const viewport = buildViewport(bridge);
-  viewport.forEach((line, offset) => {
-    linesByIndex.set(nextViewportStartIndex + offset, line);
-  });
-
-  const nextEndIndex = nextViewportStartIndex + viewport.length;
-  const nextStartIndex = Math.max(0, nextEndIndex - Math.max(viewport.length, MAX_CAPTURED_SCROLLBACK_LINES));
-  for (const index of [...linesByIndex.keys()]) {
-    if (index < nextStartIndex || index >= nextEndIndex) {
-      linesByIndex.delete(index);
-    }
-  }
-
-  const nextLines = collectContiguousMirrorLines(linesByIndex, nextStartIndex, nextEndIndex);
-  if (!nextLines) {
-    rebuildMirrorAuthoritativeBuffer(mirror);
-    bridge.clearDirty();
-    mirror.revision += 1;
-    broadcastMirrorBufferReset(mirror);
-    return;
-  }
-
-  mirror.bufferStartIndex = nextStartIndex;
-  mirror.bufferLines = nextLines;
-  mirror.viewportStartIndex = nextViewportStartIndex;
-  mirror.lastScrollbackCount = currentScrollbackCount;
-  mirror.rows = bridge.getRows();
-  mirror.cols = bridge.getCols();
-
-  let earliestChangedIndex: number | null = null;
-  for (let index = nextStartIndex; index < nextEndIndex; index += 1) {
-    const nextRow = mirror.bufferLines[index - nextStartIndex];
-    const previousRow =
-      index >= previousStartIndex && index < previousEndIndex
-        ? previousLines[index - previousStartIndex]
-        : null;
-    if (!previousRow || !rowsEqual(previousRow, nextRow)) {
-      earliestChangedIndex = index;
-      break;
-    }
-  }
-
-  bridge.clearDirty();
-
-  if (earliestChangedIndex === null && newScrollbackLines === 0 && previousViewportStartIndex === mirror.viewportStartIndex) {
-    return;
-  }
-
-  mirror.revision += 1;
-  const payload = buildBufferPayload(
-    mirror,
-    earliestChangedIndex === null
-      ? []
-      : sliceMirrorIndexedLines(mirror, earliestChangedIndex, nextEndIndex),
-  );
-  if (payload) {
-    payload.revision = mirror.revision;
-    broadcastMirrorBufferDelta(mirror, payload);
-  }
 }
 
 function computeMirrorFlushInterval(mirror: SessionMirror) {
@@ -1123,7 +1090,16 @@ function computeMirrorFlushInterval(mirror: SessionMirror) {
 }
 
 function scheduleMirrorFlush(mirror: SessionMirror) {
-  if (mirror.flushTimer || mirror.state !== 'connected') {
+  if (mirror.state !== 'connected') {
+    return;
+  }
+
+  if (mirror.flushInFlight) {
+    mirror.flushRequestedWhileBusy = true;
+    return;
+  }
+
+  if (mirror.flushTimer) {
     return;
   }
 
@@ -1141,11 +1117,15 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
   mirror.viewportStartIndex = 0;
+  mirror.cursorRow = 0;
+  mirror.cursorCol = 0;
+  mirror.cursorVisible = false;
   clearMirrorFlushTimer(mirror);
+  const requestedTmuxRows = resolveRequestedTmuxRows(mirror.rows);
 
   try {
     mirror.bridge = await WasmBridge.load();
-    mirror.bridge.init(mirror.cols, mirror.rows);
+    mirror.bridge.init(mirror.cols, requestedTmuxRows);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     mirror.state = 'error';
@@ -1165,7 +1145,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
     ptyProcess = pty.spawn(TMUX_BINARY, ['new-session', '-A', '-s', mirror.sessionName], {
       name: 'xterm-256color',
       cols: mirror.cols,
-      rows: mirror.rows,
+      rows: requestedTmuxRows,
       cwd: process.env.HOME || '/',
       env: cleanEnv(),
     });
@@ -1201,7 +1181,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
     await new Promise((resolve) => setTimeout(resolve, 80));
     const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
     if (!captured) {
-      rebuildMirrorAuthoritativeBuffer(mirror);
+      throw new Error('Failed to capture canonical tmux buffer during initial sync');
     }
     mirror.bridge.clearDirty();
     mirror.revision += 1;
@@ -1220,7 +1200,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
       mirror.viewportStartIndex = 0;
       const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
       if (!captured) {
-        rebuildMirrorAuthoritativeBuffer(mirror);
+        throw new Error('Failed to capture canonical tmux buffer during fallback sync');
       }
       mirror.bridge.clearDirty();
       mirror.revision += 1;
@@ -1237,7 +1217,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
           sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
         }
         sendMessage(session, { type: 'title', payload: mirror.title });
-        const fallbackPayload = buildBufferPayload(mirror, sliceMirrorIndexedLines(mirror, mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror)));
+        const fallbackPayload = buildBufferPayload(mirror, sliceIndexedLines(mirror.bufferStartIndex, mirror.bufferLines, mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror)));
         if (fallbackPayload) {
           fallbackPayload.revision = mirror.revision;
           sendMessage(session, { type: 'buffer-sync', payload: fallbackPayload });
@@ -1274,6 +1254,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   const previousMirror = getClientMirror(session);
   if (previousMirror) {
     previousMirror.subscribers.delete(session.id);
+    scheduleMirrorDestroyIfOrphaned(previousMirror, 'orphaned mirror reaped after session switch');
   }
 
   session.state = 'connecting';
@@ -1288,6 +1269,8 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   if (!mirror) {
     mirror = createMirror(nextSessionName);
   }
+  clearMirrorDestroyTimer(mirror);
+  mirror.orphanedAt = null;
   if (mirror.state !== 'connected') {
     mirror.cols = requestedCols;
     mirror.rows = requestedRows;
@@ -1297,6 +1280,18 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   sendMessage(session, { type: 'title', payload: mirror.title });
 
   if (mirror.state === 'connected' && mirror.bridge) {
+    const bridgeCols = mirror.bridge.getCols();
+    const bridgeRows = mirror.bridge.getRows();
+    const requestedTmuxRows = resolveRequestedTmuxRows(requestedRows);
+    if (
+      requestedCols !== mirror.cols
+      || requestedRows !== mirror.rows
+      || requestedCols !== bridgeCols
+      || requestedTmuxRows !== bridgeRows
+    ) {
+      await resizeConnectedMirror(mirror, requestedCols, requestedRows);
+      return;
+    }
     sendInitialBufferSyncToClient(session, mirror);
     return;
   }
@@ -1311,23 +1306,7 @@ async function handleResize(session: ClientSession, cols: number, rows: number) 
   if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess || !mirror.bridge) {
     return;
   }
-
-  mirror.cols = cols;
-  mirror.rows = rows;
-  mirror.ptyProcess.resize(cols, rows);
-  mirror.bridge.resize(cols, rows);
-  mirror.lastScrollbackCount = -1;
-  mirror.bufferLines = [];
-  mirror.bufferStartIndex = 0;
-  mirror.viewportStartIndex = 0;
-  clearMirrorFlushTimer(mirror);
-  const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
-  if (!captured) {
-    rebuildMirrorAuthoritativeBuffer(mirror);
-  }
-  mirror.bridge.clearDirty();
-  mirror.revision += 1;
-  broadcastMirrorBufferReset(mirror);
+  await resizeConnectedMirror(mirror, cols, rows);
 }
 
 function handleInput(session: ClientSession, data: string) {
@@ -1362,15 +1341,6 @@ async function handleBufferRangeRequest(session: ClientSession, startIndex: numb
 
   const normalizedStart = Math.max(0, Math.floor(startIndex));
   const normalizedEnd = Math.max(normalizedStart, Math.floor(endIndex));
-  const needsOlderTruth = normalizedStart < mirror.bufferStartIndex || normalizedEnd > getMirrorAvailableEndIndex(mirror);
-
-  if (needsOlderTruth) {
-    const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
-    if (!captured) {
-      rebuildMirrorAuthoritativeBuffer(mirror);
-    }
-  }
-
   const availableStart = mirror.bufferStartIndex;
   const availableEnd = getMirrorAvailableEndIndex(mirror);
   const actualStart = Math.max(availableStart, normalizedStart);
@@ -1596,6 +1566,21 @@ heartbeatTimer.unref?.();
 
 wss.on('close', () => {
   clearInterval(heartbeatTimer);
+});
+
+server.on('error', (error) => {
+  if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+    console.error(
+      `[${new Date().toISOString()}] daemon listen conflict on ${HOST}:${PORT}; another process is already bound to this port`,
+    );
+    process.exitCode = STARTUP_PORT_CONFLICT_EXIT_CODE;
+    return;
+  }
+
+  console.error(
+    `[${new Date().toISOString()}] daemon server error: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exitCode = 1;
 });
 
 server.on('upgrade', (request, socket, head) => {

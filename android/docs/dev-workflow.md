@@ -46,6 +46,16 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - 大屏实现优先复用**一行多列 + 垂直分屏**的 phone-sized pane 编排，不允许先做一套 desktop-only 页面再“反推兼容”
 - future Mac 的实现也必须先沿 shared app-layer / platform shell 的边界推进，不能把 Android 页面逻辑复制一份到 `mac/`
 
+
+## Terminal buffer 重构门禁
+
+- 任何 terminal buffer / scroll / cursor 改动，先更新：
+  - `docs/decisions/2026-04-21-terminal-buffer-render-separation.md`
+  - `.agents/skills/terminal-buffer-truth/SKILL.md`
+- 未完成 ownership 拆分前，禁止继续在 `TerminalView.tsx` 叠加 projection / anchor / scroll patch
+- daemon 侧提交前必须证明：它只维护和发送 canonical buffer，不承载显示逻辑
+- client 侧提交前必须证明：mirror buffer / render state / scroll state 已拆开
+
 ## 验证层级
 
 ### L1 Unit

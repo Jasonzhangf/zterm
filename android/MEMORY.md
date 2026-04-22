@@ -65,6 +65,11 @@
 - [2026-04-21] Jason 明确认可当前快捷栏/按钮视觉方向：后续 mobile UI 默认沿用“简洁、闭合、分区明确”的 capsule/block 设计语言——低噪声配色、清晰边界、成组区域、按钮闭合感优先；新增页面/组件若无特殊原因，应沿这个方向统一
 - [2026-04-21] 升级验证流程冻结：首次装机可用 ADB，但后续新版本默认必须走 app 内建升级链路验证（manifest -> 提示 -> 下载 -> 校验 -> 系统安装）；除非 Jason 明确要求，不再用 ADB 直接覆盖新版本
 - [2026-04-21] tmux pane 真源校验：`display-message '#{history_size}'` 返回的就是 `capture-pane -S -... -E -1` 可见总行数，不要再额外 `+ pane_height`；否则 absolute index 会整体偏移，导致 viewport/buffer 拼接错位
+- [2026-04-22] Jason 冻结新的 terminal render 真源：client 不再让 daemon viewport 参与最终画面决策；render 只保留绝对窗口 `[renderTopIndex, renderTopIndex + viewportRows)`，follow bottom=`availableEndIndex - viewportRows`，缺失行一律显式 blank。
+- [2026-04-22] terminal 底部被吃行时先查 UI 双重扣减：若 `TerminalCanvas` 已经处在 quick bar 上方剩余高度内，就不能再把 `quickBarHeight` 作为 `visualBottomInset/paddingBottom` 传给 `TerminalView`，否则会稳定少掉尾部几行。
+- [2026-04-22] Jason 冻结键盘规则：无论软键盘/输入法是否弹出，terminal 显示高度都不跟着改；只允许做 UI 视觉上抬，禁止把 keyboard inset 回灌成 terminal 高度变化、tmux resize 或 buffer/render window 高度变化。
+- [2026-04-22] daemon 安装/重启前先清理 legacy `com.wterm.mobile.daemon`，并用 `ThrottleInterval` 限流；否则 launchd 会在端口冲突时持续重拉服务，放大系统负担。
+- [2026-04-22] canonical bottom 必须按 `availableEndIndex` 算，不允许再被本地 slice 的 `endIndex` 截短；否则 follow 会假装已经到底，实则还差尾巴。
 
 ## Patterns & Learnings
 

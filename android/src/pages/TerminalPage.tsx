@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { TerminalCanvas } from '../components/terminal/TerminalCanvas';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { mobileTheme } from '../lib/mobile-ui';
-import type { QuickAction, Session, TerminalCell, TerminalShortcutAction } from '../lib/types';
+import type { QuickAction, Session, TerminalShortcutAction } from '../lib/types';
 
 type VirtualKeyboardApi = {
   overlaysContent: boolean;
@@ -34,7 +33,6 @@ interface TerminalPageProps {
   onTerminalInput?: (data: string) => void;
   onRequestBufferRange?: (sessionId: string, startIndex: number, endIndex: number) => void;
   onImagePaste?: (file: File) => Promise<void> | void;
-  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string) => void;
@@ -62,7 +60,6 @@ export function TerminalPage({
   onTerminalInput,
   onRequestBufferRange,
   onImagePaste,
-  onBufferLinesChange,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -88,10 +85,6 @@ export function TerminalPage({
   const [baseViewportHeight, setBaseViewportHeight] = useState(() =>
     typeof window !== 'undefined' ? Math.max(window.innerHeight, window.visualViewport?.height || 0) : 0,
   );
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const [quickBarHeight, setQuickBarHeight] = useState(0);
-  const headerRef = useRef<HTMLDivElement | null>(null);
-  const quickBarRef = useRef<HTMLDivElement | null>(null);
   const connectionIssueTimerRef = useRef<number | null>(null);
 
   const focusTerminalInput = () => {
@@ -296,32 +289,10 @@ export function TerminalPage({
             detail: activeSession.lastError || '当前 tab 已断开，请检查网络或服务器状态。',
           }
         : null;
-  const shellHeight = Math.max(0, baseViewportHeight);
-  const canvasHeight = Math.max(0, shellHeight - headerHeight - quickBarHeight);
-
-  useEffect(() => {
-    const headerNode = headerRef.current;
-    const quickBarNode = quickBarRef.current;
-    if (!headerNode && !quickBarNode) {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      setHeaderHeight(headerRef.current?.getBoundingClientRect().height || 0);
-      setQuickBarHeight(quickBarRef.current?.getBoundingClientRect().height || 0);
-    });
-
-    if (headerNode) {
-      observer.observe(headerNode);
-      setHeaderHeight(headerNode.getBoundingClientRect().height || 0);
-    }
-    if (quickBarNode) {
-      observer.observe(quickBarNode);
-      setQuickBarHeight(quickBarNode.getBoundingClientRect().height || 0);
-    }
-
-    return () => observer.disconnect();
-  }, []);
+  const shellHeight = Math.max(
+    0,
+    baseViewportHeight || viewportHeight || (typeof window !== 'undefined' ? window.innerHeight : 0),
+  );
 
   return (
     <div
@@ -334,7 +305,7 @@ export function TerminalPage({
         backgroundColor: mobileTheme.colors.shell,
       }}
     >
-      <div ref={headerRef}>
+      <div>
         <TerminalHeader
           sessions={sessions}
           activeSession={activeSession}
@@ -383,9 +354,9 @@ export function TerminalPage({
           activeSession={activeSession}
           onTitleChange={onTitleChange}
           onResize={onResize}
+          freezeResize={keyboardLayoutActive}
           onInput={onTerminalInput}
           onRequestBufferRange={onRequestBufferRange}
-          onBufferLinesChange={onBufferLinesChange}
           focusNonce={focusNonce}
           allowDomFocus={terminalKeyboardRequested}
           domInputOffscreen={isAndroid}
@@ -394,34 +365,31 @@ export function TerminalPage({
           onFontSizeChange={setTerminalFontSize}
           onSwipeSession={onSwipeSession}
           forceScrollToBottomNonce={forceScrollToBottomNonce}
-          heightPx={canvasHeight}
         />
-        <div ref={quickBarRef}>
-          <TerminalQuickBar
-            quickActions={quickActions}
-            shortcutActions={shortcutActions}
-            onSendSequence={(sequence) => {
-              onQuickActionInput?.(sequence);
-              if (terminalKeyboardRequested || keyboardInset > 0) {
-                keepTerminalInputFocused();
-              }
-            }}
-            onImagePaste={onImagePaste}
-            keyboardVisible={keyboardLayoutActive && keyboardInset > 0}
-            keyboardInsetPx={Math.max(keyboardInset, viewportInset)}
-            onToggleKeyboard={handleToggleKeyboard}
-            onQuickActionsChange={onQuickActionsChange}
-            onShortcutActionsChange={onShortcutActionsChange}
-            sessionDraft={sessionDraft}
-            onSessionDraftChange={onSessionDraftChange}
-            onSessionDraftSend={(value) => {
-              onSessionDraftSend?.(value);
-              if (terminalKeyboardRequested || keyboardInset > 0) {
-                keepTerminalInputFocused();
-              }
-            }}
-          />
-        </div>
+        <TerminalQuickBar
+          quickActions={quickActions}
+          shortcutActions={shortcutActions}
+          onSendSequence={(sequence) => {
+            onQuickActionInput?.(sequence);
+            if (terminalKeyboardRequested || keyboardInset > 0) {
+              keepTerminalInputFocused();
+            }
+          }}
+          onImagePaste={onImagePaste}
+          keyboardVisible={keyboardLayoutActive && keyboardInset > 0}
+          keyboardInsetPx={Math.max(keyboardInset, viewportInset)}
+          onToggleKeyboard={handleToggleKeyboard}
+          onQuickActionsChange={onQuickActionsChange}
+          onShortcutActionsChange={onShortcutActionsChange}
+          sessionDraft={sessionDraft}
+          onSessionDraftChange={onSessionDraftChange}
+          onSessionDraftSend={(value) => {
+            onSessionDraftSend?.(value);
+            if (terminalKeyboardRequested || keyboardInset > 0) {
+              keepTerminalInputFocused();
+            }
+          }}
+        />
       </div>
     </div>
   );

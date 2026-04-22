@@ -213,6 +213,8 @@ EOF
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
   <key>StandardOutPath</key>
   <string>${LOG_DIR}/launchd-stdout.log</string>
   <key>StandardErrorPath</key>
@@ -228,6 +230,11 @@ stop_legacy_service() {
   fi
 }
 
+remove_legacy_service() {
+  stop_legacy_service
+  rm -f "$LEGACY_LAUNCH_AGENT_PATH"
+}
+
 start_service() {
   if ! service_installed; then
     echo "zterm autostart service not installed"
@@ -236,7 +243,7 @@ start_service() {
   fi
 
   stop_tmux >/dev/null 2>&1 || true
-  stop_legacy_service
+  remove_legacy_service
 
   if service_loaded; then
     launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
@@ -270,7 +277,7 @@ restart_service() {
   fi
 
   stop_tmux >/dev/null 2>&1 || true
-  stop_legacy_service
+  remove_legacy_service
 
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
@@ -283,7 +290,7 @@ restart_service() {
 
 install_service() {
   stop_tmux >/dev/null 2>&1 || true
-  stop_legacy_service
+  remove_legacy_service
   write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
@@ -300,6 +307,7 @@ uninstall_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
+  remove_legacy_service
   rm -f "$LAUNCH_AGENT_PATH"
   echo "zterm autostart service uninstalled"
   echo "plist=${LAUNCH_AGENT_PATH}"

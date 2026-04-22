@@ -1,16 +1,16 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { Session, TerminalCell } from '../../lib/types';
-import { TerminalView } from '../TerminalView';
+import type { Session } from '../../lib/types';
+import { TerminalView, type TerminalDebugMetrics } from '../TerminalView';
 
 interface TerminalCanvasProps {
   sessions: Session[];
   activeSession: Session | null;
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  freezeResize?: boolean;
   onInput?: (data: string) => void;
   onRequestBufferRange?: (sessionId: string, startIndex: number, endIndex: number) => void;
-  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   focusNonce?: number;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
@@ -50,12 +50,12 @@ interface SessionTerminalPaneProps {
   domInputOffscreen: boolean;
   onTitleChange?: (title: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  freezeResize?: boolean;
   onInput?: (data: string) => void;
   onRequestBufferRange?: (startIndex: number, endIndex: number) => void;
   onHorizontalSwipeStart?: () => void;
   onHorizontalSwipeMove?: (deltaX: number) => void;
   onHorizontalSwipeEnd?: (deltaX: number) => void;
-  onBufferLinesChange?: (sessionId: string, lines: TerminalCell[][]) => void;
   focusNonce?: number;
   forceScrollToBottomNonce?: number;
   fontSize: number;
@@ -63,6 +63,7 @@ interface SessionTerminalPaneProps {
   rowHeight: string;
   swipeAnimating: boolean;
   debugOverlayEnabled: boolean;
+  onDebugMetricsChange?: (metrics: TerminalDebugMetrics | null) => void;
 }
 
 const SessionTerminalPane = memo(function SessionTerminalPane({
@@ -75,12 +76,12 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   domInputOffscreen,
   onTitleChange,
   onResize,
+  freezeResize = false,
   onInput,
   onRequestBufferRange,
   onHorizontalSwipeStart,
   onHorizontalSwipeMove,
   onHorizontalSwipeEnd,
-  onBufferLinesChange,
   focusNonce = 0,
   forceScrollToBottomNonce = 0,
   fontSize,
@@ -88,6 +89,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   rowHeight,
   swipeAnimating,
   debugOverlayEnabled,
+  onDebugMetricsChange,
 }: SessionTerminalPaneProps) {
   return (
     <div
@@ -108,30 +110,27 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
         initialBufferLines={session.buffer.lines}
         bufferStartIndex={session.buffer.startIndex}
         bufferAvailableStartIndex={session.buffer.availableStartIndex}
-        bufferUpdateKind={session.buffer.updateKind}
+        bufferAvailableEndIndex={session.buffer.availableEndIndex}
         bufferRevision={session.buffer.revision}
-        bufferRows={session.buffer.rows}
-        cursorRow={session.buffer.cursorRow}
-        cursorCol={session.buffer.cursorCol}
-        cursorVisible={session.buffer.cursorVisible}
         cursorKeysApp={session.buffer.cursorKeysApp}
         active={isActive}
         allowDomFocus={allowDomFocus}
         domInputOffscreen={domInputOffscreen}
         onTitleChange={onTitleChange}
         onResize={onResize}
+        freezeResize={freezeResize}
         onInput={onInput}
         onRequestBufferRange={onRequestBufferRange}
         onHorizontalSwipeStart={onHorizontalSwipeStart}
         onHorizontalSwipeMove={onHorizontalSwipeMove}
         onHorizontalSwipeEnd={onHorizontalSwipeEnd ? (deltaX) => onHorizontalSwipeEnd(deltaX) : undefined}
-        onBufferLinesChange={onBufferLinesChange}
         focusNonce={focusNonce}
         forceScrollToBottomNonce={forceScrollToBottomNonce}
         fontSize={fontSize}
         resumeNonce={resumeNonce}
         rowHeight={rowHeight}
         debugOverlayEnabled={debugOverlayEnabled}
+        onDebugMetricsChange={isActive ? onDebugMetricsChange : undefined}
       />
     </div>
   );
@@ -150,6 +149,7 @@ const SessionTerminalPane = memo(function SessionTerminalPane({
   && prev.rowHeight === next.rowHeight
   && prev.swipeAnimating === next.swipeAnimating
   && prev.debugOverlayEnabled === next.debugOverlayEnabled
+  && prev.onDebugMetricsChange === next.onDebugMetricsChange
 ));
 
 function clampFontSize(value: number) {
@@ -181,9 +181,9 @@ export function TerminalCanvas({
   activeSession,
   onTitleChange,
   onResize,
+  freezeResize = false,
   onInput,
   onRequestBufferRange,
-  onBufferLinesChange,
   focusNonce,
   allowDomFocus = true,
   domInputOffscreen = false,
@@ -203,6 +203,7 @@ export function TerminalCanvas({
   const [canvasWidth, setCanvasWidth] = useState(0);
   const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
   const [debugOverlayEnabled, setDebugOverlayEnabled] = useState(() => readStoredDebugOverlayEnabled());
+  const [debugMetrics, setDebugMetrics] = useState<TerminalDebugMetrics | null>(null);
 
   const clearSwipeAnimationTimer = () => {
     if (swipeAnimationTimer.current) {
@@ -258,6 +259,10 @@ export function TerminalCanvas({
       setSwipeState(null);
     }
   }, [activeSession, sessions.length]);
+
+  useEffect(() => {
+    setDebugMetrics(null);
+  }, [activeSession?.id, debugOverlayEnabled]);
 
   const showIndicator = () => {
     setShowScaleIndicator(true);
@@ -433,7 +438,7 @@ export function TerminalCanvas({
         <div
           style={{
             position: 'absolute',
-            top: '10px',
+            top: debugOverlayEnabled ? '96px' : '10px',
             right: '10px',
             zIndex: 2,
             padding: '6px 10px',
@@ -470,6 +475,38 @@ export function TerminalCanvas({
       >
         DBG
       </button>
+
+      {debugOverlayEnabled && debugMetrics && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            zIndex: 4,
+            padding: '8px 10px',
+            borderRadius: '10px',
+            background: 'rgba(7, 10, 18, 0.98)',
+            color: '#8df0a1',
+            border: '1px solid rgba(141, 240, 161, 0.24)',
+            boxShadow: '0 10px 28px rgba(0,0,0,0.48)',
+            fontSize: '10px',
+            lineHeight: '1.35',
+            pointerEvents: 'none',
+            whiteSpace: 'pre-wrap',
+            textAlign: 'left',
+            width: 'min(72vw, 260px)',
+          }}
+        >
+          {`follow:${debugMetrics.followOutput ? '1' : '0'} gesture:${debugMetrics.userScrollGesture ? '1' : '0'} rendered:${debugMetrics.renderedLines}
+height:${debugMetrics.clientHeight} lh:${debugMetrics.lineHeightPx}
+resize:${debugMetrics.resizeCols}x${debugMetrics.resizeRows} vpRows:${debugMetrics.viewportRows}
+host:${debugMetrics.hostTop}-${debugMetrics.hostBottom} gap:${debugMetrics.gapToWindowBottom} win:${debugMetrics.windowHeight} vv:${debugMetrics.visualViewportHeight}
+buffer:${debugMetrics.bufferStartIndex}-${debugMetrics.bufferEndIndex} avail:${debugMetrics.availableStartIndex}-${debugMetrics.availableEndIndex}
+viewport:${debugMetrics.viewportTopIndex}-${debugMetrics.viewportBottomIndex} renderBottom:${debugMetrics.renderBottomIndex}
+local:${debugMetrics.localWindowStartIndex}-${debugMetrics.localWindowEndIndex} blankTop:${debugMetrics.blankTopRows} lines:${debugMetrics.bufferLines}`}
+        </div>
+      )}
+
       {activeSession ? (
         <div
           style={{
@@ -510,6 +547,7 @@ export function TerminalCanvas({
                 domInputOffscreen={domInputOffscreen}
                 onTitleChange={isActive ? onTitleChange : undefined}
                 onResize={isActive ? onResize : undefined}
+                freezeResize={freezeResize}
                 onInput={isActive ? onInput : undefined}
                 onRequestBufferRange={
                   isActive && onRequestBufferRange
@@ -519,14 +557,14 @@ export function TerminalCanvas({
                 onHorizontalSwipeStart={isActive ? handleHorizontalSwipeStart : undefined}
                 onHorizontalSwipeMove={isActive ? handleHorizontalSwipeMove : undefined}
                 onHorizontalSwipeEnd={isActive ? handleHorizontalSwipeEnd : undefined}
-                onBufferLinesChange={onBufferLinesChange}
-                focusNonce={isActive ? focusNonce : 0}
+                        focusNonce={isActive ? focusNonce : 0}
                 forceScrollToBottomNonce={isActive ? forceScrollToBottomNonce : 0}
                 fontSize={fontSize}
                 resumeNonce={resumeNonce}
                 rowHeight={resolvedRowHeight}
                 swipeAnimating={Boolean(swipeState?.animating)}
                 debugOverlayEnabled={debugOverlayEnabled && isActive}
+                onDebugMetricsChange={setDebugMetrics}
               />
             );
           })}

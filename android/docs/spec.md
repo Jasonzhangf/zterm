@@ -34,6 +34,12 @@
   - 同一 server 上不同 session
   - 同一 session 被多个客户端 attach
 
+
+- daemon / client 的终端真源必须是 **single canonical buffer**；不允许 latest/history/snapshot 各走一套结构
+- cursor 必须属于 canonical buffer 本身；daemon 与 client 都不允许本地猜 cursor
+- 用户手动回滚进入 reading 后，live update 期间不能再被强制拉回底部；只有“滚回底部 / 用户输入”能恢复 follow
+- “到底”必须对齐 daemon canonical buffer 的真实尾部，不能只到客户端当前 slice 的底部
+
 ## 不在范围
 
 - tmux/screen 集成

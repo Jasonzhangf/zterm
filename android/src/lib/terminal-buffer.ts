@@ -221,6 +221,8 @@ function mergeBufferPayload(
   const normalizedIncoming = normalizeIndexedLines(payload.lines || []);
   const contiguousIncoming = contiguousIncomingWindow(normalizedIncoming);
   const indices = normalizeAvailableIndices(payload);
+  const availableStart = indices.availableStartIndex;
+  const availableEnd = indices.availableEndIndex;
 
   if (!current || current.lines.length === 0) {
     const initialLines = contiguousIncoming?.lines || [];
@@ -238,51 +240,98 @@ function mergeBufferPayload(
     });
   }
 
+  const currentClampedStart = Math.max(current.startIndex, availableStart);
+  const currentClampedEnd = Math.max(currentClampedStart, Math.min(current.endIndex, availableEnd));
+  const linesByIndex = buildRangeMap(current);
+  for (const index of [...linesByIndex.keys()]) {
+    if (index < availableStart || index >= availableEnd) {
+      linesByIndex.delete(index);
+    }
+  }
+
   if (normalizedIncoming.length === 0) {
+    const fallbackWindow = collectContiguousWindow(linesByIndex, currentClampedStart, currentClampedEnd) || {
+      startIndex: currentClampedStart,
+      endIndex: currentClampedStart,
+      lines: [],
+    };
+    const trimmed = trimRangeToCache(fallbackWindow.startIndex, fallbackWindow.endIndex, cacheLines);
+    const sliceOffset = Math.max(0, trimmed.startIndex - fallbackWindow.startIndex);
+    const nextLines = fallbackWindow.lines.slice(
+      sliceOffset,
+      sliceOffset + (trimmed.endIndex - trimmed.startIndex),
+    );
     return withMetadata(current, {
-      lines: current.lines,
-      startIndex: current.startIndex,
-      endIndex: current.endIndex,
+      lines: nextLines,
+      startIndex: trimmed.startIndex,
+      endIndex: trimmed.startIndex + nextLines.length,
       payload,
       updateKind,
     });
   }
 
-  const linesByIndex = buildRangeMap(current);
   normalizedIncoming.forEach((line) => {
-    linesByIndex.set(line.index, cloneRow(line.cells));
+    if (line.index >= availableStart && line.index < availableEnd) {
+      linesByIndex.set(line.index, cloneRow(line.cells));
+    }
   });
 
-  const incomingStart = normalizedIncoming[0].index;
-  const incomingEnd = normalizedIncoming[normalizedIncoming.length - 1].index + 1;
+  const incomingStart = Math.max(availableStart, normalizedIncoming[0].index);
+  const incomingEnd = Math.min(availableEnd, normalizedIncoming[normalizedIncoming.length - 1].index + 1);
 
-  let nextStart = current.startIndex;
-  let nextEnd = current.endIndex;
+  let nextStart = currentClampedStart;
+  let nextEnd = currentClampedEnd;
 
-  if (isAdjacentOrOverlapping(current.startIndex, current.endIndex, incomingStart, incomingEnd)) {
-    nextStart = Math.min(current.startIndex, incomingStart);
-    nextEnd = Math.max(current.endIndex, incomingEnd);
+  if (currentClampedEnd <= currentClampedStart) {
+    nextStart = incomingStart;
+    nextEnd = incomingEnd;
+  } else if (isAdjacentOrOverlapping(currentClampedStart, currentClampedEnd, incomingStart, incomingEnd)) {
+    nextStart = Math.min(currentClampedStart, incomingStart);
+    nextEnd = Math.max(currentClampedEnd, incomingEnd);
   } else if (updateKind === 'replace' && contiguousIncoming) {
-    nextStart = contiguousIncoming.startIndex;
-    nextEnd = contiguousIncoming.endIndex;
+    nextStart = Math.max(availableStart, contiguousIncoming.startIndex);
+    nextEnd = Math.min(availableEnd, contiguousIncoming.endIndex);
     linesByIndex.clear();
     contiguousIncoming.lines.forEach((line, offset) => {
-      linesByIndex.set(contiguousIncoming.startIndex + offset, cloneRow(line));
+      const lineIndex = contiguousIncoming.startIndex + offset;
+      if (lineIndex >= availableStart && lineIndex < availableEnd) {
+        linesByIndex.set(lineIndex, cloneRow(line));
+      }
     });
+  } else {
+    nextStart = incomingStart;
+    nextEnd = incomingEnd;
   }
+
+  nextStart = Math.max(availableStart, nextStart);
+  nextEnd = Math.min(availableEnd, nextEnd);
 
   let collected = collectContiguousWindow(linesByIndex, nextStart, nextEnd);
   if (!collected) {
-    const fallback = collectContiguousWindow(linesByIndex, current.startIndex, current.endIndex);
+    const fallback = collectContiguousWindow(linesByIndex, currentClampedStart, currentClampedEnd);
     if (fallback) {
       collected = fallback;
     } else if (contiguousIncoming) {
-      collected = contiguousIncoming;
+      collected = {
+        startIndex: Math.max(availableStart, contiguousIncoming.startIndex),
+        endIndex: Math.min(availableEnd, contiguousIncoming.endIndex),
+        lines: cloneRows(
+          contiguousIncoming.lines.slice(
+            Math.max(0, availableStart - contiguousIncoming.startIndex),
+            Math.max(0, availableEnd - contiguousIncoming.startIndex),
+          ),
+        ),
+      };
     } else {
       collected = {
-        startIndex: current.startIndex,
-        endIndex: current.endIndex,
-        lines: cloneRows(current.lines),
+        startIndex: currentClampedStart,
+        endIndex: currentClampedEnd,
+        lines: cloneRows(
+          current.lines.slice(
+            Math.max(0, currentClampedStart - current.startIndex),
+            Math.max(0, currentClampedEnd - current.startIndex),
+          ),
+        ),
       };
     }
   }

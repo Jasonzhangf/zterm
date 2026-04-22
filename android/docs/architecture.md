@@ -10,7 +10,7 @@
 6. `CACHE.md`：短期上下文
 7. `MEMORY.md`：长期经验
 8. `evidence/`：运行证据
-9. `SKILL.md`：可复用规则
+9. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
 
 ## 模块边界
 
@@ -18,8 +18,10 @@
 - Layout/Presentation Shell：layout profile、pane 编排、safe-area / density token
 - Storage：主机配置与运行态持久化
 - Session/Transport：WebSocket、tmux bridge 会话状态
+- Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
+- Client Render State：只管理 `follow/reading + renderTopIndex + viewportRows`
 - Android Shell：Capacitor、通知、后台服务
-- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接
+- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护和发送 canonical buffer
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 
 ## 跨尺寸布局真源
@@ -127,6 +129,28 @@ mobile file picker -> websocket paste-image -> daemon temp file
   - 重建 session
   - 本地重排旧 buffer 作为真相
 - reconnect / cold resume 才允许从 daemon 重新拿 snapshot；keyboard 显隐只做 layout refresh
+
+
+## Terminal canonical buffer ownership
+
+```text
+daemon canonical buffer
+        ↓
+client mirror buffer
+        ↓
+render state
+        ↓
+DOM scroll container
+```
+
+规则：
+
+- daemon 只更新 / 发送 canonical buffer，不承载显示逻辑
+- cursor 属于 canonical buffer 本身，不走第二路真相
+- client mirror buffer 只做 absolute-index merge
+- render state 只决定当前看哪一段，不改 buffer 真相
+- 用户进入 reading 后，live update 只能继续收 buffer，不能改当前 renderTopIndex
+- 只有“回到底部 / 用户输入”能退出 reading
 
 ## Connection / Session 真源
 
