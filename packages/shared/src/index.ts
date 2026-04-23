@@ -14,6 +14,8 @@ export * from './connection/bridge-connection';
 export * from './react/use-host-storage';
 export * from './react/use-bridge-settings-storage';
 export * from './connection/terminal-buffer';
+export * from './terminal/theme';
 export * from './react/terminal-view';
 export * from './schedule/types';
 export * from './schedule/next-fire';
+export * from './shortcuts/terminal-shortcut-composer';

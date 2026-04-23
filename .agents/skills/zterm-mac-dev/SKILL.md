@@ -37,6 +37,8 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 - terminal 优先 terminal-first：少 chrome、少常驻面板、主空间给 terminal pane/tab/split。
 - 分屏默认是一行多列、垂直分屏；不要把上下堆叠当主方案。
 - reading/backfill 里 `missingRanges` 必须从 view -> runtime -> transport 原样透传；任一层清空它，scroll prefetch 都会静默失效。
+- 若桌面端要接快捷按键组合语义，优先复用 shared composer 叶子模块；不要在 Mac renderer 再复制一套 `Ctrl + 字母` 编码/默认 label 规则。
+- 若桌面端接入 terminal 主题选择 UI，只要界面显示“Active/正在使用”，点击动作就必须立即持久化到 shared `BridgeSettings.terminalThemeId`；不能只改本页 draft，避免出现“看起来切了主题，切页后又回默认”的假激活。
 
 ### 2.2 连接 / tmux
 - remote 连接与 local tmux 都必须走真实 runtime，不允许静态占位冒充 live terminal。

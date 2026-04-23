@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BRIDGE_PORT, DEFAULT_TERMINAL_CACHE_LINES, WTERM_CONFIG_DISPLAY_PATH } from './mobile-config';
-import { buildDaemonStartCommand, formatBridgeTarget, setDefaultBridgeServer, upsertBridgeServer } from './bridge-settings';
+import { buildDaemonStartCommand, formatBridgeTarget, normalizeBridgeSettings, setDefaultBridgeServer, upsertBridgeServer } from './bridge-settings';
 
 const baseSettings = {
   targetHost: '',
   targetPort: DEFAULT_BRIDGE_PORT,
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+  terminalThemeId: 'classic-dark' as const,
   servers: [],
 };
 
@@ -48,5 +49,17 @@ describe('bridge-settings helpers', () => {
     const switched = setDefaultBridgeServer(withLan, `192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
     expect(switched.targetHost).toBe('192.168.0.130');
     expect(switched.defaultServerId).toBe(`192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
+  });
+
+  it('normalizes terminal theme id and falls back for unknown values', () => {
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalThemeId: 'tabby-relaxed',
+    }).terminalThemeId).toBe('tabby-relaxed');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalThemeId: 'unknown-theme',
+    }).terminalThemeId).toBe('classic-dark');
   });
 });

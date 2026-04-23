@@ -5,8 +5,9 @@ import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
   DEFAULT_DAEMON_HOST,
-  DEFAULT_TERMINAL_CACHE_LINES,
 } from '../lib/mobile-config';
+
+export const DEFAULT_DAEMON_TERMINAL_CACHE_LINES = 3000;
 
 export const WTERM_HOME_DIRNAME = '.wterm';
 export const WTERM_CONFIG_FILENAME = 'config.json';
@@ -140,7 +141,7 @@ export function resolveDaemonRuntimeConfig(options?: {
   const terminalCacheLines =
     asPositiveInteger(env.ZTERM_TERMINAL_CACHE_LINES) ||
     asPositiveInteger(daemonConfig.terminalCacheLines) ||
-    DEFAULT_TERMINAL_CACHE_LINES;
+    DEFAULT_DAEMON_TERMINAL_CACHE_LINES;
 
   const sessionName =
     asString(env.ZTERM_DAEMON_SESSION) ||

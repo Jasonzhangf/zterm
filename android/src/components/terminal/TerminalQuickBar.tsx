@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
 import { DeviceClipboardPlugin, isNativeClipboardSupported } from '../../plugins/DeviceClipboardPlugin';
+import {
+  buildTerminalShortcutSequence,
+  buildTerminalShortcutTokensFromSequence,
+  resolveTerminalShortcutLabel,
+  type TerminalShortcutToken,
+} from '../../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
 
 const FLOATING_BUBBLE_SIZE = 48;
 const FLOATING_BUBBLE_MARGIN = 10;
@@ -77,11 +83,7 @@ type FloatingPanelTab = 'quick-actions' | 'clipboard';
 
 interface DraftShortcutAction extends TerminalShortcutAction {}
 
-interface ShortcutToken {
-  label: string;
-  sequence: string;
-  kind?: 'modifier' | 'key' | 'text';
-}
+type ShortcutToken = TerminalShortcutToken;
 
 interface ShortcutPreset extends ShortcutToken {
   row?: 'top-scroll' | 'bottom-scroll';
@@ -287,162 +289,6 @@ function normalizeShortcutActions(actions: DraftShortcutAction[]): TerminalShort
   );
 }
 
-function encodeCtrlKey(letter: string) {
-  const upper = letter.toUpperCase();
-  const code = upper.charCodeAt(0);
-  if (code < 65 || code > 90) {
-    return '';
-  }
-  return String.fromCharCode(code - 64);
-}
-
-function isModifierToken(token: ShortcutToken) {
-  return token.kind === 'modifier';
-}
-
-function formatShortcutKeyLabel(token: ShortcutToken) {
-  if (token.sequence.length === 1 && /^[a-z]$/i.test(token.sequence)) {
-    return token.label.length === 1 ? token.label.toUpperCase() : token.label;
-  }
-  return token.label;
-}
-
-function buildShortcutSequence(tokens: ShortcutToken[]) {
-  if (tokens.length === 0) {
-    return {
-      sequence: '',
-      preview: '',
-      error: '',
-    };
-  }
-
-  const modifiers = tokens.filter(isModifierToken).map((token) => token.label);
-  const normalTokens = tokens.filter((token) => !isModifierToken(token));
-
-  if (modifiers.length === 0) {
-    return {
-      sequence: normalTokens.map((token) => token.sequence).join(''),
-      preview: normalTokens.map((token) => token.label).join(' + '),
-      error: '',
-    };
-  }
-
-  if (normalTokens.length !== 1) {
-    return {
-      sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: '带修饰键时当前只支持一个目标按键',
-    };
-  }
-
-  const keyToken = normalTokens[0];
-  const hasCtrl = modifiers.includes('Ctrl');
-  const hasShift = modifiers.includes('Shift');
-  const hasCommand = modifiers.includes('Command');
-  const hasOption = modifiers.includes('Option');
-
-  if (hasOption) {
-    return {
-      sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: 'Option 组合暂未接入终端编码',
-    };
-  }
-
-  if (hasCommand && (keyToken.label === 'Cmd+V' || keyToken.label === 'Paste')) {
-    return {
-      sequence: '\x16',
-      preview: 'Command + V',
-      error: '',
-    };
-  }
-
-  if (hasCommand && (keyToken.sequence === 'v' || keyToken.sequence === 'V')) {
-    return {
-      sequence: '\x16',
-      preview: `Command + ${keyToken.label}`,
-      error: '',
-    };
-  }
-
-  if (hasCtrl) {
-    if (keyToken.sequence.length === 1) {
-      const encoded = encodeCtrlKey(keyToken.sequence);
-      if (!encoded) {
-        return {
-          sequence: '',
-          preview: tokens.map((token) => token.label).join(' + '),
-          error: 'Ctrl 当前只支持字母键',
-        };
-      }
-      return {
-        sequence: encoded,
-        preview: `Ctrl + ${formatShortcutKeyLabel(keyToken)}`,
-        error: '',
-      };
-    }
-
-    return {
-      sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: 'Ctrl 当前只支持字母键',
-    };
-  }
-
-  if (hasShift) {
-    if (keyToken.label === 'Tab') {
-      return {
-        sequence: '\x1b[Z',
-        preview: 'Shift + Tab',
-        error: '',
-      };
-    }
-    if (keyToken.label === 'Return' || keyToken.label === 'Enter') {
-      return {
-        sequence: '\n',
-        preview: 'Shift + Enter',
-        error: '',
-      };
-    }
-    if (keyToken.sequence.length === 1) {
-      return {
-        sequence: keyToken.sequence.toUpperCase(),
-        preview: `Shift + ${formatShortcutKeyLabel(keyToken)}`,
-        error: '',
-      };
-    }
-
-    return {
-      sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: 'Shift 当前只支持字母/Enter/Tab',
-    };
-  }
-
-  return {
-    sequence: keyToken.sequence,
-    preview: tokens.map((token) => token.label).join(' + '),
-    error: '',
-  };
-}
-
-function decodeCtrlShortcutTokens(sequence: string) {
-  if (sequence.length !== 1) {
-    return null;
-  }
-
-  const code = sequence.charCodeAt(0);
-  if (code < 1 || code > 26) {
-    return null;
-  }
-
-  const letter = String.fromCharCode(code + 64);
-  return [
-    { label: 'Ctrl', sequence: '__CTRL__', kind: 'modifier' } satisfies ShortcutToken,
-    { label: letter, sequence: letter.toLowerCase(), kind: 'text' } satisfies ShortcutToken,
-  ];
-}
-
 export function TerminalQuickBar({
   activeSessionId,
   quickActions,
@@ -517,7 +363,7 @@ export function TerminalQuickBar({
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
-  const draftShortcutBuild = useMemo(() => buildShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
+  const draftShortcutBuild = useMemo(() => buildTerminalShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
   const floatingPanelBottomPx = 124;
   const floatingBubbleBottomPx = 72;
   const editingIndex = editingId ? draftActions.findIndex((action) => action.id === editingId) : -1;
@@ -928,25 +774,11 @@ export function TerminalQuickBar({
   };
 
   const buildShortcutTokensFromSequence = (label: string, sequence: string): ShortcutToken[] => {
-    const ctrlTokens = decodeCtrlShortcutTokens(sequence);
-    if (ctrlTokens) {
-      return ctrlTokens;
-    }
-
-    const matchedPreset = SHORTCUT_PRESETS.find((preset) => preset.sequence === sequence)
-      || (sequence.length === 1 && label.startsWith('Ctrl+') ? { label, sequence } : null);
-
-    if (matchedPreset) {
-      return [{ label: matchedPreset.label, sequence: matchedPreset.sequence }];
-    }
-
-    return sequence
-      ? [{ label: label || '已有序列', sequence }]
-      : [];
+    return buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
   };
 
   const syncDraftShortcutTokens = (tokens: ShortcutToken[]) => {
-    const built = buildShortcutSequence(tokens);
+    const built = buildTerminalShortcutSequence(tokens);
     setDraftShortcutTokens(tokens);
     setDraftShortcutSequence(built.sequence);
   };
@@ -984,7 +816,7 @@ export function TerminalQuickBar({
   const appendShortcutToken = (token: ShortcutToken, row?: 'top-scroll' | 'bottom-scroll') => {
     setDraftShortcutTokens((current) => {
       const next = [...current, token];
-      const built = buildShortcutSequence(next);
+      const built = buildTerminalShortcutSequence(next);
       setDraftShortcutSequence(built.sequence);
       return next;
     });
@@ -996,7 +828,7 @@ export function TerminalQuickBar({
   const removeShortcutToken = (index: number) => {
     setDraftShortcutTokens((current) => {
       const next = current.filter((_, tokenIndex) => tokenIndex !== index);
-      const built = buildShortcutSequence(next);
+      const built = buildTerminalShortcutSequence(next);
       setDraftShortcutSequence(built.sequence);
       return next;
     });
@@ -1013,7 +845,7 @@ export function TerminalQuickBar({
       return;
     }
 
-    const nextLabel = draftShortcutLabel.trim() || draftShortcutBuild.preview || '新按键';
+    const nextLabel = resolveTerminalShortcutLabel(draftShortcutLabel, draftShortcutBuild.preview);
 
     const nextActions = editingShortcutId
       ? draftShortcutActions.map((action) =>

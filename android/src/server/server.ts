@@ -41,10 +41,13 @@ import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from 
 import {
   advanceKnownLocalWindowRange,
   findChangedIndexedRange,
+  normalizeCapturedLineBlock,
   paintCursorIntoViewport,
   resolveCanonicalAvailableLineCount,
   resolveFollowTailSyncPlan,
+  resolveReadingWindow,
   sliceIndexedLines,
+  trimTrailingDefaultCells,
   trimCanonicalBufferWindow,
 } from './canonical-buffer';
 import { dispatchScheduledJob } from './schedule-dispatch';
@@ -201,8 +204,8 @@ const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VER
 const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
 const WS_HEARTBEAT_INTERVAL_MS = 30000;
-const MIRROR_RECONCILE_POLL_MS = 120;
-const FALLBACK_RECONCILE_MIN_INTERVAL_MS = 250;
+const MIRROR_RECONCILE_POLL_MS = 500;
+const FALLBACK_RECONCILE_MIN_INTERVAL_MS = 2000;
 const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
 const ORPHAN_MIRROR_TTL_MS = 2 * 60 * 1000;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
@@ -218,11 +221,14 @@ const scheduleStore = loadScheduleStore();
 
 function resolveMirrorCacheLines(rows: number) {
   const viewportRows = Math.max(1, Math.floor(rows || 1));
-  const threeScreenLines = resolveTerminalCacheLines(viewportRows);
   if (!Number.isFinite(MAX_CAPTURED_SCROLLBACK_LINES) || MAX_CAPTURED_SCROLLBACK_LINES <= 0) {
-    return threeScreenLines;
+    return viewportRows;
   }
-  return Math.max(viewportRows, Math.min(Math.floor(MAX_CAPTURED_SCROLLBACK_LINES), threeScreenLines));
+  return Math.max(viewportRows, Math.floor(MAX_CAPTURED_SCROLLBACK_LINES));
+}
+
+function resolveWireFollowCacheLines(rows: number) {
+  return Math.max(1, resolveTerminalCacheLines(rows));
 }
 
 function daemonRuntimeDebug(scope: string, payload?: unknown) {
@@ -761,16 +767,7 @@ function captureTmuxPaneLines(
     `${Math.max(0, safePaneRows - 1)}`,
   ]);
 
-  const normalizeLines = (raw: string) => {
-    const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-    return lines;
-  };
-
-  const viewportLines = normalizeLines(viewportResult.stdout);
+  const viewportLines = normalizeCapturedLineBlock(viewportResult.stdout, safePaneRows);
   if (options.alternateOn) {
     return {
       historyLines: [] as string[],
@@ -790,7 +787,7 @@ function captureTmuxPaneLines(
     '-E',
     '-1',
   ]);
-  const historyCapturedLines = normalizeLines(historyResult.stdout);
+  const historyCapturedLines = normalizeCapturedLineBlock(historyResult.stdout);
   const historyLineCount = Math.max(0, Math.min(historyCapturedLines.length, safeMaxLines - safePaneRows));
 
   return {
@@ -822,7 +819,7 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
     Math.max(0, Math.min(metrics.paneRows - 1, cursor.row)),
     cursor.col,
     cursor.visible,
-  );
+  ).map(trimTrailingDefaultCells);
   const scratchScrollbackCount = scratchBridge.getScrollbackCount();
   const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - viewport.length));
   const scrollbackStartOldestIndex = Math.max(0, scratchScrollbackCount - scrollbackKeepCount);
@@ -1111,7 +1108,7 @@ function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number,
   for (let col = 0; col < lineLen; col += 1) {
     cells.push(serializeCell(bridge.getScrollbackCell(offset, col)));
   }
-  return cells;
+  return trimTrailingDefaultCells(cells);
 }
 
 function getMirrorAvailableEndIndex(mirror: SessionMirror) {
@@ -1208,7 +1205,7 @@ function resolveTailWindow(
   viewportRows: number,
 ) {
   const bufferEndIndex = getMirrorAvailableEndIndex(mirror);
-  const cacheLines = resolveMirrorCacheLines(viewportRows);
+  const cacheLines = resolveWireFollowCacheLines(viewportRows);
   return {
     startIndex: Math.max(mirror.bufferStartIndex, bufferEndIndex - cacheLines),
     endIndex: bufferEndIndex,
@@ -1390,6 +1387,13 @@ function buildClientRequestedBufferPayload(
         Math.min(mirrorEndIndex, Math.floor(request.viewportEndIndex || mirrorEndIndex)),
       );
   if (mode === 'reading') {
+    const readingWindow = resolveReadingWindow({
+      bufferStartIndex: mirrorStartIndex,
+      bufferEndIndex: mirrorEndIndex,
+      viewportEndIndex: requestedViewportEndIndex,
+      viewportRows,
+      cacheLines: resolveWireFollowCacheLines(viewportRows),
+    });
     const viewportStartIndex = Math.max(mirrorStartIndex, requestedViewportEndIndex - viewportRows);
     if (request.prefetch) {
       const preloadRows = Math.max(viewportRows * 2, 48);
@@ -1414,8 +1418,8 @@ function buildClientRequestedBufferPayload(
 
     const readingMissingRanges = collectReadingMissingRanges({
       request,
-      desiredStartIndex: viewportStartIndex,
-      desiredEndIndex: requestedViewportEndIndex,
+      desiredStartIndex: readingWindow.startIndex,
+      desiredEndIndex: readingWindow.endIndex,
       deltaRange: mirror.lastDeltaRange,
       currentRevision: mirror.revision,
       lastDeltaFromRevision: mirror.lastDeltaFromRevision,
@@ -1423,9 +1427,9 @@ function buildClientRequestedBufferPayload(
     });
     if (readingMissingRanges.length > 0) {
       return buildMissingRangeBufferSyncPayload(mirror, {
-        startIndex: viewportStartIndex,
-        endIndex: requestedViewportEndIndex,
-        viewportEndIndex: requestedViewportEndIndex,
+        startIndex: readingWindow.startIndex,
+        endIndex: readingWindow.endIndex,
+        viewportEndIndex: readingWindow.viewportEndIndex,
       }, readingMissingRanges);
     }
 
@@ -1444,7 +1448,7 @@ function buildClientRequestedBufferPayload(
     localStartIndex,
     localEndIndex,
     viewportRows,
-    cacheLines: resolveMirrorCacheLines(viewportRows),
+    cacheLines: resolveWireFollowCacheLines(viewportRows),
   });
   if (!followPlan) {
     return null;
@@ -1745,7 +1749,7 @@ function startMirrorObserver(mirror: SessionMirror, cols: number, rows: number) 
 }
 
 function shouldRunFallbackReconcile(mirror: SessionMirror) {
-  if (mirror.subscribers.size === 0) {
+  if (countActiveSubscribers(mirror) <= 0) {
     return false;
   }
 

@@ -180,6 +180,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     renameSession,
     reconnectSession,
     reconnectAllSessions,
+    refreshSessionTail,
     sendInput,
     sendImagePaste,
     resizeTerminal,
@@ -397,8 +398,40 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
         force: Boolean(options?.force),
         sessions: summarizeResumeSessions(sessions),
       });
-      console.debug('[App] reconnect all sessions ->', reason);
-      reconnectAllSessions();
+      const activeSessionId = activeSession?.id || state.activeSessionId;
+      const reconnectTargets: string[] = [];
+      let didTailRefresh = false;
+
+      if (activeSessionId) {
+        const currentActiveSession = sessions.find((session) => session.id === activeSessionId) || null;
+        if (currentActiveSession?.state === 'connected') {
+          didTailRefresh = refreshSessionTail(activeSessionId);
+          if (!didTailRefresh) {
+            reconnectTargets.push(activeSessionId);
+          }
+        } else {
+          reconnectTargets.push(activeSessionId);
+        }
+      }
+
+      reconnectTargets.push(
+        ...sessions
+          .filter((session) => session.id !== activeSessionId && session.state !== 'connected')
+          .map((session) => session.id),
+      );
+
+      const uniqueTargets = Array.from(new Set(reconnectTargets));
+      if (uniqueTargets.length > 0) {
+        console.debug('[App] foreground resume actions ->', {
+          reason,
+          didTailRefresh,
+          reconnectTargets: uniqueTargets,
+        });
+        uniqueTargets.forEach((sessionId) => reconnectSession(sessionId));
+      } else if (!didTailRefresh) {
+        console.debug('[App] reconnect all sessions ->', reason);
+        reconnectAllSessions();
+      }
       window.requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
       });
@@ -493,7 +526,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
     };
-  }, [reconnectAllSessions, sessions]);
+  }, [activeSession?.id, reconnectAllSessions, reconnectSession, refreshSessionTail, sessions, state.activeSessionId]);
 
   const sortedHosts = useMemo(() => sortHostsForPicker(hosts, pickerTarget), [hosts, pickerTarget]);
 
@@ -941,6 +974,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
               void startUpdate();
             }}
             onResetUpdateIgnorePolicy={resetIgnorePolicy}
+            onTerminalThemeChange={(themeId) => {
+              setBridgeSettings((current) => ({
+                ...current,
+                terminalThemeId: themeId,
+              }));
+            }}
             onBack={() => setPageState(openConnectionsPage())}
           />
         )}
@@ -1000,6 +1039,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             onDeleteScheduleJob={deleteScheduleJob}
             onToggleScheduleJob={toggleScheduleJob}
             onRunScheduleJobNow={runScheduleJobNow}
+            terminalThemeId={bridgeSettings.terminalThemeId}
           />
         )}
       </div>

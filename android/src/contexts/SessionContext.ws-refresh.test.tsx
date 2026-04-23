@@ -122,7 +122,7 @@ const host2: Host = {
 };
 
 function SessionHarness() {
-  const { state, createSession, sendInput, sendImagePaste, reconnectSession } = useSession();
+  const { state, createSession, sendInput, sendImagePaste, reconnectSession, reconnectAllSessions } = useSession();
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -153,12 +153,15 @@ function SessionHarness() {
       <button type="button" onClick={() => reconnectSession('session-1')}>
         reconnect-session
       </button>
+      <button type="button" onClick={() => reconnectAllSessions()}>
+        reconnect-all
+      </button>
     </div>
   );
 }
 
 function MultiSessionHarness() {
-  const { state, createSession, switchSession } = useSession();
+  const { state, createSession, switchSession, reconnectAllSessions } = useSession();
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -168,8 +171,17 @@ function MultiSessionHarness() {
   return (
     <div>
       <div data-testid="active-session">{state.activeSessionId || 'missing'}</div>
+      <div data-testid="session-1-revision">
+        {state.sessions.find((session) => session.id === 'session-1')?.buffer.revision ?? -1}
+      </div>
+      <div data-testid="session-2-revision">
+        {state.sessions.find((session) => session.id === 'session-2')?.buffer.revision ?? -1}
+      </div>
       <button type="button" onClick={() => switchSession('session-2')}>
         switch-second
+      </button>
+      <button type="button" onClick={() => reconnectAllSessions()}>
+        reconnect-all
       </button>
     </div>
   );
@@ -245,6 +257,55 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(screen.getByTestId('session-lines').textContent).toContain('APPEND_MARKER-');
       expect(screen.getByTestId('session-revision').textContent).toBe('3');
     });
+  });
+
+  it('does not re-send stream-mode or follow buffer requests on every incoming buffer-sync frame', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(
+        Array.from({ length: 24 }, (_, index) => `row-${String(index + 1).padStart(3, '0')}`),
+        24,
+        1,
+      ),
+    });
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('1'));
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(
+        Array.from({ length: 25 }, (_, index) => `row-${String(index + 1).padStart(3, '0')}`),
+        25,
+        2,
+      ),
+    });
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('2'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const sentTypes = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item).type);
+    expect(sentTypes).not.toContain('stream-mode');
+    expect(sentTypes).not.toContain('buffer-sync-request');
   });
 
   it('sends user input upstream without locally mutating session buffer', async () => {
@@ -472,6 +533,20 @@ describe('SessionContext websocket dynamic refresh', () => {
       },
     });
 
+    await waitFor(() => {
+      const sentMessages = ws2.sent
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item));
+      expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+      const tailBootstrapRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(tailBootstrapRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 0,
+        localStartIndex: 0,
+        localEndIndex: 0,
+      });
+    });
+
     ws2.triggerMessage({
       type: 'buffer-sync',
       payload: linesToPayload(['stale-after-reconnect-001', 'stale-after-reconnect-002'], 2, 5),
@@ -492,7 +567,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('only requests a bootstrap sync when switching to a connected tab', async () => {
+  it('prioritizes the active session first when reconnecting all tabs on the same host', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -507,23 +582,130 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
     ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+    fireEvent.click(screen.getByText('switch-second'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    fireEvent.click(screen.getByText('reconnect-all'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(3));
+    const reconnectWs1 = MockWebSocket.instances[2]!;
+    reconnectWs1.triggerOpen();
+
     await waitFor(() => {
-      const sent1 = ws1.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
-      expect(sent1).not.toContain('buffer-sync-request');
-      expect(sent2).not.toContain('buffer-sync-request');
+      const connectMessage = reconnectWs1.sent
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item))
+        .find((item) => item.type === 'connect');
+      expect(connectMessage?.payload?.sessionName).toBe('zterm_mirror_lab_2');
+    });
+  });
+
+  it('requests a delta-aware follow sync when switching to a connected tab with a continuous local tail', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+    ws2.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(['tail-row-001', 'tail-row-002', 'tail-row-003'], 3, 6),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-2-revision').textContent).toBe('6');
       expect(screen.getByTestId('active-session').textContent).toBe('session-1');
     });
 
     fireEvent.click(screen.getByText('switch-second'));
 
     await waitFor(() => {
+      const sent1 = ws1.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
       const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      expect(sent1.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'idle')).toBe(true);
+      expect(sent2.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'active')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
       const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
-      expect(lastRequest?.payload?.mode).toBe('follow');
+      expect(lastRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 6,
+        localStartIndex: 0,
+        localEndIndex: 3,
+      });
       expect(screen.getByTestId('active-session').textContent).toBe('session-2');
     });
+  });
+
+  it('still bootstraps when switching to a connected tab without a local tail window', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(lastRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 0,
+        localStartIndex: 0,
+        localEndIndex: 0,
+      });
+    });
+  });
+
+  it('reconnects the newly activated tab when refresh request gets neither buffer-sync nor pong', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      fireEvent.click(screen.getByText('switch-second'));
+
+      expect(
+        ws2.sent
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => JSON.parse(item))
+          .some((item) => item.type === 'ping'),
+      ).toBe(true);
+
+      vi.advanceTimersByTime(450);
+
+      expect(MockWebSocket.instances).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends image paste as metadata plus binary frame without reconnect side effects', async () => {

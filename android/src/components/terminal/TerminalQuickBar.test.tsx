@@ -262,6 +262,15 @@ describe('TerminalQuickBar', () => {
 
     renderQuickBar({
       onSendSequence,
+      shortcutActions: [
+        {
+          id: 'shortcut-enter',
+          label: 'Enter',
+          sequence: '\r',
+          order: 0,
+          row: 'bottom-scroll',
+        },
+      ],
     });
 
     const enterButton = screen.getByRole('button', { name: 'Enter' });

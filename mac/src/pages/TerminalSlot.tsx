@@ -9,6 +9,7 @@ interface TerminalSlotProps {
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   onDisconnect: () => void;
+  terminalThemeId?: string;
 }
 
 export function TerminalSlot({
@@ -19,6 +20,7 @@ export function TerminalSlot({
   onInput,
   onResize,
   onDisconnect,
+  terminalThemeId,
 }: TerminalSlotProps) {
   const activeTarget = session.activeTarget;
   const hasLiveTerminal = Boolean(activeTarget);
@@ -64,6 +66,7 @@ export function TerminalSlot({
                 active
                 onInput={onInput}
                 onResize={onResize}
+                themeId={terminalThemeId}
               />
             </div>
           </>

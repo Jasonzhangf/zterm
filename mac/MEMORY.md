@@ -5,6 +5,7 @@
 - [2026-04-20] Mac 第一阶段先做 Electron 最小可执行包，优先证明 build/package/window/stage 闭环，再逐步接业务能力
 - [2026-04-20] Mac 布局必须遵守仓库统一真源：默认一行多列、列与列之间垂直分屏、不以上下堆叠多 pane 为主方案
 - [2026-04-22] Jason 新冻结：Mac 改动默认必须先走“改代码 -> type-check/build -> 按需 package -> 退出旧 app -> 启动新包 -> 自己完成 smoke -> 落证据 -> 再汇报 Jason 手测”；未完成运行态证据闭环时，不得把基础验证转嫁给 Jason
+- [2026-04-23] Mac 若要与 Android 对齐快捷按键组合语义，真源应直接复用 shared composer（编码/反解/默认 label），本地只保留薄桥接入口，避免桌面端再复制一套 `Ctrl + 字母` 逻辑
 
 ## Patterns
 
@@ -34,3 +35,4 @@
 - [2026-04-22] Jason 新纠正：这个仓库的 Mac 开发流程只使用唯一项目 dev skill `zterm-mac-dev`；不要再额外串新的本地 dev skill 造成规则分叉
 - [2026-04-23] Mac reading/backfill 链路里，`missingRanges` 必须从 `TerminalView -> runtime -> transport` 原样透传；一旦 runtime 层把它清空，scroll prefetch 会静默变成 no-op，看起来像‘滚动了但历史补不回来’
 - [2026-04-23] Mac 的 schedule modal 若只依赖 schedule domain，也应走 `packages/shared/src/schedule/*` 叶子 import；这样桌面端做静态 HTML preview / SSR 时不会被 `@zterm/shared` 根入口里的 terminal CSS 反向拖崩。
+- [2026-04-23] 若 Mac 当前只需要“未来可接入”的快捷键组合能力，最小对齐动作不是提前复制 UI，而是先补本地 re-export 指向 shared composer；这样后续桌面编辑器落地时天然复用 Android 已验证过的算法

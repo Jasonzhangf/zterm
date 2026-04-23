@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_BRIDGE_PORT, DEFAULT_DAEMON_HOST, DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
-import { getWtermConfigPath, resolveDaemonRuntimeConfig } from './daemon-config';
+import { DEFAULT_BRIDGE_PORT, DEFAULT_DAEMON_HOST } from '../lib/mobile-config';
+import { DEFAULT_DAEMON_TERMINAL_CACHE_LINES, getWtermConfigPath, resolveDaemonRuntimeConfig } from './daemon-config';
 
 const tempDirs: string[] = [];
 
@@ -91,7 +91,7 @@ describe('daemon config', () => {
     expect(config.port).toBe(DEFAULT_BRIDGE_PORT);
     expect(config.authToken).toBe('');
     expect(config.authSource).toBe('default');
-    expect(config.terminalCacheLines).toBe(DEFAULT_TERMINAL_CACHE_LINES);
+    expect(config.terminalCacheLines).toBe(DEFAULT_DAEMON_TERMINAL_CACHE_LINES);
     expect(config.configFound).toBe(false);
   });
 });

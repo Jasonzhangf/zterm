@@ -40,6 +40,8 @@ const sessionHarness = vi.hoisted(() => {
   };
   let staleActiveSession = state.sessions[0];
   const reconnectAllSessions = vi.fn();
+  const reconnectSession = vi.fn();
+  const refreshSessionTail = vi.fn(() => true);
   const createSession = vi.fn();
   const switchSession = vi.fn();
 
@@ -47,6 +49,8 @@ const sessionHarness = vi.hoisted(() => {
     readState: () => state,
     readStaleActiveSession: () => staleActiveSession,
     reconnectAllSessions,
+    reconnectSession,
+    refreshSessionTail,
     createSession,
     switchSession,
     update(next: typeof state, stale = staleActiveSession) {
@@ -61,6 +65,9 @@ const sessionHarness = vi.hoisted(() => {
       };
       staleActiveSession = state.sessions[0];
       reconnectAllSessions.mockReset();
+      reconnectSession.mockReset();
+      refreshSessionTail.mockReset();
+      refreshSessionTail.mockReturnValue(true);
       createSession.mockReset();
       switchSession.mockReset();
     },
@@ -129,8 +136,9 @@ vi.mock('./contexts/SessionContext', () => ({
     switchSession: sessionHarness.switchSession,
     moveSession: vi.fn(),
     renameSession: vi.fn(),
-    reconnectSession: vi.fn(),
+    reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
+    refreshSessionTail: sessionHarness.refreshSessionTail,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
     sendInput: vi.fn(),
     sendImagePaste: vi.fn(),
@@ -308,12 +316,17 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.refreshSessionTail).not.toHaveBeenCalled();
 
     act(() => {
       window.dispatchEvent(new Event('pageshow'));
     });
 
-    expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
   it('coalesces hidden-resume lifecycle burst into a single reconnect sweep', async () => {
@@ -341,7 +354,10 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
   it('reconnects on Capacitor appStateChange foreground resume', async () => {
@@ -357,7 +373,29 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+  });
+
+
+  it('falls back to reconnect when tail refresh cannot run on foreground resume', async () => {
+    sessionHarness.refreshSessionTail.mockReturnValue(false);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+
+    act(() => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
+
+    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectSession).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1');
   });
 
   it('restores persisted open tabs using the stored latest tab set and active tab id', async () => {

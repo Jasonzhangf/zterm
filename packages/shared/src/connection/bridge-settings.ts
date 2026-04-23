@@ -1,6 +1,7 @@
 import { DEFAULT_TERMINAL_CACHE_LINES, WTERM_CONFIG_DISPLAY_PATH } from './mobile-config';
 import { isLikelyTailscaleHost } from './network-target';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { DEFAULT_TERMINAL_THEME_ID, normalizeTerminalThemeId, type TerminalThemeId } from '../terminal/theme';
 import {
   buildBridgeEndpointKey,
   formatBridgeEndpointLabel,
@@ -20,6 +21,7 @@ export interface BridgeSettings {
   targetPort: number;
   targetAuthToken?: string;
   terminalCacheLines: number;
+  terminalThemeId: TerminalThemeId;
   servers: BridgeServerPreset[];
   defaultServerId?: string;
 }
@@ -29,6 +31,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   targetPort: DEFAULT_BRIDGE_PORT,
   targetAuthToken: '',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+  terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
   servers: [],
   defaultServerId: undefined,
 };
@@ -193,6 +196,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     typeof candidate.terminalCacheLines === 'number' && Number.isFinite(candidate.terminalCacheLines)
       ? Math.max(200, Math.floor(candidate.terminalCacheLines))
       : DEFAULT_TERMINAL_CACHE_LINES;
+  const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
   const mergedServers =
     targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
       ? sortBridgeServers([
@@ -212,6 +216,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     targetPort,
     targetAuthToken,
     terminalCacheLines,
+    terminalThemeId,
     servers: mergedServers,
     defaultServerId:
       typeof candidate.defaultServerId === 'string'

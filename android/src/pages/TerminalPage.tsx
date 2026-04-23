@@ -74,6 +74,7 @@ interface TerminalPageProps {
   onDeleteScheduleJob?: (sessionId: string, jobId: string) => void;
   onToggleScheduleJob?: (sessionId: string, jobId: string, enabled: boolean) => void;
   onRunScheduleJobNow?: (sessionId: string, jobId: string) => void;
+  terminalThemeId?: string;
 }
 
 interface ScheduleComposerSeed {
@@ -198,6 +199,7 @@ export function TerminalPage({
   onDeleteScheduleJob,
   onToggleScheduleJob,
   onRunScheduleJobNow,
+  terminalThemeId,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   const [focusNonce, setFocusNonce] = useState(0);
@@ -565,6 +567,19 @@ export function TerminalPage({
   const shellHeight = Math.max(0, typeof window !== 'undefined' ? window.innerHeight : 0);
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
+  const handleSwipeTab = (sessionId: string, direction: 'previous' | 'next') => {
+    const currentIndex = sessions.findIndex((session) => session.id === sessionId);
+    if (currentIndex < 0) {
+      return;
+    }
+    const targetIndex = direction === 'previous' ? currentIndex - 1 : currentIndex + 1;
+    const targetSession = sessions[targetIndex] || null;
+    if (!targetSession || targetSession.id === sessionId) {
+      return;
+    }
+    onSwitchSession(targetSession.id);
+  };
+
   const saveCurrentTabList = (name: string) => {
     const now = Date.now();
     const nextList: SavedTabList = {
@@ -736,9 +751,11 @@ export function TerminalPage({
                       onInput={onTerminalInput}
                       onViewportChange={onTerminalViewportChange}
                       onViewportPrefetch={onTerminalViewportPrefetch}
+                      onSwipeTab={handleSwipeTab}
                       focusNonce={isAndroid ? 0 : sessionActive ? focusNonce : 0}
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
+                      themeId={terminalThemeId}
                     />
                   </div>
                 );

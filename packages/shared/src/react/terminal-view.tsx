@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@jsonstudio/wtermmod-react/css';
+import { getTerminalThemePreset, type TerminalThemePreset } from '../terminal/theme';
 import type { TerminalCell, TerminalGapRange, TerminalRenderBufferProjection } from '../connection/types';
 
 interface ViewState {
@@ -22,30 +23,11 @@ interface TerminalViewProps {
   onViewportPrefetch?: (viewState: ViewState) => void;
   fontSize?: number;
   rowHeight?: string;
+  themeId?: string;
 }
 
 const DEFAULT_ROWS = 24;
 const DEFAULT_COLOR = 256;
-const DEFAULT_FOREGROUND = '#d4d4d4';
-const DEFAULT_BACKGROUND = '#000000';
-const ANSI_16_COLORS = [
-  '#1e1e1e',
-  '#f44747',
-  '#6a9955',
-  '#d7ba7d',
-  '#569cd6',
-  '#c586c0',
-  '#4ec9b0',
-  '#d4d4d4',
-  '#808080',
-  '#f44747',
-  '#6a9955',
-  '#d7ba7d',
-  '#569cd6',
-  '#c586c0',
-  '#4ec9b0',
-  '#ffffff',
-] as const;
 const FLAG_BOLD = 0x01;
 const FLAG_DIM = 0x02;
 const FLAG_ITALIC = 0x04;
@@ -116,12 +98,12 @@ function safeCodePointToString(code: number) {
   }
 }
 
-function colorToCSS(index: number): string | null {
+function colorToCSS(index: number, theme: TerminalThemePreset): string | null {
   if (index === DEFAULT_COLOR) {
     return null;
   }
   if (index < 16) {
-    return ANSI_16_COLORS[index] || DEFAULT_FOREGROUND;
+    return theme.colors[index] || theme.foreground;
   }
   if (index < 232) {
     const n = index - 16;
@@ -134,26 +116,29 @@ function colorToCSS(index: number): string | null {
   return `rgb(${level},${level},${level})`;
 }
 
-function resolveColors(inputCell: TerminalCell) {
+function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
   const cell = normalizeCell(inputCell);
   let fg = cell.fg;
   let bg = cell.bg;
+  const reverse = Boolean(cell.flags & FLAG_REVERSE);
 
-  if (cell.flags & FLAG_REVERSE) {
+  if (reverse) {
     [fg, bg] = [bg, fg];
-    if (fg === DEFAULT_COLOR) fg = 0;
-    if (bg === DEFAULT_COLOR) bg = 7;
   }
 
   return {
-    fg: colorToCSS(fg) || DEFAULT_FOREGROUND,
-    bg: colorToCSS(bg) || 'transparent',
+    fg: fg === DEFAULT_COLOR
+      ? (reverse ? theme.background : theme.foreground)
+      : colorToCSS(fg, theme) || theme.foreground,
+    bg: bg === DEFAULT_COLOR
+      ? (reverse ? theme.foreground : 'transparent')
+      : colorToCSS(bg, theme) || 'transparent',
   };
 }
 
-function cellStyle(inputCell: TerminalCell, rowHeight: string) {
+function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalThemePreset) {
   const cell = normalizeCell(inputCell);
-  const colors = resolveColors(cell);
+  const colors = resolveColors(cell, theme);
   const style: Record<string, string> = {
     display: 'inline-block',
     height: rowHeight,
@@ -235,12 +220,14 @@ const VisibleRow = memo(function VisibleRow({
   absoluteIndex,
   rowHeight,
   isGap,
+  theme,
 }: {
   row: TerminalCell[];
   rowIndex: number;
   absoluteIndex: number;
   rowHeight: string;
   isGap: boolean;
+  theme: TerminalThemePreset;
 }) {
   if (isGap) {
     return (
@@ -253,9 +240,10 @@ const VisibleRow = memo(function VisibleRow({
           height: rowHeight,
           lineHeight: rowHeight,
           whiteSpace: 'pre',
-          color: 'rgba(212,212,212,0.45)',
-          background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 8px, transparent 8px 16px)',
-          borderTop: '1px dashed rgba(255,255,255,0.05)',
+          color: theme.foreground,
+          opacity: 0.48,
+          background: `repeating-linear-gradient(90deg, ${theme.selection || 'rgba(255,255,255,0.08)'} 0 8px, transparent 8px 16px)`,
+          borderTop: `1px dashed ${theme.colors[8]}`,
         }}
       >
         ⋯
@@ -276,7 +264,7 @@ const VisibleRow = memo(function VisibleRow({
     >
       {row.length > 0
         ? row.map((cell, cellIndex) => (
-            <span key={`cell-${rowIndex}-${cellIndex}`} style={cellStyle(cell, rowHeight)}>
+            <span key={`cell-${rowIndex}-${cellIndex}`} style={cellStyle(cell, rowHeight, theme)}>
               {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
             </span>
           ))
@@ -288,6 +276,7 @@ const VisibleRow = memo(function VisibleRow({
   && prev.rowHeight === next.rowHeight
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
+  && prev.theme === next.theme
 ));
 
 export function TerminalView({
@@ -303,7 +292,9 @@ export function TerminalView({
   onViewportPrefetch,
   fontSize = 13,
   rowHeight = '16px',
+  themeId,
 }: TerminalViewProps) {
+  const theme = getTerminalThemePreset(themeId);
   const resolvedProjection = projection || emptyProjection();
   const bufferLines = resolvedProjection.lines;
   const bufferGapRanges = resolvedProjection.gapRanges || [];
@@ -765,7 +756,7 @@ export function TerminalView({
         width: '100%',
         height: '100%',
         position: 'relative',
-        backgroundColor: DEFAULT_BACKGROUND,
+        backgroundColor: theme.background,
         overflowY: 'auto',
         overflowX: 'hidden',
         overscrollBehavior: 'contain',
@@ -800,6 +791,7 @@ export function TerminalView({
             rowIndex={rowIndex}
             rowHeight={resolvedRowHeight || rowHeight}
             isGap={isGap}
+            theme={theme}
           />
         ))}
       </div>

@@ -1,6 +1,7 @@
 import type { TerminalCell, TerminalIndexedLine } from '../lib/types';
 
 const FLAG_REVERSE = 0x20;
+const DEFAULT_COLOR = 256;
 
 export function cloneCell(cell: TerminalCell): TerminalCell {
   return { ...cell };
@@ -99,6 +100,50 @@ export function trimCanonicalBufferWindow(bufferStartIndex: number, bufferLines:
     startIndex: bufferStartIndex + trimCount,
     lines: bufferLines.slice(trimCount),
   };
+}
+
+function isTrailingDefaultBlankCell(cell: TerminalCell | null | undefined) {
+  return Boolean(
+    cell
+    && cell.width === 1
+    && cell.char === 32
+    && cell.fg === DEFAULT_COLOR
+    && cell.bg === DEFAULT_COLOR
+    && cell.flags === 0,
+  );
+}
+
+export function trimTrailingDefaultCells(row: TerminalCell[]) {
+  let end = row.length;
+  while (end > 0 && isTrailingDefaultBlankCell(row[end - 1])) {
+    end -= 1;
+  }
+  return end === row.length ? row : row.slice(0, end);
+}
+
+export function normalizeCapturedLineBlock(raw: string, expectedLineCount?: number) {
+  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+
+  if (typeof expectedLineCount === 'number' && Number.isFinite(expectedLineCount)) {
+    const targetCount = Math.max(0, Math.floor(expectedLineCount));
+    let nextLines = lines;
+    if (nextLines.length > targetCount && nextLines[nextLines.length - 1] === '') {
+      nextLines = nextLines.slice(0, -1);
+    }
+    if (nextLines.length > targetCount) {
+      nextLines = nextLines.slice(0, targetCount);
+    }
+    while (nextLines.length < targetCount) {
+      nextLines = [...nextLines, ''];
+    }
+    return nextLines;
+  }
+
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
 }
 
 export function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {
@@ -286,6 +331,47 @@ function mergeIndexedRanges(ranges: Array<{ startIndex: number; endIndex: number
   }
 
   return merged;
+}
+
+
+export function resolveReadingWindow(options: {
+  bufferStartIndex: number;
+  bufferEndIndex: number;
+  viewportEndIndex: number;
+  viewportRows: number;
+  cacheLines: number;
+}) {
+  const safeBufferStart = Math.max(0, Math.floor(options.bufferStartIndex));
+  const safeBufferEnd = Math.max(safeBufferStart, Math.floor(options.bufferEndIndex));
+  if (safeBufferEnd <= safeBufferStart) {
+    return {
+      startIndex: safeBufferStart,
+      endIndex: safeBufferStart,
+      viewportEndIndex: safeBufferStart,
+    };
+  }
+
+  const safeViewportEndIndex = Math.max(
+    safeBufferStart,
+    Math.min(safeBufferEnd, Math.floor(options.viewportEndIndex || safeBufferEnd)),
+  );
+  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
+  const cacheLines = Math.max(viewportRows, Math.floor(options.cacheLines || viewportRows));
+  const trailingContextRows = Math.min(viewportRows, Math.max(0, cacheLines - viewportRows));
+
+  let endIndex = Math.min(safeBufferEnd, safeViewportEndIndex + trailingContextRows);
+  let startIndex = Math.max(safeBufferStart, endIndex - cacheLines);
+
+  if (endIndex - startIndex < cacheLines) {
+    endIndex = Math.min(safeBufferEnd, startIndex + cacheLines);
+    startIndex = Math.max(safeBufferStart, endIndex - cacheLines);
+  }
+
+  return {
+    startIndex,
+    endIndex,
+    viewportEndIndex: safeViewportEndIndex,
+  };
 }
 
 export function resolveFollowTailSyncPlan(options: {

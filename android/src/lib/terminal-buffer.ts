@@ -122,6 +122,8 @@ function trimToCache(
   lines: TerminalCell[][],
   gapRanges: TerminalGapRange[],
   cacheLines: number,
+  viewportEndIndex: number,
+  viewportRows: number,
 ) {
   const safeStartIndex = Math.max(0, Math.floor(startIndex));
   const safeCacheLines = Math.max(1, Math.floor(cacheLines || 1));
@@ -133,9 +135,24 @@ function trimToCache(
     };
   }
 
-  const trimCount = lines.length - safeCacheLines;
-  const nextStartIndex = safeStartIndex + trimCount;
-  const nextEndIndex = safeStartIndex + lines.length;
+  const safeEndIndex = safeStartIndex + lines.length;
+  const safeViewportEndIndex = Math.max(
+    safeStartIndex,
+    Math.min(safeEndIndex, Math.floor(viewportEndIndex || safeEndIndex)),
+  );
+  const safeViewportRows = Math.max(1, Math.min(safeCacheLines, Math.floor(viewportRows || 1)));
+  const trailingContextRows = Math.min(safeViewportRows, Math.max(0, safeCacheLines - safeViewportRows));
+
+  let nextEndIndex = Math.min(safeEndIndex, safeViewportEndIndex + trailingContextRows);
+  let nextStartIndex = Math.max(safeStartIndex, nextEndIndex - safeCacheLines);
+
+  if (nextEndIndex - nextStartIndex < safeCacheLines) {
+    nextEndIndex = Math.min(safeEndIndex, nextStartIndex + safeCacheLines);
+    nextStartIndex = Math.max(safeStartIndex, nextEndIndex - safeCacheLines);
+  }
+
+  const sliceStart = Math.max(0, nextStartIndex - safeStartIndex);
+  const sliceEnd = Math.max(sliceStart, Math.min(lines.length, sliceStart + safeCacheLines));
   const nextGapRanges = gapRanges
     .map((range) => ({
       startIndex: Math.max(nextStartIndex, range.startIndex),
@@ -145,7 +162,7 @@ function trimToCache(
 
   return {
     startIndex: nextStartIndex,
-    lines: lines.slice(trimCount),
+    lines: lines.slice(sliceStart, sliceEnd),
     gapRanges: nextGapRanges,
   };
 }
@@ -162,7 +179,14 @@ function buildSessionBufferState(options: {
   cacheLines: number;
   updateKind: SessionBufferState['updateKind'];
 }): SessionBufferState {
-  const trimmed = trimToCache(options.startIndex, options.lines, options.gapRanges, options.cacheLines);
+  const trimmed = trimToCache(
+    options.startIndex,
+    options.lines,
+    options.gapRanges,
+    options.cacheLines,
+    options.viewportEndIndex,
+    options.rows,
+  );
   const endIndex = trimmed.startIndex + trimmed.lines.length;
 
   return {

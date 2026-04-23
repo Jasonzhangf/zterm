@@ -78,6 +78,15 @@
 - [2026-04-23] schedule UI 若只消费定时规则/格式化函数，也应优先 import `packages/shared/src/schedule/*` 叶子模块；否则会把 `@zterm/shared` 根入口的 terminal-view/CSS 依赖链进来，污染静态渲染与 Node 工具链。
 - [2026-04-23] session schedule 的最小真实闭环证据可以做成“临时 daemon + 临时 HOME + tmux session + websocket 协议 smoke + tmux side-effect 文件 + schedules.json 持久化”组合；相比只看 `schedule-event(triggered)`，这样能同时证明协议、执行和落盘都是真的。
 - [2026-04-23] Android quick input/floating panel 若渲染在被 `transform` 抬起的 quick bar 容器下，fixed overlay/bubble/panel 不能再额外按 `keyboardInset` 计算 bottom/padding；否则会出现“输入法一弹出，面板被抬到屏幕外”的双重位移。
+- [2026-04-23] 快捷按键组合算法若同时被 Android / Mac 消费，必须下沉为 shared 纯函数（组合编码、序列反解、默认 label）；平台侧只维护 token 编辑与展示，不能复制 `Ctrl + 字母` 等规则。
+- [2026-04-23] foreground 恢复不要无差别重连所有 session；应先恢复 active session，其他 session 仅在本身非健康时补拉，否则 hidden tabs 也会被一并唤醒，徒增带宽且拖慢当前 tab 恢复。
+- [2026-04-23] 同 host 多 session 的统一 foreground reconnect 若仍保留串行 bucket，必须先重连 active session；否则当前 tab 会被隐藏 tab 的重连排队拖住，表现成“回前台后当前页假死”。
+- [2026-04-23] reconnect 成功后的 client 不能只等待服务端 live flush；应立即补一条 tail refresh request，否则 session 会先显示 `connected` 但本地 buffer 仍停在旧 revision，造成“假连接、不更新”。但 **hidden->active / foreground refresh** 不能无脑 bootstrap 整个 tail：若本地尾窗连续，应发送带本地 `revision + local window` 的 follow request；只有本地尾窗缺口/空 buffer 才 bootstrap。与此同时应补一发 `ping` + 短超时 watchdog，避免“激活了 tab 但没渲染也不重连”。
+- [2026-04-23] active tab 的 terminal render 不允许在 visible/precheck window 有 gap 时继续复用上一帧；当前三屏窗口可以不连续，UI 应立即渲染最新 tail + gap marker，再对窗口内 missing ranges 发稀疏 prefetch。
+- [2026-04-23] follow 态的 gap repair 真源是“当前三屏窗口内 missing ranges”，不是“从旧 stop point 连续追到最新”；active 页只补当前窗口命中的缺口，hidden/窗口外内容允许继续缺失，以控制带宽。
+- [2026-04-23] terminal 主题真源要覆盖默认前景/背景 + ANSI 16 色，而不是只改背景色；theme choice 应持久化到 shared `BridgeSettings.terminalThemeId`，Settings 只负责切换 preset。
+- [2026-04-23] Android / Mac 共用 terminal theme 时，preset 与颜色算法必须下沉到 shared 纯模块（如 `packages/shared/src/terminal/theme.ts`）；平台各自只消费 preset，禁止复制第二套 ANSI 映射表。
+- [2026-04-23] Settings 若把 terminal theme 卡片显示成“正在使用/Active”，该点击动作就必须立即持久化到真实 `BridgeSettings.terminalThemeId`；不能只改页面 draft 再等 Save，否则切页回来会回默认主题，制造“已生效”的假状态。
 - [2026-04-23] Android 快捷输入面板的 outside-close 要走 document capture 级监听；仅靠面板外遮罩 click，在 quick bar 根节点有 pointer capture / preventDefault 时并不稳定。
 - [2026-04-23] session 级定时发送入口不能挂在 tab strip/header 这种易被理解成“tab 全局动作”的位置；Android 侧应放在当前 session 的 quick input/composer 入口内，明确“对当前 session 生效”。
 - [2026-04-23] 悬浮球若保存的是绝对 `left/top` 坐标，必须在 mount 和 viewport resize 时自动 re-clamp 到当前可视区；只在拖动时 clamp 会导致旋转/窗口变化后入口消失。

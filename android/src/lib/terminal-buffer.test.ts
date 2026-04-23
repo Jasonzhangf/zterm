@@ -120,6 +120,27 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(String.fromCodePoint(next.lines[3][0].char)).toBe('f');
   });
 
+
+  it('keeps the cache window centered on the reading viewport instead of always trimming to the newest tail', () => {
+    const next = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 0,
+        endIndex: 12,
+        viewportEndIndex: 6,
+        rows: 4,
+        revision: 1,
+        lines: Array.from({ length: 12 }, (_, index) => [index, `line-${index}`]),
+      }),
+      4,
+    );
+
+    expect(next.startIndex).toBe(2);
+    expect(next.endIndex).toBe(6);
+    expect(next.viewportEndIndex).toBe(6);
+    expect(next.lines.map(cellsToLine)).toEqual(['line-2', 'line-3', 'line-4', 'line-5']);
+  });
+
   it('ignores stale revisions', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,
@@ -295,5 +316,43 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.gapRanges).toEqual([]);
     expect(next.lines.map(cellsToLine)).toEqual(['Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'G']);
+  });
+
+
+  it('moves the local cache window upward when reading older history is fetched', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 188,
+        endIndex: 200,
+        viewportEndIndex: 200,
+        rows: 4,
+        revision: 2,
+        lines: Array.from({ length: 12 }, (_, offset) => [188 + offset, `line-${188 + offset}`]),
+      }),
+      12,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 180,
+        endIndex: 192,
+        viewportEndIndex: 188,
+        rows: 4,
+        revision: 3,
+        lines: Array.from({ length: 12 }, (_, offset) => [180 + offset, `line-${180 + offset}`]),
+      }),
+      12,
+    );
+
+    expect(next.startIndex).toBe(180);
+    expect(next.endIndex).toBe(192);
+    expect(next.viewportEndIndex).toBe(188);
+    expect(next.lines.map(cellsToLine)).toEqual([
+      'line-180', 'line-181', 'line-182', 'line-183',
+      'line-184', 'line-185', 'line-186', 'line-187',
+      'line-188', 'line-189', 'line-190', 'line-191',
+    ]);
   });
 });

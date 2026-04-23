@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceKnownLocalWindowRange,
   findChangedIndexedRange,
+  normalizeCapturedLineBlock,
   resolveCanonicalAvailableLineCount,
   resolveClientIncrementalPatchRange,
   resolveFollowTailSyncPlan,
+  resolveReadingWindow,
   resolveIncrementalSyncRange,
+  trimTrailingDefaultCells,
 } from './canonical-buffer';
 
 function row(text: string) {
@@ -35,6 +38,54 @@ describe('resolveCanonicalAvailableLineCount', () => {
       capturedLineCount: 1,
       scratchLineCount: 24,
     })).toBe(24);
+  });
+});
+
+describe('normalizeCapturedLineBlock', () => {
+  it('preserves trailing blank viewport rows when an expected pane height is provided', () => {
+    expect(normalizeCapturedLineBlock('row-1\nrow-2\n', 3)).toEqual([
+      'row-1',
+      'row-2',
+      '',
+    ]);
+  });
+
+  it('pads viewport captures up to the requested pane height', () => {
+    expect(normalizeCapturedLineBlock('row-1\nrow-2', 4)).toEqual([
+      'row-1',
+      'row-2',
+      '',
+      '',
+    ]);
+  });
+
+  it('still trims the trailing separator for history captures', () => {
+    expect(normalizeCapturedLineBlock('row-1\nrow-2\n')).toEqual([
+      'row-1',
+      'row-2',
+    ]);
+  });
+});
+
+describe('trimTrailingDefaultCells', () => {
+  it('removes only pure default trailing blanks', () => {
+    expect(trimTrailingDefaultCells([
+      row('x')[0]!,
+      { char: 32, fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 32, fg: 256, bg: 256, flags: 0, width: 1 },
+    ])).toEqual([
+      row('x')[0]!,
+    ]);
+  });
+
+  it('keeps trailing cells that still carry visual meaning', () => {
+    expect(trimTrailingDefaultCells([
+      row('x')[0]!,
+      { char: 32, fg: 256, bg: 1, flags: 0, width: 1 },
+    ])).toEqual([
+      row('x')[0]!,
+      { char: 32, fg: 256, bg: 1, flags: 0, width: 1 },
+    ]);
   });
 });
 
@@ -188,6 +239,37 @@ describe('resolveClientIncrementalPatchRange', () => {
       viewportEndIndex: 306,
       viewportRows: 4,
     })).toBeNull();
+  });
+});
+
+
+describe('resolveReadingWindow', () => {
+  it('keeps a dynamic three-screen window centered on the reading viewport when the authoritative buffer has room', () => {
+    expect(resolveReadingWindow({
+      bufferStartIndex: 0,
+      bufferEndIndex: 200,
+      viewportEndIndex: 140,
+      viewportRows: 24,
+      cacheLines: 72,
+    })).toEqual({
+      startIndex: 92,
+      endIndex: 164,
+      viewportEndIndex: 140,
+    });
+  });
+
+  it('pins the window to the authoritative top edge and expands downward when older history is not available locally', () => {
+    expect(resolveReadingWindow({
+      bufferStartIndex: 100,
+      bufferEndIndex: 200,
+      viewportEndIndex: 124,
+      viewportRows: 24,
+      cacheLines: 72,
+    })).toEqual({
+      startIndex: 100,
+      endIndex: 172,
+      viewportEndIndex: 124,
+    });
   });
 });
 

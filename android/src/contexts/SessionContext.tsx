@@ -42,6 +42,7 @@ const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 const ACTIVE_BUFFER_SYNC_REQUEST_INTERVAL_MS = 16;
 const SCROLL_BUFFER_SYNC_DELAY_MS = 24;
 const BUFFER_RENDER_COMMIT_INTERVAL_MS = 16;
+const ACTIVE_TAIL_REFRESH_ACK_TIMEOUT_MS = 400;
 
 function resolveInitialViewportSize(
   viewportMap: Map<string, { cols: number; rows: number }>,
@@ -197,6 +198,7 @@ interface SessionContextValue {
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
+  refreshSessionTail: (id: string) => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
@@ -353,6 +355,43 @@ function buildBufferSyncRequestPayload(session: Session, viewState?: SessionSync
   };
 }
 
+function buildTailBootstrapBufferSyncRequestPayload(session: Session, viewState?: SessionSyncViewState): BufferSyncRequestPayload {
+  return {
+    knownRevision: 0,
+    localStartIndex: 0,
+    localEndIndex: 0,
+    viewportEndIndex: Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0)),
+    viewportRows: Math.max(1, Math.floor(viewState?.viewportRows || session.buffer.rows || 24)),
+    mode: 'follow',
+  };
+}
+
+function hasGapInAbsoluteWindow(
+  gapRanges: SessionBufferState['gapRanges'],
+  startIndex: number,
+  endIndex: number,
+) {
+  if (endIndex <= startIndex) {
+    return false;
+  }
+  return gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
+}
+
+function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
+  if (!activeSessionId) {
+    return sessions;
+  }
+  return [...sessions].sort((left, right) => {
+    if (left.id === activeSessionId) {
+      return -1;
+    }
+    if (right.id === activeSessionId) {
+      return 1;
+    }
+    return 0;
+  });
+}
+
 export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES }: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
   const [scheduleStates, setScheduleStates] = React.useState<Record<string, SessionScheduleState>>({});
@@ -372,6 +411,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const lastPrefetchAtRef = useRef<Map<string, number>>(new Map());
   const pendingIncomingBufferPayloadsRef = useRef<Map<string, TerminalBufferPayload[]>>(new Map());
   const pendingIncomingBufferTimersRef = useRef<Map<string, number>>(new Map());
+  const lastSyncedStreamModeRef = useRef<Map<string, 'active' | 'idle'>>(new Map());
+  const lastActivatedSessionIdRef = useRef<string | null>(null);
+  const pendingTailRefreshAckTimersRef = useRef<Map<string, number>>(new Map());
+  const pendingTailRefreshAckNonceRef = useRef<Map<string, number>>(new Map());
+  const armTailRefreshAckWatchdogRef = useRef<(sessionId: string) => void>(() => undefined);
 
   const resolveSessionCacheLines = useCallback((rows?: number | null) => {
     const viewportRows =
@@ -474,6 +518,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     pendingIncomingBufferPayloadsRef.current.delete(sessionId);
   }, []);
 
+  const clearPendingTailRefreshAck = useCallback((sessionId: string) => {
+    const timer = pendingTailRefreshAckTimersRef.current.get(sessionId);
+    if (timer) {
+      window.clearTimeout(timer);
+      pendingTailRefreshAckTimersRef.current.delete(sessionId);
+    }
+    pendingTailRefreshAckNonceRef.current.delete(sessionId);
+  }, []);
+
   const flushPendingIncomingBuffer = useCallback((sessionId: string) => {
     pendingIncomingBufferTimersRef.current.delete(sessionId);
     const pendingPayloads = pendingIncomingBufferPayloadsRef.current.get(sessionId);
@@ -566,8 +619,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     clearBufferSyncPoll(sessionId);
     clearQueuedBufferSync(sessionId);
     clearPendingIncomingBuffer(sessionId);
+    clearPendingTailRefreshAck(sessionId);
     sessionSyncViewRef.current.delete(sessionId);
-  }, [clearBufferSyncPoll, clearHeartbeat, clearPendingIncomingBuffer, clearQueuedBufferSync]);
+    lastSyncedStreamModeRef.current.delete(sessionId);
+  }, [clearBufferSyncPoll, clearHeartbeat, clearPendingIncomingBuffer, clearPendingTailRefreshAck, clearQueuedBufferSync]);
 
   const drainReconnectBucket = useCallback((hostKey: string) => {
     const bucket = reconnectBucketsRef.current.get(hostKey);
@@ -769,11 +824,40 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                 type: 'schedule-list',
                 payload: { sessionName: connectedSessionName },
               } satisfies ClientMessage));
+              const isActiveReconnectTarget = stateRef.current.activeSessionId === nextSessionId;
+              ws.send(JSON.stringify({
+                type: 'stream-mode',
+                payload: {
+                  mode: isActiveReconnectTarget ? 'active' : 'idle',
+                },
+              } satisfies ClientMessage));
+              lastSyncedStreamModeRef.current.set(nextSessionId, isActiveReconnectTarget ? 'active' : 'idle');
+              if (isActiveReconnectTarget) {
+                const connectedSession = stateRef.current.sessions.find((item) => item.id === nextSessionId);
+                if (connectedSession) {
+                  const tailBootstrapPayload = buildTailBootstrapBufferSyncRequestPayload(
+                    connectedSession,
+                    sessionSyncViewRef.current.get(nextSessionId),
+                  );
+                  runtimeDebug('session.buffer.tail-bootstrap-request', {
+                    sessionId: nextSessionId,
+                    activeSessionId: stateRef.current.activeSessionId,
+                    payload: tailBootstrapPayload,
+                  });
+                  ws.send(JSON.stringify({
+                    type: 'buffer-sync-request',
+                    payload: tailBootstrapPayload,
+                  } satisfies ClientMessage));
+                  ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
+                  armTailRefreshAckWatchdogRef.current(nextSessionId);
+                }
+              }
               flushPendingInputQueue(nextSessionId);
               dispatch({ type: 'INCREMENT_CONNECTED' });
               setTimeout(() => drainReconnectBucket(hostKey), POST_SUCCESS_NEXT_RETRY_DELAY_MS);
               break;
             case 'buffer-sync':
+              clearPendingTailRefreshAck(nextSessionId);
               runtimeDebug('session.ws.reconnect.buffer-sync', {
                 sessionId: nextSessionId,
                 payload: summarizeBufferPayload(msg.payload),
@@ -811,6 +895,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             case 'sessions':
               break;
             case 'pong':
+              clearPendingTailRefreshAck(nextSessionId);
               lastPongAtRef.current.set(nextSessionId, Date.now());
               break;
           }
@@ -822,7 +907,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       ws.onerror = () => finalizeFailure('WebSocket error', true);
       ws.onclose = () => finalizeFailure('socket closed', true);
     }, delay);
-  }, [cleanupSocket, resolveSessionCacheLines, wsUrl]);
+  }, [cleanupSocket, clearPendingTailRefreshAck, resolveSessionCacheLines, wsUrl]);
 
   const scheduleReconnect = useCallback((
     sessionId: string,
@@ -876,6 +961,38 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     emitSessionStatus(sessionId, 'error', message);
     drainReconnectBucket(hostKey);
   }, [drainReconnectBucket]);
+
+  const armTailRefreshAckWatchdog = useCallback((sessionId: string) => {
+    clearPendingTailRefreshAck(sessionId);
+    const nextNonce = (pendingTailRefreshAckNonceRef.current.get(sessionId) || 0) + 1;
+    pendingTailRefreshAckNonceRef.current.set(sessionId, nextNonce);
+    const timer = window.setTimeout(() => {
+      const currentNonce = pendingTailRefreshAckNonceRef.current.get(sessionId);
+      if (currentNonce !== nextNonce) {
+        return;
+      }
+
+      const currentSession = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+      const currentWs = wsRefs.current.get(sessionId);
+      const isStillActive = stateRef.current.activeSessionId === sessionId;
+      if (!currentSession || currentSession.state !== 'connected' || !currentWs || currentWs.readyState !== WebSocket.OPEN || !isStillActive) {
+        clearPendingTailRefreshAck(sessionId);
+        return;
+      }
+
+      runtimeDebug('session.buffer.tail-refresh.timeout', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        revision: currentSession.buffer.revision,
+        startIndex: currentSession.buffer.startIndex,
+        endIndex: currentSession.buffer.endIndex,
+      });
+      cleanupSocket(sessionId, true);
+      scheduleReconnect(sessionId, 'tail refresh timeout', true, { immediate: true, resetAttempt: true });
+    }, ACTIVE_TAIL_REFRESH_ACK_TIMEOUT_MS);
+    pendingTailRefreshAckTimersRef.current.set(sessionId, timer);
+  }, [clearPendingTailRefreshAck, cleanupSocket, scheduleReconnect]);
+  armTailRefreshAckWatchdogRef.current = armTailRefreshAckWatchdog;
 
   const connectSession = useCallback((sessionId: string, host: Host, activate: boolean) => {
     clearReconnectForSession(sessionId);
@@ -1017,6 +1134,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             dispatch({ type: 'INCREMENT_CONNECTED' });
             break;
           case 'buffer-sync':
+            clearPendingTailRefreshAck(sessionId);
             runtimeDebug('session.ws.buffer-sync', {
               sessionId,
               payload: summarizeBufferPayload(msg.payload),
@@ -1054,6 +1172,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
           case 'sessions':
             break;
           case 'pong':
+            clearPendingTailRefreshAck(sessionId);
             lastPongAtRef.current.set(sessionId, Date.now());
             break;
         }
@@ -1064,7 +1183,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     ws.onerror = () => finalizeFailure('WebSocket error', true);
     ws.onclose = () => finalizeFailure('socket closed', true);
-  }, [cleanupSocket, clearReconnectForSession, resolveSessionCacheLines, scheduleReconnect, wsUrl]);
+  }, [cleanupSocket, clearPendingTailRefreshAck, clearReconnectForSession, resolveSessionCacheLines, scheduleReconnect, wsUrl]);
 
   const createSession = useCallback((host: Host, options?: CreateSessionOptions): string => {
     const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1211,7 +1330,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       activeSessionId: stateRef.current.activeSessionId,
       sessions: summarizeSessions(stateRef.current.sessions),
     });
-    for (const session of stateRef.current.sessions) {
+    const orderedSessions = orderSessionsForReconnect(
+      stateRef.current.sessions,
+      stateRef.current.activeSessionId,
+    );
+    for (const session of orderedSessions) {
       reconnectSession(session.id);
     }
   }, [reconnectSession]);
@@ -1304,6 +1427,106 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     } satisfies ClientMessage));
   }, []);
 
+  const sendTailBootstrapBufferSyncRequest = useCallback((sessionId: string, ws?: WebSocket | null) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const targetWs = ws || wsRefs.current.get(sessionId);
+    if (!session || !targetWs || targetWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const payload = buildTailBootstrapBufferSyncRequestPayload(session, sessionSyncViewRef.current.get(sessionId));
+    runtimeDebug('session.buffer.tail-bootstrap-request', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      payload,
+    });
+    targetWs.send(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload,
+    } satisfies ClientMessage));
+  }, []);
+
+  const sendFollowRefreshBufferSyncRequest = useCallback((sessionId: string, ws?: WebSocket | null) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const targetWs = ws || wsRefs.current.get(sessionId);
+    if (!session || !targetWs || targetWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const payload = buildBufferSyncRequestPayload(session, sessionSyncViewRef.current.get(sessionId));
+    runtimeDebug('session.buffer.follow-refresh-request', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      payload,
+    });
+    targetWs.send(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload,
+    } satisfies ClientMessage));
+  }, []);
+
+  const refreshSessionTail = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const ws = wsRefs.current.get(sessionId);
+    if (!session || session.state !== 'connected' || !ws || ws.readyState !== WebSocket.OPEN) {
+      runtimeDebug('session.buffer.tail-refresh.skip', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        hasSession: Boolean(session),
+        sessionState: session?.state ?? null,
+        wsReadyState: ws?.readyState ?? null,
+      });
+      return false;
+    }
+
+    const viewportRows = Math.max(
+      1,
+      Math.floor(sessionSyncViewRef.current.get(sessionId)?.viewportRows || session.buffer.rows || 24),
+    );
+    sessionSyncViewRef.current.set(sessionId, {
+      mode: 'follow',
+      viewportRows,
+      viewportEndIndex: Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0)),
+    });
+
+    const isActive = stateRef.current.activeSessionId === sessionId;
+    syncSessionStreamMode(sessionId, isActive);
+    lastSyncedStreamModeRef.current.set(sessionId, isActive ? 'active' : 'idle');
+    clearQueuedBufferSync(sessionId);
+    runtimeDebug('session.buffer.tail-refresh', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      viewportRows,
+      isActive,
+      localRevision: session.buffer.revision,
+      localStartIndex: session.buffer.startIndex,
+      localEndIndex: session.buffer.endIndex,
+    });
+    if (isActive) {
+      const followWindowEndIndex = Math.max(
+        0,
+        Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0),
+      );
+      const followWindowStartIndex = Math.max(
+        session.buffer.startIndex,
+        followWindowEndIndex - resolveSessionCacheLines(viewportRows),
+      );
+      const shouldBootstrap =
+        session.buffer.revision <= 0
+        || session.buffer.endIndex <= session.buffer.startIndex
+        || session.buffer.lines.length === 0
+        || hasGapInAbsoluteWindow(session.buffer.gapRanges, followWindowStartIndex, followWindowEndIndex);
+      if (shouldBootstrap) {
+        sendTailBootstrapBufferSyncRequest(sessionId, ws);
+      } else {
+        sendFollowRefreshBufferSyncRequest(sessionId, ws);
+      }
+      ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
+      armTailRefreshAckWatchdog(sessionId);
+    }
+    return true;
+  }, [armTailRefreshAckWatchdog, clearQueuedBufferSync, resolveSessionCacheLines, sendFollowRefreshBufferSyncRequest, sendTailBootstrapBufferSyncRequest, syncSessionStreamMode]);
+
   const requestViewportPrefetch = useCallback((sessionId: string, viewState: SessionSyncViewState) => {
     const now = Date.now();
     const lastAt = lastPrefetchAtRef.current.get(sessionId) || 0;
@@ -1367,8 +1590,13 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
   useEffect(() => {
     if (!state.activeSessionId) {
+      lastActivatedSessionIdRef.current = null;
       return;
     }
+    if (lastActivatedSessionIdRef.current === state.activeSessionId) {
+      return;
+    }
+    lastActivatedSessionIdRef.current = state.activeSessionId;
     const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
     if (activeSession) {
       sessionSyncViewRef.current.set(state.activeSessionId, {
@@ -1380,15 +1608,33 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         viewportRows: Math.max(1, Math.floor(activeSession.buffer.rows || 24)),
       });
     }
+    const currentActiveSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+    if (currentActiveSession?.state === 'connected') {
+      refreshSessionTail(state.activeSessionId);
+      return;
+    }
     scheduleBufferSyncRequest(state.activeSessionId, 0);
-  }, [scheduleBufferSyncRequest, state.activeSessionId, state.sessions]);
+  }, [refreshSessionTail, scheduleBufferSyncRequest, state.activeSessionId, state.sessions]);
 
   useEffect(() => {
+    const connectedSessionIds = new Set<string>();
     for (const session of state.sessions) {
       if (session.state !== 'connected') {
+        lastSyncedStreamModeRef.current.delete(session.id);
         continue;
       }
-      syncSessionStreamMode(session.id, session.id === state.activeSessionId);
+      connectedSessionIds.add(session.id);
+      const nextMode: 'active' | 'idle' = session.id === state.activeSessionId ? 'active' : 'idle';
+      if (lastSyncedStreamModeRef.current.get(session.id) === nextMode) {
+        continue;
+      }
+      syncSessionStreamMode(session.id, nextMode === 'active');
+      lastSyncedStreamModeRef.current.set(session.id, nextMode);
+    }
+    for (const sessionId of Array.from(lastSyncedStreamModeRef.current.keys())) {
+      if (!connectedSessionIds.has(sessionId)) {
+        lastSyncedStreamModeRef.current.delete(sessionId);
+      }
     }
   }, [state.activeSessionId, state.sessions, syncSessionStreamMode]);
 
@@ -1577,6 +1823,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     renameSession,
     reconnectSession,
     reconnectAllSessions,
+    refreshSessionTail,
     sendMessage,
     sendInput,
     sendImagePaste,

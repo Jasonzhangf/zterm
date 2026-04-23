@@ -274,6 +274,7 @@ function PaneSurface({
   isVisible,
   isInputFocused,
   onOpenConnection,
+  terminalThemeId,
 }: {
   tab: ShellWorkspaceTab;
   target: EditableHost | null;
@@ -282,6 +283,7 @@ function PaneSurface({
   isVisible: boolean;
   isInputFocused: boolean;
   onOpenConnection: () => void;
+  terminalThemeId?: string;
 }) {
   const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
 
@@ -329,6 +331,7 @@ function PaneSurface({
           onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
           onViewportChange={(viewState) => runtime?.updateViewport(viewState)}
           onViewportPrefetch={(viewState) => runtime?.requestViewportPrefetch(viewState)}
+          themeId={terminalThemeId}
         />
       </div>
     </div>
@@ -1058,6 +1061,7 @@ export function ShellWorkspace({
                     isVisible
                     isInputFocused={pane.id === workspace.activePaneId}
                     onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
+                    terminalThemeId={bridgeSettings.terminalThemeId}
                   />
                 </div>
               </div>

@@ -121,6 +121,15 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 拖拽排序类交互若在 `pointerMove` 更新 React state、`pointerUp` 立即提交，必须用 ref 同步保存最新 dragState；release 不能只读 state 闭包，否则会出现“拖了但顺序没生效”
 - keyboard 关闭态不要在 quick bar / bottom overlay 外层保留空 `transform`（如 `translateY(0)`）；这会让内部 `position: fixed` 的悬浮球/面板改绑到容器坐标系，导致入口“消失”
 - 快捷按键编辑器里，组合键默认名必须来自最终组合 preview，而不是第一个被点击的 modifier token；否则 `Ctrl + C` 会被错误保存成 `Ctrl`
+- Android / Mac 若都要消费快捷按键组合规则，编码/反解/默认 label 必须下沉到 shared 纯函数；平台 UI 只保留 token 编辑与展示，禁止再复制一份组合算法
+- foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
+- foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
+- active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + gap marker；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
+- active 页的 gap repair 只针对 reading 态当前三屏窗口命中的缺口；不要从旧 stop point 连续追到最新，窗口外内容允许保持不连续以控制带宽
+- client 本地 cache window 必须围绕当前 reading viewport 动态移动；禁止 trim 时永远只保最新 tail，否则向前补到的历史会被立刻愚蠢扔掉
+- terminal 主题切换的真源是“默认前景/背景 + ANSI 16 色 preset”，不是只换容器背景；主题 id 应持久化到 shared `BridgeSettings`，Settings 只做 preset 选择
+- Android / Mac 若都要支持 terminal 主题，preset 与颜色算法必须下沉到 shared 纯模块，平台 TerminalView 只消费同一份 preset，避免 ANSI 映射再次分叉
+- 若 Settings UI 把主题卡片标成“正在使用/Active”，点击卡片就必须立即写入真实持久化存储；不能只停留在本页 draft，否则用户切出去再回来会恢复默认主题，属于典型假状态
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
 ---
