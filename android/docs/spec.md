@@ -9,6 +9,7 @@
 - 主机管理：新增、编辑、删除、置顶、最近连接
 - tmux 会话：多 Tab、切换、关闭、重连
 - 终端渲染：接入 `@jsonstudio/wtermmod-react`
+- 定时发送：针对当前 tmux session 创建周期发送 / 指定时间发送任务，由 daemon 执行
 - 移动端增强输入：快捷键条、方向键、键盘切换、必要时命令输入条
 - 悬浮球快捷菜单：展开后显示**文本快捷输入**列表，支持点击注入保存好的字符串、+添加、排序、编辑
 - 图片传送：从手机本地选择图片，传到本地 daemon，写入服务器剪贴板，并向当前会话发送 `Ctrl+V`
@@ -80,6 +81,16 @@
 6. 发送方向键 / 回车 / 控制键
 7. 点击图片按钮，选择本地图像，发到当前会话
 
+### 主路径 D：session 定时发送
+
+1. 进入某个 terminal session
+2. 点击顶部 alarm / clock 入口
+3. 打开当前 session 的 schedule sheet
+4. 选择“周期”或“闹钟”规则
+5. 填写发送文本、是否回车、日期/时间或周期
+6. 保存后看到 `nextFireAt`
+7. 即使客户端离线，daemon 仍能在到点时发送到该 tmux session
+
 ## 视觉与交互参考冻结
 
 ### 主参考
@@ -142,12 +153,16 @@
 - Connections 列表页新增入口位于安全区内的浮动按钮
 - live session/tab/header 中必须能看出当前 `server + session` 组合
 - 服务器端必须能通过单一 daemon CLI 在本地后台启动，默认监听端口由统一配置决定（当前为 `3333`）
-- 全局 daemon CLI 入口为 `wterm daemon ...`，并支持 `start / stop / restart / status / install-service / uninstall-service / service-status`
-- `wterm daemon start / restart / install-service` 必须等待 daemon 端口真正 ready，再回报成功；不能只以 launchd 已加载为准
+- 全局 daemon CLI 入口为 `zterm-daemon ...`，并支持 `start / stop / restart / status / install-service / uninstall-service / service-status`
+- `zterm-daemon start / restart / install-service` 必须等待 daemon 端口真正 ready，再回报成功；不能只以 launchd 已加载为准
 - websocket bridge 必须做双向保活：client 定时 ping 并校验 pong 超时，server 也要做 ws heartbeat；任一侧丢心跳后都应自动回收并进入重连，不允许死连接长期占住 session
 - daemon 初始快照失败时不能崩进程；`capture-pane` 失败只允许降级快照，不允许把整个 bridge 打挂
 - daemon 鉴权真源必须落到 `~/.wterm/config.json`；至少支持 `mobile.daemon.authToken`
 - client 必须按服务器维度记住鉴权配置：`bridgeHost + bridgePort + authToken`
+- 定时发送真源必须在 daemon；Android / Mac 不得各自维护第二套本地调度器
+- 定时任务必须绑定 tmux session 真源，而不是客户端临时 sessionId
+- Android / Mac 必须都以“日历 + 闹钟”语义编辑同一份 per-session schedule 状态
+- client 离线时，daemon 仍能继续执行已保存的定时发送任务
 - 终端快捷栏必须支持图片按钮；选图后 daemon 需把图片解码/转成 PNG 写入本机剪贴板，并给当前 tmux 会话发送 `Ctrl+V`
 - Session picker / Connection Properties 必须提供显式 `Connect / Refresh` 按钮，不能在输入 host/token 时自动探测 tmux
 - phone / tablet / foldable / split-screen / future Mac 的布局切换必须来自同一 layout profile 方法，不能在每个页面各自分叉 breakpoint

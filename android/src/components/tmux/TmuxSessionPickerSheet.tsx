@@ -453,51 +453,53 @@ export function TmuxSessionPickerSheet({
           </div>
         </div>
 
-        <div
-          style={{
-            borderRadius: '22px',
-            padding: '16px',
-            backgroundColor: '#ffffff',
-            boxShadow: mobileTheme.shadow.soft,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
-          }}
-        >
-          <SectionTitle title="History" subtitle="优先显示历史连接；Tailscale IP 会比局域网目标更靠前。" />
-          {historyHosts.length === 0 ? (
-            <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>当前没有历史连接。</div>
-          ) : (
-            historyHosts.map((host) => (
-              <button
-                key={host.id}
-                onClick={() => onSelectHistoryHost(host)}
-                style={{
-                  border: 'none',
-                  borderRadius: '18px',
-                  padding: '12px 14px',
-                  backgroundColor:
-                    host.bridgeHost === selectedTarget.bridgeHost && host.bridgePort === selectedTarget.bridgePort
-                      ? 'rgba(31, 214, 122, 0.14)'
-                      : '#f6f8fb',
-                  color: mobileTheme.colors.lightText,
-                  textAlign: 'left',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                  <div style={{ fontWeight: 800 }}>{host.name}</div>
-                  <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>{host.sessionName || host.name}</div>
-                </div>
-                <div style={{ marginTop: '5px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
-                  {host.bridgeHost}:{host.bridgePort}
-                </div>
-                <div style={{ marginTop: '4px', fontSize: '10px', color: mobileTheme.colors.lightMuted }}>
-                  {formatTargetBadge(host.bridgeHost)} · {host.authToken ? 'Auth' : 'No auth'}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
+        {mode !== 'new-connection' && (
+          <div
+            style={{
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <SectionTitle title="History" subtitle="优先显示历史连接；Tailscale IP 会比局域网目标更靠前。" />
+            {historyHosts.length === 0 ? (
+              <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>当前没有历史连接。</div>
+            ) : (
+              historyHosts.map((host) => (
+                <button
+                  key={host.id}
+                  onClick={() => onSelectHistoryHost(host)}
+                  style={{
+                    border: 'none',
+                    borderRadius: '18px',
+                    padding: '12px 14px',
+                    backgroundColor:
+                      host.bridgeHost === selectedTarget.bridgeHost && host.bridgePort === selectedTarget.bridgePort
+                        ? 'rgba(31, 214, 122, 0.14)'
+                        : '#f6f8fb',
+                    color: mobileTheme.colors.lightText,
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div style={{ fontWeight: 800 }}>{host.name}</div>
+                    <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>{host.sessionName || host.name}</div>
+                  </div>
+                  <div style={{ marginTop: '5px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                    {host.bridgeHost}:{host.bridgePort}
+                  </div>
+                  <div style={{ marginTop: '4px', fontSize: '10px', color: mobileTheme.colors.lightMuted }}>
+                    {formatTargetBadge(host.bridgeHost)} · {host.authToken ? 'Auth' : 'No auth'}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        )}
 
         <div
           style={{
@@ -664,38 +666,40 @@ export function TmuxSessionPickerSheet({
           </div>
         </div>
 
-        <div
-          style={{
-            borderRadius: '22px',
-            padding: '16px',
-            backgroundColor: '#ffffff',
-            boxShadow: mobileTheme.shadow.soft,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-          }}
-        >
-          <SectionTitle title="Clean Session" subtitle="不选历史和现有 tmux session，就走干净的新连接/新 tab。" />
-          <button
-            onClick={() => onSelectCleanSession(selectedTarget)}
+        {mode !== 'new-connection' && (
+          <div
             style={{
-              border: 'none',
-              borderRadius: '18px',
-              padding: '14px',
-              backgroundColor: mobileTheme.colors.accentSoft,
-              color: mobileTheme.colors.lightText,
-              fontWeight: 800,
-              textAlign: 'left',
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
             }}
           >
-            {mode === 'quick-tab' ? 'Create blank tab target' : isEditGroupMode ? 'Use full connection form' : 'Open full connection form'}
-          </button>
-          {isLikelyTailscaleHost(selectedTarget.bridgeHost) && (
-            <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>
-              当前目标是 Tailscale，会优先记忆这个 IP。
-            </div>
-          )}
-        </div>
+            <SectionTitle title="Clean Session" subtitle="不选历史和现有 tmux session，就走干净的新连接/新 tab。" />
+            <button
+              onClick={() => onSelectCleanSession(selectedTarget)}
+              style={{
+                border: 'none',
+                borderRadius: '18px',
+                padding: '14px',
+                backgroundColor: mobileTheme.colors.accentSoft,
+                color: mobileTheme.colors.lightText,
+                fontWeight: 800,
+                textAlign: 'left',
+              }}
+            >
+              {mode === 'quick-tab' ? 'Create blank tab target' : isEditGroupMode ? 'Use full connection form' : 'Open full connection form'}
+            </button>
+            {isLikelyTailscaleHost(selectedTarget.bridgeHost) && (
+              <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>
+                当前目标是 Tailscale，会优先记忆这个 IP。
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

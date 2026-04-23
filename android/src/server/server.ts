@@ -17,28 +17,39 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { basename, extname, join, resolve } from 'path';
 import { homedir } from 'os';
 import type {
+  BufferSyncRequestPayload,
   PasteImagePayload,
+  PasteImageStartPayload,
   RuntimeDebugLogEntry,
+  ScheduleEventPayload,
+  ScheduleJobDraft,
+  ScheduleStatePayload,
   TerminalBufferPayload,
   TerminalCell,
   TerminalIndexedLine,
 } from '../lib/types';
+import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
 import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_SESSION_NAME,
+  resolveTerminalCacheLines,
   WTERM_CONFIG_DISPLAY_PATH,
 } from '../lib/mobile-config';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
 import {
-  cloneRow,
+  advanceKnownLocalWindowRange,
   findChangedIndexedRange,
   paintCursorIntoViewport,
   resolveCanonicalAvailableLineCount,
+  resolveFollowTailSyncPlan,
   sliceIndexedLines,
   trimCanonicalBufferWindow,
 } from './canonical-buffer';
+import { dispatchScheduledJob } from './schedule-dispatch';
+import { ScheduleEngine } from './schedule-engine';
+import { loadScheduleStore, saveScheduleStore } from './schedule-store';
 
 interface TmuxConnectPayload {
   name: string;
@@ -55,12 +66,15 @@ interface ClientSession {
   ws: WebSocket;
   requestOrigin: string;
   state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
+  streamMode: 'active' | 'idle';
   title: string;
   sessionName: string;
   mirrorKey: string | null;
   cols: number;
   rows: number;
   wsAlive: boolean;
+  lastBufferSyncRequest: BufferSyncRequestPayload | null;
+  pendingPasteImage: PasteImageStartPayload | null;
 }
 
 interface SessionMirror {
@@ -76,6 +90,9 @@ interface SessionMirror {
   rows: number;
   cursorKeysApp: boolean;
   revision: number;
+  lastDeltaFromRevision: number;
+  lastDeltaToRevision: number;
+  lastDeltaRange: { startIndex: number; endIndex: number } | null;
   lastScrollbackCount: number;
   bufferStartIndex: number;
   bufferLines: TerminalCell[][];
@@ -106,12 +123,20 @@ interface TmuxCursorState {
 
 type ClientMessage =
   | { type: 'connect'; payload: TmuxConnectPayload }
+  | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
+  | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }
+  | { type: 'schedule-list'; payload: { sessionName: string } }
+  | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
+  | { type: 'schedule-delete'; payload: { jobId: string } }
+  | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
+  | { type: 'schedule-run-now'; payload: { jobId: string } }
   | { type: 'tmux-create-session'; payload: { sessionName: string } }
   | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
+  | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
@@ -131,6 +156,8 @@ type ServerMessage =
     }
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
+  | { type: 'schedule-state'; payload: ScheduleStatePayload }
+  | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
@@ -164,8 +191,7 @@ const DAEMON_SESSION_NAME = DAEMON_CONFIG.sessionName || buildDaemonSessionName(
 const HIDDEN_TMUX_SESSIONS = new Set([DAEMON_SESSION_NAME, DEFAULT_DAEMON_SESSION_NAME]);
 const AUTO_COMMAND_DELAY_MS = 180;
 const REQUIRED_AUTH_TOKEN = DAEMON_CONFIG.authToken;
-const ACTIVE_STREAM_INTERVAL_MS = 48;
-const INACTIVE_STREAM_INTERVAL_MS = 900;
+const ACTIVE_STREAM_INTERVAL_MS = 16;
 const MAX_CAPTURED_SCROLLBACK_LINES = DAEMON_CONFIG.terminalCacheLines;
 const WTERM_HOME_DIR = getWtermHomeDir(homedir());
 const UPDATES_DIR = getWtermUpdatesDir(homedir());
@@ -182,9 +208,22 @@ const ORPHAN_MIRROR_TTL_MS = 2 * 60 * 1000;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
 const MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
 const MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS = 900;
+const MEMORY_GUARD_INTERVAL_MS = 30_000;
+const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
+const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
 const sessions = new Map<string, ClientSession>();
 const mirrors = new Map<string, SessionMirror>();
+const scheduleStore = loadScheduleStore();
+
+function resolveMirrorCacheLines(rows: number) {
+  const viewportRows = Math.max(1, Math.floor(rows || 1));
+  const threeScreenLines = resolveTerminalCacheLines(viewportRows);
+  if (!Number.isFinite(MAX_CAPTURED_SCROLLBACK_LINES) || MAX_CAPTURED_SCROLLBACK_LINES <= 0) {
+    return threeScreenLines;
+  }
+  return Math.max(viewportRows, Math.min(Math.floor(MAX_CAPTURED_SCROLLBACK_LINES), threeScreenLines));
+}
 
 function daemonRuntimeDebug(scope: string, payload?: unknown) {
   if (!DAEMON_RUNTIME_DEBUG) {
@@ -310,6 +349,85 @@ function sendMessage(session: ClientSession, message: ServerMessage) {
   }
 }
 
+function buildScheduleStatePayload(sessionName: string): ScheduleStatePayload {
+  return {
+    sessionName,
+    jobs: scheduleEngine.listBySession(sessionName),
+  };
+}
+
+function sendScheduleStateToSession(session: ClientSession, sessionName = session.sessionName) {
+  if (!sessionName) {
+    return;
+  }
+  sendMessage(session, {
+    type: 'schedule-state',
+    payload: buildScheduleStatePayload(sessionName),
+  });
+}
+
+function broadcastScheduleState(sessionName: string) {
+  if (!sessionName) {
+    return;
+  }
+  for (const session of sessions.values()) {
+    if (session.sessionName !== sessionName || session.state === 'closed') {
+      continue;
+    }
+    sendScheduleStateToSession(session, sessionName);
+  }
+}
+
+function broadcastScheduleEvent(event: ScheduleEventPayload) {
+  for (const session of sessions.values()) {
+    if (session.sessionName !== event.sessionName || session.state === 'closed') {
+      continue;
+    }
+    sendMessage(session, {
+      type: 'schedule-event',
+      payload: event,
+    });
+  }
+}
+
+function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
+  runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
+  if (appendEnter) {
+    runTmux(['send-keys', '-t', sessionName, 'Enter']);
+  }
+}
+
+function writeToLiveMirror(sessionName: string, payload: string) {
+  const mirror = mirrors.get(getMirrorKey(sessionName));
+  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+    return false;
+  }
+  mirror.ptyProcess.write(payload);
+  scheduleMirrorFlush(mirror);
+  return true;
+}
+
+const scheduleEngine = new ScheduleEngine({
+  initialJobs: scheduleStore.jobs,
+  saveJobs: (jobs) => {
+    saveScheduleStore(jobs);
+  },
+  executeJob: async (job) =>
+    dispatchScheduledJob(
+      {
+        writeToLiveMirror,
+        writeToTmuxSession,
+      },
+      job,
+    ),
+  onStateChange: (sessionName) => {
+    broadcastScheduleState(sessionName);
+  },
+  onEvent: (event) => {
+    broadcastScheduleEvent(event);
+  },
+});
+
 function readLatestUpdateManifest() {
   const manifestPath = join(UPDATES_DIR, 'latest.json');
   if (!existsSync(manifestPath)) {
@@ -385,6 +503,39 @@ function resolveUpdateFilePath(pathname: string) {
   return absolutePath;
 }
 
+function buildRuntimeHealthSnapshot(request: IncomingMessage) {
+  const requestHost = request.headers.host || `${HOST}:${PORT}`;
+  const memoryUsage = process.memoryUsage();
+  const sessionEntries = Array.from(sessions.values());
+  const mirrorEntries = Array.from(mirrors.values());
+  return {
+    ok: true,
+    wsUrl: `ws://${requestHost}`,
+    updatesUrl: `${resolveRequestOrigin(request)}/updates/latest.json`,
+    updatesDir: UPDATES_DIR,
+    uptimeSec: Math.floor(process.uptime()),
+    pid: process.pid,
+    memory: {
+      rss: memoryUsage.rss,
+      heapTotal: memoryUsage.heapTotal,
+      heapUsed: memoryUsage.heapUsed,
+      external: memoryUsage.external,
+      arrayBuffers: memoryUsage.arrayBuffers,
+    },
+    sessions: {
+      total: sessionEntries.length,
+      connected: sessionEntries.filter((session) => session.state === 'connected').length,
+      connecting: sessionEntries.filter((session) => session.state === 'connecting').length,
+    },
+    mirrors: {
+      total: mirrorEntries.length,
+      connected: mirrorEntries.filter((mirror) => mirror.state === 'connected').length,
+      orphaned: mirrorEntries.filter((mirror) => mirror.subscribers.size === 0).length,
+      subscribers: mirrorEntries.reduce((sum, mirror) => sum + mirror.subscribers.size, 0),
+    },
+  };
+}
+
 function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
   writeCorsHeaders(response);
 
@@ -398,12 +549,7 @@ function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
   const url = new URL(request.url || '/', origin);
 
   if (url.pathname === '/health') {
-    serveJson(response, {
-      ok: true,
-      wsUrl: `ws://${request.headers.host || `${HOST}:${PORT}`}`,
-      updatesUrl: `${origin}/updates/latest.json`,
-      updatesDir: UPDATES_DIR,
-    });
+    serveJson(response, buildRuntimeHealthSnapshot(request));
     return;
   }
 
@@ -509,17 +655,40 @@ function writeImageToClipboard(pngPath: string) {
   ]);
 }
 
-function persistClipboardImage(payload: PasteImagePayload) {
+function persistClipboardImageBuffer(
+  fileMeta: {
+    name: string;
+    mimeType: string;
+  },
+  buffer: Buffer,
+) {
   ensureUploadDir();
-  const safeName = sanitizeUploadFileName(payload.name || 'upload');
+  const safeName = sanitizeUploadFileName(fileMeta.name || 'upload');
   const explicitExt = extname(safeName);
-  const sourceExt = explicitExt || (payload.mimeType === 'image/jpeg' ? '.jpg' : payload.mimeType === 'image/png' ? '.png' : payload.mimeType === 'image/gif' ? '.gif' : '');
+  const sourceExt =
+    explicitExt
+    || (fileMeta.mimeType === 'image/jpeg'
+      ? '.jpg'
+      : fileMeta.mimeType === 'image/png'
+        ? '.png'
+        : fileMeta.mimeType === 'image/gif'
+          ? '.gif'
+          : '');
   const sourcePath = join(UPLOAD_DIR, `${safeName.replace(/\.[^.]+$/u, '')}-${Date.now()}${sourceExt}`);
-  const buffer = Buffer.from(payload.dataBase64, 'base64');
   writeFileSync(sourcePath, buffer);
   const pngPath = normalizeImageToPng(sourcePath, safeName.replace(/\.[^.]+$/u, ''));
   writeImageToClipboard(pngPath);
   return { sourcePath, pngPath, bytes: buffer.byteLength };
+}
+
+function persistClipboardImage(payload: PasteImagePayload) {
+  return persistClipboardImageBuffer(
+    {
+      name: payload.name,
+      mimeType: payload.mimeType,
+    },
+    Buffer.from(payload.dataBase64, 'base64'),
+  );
 }
 
 function listTmuxSessions() {
@@ -633,7 +802,7 @@ function captureTmuxPaneLines(
 async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   const metrics = readTmuxPaneMetrics(mirror.sessionName);
   const cursor = readTmuxCursorState(metrics.paneId);
-  const maxLines = Math.max(metrics.paneRows, MAX_CAPTURED_SCROLLBACK_LINES);
+  const maxLines = resolveMirrorCacheLines(metrics.paneRows);
   const captured = captureTmuxPaneLines(metrics.paneId, {
     paneRows: metrics.paneRows,
     maxLines,
@@ -675,7 +844,11 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   mirror.cols = metrics.paneCols;
   mirror.cursorKeysApp = cursor.cursorKeysApp;
   mirror.lastScrollbackCount = scratchScrollbackCount;
-  const trimmed = trimCanonicalBufferWindow(nextBufferStartIndex, nextBufferLines, Math.max(mirror.rows, MAX_CAPTURED_SCROLLBACK_LINES));
+  const trimmed = trimCanonicalBufferWindow(
+    nextBufferStartIndex,
+    nextBufferLines,
+    resolveMirrorCacheLines(mirror.rows),
+  );
   mirror.bufferStartIndex = trimmed.startIndex;
   mirror.bufferLines = trimmed.lines;
   const availableEndIndex = getMirrorAvailableEndIndex(mirror);
@@ -749,15 +922,37 @@ function createClientSession(ws: WebSocket, requestOrigin: string): ClientSessio
     ws,
     requestOrigin,
     state: 'idle',
+    streamMode: 'idle',
     title: 'Terminal',
     sessionName: DEFAULT_SESSION_NAME,
     mirrorKey: null,
     cols: 80,
     rows: 24,
     wsAlive: true,
+    lastBufferSyncRequest: null,
+    pendingPasteImage: null,
   };
   sessions.set(session.id, session);
   return session;
+}
+
+function normalizeBufferSyncRequestPayload(
+  session: ClientSession,
+  request: BufferSyncRequestPayload,
+): BufferSyncRequestPayload {
+  const localStartIndex = Math.max(0, Math.floor(request.localStartIndex || 0));
+  const mirror = getClientMirror(session);
+  const fallbackRows = mirror?.rows || session.rows || 24;
+  const fallbackEndIndex = mirror ? getMirrorAvailableEndIndex(mirror) : 0;
+
+  return {
+    knownRevision: Math.max(0, Math.floor(request.knownRevision || 0)),
+    localStartIndex,
+    localEndIndex: Math.max(localStartIndex, Math.floor(request.localEndIndex || localStartIndex)),
+    viewportEndIndex: Math.max(0, Math.floor(request.viewportEndIndex || fallbackEndIndex)),
+    viewportRows: Math.max(1, Math.floor(request.viewportRows || fallbackRows)),
+    mode: request.mode === 'reading' ? 'reading' : 'follow',
+  };
 }
 
 function createMirror(sessionName: string): SessionMirror {
@@ -775,6 +970,9 @@ function createMirror(sessionName: string): SessionMirror {
     rows: 24,
     cursorKeysApp: false,
     revision: 0,
+    lastDeltaFromRevision: 0,
+    lastDeltaToRevision: 0,
+    lastDeltaRange: null,
     lastScrollbackCount: -1,
     bufferStartIndex: 0,
     bufferLines: [],
@@ -872,6 +1070,9 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
   mirror.observerLineBuffer = '';
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
+  mirror.lastDeltaFromRevision = 0;
+  mirror.lastDeltaToRevision = 0;
+  mirror.lastDeltaRange = null;
   mirror.lastScrollbackCount = -1;
   mirror.orphanedAt = null;
   mirrors.delete(mirror.key);
@@ -961,6 +1162,17 @@ function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: nu
   return lines;
 }
 
+function countActiveSubscribers(mirror: SessionMirror) {
+  let activeCount = 0;
+  for (const sessionId of mirror.subscribers) {
+    const session = sessions.get(sessionId);
+    if (session?.state === 'connected' && session.streamMode === 'active') {
+      activeCount += 1;
+    }
+  }
+  return activeCount;
+}
+
 function buildBufferPayload(
   mirror: SessionMirror,
   lines: TerminalIndexedLine[],
@@ -975,7 +1187,7 @@ function buildBufferPayload(
     cols: mirror.cols,
     rows: mirror.rows,
     cursorKeysApp: mirror.cursorKeysApp,
-    lines: lines.map((line) => ({ index: line.index, cells: cloneRow(line.cells) })),
+    lines: lines.map((line) => ({ index: line.index, cells: line.cells })),
   };
 }
 
@@ -991,6 +1203,32 @@ function buildFullBufferSyncPayload(mirror: SessionMirror): TerminalBufferPayloa
   );
 }
 
+function resolveTailWindow(
+  mirror: SessionMirror,
+  viewportRows: number,
+) {
+  const bufferEndIndex = getMirrorAvailableEndIndex(mirror);
+  const cacheLines = resolveMirrorCacheLines(viewportRows);
+  return {
+    startIndex: Math.max(mirror.bufferStartIndex, bufferEndIndex - cacheLines),
+    endIndex: bufferEndIndex,
+    viewportEndIndex: bufferEndIndex,
+  };
+}
+
+function buildTailWindowBufferSyncPayload(
+  mirror: SessionMirror,
+  viewportRows: number,
+) {
+  const tailWindow = resolveTailWindow(mirror, viewportRows);
+  return buildSparseWindowBufferSyncPayload(mirror, tailWindow, [
+    {
+      startIndex: tailWindow.startIndex,
+      endIndex: tailWindow.endIndex,
+    },
+  ]);
+}
+
 function mirrorBufferChanged(
   mirror: SessionMirror,
   previousStartIndex: number,
@@ -1004,20 +1242,304 @@ function mirrorBufferChanged(
   });
 }
 
-function sendBufferSyncToClient(session: ClientSession, mirror: SessionMirror) {
-  const payload = buildFullBufferSyncPayload(mirror);
+function normalizeRequestedMissingRanges(
+  missingRanges: BufferSyncRequestPayload['missingRanges'],
+  startIndex: number,
+  endIndex: number,
+) {
+  if (!Array.isArray(missingRanges) || endIndex <= startIndex) {
+    return [] as Array<{ startIndex: number; endIndex: number }>;
+  }
+  return missingRanges
+    .map((range) => ({
+      startIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.startIndex || 0))),
+      endIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.endIndex || 0))),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+}
+
+function buildMissingRangeBufferSyncPayload(
+  mirror: SessionMirror,
+  window: { startIndex: number; endIndex: number; viewportEndIndex: number },
+  missingRanges: Array<{ startIndex: number; endIndex: number }>,
+) {
+  if (missingRanges.length === 0 || window.endIndex <= window.startIndex) {
+    return null;
+  }
+  const indexedLines = missingRanges.flatMap((range) => sliceIndexedLines(
+    mirror.bufferStartIndex,
+    mirror.bufferLines,
+    range.startIndex,
+    range.endIndex,
+  ));
+  const payload = buildBufferPayload(mirror, indexedLines);
   if (!payload) {
+    return null;
+  }
+  payload.startIndex = window.startIndex;
+  payload.endIndex = window.endIndex;
+  payload.viewportEndIndex = Math.max(window.startIndex, Math.floor(window.viewportEndIndex));
+  return payload;
+}
+
+function buildSparseWindowBufferSyncPayload(
+  mirror: SessionMirror,
+  window: { startIndex: number; endIndex: number; viewportEndIndex: number },
+  lineRanges: Array<{ startIndex: number; endIndex: number }>,
+) {
+  if (lineRanges.length === 0 || window.endIndex <= window.startIndex) {
+    return null;
+  }
+
+  const indexedLines = lineRanges.flatMap((range) => sliceIndexedLines(
+    mirror.bufferStartIndex,
+    mirror.bufferLines,
+    range.startIndex,
+    range.endIndex,
+  ));
+  const payload = buildBufferPayload(mirror, indexedLines);
+  if (!payload) {
+    return null;
+  }
+
+  payload.startIndex = window.startIndex;
+  payload.endIndex = window.endIndex;
+  payload.viewportEndIndex = Math.max(window.startIndex, Math.floor(window.viewportEndIndex));
+  return payload;
+}
+
+function collectReadingMissingRanges(options: {
+  request: BufferSyncRequestPayload;
+  desiredStartIndex: number;
+  desiredEndIndex: number;
+  deltaRange: { startIndex: number; endIndex: number } | null;
+  currentRevision: number;
+  lastDeltaFromRevision: number;
+  lastDeltaToRevision: number;
+}) {
+  const ranges: Array<{ startIndex: number; endIndex: number }> = [];
+  const localStartIndex = Math.max(0, Math.floor(options.request.localStartIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(options.request.localEndIndex || localStartIndex));
+
+  if (options.desiredStartIndex < localStartIndex) {
+    ranges.push({
+      startIndex: options.desiredStartIndex,
+      endIndex: Math.min(options.desiredEndIndex, localStartIndex),
+    });
+  }
+  if (options.desiredEndIndex > localEndIndex) {
+    ranges.push({
+      startIndex: Math.max(options.desiredStartIndex, localEndIndex),
+      endIndex: options.desiredEndIndex,
+    });
+  }
+
+  const knownRevision = Math.max(0, Math.floor(options.request.knownRevision || 0));
+  const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision || 0));
+  const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision || 0));
+  const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision || 0));
+  if (
+    options.deltaRange
+    && knownRevision < safeCurrentRevision
+    && knownRevision === safeDeltaFromRevision
+    && safeCurrentRevision === safeDeltaToRevision
+  ) {
+    const startIndex = Math.max(options.desiredStartIndex, Math.floor(options.deltaRange.startIndex || 0));
+    const endIndex = Math.min(options.desiredEndIndex, Math.floor(options.deltaRange.endIndex || 0));
+    if (endIndex > startIndex) {
+      ranges.push({ startIndex, endIndex });
+    }
+  }
+
+  ranges.sort((a, b) => a.startIndex - b.startIndex);
+  const merged: Array<{ startIndex: number; endIndex: number }> = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (!last || range.startIndex > last.endIndex) {
+      merged.push({ ...range });
+      continue;
+    }
+    last.endIndex = Math.max(last.endIndex, range.endIndex);
+  }
+  return merged.filter((range) => range.endIndex > range.startIndex);
+}
+
+function buildClientRequestedBufferPayload(
+  mirror: SessionMirror,
+  request: BufferSyncRequestPayload,
+) {
+  const knownRevision = Math.max(0, Math.floor(request.knownRevision || 0));
+  if (knownRevision >= mirror.revision) {
+    return null;
+  }
+
+  const mirrorStartIndex = mirror.bufferStartIndex;
+  const mirrorEndIndex = getMirrorAvailableEndIndex(mirror);
+  if (mirrorEndIndex <= mirrorStartIndex) {
+    return buildFullBufferSyncPayload(mirror);
+  }
+
+  const localStartIndex = Math.max(0, Math.floor(request.localStartIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(request.localEndIndex || localStartIndex));
+  const viewportRows = Math.max(1, Math.floor(request.viewportRows || mirror.rows || 1));
+  const mode = request.mode === 'reading' ? 'reading' : 'follow';
+  const requestedViewportEndIndex = mode === 'follow'
+    ? mirrorEndIndex
+    : Math.max(
+        mirrorStartIndex,
+        Math.min(mirrorEndIndex, Math.floor(request.viewportEndIndex || mirrorEndIndex)),
+      );
+  if (mode === 'reading') {
+    const viewportStartIndex = Math.max(mirrorStartIndex, requestedViewportEndIndex - viewportRows);
+    if (request.prefetch) {
+      const preloadRows = Math.max(viewportRows * 2, 48);
+      const readingWindowStartIndex = Math.max(mirrorStartIndex, viewportStartIndex - preloadRows);
+      const readingWindowEndIndex = Math.max(readingWindowStartIndex, requestedViewportEndIndex);
+      const missingRanges = normalizeRequestedMissingRanges(
+        request.missingRanges,
+        readingWindowStartIndex,
+        readingWindowEndIndex,
+      );
+
+      if (missingRanges.length > 0) {
+        return buildMissingRangeBufferSyncPayload(mirror, {
+          startIndex: readingWindowStartIndex,
+          endIndex: readingWindowEndIndex,
+          viewportEndIndex: requestedViewportEndIndex,
+        }, missingRanges);
+      }
+
+      return null;
+    }
+
+    const readingMissingRanges = collectReadingMissingRanges({
+      request,
+      desiredStartIndex: viewportStartIndex,
+      desiredEndIndex: requestedViewportEndIndex,
+      deltaRange: mirror.lastDeltaRange,
+      currentRevision: mirror.revision,
+      lastDeltaFromRevision: mirror.lastDeltaFromRevision,
+      lastDeltaToRevision: mirror.lastDeltaToRevision,
+    });
+    if (readingMissingRanges.length > 0) {
+      return buildMissingRangeBufferSyncPayload(mirror, {
+        startIndex: viewportStartIndex,
+        endIndex: requestedViewportEndIndex,
+        viewportEndIndex: requestedViewportEndIndex,
+      }, readingMissingRanges);
+    }
+
+    return null;
+  }
+
+  const tailWindow = resolveTailWindow(mirror, viewportRows);
+  const followPlan = resolveFollowTailSyncPlan({
+    knownRevision,
+    currentRevision: mirror.revision,
+    lastDeltaFromRevision: mirror.lastDeltaFromRevision,
+    lastDeltaToRevision: mirror.lastDeltaToRevision,
+    lastDeltaRange: mirror.lastDeltaRange,
+    bufferStartIndex: tailWindow.startIndex,
+    bufferEndIndex: tailWindow.endIndex,
+    localStartIndex,
+    localEndIndex,
+    viewportRows,
+    cacheLines: resolveMirrorCacheLines(viewportRows),
+  });
+  if (!followPlan) {
+    return null;
+  }
+
+  return buildSparseWindowBufferSyncPayload(mirror, {
+    startIndex: followPlan.windowStartIndex,
+    endIndex: followPlan.windowEndIndex,
+    viewportEndIndex: tailWindow.viewportEndIndex,
+  }, followPlan.ranges);
+}
+
+function buildLiveBufferPayloadForSession(session: ClientSession, mirror: SessionMirror) {
+  if (session.streamMode !== 'active') {
+    return null;
+  }
+  const request = session.lastBufferSyncRequest;
+  if (request) {
+    if (request.mode === 'reading') {
+      return buildClientRequestedBufferPayload(mirror, request);
+    }
+    return buildClientRequestedBufferPayload(mirror, request)
+      || buildTailWindowBufferSyncPayload(mirror, request.viewportRows || session.rows || mirror.rows);
+  }
+  return buildTailWindowBufferSyncPayload(mirror, session.rows || mirror.rows);
+}
+
+function advanceSessionBufferSyncRequest(
+  session: ClientSession,
+  payload: TerminalBufferPayload,
+) {
+  if (!session.lastBufferSyncRequest) {
     return;
   }
 
+  const nextLocalWindow = advanceKnownLocalWindowRange({
+    localStartIndex: session.lastBufferSyncRequest.localStartIndex,
+    localEndIndex: session.lastBufferSyncRequest.localEndIndex,
+    payloadStartIndex: Math.max(0, Math.floor(payload.startIndex || 0)),
+    payloadEndIndex: Math.max(
+      Math.max(0, Math.floor(payload.startIndex || 0)),
+      Math.floor(payload.endIndex || 0),
+    ),
+  });
+
+  session.lastBufferSyncRequest = {
+    ...session.lastBufferSyncRequest,
+    knownRevision: Math.max(0, Math.floor(payload.revision || 0)),
+    localStartIndex: nextLocalWindow.startIndex,
+    localEndIndex: nextLocalWindow.endIndex,
+    viewportEndIndex:
+      session.lastBufferSyncRequest.mode === 'follow'
+        ? Math.max(0, Math.floor(payload.viewportEndIndex || session.lastBufferSyncRequest.viewportEndIndex))
+        : session.lastBufferSyncRequest.viewportEndIndex,
+  };
+}
+
+function pushMirrorBufferSyncToSubscribers(mirror: SessionMirror) {
+  for (const sessionId of mirror.subscribers) {
+    const session = sessions.get(sessionId);
+    if (!session || session.state === 'closed') {
+      continue;
+    }
+
+    const payload = buildLiveBufferPayloadForSession(session, mirror);
+    if (!payload) {
+      continue;
+    }
+
+    sendMessage(session, { type: 'buffer-sync', payload });
+    advanceSessionBufferSyncRequest(session, payload);
+  }
+}
+
+function sendBufferSyncToClient(session: ClientSession, mirror: SessionMirror) {
   session.title = mirror.title;
   session.sessionName = mirror.sessionName;
   if (session.state !== 'connected') {
     session.state = 'connected';
     sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
+    sendScheduleStateToSession(session, mirror.sessionName);
   }
   sendMessage(session, { type: 'title', payload: mirror.title });
+  if (session.streamMode !== 'active') {
+    return;
+  }
+  const payload = buildTailWindowBufferSyncPayload(
+    mirror,
+    session.lastBufferSyncRequest?.viewportRows || session.rows || mirror.rows,
+  );
+  if (!payload) {
+    return;
+  }
   sendMessage(session, { type: 'buffer-sync', payload });
+  advanceSessionBufferSyncRequest(session, payload);
 }
 
 function sendInitialBufferSyncToClient(session: ClientSession, mirror: SessionMirror) {
@@ -1041,7 +1563,10 @@ async function resizeConnectedMirror(mirror: SessionMirror, cols: number, rows: 
   if (!captured) {
     throw new Error('Failed to capture canonical tmux buffer after resize');
   }
+  mirror.lastDeltaFromRevision = mirror.revision;
   mirror.revision += 1;
+  mirror.lastDeltaToRevision = mirror.revision;
+  mirror.lastDeltaRange = null;
   broadcastMirrorBufferReset(mirror);
 }
 
@@ -1072,25 +1597,6 @@ function broadcastMirrorBufferReset(mirror: SessionMirror) {
   }
 }
 
-function broadcastMirrorBufferDelta(mirror: SessionMirror, payload: TerminalBufferPayload) {
-  daemonRuntimeDebug('mirror.broadcast.delta', {
-    sessionName: mirror.sessionName,
-    revision: payload.revision,
-    startIndex: payload.startIndex,
-    endIndex: payload.endIndex,
-    viewportEndIndex: payload.viewportEndIndex,
-    lineCount: payload.lines.length,
-    subscriberCount: mirror.subscribers.size,
-  });
-  for (const sessionId of mirror.subscribers) {
-    const session = sessions.get(sessionId);
-    if (!session || session.state !== 'connected') {
-      continue;
-    }
-    sendMessage(session, { type: 'buffer-sync', payload });
-  }
-}
-
 function flushMirrorUpdates(mirror: SessionMirror) {
   mirror.flushTimer = null;
 
@@ -1109,22 +1615,15 @@ function flushMirrorUpdates(mirror: SessionMirror) {
         throw new Error('tmux capture returned no canonical buffer');
       }
 
-      mirror.revision += 1;
       const changedRange = mirrorBufferChanged(mirror, previousStartIndex, previousLines);
       if (changedRange) {
-        const payload = buildBufferPayload(
-          mirror,
-          sliceIndexedLines(
-            mirror.bufferStartIndex,
-            mirror.bufferLines,
-            changedRange.startIndex,
-            changedRange.endIndex,
-          ),
-        );
-        if (payload) {
-          payload.revision = mirror.revision;
-          broadcastMirrorBufferDelta(mirror, payload);
-        }
+        mirror.lastDeltaFromRevision = mirror.revision;
+        mirror.lastDeltaToRevision = mirror.revision + 1;
+        mirror.lastDeltaRange = changedRange;
+        mirror.revision += 1;
+        pushMirrorBufferSyncToSubscribers(mirror);
+      } else {
+        mirror.lastDeltaRange = null;
       }
     })
     .catch((error) => {
@@ -1149,6 +1648,12 @@ function scheduleMirrorFlush(mirror: SessionMirror) {
     return;
   }
 
+  const activeSubscribers = countActiveSubscribers(mirror);
+  if (activeSubscribers <= 0) {
+    clearMirrorFlushTimer(mirror);
+    return;
+  }
+
   if (mirror.flushInFlight) {
     mirror.flushRequestedWhileBusy = true;
     return;
@@ -1158,10 +1663,7 @@ function scheduleMirrorFlush(mirror: SessionMirror) {
     return;
   }
 
-  mirror.flushTimer = setTimeout(
-    () => flushMirrorUpdates(mirror),
-    mirror.subscribers.size > 0 ? ACTIVE_STREAM_INTERVAL_MS : INACTIVE_STREAM_INTERVAL_MS,
-  );
+  mirror.flushTimer = setTimeout(() => flushMirrorUpdates(mirror), ACTIVE_STREAM_INTERVAL_MS);
 }
 
 function handleTmuxControlNotification(mirror: SessionMirror, line: string) {
@@ -1445,6 +1947,7 @@ function handleInput(session: ClientSession, data: string) {
   const mirror = getClientMirror(session);
   if (mirror?.state === 'connected' && mirror.ptyProcess) {
     mirror.ptyProcess.write(data);
+    scheduleMirrorFlush(mirror);
   }
 }
 
@@ -1459,6 +1962,7 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
     const { sourcePath, pngPath, bytes } = persistClipboardImage(payload);
     const pasteSequence = payload.pasteSequence || '\x16';
     mirror.ptyProcess.write(pasteSequence);
+    scheduleMirrorFlush(mirror);
     sendMessage(session, {
       type: 'image-pasted',
       payload: {
@@ -1479,8 +1983,70 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
   }
 }
 
-function handleMessage(session: ClientSession, rawData: RawData) {
-  const text = typeof rawData === 'string' ? rawData : rawData.toString('utf-8');
+function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
+  const pending = session.pendingPasteImage;
+  session.pendingPasteImage = null;
+
+  if (!pending) {
+    handleInput(session, buffer.toString('utf-8'));
+    return;
+  }
+
+  const mirror = getClientMirror(session);
+  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+    sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' } });
+    return;
+  }
+
+  try {
+    const { sourcePath, pngPath, bytes } = persistClipboardImageBuffer(
+      {
+        name: pending.name,
+        mimeType: pending.mimeType,
+      },
+      buffer,
+    );
+    const pasteSequence = pending.pasteSequence || '\x16';
+    mirror.ptyProcess.write(pasteSequence);
+    scheduleMirrorFlush(mirror);
+    sendMessage(session, {
+      type: 'image-pasted',
+      payload: {
+        name: pending.name,
+        mimeType: pending.mimeType,
+        bytes,
+      },
+    });
+    try {
+      unlinkSync(sourcePath);
+    } catch {}
+    try {
+      unlinkSync(pngPath);
+    } catch {}
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    sendMessage(session, { type: 'error', payload: { message: `Failed to paste image: ${err}`, code: 'paste_image_failed' } });
+  }
+}
+
+function handleMessage(session: ClientSession, rawData: RawData, isBinary = false) {
+  if (isBinary) {
+    const binaryBuffer = Buffer.isBuffer(rawData)
+      ? rawData
+      : Array.isArray(rawData)
+        ? Buffer.concat(rawData)
+        : Buffer.from(rawData as ArrayBuffer);
+    handlePasteImageBinary(session, binaryBuffer);
+    return;
+  }
+
+  const text = typeof rawData === 'string'
+    ? rawData
+    : Buffer.isBuffer(rawData)
+      ? rawData.toString('utf-8')
+      : Array.isArray(rawData)
+        ? Buffer.concat(rawData).toString('utf-8')
+        : Buffer.from(rawData as ArrayBuffer).toString('utf-8');
 
   let message: ClientMessage;
   try {
@@ -1499,9 +2065,77 @@ function handleMessage(session: ClientSession, rawData: RawData) {
         sendMessage(session, { type: 'error', payload: { message: `Failed to list tmux sessions: ${err}`, code: 'list_sessions_failed' } });
       }
       break;
+    case 'schedule-list':
+      sendScheduleStateToSession(session, sanitizeSessionName(message.payload.sessionName || session.sessionName));
+      break;
+    case 'schedule-upsert':
+      try {
+        const normalized = normalizeScheduleDraft(
+          {
+            ...message.payload.job,
+            targetSessionName: sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName),
+          },
+          {
+            now: new Date(),
+            existing: message.payload.job.id
+              ? scheduleEngine.listBySession(sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName)).find((job) => job.id === message.payload.job.id) || null
+              : null,
+          },
+        );
+        if (!normalized.targetSessionName) {
+          sendMessage(session, { type: 'error', payload: { message: 'Missing target session', code: 'schedule_invalid_target' } });
+          break;
+        }
+        scheduleEngine.upsert({
+          ...message.payload.job,
+          targetSessionName: normalized.targetSessionName,
+        });
+      } catch (error) {
+        const err = error instanceof Error ? error.message : String(error);
+        sendMessage(session, { type: 'error', payload: { message: `Failed to save schedule: ${err}`, code: 'schedule_upsert_failed' } });
+      }
+      break;
+    case 'schedule-delete':
+      scheduleEngine.delete(message.payload.jobId);
+      break;
+    case 'schedule-toggle':
+      scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled));
+      break;
+    case 'schedule-run-now':
+      void scheduleEngine.runNow(message.payload.jobId);
+      break;
     case 'connect':
       void attachTmux(session, message.payload);
       break;
+    case 'stream-mode': {
+      session.streamMode = message.payload.mode === 'active' ? 'active' : 'idle';
+      const mirror = getClientMirror(session);
+      if (mirror) {
+        if (session.streamMode === 'active') {
+          scheduleMirrorFlush(mirror);
+        } else if (countActiveSubscribers(mirror) <= 0) {
+          clearMirrorFlushTimer(mirror);
+        }
+      }
+      break;
+    }
+    case 'paste-image-start':
+      session.pendingPasteImage = message.payload;
+      break;
+    case 'buffer-sync-request': {
+      const mirror = getClientMirror(session);
+      if (!mirror || mirror.state !== 'connected') {
+        break;
+      }
+      const request = normalizeBufferSyncRequestPayload(session, message.payload);
+      session.lastBufferSyncRequest = request;
+      const payload = buildClientRequestedBufferPayload(mirror, request);
+      if (payload) {
+        sendMessage(session, { type: 'buffer-sync', payload });
+        advanceSessionBufferSyncRequest(session, payload);
+      }
+      break;
+    }
     case 'debug-log':
       handleClientDebugLog(session, message.payload);
       break;
@@ -1520,6 +2154,7 @@ function handleMessage(session: ClientSession, rawData: RawData) {
         const nextName = renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName);
         const currentKey = getMirrorKey(currentName);
         const nextKey = getMirrorKey(nextName);
+        scheduleEngine.renameSession(currentName, nextName);
         const mirror = mirrors.get(currentKey);
         if (mirror && currentKey !== nextKey) {
           mirrors.delete(currentKey);
@@ -1547,6 +2182,7 @@ function handleMessage(session: ClientSession, rawData: RawData) {
     case 'tmux-kill-session':
       try {
         const sessionName = killTmuxSession(message.payload.sessionName);
+        scheduleEngine.markSessionMissing(sessionName, 'session killed');
         const mirror = mirrors.get(getMirrorKey(sessionName));
         if (mirror) {
           destroyMirror(mirror, 'tmux session killed');
@@ -1614,9 +2250,9 @@ wss.on('connection', (ws: WebSocket, request) => {
     session.wsAlive = true;
   });
 
-  ws.on('message', (rawData) => {
+  ws.on('message', (rawData, isBinary) => {
     session.wsAlive = true;
-    handleMessage(session, rawData);
+    handleMessage(session, rawData, isBinary);
   });
 
   ws.on('close', () => {
@@ -1672,9 +2308,73 @@ const mirrorReconcileTimer = setInterval(() => {
 
 mirrorReconcileTimer.unref?.();
 
+let shutdownInFlight = false;
+
+function shutdownDaemon(reason: string, exitCode = 0) {
+  if (shutdownInFlight) {
+    return;
+  }
+  shutdownInFlight = true;
+
+  console.log(`[${new Date().toISOString()}] daemon shutdown start: ${reason}`);
+  clearInterval(heartbeatTimer);
+  clearInterval(mirrorReconcileTimer);
+  clearInterval(memoryGuardTimer);
+  scheduleEngine.dispose();
+
+  for (const session of sessions.values()) {
+    try {
+      if (session.ws.readyState < WebSocket.CLOSING) {
+        session.ws.close(1001, reason);
+      }
+    } catch (error) {
+      console.warn(`[${new Date().toISOString()}] failed to close websocket for session ${session.id}:`, error);
+    }
+  }
+
+  for (const mirror of [...mirrors.values()]) {
+    destroyMirror(mirror, reason, true);
+  }
+
+  const finalize = () => {
+    process.exit(exitCode);
+  };
+
+  try {
+    wss.close();
+  } catch (error) {
+    console.warn(`[${new Date().toISOString()}] websocket server close failed:`, error);
+  }
+
+  server.close((error) => {
+    if (error) {
+      console.warn(`[${new Date().toISOString()}] http server close failed: ${error.message}`);
+    }
+    finalize();
+  });
+
+  setTimeout(finalize, 1500).unref?.();
+}
+
+const memoryGuardTimer = setInterval(() => {
+  const usage = process.memoryUsage();
+  if (usage.rss < MEMORY_GUARD_MAX_RSS_BYTES && usage.heapUsed < MEMORY_GUARD_MAX_HEAP_USED_BYTES) {
+    return;
+  }
+
+  console.error(
+    `[${new Date().toISOString()}] daemon memory guard tripped: rss=${usage.rss} heapUsed=${usage.heapUsed} sessions=${sessions.size} mirrors=${mirrors.size}`,
+  );
+  shutdownDaemon('memory guard', 70);
+}, MEMORY_GUARD_INTERVAL_MS);
+
+memoryGuardTimer.unref?.();
+
 wss.on('close', () => {
   clearInterval(heartbeatTimer);
   clearInterval(mirrorReconcileTimer);
+  clearInterval(memoryGuardTimer);
+  scheduleEngine.dispose();
 });
 
 server.on('error', (error) => {
@@ -1682,14 +2382,14 @@ server.on('error', (error) => {
     console.error(
       `[${new Date().toISOString()}] daemon listen conflict on ${HOST}:${PORT}; another process is already bound to this port`,
     );
-    process.exitCode = STARTUP_PORT_CONFLICT_EXIT_CODE;
+    shutdownDaemon('listen conflict', STARTUP_PORT_CONFLICT_EXIT_CODE);
     return;
   }
 
   console.error(
     `[${new Date().toISOString()}] daemon server error: ${error instanceof Error ? error.message : String(error)}`,
   );
-  process.exitCode = 1;
+  shutdownDaemon('server error', 1);
 });
 
 server.on('upgrade', (request, socket, head) => {
@@ -1719,3 +2419,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  - config: ${DAEMON_CONFIG.configFound ? WTERM_CONFIG_DISPLAY_PATH : `${WTERM_CONFIG_DISPLAY_PATH} (not found)`}`);
   console.log(`  - terminal cache lines: ${MAX_CAPTURED_SCROLLBACK_LINES}`);
 });
+
+process.on('SIGINT', () => shutdownDaemon('SIGINT', 0));
+process.on('SIGTERM', () => shutdownDaemon('SIGTERM', 0));
+process.on('SIGHUP', () => shutdownDaemon('SIGHUP', 0));

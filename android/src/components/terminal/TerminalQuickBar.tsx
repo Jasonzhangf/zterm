@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
 import { DeviceClipboardPlugin, isNativeClipboardSupported } from '../../plugins/DeviceClipboardPlugin';
 
 const FLOATING_BUBBLE_SIZE = 48;
 const FLOATING_BUBBLE_MARGIN = 10;
-const FLOATING_BUBBLE_LONG_PRESS_MS = 260;
+const FLOATING_BUBBLE_DRAG_THRESHOLD_PX = 8;
 const QUICK_BAR_SIDE_PADDING = 6;
 const QUICK_BAR_ROW_GAP = 4;
 const QUICK_BAR_FIXED_COLUMNS = 3;
 const FIXED_BUTTON_MIN_WIDTH = 32;
 const FIXED_CLUSTER_PADDING_X = 3;
+const REPEATABLE_ACTION_LONG_PRESS_MS = 420;
+const REPEATABLE_ACTION_REPEAT_MS = 90;
 const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
 const MAX_CLIPBOARD_HISTORY = 100;
 const FLOATING_BUBBLE_POSITION_STORAGE_KEY = 'zterm:floating-bubble-position';
@@ -49,10 +51,11 @@ const BASE_ACTIONS = [
 ];
 
 interface TerminalQuickBarProps {
+  activeSessionId?: string | null;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onSendSequence?: (sequence: string) => void;
-  onImagePaste?: (file: File) => Promise<void> | void;
+  onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
   onToggleKeyboard?: () => void;
@@ -61,6 +64,8 @@ interface TerminalQuickBarProps {
   sessionDraft: string;
   onSessionDraftChange?: (value: string) => void;
   onSessionDraftSend?: (value: string) => void;
+  onOpenScheduleComposer?: (text: string) => void;
+  onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
 }
 
@@ -220,12 +225,40 @@ function readStoredBubblePosition() {
   }
 }
 
+function bubbleViewportRectWithInset(keyboardInsetPx: number) {
+  if (typeof window === 'undefined') {
+    return {
+      width: FLOATING_BUBBLE_SIZE,
+      height: FLOATING_BUBBLE_SIZE,
+    };
+  }
+
+  const visualViewport = window.visualViewport;
+  const viewportWidth = Math.round(visualViewport?.width || window.innerWidth || FLOATING_BUBBLE_SIZE);
+  const viewportHeight = Math.round(
+    visualViewport?.height || Math.max(FLOATING_BUBBLE_SIZE, (window.innerHeight || FLOATING_BUBBLE_SIZE) - Math.max(0, keyboardInsetPx)),
+  );
+
+  return {
+    width: Math.max(viewportWidth, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
+    height: Math.max(viewportHeight, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
+  };
+}
+
 function createShortcutActionId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
 
   return `shortcut-action-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function normalizeSequenceForImmediateSend(value: string) {
+  const normalized = value.replace(/\r?\n/g, '\r');
+  if (!normalized.trim()) {
+    return '';
+  }
+  return /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
 }
 
 function sortShortcutActions(actions: TerminalShortcutAction[]) {
@@ -265,6 +298,13 @@ function encodeCtrlKey(letter: string) {
 
 function isModifierToken(token: ShortcutToken) {
   return token.kind === 'modifier';
+}
+
+function formatShortcutKeyLabel(token: ShortcutToken) {
+  if (token.sequence.length === 1 && /^[a-z]$/i.test(token.sequence)) {
+    return token.label.length === 1 ? token.label.toUpperCase() : token.label;
+  }
+  return token.label;
 }
 
 function buildShortcutSequence(tokens: ShortcutToken[]) {
@@ -337,7 +377,7 @@ function buildShortcutSequence(tokens: ShortcutToken[]) {
       }
       return {
         sequence: encoded,
-        preview: `Ctrl + ${keyToken.label}`,
+        preview: `Ctrl + ${formatShortcutKeyLabel(keyToken)}`,
         error: '',
       };
     }
@@ -367,7 +407,7 @@ function buildShortcutSequence(tokens: ShortcutToken[]) {
     if (keyToken.sequence.length === 1) {
       return {
         sequence: keyToken.sequence.toUpperCase(),
-        preview: `Shift + ${keyToken.label}`,
+        preview: `Shift + ${formatShortcutKeyLabel(keyToken)}`,
         error: '',
       };
     }
@@ -386,7 +426,25 @@ function buildShortcutSequence(tokens: ShortcutToken[]) {
   };
 }
 
+function decodeCtrlShortcutTokens(sequence: string) {
+  if (sequence.length !== 1) {
+    return null;
+  }
+
+  const code = sequence.charCodeAt(0);
+  if (code < 1 || code > 26) {
+    return null;
+  }
+
+  const letter = String.fromCharCode(code + 64);
+  return [
+    { label: 'Ctrl', sequence: '__CTRL__', kind: 'modifier' } satisfies ShortcutToken,
+    { label: letter, sequence: letter.toLowerCase(), kind: 'text' } satisfies ShortcutToken,
+  ];
+}
+
 export function TerminalQuickBar({
+  activeSessionId,
   quickActions,
   shortcutActions,
   keyboardVisible = false,
@@ -399,6 +457,8 @@ export function TerminalQuickBar({
   sessionDraft,
   onSessionDraftChange,
   onSessionDraftSend,
+  onOpenScheduleComposer,
+  onEditorDomFocusChange,
   onMeasuredHeightChange,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
@@ -421,9 +481,13 @@ export function TerminalQuickBar({
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [floatingBubblePosition, setFloatingBubblePosition] = useState<{ x: number | null; y: number | null }>(() => readStoredBubblePosition());
+  const [repeatingActionId, setRepeatingActionId] = useState<string | null>(null);
   const suppressKeyboardClickRef = useRef(false);
   const suppressBubbleClickRef = useRef(false);
-  const floatingBubblePressTimerRef = useRef<number | null>(null);
+  const suppressActionClickRef = useRef<string | null>(null);
+  const repeatLongPressTimerRef = useRef<number | null>(null);
+  const repeatIntervalTimerRef = useRef<number | null>(null);
+  const pressedRepeatableActionIdRef = useRef<string | null>(null);
   const floatingBubbleDragRef = useRef({
     pointerId: -1,
     active: false,
@@ -434,7 +498,6 @@ export function TerminalQuickBar({
     width: FLOATING_BUBBLE_SIZE,
     height: FLOATING_BUBBLE_SIZE,
   });
-  const floatingBubbleTouchTimerRef = useRef<number | null>(null);
   const floatingBubbleTouchDragRef = useRef({
     active: false,
     moved: false,
@@ -446,13 +509,17 @@ export function TerminalQuickBar({
     height: FLOATING_BUBBLE_SIZE,
   });
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const imagePasteSessionIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const floatingPanelRef = useRef<HTMLDivElement | null>(null);
+  const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
+  const domEditorFocusTimerRef = useRef<number | null>(null);
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
   const draftShortcutBuild = useMemo(() => buildShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
-  const floatingPanelBottomPx = Math.max(124, keyboardInsetPx + 18);
-  const floatingBubbleBottomPx = Math.max(72, keyboardInsetPx + 18);
+  const floatingPanelBottomPx = 124;
+  const floatingBubbleBottomPx = 72;
   const editingIndex = editingId ? draftActions.findIndex((action) => action.id === editingId) : -1;
   const editingShortcutIndex = editingShortcutId ? draftShortcutActions.findIndex((action) => action.id === editingShortcutId) : -1;
 
@@ -461,13 +528,81 @@ export function TerminalQuickBar({
   };
 
   const sendSessionDraft = () => {
-    const normalized = sessionDraft.replace(/\r?\n/g, '\r');
-    if (!normalized.trim()) {
+    const payload = normalizeSequenceForImmediateSend(sessionDraft);
+    if (!payload) {
       return;
     }
-    const payload = /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
     onSessionDraftSend?.(payload);
   };
+
+  const sendQuickActionNow = (value: string) => {
+    const payload = normalizeSequenceForImmediateSend(value);
+    if (!payload) {
+      return;
+    }
+    onSendSequence?.(payload);
+  };
+
+  const clearRepeatLongPressTimer = useCallback(() => {
+    if (repeatLongPressTimerRef.current !== null) {
+      window.clearTimeout(repeatLongPressTimerRef.current);
+      repeatLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const stopRepeatingAction = useCallback(() => {
+    clearRepeatLongPressTimer();
+    pressedRepeatableActionIdRef.current = null;
+    if (repeatIntervalTimerRef.current !== null) {
+      window.clearInterval(repeatIntervalTimerRef.current);
+      repeatIntervalTimerRef.current = null;
+    }
+    setRepeatingActionId(null);
+  }, [clearRepeatLongPressTimer]);
+
+  const triggerActionSequence = useCallback((action: { id: string; label: string; sequence: string }) => {
+    if (action.id === 'keyboard') {
+      onToggleKeyboard?.();
+      return;
+    }
+    if (action.id === 'image') {
+      imagePasteSessionIdRef.current = activeSessionId || null;
+      imageInputRef.current?.click();
+      return;
+    }
+    if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
+      void handleClipboardPaste();
+      return;
+    }
+    if (action.id.startsWith('shortcut-editor')) {
+      openShortcutEditor();
+      return;
+    }
+    onSendSequence?.(action.sequence);
+  }, [activeSessionId, onSendSequence, onToggleKeyboard]);
+
+  const isRepeatableAction = useCallback((action: { id: string; label: string; sequence: string }) => {
+    if (!action.sequence) {
+      return false;
+    }
+    if (action.id === 'keyboard' || action.id === 'image' || action.id === 'paste') {
+      return false;
+    }
+    if (action.id.startsWith('shortcut-editor')) {
+      return false;
+    }
+    return true;
+  }, []);
+
+  const startRepeatingAction = useCallback((action: { id: string; label: string; sequence: string }) => {
+    stopRepeatingAction();
+    suppressActionClickRef.current = action.id;
+    setRepeatingActionId(action.id);
+    triggerActionSequence(action);
+    repeatIntervalTimerRef.current = window.setInterval(() => {
+      triggerActionSequence(action);
+    }, REPEATABLE_ACTION_REPEAT_MS);
+  }, [stopRepeatingAction, triggerActionSequence]);
 
   const persistDraftActions = (nextActions: DraftQuickAction[]) => {
     const normalized = normalizeDraftActions(nextActions);
@@ -599,32 +734,46 @@ export function TerminalQuickBar({
   const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
   const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
 
-  const clearFloatingBubblePressTimer = () => {
-    if (floatingBubblePressTimerRef.current) {
-      window.clearTimeout(floatingBubblePressTimerRef.current);
-      floatingBubblePressTimerRef.current = null;
-    }
-  };
-
-  const clearFloatingBubbleTouchTimer = () => {
-    if (floatingBubbleTouchTimerRef.current) {
-      window.clearTimeout(floatingBubbleTouchTimerRef.current);
-      floatingBubbleTouchTimerRef.current = null;
-    }
-  };
-
   const clampFloatingBubblePosition = (nextX: number, nextY: number, width: number, height: number) => {
-    if (typeof window === 'undefined') {
-      return { x: nextX, y: nextY };
-    }
-
-    const maxX = Math.max(FLOATING_BUBBLE_MARGIN, window.innerWidth - width - FLOATING_BUBBLE_MARGIN);
-    const maxY = Math.max(FLOATING_BUBBLE_MARGIN, window.innerHeight - height - FLOATING_BUBBLE_MARGIN);
+    const viewport = bubbleViewportRectWithInset(keyboardInsetPx);
+    const maxX = Math.max(FLOATING_BUBBLE_MARGIN, viewport.width - width - FLOATING_BUBBLE_MARGIN);
+    const maxY = Math.max(FLOATING_BUBBLE_MARGIN, viewport.height - height - FLOATING_BUBBLE_MARGIN);
     return {
       x: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextX), maxX),
       y: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextY), maxY),
     };
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const rescueBubblePosition = () => {
+      setFloatingBubblePosition((current) => {
+        if (current.x === null || current.y === null) {
+          return current;
+        }
+
+        const bubbleWidth = floatingBubbleRef.current?.offsetWidth || FLOATING_BUBBLE_SIZE;
+        const bubbleHeight = floatingBubbleRef.current?.offsetHeight || FLOATING_BUBBLE_SIZE;
+        const clamped = clampFloatingBubblePosition(current.x, current.y, bubbleWidth, bubbleHeight);
+        if (clamped.x === current.x && clamped.y === current.y) {
+          return current;
+        }
+        return clamped;
+      });
+    };
+
+    rescueBubblePosition();
+    window.addEventListener('resize', rescueBubblePosition);
+    window.visualViewport?.addEventListener('resize', rescueBubblePosition);
+
+    return () => {
+      window.removeEventListener('resize', rescueBubblePosition);
+      window.visualViewport?.removeEventListener('resize', rescueBubblePosition);
+    };
+  }, [keyboardInsetPx]);
 
   const fixedClusterStyle = {
     display: 'grid',
@@ -696,6 +845,35 @@ export function TerminalQuickBar({
     }
   }, [floatingBubblePosition]);
 
+  useEffect(() => {
+    if (!floatingMenuOpen || typeof document === 'undefined') {
+      return;
+    }
+
+    const closeIfOutside = (event: PointerEvent | MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (floatingPanelRef.current?.contains(target) || floatingBubbleRef.current?.contains(target)) {
+        return;
+      }
+      setFloatingMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeIfOutside, true);
+    return () => {
+      document.removeEventListener('pointerdown', closeIfOutside, true);
+    };
+  }, [floatingMenuOpen]);
+
+  useEffect(() => () => {
+    if (domEditorFocusTimerRef.current !== null) {
+      window.clearTimeout(domEditorFocusTimerRef.current);
+      domEditorFocusTimerRef.current = null;
+    }
+  }, []);
+
   const captureSystemClipboard = async () => {
     try {
       setClipboardBusy(true);
@@ -750,6 +928,11 @@ export function TerminalQuickBar({
   };
 
   const buildShortcutTokensFromSequence = (label: string, sequence: string): ShortcutToken[] => {
+    const ctrlTokens = decodeCtrlShortcutTokens(sequence);
+    if (ctrlTokens) {
+      return ctrlTokens;
+    }
+
     const matchedPreset = SHORTCUT_PRESETS.find((preset) => preset.sequence === sequence)
       || (sequence.length === 1 && label.startsWith('Ctrl+') ? { label, sequence } : null);
 
@@ -799,7 +982,6 @@ export function TerminalQuickBar({
   };
 
   const appendShortcutToken = (token: ShortcutToken, row?: 'top-scroll' | 'bottom-scroll') => {
-    setDraftShortcutLabel((current) => current || token.label);
     setDraftShortcutTokens((current) => {
       const next = [...current, token];
       const built = buildShortcutSequence(next);
@@ -870,6 +1052,8 @@ export function TerminalQuickBar({
   const renderBaseActionButton = (action: { id: string; label: string; sequence: string }, options?: { fixed?: boolean; compact?: boolean }) => {
     const compact = options?.compact ?? false;
     const fixed = options?.fixed ?? false;
+    const repeatable = isRepeatableAction(action);
+    const repeatActive = repeatingActionId === action.id;
     return (
       <button
         key={action.id}
@@ -879,6 +1063,18 @@ export function TerminalQuickBar({
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
           if (action.id !== 'keyboard') {
+            if (!repeatable) {
+              return;
+            }
+            clearRepeatLongPressTimer();
+            pressedRepeatableActionIdRef.current = action.id;
+            repeatLongPressTimerRef.current = window.setTimeout(() => {
+              repeatLongPressTimerRef.current = null;
+              if (pressedRepeatableActionIdRef.current !== action.id) {
+                return;
+              }
+              startRepeatingAction(action);
+            }, REPEATABLE_ACTION_LONG_PRESS_MS);
             return;
           }
           suppressKeyboardClickRef.current = true;
@@ -887,45 +1083,60 @@ export function TerminalQuickBar({
             suppressKeyboardClickRef.current = false;
           }, 220);
         }}
+        onPointerUp={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+        }}
+        onPointerCancel={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+        }}
+        onPointerLeave={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+        }}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
+          if (repeatActive) {
+            stopRepeatingAction();
+            suppressActionClickRef.current = null;
+            return;
+          }
+          if (suppressActionClickRef.current === action.id) {
+            suppressActionClickRef.current = null;
+            return;
+          }
           if (action.id === 'keyboard') {
             if (suppressKeyboardClickRef.current) {
               return;
             }
-            onToggleKeyboard?.();
-            return;
           }
-          if (action.id === 'image') {
-            imageInputRef.current?.click();
-            return;
+          if (repeatingActionId) {
+            stopRepeatingAction();
           }
-          if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
-            void handleClipboardPaste();
-            return;
-          }
-          if (action.id.startsWith('shortcut-editor')) {
-            openShortcutEditor();
-            return;
-          }
-          onSendSequence?.(action.sequence);
+          triggerActionSequence(action);
         }}
+        onFocus={(event) => event.currentTarget.blur()}
+        aria-pressed={repeatActive}
         style={{
           minHeight: compact ? '32px' : '34px',
           width: fixed ? '100%' : undefined,
           minWidth: fixed ? `${FIXED_BUTTON_MIN_WIDTH}px` : action.label.length > 4 ? '58px' : action.label.length > 2 ? '48px' : '34px',
           padding: fixed ? '0 6px' : '0 10px',
           border: 'none',
+          outline: 'none',
           borderRadius: '10px',
           backgroundColor:
-            action.id === 'keyboard' && keyboardVisible
+            repeatActive
+              ? 'rgba(113, 164, 255, 0.28)'
+              : action.id === 'keyboard' && keyboardVisible
               ? 'rgba(31,214,122,0.18)'
               : fixed
                 ? 'rgba(22, 28, 41, 0.92)'
                 : 'rgba(31, 38, 53, 0.82)',
-          color: action.id === 'keyboard' && keyboardVisible ? mobileTheme.colors.accent : '#fff',
+          color: repeatActive ? '#bcd3ff' : action.id === 'keyboard' && keyboardVisible ? mobileTheme.colors.accent : '#fff',
           fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : action.label.length > 3 ? '11px' : '14px',
           fontWeight: 700,
           cursor: 'pointer',
@@ -936,12 +1147,18 @@ export function TerminalQuickBar({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
+          boxShadow: repeatActive ? 'inset 0 0 0 1px rgba(141,183,255,0.55)' : 'none',
         }}
       >
         {action.label}
       </button>
     );
   };
+
+  useEffect(() => () => {
+    stopRepeatingAction();
+    suppressActionClickRef.current = null;
+  }, [stopRepeatingAction]);
 
   useEffect(() => {
     const host = rootRef.current;
@@ -963,26 +1180,68 @@ export function TerminalQuickBar({
     };
   }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
 
+  const shellRowsLiftStyle = !floatingMenuOpen && keyboardVisible
+    ? {
+        transform: `translateY(-${keyboardInsetPx}px)`,
+        transition: 'transform 180ms ease',
+        willChange: 'transform',
+      }
+    : undefined;
+
   return (
     <div
       ref={rootRef}
+      onFocusCapture={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (!target) {
+          return;
+        }
+        if (target instanceof HTMLInputElement && target.type === 'file') {
+          return;
+        }
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          onEditorDomFocusChange?.(true);
+        }
+      }}
+      onBlurCapture={() => {
+        if (domEditorFocusTimerRef.current !== null) {
+          window.clearTimeout(domEditorFocusTimerRef.current);
+        }
+        domEditorFocusTimerRef.current = window.setTimeout(() => {
+          domEditorFocusTimerRef.current = null;
+          const activeElement = document.activeElement;
+          const stillFocused =
+            rootRef.current?.contains(activeElement)
+            && (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement)
+            && !(activeElement instanceof HTMLInputElement && activeElement.type === 'file');
+          onEditorDomFocusChange?.(Boolean(stillFocused));
+        }, 0);
+      }}
       onPointerDownCapture={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label')) {
+          return;
+        }
         event.stopPropagation();
-        if (!(event.target as HTMLElement | null)?.closest('input,textarea')) {
+        if (!target?.closest('input,textarea')) {
           event.preventDefault();
         }
       }}
       onTouchStartCapture={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label')) {
+          return;
+        }
         event.stopPropagation();
-        if (!(event.target as HTMLElement | null)?.closest('input,textarea')) {
+        if (!target?.closest('input,textarea')) {
           event.preventDefault();
         }
       }}
       style={{
-        padding: `6px 0 ${mobileTheme.safeArea.bottom}`,
+        padding: floatingMenuOpen ? '0' : `6px 0 ${mobileTheme.safeArea.bottom}`,
         position: 'relative',
-        backgroundColor: 'rgba(11, 15, 24, 0.88)',
-        borderTop: '1px solid rgba(255,255,255,0.08)',
+        backgroundColor: floatingMenuOpen ? 'transparent' : 'rgba(11, 15, 24, 0.88)',
+        borderTop: floatingMenuOpen ? 'none' : '1px solid rgba(255,255,255,0.08)',
       }}
     >
       <input
@@ -993,11 +1252,17 @@ export function TerminalQuickBar({
         onChange={async (event) => {
           const file = event.target.files?.[0];
           event.currentTarget.value = '';
+          const targetSessionId = imagePasteSessionIdRef.current || activeSessionId || null;
+          imagePasteSessionIdRef.current = null;
           if (!file) {
             return;
           }
+          if (!targetSessionId) {
+            alert('当前没有可用的目标 session');
+            return;
+          }
           try {
-            await onImagePaste?.(file);
+            await onImagePaste?.(targetSessionId, file);
           } catch (error) {
             alert(error instanceof Error ? error.message : 'Failed to paste image');
           }
@@ -1005,6 +1270,7 @@ export function TerminalQuickBar({
       />
       {editorOpen && (
         <div
+          data-quickbar-allow-pointer="true"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1013,13 +1279,13 @@ export function TerminalQuickBar({
             backdropFilter: 'blur(10px)',
             display: 'flex',
             alignItems: 'flex-end',
-            paddingBottom: `${Math.max(0, keyboardInsetPx)}px`,
+            paddingBottom: '0px',
           }}
         >
           <div
             style={{
               width: '100%',
-              maxHeight: `calc(100dvh - ${Math.max(16, keyboardInsetPx + 16)}px)`,
+              maxHeight: 'calc(100dvh - 16px)',
               borderRadius: '26px 26px 0 0',
               backgroundColor: '#f7f8fb',
               color: mobileTheme.colors.lightText,
@@ -1257,6 +1523,7 @@ export function TerminalQuickBar({
 
       {shortcutEditorOpen && (
         <div
+          data-quickbar-allow-pointer="true"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1265,13 +1532,13 @@ export function TerminalQuickBar({
             backdropFilter: 'blur(10px)',
             display: 'flex',
             alignItems: 'flex-end',
-            paddingBottom: `${Math.max(0, keyboardInsetPx)}px`,
+            paddingBottom: '0px',
           }}
         >
           <div
             style={{
               width: '100%',
-              maxHeight: `calc(100dvh - ${Math.max(16, keyboardInsetPx + 16)}px)`,
+              maxHeight: 'calc(100dvh - 16px)',
               borderRadius: '26px 26px 0 0',
               backgroundColor: '#f7f8fb',
               color: mobileTheme.colors.lightText,
@@ -1613,6 +1880,7 @@ export function TerminalQuickBar({
       {floatingMenuOpen && !editorOpen && (
         <>
           <div
+            data-quickbar-allow-pointer="true"
             onClick={() => setFloatingMenuOpen(false)}
             style={{
               position: 'fixed',
@@ -1622,10 +1890,12 @@ export function TerminalQuickBar({
             }}
           />
           <div
+            ref={floatingPanelRef}
+            data-quickbar-allow-pointer="true"
             style={{
               position: 'fixed',
               right: '12px',
-              bottom: `calc(${floatingPanelBottomPx}px + env(safe-area-inset-bottom, 0px))`,
+              bottom: `calc(${floatingPanelBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`,
               zIndex: 130,
               width: 'min(320px, calc(100vw - 24px))',
               maxHeight: `min(560px, calc(100dvh - ${Math.max(180, keyboardInsetPx + 72)}px))`,
@@ -1645,9 +1915,37 @@ export function TerminalQuickBar({
                 borderBottom: '1px solid rgba(255,255,255,0.08)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
-              }}
-            >
+              gap: '10px',
+            }}
+          >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 800 }}>快捷输入</div>
+                  <div style={{ marginTop: '2px', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                    外点关闭，右侧可直接进入定时发送
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFloatingMenuOpen(false)}
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '999px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    color: '#fff',
+                    fontSize: '18px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                  aria-label="关闭快捷输入"
+                >
+                  ×
+                </button>
+              </div>
+
               <div
                 style={{
                   borderRadius: '18px',
@@ -1710,6 +2008,29 @@ export function TerminalQuickBar({
                   }}
                 >
                   加为快捷输入
+                </button>
+                <button
+                  onClick={() => {
+                    if (!sessionDraft.trim()) {
+                      return;
+                    }
+                    setFloatingMenuOpen(false);
+                    onOpenScheduleComposer?.(sessionDraft);
+                  }}
+                  disabled={!sessionDraft.trim() || !activeSessionId}
+                  style={{
+                    width: '88px',
+                    minHeight: '40px',
+                    border: '1px solid rgba(113, 164, 255, 0.24)',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(113, 164, 255, 0.12)',
+                    color: '#8db7ff',
+                    fontWeight: 800,
+                    opacity: !sessionDraft.trim() || !activeSessionId ? 0.45 : 1,
+                    cursor: !sessionDraft.trim() || !activeSessionId ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  定时
                 </button>
                 <button
                   onClick={() => {
@@ -1791,7 +2112,7 @@ export function TerminalQuickBar({
                       >
                         <button
                           onClick={() => {
-                            appendToDraft(action.sequence.replace(/\r/g, '\n'));
+                            sendQuickActionNow(action.sequence);
                           }}
                           style={{
                             flex: 1,
@@ -1895,206 +2216,221 @@ export function TerminalQuickBar({
         </>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'stretch',
-          gap: `${QUICK_BAR_ROW_GAP}px`,
-          padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
-          marginBottom: `${QUICK_BAR_ROW_GAP}px`,
-        }}
-      >
-        {!editorOpen && (
-          <button
-            type="button"
-            onPointerDown={(event) => {
-              if (event.pointerType === 'touch') {
-                return;
-              }
-              event.preventDefault();
-              blurCurrentTarget(event.currentTarget);
-              event.currentTarget.setPointerCapture(event.pointerId);
-              const rect = event.currentTarget.getBoundingClientRect();
-              floatingBubbleDragRef.current = {
-                pointerId: event.pointerId,
-                active: false,
-                startX: event.clientX,
-                startY: event.clientY,
-                originX: rect.left,
-                originY: rect.top,
-                width: rect.width || FLOATING_BUBBLE_SIZE,
-                height: rect.height || FLOATING_BUBBLE_SIZE,
-              };
-              clearFloatingBubblePressTimer();
-              floatingBubblePressTimerRef.current = window.setTimeout(() => {
-                floatingBubbleDragRef.current.active = true;
-                suppressBubbleClickRef.current = true;
-              }, FLOATING_BUBBLE_LONG_PRESS_MS);
-            }}
-            onPointerMove={(event) => {
-              if (event.pointerType === 'touch') {
-                return;
-              }
-              const drag = floatingBubbleDragRef.current;
-              if (drag.pointerId !== event.pointerId || !drag.active) {
-                return;
-              }
-              event.preventDefault();
-              setFloatingBubblePosition(
-                clampFloatingBubblePosition(
-                  drag.originX + (event.clientX - drag.startX),
-                  drag.originY + (event.clientY - drag.startY),
-                  drag.width,
-                  drag.height,
-                ),
-              );
-            }}
-            onPointerUp={(event) => {
-              if (event.pointerType === 'touch') {
-                return;
-              }
-              clearFloatingBubblePressTimer();
-              if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
-                if (floatingBubbleDragRef.current.active) {
-                  suppressBubbleClickRef.current = true;
-                  window.setTimeout(() => {
-                    suppressBubbleClickRef.current = false;
-                  }, 180);
-                }
-                floatingBubbleDragRef.current.active = false;
-                floatingBubbleDragRef.current.pointerId = -1;
-              }
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            }}
-            onPointerCancel={(event) => {
-              if (event.pointerType === 'touch') {
-                return;
-              }
-              clearFloatingBubblePressTimer();
-              floatingBubbleDragRef.current.active = false;
-              floatingBubbleDragRef.current.pointerId = -1;
-              try {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              } catch {}
-            }}
-            onClick={() => {
-              if (suppressBubbleClickRef.current) {
-                return;
-              }
-              setFloatingMenuOpen((current) => !current);
-            }}
-            onTouchStart={(event) => {
-              event.stopPropagation();
-              const touch = event.touches[0];
-              if (!touch) {
-                return;
-              }
-              const rect = event.currentTarget.getBoundingClientRect();
-              floatingBubbleTouchDragRef.current = {
-                active: false,
-                moved: false,
-                startX: touch.clientX,
-                startY: touch.clientY,
-                originX: rect.left,
-                originY: rect.top,
-                width: rect.width || FLOATING_BUBBLE_SIZE,
-                height: rect.height || FLOATING_BUBBLE_SIZE,
-              };
-              clearFloatingBubbleTouchTimer();
-              floatingBubbleTouchTimerRef.current = window.setTimeout(() => {
-                floatingBubbleTouchDragRef.current.active = true;
-                suppressBubbleClickRef.current = true;
-              }, FLOATING_BUBBLE_LONG_PRESS_MS);
-            }}
-            onTouchMove={(event) => {
-              const touch = event.touches[0];
-              const drag = floatingBubbleTouchDragRef.current;
-              if (!touch || !drag.active) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              drag.moved = true;
-              setFloatingBubblePosition(
-                clampFloatingBubblePosition(
-                  drag.originX + (touch.clientX - drag.startX),
-                  drag.originY + (touch.clientY - drag.startY),
-                  drag.width,
-                  drag.height,
-                ),
-              );
-            }}
-            onTouchEnd={() => {
-              clearFloatingBubbleTouchTimer();
-              if (floatingBubbleTouchDragRef.current.active) {
+      {!editorOpen && (
+        <button
+          ref={floatingBubbleRef}
+          data-quickbar-allow-pointer="true"
+          type="button"
+          tabIndex={-1}
+          onFocus={(event) => event.currentTarget.blur()}
+          onPointerDown={(event) => {
+            if (event.pointerType === 'touch') {
+              return;
+            }
+            event.preventDefault();
+            blurCurrentTarget(event.currentTarget);
+            event.currentTarget.setPointerCapture(event.pointerId);
+            const rect = event.currentTarget.getBoundingClientRect();
+            floatingBubbleDragRef.current = {
+              pointerId: event.pointerId,
+              active: false,
+              startX: event.clientX,
+              startY: event.clientY,
+              originX: rect.left,
+              originY: rect.top,
+              width: rect.width || FLOATING_BUBBLE_SIZE,
+              height: rect.height || FLOATING_BUBBLE_SIZE,
+            };
+          }}
+          onPointerMove={(event) => {
+            if (event.pointerType === 'touch') {
+              return;
+            }
+            const drag = floatingBubbleDragRef.current;
+            if (drag.pointerId !== event.pointerId) {
+              return;
+            }
+            const deltaX = event.clientX - drag.startX;
+            const deltaY = event.clientY - drag.startY;
+            if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX) {
+              drag.active = true;
+              suppressBubbleClickRef.current = true;
+            }
+            if (!drag.active) {
+              return;
+            }
+            event.preventDefault();
+            setFloatingBubblePosition(
+              clampFloatingBubblePosition(
+                drag.originX + deltaX,
+                drag.originY + deltaY,
+                drag.width,
+                drag.height,
+              ),
+            );
+          }}
+          onPointerUp={(event) => {
+            if (event.pointerType === 'touch') {
+              return;
+            }
+            if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
+              if (floatingBubbleDragRef.current.active) {
                 suppressBubbleClickRef.current = true;
                 window.setTimeout(() => {
                   suppressBubbleClickRef.current = false;
                 }, 180);
               }
-              floatingBubbleTouchDragRef.current.active = false;
-              floatingBubbleTouchDragRef.current.moved = false;
-            }}
-            onTouchCancel={() => {
-              clearFloatingBubbleTouchTimer();
-              floatingBubbleTouchDragRef.current.active = false;
-              floatingBubbleTouchDragRef.current.moved = false;
-            }}
-            style={{
-              position: 'fixed',
-              right: floatingBubblePosition.x === null ? `${FLOATING_BUBBLE_MARGIN}px` : 'auto',
-              bottom: floatingBubblePosition.y === null ? `calc(${floatingBubbleBottomPx}px + env(safe-area-inset-bottom, 0px))` : 'auto',
-              left: floatingBubblePosition.x === null ? 'auto' : `${floatingBubblePosition.x}px`,
-              top: floatingBubblePosition.y === null ? 'auto' : `${floatingBubblePosition.y}px`,
-              zIndex: 128,
-              width: `${FLOATING_BUBBLE_SIZE}px`,
-              height: `${FLOATING_BUBBLE_SIZE}px`,
-              borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: floatingMenuOpen ? 'rgba(31,214,122,0.18)' : 'rgba(18, 24, 38, 0.72)',
-              color: floatingMenuOpen ? mobileTheme.colors.accent : '#fff',
-              fontSize: '20px',
-              fontWeight: 800,
-              boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
-              transform: 'none',
-              touchAction: 'none',
-            }}
-            aria-label="Toggle floating quick menu"
-          >
-            ⌘
-          </button>
-        )}
-        <div style={fixedClusterStyle}>
-          {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true }))}
-        </div>
-        <div style={scrollTrackShellStyle}>
-          <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-            {topScrollActions.map((action) => renderBaseActionButton(action))}
-            {renderBaseActionButton(topShortcutEditorEntry)}
-          </div>
-        </div>
-      </div>
+              floatingBubbleDragRef.current.active = false;
+              floatingBubbleDragRef.current.pointerId = -1;
+            }
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={(event) => {
+            if (event.pointerType === 'touch') {
+              return;
+            }
+            floatingBubbleDragRef.current.active = false;
+            floatingBubbleDragRef.current.pointerId = -1;
+            try {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            } catch {}
+          }}
+          onClick={() => {
+            if (suppressBubbleClickRef.current) {
+              return;
+            }
+            setFloatingMenuOpen((current) => !current);
+          }}
+          onTouchStart={(event) => {
+            event.stopPropagation();
+            const touch = event.touches[0];
+            if (!touch) {
+              return;
+            }
+            const rect = event.currentTarget.getBoundingClientRect();
+            floatingBubbleTouchDragRef.current = {
+              active: false,
+              moved: false,
+              startX: touch.clientX,
+              startY: touch.clientY,
+              originX: rect.left,
+              originY: rect.top,
+              width: rect.width || FLOATING_BUBBLE_SIZE,
+              height: rect.height || FLOATING_BUBBLE_SIZE,
+            };
+          }}
+          onTouchMove={(event) => {
+            const touch = event.touches[0];
+            const drag = floatingBubbleTouchDragRef.current;
+            if (!touch) {
+              return;
+            }
+            const deltaX = touch.clientX - drag.startX;
+            const deltaY = touch.clientY - drag.startY;
+            if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX) {
+              drag.active = true;
+              suppressBubbleClickRef.current = true;
+            }
+            if (!drag.active) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            drag.moved = true;
+            setFloatingBubblePosition(
+              clampFloatingBubblePosition(
+                drag.originX + deltaX,
+                drag.originY + deltaY,
+                drag.width,
+                drag.height,
+              ),
+            );
+          }}
+          onTouchEnd={() => {
+            if (floatingBubbleTouchDragRef.current.active) {
+              suppressBubbleClickRef.current = true;
+              window.setTimeout(() => {
+                suppressBubbleClickRef.current = false;
+              }, 180);
+            }
+            floatingBubbleTouchDragRef.current.active = false;
+            floatingBubbleTouchDragRef.current.moved = false;
+          }}
+          onTouchCancel={() => {
+            floatingBubbleTouchDragRef.current.active = false;
+            floatingBubbleTouchDragRef.current.moved = false;
+          }}
+          style={{
+            position: 'fixed',
+            right: floatingBubblePosition.x === null ? `${FLOATING_BUBBLE_MARGIN}px` : 'auto',
+            bottom: floatingBubblePosition.y === null
+              ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+              : 'auto',
+            left: floatingBubblePosition.x === null ? 'auto' : `${floatingBubblePosition.x}px`,
+            top: floatingBubblePosition.y === null ? 'auto' : `${floatingBubblePosition.y}px`,
+            zIndex: 128,
+            width: `${FLOATING_BUBBLE_SIZE}px`,
+            height: `${FLOATING_BUBBLE_SIZE}px`,
+            borderRadius: '999px',
+            border: '1px solid rgba(255,255,255,0.12)',
+            background: floatingMenuOpen ? 'rgba(31,214,122,0.18)' : 'rgba(18, 24, 38, 0.72)',
+            color: floatingMenuOpen ? mobileTheme.colors.accent : '#fff',
+            fontSize: '20px',
+            fontWeight: 800,
+            boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
+            transform: 'none',
+            touchAction: 'none',
+          }}
+          aria-label="Toggle floating quick menu"
+        >
+          ⌘
+        </button>
+      )}
 
-      <div
-        style={{
-          minHeight: '40px',
-          display: 'flex',
-          alignItems: 'stretch',
-          gap: `${QUICK_BAR_ROW_GAP}px`,
-          padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-          backgroundColor: 'rgba(255,255,255,0.02)',
-        }}
-      >
-        <div style={fixedClusterStyle}>
-          {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
-        </div>
-        <div style={scrollTrackShellStyle}>
-          <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-            {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-            {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+      {!floatingMenuOpen && (
+        <div style={shellRowsLiftStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: `${QUICK_BAR_ROW_GAP}px`,
+              padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+              marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+            }}
+          >
+            <div style={fixedClusterStyle}>
+              {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true }))}
+            </div>
+            <div style={scrollTrackShellStyle}>
+              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                {topScrollActions.map((action) => renderBaseActionButton(action))}
+                {renderBaseActionButton(topShortcutEditorEntry)}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              minHeight: '40px',
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: `${QUICK_BAR_ROW_GAP}px`,
+              padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+              backgroundColor: 'rgba(255,255,255,0.02)',
+            }}
+          >
+            <div style={fixedClusterStyle}>
+              {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+            </div>
+            <div style={scrollTrackShellStyle}>
+              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

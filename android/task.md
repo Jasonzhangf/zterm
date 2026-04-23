@@ -69,6 +69,16 @@
 - [x] T7 构建 Mac 最小可执行包（`mobile-14.4`）
 - [x] T8 把 Android 连接配置流程移植到 Mac（shared connection model / storage / details form）
 
+## Epic-005 per-session 定时发送 / heartbeat
+
+- [x] T1 冻结定时发送设计真源（`docs/decisions/2026-04-22-session-schedule-timed-send.md`）
+- [x] T2 下沉 shared schedule types / next-fire 计算与协议扩展
+- [x] T3 daemon 落地 schedule store / engine / dispatch
+- [x] T4 Android terminal schedule sheet（calendar + alarm UI）
+- [x] T5 Mac terminal schedule sheet（calendar + alarm UI）
+- [x] T6 rename / kill / offline / daemon restart 边界 closeout
+- [x] T7 daemon + Android + Mac 联调验证与证据补齐
+
 ## 当前状态
 
 - 2026-04-20 当前切片：Connections 页按 server IP 聚合，支持 group 长按展开、多选 session、跨 group 同时打开
@@ -107,3 +117,11 @@
 - 2026-04-20 Mac shell 已进入最小真实 open tabs：saved target 可开成 tab、`+` 可进入 new connection tab、tab 可关闭；当前真边界明确为 `single runtime · multi tabs`
 - 2026-04-20 Mac 壳层排版已做第一轮 terminal-first 收口：列宽不再等分，Terminal 主列明显更宽；顶部 chrome / shell tabs / terminal 内二级 tabs 已压缩
 - 2026-04-20 Jason 新冻结：右侧不是固定抽屉，而是可选比例的 vertical split workspace（类似 iTerm2）；当前 packaged `.app` 已补最小 preset：`1 / 2 / 3` 分列
+- 2026-04-22 新需求已冻结成文档：session 定时发送 / heartbeat 采用 daemon 单一调度真源，按 tmux `sessionName` 绑定；Android / Mac 只提供 calendar + alarm 风格编辑器
+- 2026-04-22 Epic-005 当前代码已落地：shared schedule types / next-fire、daemon schedule engine、Android schedule sheet、Mac schedule modal 均已接入；已通过 android/mac type-check + android vite build + mac build + schedule engine smoke
+- 2026-04-23 Epic-005 已完成证据闭环：`android/evidence/2026-04-22-session-schedule/` 已补 type-check/build、schedule logic smoke、真实 daemon websocket smoke（含 schedule store 持久化 + tmux 执行 side effect）；`mac/evidence/2026-04-22-session-schedule/` 已补 type-check/build/package 与静态 schedule modal HTML preview
+- 2026-04-23 Android terminal 输入层已补一轮交互收口：快捷输入面板支持外点关闭 + 显式关闭按钮；定时发送入口已并入预输入区右侧；悬浮球改成直接拖动；floating overlay 不再叠加 keyboard inset 导致面板抬升过高；验证证据已落到 `android/evidence/2026-04-23-quick-input-ui/`
+- 2026-04-23 Android terminal 输入层第二轮修正已落地：tab 长按阈值已增大；tab header 的定时入口已移除，仅保留 quick input 右侧 session 级入口；悬浮球持久化坐标会在 mount/resize 自动回收进可视区
+- 2026-04-23 Tab manager 拖拽排序不生效已修正：拖拽目标计算已排除当前拖动行，release 提交改为读取 ref 同步的最新 dragState；已补 `TabManagerSheet.test.tsx` 回归并完成 Android 构建/升级目录投放
+- 2026-04-23 悬浮球“消失”根因已确认并修正：`TerminalPage` 的 quick bar 包裹层在 keyboard 关闭时不再保留 `transform: translateY(0)`，避免 fixed 悬浮层错误绑定到容器坐标系
+- 2026-04-23 快捷按键组合默认名已修正：`Ctrl` 等 modifier 不再提前占用 label；未手填名称时，保存自动使用组合 preview（如 `Ctrl + C`）；已补 `TerminalQuickBar.test.tsx` 回归并完成 Android 构建/升级目录投放

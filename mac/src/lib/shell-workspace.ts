@@ -8,9 +8,10 @@ export type QuickPaletteTab = 'shortcuts' | 'clipboard';
 export interface ShellWorkspaceTab {
   id: string;
   title: string;
-  kind: 'empty' | 'connection';
+  kind: 'empty' | 'connection' | 'local-tmux';
   persistedHostId?: string;
   target?: EditableHost;
+  localSessionName?: string;
 }
 
 export interface ShellWorkspacePane {
@@ -82,6 +83,15 @@ export function createConnectionWorkspaceTab(target: EditableHost, persistedHost
   };
 }
 
+export function createLocalTmuxWorkspaceTab(sessionName: string): ShellWorkspaceTab {
+  return {
+    id: generateId('tab'),
+    title: sessionName.trim() || 'Local tmux',
+    kind: 'local-tmux',
+    localSessionName: sessionName.trim(),
+  };
+}
+
 export function createWorkspacePane(size = 1): ShellWorkspacePane {
   const tab = createEmptyWorkspaceTab();
   return {
@@ -136,7 +146,11 @@ export function normalizeWorkspaceState(input: unknown): ShellWorkspaceState {
             return null;
           }
           const rawTab = tab as Partial<ShellWorkspaceTab>;
-          const kind = rawTab.kind === 'connection' ? 'connection' : 'empty';
+          const kind = rawTab.kind === 'connection'
+            ? 'connection'
+            : rawTab.kind === 'local-tmux'
+              ? 'local-tmux'
+              : 'empty';
           const baseTitle = typeof rawTab.title === 'string' && rawTab.title.trim() ? rawTab.title : kind === 'empty' ? '+' : 'Terminal';
           return {
             id: typeof rawTab.id === 'string' && rawTab.id ? rawTab.id : generateId('tab'),
@@ -144,6 +158,9 @@ export function normalizeWorkspaceState(input: unknown): ShellWorkspaceState {
             kind,
             persistedHostId: typeof rawTab.persistedHostId === 'string' ? rawTab.persistedHostId : undefined,
             target: kind === 'connection' ? normalizeTarget(rawTab.target) : undefined,
+            localSessionName: kind === 'local-tmux' && typeof rawTab.localSessionName === 'string'
+              ? rawTab.localSessionName.trim()
+              : undefined,
           };
         })
         .filter((tab): tab is ShellWorkspaceTab => tab !== null);

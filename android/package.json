@@ -22,6 +22,7 @@
     "daemon:install-global": "bash ./scripts/install-global-daemon-cli.sh",
     "daemon:install-service": "bash ./scripts/zterm-daemon.sh install-service",
     "daemon:service-status": "bash ./scripts/zterm-daemon.sh service-status",
+    "daemon:prepare-release": "bash ./scripts/prepare-global-daemon-release.sh",
     "sync:android": "npx cap sync android",
     "run:android": "npx cap run android",
     "build:android": "./scripts/build-android-debug.sh",
@@ -29,6 +30,7 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/keyboard": "^6.0.4",
     "@capacitor/local-notifications": "^6.0.0",

@@ -1,8 +1,5 @@
 import {
-  appendTerminalDataToSessionBuffer,
-  applyScrollbackUpdateToSessionBuffer,
-  applySnapshotToSessionBuffer,
-  applyViewportUpdateToSessionBuffer,
+  applyBufferSyncToSessionBuffer,
   createSessionBufferState,
   isBridgeBufferMessage,
   type BridgeBufferMessage,
@@ -32,7 +29,13 @@ function createEmptyBuffer(cacheLines: number) {
 function projectRenderBuffer(buffer: SessionBufferState): TerminalRenderBufferProjection {
   return {
     lines: buffer.lines,
-    scrollbackStartIndex: buffer.scrollbackStartIndex,
+    gapRanges: buffer.gapRanges,
+    startIndex: buffer.startIndex,
+    endIndex: buffer.endIndex,
+    viewportEndIndex: buffer.viewportEndIndex,
+    cols: buffer.cols,
+    rows: buffer.rows,
+    cursorKeysApp: buffer.cursorKeysApp,
     revision: buffer.revision,
   };
 }
@@ -42,18 +45,10 @@ function reduceCanonicalBuffer(
   message: BridgeBufferMessage,
   cacheLines: number,
 ): SessionBufferState {
-  switch (message.type) {
-    case 'snapshot':
-      return applySnapshotToSessionBuffer(current, message.payload, cacheLines);
-    case 'viewport-update':
-      return applyViewportUpdateToSessionBuffer(current, message.payload, cacheLines);
-    case 'scrollback-update':
-      return applyScrollbackUpdateToSessionBuffer(current, message.payload, cacheLines);
-    case 'data':
-      return appendTerminalDataToSessionBuffer(current, message.payload, cacheLines);
-    default:
-      return current;
+  if (message.type !== 'buffer-sync') {
+    return current;
   }
+  return applyBufferSyncToSessionBuffer(current, message.payload, cacheLines);
 }
 
 export function createTerminalBufferStore(cacheLines = DEFAULT_TERMINAL_CACHE_LINES): TerminalBufferStore {
@@ -68,6 +63,9 @@ export function createTerminalBufferStore(cacheLines = DEFAULT_TERMINAL_CACHE_LI
   };
 
   const setBuffer = (nextBuffer: SessionBufferState) => {
+    if (nextBuffer === state.canonicalBuffer) {
+      return;
+    }
     state = {
       canonicalBuffer: nextBuffer,
       renderBuffer: projectRenderBuffer(nextBuffer),

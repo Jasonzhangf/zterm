@@ -1,85 +1,25 @@
 import type {
   SessionBufferState,
+  TerminalBufferPayload,
   TerminalCell,
-  TerminalScrollbackUpdate,
-  TerminalSnapshot,
-  TerminalViewportUpdate,
+  TerminalGapRange,
+  TerminalIndexedLine,
 } from './types';
 
-function trimOutputHistory(history: string, cacheLines: number) {
-  const lines = history.split('\n');
-  if (lines.length <= cacheLines) {
-    return history;
-  }
-  return lines.slice(lines.length - cacheLines).join('\n');
+const EMPTY_ROW: TerminalCell[] = [];
+
+function cloneGapRanges(gapRanges: TerminalGapRange[]) {
+  return gapRanges.map((range) => ({ ...range }));
 }
 
-export function normalizeBufferLines(lines: string[], cacheLines: number) {
-  const normalized = lines.map((line) => (typeof line === 'string' ? line : String(line ?? '')));
-  if (normalized.length <= cacheLines) {
-    return normalized;
-  }
-  return normalized.slice(normalized.length - cacheLines);
-}
-
-function trimBufferWithScrollbackStart(
-  lines: string[],
-  scrollbackStartIndex: number | undefined,
-  viewportRows: number,
-  cacheLines: number,
-) {
-  const normalized = lines.map((line) => (typeof line === 'string' ? line : String(line ?? '')));
-  const normalizedViewportRows = Math.max(0, viewportRows);
-  if (normalized.length <= cacheLines) {
-    return {
-      lines: normalized,
-      scrollbackStartIndex:
-        scrollbackStartIndex !== undefined && normalized.length > normalizedViewportRows
-          ? scrollbackStartIndex
-          : undefined,
-    };
-  }
-
-  const trimmedCount = normalized.length - cacheLines;
-  const nextLines = normalized.slice(trimmedCount);
-  const scrollbackCount = Math.max(0, normalized.length - normalizedViewportRows);
-  const removedScrollbackCount = Math.min(trimmedCount, scrollbackCount);
-  const nextScrollbackCount = Math.max(0, nextLines.length - normalizedViewportRows);
-
-  return {
-    lines: nextLines,
-    scrollbackStartIndex:
-      scrollbackStartIndex !== undefined && nextScrollbackCount > 0
-        ? scrollbackStartIndex + removedScrollbackCount
-        : undefined,
-  };
-}
-
-function mergeIndexedScrollbackRanges(
-  current: { lines: string[]; startIndex?: number },
-  incoming: { lines: string[]; startIndex?: number },
-) {
-  if (incoming.startIndex === undefined || current.startIndex === undefined) {
-    return {
-      lines: [...current.lines, ...incoming.lines],
-      startIndex: incoming.startIndex ?? current.startIndex,
-    };
-  }
-
-  const merged = new Map<number, string>();
-
-  current.lines.forEach((line, index) => {
-    merged.set(current.startIndex! + index, line);
-  });
-  incoming.lines.forEach((line, index) => {
-    merged.set(incoming.startIndex! + index, line);
-  });
-
-  const indexes = [...merged.keys()].sort((a, b) => a - b);
-  return {
-    startIndex: indexes[0],
-    lines: indexes.map((index) => merged.get(index) || ''),
-  };
+function textLineToCells(line: string): TerminalCell[] {
+  return Array.from(line).map((char) => ({
+    char: char.codePointAt(0) || 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+  }));
 }
 
 export function cellsToLine(cells: TerminalCell[]) {
@@ -93,222 +33,346 @@ export function cellsToLine(cells: TerminalCell[]) {
   return line.replace(/\s+$/u, '');
 }
 
-function createBlankCell(): TerminalCell {
-  return {
-    char: 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  };
+export function normalizeBufferLines(lines: Array<TerminalCell[] | string>, cacheLines: number) {
+  const normalized = lines.map((line) => {
+    if (Array.isArray(line)) {
+      return line;
+    }
+    return textLineToCells(typeof line === 'string' ? line : String(line ?? ''));
+  });
+
+  if (normalized.length <= cacheLines) {
+    return normalized;
+  }
+
+  return normalized.slice(normalized.length - cacheLines);
 }
 
-function applyViewportUpdate(previous: TerminalSnapshot | undefined, update: TerminalViewportUpdate): TerminalSnapshot {
-  const viewport =
-    previous && previous.cols === update.cols && previous.rows === update.rows
-      ? previous.viewport.slice()
-      : Array.from({ length: update.rows }, () =>
-          Array.from({ length: update.cols }, () => createBlankCell()),
-        );
+function normalizeIndexedLines(lines: TerminalIndexedLine[]) {
+  return lines
+    .filter((line) => line && Number.isFinite(line.index))
+    .map((line) => ({
+      index: Math.max(0, Math.floor(line.index)),
+      cells: line.cells || EMPTY_ROW,
+    }))
+    .sort((left, right) => left.index - right.index);
+}
 
-  for (const patch of update.rowsPatch) {
-    if (patch.row < 0 || patch.row >= viewport.length) {
+function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (!a || !b) {
+      return false;
+    }
+    if (a.char !== b.char || a.fg !== b.fg || a.bg !== b.bg || a.flags !== b.flags || a.width !== b.width) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
+  for (const range of gapRanges) {
+    if (absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectGapRanges(rows: Array<TerminalCell[] | undefined>, startIndex: number) {
+  const gapRanges: TerminalGapRange[] = [];
+  let gapStartOffset: number | null = null;
+
+  for (let offset = 0; offset < rows.length; offset += 1) {
+    if (rows[offset] === undefined) {
+      if (gapStartOffset === null) {
+        gapStartOffset = offset;
+      }
       continue;
     }
-    viewport[patch.row] = patch.cells.map((cell) => ({ ...cell }));
+
+    if (gapStartOffset !== null) {
+      gapRanges.push({
+        startIndex: startIndex + gapStartOffset,
+        endIndex: startIndex + offset,
+      });
+      gapStartOffset = null;
+    }
   }
 
+  if (gapStartOffset !== null) {
+    gapRanges.push({
+      startIndex: startIndex + gapStartOffset,
+      endIndex: startIndex + rows.length,
+    });
+  }
+
+  return gapRanges;
+}
+
+function trimToCache(
+  startIndex: number,
+  lines: TerminalCell[][],
+  gapRanges: TerminalGapRange[],
+  cacheLines: number,
+) {
+  const safeStartIndex = Math.max(0, Math.floor(startIndex));
+  const safeCacheLines = Math.max(1, Math.floor(cacheLines || 1));
+  if (lines.length <= safeCacheLines) {
+    return {
+      startIndex: safeStartIndex,
+      lines,
+      gapRanges: cloneGapRanges(gapRanges),
+    };
+  }
+
+  const trimCount = lines.length - safeCacheLines;
+  const nextStartIndex = safeStartIndex + trimCount;
+  const nextEndIndex = safeStartIndex + lines.length;
+  const nextGapRanges = gapRanges
+    .map((range) => ({
+      startIndex: Math.max(nextStartIndex, range.startIndex),
+      endIndex: Math.min(nextEndIndex, range.endIndex),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+
   return {
-    cols: update.cols,
-    rows: update.rows,
-    viewport,
-    cursor: update.cursor,
-    cursorKeysApp: update.cursorKeysApp,
-    scrollbackLines: previous?.scrollbackLines,
-    scrollbackStartIndex: previous?.scrollbackStartIndex,
+    startIndex: nextStartIndex,
+    lines: lines.slice(trimCount),
+    gapRanges: nextGapRanges,
   };
 }
 
-function linesFromSnapshot(snapshot: TerminalSnapshot, cacheLines: number) {
-  const viewportLines = snapshot.viewport.map(cellsToLine);
-  if (snapshot.scrollbackLines) {
-    return trimBufferWithScrollbackStart(
-      [...snapshot.scrollbackLines, ...viewportLines],
-      snapshot.scrollbackStartIndex,
-      snapshot.rows,
-      cacheLines,
-    );
-  }
+function buildSessionBufferState(options: {
+  lines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
+  startIndex: number;
+  viewportEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
+  revision: number;
+  cacheLines: number;
+  updateKind: SessionBufferState['updateKind'];
+}): SessionBufferState {
+  const trimmed = trimToCache(options.startIndex, options.lines, options.gapRanges, options.cacheLines);
+  const endIndex = trimmed.startIndex + trimmed.lines.length;
 
-  return trimBufferWithScrollbackStart(viewportLines, undefined, snapshot.rows, cacheLines);
-}
-
-function nextRevision(current?: SessionBufferState) {
-  return (current?.revision || 0) + 1;
+  return {
+    lines: trimmed.lines,
+    gapRanges: trimmed.gapRanges,
+    startIndex: trimmed.startIndex,
+    endIndex,
+    viewportEndIndex: Math.max(trimmed.startIndex, Math.min(endIndex, Math.floor(options.viewportEndIndex))),
+    cols: Math.max(1, Math.floor(options.cols || 80)),
+    rows: Math.max(1, Math.floor(options.rows || 24)),
+    cursorKeysApp: Boolean(options.cursorKeysApp),
+    updateKind: options.updateKind,
+    revision: Math.max(0, Math.floor(options.revision || 0)),
+  };
 }
 
 export function createSessionBufferState(options: {
-  lines?: string[];
-  scrollbackStartIndex?: number;
-  remoteSnapshot?: TerminalSnapshot;
-  updateKind?: SessionBufferState['updateKind'];
+  lines?: Array<TerminalCell[] | string>;
+  startIndex?: number;
+  endIndex?: number;
+  viewportEndIndex?: number;
+  cols?: number;
+  rows?: number;
+  cursorKeysApp?: boolean;
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
-  const lines = normalizeBufferLines(options.lines || [], options.cacheLines);
-  return {
+  const startIndex = Number.isFinite(options.startIndex) ? Math.max(0, Math.floor(options.startIndex!)) : 0;
+  const normalizedLines = normalizeBufferLines(options.lines || [], options.cacheLines);
+  const requestedEndIndex = Number.isFinite(options.endIndex)
+    ? Math.max(startIndex, Math.floor(options.endIndex!))
+    : startIndex + normalizedLines.length;
+  const expectedLineCount = Math.max(0, requestedEndIndex - startIndex);
+  const lines = normalizedLines.slice(Math.max(0, normalizedLines.length - expectedLineCount));
+  const effectiveStartIndex = Math.max(0, requestedEndIndex - lines.length);
+
+  return buildSessionBufferState({
     lines,
-    scrollbackStartIndex: options.scrollbackStartIndex,
-    remoteSnapshot: options.remoteSnapshot,
-    updateKind: options.updateKind || 'replace',
+    gapRanges: [],
+    startIndex: effectiveStartIndex,
+    viewportEndIndex: Number.isFinite(options.viewportEndIndex) ? Math.floor(options.viewportEndIndex!) : requestedEndIndex,
+    cols: options.cols || 80,
+    rows: options.rows || 24,
+    cursorKeysApp: Boolean(options.cursorKeysApp),
     revision: options.revision ?? 0,
+    cacheLines: options.cacheLines,
+    updateKind: 'replace',
+  });
+}
+
+function payloadToSparseWindow(payload: TerminalBufferPayload) {
+  const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
+
+  const rowsByIndex = new Map<number, TerminalCell[]>();
+  for (const line of normalizedLines) {
+    if (line.index < expectedStartIndex || line.index >= expectedEndIndex) {
+      return {
+        ok: false as const,
+        reason: `buffer-sync lines exceed payload window: window ${expectedStartIndex}-${expectedEndIndex}, got ${line.index}`,
+      };
+    }
+    rowsByIndex.set(line.index, line.cells);
+  }
+
+  return {
+    ok: true as const,
+    startIndex: expectedStartIndex,
+    endIndex: expectedEndIndex,
+    rowsByIndex,
   };
+}
+
+function buildPatchedWindowFromCurrent(
+  current: SessionBufferState | undefined,
+  sparseWindow: {
+    startIndex: number;
+    endIndex: number;
+    rowsByIndex: Map<number, TerminalCell[]>;
+  },
+) {
+  const nextLength = Math.max(0, sparseWindow.endIndex - sparseWindow.startIndex);
+  const nextRows: Array<TerminalCell[] | undefined> = Array.from({ length: nextLength }, () => undefined);
+
+  if (current && current.lines.length > 0) {
+    const overlapStart = Math.max(current.startIndex, sparseWindow.startIndex);
+    const overlapEnd = Math.min(current.endIndex, sparseWindow.endIndex);
+
+    for (let absoluteIndex = overlapStart; absoluteIndex < overlapEnd; absoluteIndex += 1) {
+      if (isGapIndex(current.gapRanges, absoluteIndex)) {
+        continue;
+      }
+      const currentOffset = absoluteIndex - current.startIndex;
+      const nextOffset = absoluteIndex - sparseWindow.startIndex;
+      nextRows[nextOffset] = current.lines[currentOffset] || EMPTY_ROW;
+    }
+  }
+
+  for (const [absoluteIndex, row] of sparseWindow.rowsByIndex.entries()) {
+    const nextOffset = absoluteIndex - sparseWindow.startIndex;
+    if (nextOffset < 0 || nextOffset >= nextRows.length) {
+      continue;
+    }
+    nextRows[nextOffset] = row;
+  }
+
+  const gapRanges = collectGapRanges(nextRows, sparseWindow.startIndex);
+  const lines = nextRows.map((row) => (row ? row : EMPTY_ROW));
+
+  return {
+    startIndex: sparseWindow.startIndex,
+    lines,
+    gapRanges,
+  };
+}
+
+function detectUpdateKind(current: SessionBufferState | undefined, next: { startIndex: number; endIndex: number }) {
+  if (!current) {
+    return 'replace' as const;
+  }
+  if (next.startIndex >= current.endIndex) {
+    return 'append' as const;
+  }
+  if (next.endIndex <= current.startIndex) {
+    return 'prepend' as const;
+  }
+  return 'patch' as const;
+}
+
+export function applyBufferSyncToSessionBuffer(
+  current: SessionBufferState | undefined,
+  payload: TerminalBufferPayload,
+  cacheLines: number,
+) {
+  const revision = Number.isFinite(payload.revision) ? Math.max(0, Math.floor(payload.revision)) : 0;
+  if (current && revision < current.revision) {
+    return current;
+  }
+
+  const sparseWindow = payloadToSparseWindow(payload);
+  if (!sparseWindow.ok) {
+    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${sparseWindow.reason}`);
+    return current || createSessionBufferState({
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
+      viewportEndIndex: 0,
+      cols: payload.cols,
+      rows: payload.rows,
+      cursorKeysApp: payload.cursorKeysApp,
+      revision,
+      cacheLines,
+    });
+  }
+
+  const patched = buildPatchedWindowFromCurrent(current, sparseWindow);
+  return buildSessionBufferState({
+    lines: patched.lines,
+    gapRanges: patched.gapRanges,
+    startIndex: patched.startIndex,
+    viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : sparseWindow.endIndex,
+    cols: payload.cols,
+    rows: payload.rows,
+    cursorKeysApp: payload.cursorKeysApp,
+    revision,
+    cacheLines,
+    updateKind: detectUpdateKind(current, sparseWindow),
+  });
 }
 
 export function sessionBufferToHistory(buffer: SessionBufferState, cacheLines: number) {
-  return trimOutputHistory(buffer.lines.join('\n'), cacheLines);
+  const materializedLines = buffer.lines.map((cells, offset) => (
+    isGapIndex(buffer.gapRanges, buffer.startIndex + offset) ? '' : cellsToLine(cells)
+  ));
+
+  if (materializedLines.length <= cacheLines) {
+    return materializedLines.join('\n');
+  }
+  return materializedLines.slice(-cacheLines).join('\n');
 }
 
-export function applySnapshotToSessionBuffer(
-  current: SessionBufferState | undefined,
-  snapshot: TerminalSnapshot,
-  cacheLines: number,
-): SessionBufferState {
-  const nextBuffer = linesFromSnapshot(snapshot, cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    scrollbackStartIndex: nextBuffer.scrollbackStartIndex,
-    remoteSnapshot: snapshot,
-    updateKind: 'replace',
-    revision: nextRevision(current),
-  };
-}
-
-export function applyViewportUpdateToSessionBuffer(
-  current: SessionBufferState,
-  update: TerminalViewportUpdate,
-  cacheLines: number,
-): SessionBufferState {
-  const currentScrollbackLines = current.remoteSnapshot?.scrollbackLines?.slice() || [];
-  const nextSnapshot = applyViewportUpdate(current.remoteSnapshot, update);
-  nextSnapshot.scrollbackLines = currentScrollbackLines;
-  nextSnapshot.scrollbackStartIndex = current.scrollbackStartIndex;
-  const nextBuffer = linesFromSnapshot(nextSnapshot, cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    scrollbackStartIndex: nextBuffer.scrollbackStartIndex,
-    remoteSnapshot: nextSnapshot,
-    updateKind: 'viewport',
-    revision: nextRevision(current),
-  };
-}
-
-export function applyScrollbackUpdateToSessionBuffer(
-  current: SessionBufferState,
-  update: TerminalScrollbackUpdate,
-  cacheLines: number,
-): SessionBufferState {
-  const viewportLineCount = current.remoteSnapshot?.rows || 0;
-  const currentScrollback = current.remoteSnapshot?.scrollbackLines?.slice() || [];
-  const viewportLines = current.remoteSnapshot?.viewport?.map(cellsToLine) || [];
-
-  let nextScrollback = currentScrollback;
-  let nextScrollbackStartIndex = current.scrollbackStartIndex;
-  let updateKind: SessionBufferState['updateKind'] = 'append';
-
-  if (update.mode === 'reset') {
-    nextScrollback = update.lines.slice();
-    nextScrollbackStartIndex = update.startIndex;
-    updateKind = 'replace';
-  } else {
-    const merged = mergeIndexedScrollbackRanges(
-      {
-        lines: currentScrollback,
-        startIndex: current.scrollbackStartIndex,
-      },
-      {
-        lines: update.lines,
-        startIndex: update.startIndex,
-      },
-    );
-    nextScrollback = merged.lines;
-    nextScrollbackStartIndex = merged.startIndex;
-    updateKind = update.mode === 'prepend' ? 'prepend' : 'append';
+export function sessionBuffersEqual(left: SessionBufferState, right: SessionBufferState) {
+  if (
+    left.startIndex !== right.startIndex
+    || left.endIndex !== right.endIndex
+    || left.viewportEndIndex !== right.viewportEndIndex
+    || left.cols !== right.cols
+    || left.rows !== right.rows
+    || left.cursorKeysApp !== right.cursorKeysApp
+    || left.lines.length !== right.lines.length
+    || left.gapRanges.length !== right.gapRanges.length
+  ) {
+    return false;
   }
 
-  if (update.startIndex === undefined) {
-    if (update.mode === 'prepend') {
-      nextScrollback = [...update.lines, ...currentScrollback];
-      updateKind = 'prepend';
-    } else if (update.mode === 'append') {
-      nextScrollback = [...currentScrollback, ...update.lines];
-      updateKind = 'append';
+  for (let index = 0; index < left.gapRanges.length; index += 1) {
+    if (
+      left.gapRanges[index]?.startIndex !== right.gapRanges[index]?.startIndex
+      || left.gapRanges[index]?.endIndex !== right.gapRanges[index]?.endIndex
+    ) {
+      return false;
     }
-    nextScrollbackStartIndex = undefined;
   }
 
-  const nextBuffer = trimBufferWithScrollbackStart(
-    [...nextScrollback, ...viewportLines],
-    nextScrollbackStartIndex,
-    viewportLineCount,
-    cacheLines,
-  );
-
-  return {
-    lines: nextBuffer.lines,
-    scrollbackStartIndex: nextBuffer.scrollbackStartIndex,
-    remoteSnapshot: current.remoteSnapshot
-      ? {
-          ...current.remoteSnapshot,
-          scrollbackLines: nextScrollback,
-          scrollbackStartIndex: nextScrollbackStartIndex,
-        }
-      : current.remoteSnapshot,
-    updateKind,
-    revision: nextRevision(current),
-  };
-}
-
-export function replaceSessionBufferLines(
-  current: SessionBufferState | undefined,
-  lines: string[],
-  cacheLines: number,
-): SessionBufferState {
-  const nextBuffer = trimBufferWithScrollbackStart(lines, undefined, 0, cacheLines);
-  return {
-    lines: nextBuffer.lines,
-    scrollbackStartIndex: nextBuffer.scrollbackStartIndex,
-    remoteSnapshot: current?.remoteSnapshot,
-    updateKind: 'replace',
-    revision: nextRevision(current),
-  };
-}
-
-export function appendTerminalDataToSessionBuffer(
-  current: SessionBufferState | undefined,
-  chunk: string,
-  cacheLines: number,
-): SessionBufferState {
-  const baseLines = current?.lines?.length ? [...current.lines] : [''];
-  const normalizedChunk = chunk.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const pieces = normalizedChunk.split('\n');
-
-  if (baseLines.length === 0) {
-    baseLines.push('');
+  for (let index = 0; index < left.lines.length; index += 1) {
+    if (!rowsEqual(left.lines[index], right.lines[index])) {
+      return false;
+    }
   }
 
-  const nextLines = [...baseLines];
-  nextLines[nextLines.length - 1] += pieces[0] || '';
-  for (let index = 1; index < pieces.length; index += 1) {
-    nextLines.push(pieces[index] || '');
-  }
-
-  const trimmed = normalizeBufferLines(nextLines, cacheLines);
-  return {
-    lines: trimmed,
-    scrollbackStartIndex: current?.scrollbackStartIndex,
-    remoteSnapshot: current?.remoteSnapshot,
-    updateKind: 'append',
-    revision: nextRevision(current),
-  };
+  return true;
 }

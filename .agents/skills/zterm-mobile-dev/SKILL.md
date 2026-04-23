@@ -110,7 +110,17 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - terminal 持久化缓存不允许只拼 raw output chunk；应从本地 terminal buffer 抽取按行 snapshot（scrollback + visible rows）后再持久化
 - daemon 的 `sendInitialSnapshot()` 不能让 `tmux capture-pane` 异常冒泡到进程级；最多只允许日志告警 + fallback snapshot
 - daemon 的 buffer 真源必须按 **tmux session mirror** 维护：一个 websocket/tab 只是客户端，不得拥有自己的 authoritative buffer；客户端 detach/reattach 不能重建 session 镜像
+- Node/daemon 侧若要复用 `packages/shared`，只允许 import **叶子模块**（如 `schedule/next-fire.ts`、`connection/types.ts`）；禁止从 `@zterm/shared` 根入口取模块，因为根入口会连带 React/CSS，直接把 daemon 运行时打崩
 - 悬浮球快捷菜单的语义是“文本 snippet 注入”；方向键 / Esc / Tab / Backspace 属于常驻快捷栏，不要和自定义 snippet 共用同一概念模型
+- session 级“定时发送”入口不要挂在 tab strip / header 这种易被理解成全局 tab 动作的位置；Android 侧优先放在当前 session 的 quick input/composer 入口里
+- 悬浮球若持久化的是绝对拖拽坐标，mount / viewport resize 时必须自动 re-clamp 到可视区；不能只在拖动瞬间 clamp，否则旋转/尺寸变化后用户会丢入口
+- 悬浮菜单打开时可以隐藏底部 shell rows，但关闭后必须立刻恢复；keyboard 弹起时只上抬 shell rows，本体悬浮球/面板不要跟着复用同一 transform
+- 悬浮菜单内的快捷输入列表点击语义是“立即发送 snippet”，默认补 `\r` 执行；只有剪贴板注入才追加到 draft，不要混成同一路径
+- terminal follow 态不要在每次 buffer/input 到来时直接同步硬改 `scrollTop`；应合并成单向 cadence（如 rAF）贴底，并屏蔽程序化 scroll 反向触发 onScroll，避免底部抖动/拉扯
+- tab strip / shell header 不要保留浏览器默认 focus ring；移动端若无键盘导航需求，容器与 tab 按钮默认 `tabIndex=-1 + blur + outline none`
+- 拖拽排序类交互若在 `pointerMove` 更新 React state、`pointerUp` 立即提交，必须用 ref 同步保存最新 dragState；release 不能只读 state 闭包，否则会出现“拖了但顺序没生效”
+- keyboard 关闭态不要在 quick bar / bottom overlay 外层保留空 `transform`（如 `translateY(0)`）；这会让内部 `position: fixed` 的悬浮球/面板改绑到容器坐标系，导致入口“消失”
+- 快捷按键编辑器里，组合键默认名必须来自最终组合 preview，而不是第一个被点击的 modifier token；否则 `Ctrl + C` 会被错误保存成 `Ctrl`
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
 ---
@@ -571,11 +581,33 @@ android/
 - **解决方案**: Android 上 terminal 不再主动 focus DOM textarea；键盘按钮只走原生 `ImeAnchor`；必要时先 clear WebView focus，再由原生 `EditText` 请求焦点并 `showSoftInput`
 - **验证**: logcat 中 `ImeAnchor show()/showSoftInput()` 命中，点击键盘按钮后系统 IME 实际弹出且中文输入可提交到 tmux
 
+### 问题: Android 悬浮快捷输入里语音转文字失效 / ImeAnchor 抢走输入
+- **触发信号**: terminal 中文输入恢复了，但打开悬浮 quick input / editor 后，语音转文字不再落到 textarea，反而把 terminal 或 header 焦点搞乱
+- **真源**: 把 Android 全部输入都切到 `ImeAnchor` 以后，没有给 quick input/editor 这类 DOM textarea 留独立输入通道；terminal IME 与 quick input DOM focus 没有分层
+- **解决方案**: terminal live input 继续走 `ImeAnchor`；quick input / editor / 浮层 textarea 获得 DOM focus 时，立即 suspend terminal IME、停止把 anchor 输入路由回 session；浮层展开时同时隐藏底部 shell quick rows，避免双入口叠加
+- **验证**: quick input textarea 可正常语音转文字；此时 terminal 不再收到 anchor 输入；关闭/失焦后 terminal 再恢复自己的输入链
+
+### 问题: Android terminal 语音输入按钮弹得出但不上 shell
+- **触发信号**: 键盘已弹出、麦克风能开始录，但结果不提交到 shell，尤其是拼音/语音这种 composition 完成链
+- **真源**: `ImeAnchor` 不能把输入字段伪装成 password/no-suggestions 真空场；否则语音/组合输入完成链可能只走 composing/finish，不走普通 `commitText`
+- **解决方案**: `ImeAnchor` 输入类型保持普通 text multiline，不再用 password/no-suggestions 组合硬压；同时在 `InputConnection` 补 `finishComposingText` 收口，确保最终文本会 emit 到 terminal
+- **验证**: 中文拼音提交、语音转文字提交都能直接落到 shell，不依赖 DOM terminal textarea
+
+### 模式: Android 前后台恢复不要只信 WebView lifecycle
+- **适用场景**: 回到前台后 UI 还显示 connected，但实际上 websocket 已假活、不再刷新
+- **动作**: 前端同时监听 `visibilitychange/resume/focus` 与 Capacitor `App.appStateChange`；进入前台时强制 sweep `reconnectAllSessions()`，不要只等 heartbeat 自己超时
+
 ### 问题: 手机上下滑导致整页 reload / 回弹
 - **触发信号**: 竖向滑动 shell 时，整个页面像被重新加载或出现 WebView 级下拉回弹
 - **真源**: body/root 仍可滚动，或 Capacitor WebView 自身 overscroll 未关
 - **解决方案**: `html/body/#root` 固定为 `overflow:hidden + overscroll-behavior:none`，只让 terminal buffer 容器滚动；`MainActivity` 再把 WebView 设为 `OVER_SCROLL_NEVER`
 - **验证**: 竖向滑动只滚 terminal buffer，不触发整页回弹/重载
+
+### 问题: 快捷输入面板点外面关不掉 / 键盘弹出后面板被抬太高
+- **触发信号**: 悬浮球打开的 quick input 面板无法靠点击空白区关闭，或输入法弹出后面板主体被抬到屏幕外
+- **真源**: quick bar 根节点会拦 pointer；同时 quick overlay 若挂在已 `transform` 抬起的 quick bar 容器下，再按 `keyboardInset` 计算 `bottom/padding` 会发生双重位移
+- **解决方案**: outside-close 走 document capture 级监听；quick input / editor / floating panel 这类 fixed overlay 不再二次叠加 `keyboardInset`
+- **验证**: 点击面板外空白区应立即关闭；弹出输入法后面板主输入区和按钮区仍保持可见
 
 ---
 
@@ -607,6 +639,11 @@ android/
 ### 模式: tmux discovery 不等于 live connect
 - **触发信号**: UI 能列出 tmux sessions，但用户仍反馈“无法连接”
 - **动作**: 检查客户端是否真的走了 Android 同构协议：`ws open -> send connect(payload) -> send stream-mode(active)`；仅有 `list-sessions` 只能证明 bridge 可达，不能证明 session 已 attach
+
+### 模式: 悬浮球拖动与点击分离
+- **适用场景**: terminal 悬浮球 / 浮动入口既要支持点按开关，又要支持拖动 reposition
+- **动作**: 用 `pointer/touch move threshold` 区分 click 和 drag；超过阈值后进入拖动态并 suppress click，位置持久化到 localStorage
+- **反模式**: 只靠长按进入拖动，或拖动完成后未 suppress click，都会导致“拖不动”或“拖完又误开菜单”
 
 ---
 

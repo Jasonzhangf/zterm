@@ -1,8 +1,13 @@
 import {
+  buildEmptyScheduleState,
   formatBridgeEndpoint,
   getResolvedSessionName,
   openBridgeConnection,
   type BridgeServerMessage,
+  type BufferSyncRequestPayload,
+  type PasteImagePayload,
+  type ScheduleJobDraft,
+  type SessionScheduleState,
   type EditableHost,
   type Host,
   type HostConfigMessage,
@@ -29,12 +34,23 @@ export interface TerminalConnectionState {
   activeTarget: ActiveBridgeTargetState | null;
 }
 
+export type BridgeStreamMode = 'active' | 'idle';
+
 export interface BridgeTransportController {
   getState: () => TerminalConnectionState;
+  getScheduleState: () => SessionScheduleState;
   subscribe: (listener: () => void) => () => void;
   connect: (host: EditableHost | Host, handlers?: { onServerMessage?: (message: BridgeServerMessage) => void }) => void;
   disconnect: () => void;
+  setActivityMode: (mode: BridgeStreamMode) => void;
+  requestBufferSync: (payload: BufferSyncRequestPayload) => void;
+  requestScheduleList: (sessionName: string) => void;
+  upsertScheduleJob: (job: ScheduleJobDraft) => void;
+  deleteScheduleJob: (jobId: string) => void;
+  toggleScheduleJob: (jobId: string, enabled: boolean) => void;
+  runScheduleJobNow: (jobId: string) => void;
   sendInput: (data: string) => void;
+  pasteImage: (payload: PasteImagePayload) => boolean;
   resizeTerminal: (cols: number, rows: number) => void;
   dispose: () => void;
 }
@@ -89,11 +105,13 @@ export function createIdleConnectionState(): TerminalConnectionState {
 export function createBridgeTransportController(): BridgeTransportController {
   const listeners = new Set<() => void>();
   let state: TerminalConnectionState = createIdleConnectionState();
+  let scheduleState: SessionScheduleState = buildEmptyScheduleState('');
   let ws: WebSocket | null = null;
   let connectionToken = 0;
   let heartbeatId: number | null = null;
   let lastPongAt = 0;
   let viewport = { cols: 80, rows: 24 };
+  let streamMode: BridgeStreamMode = 'active';
 
   const emit = () => {
     listeners.forEach((listener) => listener());
@@ -101,6 +119,15 @@ export function createBridgeTransportController(): BridgeTransportController {
 
   const setState = (nextState: TerminalConnectionState | ((current: TerminalConnectionState) => TerminalConnectionState)) => {
     state = typeof nextState === 'function' ? nextState(state) : nextState;
+    emit();
+  };
+
+  const setScheduleState = (
+    nextState:
+      | SessionScheduleState
+      | ((current: SessionScheduleState) => SessionScheduleState),
+  ) => {
+    scheduleState = typeof nextState === 'function' ? nextState(scheduleState) : nextState;
     emit();
   };
 
@@ -133,11 +160,21 @@ export function createBridgeTransportController(): BridgeTransportController {
 
   const disconnect = () => {
     closeSocket(true);
+    setScheduleState(buildEmptyScheduleState(''));
     setState(createIdleConnectionState());
+  };
+
+  const setActivityMode = (mode: BridgeStreamMode) => {
+    if (streamMode === mode) {
+      return;
+    }
+    streamMode = mode;
+    void sendMessage({ type: 'stream-mode', payload: { mode } });
   };
 
   return {
     getState: () => state,
+    getScheduleState: () => scheduleState,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -168,6 +205,11 @@ export function createBridgeTransportController(): BridgeTransportController {
         connectedSessionId: '',
         title: normalizedTarget.sessionName,
         activeTarget: normalizedTarget,
+      });
+      setScheduleState({
+        sessionName: normalizedTarget.sessionName,
+        jobs: [],
+        loading: true,
       });
 
       ws = openBridgeConnection(bridgeTarget, hostConfig, {
@@ -203,11 +245,17 @@ export function createBridgeTransportController(): BridgeTransportController {
             error: '',
             connectedSessionId: sessionId,
           }));
+          sendMessage({ type: 'schedule-list', payload: { sessionName: normalizedTarget.sessionName } });
         },
         onError: (message) => {
           if (token !== connectionToken) {
             return;
           }
+          setScheduleState((current) => ({
+            ...current,
+            loading: false,
+            error: message,
+          }));
           setState((current) => ({ ...current, status: 'error', error: message }));
         },
         onTitle: (title) => {
@@ -221,6 +269,11 @@ export function createBridgeTransportController(): BridgeTransportController {
             return;
           }
           clearHeartbeat();
+          setScheduleState((current) => ({
+            ...current,
+            loading: false,
+            error: reason || current.error,
+          }));
           setState((current) => {
             if (current.status === 'error') {
               return current;
@@ -238,15 +291,59 @@ export function createBridgeTransportController(): BridgeTransportController {
           }
           if (message.type === 'pong') {
             lastPongAt = Date.now();
+          } else if (message.type === 'schedule-state') {
+            setScheduleState({
+              sessionName: message.payload.sessionName,
+              jobs: message.payload.jobs,
+              loading: false,
+              lastEvent: scheduleState.lastEvent,
+              error: '',
+            });
+          } else if (message.type === 'schedule-event') {
+            setScheduleState((current) => ({
+              ...current,
+              sessionName: message.payload.sessionName,
+              lastEvent: message.payload,
+            }));
           }
           handlers?.onServerMessage?.(message);
         },
-      });
+      }, { initialStreamMode: streamMode });
     },
     disconnect,
+    setActivityMode,
+    requestBufferSync: (payload) => {
+      void sendMessage({ type: 'buffer-sync-request', payload });
+    },
+    requestScheduleList: (sessionName) => {
+      setScheduleState((current) => ({
+        ...current,
+        sessionName,
+        loading: true,
+        error: '',
+      }));
+      void sendMessage({ type: 'schedule-list', payload: { sessionName } });
+    },
+    upsertScheduleJob: (job) => {
+      setScheduleState((current) => ({ ...current, loading: true, error: '' }));
+      void sendMessage({ type: 'schedule-upsert', payload: { job } });
+    },
+    deleteScheduleJob: (jobId) => {
+      setScheduleState((current) => ({ ...current, loading: true, error: '' }));
+      void sendMessage({ type: 'schedule-delete', payload: { jobId } });
+    },
+    toggleScheduleJob: (jobId, enabled) => {
+      setScheduleState((current) => ({ ...current, loading: true, error: '' }));
+      void sendMessage({ type: 'schedule-toggle', payload: { jobId, enabled } });
+    },
+    runScheduleJobNow: (jobId) => {
+      setScheduleState((current) => ({ ...current, loading: true, error: '' }));
+      void sendMessage({ type: 'schedule-run-now', payload: { jobId } });
+    },
     sendInput: (data) => {
       void sendMessage({ type: 'input', payload: data });
     },
+    pasteImage: (payload) => sendMessage({ type: 'paste-image', payload }),
     resizeTerminal: (cols, rows) => {
       if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols <= 0 || rows <= 0) {
         return;

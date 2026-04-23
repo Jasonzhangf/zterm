@@ -5,12 +5,13 @@
 1. `spec.md`：产品范围
 2. `architecture.md`：模块边界
 3. `docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局 / Mac 共享壳决策
-4. `dev-workflow.md`：执行门禁
-5. `task.md`：当前任务
-6. `CACHE.md`：短期上下文
-7. `MEMORY.md`：长期经验
-8. `evidence/`：运行证据
-9. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+4. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
+5. `dev-workflow.md`：执行门禁
+6. `task.md`：当前任务
+7. `CACHE.md`：短期上下文
+8. `MEMORY.md`：长期经验
+9. `evidence/`：运行证据
+10. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
 
 ## 模块边界
 
@@ -18,10 +19,11 @@
 - Layout/Presentation Shell：layout profile、pane 编排、safe-area / density token
 - Storage：主机配置与运行态持久化
 - Session/Transport：WebSocket、tmux bridge 会话状态
+- Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
 - Client Render Window：只根据 daemon viewport bottom pointer + 本地 viewportRows 取绝对窗口
 - Android Shell：Capacitor、通知、后台服务
-- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护和发送 canonical buffer
+- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 
 ## 跨尺寸布局真源
@@ -97,7 +99,8 @@ operation -> event -> projection
 - UI 只消费 projection，不补业务真相
 - Storage 只管持久化，不管业务决策
 - Session/Transport 只管连接与协议转换
-- Server 只管本地 tmux 真源
+- Schedule/Automation 只定义规则、nextFireAt 计算与执行结果，不直接承载 UI 展示
+- Server 负责本地 tmux 真源，以及定时发送的唯一执行真源
 
 ## 图片传送链路
 
@@ -112,6 +115,28 @@ mobile file picker -> websocket paste-image -> daemon temp file
 - server 负责解码/格式统一（当前统一转成 PNG）
 - 剪贴板真源在本地 Mac/PC daemon，不在 mobile client
 - `Ctrl+V` 发送给当前 active tmux 会话，不广播给其他 tabs
+
+## Session schedule / timed send 真源
+
+### Schedule Job
+
+- `targetSessionName`
+- `payload.text`
+- `payload.appendEnter`
+- `rule`
+- `enabled`
+- `nextFireAt`
+- `lastFiredAt`
+- `lastResult`
+- `lastError`
+
+规则：
+
+- daemon 是定时发送的唯一真源；Android / Mac 只做编辑和展示
+- job 绑定 tmux `sessionName`，不能绑定客户端 runtime `sessionId`
+- client 不允许再各自起本地 timer 做实际发送
+- UI 可以显示 `bridgeHost + bridgePort + sessionName`，但实际执行 target 先以 tmux session 为准
+- daemon 重启后不补历史 backlog，只计算未来下一次触发
 
 ## Terminal viewport / buffer 规则
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { TerminalBufferPayload, TerminalCell } from './types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from './terminal-buffer';
 
@@ -49,6 +49,7 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.endIndex).toBe(210);
     expect(next.viewportEndIndex).toBe(210);
     expect(next.lines).toHaveLength(20);
+    expect(next.gapRanges).toEqual([]);
   });
 
   it('replaces the whole local mirror window on a newer revision', () => {
@@ -86,6 +87,7 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.endIndex).toBe(107);
     expect(next.viewportEndIndex).toBe(107);
     expect(next.lines).toHaveLength(6);
+    expect(next.gapRanges).toEqual([]);
     expect(String.fromCodePoint(next.lines[0][0].char)).toBe('b');
     expect(String.fromCodePoint(next.lines[5][0].char)).toBe('G');
   });
@@ -113,6 +115,7 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.startIndex).toBe(2);
     expect(next.endIndex).toBe(6);
     expect(next.lines).toHaveLength(4);
+    expect(next.gapRanges).toEqual([]);
     expect(String.fromCodePoint(next.lines[0][0].char)).toBe('c');
     expect(String.fromCodePoint(next.lines[3][0].char)).toBe('f');
   });
@@ -189,6 +192,7 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.startIndex).toBe(101);
     expect(next.endIndex).toBe(107);
     expect(next.lines.map(cellsToLine)).toEqual(['b', 'c', 'd', 'e', 'f', 'G']);
+    expect(next.gapRanges).toEqual([]);
   });
 
   it('patches a valid middle span partial payload onto the current contiguous window', () => {
@@ -227,10 +231,33 @@ describe('terminal-buffer canonical mirror patching', () => {
     );
 
     expect(next.lines.map(cellsToLine)).toEqual(['a', 'b', 'C', 'D', 'e', 'f']);
+    expect(next.gapRanges).toEqual([]);
   });
 
-  it('rejects malformed partial payloads that leave holes outside the local overlap', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('keeps sparse gaps when the requested window still has unknown rows', () => {
+    const next = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 98,
+        endIndex: 107,
+        viewportEndIndex: 107,
+        revision: 3,
+        lines: [
+          [98, 'Y'],
+          [99, 'Z'],
+          [106, 'G'],
+        ],
+      }),
+      3000,
+    );
+
+    expect(next.startIndex).toBe(98);
+    expect(next.endIndex).toBe(107);
+    expect(next.gapRanges).toEqual([{ startIndex: 100, endIndex: 106 }]);
+    expect(next.lines.map(cellsToLine)).toEqual(['Y', 'Z', '', '', '', '', '', '', 'G']);
+  });
+
+  it('auto-stitches older rows onto the current local cache without forcing a full reload', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,
       payload({
@@ -260,16 +287,13 @@ describe('terminal-buffer canonical mirror patching', () => {
         lines: [
           [98, 'Y'],
           [99, 'Z'],
-          [104, 'E'],
-          [105, 'F'],
           [106, 'G'],
         ],
       }),
       3000,
     );
 
-    expect(next).toBe(current);
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+    expect(next.gapRanges).toEqual([]);
+    expect(next.lines.map(cellsToLine)).toEqual(['Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'G']);
   });
 });

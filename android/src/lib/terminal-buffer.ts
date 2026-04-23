@@ -2,19 +2,14 @@ import type {
   SessionBufferState,
   TerminalBufferPayload,
   TerminalCell,
+  TerminalGapRange,
   TerminalIndexedLine,
 } from './types';
 
-function cloneCell(cell: TerminalCell): TerminalCell {
-  return { ...cell };
-}
+const EMPTY_ROW: TerminalCell[] = [];
 
-function cloneRow(row: TerminalCell[]): TerminalCell[] {
-  return row.map(cloneCell);
-}
-
-function cloneRows(rows: TerminalCell[][]): TerminalCell[][] {
-  return rows.map(cloneRow);
+function cloneGapRanges(gapRanges: TerminalGapRange[]) {
+  return gapRanges.map((range) => ({ ...range }));
 }
 
 function textLineToCells(line: string): TerminalCell[] {
@@ -41,7 +36,7 @@ export function cellsToLine(cells: TerminalCell[]) {
 export function normalizeBufferLines(lines: Array<TerminalCell[] | string>, cacheLines: number) {
   const normalized = lines.map((line) => {
     if (Array.isArray(line)) {
-      return cloneRow(line);
+      return line;
     }
     return textLineToCells(typeof line === 'string' ? line : String(line ?? ''));
   });
@@ -58,7 +53,7 @@ function normalizeIndexedLines(lines: TerminalIndexedLine[]) {
     .filter((line) => line && Number.isFinite(line.index))
     .map((line) => ({
       index: Math.max(0, Math.floor(line.index)),
-      cells: cloneRow(line.cells || []),
+      cells: line.cells || EMPTY_ROW,
     }))
     .sort((left, right) => left.index - right.index);
 }
@@ -82,25 +77,82 @@ function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
   return true;
 }
 
-function trimToCache(startIndex: number, lines: TerminalCell[][], cacheLines: number) {
+function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
+  for (const range of gapRanges) {
+    if (absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectGapRanges(rows: Array<TerminalCell[] | undefined>, startIndex: number) {
+  const gapRanges: TerminalGapRange[] = [];
+  let gapStartOffset: number | null = null;
+
+  for (let offset = 0; offset < rows.length; offset += 1) {
+    if (rows[offset] === undefined) {
+      if (gapStartOffset === null) {
+        gapStartOffset = offset;
+      }
+      continue;
+    }
+
+    if (gapStartOffset !== null) {
+      gapRanges.push({
+        startIndex: startIndex + gapStartOffset,
+        endIndex: startIndex + offset,
+      });
+      gapStartOffset = null;
+    }
+  }
+
+  if (gapStartOffset !== null) {
+    gapRanges.push({
+      startIndex: startIndex + gapStartOffset,
+      endIndex: startIndex + rows.length,
+    });
+  }
+
+  return gapRanges;
+}
+
+function trimToCache(
+  startIndex: number,
+  lines: TerminalCell[][],
+  gapRanges: TerminalGapRange[],
+  cacheLines: number,
+) {
   const safeStartIndex = Math.max(0, Math.floor(startIndex));
   const safeCacheLines = Math.max(1, Math.floor(cacheLines || 1));
   if (lines.length <= safeCacheLines) {
     return {
       startIndex: safeStartIndex,
-      lines: cloneRows(lines),
+      lines,
+      gapRanges: cloneGapRanges(gapRanges),
     };
   }
 
   const trimCount = lines.length - safeCacheLines;
+  const nextStartIndex = safeStartIndex + trimCount;
+  const nextEndIndex = safeStartIndex + lines.length;
+  const nextGapRanges = gapRanges
+    .map((range) => ({
+      startIndex: Math.max(nextStartIndex, range.startIndex),
+      endIndex: Math.min(nextEndIndex, range.endIndex),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+
   return {
-    startIndex: safeStartIndex + trimCount,
-    lines: cloneRows(lines.slice(trimCount)),
+    startIndex: nextStartIndex,
+    lines: lines.slice(trimCount),
+    gapRanges: nextGapRanges,
   };
 }
 
 function buildSessionBufferState(options: {
   lines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
   startIndex: number;
   viewportEndIndex: number;
   cols: number;
@@ -108,19 +160,21 @@ function buildSessionBufferState(options: {
   cursorKeysApp: boolean;
   revision: number;
   cacheLines: number;
+  updateKind: SessionBufferState['updateKind'];
 }): SessionBufferState {
-  const trimmed = trimToCache(options.startIndex, options.lines, options.cacheLines);
+  const trimmed = trimToCache(options.startIndex, options.lines, options.gapRanges, options.cacheLines);
   const endIndex = trimmed.startIndex + trimmed.lines.length;
 
   return {
     lines: trimmed.lines,
+    gapRanges: trimmed.gapRanges,
     startIndex: trimmed.startIndex,
     endIndex,
-    viewportEndIndex: Math.max(trimmed.startIndex, Math.floor(options.viewportEndIndex)),
+    viewportEndIndex: Math.max(trimmed.startIndex, Math.min(endIndex, Math.floor(options.viewportEndIndex))),
     cols: Math.max(1, Math.floor(options.cols || 80)),
     rows: Math.max(1, Math.floor(options.rows || 24)),
     cursorKeysApp: Boolean(options.cursorKeysApp),
-    updateKind: 'replace',
+    updateKind: options.updateKind,
     revision: Math.max(0, Math.floor(options.revision || 0)),
   };
 }
@@ -147,6 +201,7 @@ export function createSessionBufferState(options: {
 
   return buildSessionBufferState({
     lines,
+    gapRanges: [],
     startIndex: effectiveStartIndex,
     viewportEndIndex: Number.isFinite(options.viewportEndIndex) ? Math.floor(options.viewportEndIndex!) : requestedEndIndex,
     cols: options.cols || 80,
@@ -154,121 +209,91 @@ export function createSessionBufferState(options: {
     cursorKeysApp: Boolean(options.cursorKeysApp),
     revision: options.revision ?? 0,
     cacheLines: options.cacheLines,
+    updateKind: 'replace',
   });
 }
 
-function payloadToContiguousRows(payload: TerminalBufferPayload) {
+function payloadToSparseWindow(payload: TerminalBufferPayload) {
   const normalizedLines = normalizeIndexedLines(payload.lines || []);
   const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
   const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
 
-  if (normalizedLines.length === 0) {
-    return {
-      ok: true as const,
-      startIndex: expectedStartIndex,
-      endIndex: expectedEndIndex,
-      lines: [] as Array<{ index: number; cells: TerminalCell[] }>,
-    };
-  }
-
-  const firstIndex = normalizedLines[0]!.index;
-  const lastIndex = normalizedLines[normalizedLines.length - 1]!.index + 1;
-
-  if (firstIndex < expectedStartIndex || lastIndex > expectedEndIndex) {
-    return {
-      ok: false as const,
-      reason: `buffer-sync lines exceed payload window: window ${expectedStartIndex}-${expectedEndIndex}, got ${firstIndex}-${lastIndex}`,
-    };
-  }
-
-  for (let index = 1; index < normalizedLines.length; index += 1) {
-    if (normalizedLines[index]!.index !== normalizedLines[index - 1]!.index + 1) {
+  const rowsByIndex = new Map<number, TerminalCell[]>();
+  for (const line of normalizedLines) {
+    if (line.index < expectedStartIndex || line.index >= expectedEndIndex) {
       return {
         ok: false as const,
-        reason: `buffer-sync lines are not contiguous around ${normalizedLines[index - 1]!.index}-${normalizedLines[index]!.index}`,
+        reason: `buffer-sync lines exceed payload window: window ${expectedStartIndex}-${expectedEndIndex}, got ${line.index}`,
       };
     }
+    rowsByIndex.set(line.index, line.cells);
   }
 
   return {
     ok: true as const,
     startIndex: expectedStartIndex,
     endIndex: expectedEndIndex,
-    lines: normalizedLines.map((line) => ({
-      index: line.index,
-      cells: cloneRow(line.cells),
-    })),
+    rowsByIndex,
   };
 }
 
 function buildPatchedWindowFromCurrent(
   current: SessionBufferState | undefined,
-  contiguous: {
+  sparseWindow: {
     startIndex: number;
     endIndex: number;
-    lines: Array<{ index: number; cells: TerminalCell[] }>;
+    rowsByIndex: Map<number, TerminalCell[]>;
   },
 ) {
-  const nextLength = Math.max(0, contiguous.endIndex - contiguous.startIndex);
-  const incomingCount = contiguous.lines.length;
+  const nextLength = Math.max(0, sparseWindow.endIndex - sparseWindow.startIndex);
+  const nextRows: Array<TerminalCell[] | undefined> = Array.from({ length: nextLength }, () => undefined);
 
-  if (nextLength === 0) {
-    return {
-      ok: true as const,
-      startIndex: contiguous.startIndex,
-      lines: [] as TerminalCell[][],
-    };
+  if (current && current.lines.length > 0) {
+    const overlapStart = Math.max(current.startIndex, sparseWindow.startIndex);
+    const overlapEnd = Math.min(current.endIndex, sparseWindow.endIndex);
+
+    for (let absoluteIndex = overlapStart; absoluteIndex < overlapEnd; absoluteIndex += 1) {
+      if (isGapIndex(current.gapRanges, absoluteIndex)) {
+        continue;
+      }
+      const currentOffset = absoluteIndex - current.startIndex;
+      const nextOffset = absoluteIndex - sparseWindow.startIndex;
+      nextRows[nextOffset] = current.lines[currentOffset] || EMPTY_ROW;
+    }
   }
 
-  if (incomingCount === nextLength) {
-    return {
-      ok: true as const,
-      startIndex: contiguous.startIndex,
-      lines: contiguous.lines.map((line) => cloneRow(line.cells)),
-    };
+  for (const [absoluteIndex, row] of sparseWindow.rowsByIndex.entries()) {
+    const nextOffset = absoluteIndex - sparseWindow.startIndex;
+    if (nextOffset < 0 || nextOffset >= nextRows.length) {
+      continue;
+    }
+    nextRows[nextOffset] = row;
   }
 
-  if (!current || current.lines.length === 0) {
-    return {
-      ok: false as const,
-      reason: `buffer-sync partial payload has no local base for window ${contiguous.startIndex}-${contiguous.endIndex}`,
-    };
-  }
-
-  const overlapStart = Math.max(current.startIndex, contiguous.startIndex);
-  const overlapEnd = Math.min(current.endIndex, contiguous.endIndex);
-  if (overlapEnd <= overlapStart) {
-    return {
-      ok: false as const,
-      reason: `buffer-sync partial payload has no overlap with local mirror: local ${current.startIndex}-${current.endIndex}, incoming ${contiguous.startIndex}-${contiguous.endIndex}`,
-    };
-  }
-
-  const nextLines: Array<TerminalCell[] | undefined> = Array.from({ length: nextLength }, () => undefined);
-
-  for (let absoluteIndex = overlapStart; absoluteIndex < overlapEnd; absoluteIndex += 1) {
-    const currentOffset = absoluteIndex - current.startIndex;
-    const nextOffset = absoluteIndex - contiguous.startIndex;
-    nextLines[nextOffset] = cloneRow(current.lines[currentOffset] || []);
-  }
-
-  for (const line of contiguous.lines) {
-    const nextOffset = line.index - contiguous.startIndex;
-    nextLines[nextOffset] = cloneRow(line.cells);
-  }
-
-  if (nextLines.some((line) => line === undefined)) {
-    return {
-      ok: false as const,
-      reason: `buffer-sync partial payload leaves holes in local mirror window ${contiguous.startIndex}-${contiguous.endIndex}`,
-    };
-  }
+  const gapRanges = collectGapRanges(nextRows, sparseWindow.startIndex);
+  const lines = nextRows.map((row) => (row ? row : EMPTY_ROW));
 
   return {
-    ok: true as const,
-    startIndex: contiguous.startIndex,
-    lines: nextLines as TerminalCell[][],
+    startIndex: sparseWindow.startIndex,
+    lines,
+    gapRanges,
   };
+}
+
+function detectUpdateKind(
+  current: SessionBufferState | undefined,
+  next: { startIndex: number; endIndex: number },
+) {
+  if (!current) {
+    return 'replace' as const;
+  }
+  if (next.startIndex >= current.endIndex) {
+    return 'append' as const;
+  }
+  if (next.endIndex <= current.startIndex) {
+    return 'prepend' as const;
+  }
+  return 'patch' as const;
 }
 
 export function applyBufferSyncToSessionBuffer(
@@ -281,9 +306,9 @@ export function applyBufferSyncToSessionBuffer(
     return current;
   }
 
-  const contiguous = payloadToContiguousRows(payload);
-  if (!contiguous.ok) {
-    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${contiguous.reason}`);
+  const sparseWindow = payloadToSparseWindow(payload);
+  if (!sparseWindow.ok) {
+    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${sparseWindow.reason}`);
     return current || createSessionBufferState({
       lines: [],
       startIndex: 0,
@@ -297,39 +322,31 @@ export function applyBufferSyncToSessionBuffer(
     });
   }
 
-  const patched = buildPatchedWindowFromCurrent(current, contiguous);
-  if (!patched.ok) {
-    console.error(`[terminal-buffer] rejected malformed buffer-sync: ${patched.reason}`);
-    return current || createSessionBufferState({
-      lines: [],
-      startIndex: 0,
-      endIndex: 0,
-      viewportEndIndex: 0,
-      cols: payload.cols,
-      rows: payload.rows,
-      cursorKeysApp: payload.cursorKeysApp,
-      revision,
-      cacheLines,
-    });
-  }
+  const patched = buildPatchedWindowFromCurrent(current, sparseWindow);
 
   return buildSessionBufferState({
     lines: patched.lines,
+    gapRanges: patched.gapRanges,
     startIndex: patched.startIndex,
-    viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : contiguous.startIndex + contiguous.lines.length,
+    viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : sparseWindow.endIndex,
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
     revision,
     cacheLines,
+    updateKind: detectUpdateKind(current, sparseWindow),
   });
 }
 
 export function sessionBufferToHistory(buffer: SessionBufferState, cacheLines: number) {
-  if (buffer.lines.length <= cacheLines) {
-    return buffer.lines.map(cellsToLine).join('\n');
+  const materializedLines = buffer.lines.map((cells, offset) => (
+    isGapIndex(buffer.gapRanges, buffer.startIndex + offset) ? '' : cellsToLine(cells)
+  ));
+
+  if (materializedLines.length <= cacheLines) {
+    return materializedLines.join('\n');
   }
-  return buffer.lines.slice(-cacheLines).map(cellsToLine).join('\n');
+  return materializedLines.slice(-cacheLines).join('\n');
 }
 
 export function sessionBuffersEqual(left: SessionBufferState, right: SessionBufferState) {
@@ -341,8 +358,18 @@ export function sessionBuffersEqual(left: SessionBufferState, right: SessionBuff
     || left.rows !== right.rows
     || left.cursorKeysApp !== right.cursorKeysApp
     || left.lines.length !== right.lines.length
+    || left.gapRanges.length !== right.gapRanges.length
   ) {
     return false;
+  }
+
+  for (let index = 0; index < left.gapRanges.length; index += 1) {
+    if (
+      left.gapRanges[index]?.startIndex !== right.gapRanges[index]?.startIndex
+      || left.gapRanges[index]?.endIndex !== right.gapRanges[index]?.endIndex
+    ) {
+      return false;
+    }
   }
 
   for (let index = 0; index < left.lines.length; index += 1) {

@@ -15,3 +15,5 @@ export * from './react/use-host-storage';
 export * from './react/use-bridge-settings-storage';
 export * from './connection/terminal-buffer';
 export * from './react/terminal-view';
+export * from './schedule/types';
+export * from './schedule/next-fire';

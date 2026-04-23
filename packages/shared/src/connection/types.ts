@@ -63,17 +63,60 @@ export interface TerminalScrollbackUpdate {
   remaining?: number;
 }
 
-export interface SessionBufferState {
-  lines: string[];
-  scrollbackStartIndex?: number;
-  updateKind: 'replace' | 'append' | 'prepend' | 'viewport';
+export interface TerminalIndexedLine {
+  index: number;
+  cells: TerminalCell[];
+}
+
+export interface TerminalGapRange {
+  startIndex: number;
+  endIndex: number;
+}
+
+export interface TerminalBufferPayload {
   revision: number;
-  remoteSnapshot?: TerminalSnapshot;
+  startIndex: number;
+  endIndex: number;
+  viewportEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
+  lines: TerminalIndexedLine[];
+}
+
+export interface BufferSyncRequestPayload {
+  knownRevision: number;
+  localStartIndex: number;
+  localEndIndex: number;
+  viewportEndIndex: number;
+  viewportRows: number;
+  mode: 'follow' | 'reading';
+  prefetch?: boolean;
+  missingRanges?: TerminalGapRange[];
+}
+
+export interface SessionBufferState {
+  lines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
+  startIndex: number;
+  endIndex: number;
+  viewportEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
+  updateKind: 'replace' | 'append' | 'prepend' | 'patch';
+  revision: number;
 }
 
 export interface TerminalRenderBufferProjection {
-  lines: string[];
-  scrollbackStartIndex?: number;
+  lines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
+  startIndex: number;
+  endIndex: number;
+  viewportEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
   revision: number;
 }
 

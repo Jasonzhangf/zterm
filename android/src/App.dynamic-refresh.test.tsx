@@ -40,11 +40,15 @@ const sessionHarness = vi.hoisted(() => {
   };
   let staleActiveSession = state.sessions[0];
   const reconnectAllSessions = vi.fn();
+  const createSession = vi.fn();
+  const switchSession = vi.fn();
 
   return {
     readState: () => state,
     readStaleActiveSession: () => staleActiveSession,
     reconnectAllSessions,
+    createSession,
+    switchSession,
     update(next: typeof state, stale = staleActiveSession) {
       state = next;
       staleActiveSession = stale;
@@ -57,17 +61,72 @@ const sessionHarness = vi.hoisted(() => {
       };
       staleActiveSession = state.sessions[0];
       reconnectAllSessions.mockReset();
+      createSession.mockReset();
+      switchSession.mockReset();
     },
   };
 });
+
+const hostHarness = vi.hoisted(() => {
+  let hosts: any[] = [];
+  let isLoaded = true;
+
+  return {
+    readHosts: () => hosts,
+    readLoaded: () => isLoaded,
+    setHosts(next: any[]) {
+      hosts = next;
+    },
+    setLoaded(next: boolean) {
+      isLoaded = next;
+    },
+    reset() {
+      hosts = [];
+      isLoaded = true;
+    },
+  };
+});
+
+const capacitorAppHarness = vi.hoisted(() => {
+  let listeners: Array<(state: { isActive: boolean }) => void> = [];
+
+  return {
+    addListener: vi.fn(async (_eventName: string, listener: (state: { isActive: boolean }) => void) => {
+      listeners.push(listener);
+      return {
+        remove: vi.fn(async () => {
+          listeners = listeners.filter((item) => item !== listener);
+        }),
+      };
+    }),
+    emit(state: { isActive: boolean }) {
+      const activeListeners = listeners.length > 0
+        ? listeners
+        : [this.addListener.mock.calls[this.addListener.mock.calls.length - 1]?.[1]].filter(
+            (listener): listener is (state: { isActive: boolean }) => void => typeof listener === 'function',
+          );
+      activeListeners.forEach((listener) => listener(state));
+    },
+    reset() {
+      listeners = [];
+      this.addListener.mockReset();
+    },
+  };
+});
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    addListener: capacitorAppHarness.addListener,
+  },
+}));
 
 vi.mock('./contexts/SessionContext', () => ({
   SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSession: () => ({
     state: sessionHarness.readState(),
-    createSession: vi.fn(),
+    createSession: sessionHarness.createSession,
     closeSession: vi.fn(),
-    switchSession: vi.fn(),
+    switchSession: sessionHarness.switchSession,
     moveSession: vi.fn(),
     renameSession: vi.fn(),
     reconnectSession: vi.fn(),
@@ -76,6 +135,8 @@ vi.mock('./contexts/SessionContext', () => ({
     sendInput: vi.fn(),
     sendImagePaste: vi.fn(),
     resizeTerminal: vi.fn(),
+    updateSessionViewport: vi.fn(),
+    requestViewportPrefetch: vi.fn(),
   }),
 }));
 
@@ -96,7 +157,8 @@ vi.mock('./hooks/useAppUpdate', () => ({
 
 vi.mock('./hooks/useHostStorage', () => ({
   useHostStorage: () => ({
-    hosts: [],
+    hosts: hostHarness.readHosts(),
+    isLoaded: hostHarness.readLoaded(),
     addHost: vi.fn(),
     upsertHost: vi.fn(),
     updateHost: vi.fn(),
@@ -166,6 +228,8 @@ describe('App dynamic refresh matrix', () => {
 
   beforeEach(() => {
     sessionHarness.reset();
+    hostHarness.reset();
+    capacitorAppHarness.reset();
     localStorage.clear();
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 's1' }));
   });
@@ -232,7 +296,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('9'));
   });
 
-  it('does not reconnect healthy sessions on pageshow/online noise', async () => {
+  it('reconnects on pageshow foreground restore but ignores plain online noise', async () => {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -240,11 +304,16 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
 
     act(() => {
-      window.dispatchEvent(new Event('pageshow'));
       window.dispatchEvent(new Event('online'));
     });
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
+
+    expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
   });
 
   it('coalesces hidden-resume lifecycle burst into a single reconnect sweep', async () => {
@@ -273,5 +342,96 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconnects on Capacitor appStateChange foreground resume', async () => {
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    await waitFor(() => expect(capacitorAppHarness.addListener).toHaveBeenCalled());
+
+    act(() => {
+      capacitorAppHarness.emit({ isActive: false });
+      capacitorAppHarness.emit({ isActive: true });
+    });
+
+    expect(sessionHarness.reconnectAllSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores persisted open tabs using the stored latest tab set and active tab id', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      {
+        id: 'host-b',
+        createdAt: 2,
+        name: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'tab-b',
+        hostId: 'host-b',
+        connectionName: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-b');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'tab-b' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: 'host-a', sessionName: 'alpha' }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false }),
+    );
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: false }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
 });

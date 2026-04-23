@@ -16,7 +16,7 @@ class MockWebSocket {
 
   readonly url: string;
   readyState = MockWebSocket.CONNECTING;
-  sent: string[] = [];
+  sent: Array<string | ArrayBuffer> = [];
   onopen: ((event?: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -27,7 +27,7 @@ class MockWebSocket {
     MockWebSocket.instances.push(this);
   }
 
-  send(data: string) {
+  send(data: string | ArrayBuffer) {
     this.sent.push(data);
   }
 
@@ -114,8 +114,15 @@ const host: Host = {
   pinned: false,
 };
 
+const host2: Host = {
+  ...host,
+  id: 'host-2',
+  name: 'local-test-2',
+  sessionName: 'zterm_mirror_lab_2',
+};
+
 function SessionHarness() {
-  const { state, createSession, sendInput, reconnectSession } = useSession();
+  const { state, createSession, sendInput, sendImagePaste, reconnectSession } = useSession();
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -129,11 +136,40 @@ function SessionHarness() {
       <div data-testid="session-state">{activeSession?.state || 'missing'}</div>
       <div data-testid="session-revision">{activeSession?.buffer.revision ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
-      <button type="button" onClick={() => sendInput('typed-from-client\r')}>
+      <button type="button" onClick={() => sendInput('session-1', 'typed-from-client\r')}>
         send-input
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          sendImagePaste(
+            'session-1',
+            new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'proof.png', { type: 'image/png' }),
+          )
+        }
+      >
+        send-image
       </button>
       <button type="button" onClick={() => reconnectSession('session-1')}>
         reconnect-session
+      </button>
+    </div>
+  );
+}
+
+function MultiSessionHarness() {
+  const { state, createSession, switchSession } = useSession();
+
+  useEffect(() => {
+    createSession(host, { sessionId: 'session-1', activate: true });
+    createSession(host2, { sessionId: 'session-2', activate: false });
+  }, [createSession]);
+
+  return (
+    <div>
+      <div data-testid="active-session">{state.activeSessionId || 'missing'}</div>
+      <button type="button" onClick={() => switchSession('session-2')}>
+        switch-second
       </button>
     </div>
   );
@@ -167,7 +203,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws.triggerOpen();
 
     await waitFor(() => {
-      const sentTypes = ws.sent.map((item) => JSON.parse(item).type);
+      const sentTypes = ws.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
       expect(sentTypes).toContain('connect');
     });
 
@@ -234,10 +270,16 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
     await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001'));
 
+    const sentCountBeforeInput = ws.sent.length;
+
     fireEvent.click(screen.getByText('send-input'));
 
-    const sentMessages = ws.sent.map((item) => JSON.parse(item));
+    const sentMessages = ws.sent
+      .slice(sentCountBeforeInput)
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item));
     expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
+    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     expect(screen.getByTestId('session-lines').textContent).not.toContain('typed-from-client');
     expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001');
   });
@@ -336,9 +378,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('rejects malformed websocket partial buffer-sync payloads that leave holes outside the local overlap', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
+  it('stitches prepended history rows onto the current local mirror without a full reset', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -390,12 +430,9 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('session-lines').textContent).toContain('line-a|line-b|line-c|line-d|line-e|line-f');
-      expect(screen.getByTestId('session-revision').textContent).toBe('1');
-      expect(errorSpy).toHaveBeenCalled();
+      expect(screen.getByTestId('session-lines').textContent).toContain('line-y|line-z|line-a|line-b|line-c|line-d|line-e|line-f|line-g');
+      expect(screen.getByTestId('session-revision').textContent).toBe('2');
     });
-
-    errorSpy.mockRestore();
   });
 
   it('keeps latest mirror truth across reconnect and rejects stale post-reconnect snapshots', async () => {
@@ -453,5 +490,78 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(screen.getByTestId('session-lines').textContent).toContain('after-reconnect-001');
       expect(screen.getByTestId('session-revision').textContent).toBe('7');
     });
+  });
+
+  it('only requests a bootstrap sync when switching to a connected tab', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => {
+      const sent1 = ws1.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
+      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
+      expect(sent1).not.toContain('buffer-sync-request');
+      expect(sent2).not.toContain('buffer-sync-request');
+      expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+    });
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+      const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(lastRequest?.payload?.mode).toBe('follow');
+      expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+    });
+  });
+
+  it('sends image paste as metadata plus binary frame without reconnect side effects', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('send-image'));
+
+    await waitFor(() => expect(ws.sent.length).toBeGreaterThanOrEqual(3));
+
+    const pasteMeta = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item))
+      .find((item) => item.type === 'paste-image-start');
+
+    expect(pasteMeta).toBeTruthy();
+    expect(pasteMeta.payload).toMatchObject({
+      name: 'proof.png',
+      mimeType: 'image/png',
+      byteLength: 4,
+      pasteSequence: '\u0016',
+    });
+    expect(ws.sent.some((item) => item instanceof ArrayBuffer)).toBe(true);
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 });

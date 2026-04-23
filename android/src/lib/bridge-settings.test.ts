@@ -12,7 +12,7 @@ const baseSettings = {
 describe('bridge-settings helpers', () => {
   it('builds daemon start command with configured port', () => {
     expect(buildDaemonStartCommand({ ...baseSettings, targetHost: '100.127.23.27', targetPort: 37283 })).toBe(
-      `wterm daemon start  # auth from ${WTERM_CONFIG_DISPLAY_PATH} (100.127.23.27:37283)`,
+      `zterm-daemon start  # auth from ${WTERM_CONFIG_DISPLAY_PATH} (100.127.23.27:37283)`,
     );
   });
 

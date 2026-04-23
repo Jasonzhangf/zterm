@@ -7,14 +7,24 @@ import os, sys
 print(os.path.realpath(sys.argv[1]))
 PY
 )"
+WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 NODE_BIN="$(command -v node)"
 LOG_DIR="${HOME}/.wterm/logs"
 WTERM_HOME="${HOME}/.wterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
-LAUNCH_RUNNER="${WTERM_BIN_DIR}/wterm-daemon-launchd-run"
-DIRECT_RUNNER="${WTERM_BIN_DIR}/wterm-daemon-run"
-LAUNCH_AGENT_LABEL="com.zterm.android.daemon"
+RUNTIME_STATE_DIR="${WTERM_HOME}/run"
+DAEMON_RUNTIME_DIR="${WTERM_HOME}/daemon-runtime"
+LAUNCH_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-launchd-run"
+DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
+DAEMON_ENTRY="${ROOT_DIR}/src/server/server.ts"
+ROOT_NODE_PTY_HELPER_GLOB="${ROOT_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
+WORKSPACE_NODE_PTY_HELPER_GLOB="${WORKSPACE_ROOT}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
+STAGED_NODE_PTY_HELPER_GLOB="${DAEMON_RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
+STAGED_DAEMON_ENTRY="${DAEMON_RUNTIME_DIR}/server.cjs"
+LAUNCH_AGENT_LABEL="com.zterm.android.zterm-daemon"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+PREVIOUS_LAUNCH_AGENT_LABEL="com.zterm.android.daemon"
+PREVIOUS_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${PREVIOUS_LAUNCH_AGENT_LABEL}.plist"
 LEGACY_LAUNCH_AGENT_LABEL="com.wterm.mobile.daemon"
 LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LABEL}.plist"
 read_config() {
@@ -48,7 +58,8 @@ Usage:
   ./scripts/zterm-daemon.sh install-service
   ./scripts/zterm-daemon.sh uninstall-service
   ./scripts/zterm-daemon.sh service-status
-  wterm daemon start|stop|restart|status|install-service|uninstall-service|service-status
+  zterm-daemon start|stop|restart|status|install-service|uninstall-service|service-status
+  wterm daemon start|stop|restart|status|install-service|uninstall-service|service-status  # legacy alias
 
 Behavior:
   - `run` keeps daemon in foreground (for launchd autostart)
@@ -70,6 +81,10 @@ legacy_service_loaded() {
   launchctl print "gui/$(id -u)/${LEGACY_LAUNCH_AGENT_LABEL}" >/dev/null 2>&1
 }
 
+previous_service_loaded() {
+  launchctl print "gui/$(id -u)/${PREVIOUS_LAUNCH_AGENT_LABEL}" >/dev/null 2>&1
+}
+
 service_snapshot() {
   launchctl print "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" 2>/dev/null || true
 }
@@ -89,15 +104,59 @@ wait_for_service_ready() {
   return 1
 }
 
+port_listening() {
+  nc -z 127.0.0.1 "${PORT}" >/dev/null 2>&1
+}
+
+reset_launch_crash_guard() {
+  rm -f "${RUNTIME_STATE_DIR}/zterm-daemon-launch-crashes.log"
+}
+
+resolve_esbuild_bin() {
+  local candidate
+  candidate="$(
+    {
+      ls "${ROOT_DIR}"/node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild 2>/dev/null || true
+      ls "${WORKSPACE_ROOT}"/node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild 2>/dev/null || true
+    } | sort -V | tail -n 1
+  )"
+  if [[ -n "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+  return 1
+}
+
+stage_daemon_runtime() {
+  local esbuild_bin
+  esbuild_bin="$(resolve_esbuild_bin)" || {
+    echo "missing esbuild binary under ${ROOT_DIR}/node_modules/.pnpm or ${WORKSPACE_ROOT}/node_modules/.pnpm" >&2
+    return 1
+  }
+
+  mkdir -p "${DAEMON_RUNTIME_DIR}/node_modules"
+  "${esbuild_bin}" "${DAEMON_ENTRY}" \
+    --bundle \
+    --platform=node \
+    --format=cjs \
+    --target=node20 \
+    --outfile="${STAGED_DAEMON_ENTRY}" \
+    --external:node-pty >/dev/null
+  rm -rf "${DAEMON_RUNTIME_DIR}/node_modules/node-pty"
+  cp -RL "${ROOT_DIR}/node_modules/node-pty" "${DAEMON_RUNTIME_DIR}/node_modules/"
+  chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
+}
+
 run_foreground() {
   mkdir -p "$LOG_DIR"
-  cd "$ROOT_DIR"
-  chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
-  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" "$NODE_BIN" --import tsx src/server/server.ts
+  stage_daemon_runtime
+  chmod +x ${ROOT_NODE_PTY_HELPER_GLOB} ${WORKSPACE_NODE_PTY_HELPER_GLOB} ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
+  cd "${HOME}"
+  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
 status_tmux() {
-  if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  if tmux has-session -t "$SESSION_NAME" 2>/dev/null && port_listening; then
     echo "zterm daemon running: session=${SESSION_NAME} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
     return 0
   fi
@@ -119,22 +178,26 @@ status_service() {
   last_exit="$(printf '%s\n' "$snapshot" | awk '/last exit code =/ { print $5; exit }')"
   active_count="$(printf '%s\n' "$snapshot" | awk '/active count =/ { print $4; exit }')"
 
-  if [[ "${active_count:-0}" != "0" ]]; then
+  if [[ "${active_count:-0}" != "0" ]] && port_listening; then
     echo "zterm autostart service running: label=${LAUNCH_AGENT_LABEL} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
     echo "plist=${LAUNCH_AGENT_PATH}"
     echo "active_count=${active_count:-unknown} last_exit=${last_exit:-unknown}"
     return 0
   fi
 
-  echo "zterm autostart service installed but inactive: label=${LAUNCH_AGENT_LABEL}"
+  echo "zterm autostart service installed but unhealthy: label=${LAUNCH_AGENT_LABEL}"
   echo "plist=${LAUNCH_AGENT_PATH}"
   echo "active_count=${active_count:-unknown} last_exit=${last_exit:-unknown}"
+  echo "listener=down port=${PORT}"
   return 1
 }
 
 status() {
   if service_installed; then
-    status_service
+    if status_service; then
+      return 0
+    fi
+    status_tmux
     return $?
   fi
 
@@ -153,11 +216,11 @@ start_tmux() {
     return 0
   fi
 
-  cd "$ROOT_DIR"
-  chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
+  stage_daemon_runtime
+  chmod +x ${ROOT_NODE_PTY_HELPER_GLOB} ${WORKSPACE_NODE_PTY_HELPER_GLOB} ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 
   tmux new-session -d -s "$SESSION_NAME" \
-    "cd '$ROOT_DIR' && env -u TMUX -u TMUX_PANE HOST='$HOST' PORT='$PORT' ZTERM_HOST='$HOST' ZTERM_PORT='$PORT' ZTERM_AUTH_TOKEN='${ZTERM_AUTH_TOKEN:-}' '$NODE_BIN' --import tsx src/server/server.ts >>'$log_file' 2>&1"
+    "cd '${HOME}' && env -u TMUX -u TMUX_PANE HOST='$HOST' PORT='$PORT' ZTERM_HOST='$HOST' ZTERM_PORT='$PORT' ZTERM_AUTH_TOKEN='${ZTERM_AUTH_TOKEN:-}' '$NODE_BIN' '$STAGED_DAEMON_ENTRY' >>'$log_file' 2>&1"
 
   echo "zterm daemon started"
   echo "session=${SESSION_NAME}"
@@ -179,21 +242,63 @@ stop_tmux() {
 }
 
 write_launch_agent() {
-  mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR"
+  stage_daemon_runtime
+  mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"
 cat > "$DIRECT_RUNNER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-cd "${ROOT_DIR}"
-chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" --import tsx src/server/server.ts
+cd "${HOME}"
+chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
+exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$DIRECT_RUNNER"
 cat > "$LAUNCH_RUNNER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-cd "${ROOT_DIR}"
-chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" --import tsx src/server/server.ts
+PORT="${PORT}"
+STATE_DIR="${RUNTIME_STATE_DIR}"
+CRASH_FILE="${RUNTIME_STATE_DIR}/zterm-daemon-launch-crashes.log"
+mkdir -p "\$STATE_DIR"
+
+if lsof -nP -iTCP:"\$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd preflight: port \$PORT already listening, skip duplicate start" >> "${LOG_DIR}/launchd-stdout.log"
+  exit 0
+fi
+
+RECENT_LAUNCHES="\$(
+  if [[ -f "\$CRASH_FILE" ]]; then
+    python3 - "\$CRASH_FILE" "\$(date +%s)" <<'PY'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+now = int(sys.argv[2])
+cutoff = now - 120
+entries = []
+for line in path.read_text().splitlines():
+    try:
+        value = int(line.strip())
+    except ValueError:
+        continue
+    if value >= cutoff:
+        entries.append(value)
+entries.append(now)
+path.write_text("\n".join(str(item) for item in entries[-8:]) + "\n")
+print(len(entries))
+PY
+  else
+    printf '%s\n' "\$(date +%s)" > "\$CRASH_FILE"
+    echo 1
+  fi
+)"
+
+if [[ "\${RECENT_LAUNCHES:-0}" -ge 5 ]]; then
+  echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd preflight: crash-loop guard tripped (\${RECENT_LAUNCHES} launches/120s), stop auto-restart" >> "${LOG_DIR}/launchd-stderr.log"
+  exit 0
+fi
+
+cd "${HOME}"
+chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
+exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$LAUNCH_RUNNER"
   cat > "$LAUNCH_AGENT_PATH" <<EOF
@@ -207,14 +312,15 @@ EOF
   <array>
     <string>${LAUNCH_RUNNER}</string>
   </array>
-  <key>WorkingDirectory</key>
-  <string>${ROOT_DIR}</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>ThrottleInterval</key>
-  <integer>15</integer>
+  <integer>60</integer>
   <key>StandardOutPath</key>
   <string>${LOG_DIR}/launchd-stdout.log</string>
   <key>StandardErrorPath</key>
@@ -225,6 +331,9 @@ EOF
 }
 
 stop_legacy_service() {
+  if previous_service_loaded; then
+    launchctl bootout "gui/$(id -u)" "$PREVIOUS_LAUNCH_AGENT_PATH" || launchctl bootout "gui/$(id -u)/${PREVIOUS_LAUNCH_AGENT_LABEL}" || true
+  fi
   if legacy_service_loaded; then
     launchctl bootout "gui/$(id -u)" "$LEGACY_LAUNCH_AGENT_PATH" || launchctl bootout "gui/$(id -u)/${LEGACY_LAUNCH_AGENT_LABEL}" || true
   fi
@@ -232,7 +341,13 @@ stop_legacy_service() {
 
 remove_legacy_service() {
   stop_legacy_service
+  rm -f "$PREVIOUS_LAUNCH_AGENT_PATH"
   rm -f "$LEGACY_LAUNCH_AGENT_PATH"
+}
+
+bootstrap_service() {
+  reset_launch_crash_guard
+  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
 }
 
 start_service() {
@@ -246,14 +361,18 @@ start_service() {
   remove_legacy_service
 
   if service_loaded; then
-    launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
-  else
-    launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
-    launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+    launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+  fi
+  bootstrap_service
+
+  if wait_for_service_ready; then
+    status_service
+    return 0
   fi
 
-  wait_for_service_ready || true
-  status_service
+  echo "zterm autostart service unhealthy after start; falling back to tmux session"
+  launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+  start_tmux
 }
 
 stop_service() {
@@ -282,10 +401,15 @@ restart_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
-  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
-  launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
-  wait_for_service_ready || true
-  status_service
+  bootstrap_service
+  if wait_for_service_ready; then
+    status_service
+    return 0
+  fi
+
+  echo "zterm autostart service unhealthy after restart; falling back to tmux session"
+  launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+  start_tmux
 }
 
 install_service() {
@@ -295,12 +419,17 @@ install_service() {
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
   fi
-  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
-  launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+  bootstrap_service
   echo "zterm autostart service installed"
   echo "plist=${LAUNCH_AGENT_PATH}"
-  wait_for_service_ready || true
-  status_service
+  if wait_for_service_ready; then
+    status_service
+    return 0
+  fi
+
+  echo "zterm autostart service unhealthy after install"
+  launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+  return 1
 }
 
 uninstall_service() {

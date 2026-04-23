@@ -16,12 +16,15 @@ import {
   useTerminalRuntimeSnapshot,
   type TerminalRuntimeController,
 } from '../lib/terminal-runtime';
+import { createIdleConnectionState, type TerminalConnectionState } from '../lib/bridge-transport';
 import { DetailsSlot } from './DetailsSlot';
 import { QuickConnectSheet } from './QuickConnectSheet';
+import { SessionScheduleModal } from '../components/SessionScheduleModal';
 import {
   cloneWorkspaceState,
   createConnectionWorkspaceTab,
   createEmptyWorkspaceTab,
+  createLocalTmuxWorkspaceTab,
   createShellProfile,
   createWorkspacePane,
   loadShellProfiles,
@@ -63,6 +66,20 @@ interface QuickPaletteItem {
   subtitle: string;
   value: string;
 }
+
+type ConnectionRequest =
+  | {
+      kind: 'local-tmux';
+      tabId: string;
+      sessionName: string;
+      signature: string;
+    }
+  | {
+      kind: 'connection';
+      tabId: string;
+      target: EditableHost;
+      signature: string;
+    };
 
 const MAX_PANES = 3;
 const MIN_PANE_RATIO = 0.18;
@@ -127,6 +144,51 @@ function resolveTabTarget(tab: ShellWorkspaceTab | null | undefined, hosts: Host
     }
   }
   return tab.target ? toEditableHost(tab.target) : null;
+}
+
+function resolveLocalSessionName(tab: ShellWorkspaceTab | null | undefined) {
+  return tab?.kind === 'local-tmux' ? tab.localSessionName?.trim() || '' : '';
+}
+
+function buildRemoteTabSignature(tabId: string, target: EditableHost) {
+  return JSON.stringify({
+    kind: 'remote',
+    tabId,
+    name: target.name,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+    sessionName: target.sessionName,
+    authToken: target.authToken || '',
+    authType: target.authType,
+    password: target.password || '',
+    privateKey: target.privateKey || '',
+    autoCommand: target.autoCommand || '',
+  });
+}
+
+function buildLocalTabSignature(tabId: string, sessionName: string) {
+  return JSON.stringify({
+    kind: 'local-tmux',
+    tabId,
+    sessionName,
+  });
+}
+
+async function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Unsupported image payload'));
+        return;
+      }
+      const [, dataBase64 = ''] = result.split(',', 2);
+      resolve(dataBase64);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function updateWorkspacePane(
@@ -200,24 +262,30 @@ function PaneTabStatus({
   runtime: TerminalRuntimeController | null;
 }) {
   const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
-  const runtimeStatus = tab.kind === 'connection' ? runtimeSnapshot.connection.status : 'idle';
+  const runtimeStatus = tab.kind !== 'empty' ? runtimeSnapshot.connection.status : 'idle';
   return <span className={`shell-tab-dot ${runtimeStatus}`} />;
 }
 
 function PaneSurface({
   tab,
   target,
+  localSessionName,
   runtime,
+  isVisible,
+  isInputFocused,
   onOpenConnection,
 }: {
   tab: ShellWorkspaceTab;
   target: EditableHost | null;
+  localSessionName: string;
   runtime: TerminalRuntimeController | null;
+  isVisible: boolean;
+  isInputFocused: boolean;
   onOpenConnection: () => void;
 }) {
   const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
 
-  if (tab.kind === 'empty' || !target) {
+  if (tab.kind === 'empty' || (tab.kind === 'connection' && !target) || (tab.kind === 'local-tmux' && !localSessionName)) {
     return <EmptyPane onOpen={onOpenConnection} />;
   }
 
@@ -226,16 +294,41 @@ function PaneSurface({
       {runtimeSnapshot.connection.error ? <div className="shell-terminal-banner error">{runtimeSnapshot.connection.error}</div> : null}
       <div className="shell-terminal-statusbar">
         <span className={`shell-runtime-pill ${runtimeSnapshot.connection.status}`}>{runtimeSnapshot.connection.status}</span>
-        <span>{formatBridgeSessionTarget(target)}</span>
-        <span>{runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(target)}</span>
+        <span>{tab.kind === 'local-tmux' ? `Local tmux · ${localSessionName}` : formatBridgeSessionTarget(target!)}</span>
+        <span>
+          {runtimeSnapshot.connection.connectedSessionId
+            || (tab.kind === 'local-tmux' ? localSessionName : getResolvedSessionName(target!))}
+        </span>
       </div>
       <div className="shell-terminal-canvas">
         <TerminalView
-          sessionId={runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(target)}
+          sessionId={
+            runtimeSnapshot.connection.connectedSessionId
+            || (tab.kind === 'local-tmux' ? localSessionName : getResolvedSessionName(target!))
+          }
           projection={runtimeSnapshot.render}
-          active
+          active={isVisible}
+          allowDomFocus={isInputFocused}
           onInput={(data) => runtime?.sendInput(data)}
+          onImagePaste={
+            tab.kind === 'connection'
+              ? async (file) => {
+                  const dataBase64 = await fileToBase64(file);
+                  const ok = runtime?.pasteImage({
+                    name: file.name || 'clipboard-image',
+                    mimeType: file.type || 'image/png',
+                    dataBase64,
+                    pasteSequence: '\x16',
+                  });
+                  if (!ok) {
+                    throw new Error('当前远端会话还没连上，暂时不能贴图。');
+                  }
+                }
+              : undefined
+          }
           onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
+          onViewportChange={(viewState) => runtime?.updateViewport(viewState)}
+          onViewportPrefetch={(viewState) => runtime?.requestViewportPrefetch(viewState)}
         />
       </div>
     </div>
@@ -252,12 +345,14 @@ export function ShellWorkspace({
 }: ShellWorkspaceProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const runtimeRegistryRef = useRef(new Map<string, TerminalRuntimeController>());
+  const connectedTabSignaturesRef = useRef(new Map<string, string>());
   const [workspace, setWorkspace] = useState<ShellWorkspaceState>(() => loadShellWorkspaceState());
   const [profiles, setProfiles] = useState<ShellProfileRecord[]>(() => loadShellProfiles());
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [connectionPicker, setConnectionPicker] = useState<ConnectionPickerState | null>(null);
   const [connectionEditor, setConnectionEditor] = useState<ConnectionEditorState | null>(null);
   const [quickPaletteOpen, setQuickPaletteOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [quickPaletteTab, setQuickPaletteTab] = useState<QuickPaletteTab>('shortcuts');
   const [quickPaletteQuery, setQuickPaletteQuery] = useState('');
   const [clipboardText, setClipboardText] = useState('');
@@ -313,18 +408,60 @@ export function ShellWorkspace({
 
   const activeTab = useMemo(() => resolveActiveTab(workspace), [workspace]);
   const activeTarget = useMemo(() => resolveTabTarget(activeTab, hosts), [activeTab, hosts]);
-  const activeRuntime = activeTab && activeTab.kind === 'connection' ? getRuntimeForTab(activeTab.id) : null;
+  const activeLocalSessionName = useMemo(() => resolveLocalSessionName(activeTab), [activeTab]);
+  const activeRuntime = activeTab && activeTab.kind !== 'empty' ? getRuntimeForTab(activeTab.id) : null;
   const activeRuntimeSnapshot = useTerminalRuntimeSnapshot(activeRuntime);
+  const activeBridgeRuntime = useMemo<TerminalConnectionState>(() => {
+    if (activeTab?.kind === 'connection') {
+      return activeRuntimeSnapshot.connection as TerminalConnectionState;
+    }
+    return createIdleConnectionState();
+  }, [activeRuntimeSnapshot.connection, activeTab?.kind]);
+  const connectionRequests = useMemo<ConnectionRequest[]>(() => {
+    const requests: ConnectionRequest[] = [];
+    workspace.panes.forEach((pane) => {
+      pane.tabs.forEach((tab) => {
+        if (tab.kind === 'empty') {
+          return;
+        }
+        if (tab.kind === 'local-tmux') {
+          const localSessionName = resolveLocalSessionName(tab);
+          if (!localSessionName) {
+            return;
+          }
+          requests.push({
+            kind: 'local-tmux',
+            tabId: tab.id,
+            sessionName: localSessionName,
+            signature: buildLocalTabSignature(tab.id, localSessionName),
+          });
+          return;
+        }
+        const target = resolveTabTarget(tab, hosts);
+        if (!target) {
+          return;
+        }
+        requests.push({
+          kind: 'connection',
+          tabId: tab.id,
+          target,
+          signature: buildRemoteTabSignature(tab.id, target),
+        });
+      });
+    });
+    return requests;
+  }, [hosts, workspace]);
 
   useEffect(() => {
     const activeRuntimeIds = new Set(
-      workspace.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'connection').map((tab) => tab.id)),
+      workspace.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind !== 'empty').map((tab) => tab.id)),
     );
 
     runtimeRegistryRef.current.forEach((runtime, tabId) => {
       if (!activeRuntimeIds.has(tabId)) {
         runtime.dispose();
         runtimeRegistryRef.current.delete(tabId);
+        connectedTabSignaturesRef.current.delete(tabId);
       }
     });
   }, [workspace]);
@@ -332,21 +469,43 @@ export function ShellWorkspace({
   useEffect(() => {
     workspace.panes.forEach((pane) => {
       pane.tabs.forEach((tab) => {
-        if (tab.kind !== 'connection') {
+        if (tab.kind === 'empty') {
           return;
         }
-        const target = resolveTabTarget(tab, hosts);
-        if (!target) {
-          return;
-        }
-        getRuntimeForTab(tab.id).connect(target);
+        const runtime = getRuntimeForTab(tab.id);
+        const isVisible = pane.activeTabId === tab.id;
+        runtime.setActivityMode(isVisible ? 'active' : 'idle');
       });
     });
-  }, [getRuntimeForTab, hosts, workspace]);
+  }, [getRuntimeForTab, workspace]);
+
+  useEffect(() => {
+    const activeRequestIds = new Set<string>();
+    connectionRequests.forEach((request) => {
+      activeRequestIds.add(request.tabId);
+      const previousSignature = connectedTabSignaturesRef.current.get(request.tabId);
+      if (previousSignature === request.signature) {
+        return;
+      }
+      const runtime = getRuntimeForTab(request.tabId);
+      if (request.kind === 'local-tmux') {
+        runtime.connectLocalTmux({ sessionName: request.sessionName, title: request.sessionName });
+      } else {
+        runtime.connectRemote(request.target);
+      }
+      connectedTabSignaturesRef.current.set(request.tabId, request.signature);
+    });
+    connectedTabSignaturesRef.current.forEach((_signature, tabId) => {
+      if (!activeRequestIds.has(tabId)) {
+        connectedTabSignaturesRef.current.delete(tabId);
+      }
+    });
+  }, [connectionRequests, getRuntimeForTab]);
 
   useEffect(() => () => {
     runtimeRegistryRef.current.forEach((runtime) => runtime.dispose());
     runtimeRegistryRef.current.clear();
+    connectedTabSignaturesRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -438,40 +597,90 @@ export function ShellWorkspace({
     [],
   );
 
+  const assignTabsToPane = useCallback(
+    (paneId: string, tabsToOpen: ShellWorkspaceTab[], mode: 'replace-active' | 'append-tab') => {
+      if (tabsToOpen.length === 0) {
+        return;
+      }
+      setWorkspace((current) => {
+        const next = updateWorkspacePane(current, paneId, (pane) => {
+          const tabIndex = pane.tabs.findIndex((tab) => tab.id === pane.activeTabId);
+          const activeTabInPane = tabIndex >= 0 ? pane.tabs[tabIndex] : pane.tabs[0];
+          const tabs = [...pane.tabs];
+          let activeTabId = pane.activeTabId;
 
-  const handleOpenConnection = useCallback(
-    (hostData: EditableHost, persistedHostId?: string) => {
+          tabsToOpen.forEach((nextTab, index) => {
+            const shouldReplace = index === 0 && mode === 'replace-active' && activeTabInPane?.kind === 'empty';
+            if (shouldReplace && tabIndex >= 0) {
+              tabs[tabIndex] = nextTab;
+            } else {
+              tabs.push(nextTab);
+            }
+            activeTabId = nextTab.id;
+          });
+
+          return {
+            ...pane,
+            tabs,
+            activeTabId,
+          };
+        });
+        return {
+          ...next,
+          activePaneId: paneId,
+        };
+      });
+      setConnectionPicker(null);
+      setConnectionEditor(null);
+    },
+    [],
+  );
+
+
+  const handleOpenRemoteSessions = useCallback(
+    (items: Array<{ hostData: EditableHost; persistedHostId?: string }>) => {
       if (!connectionPicker) {
         return;
       }
-      const hostWithHistory: EditableHost = {
-        ...hostData,
-        lastConnected: Date.now(),
-      };
-      persistBridgeServer(hostData);
-      if (persistedHostId) {
-        const currentHost = hosts.find((host) => host.id === persistedHostId);
-        if (!currentHost) {
+      const nextTabs: ShellWorkspaceTab[] = [];
+
+      items.forEach(({ hostData, persistedHostId }) => {
+        const hostWithHistory: EditableHost = {
+          ...hostData,
+          lastConnected: Date.now(),
+        };
+        persistBridgeServer(hostData);
+        if (persistedHostId) {
+          const currentHost = hosts.find((host) => host.id === persistedHostId);
+          if (!currentHost) {
+            return;
+          }
+          updateHost(persistedHostId, hostWithHistory);
+          nextTabs.push(createConnectionWorkspaceTab({
+            ...toEditableHost(currentHost),
+            ...hostWithHistory,
+          }, persistedHostId));
           return;
         }
-        updateHost(persistedHostId, hostWithHistory);
-        assignHostToPane(
-          connectionPicker.paneId,
-          {
-            ...currentHost,
-            ...hostWithHistory,
-            id: persistedHostId,
-          },
-          connectionPicker.mode,
-          persistedHostId,
-        );
-        return;
-      }
-      const created = addHost(hostWithHistory);
-      assignHostToPane(connectionPicker.paneId, created, connectionPicker.mode, created.id);
+        const created = addHost(hostWithHistory);
+        nextTabs.push(createConnectionWorkspaceTab(toEditableHost(created), created.id));
+      });
+
+      assignTabsToPane(connectionPicker.paneId, nextTabs, connectionPicker.mode);
     },
-    [addHost, assignHostToPane, connectionPicker, hosts, persistBridgeServer, updateHost],
+    [addHost, assignTabsToPane, connectionPicker, hosts, persistBridgeServer, updateHost],
   );
+
+  const handleOpenLocalTmuxSessions = useCallback((sessionNames: string[]) => {
+    if (!connectionPicker) {
+      return;
+    }
+    assignTabsToPane(
+      connectionPicker.paneId,
+      sessionNames.map((sessionName) => createLocalTmuxWorkspaceTab(sessionName)),
+      connectionPicker.mode,
+    );
+  }, [assignTabsToPane, connectionPicker]);
 
   const handleSaveConnection = useCallback(
     (hostData: EditableHost) => {
@@ -686,7 +895,13 @@ export function ShellWorkspace({
 
         <div className="shell-topbar-title">
           <strong>ZTerm</strong>
-          <span>{activeTarget ? formatBridgeSessionTarget(activeTarget) : 'single shell · split on demand'}</span>
+          <span>
+            {activeLocalSessionName
+              ? `Local tmux · ${activeLocalSessionName}`
+              : activeTarget
+                ? formatBridgeSessionTarget(activeTarget)
+                : 'single shell · split on demand'}
+          </span>
         </div>
 
         <div className="shell-topbar-actions">
@@ -695,6 +910,20 @@ export function ShellWorkspace({
           </button>
           <button className="shell-action-button" type="button" onClick={splitActivePane} disabled={workspace.panes.length >= MAX_PANES}>
             Split
+          </button>
+          <button
+            className="shell-action-button"
+            type="button"
+            disabled={activeTab?.kind !== 'connection' || !activeTarget || !activeRuntime}
+            onClick={() => {
+              if (activeTab?.kind !== 'connection' || !activeTarget || !activeRuntime) {
+                return;
+              }
+              activeRuntime.requestScheduleList(getResolvedSessionName(activeTarget));
+              setScheduleModalOpen(true);
+            }}
+          >
+            Schedule
           </button>
           <div className="shell-menu-anchor">
             <button className="shell-action-button" type="button" onClick={() => setProfileMenuOpen((current) => !current)}>
@@ -768,8 +997,11 @@ export function ShellWorkspace({
             pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
             hosts,
           );
+          const paneLocalSessionName = resolveLocalSessionName(
+            pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
+          );
           const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
-          const paneRuntime = paneActiveTab.kind === 'connection' ? getRuntimeForTab(paneActiveTab.id) : null;
+          const paneRuntime = paneActiveTab.kind !== 'empty' ? getRuntimeForTab(paneActiveTab.id) : null;
 
           return (
             <Fragment key={pane.id}>
@@ -777,7 +1009,7 @@ export function ShellWorkspace({
                 <div className="shell-pane-tabs">
                   <div className="shell-pane-tablist">
                     {pane.tabs.map((tab) => {
-                      const tabRuntime = tab.kind === 'connection' ? getRuntimeForTab(tab.id) : null;
+                      const tabRuntime = tab.kind !== 'empty' ? getRuntimeForTab(tab.id) : null;
                       return (
                         <div
                           className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}
@@ -821,7 +1053,10 @@ export function ShellWorkspace({
                   <PaneSurface
                     tab={paneActiveTab}
                     target={paneTarget}
+                    localSessionName={paneLocalSessionName}
                     runtime={paneRuntime}
+                    isVisible
+                    isInputFocused={pane.id === workspace.activePaneId}
                     onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
                   />
                 </div>
@@ -848,7 +1083,8 @@ export function ShellWorkspace({
             bridgeSettings={bridgeSettings}
             hosts={hosts}
             onClose={() => setConnectionPicker(null)}
-            onOpen={handleOpenConnection}
+            onOpenRemoteSessions={handleOpenRemoteSessions}
+            onOpenLocalTmuxSessions={handleOpenLocalTmuxSessions}
             onOpenAdvanced={() => {
               setConnectionEditor({ paneId: connectionPicker.paneId, mode: connectionPicker.mode });
               setConnectionPicker(null);
@@ -863,7 +1099,7 @@ export function ShellWorkspace({
             <DetailsSlot
               host={connectionEditor.hostId ? hosts.find((host) => host.id === connectionEditor.hostId) : undefined}
               bridgeSettings={bridgeSettings}
-              bridgeRuntime={activeRuntimeSnapshot.connection}
+              bridgeRuntime={activeBridgeRuntime}
               isEditing
               onSave={handleSaveConnection}
               onCancel={() => setConnectionEditor(null)}
@@ -920,6 +1156,20 @@ export function ShellWorkspace({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {activeTab?.kind === 'connection' && activeTarget && activeRuntime ? (
+        <SessionScheduleModal
+          open={scheduleModalOpen}
+          sessionName={getResolvedSessionName(activeTarget)}
+          scheduleState={activeRuntimeSnapshot.schedule}
+          onClose={() => setScheduleModalOpen(false)}
+          onRefresh={() => activeRuntime.requestScheduleList(getResolvedSessionName(activeTarget))}
+          onSave={(job) => activeRuntime.upsertScheduleJob(job)}
+          onDelete={(jobId) => activeRuntime.deleteScheduleJob(jobId)}
+          onToggle={(jobId, enabled) => activeRuntime.toggleScheduleJob(jobId, enabled)}
+          onRunNow={(jobId) => activeRuntime.runScheduleJobNow(jobId)}
+        />
       ) : null}
     </div>
   );

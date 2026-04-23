@@ -4,9 +4,15 @@
  * 基于 android/docs/spec.md 的主机/会话范围定义
  */
 
+import type {
+  ScheduleEventPayload,
+  ScheduleJobDraft,
+  ScheduleStatePayload,
+} from '@zterm/shared';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
+export type { ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared';
 
 // ============================================
 // Host 配置
@@ -41,15 +47,21 @@ export type SessionState =
   | 'error'       // 连接失败
   | 'closed';     // 已关闭
 
+export interface TerminalGapRange {
+  startIndex: number;
+  endIndex: number;
+}
+
 export interface SessionBufferState {
-  lines: TerminalCell[][];          // latest contiguous mirror window for this session
-  startIndex: number;               // absolute index for the first locally cached line
-  endIndex: number;                 // exclusive absolute index for the last locally cached line
+  lines: TerminalCell[][];          // sparse cached window rows; gap rows are [] and described by gapRanges
+  gapRanges: TerminalGapRange[];    // absolute missing spans inside [startIndex, endIndex)
+  startIndex: number;               // absolute index for the first locally cached row
+  endIndex: number;                 // exclusive absolute index for the last locally cached row
   viewportEndIndex: number;         // exclusive absolute row index for viewport tail
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
-  updateKind: 'replace';
+  updateKind: 'replace' | 'append' | 'prepend' | 'patch';
   revision: number;
 }
 
@@ -97,10 +109,28 @@ export interface TerminalBufferPayload {
   lines: TerminalIndexedLine[];     // concrete rows carried by this message; may be full window or subset
 }
 
+export interface BufferSyncRequestPayload {
+  knownRevision: number;
+  localStartIndex: number;
+  localEndIndex: number;
+  viewportEndIndex: number;
+  viewportRows: number;
+  mode: 'follow' | 'reading';
+  prefetch?: boolean;
+  missingRanges?: TerminalGapRange[];
+}
+
 export interface PasteImagePayload {
   name: string;
   mimeType: string;
   dataBase64: string;
+  pasteSequence?: string;
+}
+
+export interface PasteImageStartPayload {
+  name: string;
+  mimeType: string;
+  byteLength: number;
   pasteSequence?: string;
 }
 
@@ -164,6 +194,28 @@ export interface SessionGroupHistory {
   lastOpenedAt: number;
 }
 
+export interface PersistedOpenTab {
+  sessionId: string;
+  hostId: string;
+  connectionName: string;
+  bridgeHost: string;
+  bridgePort: number;
+  sessionName: string;
+  authToken?: string;
+  autoCommand?: string;
+  customName?: string;
+  createdAt: number;
+}
+
+export interface SavedTabList {
+  id: string;
+  name: string;
+  tabs: PersistedOpenTab[];
+  activeSessionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ============================================
 // 命令历史
 // ============================================
@@ -181,12 +233,20 @@ export interface CommandHistory {
 
 export type ClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
+  | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
+  | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }
+  | { type: 'schedule-list'; payload: { sessionName: string } }
+  | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
+  | { type: 'schedule-delete'; payload: { jobId: string } }
+  | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
+  | { type: 'schedule-run-now'; payload: { jobId: string } }
   | { type: 'tmux-create-session'; payload: { sessionName: string } }
   | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
+  | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
@@ -207,6 +267,8 @@ export type ServerMessage =
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'data'; payload: string }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
+  | { type: 'schedule-state'; payload: ScheduleStatePayload }
+  | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
@@ -275,6 +337,7 @@ export const STORAGE_KEYS = {
   SESSION_HISTORY: 'zterm:session-history',
   SESSION_GROUPS: 'zterm:session-groups',
   OPEN_TABS: 'zterm:open-tabs',
+  SAVED_TAB_LISTS: 'zterm:saved-tab-lists',
   QUICK_ACTIONS: 'zterm:quick-actions',
   SHORTCUT_ACTIONS: 'zterm:shortcut-actions',
   SESSION_DRAFTS: 'zterm:session-drafts',

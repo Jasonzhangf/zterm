@@ -70,6 +70,25 @@
 - [2026-04-22] Jason 冻结键盘规则：无论软键盘/输入法是否弹出，terminal 显示高度都不跟着改；只允许做 UI 视觉上抬，禁止把 keyboard inset 回灌成 terminal 高度变化、tmux resize 或 buffer/render window 高度变化。
 - [2026-04-22] daemon 安装/重启前先清理 legacy `com.wterm.mobile.daemon`，并用 `ThrottleInterval` 限流；否则 launchd 会在端口冲突时持续重拉服务，放大系统负担。
 - [2026-04-22] canonical bottom 必须按 `availableEndIndex` 算，不允许再被本地 slice 的 `endIndex` 截短；否则 follow 会假装已经到底，实则还差尾巴。
+- [2026-04-22] tab/session 隔离门禁：Terminal callback（input / resize / viewport / focus）必须显式携带 `sessionId`，禁止在 App 层按 `activeSession` 隐式路由；tab 切换只允许改变 active/render 频率，不允许 remount 单一 TerminalView 去复用别的 session 状态。
+- [2026-04-22] buffer-sync 新冻结：hidden tab 完全冻结，不收 live buffer；active tab 默认只追当前尾屏并按绝对行号连续门禁渲染，若当前/预校验窗口不连续则保持上一帧并触发补拉；只有 reading 且断裂时才向前预拉两屏高度。
+- [2026-04-22] 新根因补充：follow 态若把每次 `viewportEndIndex` 推进都回发成新的 `buffer-sync-request`，会形成“server 刚推一帧 -> client 立刻再拉一帧”的请求风暴；follow 请求只应在 connect/switch/input/resize/模式切换时刷新，active live payload 默认只发 changed-range，不拼整屏 viewport。
+- [2026-04-22] session 定时发送 / heartbeat 的唯一真源必须在 daemon：job 绑定 tmux `sessionName`，daemon 负责持久化、nextFireAt 和实际发送；Android / Mac 只做 calendar + alarm 风格编辑器，不允许各自维护本地调度器。
+- [2026-04-22] daemon 若要复用 `packages/shared`，不能从 `@zterm/shared` 根入口 import；根入口会带上 React/CSS，Node 运行态会直接 SyntaxError。server 侧必须只 import 叶子 shared 模块（如 `schedule/next-fire.ts`）。
+- [2026-04-23] schedule UI 若只消费定时规则/格式化函数，也应优先 import `packages/shared/src/schedule/*` 叶子模块；否则会把 `@zterm/shared` 根入口的 terminal-view/CSS 依赖链进来，污染静态渲染与 Node 工具链。
+- [2026-04-23] session schedule 的最小真实闭环证据可以做成“临时 daemon + 临时 HOME + tmux session + websocket 协议 smoke + tmux side-effect 文件 + schedules.json 持久化”组合；相比只看 `schedule-event(triggered)`，这样能同时证明协议、执行和落盘都是真的。
+- [2026-04-23] Android quick input/floating panel 若渲染在被 `transform` 抬起的 quick bar 容器下，fixed overlay/bubble/panel 不能再额外按 `keyboardInset` 计算 bottom/padding；否则会出现“输入法一弹出，面板被抬到屏幕外”的双重位移。
+- [2026-04-23] Android 快捷输入面板的 outside-close 要走 document capture 级监听；仅靠面板外遮罩 click，在 quick bar 根节点有 pointer capture / preventDefault 时并不稳定。
+- [2026-04-23] session 级定时发送入口不能挂在 tab strip/header 这种易被理解成“tab 全局动作”的位置；Android 侧应放在当前 session 的 quick input/composer 入口内，明确“对当前 session 生效”。
+- [2026-04-23] 悬浮球若保存的是绝对 `left/top` 坐标，必须在 mount 和 viewport resize 时自动 re-clamp 到当前可视区；只在拖动时 clamp 会导致旋转/窗口变化后入口消失。
+- [2026-04-23] 悬浮菜单与底部 shell rows 必须分层：菜单打开时可隐藏 rows，但关闭后要立刻恢复；keyboard 弹起时只上抬 rows，不要让悬浮球/菜单复用同一 transform。
+- [2026-04-23] 悬浮菜单里的快捷输入列表点击语义是“立即发送并默认补 `\\r`”，不要再走“追加到 draft 再手动发送”；只有剪贴板条目才做 draft 注入。
+- [2026-04-23] terminal follow 若在每次 buffer/input 事件里立刻 `host.scrollTop = bottom`，会和 onScroll / viewport emit 形成双向拉扯；要改成 rAF cadence 单向贴底，并忽略程序化 scroll 触发的 onScroll，底部才不会抖。
+- [2026-04-23] terminal 顶部 tab strip 若无键盘导航需求，不要留下浏览器默认 focus ring；`tabIndex=-1 + blur + outline none` 是移动端更稳的默认态。
+- [2026-04-23] 拖拽排序 UI 若在 `pointerMove` 里更新 React state、在 `pointerUp` 里立刻提交，不能只依赖 state 闭包值；必须维护一个同步 ref 作为 drag 真源，否则 release 可能读到旧 targetIndex，表现为“拖了但顺序没生效”。
+- [2026-04-23] drag target 计算不能把正在拖的那一行自己也纳入候选；否则命中会持续偏向自身行，排序目标几乎不会变化。
+- [2026-04-23] keyboard 关闭态不能在 quick bar 外层保留 `transform: translateY(0)`；这会让其内部 `position: fixed` 悬浮层脱离视口坐标系，直接把悬浮球/快捷面板的位置算坏。
+- [2026-04-23] 快捷按键编辑器的“显示名称”若自动写入第一个 token（例如先点 `Ctrl` 就写成 `Ctrl`），会把组合键默认名污染掉；组合键的默认显示名必须来自最终 `preview`（如 `Ctrl + C`），不是来自首个 token。
 
 ## Patterns & Learnings
 

@@ -40,7 +40,7 @@ export function buildDaemonStartCommand(settings: BridgeSettings) {
         bridgePort: settings.targetPort,
       })
     : '默认监听配置';
-  return `wterm daemon start  # auth from ${WTERM_CONFIG_DISPLAY_PATH} (${target})`;
+  return `zterm-daemon start  # auth from ${WTERM_CONFIG_DISPLAY_PATH} (${target})`;
 }
 
 export function formatBridgeTarget(settings: BridgeSettings) {

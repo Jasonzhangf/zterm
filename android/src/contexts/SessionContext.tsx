@@ -4,25 +4,30 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef } from 'react';
 import type {
+  BufferSyncRequestPayload,
   ClientMessage,
   Host,
   HostConfigMessage,
+  PasteImageStartPayload,
+  ScheduleJobDraft,
   ServerMessage,
   Session,
+  SessionScheduleState,
   SessionBufferState,
   SessionState,
   TerminalBufferPayload,
   TerminalCell,
 } from '../lib/types';
-import { STORAGE_KEYS } from '../lib/types';
+import { buildEmptyScheduleState } from '@zterm/shared';
 import { buildBridgeUrl } from '../lib/bridge-url';
 import { getResolvedSessionName } from '../lib/connection-target';
 import { getDefaultTerminalViewportSize } from '../lib/default-terminal-viewport';
-import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalCacheLines } from '../lib/mobile-config';
 import { drainRuntimeDebugEntries, getPendingRuntimeDebugEntryCount, isRuntimeDebugEnabled, runtimeDebug } from '../lib/runtime-debug';
 import {
   applyBufferSyncToSessionBuffer,
   createSessionBufferState,
+  sessionBuffersEqual,
 } from '../lib/terminal-buffer';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
@@ -34,6 +39,9 @@ const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
 const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
+const ACTIVE_BUFFER_SYNC_REQUEST_INTERVAL_MS = 16;
+const SCROLL_BUFFER_SYNC_DELAY_MS = 24;
+const BUFFER_RENDER_COMMIT_INTERVAL_MS = 16;
 
 function resolveInitialViewportSize(
   viewportMap: Map<string, { cols: number; rows: number }>,
@@ -181,6 +189,7 @@ function sessionReducer(state: SessionManagerState, action: SessionAction): Sess
 
 interface SessionContextValue {
   state: SessionManagerState;
+  scheduleStates: Record<string, SessionScheduleState>;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string) => void;
   switchSession: (id: string) => void;
@@ -189,9 +198,17 @@ interface SessionContextValue {
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
-  sendInput: (data: string) => void;
-  sendImagePaste: (file: File) => Promise<void>;
-  resizeTerminal: (cols: number, rows: number) => void;
+  sendInput: (sessionId: string, data: string) => void;
+  sendImagePaste: (sessionId: string, file: File) => Promise<void>;
+  resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
+  updateSessionViewport: (sessionId: string, viewState: SessionSyncViewState) => void;
+  requestViewportPrefetch: (sessionId: string, viewState: SessionSyncViewState) => void;
+  requestScheduleList: (sessionId: string) => void;
+  upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
+  deleteScheduleJob: (sessionId: string, jobId: string) => void;
+  toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => void;
+  runScheduleJobNow: (sessionId: string, jobId: string) => void;
+  getSessionScheduleState: (sessionId: string) => SessionScheduleState;
   getActiveSession: () => Session | null;
   getSession: (id: string) => Session | null;
 }
@@ -218,6 +235,15 @@ interface ReconnectBucket {
   nextDelayMs: number | null;
 }
 
+type SessionMirrorMode = 'follow' | 'reading';
+
+interface SessionSyncViewState {
+  mode: SessionMirrorMode;
+  viewportEndIndex: number;
+  viewportRows: number;
+  missingRanges?: { startIndex: number; endIndex: number }[];
+}
+
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 function toHostKey(target: { bridgeHost: string; bridgePort: number }) {
@@ -236,23 +262,6 @@ function createReconnectBucket(): ReconnectBucket {
 
 function computeReconnectDelay(attempt: number) {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
-}
-
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error('Failed to read image file'));
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('Unexpected file reader result'));
-        return;
-      }
-      const [, dataBase64 = ''] = result.split(',', 2);
-      resolve(dataBase64);
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
@@ -327,18 +336,54 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
   };
 }
 
+function buildBufferSyncRequestPayload(session: Session, viewState?: SessionSyncViewState): BufferSyncRequestPayload {
+  const resolvedViewportRows = Math.max(1, Math.floor(viewState?.viewportRows || session.buffer.rows || 24));
+  const resolvedMode: SessionMirrorMode = viewState?.mode === 'reading' ? 'reading' : 'follow';
+  const resolvedViewportEndIndex = resolvedMode === 'follow'
+    ? Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0))
+    : Math.max(0, Math.floor(viewState?.viewportEndIndex || session.buffer.viewportEndIndex || session.buffer.endIndex || 0));
+
+  return {
+    knownRevision: Math.max(0, Math.floor(session.buffer.revision || 0)),
+    localStartIndex: Math.max(0, Math.floor(session.buffer.startIndex || 0)),
+    localEndIndex: Math.max(0, Math.floor(session.buffer.endIndex || 0)),
+    viewportEndIndex: resolvedViewportEndIndex,
+    viewportRows: resolvedViewportRows,
+    mode: resolvedMode,
+  };
+}
+
 export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES }: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
+  const [scheduleStates, setScheduleStates] = React.useState<Record<string, SessionScheduleState>>({});
   const stateRef = useRef(state);
+  const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
   const wsRefs = useRef<Map<string, WebSocket>>(new Map());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const bufferSyncIntervals = useRef<Map<string, number>>(new Map());
+  const queuedBufferSyncTimers = useRef<Map<string, number>>(new Map());
+  const sessionSyncViewRef = useRef<Map<string, SessionSyncViewState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
   const reconnectBucketsRef = useRef<Map<string, ReconnectBucket>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
   const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
-  const restoreStartedRef = useRef(false);
+  const lastPrefetchAtRef = useRef<Map<string, number>>(new Map());
+  const pendingIncomingBufferPayloadsRef = useRef<Map<string, TerminalBufferPayload[]>>(new Map());
+  const pendingIncomingBufferTimersRef = useRef<Map<string, number>>(new Map());
+
+  const resolveSessionCacheLines = useCallback((rows?: number | null) => {
+    const viewportRows =
+      typeof rows === 'number' && Number.isFinite(rows)
+        ? Math.max(1, Math.floor(rows))
+        : getDefaultTerminalViewportSize().rows;
+    const threeScreenLines = resolveTerminalCacheLines(viewportRows);
+    if (!Number.isFinite(terminalCacheLines) || terminalCacheLines <= 0) {
+      return threeScreenLines;
+    }
+    return Math.max(viewportRows, Math.min(Math.floor(terminalCacheLines), threeScreenLines));
+  }, [terminalCacheLines]);
 
   const flushRuntimeDebugLogs = useCallback(() => {
     if (!isRuntimeDebugEnabled() || getPendingRuntimeDebugEntryCount() === 0) {
@@ -372,6 +417,29 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     stateRef.current = state;
   }, [state]);
 
+  useEffect(() => {
+    scheduleStatesRef.current = scheduleStates;
+  }, [scheduleStates]);
+
+  const setScheduleStateForSession = useCallback((
+    sessionId: string,
+    nextState:
+      | SessionScheduleState
+      | ((current: SessionScheduleState) => SessionScheduleState),
+  ) => {
+    setScheduleStates((current) => {
+      const fallback = buildEmptyScheduleState(
+        stateRef.current.sessions.find((session) => session.id === sessionId)?.sessionName || '',
+      );
+      const resolvedCurrent = current[sessionId] || fallback;
+      const resolved = typeof nextState === 'function' ? nextState(resolvedCurrent) : nextState;
+      return {
+        ...current,
+        [sessionId]: resolved,
+      };
+    });
+  }, []);
+
   const clearHeartbeat = useCallback((sessionId: string) => {
     const heartbeat = pingIntervals.current.get(sessionId);
     if (heartbeat) {
@@ -380,6 +448,80 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
     lastPongAtRef.current.delete(sessionId);
   }, []);
+
+  const clearBufferSyncPoll = useCallback((sessionId: string) => {
+    const timer = bufferSyncIntervals.current.get(sessionId);
+    if (timer) {
+      clearInterval(timer);
+      bufferSyncIntervals.current.delete(sessionId);
+    }
+  }, []);
+
+  const clearQueuedBufferSync = useCallback((sessionId: string) => {
+    const timer = queuedBufferSyncTimers.current.get(sessionId);
+    if (timer) {
+      window.clearTimeout(timer);
+      queuedBufferSyncTimers.current.delete(sessionId);
+    }
+  }, []);
+
+  const clearPendingIncomingBuffer = useCallback((sessionId: string) => {
+    const timer = pendingIncomingBufferTimersRef.current.get(sessionId);
+    if (timer) {
+      window.clearTimeout(timer);
+      pendingIncomingBufferTimersRef.current.delete(sessionId);
+    }
+    pendingIncomingBufferPayloadsRef.current.delete(sessionId);
+  }, []);
+
+  const flushPendingIncomingBuffer = useCallback((sessionId: string) => {
+    pendingIncomingBufferTimersRef.current.delete(sessionId);
+    const pendingPayloads = pendingIncomingBufferPayloadsRef.current.get(sessionId);
+    if (!pendingPayloads || pendingPayloads.length === 0) {
+      pendingIncomingBufferPayloadsRef.current.delete(sessionId);
+      return;
+    }
+    pendingIncomingBufferPayloadsRef.current.delete(sessionId);
+
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      return;
+    }
+
+    let nextBuffer = session.buffer;
+    for (const payload of pendingPayloads) {
+      nextBuffer = applyBufferSyncToSessionBuffer(
+        nextBuffer,
+        payload,
+        resolveSessionCacheLines(payload.rows || nextBuffer.rows),
+      );
+    }
+
+    if (sessionBuffersEqual(session.buffer, nextBuffer)) {
+      return;
+    }
+
+    dispatch({
+      type: 'UPDATE_SESSION',
+      id: sessionId,
+      updates: { buffer: nextBuffer },
+    });
+  }, [resolveSessionCacheLines]);
+
+  const queueIncomingBufferSync = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
+    const pending = pendingIncomingBufferPayloadsRef.current.get(sessionId) || [];
+    pending.push(payload);
+    pendingIncomingBufferPayloadsRef.current.set(sessionId, pending);
+
+    if (pendingIncomingBufferTimersRef.current.has(sessionId)) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      flushPendingIncomingBuffer(sessionId);
+    }, BUFFER_RENDER_COMMIT_INTERVAL_MS);
+    pendingIncomingBufferTimersRef.current.set(sessionId, timer);
+  }, [flushPendingIncomingBuffer]);
 
   const clearReconnectForSession = useCallback((sessionId: string) => {
     const host = sessionHostRef.current.get(sessionId);
@@ -421,7 +563,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
 
     clearHeartbeat(sessionId);
-  }, [clearHeartbeat]);
+    clearBufferSyncPoll(sessionId);
+    clearQueuedBufferSync(sessionId);
+    clearPendingIncomingBuffer(sessionId);
+    sessionSyncViewRef.current.delete(sessionId);
+  }, [clearBufferSyncPoll, clearHeartbeat, clearPendingIncomingBuffer, clearQueuedBufferSync]);
 
   const drainReconnectBucket = useCallback((hostKey: string) => {
     const bucket = reconnectBucketsRef.current.get(hostKey);
@@ -482,6 +628,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         }
         completed = true;
         cleanupSocket(nextSessionId);
+        setScheduleStateForSession(nextSessionId, (current) => ({
+          ...current,
+          loading: false,
+          error: message,
+        }));
 
         if (manualCloseRef.current.has(nextSessionId)) {
           bucket.activeSessionId = null;
@@ -540,6 +691,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             sessionName: targetSessionName,
           },
         });
+        setScheduleStateForSession(nextSessionId, {
+          sessionName: targetSessionName,
+          jobs: [],
+          loading: true,
+        });
 
         const hostConfig: HostConfigMessage = {
           name: targetHost.name,
@@ -587,6 +743,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             case 'connected':
               if (completed) return;
               completed = true;
+              const connectedSessionName = getResolvedSessionName(targetHost);
               runtimeDebug('session.ws.reconnect.connected', {
                 sessionId: nextSessionId,
                 activeSessionId: stateRef.current.activeSessionId,
@@ -602,6 +759,16 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                   lastError: undefined,
                 },
               });
+              setScheduleStateForSession(nextSessionId, (current) => ({
+                ...current,
+                sessionName: connectedSessionName,
+                loading: true,
+                error: undefined,
+              }));
+              ws.send(JSON.stringify({
+                type: 'schedule-list',
+                payload: { sessionName: connectedSessionName },
+              } satisfies ClientMessage));
               flushPendingInputQueue(nextSessionId);
               dispatch({ type: 'INCREMENT_CONNECTED' });
               setTimeout(() => drainReconnectBucket(hostKey), POST_SUCCESS_NEXT_RETRY_DELAY_MS);
@@ -612,12 +779,23 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                 payload: summarizeBufferPayload(msg.payload),
                 activeSessionId: stateRef.current.activeSessionId,
               });
-              dispatch({
-                type: 'SET_SESSION_BUFFER_SYNC',
-                id: nextSessionId,
-                payload: normalizeIncomingBufferPayload(msg.payload),
-                cacheLines: terminalCacheLines,
+              queueIncomingBufferSync(nextSessionId, normalizeIncomingBufferPayload(msg.payload));
+              break;
+            case 'schedule-state':
+              setScheduleStateForSession(nextSessionId, {
+                sessionName: msg.payload.sessionName,
+                jobs: msg.payload.jobs,
+                loading: false,
+                lastEvent: scheduleStatesRef.current[nextSessionId]?.lastEvent,
               });
+              break;
+            case 'schedule-event':
+              setScheduleStateForSession(nextSessionId, (current) => ({
+                ...current,
+                sessionName: msg.payload.sessionName,
+                loading: false,
+                lastEvent: msg.payload,
+              }));
               break;
             case 'title':
               dispatch({ type: 'SET_SESSION_TITLE', id: nextSessionId, title: msg.payload });
@@ -644,7 +822,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       ws.onerror = () => finalizeFailure('WebSocket error', true);
       ws.onclose = () => finalizeFailure('socket closed', true);
     }, delay);
-  }, [cleanupSocket, terminalCacheLines, wsUrl]);
+  }, [cleanupSocket, resolveSessionCacheLines, wsUrl]);
 
   const scheduleReconnect = useCallback((
     sessionId: string,
@@ -720,6 +898,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         lastError: undefined,
       },
     });
+    setScheduleStateForSession(sessionId, {
+      sessionName: getResolvedSessionName(host),
+      jobs: [],
+      loading: true,
+    });
     if (activate) {
       dispatch({ type: 'SET_ACTIVE_SESSION', id: sessionId });
     }
@@ -743,6 +926,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       }
       completed = true;
       cleanupSocket(sessionId);
+      setScheduleStateForSession(sessionId, (current) => ({
+        ...current,
+        loading: false,
+        error: message,
+      }));
       if (manualCloseRef.current.has(sessionId)) {
         return;
       }
@@ -816,6 +1004,16 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                 lastError: undefined,
               },
             });
+            setScheduleStateForSession(sessionId, (current) => ({
+              ...current,
+              sessionName: getResolvedSessionName(host),
+              loading: true,
+              error: undefined,
+            }));
+            ws.send(JSON.stringify({
+              type: 'schedule-list',
+              payload: { sessionName: getResolvedSessionName(host) },
+            } satisfies ClientMessage));
             dispatch({ type: 'INCREMENT_CONNECTED' });
             break;
           case 'buffer-sync':
@@ -824,12 +1022,23 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
               payload: summarizeBufferPayload(msg.payload),
               activeSessionId: stateRef.current.activeSessionId,
             });
-            dispatch({
-              type: 'SET_SESSION_BUFFER_SYNC',
-              id: sessionId,
-              payload: normalizeIncomingBufferPayload(msg.payload),
-              cacheLines: terminalCacheLines,
+            queueIncomingBufferSync(sessionId, normalizeIncomingBufferPayload(msg.payload));
+            break;
+          case 'schedule-state':
+            setScheduleStateForSession(sessionId, {
+              sessionName: msg.payload.sessionName,
+              jobs: msg.payload.jobs,
+              loading: false,
+              lastEvent: scheduleStatesRef.current[sessionId]?.lastEvent,
             });
+            break;
+          case 'schedule-event':
+            setScheduleStateForSession(sessionId, (current) => ({
+              ...current,
+              sessionName: msg.payload.sessionName,
+              loading: false,
+              lastEvent: msg.payload,
+            }));
             break;
           case 'error':
             finalizeFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
@@ -855,7 +1064,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     ws.onerror = () => finalizeFailure('WebSocket error', true);
     ws.onclose = () => finalizeFailure('socket closed', true);
-  }, [cleanupSocket, clearReconnectForSession, scheduleReconnect, terminalCacheLines, wsUrl]);
+  }, [cleanupSocket, clearReconnectForSession, resolveSessionCacheLines, scheduleReconnect, wsUrl]);
 
   const createSession = useCallback((host: Host, options?: CreateSessionOptions): string => {
     const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -876,7 +1085,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       customName: options?.customName?.trim() || undefined,
       buffer: options?.buffer || createSessionBufferState({
         lines: [],
-        cacheLines: terminalCacheLines,
+        cacheLines: resolveSessionCacheLines(getDefaultTerminalViewportSize().rows),
       }),
       reconnectAttempt: 0,
       createdAt: options?.createdAt || Date.now(),
@@ -885,7 +1094,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     dispatch({ type: 'CREATE_SESSION', session, activate: options?.activate !== false });
     connectSession(sessionId, host, options?.activate !== false);
     return sessionId;
-  }, [connectSession]);
+  }, [connectSession, resolveSessionCacheLines]);
 
   const closeSession = useCallback((id: string) => {
     manualCloseRef.current.add(id);
@@ -899,6 +1108,14 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     cleanupSocket(id, true);
     sessionHostRef.current.delete(id);
     viewportSizeRef.current.delete(id);
+    setScheduleStates((current) => {
+      if (!(id in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     dispatch({ type: 'DELETE_SESSION', id });
   }, [cleanupSocket, clearReconnectForSession]);
 
@@ -1006,6 +1223,175 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
   }, []);
 
+  const requestScheduleList = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+    if (!session) {
+      return;
+    }
+    setScheduleStateForSession(sessionId, (current) => ({
+      ...current,
+      sessionName: session.sessionName,
+      loading: true,
+      error: undefined,
+    }));
+    sendMessage(sessionId, {
+      type: 'schedule-list',
+      payload: { sessionName: session.sessionName },
+    });
+  }, [sendMessage, setScheduleStateForSession]);
+
+  const upsertScheduleJob = useCallback((sessionId: string, job: ScheduleJobDraft) => {
+    setScheduleStateForSession(sessionId, (current) => ({
+      ...current,
+      loading: true,
+      error: undefined,
+    }));
+    sendMessage(sessionId, { type: 'schedule-upsert', payload: { job } });
+  }, [sendMessage, setScheduleStateForSession]);
+
+  const deleteScheduleJob = useCallback((sessionId: string, jobId: string) => {
+    setScheduleStateForSession(sessionId, (current) => ({
+      ...current,
+      loading: true,
+      error: undefined,
+    }));
+    sendMessage(sessionId, { type: 'schedule-delete', payload: { jobId } });
+  }, [sendMessage, setScheduleStateForSession]);
+
+  const toggleScheduleJob = useCallback((sessionId: string, jobId: string, enabled: boolean) => {
+    setScheduleStateForSession(sessionId, (current) => ({
+      ...current,
+      loading: true,
+      error: undefined,
+    }));
+    sendMessage(sessionId, { type: 'schedule-toggle', payload: { jobId, enabled } });
+  }, [sendMessage, setScheduleStateForSession]);
+
+  const runScheduleJobNow = useCallback((sessionId: string, jobId: string) => {
+    setScheduleStateForSession(sessionId, (current) => ({
+      ...current,
+      loading: true,
+      error: undefined,
+    }));
+    sendMessage(sessionId, { type: 'schedule-run-now', payload: { jobId } });
+  }, [sendMessage, setScheduleStateForSession]);
+
+  const syncSessionStreamMode = useCallback((sessionId: string, active: boolean) => {
+    sendMessage(sessionId, {
+      type: 'stream-mode',
+      payload: {
+        mode: active ? 'active' : 'idle',
+      },
+    });
+  }, [sendMessage]);
+
+  const requestBufferSync = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const ws = wsRefs.current.get(sessionId);
+    if (!session || session.state !== 'connected' || !ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const payload = buildBufferSyncRequestPayload(session, sessionSyncViewRef.current.get(sessionId));
+    runtimeDebug('session.buffer.request', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      payload,
+    });
+    ws.send(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload,
+    } satisfies ClientMessage));
+  }, []);
+
+  const requestViewportPrefetch = useCallback((sessionId: string, viewState: SessionSyncViewState) => {
+    const now = Date.now();
+    const lastAt = lastPrefetchAtRef.current.get(sessionId) || 0;
+    if (now - lastAt < ACTIVE_BUFFER_SYNC_REQUEST_INTERVAL_MS) {
+      return;
+    }
+    lastPrefetchAtRef.current.set(sessionId, now);
+
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const ws = wsRefs.current.get(sessionId);
+    if (!session || session.state !== 'connected' || !ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || session.buffer.rows || 24));
+    ws.send(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload: {
+        knownRevision: Math.max(0, Math.floor(session.buffer.revision || 0)),
+        localStartIndex: Math.max(0, Math.floor(session.buffer.startIndex || 0)),
+        localEndIndex: Math.max(0, Math.floor(session.buffer.endIndex || 0)),
+        viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || session.buffer.viewportEndIndex || session.buffer.endIndex || 0)),
+        viewportRows,
+        mode: 'reading',
+        prefetch: true,
+        missingRanges: Array.isArray(viewState.missingRanges)
+          ? viewState.missingRanges
+              .map((range) => ({
+                startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+                endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+              }))
+              .filter((range) => range.endIndex > range.startIndex)
+          : undefined,
+      },
+    } satisfies ClientMessage));
+  }, []);
+
+  const scheduleBufferSyncRequest = useCallback((sessionId: string, delayMs: number) => {
+    clearQueuedBufferSync(sessionId);
+    const timer = window.setTimeout(() => {
+      queuedBufferSyncTimers.current.delete(sessionId);
+      requestBufferSync(sessionId);
+    }, Math.max(0, delayMs));
+    queuedBufferSyncTimers.current.set(sessionId, timer);
+  }, [clearQueuedBufferSync, requestBufferSync]);
+
+  const updateSessionViewport = useCallback((sessionId: string, viewState: SessionSyncViewState) => {
+    const normalized: SessionSyncViewState = {
+      mode: viewState.mode === 'reading' ? 'reading' : 'follow',
+      viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
+      viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
+    };
+    sessionSyncViewRef.current.set(sessionId, normalized);
+    if (stateRef.current.activeSessionId === sessionId && normalized.mode === 'reading') {
+      scheduleBufferSyncRequest(
+        sessionId,
+        SCROLL_BUFFER_SYNC_DELAY_MS,
+      );
+    }
+  }, [scheduleBufferSyncRequest]);
+
+  useEffect(() => {
+    if (!state.activeSessionId) {
+      return;
+    }
+    const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+    if (activeSession) {
+      sessionSyncViewRef.current.set(state.activeSessionId, {
+        mode: 'follow',
+        viewportEndIndex: Math.max(
+          0,
+          Math.floor(activeSession.buffer.viewportEndIndex || activeSession.buffer.endIndex || 0),
+        ),
+        viewportRows: Math.max(1, Math.floor(activeSession.buffer.rows || 24)),
+      });
+    }
+    scheduleBufferSyncRequest(state.activeSessionId, 0);
+  }, [scheduleBufferSyncRequest, state.activeSessionId, state.sessions]);
+
+  useEffect(() => {
+    for (const session of state.sessions) {
+      if (session.state !== 'connected') {
+        continue;
+      }
+      syncSessionStreamMode(session.id, session.id === state.activeSessionId);
+    }
+  }, [state.activeSessionId, state.sessions, syncSessionStreamMode]);
+
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
     const queued = pendingInputQueueRef.current.get(sessionId);
@@ -1031,15 +1417,21 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     return () => window.clearInterval(timer);
   }, [flushRuntimeDebugLogs]);
 
-  const sendInput = useCallback((data: string) => {
-    const targetSessionId =
-      stateRef.current.activeSessionId
-      || stateRef.current.sessions.find((session) => session.state === 'connected')?.id
-      || stateRef.current.sessions[0]?.id;
-
+  const sendInput = useCallback((sessionId: string, data: string) => {
+    const targetSessionId = sessionId.trim();
     if (!targetSessionId) {
       runtimeDebug('session.input.skip', {
         why: 'no-target-session',
+        size: data.length,
+      });
+      return;
+    }
+
+    const session = stateRef.current.sessions.find((item) => item.id === targetSessionId) || null;
+    if (!session) {
+      runtimeDebug('session.input.skip', {
+        why: 'missing-session',
+        sessionId: targetSessionId,
         size: data.length,
       });
       return;
@@ -1090,7 +1482,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
 
     if (initial.session.state !== 'connecting' && initial.session.state !== 'reconnecting') {
-      reconnectSession(sessionId);
+      throw new Error(`Active session is not ready yet (${initial.session.state || 'missing'})`);
     }
 
     const startedAt = Date.now();
@@ -1105,38 +1497,42 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     const latest = readReadyState();
     const stateLabel = latest.session?.state || 'missing';
     throw new Error(`Active session is not ready yet (${stateLabel})`);
-  }, [reconnectSession]);
+  }, []);
 
-  const sendImagePaste = useCallback(async (file: File) => {
-    const sessionId = stateRef.current.activeSessionId;
-    if (!sessionId) {
-      throw new Error('No active session for image paste');
+  const sendImagePaste = useCallback(async (sessionId: string, file: File) => {
+    const targetSessionId = sessionId.trim();
+    if (!targetSessionId) {
+      throw new Error('No target session for image paste');
     }
 
-    await ensureSessionReadyForPaste(sessionId);
+    const ws = await ensureSessionReadyForPaste(targetSessionId);
+    const fileBuffer = await file.arrayBuffer();
+    const payload: PasteImageStartPayload = {
+      name: file.name || 'upload',
+      mimeType: file.type || 'application/octet-stream',
+      byteLength: fileBuffer.byteLength,
+      pasteSequence: '\x16',
+    };
 
-    const dataBase64 = await fileToBase64(file);
-    sendMessage(sessionId, {
-      type: 'paste-image',
-      payload: {
-        name: file.name || 'upload',
-        mimeType: file.type || 'application/octet-stream',
-        dataBase64,
-        pasteSequence: '\x16',
-      },
-    });
+    ws.send(JSON.stringify({
+      type: 'paste-image-start',
+      payload,
+    } satisfies ClientMessage));
+    ws.send(fileBuffer);
   }, [ensureSessionReadyForPaste, sendMessage]);
 
-  const resizeTerminal = useCallback((cols: number, rows: number) => {
-    if (stateRef.current.activeSessionId) {
-      const sessionId = stateRef.current.activeSessionId;
-      const previous = viewportSizeRef.current.get(sessionId);
-      if (previous && previous.cols === cols && previous.rows === rows) {
-        return;
-      }
-      viewportSizeRef.current.set(sessionId, { cols, rows });
-      sendMessage(sessionId, { type: 'resize', payload: { cols, rows } });
+  const resizeTerminal = useCallback((sessionId: string, cols: number, rows: number) => {
+    const targetSessionId = sessionId.trim();
+    if (!targetSessionId) {
+      return;
     }
+
+    const previous = viewportSizeRef.current.get(targetSessionId);
+    if (previous && previous.cols === cols && previous.rows === rows) {
+      return;
+    }
+    viewportSizeRef.current.set(targetSessionId, { cols, rows });
+    sendMessage(targetSessionId, { type: 'resize', payload: { cols, rows } });
   }, [sendMessage]);
 
   const getActiveSession = useCallback(
@@ -1146,21 +1542,18 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
   const getSession = useCallback((id: string) => stateRef.current.sessions.find((session) => session.id === id) || null, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || restoreStartedRef.current) {
-      return;
-    }
-
-    restoreStartedRef.current = true;
-    try {
-      localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
-      localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
-    } catch (error) {
-      console.error('[SessionProvider] Failed to restore sessions:', error);
-    }
-  }, [createSession]);
+  const getSessionScheduleState = useCallback((sessionId: string) => {
+    return scheduleStatesRef.current[sessionId]
+      || buildEmptyScheduleState(stateRef.current.sessions.find((session) => session.id === sessionId)?.sessionName || '');
+  }, []);
 
   useEffect(() => () => {
+    for (const timer of bufferSyncIntervals.current.values()) {
+      clearInterval(timer);
+    }
+    for (const timer of queuedBufferSyncTimers.current.values()) {
+      window.clearTimeout(timer);
+    }
     for (const timer of pingIntervals.current.values()) {
       clearInterval(timer);
     }
@@ -1176,6 +1569,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
   const value: SessionContextValue = {
     state,
+    scheduleStates,
     createSession,
     closeSession,
     switchSession,
@@ -1187,6 +1581,14 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     sendInput,
     sendImagePaste,
     resizeTerminal,
+    updateSessionViewport,
+    requestViewportPrefetch,
+    requestScheduleList,
+    upsertScheduleJob,
+    deleteScheduleJob,
+    toggleScheduleJob,
+    runScheduleJobNow,
+    getSessionScheduleState,
     getActiveSession,
     getSession,
   };

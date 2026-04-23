@@ -1,3 +1,8 @@
+---
+name: terminal-buffer-truth
+description: "terminal buffer / render / daemon mirror 真源与门禁"
+---
+
 # terminal-buffer-truth
 
 ## 适用场景
@@ -14,8 +19,11 @@
 3.3 **geometry 只看 zterm clients**：Termius、iTerm2 等外部 tmux clients 不参与 daemon geometry policy。
 3.4 **daemon 不改写 tmux 内容**：daemon 只发送控制（input/attach/resize 等）并读取 truth；禁止在 daemon 侧二次改写/裁剪/重排 tmux 内容来修复显示。
 4. **client 只读 mirror**：client 只按绝对行号合并 daemon buffer，不反向影响 daemon。
+4.2 **session 级回调必须显式带 sessionId**：input / resize / viewport / focus 相关回调禁止在 App 层按 `activeSession` 隐式路由；切 tab 期间任何异步回调都只能写回自己的 session。
 4.1 **历史 buffer immutable**：一旦某行进入 canonical buffer，就视为已发生事实；后续 resize 只影响新输出，不回改旧历史。
+4.3 **hidden tab 完全冻结**：inactive tab 不收 live buffer、不做 merge、不做 render 刷新；切回 active 后再单次拉当前真相。
 5. **render / scroll 解耦**：renderTopIndex、mode(follow/reading)、DOM scroll 是三个层次；不能混在一个组件里靠副作用凑。
+5.1 **渲染前必须校验绝对行号连续**：当前 render window 若绝对行号不连续，禁止直接渲染 gap/错屏；应保持上一帧稳定画面并触发按绝对行号的补拉。
 6. **reading 退出条件只允许两个**：滚回底部，或用户输入。除此之外任何 live update 都不能把用户拉回底部。
 7. **禁止补丁式修 TerminalView**：出现滚动/底部问题，先检查 ownership 是否错，不能继续叠加 projection、anchor、scroll hack。
 8. **follow 底部优先吃 daemon viewport 真相**：client 不得只用 `availableEndIndex - rows` 猜“到底”；必须优先使用 daemon 给出的 viewport 底部事实，必要时补 virtual bottom padding。
@@ -23,7 +31,11 @@
 8.2 **client / wire 不再依赖 viewportStart**：Android 本地 mirror 只保留绝对 cached window + `viewportEndIndex`；顶部指针不能再进入 client render state，也不应再作为 Android wire truth 的必要字段。
 8.3 **不要再分第二种 live buffer 消息**：Android 当前 mirror 收敛阶段，live refresh 统一走 `buffer-sync`；禁止再引入 `buffer-delta` 这类第二套 live 更新语义去分叉 client merge 逻辑。
 8.4 **daemon mirror 也不要固化 top pointer state**：server 内部若只是为了算当前 viewport top，应按 `availableEndIndex - rows` 临时派生；不要把顶部指针再存成第二真源状态。
-8.5 **live 增量也必须自带当前 viewport**：daemon active 增量可以只发 changed-range，但 payload 至少要覆盖“changed-range ∪ 当前 viewport”；否则 client replay 虽可恢复，单条 daemon payload 仍不是自洽 mirror，TUI bottom/status line 校验会失真。
+8.5 **active live 增量优先只发 changed-range**：只要 client 已持有连续本地 mirror，daemon follow 增量就不要再把整屏 viewport 一起回传；否则会把“连续渲染”误做成“整屏重拉”，直接抬高带宽与输入期延迟。若连续性失真，再由 client 触发补拉。
+8.6 **active live 默认只追尾部**：active tab 的 16ms refresh 只校验/刷新当前显示尾屏；只有 reading 且本地连续区间断裂时，才允许向前预拉两屏高度。
+8.7 **follow 态不能因每次尾部推进就重复 request**：follow bottom 的 `viewportEndIndex` 应由 server payload 推进；client 只在 connect/switch/input/resize/reading 切换时更新 request，不能在每个 live frame 后再回发一次 sync request。
+8.8 **follow 去重 key 不能带动态 viewportEndIndex**：client 若在 follow 态用 `viewportEndIndex` 参与 request 去重，会把每次 live append 误判成‘viewport 变化’，直接退化成 16ms request 风暴。follow 去重只能绑定模式 + viewportRows / geometry。
+8.9 **reading 补拉只在两种信号下发生**：1) 用户滚动进入 reading；2) 当前可见窗或向前两屏预校验发现绝对行号缺口。follow 态禁止触发 prefetch；reading 靠近本地窗口上下边界时只更新 viewport request，不直接整窗重拉。
 9. **daemon 要有内存边界**：orphan mirror 必须可回收；capture/reconcile 里的 scratch runtime 不能每次 flush 新建。
 9.1 **daemon reconcile 不能自旋成风暴**：fallback reconcile 只能当 observer 丢通知时兜底，不能对常驻连接无脑高频抓 tmux；至少要区分 active subscribers，并对 quiet mirrors 设更长的最小 capture 间隔。
 9.2 **runtime debug 回传也必须限流**：client -> daemon 的 debug 日志只能走 bounded queue + 小批量定时 flush + payload 截断；观测链本身不能制造第二场日志风暴。

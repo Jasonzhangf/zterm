@@ -182,6 +182,11 @@ export function useAppUpdate() {
         expectedPackageName: APP_PACKAGE_NAME,
       });
 
+      setPreferences((current) => ({
+        ...current,
+        skippedVersionCode: target.versionCode,
+        ignoreUntilManualCheck: false,
+      }));
       setAvailableManifest(null);
       return true;
     } catch (error) {
@@ -191,7 +196,7 @@ export function useAppUpdate() {
     } finally {
       setInstalling(false);
     }
-  }, [availableManifest, latestManifest]);
+  }, [availableManifest, latestManifest, setPreferences]);
 
   useEffect(() => {
     if (didAutoCheckRef.current) {

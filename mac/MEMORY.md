@@ -4,6 +4,7 @@
 
 - [2026-04-20] Mac 第一阶段先做 Electron 最小可执行包，优先证明 build/package/window/stage 闭环，再逐步接业务能力
 - [2026-04-20] Mac 布局必须遵守仓库统一真源：默认一行多列、列与列之间垂直分屏、不以上下堆叠多 pane 为主方案
+- [2026-04-22] Jason 新冻结：Mac 改动默认必须先走“改代码 -> type-check/build -> 按需 package -> 退出旧 app -> 启动新包 -> 自己完成 smoke -> 落证据 -> 再汇报 Jason 手测”；未完成运行态证据闭环时，不得把基础验证转嫁给 Jason
 
 ## Patterns
 
@@ -28,3 +29,8 @@
 - [2026-04-21] Jason 进一步冻结了 Mac 方向：不要再把左 rail / inspector / demo shell 当主视图；默认应是干净 terminal workspace，无连接时中央 `+`，连接配置按需弹出，宽屏价值优先给 `1 / 2 / 3` 个 vertical terminal panes
 - [2026-04-21] Mac 黑屏排查结论：不是外部 `@jsonstudio/wtermmod-*` 依赖被本地 repo 偷改导致；zterm Mac 当前直接问题是 **本 repo 内 `packages/shared` 仍只消费旧协议 `snapshot / viewport-update / scrollback-update`，而 Android daemon 已切到 `buffer-sync / buffer-delta / buffer-range`**，因此会出现“能列 session，但连接后黑屏”
 - [2026-04-21] Mac shell workspace 打包 smoke 时，要先意识到 renderer 会恢复上次 panes/tabs/connection 布局；如果看到 Split 变灰或默认不是单 pane，先判断是不是 restore-last-state 生效，而不是误判布局代码失效
+- [2026-04-22] Mac 自闭环 smoke 的最小证据至少包括：`type-check/build/package` 输出、packaged app 截图、运行态 `ps/top` 资源快照、退出后 orphan process 检查；若只验证 dev server 或只编译通过，不能汇报“可实际使用”
+- [2026-04-22] Mac refresh/scroll 收口新增经验：follow 态的 viewport 去重 key 不能包含实时 `viewportEndIndex`，否则每次 live append 都会触发 client 反向 `buffer-sync-request` 风暴；reading 态只在滚动进入 reading 或绝对行号预校验发现缺口时补拉，并保持上一帧稳定画面直到连续区间补齐
+- [2026-04-22] Jason 新纠正：这个仓库的 Mac 开发流程只使用唯一项目 dev skill `zterm-mac-dev`；不要再额外串新的本地 dev skill 造成规则分叉
+- [2026-04-23] Mac reading/backfill 链路里，`missingRanges` 必须从 `TerminalView -> runtime -> transport` 原样透传；一旦 runtime 层把它清空，scroll prefetch 会静默变成 no-op，看起来像‘滚动了但历史补不回来’
+- [2026-04-23] Mac 的 schedule modal 若只依赖 schedule domain，也应走 `packages/shared/src/schedule/*` 叶子 import；这样桌面端做静态 HTML preview / SSR 时不会被 `@zterm/shared` 根入口里的 terminal CSS 反向拖崩。

@@ -443,6 +443,7 @@ export function SettingsPage({
             Server entry:
             <br />- `pnpm --filter @zterm/android daemon start|status|stop|restart`
             <br />- `scripts/zterm-daemon.sh`
+            <br />- `zterm-daemon start|status|stop|restart|install-service`
             <br />- auth token / host / port come from `{WTERM_CONFIG_DISPLAY_PATH}`
             <br />- optional env override: `ZTERM_AUTH_TOKEN=... pnpm --filter @zterm/android daemon start`
           </div>

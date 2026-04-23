@@ -1,25 +1,24 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { TerminalCell } from '../lib/types';
+import type { TerminalCell, TerminalGapRange } from '../lib/types';
 
 interface TerminalViewProps {
   sessionId: string | null;
   initialBufferLines?: TerminalCell[][];
   bufferStartIndex?: number;
+  bufferEndIndex?: number;
   bufferViewportEndIndex?: number;
+  bufferGapRanges?: TerminalGapRange[];
   cursorKeysApp?: boolean;
   active?: boolean;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
-  onInput?: (data: string) => void;
-  onResize?: (cols: number, rows: number) => void;
+  onInput?: (sessionId: string, data: string) => void;
+  onResize?: (sessionId: string, cols: number, rows: number) => void;
+  onViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
+  onViewportPrefetch?: (sessionId: string, viewState: { mode: 'reading'; viewportEndIndex: number; viewportRows: number; missingRanges?: TerminalGapRange[] }) => void;
   focusNonce?: number;
   fontSize?: number;
   rowHeight?: string;
-}
-
-interface RenderRow {
-  index: number;
-  row: TerminalCell[];
 }
 
 const DEFAULT_ROWS = 24;
@@ -67,18 +66,17 @@ const TERMINAL_FONT_STACK = [
   '"Sarasa Mono SC"',
   '"Sarasa Term SC"',
   '"Noto Sans Mono CJK SC"',
-  '"Noto Sans CJK SC"',
-  '"Source Han Sans SC"',
-  '"Droid Sans Fallback"',
-  '"PingFang SC"',
-  '"Microsoft YaHei UI"',
+  '"SF Mono"',
+  '"Monaco"',
   '"Roboto Mono"',
   '"Menlo"',
   '"Consolas"',
+  'ui-monospace',
   'monospace',
 ].join(', ');
 const XTERM_6X6_STEPS = [0, 95, 135, 175, 215, 255] as const;
-
+const OVERSCAN_ROWS = 4;
+const PRELOAD_MARGIN_ROWS = 12;
 
 function normalizeCell(cell: TerminalCell | null | undefined): TerminalCell {
   return {
@@ -127,12 +125,8 @@ function resolveColors(inputCell: TerminalCell) {
 
   if (cell.flags & FLAG_REVERSE) {
     [fg, bg] = [bg, fg];
-    if (fg === DEFAULT_COLOR) {
-      fg = 0;
-    }
-    if (bg === DEFAULT_COLOR) {
-      bg = 7;
-    }
+    if (fg === DEFAULT_COLOR) fg = 0;
+    if (bg === DEFAULT_COLOR) bg = 7;
   }
 
   return {
@@ -152,6 +146,11 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string) {
     overflow: 'hidden',
     whiteSpace: 'pre',
     width: cell.width === 2 ? '2ch' : cell.width === 0 ? '0px' : '1ch',
+    letterSpacing: '0',
+    fontKerning: 'none',
+    fontVariantLigatures: 'none',
+    fontFeatureSettings: '"liga" 0, "calt" 0',
+    textRendering: 'optimizeSpeed',
   };
 
   if (cell.width === 0) {
@@ -160,7 +159,6 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string) {
 
   style.color = colors.fg;
   style.background = colors.bg;
-
   if (cell.flags & FLAG_BOLD) style.fontWeight = '700';
   if (cell.flags & FLAG_DIM) style.opacity = '0.5';
   if (cell.flags & FLAG_ITALIC) style.fontStyle = 'italic';
@@ -175,39 +173,6 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string) {
 
   return style;
 }
-
-const VisibleRow = memo(function VisibleRow({
-  row,
-  rowIndex,
-  rowHeight,
-}: {
-  row: TerminalCell[];
-  rowIndex: number;
-  rowHeight: string;
-}) {
-  return (
-    <div
-      data-terminal-row="true"
-      style={{
-        display: 'block',
-        height: rowHeight,
-        lineHeight: rowHeight,
-        whiteSpace: 'pre',
-      }}
-    >
-      {row.length > 0
-        ? row.map((cell, cellIndex) => (
-            <span
-              key={`cell-${rowIndex}-${cellIndex}`}
-              style={cellStyle(cell, rowHeight)}
-            >
-              {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
-            </span>
-          ))
-        : ' '}
-    </div>
-  );
-}, (prev, next) => prev.row === next.row && prev.rowHeight === next.rowHeight);
 
 function measureViewport(host: HTMLDivElement, fontSize: number, rowHeight: string) {
   if (typeof document === 'undefined') {
@@ -240,60 +205,201 @@ function measureViewport(host: HTMLDivElement, fontSize: number, rowHeight: stri
   };
 }
 
-function deriveRenderRows(options: {
-  lines: TerminalCell[][];
-  startIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-}): RenderRow[] {
-  const viewportRows = Math.max(1, Math.floor(options.viewportRows || DEFAULT_ROWS));
-  const viewportBottomIndex = Math.max(0, Math.floor(options.viewportEndIndex));
-  const viewportTopIndex = Math.max(0, viewportBottomIndex - viewportRows);
-  const rows: RenderRow[] = [];
+function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
+  return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
+}
 
-  for (let index = viewportTopIndex; index < viewportBottomIndex; index += 1) {
-    const rowOffset = index - options.startIndex;
-    rows.push({
-      index,
-      row: rowOffset >= 0 && rowOffset < options.lines.length ? options.lines[rowOffset] || [] : [],
-    });
+function collectIntersectingGapRanges(gapRanges: TerminalGapRange[], startIndex: number, endIndex: number) {
+  if (endIndex <= startIndex) {
+    return [] as TerminalGapRange[];
+  }
+  return gapRanges
+    .map((range) => ({
+      startIndex: Math.max(startIndex, range.startIndex),
+      endIndex: Math.min(endIndex, range.endIndex),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+}
+
+const VisibleRow = memo(function VisibleRow({
+  row,
+  rowIndex,
+  absoluteIndex,
+  rowHeight,
+  isGap,
+}: {
+  row: TerminalCell[];
+  rowIndex: number;
+  absoluteIndex: number;
+  rowHeight: string;
+  isGap: boolean;
+}) {
+  if (isGap) {
+    return (
+      <div
+        data-terminal-row="true"
+        data-terminal-gap="true"
+        data-terminal-index={absoluteIndex}
+        style={{
+          display: 'block',
+          height: rowHeight,
+          lineHeight: rowHeight,
+          whiteSpace: 'pre',
+          color: 'rgba(212,212,212,0.45)',
+          background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 8px, transparent 8px 16px)',
+          borderTop: '1px dashed rgba(255,255,255,0.05)',
+        }}
+      >
+        ⋯
+      </div>
+    );
   }
 
-  return rows;
-}
+  return (
+    <div
+      data-terminal-row="true"
+      data-terminal-index={absoluteIndex}
+      style={{
+        display: 'block',
+        height: rowHeight,
+        lineHeight: rowHeight,
+        whiteSpace: 'pre',
+      }}
+    >
+      {row.length > 0
+        ? row.map((cell, cellIndex) => (
+            <span
+              key={`cell-${rowIndex}-${cellIndex}`}
+              style={cellStyle(cell, rowHeight)}
+            >
+              {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
+            </span>
+          ))
+        : ' '}
+    </div>
+  );
+}, (prev, next) => (
+  prev.row === next.row
+  && prev.rowHeight === next.rowHeight
+  && prev.isGap === next.isGap
+  && prev.absoluteIndex === next.absoluteIndex
+));
 
 export function TerminalView({
   sessionId,
   initialBufferLines,
   bufferStartIndex = 0,
+  bufferEndIndex,
   bufferViewportEndIndex,
+  bufferGapRanges = [],
   cursorKeysApp = false,
   active = false,
   allowDomFocus = true,
   domInputOffscreen = false,
   onInput,
   onResize,
+  onViewportChange,
+  onViewportPrefetch,
   focusNonce = 0,
   fontSize = 14,
   rowHeight = '17px',
 }: TerminalViewProps) {
   const bufferLines = initialBufferLines || [];
+  const effectiveBufferEndIndex = typeof bufferEndIndex === 'number' && Number.isFinite(bufferEndIndex)
+    ? Math.max(bufferStartIndex, Math.floor(bufferEndIndex))
+    : bufferStartIndex + bufferLines.length;
+  const authoritativeViewportEndIndex = typeof bufferViewportEndIndex === 'number' && Number.isFinite(bufferViewportEndIndex)
+    ? Math.max(bufferStartIndex, Math.floor(bufferViewportEndIndex))
+    : effectiveBufferEndIndex;
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
   const resizeCommitTimerRef = useRef<number | null>(null);
+  const previousBufferStartIndexRef = useRef(bufferStartIndex);
+  const lastReportedViewportRef = useRef<string>('');
+  const lastRenderableRowsRef = useRef<Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean }>>([]);
+  const followFlushFrameRef = useRef<number | null>(null);
+  const pendingFollowScrollTopRef = useRef<number | null>(null);
+  const suppressProgrammaticScrollRef = useRef(false);
+  const wasActiveRef = useRef(active);
+
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [followMode, setFollowMode] = useState(true);
 
-  const renderRows = useMemo(() => deriveRenderRows({
-    lines: bufferLines,
-    startIndex: bufferStartIndex,
-    viewportEndIndex:
-      typeof bufferViewportEndIndex === 'number' && Number.isFinite(bufferViewportEndIndex)
-        ? Math.floor(bufferViewportEndIndex)
-        : bufferStartIndex + bufferLines.length,
+  const rowHeightPx = Math.max(1, parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17);
+  const totalRows = Math.max(
+    bufferLines.length,
+    effectiveBufferEndIndex - bufferStartIndex,
+    authoritativeViewportEndIndex - bufferStartIndex,
     viewportRows,
-  }), [bufferLines, bufferStartIndex, bufferViewportEndIndex, viewportRows]);
+  );
+  const followViewportTopOffset = Math.max(
+    0,
+    Math.min(totalRows - viewportRows, authoritativeViewportEndIndex - bufferStartIndex - viewportRows),
+  );
+  const maxScrollTop = Math.max(0, (totalRows - viewportRows) * rowHeightPx);
+  const visibleStartOffset = followMode
+    ? followViewportTopOffset
+    : Math.max(0, Math.floor(scrollTop / rowHeightPx));
+  const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
+  const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
+
+  const visibleRows = useMemo(() => {
+    const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean }> = [];
+    for (let offset = renderStartOffset; offset < renderEndOffset; offset += 1) {
+      const absoluteIndex = bufferStartIndex + offset;
+      const row = bufferLines[offset] || [];
+      rows.push({
+        absoluteIndex,
+        row,
+        isGap: isGapIndex(bufferGapRanges, absoluteIndex),
+      });
+    }
+    return rows;
+  }, [bufferGapRanges, bufferLines, bufferStartIndex, renderEndOffset, renderStartOffset]);
+
+  const continuityCheck = useMemo(() => {
+    const visibleWindowStartIndex = bufferStartIndex + visibleStartOffset;
+    const visibleWindowEndIndex = Math.min(
+      effectiveBufferEndIndex,
+      visibleWindowStartIndex + viewportRows,
+    );
+    const precheckStartIndex = Math.max(
+      bufferStartIndex,
+      visibleWindowStartIndex - viewportRows * 2,
+    );
+
+    let visibleContinuous = true;
+    let precheckContinuous = true;
+    for (const range of bufferGapRanges) {
+      if (range.endIndex <= precheckStartIndex || range.startIndex >= visibleWindowEndIndex) {
+        continue;
+      }
+      precheckContinuous = false;
+      if (range.endIndex > visibleWindowStartIndex && range.startIndex < visibleWindowEndIndex) {
+        visibleContinuous = false;
+      }
+    }
+
+    return {
+      visibleContinuous,
+      precheckContinuous,
+      precheckStartIndex,
+      visibleWindowStartIndex,
+      visibleWindowEndIndex,
+      missingRanges: collectIntersectingGapRanges(bufferGapRanges, precheckStartIndex, visibleWindowEndIndex),
+    };
+  }, [bufferGapRanges, bufferStartIndex, effectiveBufferEndIndex, viewportRows, visibleStartOffset]);
+
+  const renderRows = useMemo(() => {
+    if (continuityCheck.visibleContinuous) {
+      return visibleRows;
+    }
+    return lastRenderableRowsRef.current;
+  }, [continuityCheck.visibleContinuous, visibleRows]);
 
   const focusTerminal = useCallback(() => {
     if (!allowDomFocus) {
@@ -312,7 +418,7 @@ export function TerminalView({
 
   const syncViewport = useCallback(() => {
     const host = containerRef.current;
-    if (!host) {
+    if (!host || !active || !sessionId) {
       return;
     }
 
@@ -331,10 +437,200 @@ export function TerminalView({
 
     resizeCommitTimerRef.current = window.setTimeout(() => {
       lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
-      onResize?.(nextViewport.cols, nextViewport.rows);
+      onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
-  }, [fontSize, onResize, rowHeight]);
+  }, [active, fontSize, onResize, rowHeight, sessionId]);
+
+  const emitViewportState = useCallback((nextMode: 'follow' | 'reading', nextScrollTop: number) => {
+    if (!active || !sessionId || !onViewportChange) {
+      return;
+    }
+
+    const viewportTopOffset = Math.max(0, Math.floor(nextScrollTop / rowHeightPx));
+    const viewportEndIndex = nextMode === 'follow'
+      ? authoritativeViewportEndIndex
+      : bufferStartIndex + Math.min(totalRows, viewportTopOffset + viewportRows);
+    const key = nextMode === 'follow'
+      ? `${nextMode}:${viewportRows}`
+      : `${nextMode}:${viewportEndIndex}:${viewportRows}`;
+    if (lastReportedViewportRef.current === key) {
+      return;
+    }
+    lastReportedViewportRef.current = key;
+    onViewportChange(sessionId, {
+      mode: nextMode,
+      viewportEndIndex,
+      viewportRows,
+    });
+  }, [active, authoritativeViewportEndIndex, bufferStartIndex, onViewportChange, rowHeightPx, sessionId, totalRows, viewportRows]);
+
+  const applyScrollState = useCallback((nextScrollTop: number) => {
+    const clamped = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
+    setScrollTop(clamped);
+
+    const nextVisibleStart = Math.max(0, Math.floor(clamped / rowHeightPx));
+    const distanceFromBottomRows = Math.max(0, followViewportTopOffset - nextVisibleStart);
+    const nextMode: 'follow' | 'reading' = distanceFromBottomRows <= 1 ? 'follow' : 'reading';
+    setFollowMode(nextMode === 'follow');
+    emitViewportState(nextMode, clamped);
+  }, [emitViewportState, followViewportTopOffset, maxScrollTop, rowHeightPx]);
+
+  const scheduleFollowViewportSync = useCallback((nextScrollTop: number) => {
+    const host = containerRef.current;
+    if (host) {
+      pendingFollowScrollTopRef.current = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
+      if (followFlushFrameRef.current !== null) {
+        return;
+      }
+
+      followFlushFrameRef.current = window.requestAnimationFrame(() => {
+        followFlushFrameRef.current = null;
+        const targetScrollTop = pendingFollowScrollTopRef.current;
+        pendingFollowScrollTopRef.current = null;
+        if (targetScrollTop === null) {
+          return;
+        }
+
+        const nextTarget = Math.max(0, Math.min(maxScrollTop, targetScrollTop));
+        suppressProgrammaticScrollRef.current = true;
+        if (Math.abs(host.scrollTop - nextTarget) > 1) {
+          host.scrollTop = nextTarget;
+        }
+        setScrollTop(nextTarget);
+        window.setTimeout(() => {
+          suppressProgrammaticScrollRef.current = false;
+        }, 0);
+      });
+    }
+  }, [maxScrollTop]);
+
+  const forceFollowViewport = useCallback(() => {
+    const nextScrollTop = followViewportTopOffset * rowHeightPx;
+    setFollowMode(true);
+    scheduleFollowViewportSync(nextScrollTop);
+    emitViewportState('follow', nextScrollTop);
+  }, [emitViewportState, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
+
+  useEffect(() => {
+    setFollowMode(true);
+    setScrollTop(0);
+    lastReportedViewportRef.current = '';
+  }, [sessionId]);
+
+  useEffect(() => {
+    const becameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (!becameActive) {
+      return;
+    }
+
+    const nextScrollTop = followViewportTopOffset * rowHeightPx;
+    lastReportedViewportRef.current = '';
+    setFollowMode(true);
+    setScrollTop(nextScrollTop);
+    scheduleFollowViewportSync(nextScrollTop);
+    emitViewportState('follow', nextScrollTop);
+  }, [active, emitViewportState, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
+
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+
+    if (followMode) {
+      const nextScrollTop = followViewportTopOffset * rowHeightPx;
+      scheduleFollowViewportSync(nextScrollTop);
+      emitViewportState('follow', nextScrollTop);
+      previousBufferStartIndexRef.current = bufferStartIndex;
+      return;
+    }
+
+    const previousStartIndex = previousBufferStartIndexRef.current;
+    if (bufferStartIndex < previousStartIndex) {
+      const prependedRows = previousStartIndex - bufferStartIndex;
+      const nextScrollTop = host.scrollTop + prependedRows * rowHeightPx;
+      host.scrollTop = nextScrollTop;
+      setScrollTop(nextScrollTop);
+      emitViewportState('reading', nextScrollTop);
+    }
+    previousBufferStartIndexRef.current = bufferStartIndex;
+  }, [bufferStartIndex, emitViewportState, followMode, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(syncViewport);
+    const timer = window.setTimeout(syncViewport, 120);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [active, sessionId, syncViewport]);
+
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+    const observer = new ResizeObserver(() => syncViewport());
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [syncViewport]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    emitViewportState(followMode ? 'follow' : 'reading', scrollTop);
+  }, [active, emitViewportState, followMode, scrollTop, viewportRows]);
+
+  useEffect(() => {
+    if (!active || followMode) {
+      return;
+    }
+    const nearTop = visibleStartOffset <= PRELOAD_MARGIN_ROWS;
+    const nearBottom = followViewportTopOffset - visibleStartOffset <= PRELOAD_MARGIN_ROWS;
+    if (nearTop || nearBottom) {
+      emitViewportState('reading', scrollTop);
+    }
+  }, [active, emitViewportState, followMode, followViewportTopOffset, scrollTop, visibleStartOffset]);
+
+  useEffect(() => {
+    if (continuityCheck.visibleContinuous) {
+      lastRenderableRowsRef.current = visibleRows;
+    }
+  }, [continuityCheck.visibleContinuous, visibleRows]);
+
+  useEffect(() => {
+    if (!active || !sessionId || followMode) {
+      return;
+    }
+    if (continuityCheck.precheckContinuous) {
+      return;
+    }
+    onViewportPrefetch?.(sessionId, {
+      mode: 'reading',
+      viewportEndIndex: continuityCheck.visibleWindowEndIndex,
+      viewportRows,
+      missingRanges: continuityCheck.missingRanges,
+    });
+  }, [
+    active,
+    continuityCheck.missingRanges,
+    continuityCheck.precheckContinuous,
+    continuityCheck.visibleWindowEndIndex,
+    followMode,
+    onViewportPrefetch,
+    sessionId,
+    viewportRows,
+  ]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -359,24 +655,25 @@ export function TerminalView({
   }, [allowDomFocus, domInputOffscreen]);
 
   useEffect(() => {
-    if (!allowDomFocus || !active) {
-      return;
-    }
-    focusTerminal();
-  }, [active, allowDomFocus, focusNonce, focusTerminal]);
-
-  useEffect(() => {
     const input = inputRef.current;
     if (!input) {
       return;
     }
 
     let composing = false;
-    let pendingComposedValue: string | null = null;
+    let skipNextInput = false;
+
+    const sendTerminalInput = (value: string) => {
+      forceFollowViewport();
+      if (!sessionId) {
+        return;
+      }
+      onInput?.(sessionId, value);
+    };
 
     const handleCompositionStart = () => {
       composing = true;
-      pendingComposedValue = null;
+      skipNextInput = false;
       input.value = '';
     };
 
@@ -384,37 +681,33 @@ export function TerminalView({
       composing = false;
       const value = event.data || input.value;
       if (value) {
-        pendingComposedValue = value;
-        onInput?.(value);
+        skipNextInput = true;
+        sendTerminalInput(value);
       }
       input.value = '';
       focusTerminal();
     };
 
     const handleInput = () => {
-      if (composing || !input.value) {
+      if (composing) {
         return;
       }
-
-      const normalizedValue = input.value.replace(/\n/g, '\r');
-      if (pendingComposedValue !== null) {
-        if (normalizedValue === pendingComposedValue) {
-          pendingComposedValue = null;
-          input.value = '';
-          return;
-        }
-        pendingComposedValue = null;
+      if (skipNextInput) {
+        skipNextInput = false;
+        input.value = '';
+        return;
       }
-
-      onInput?.(normalizedValue);
-      input.value = '';
-      focusTerminal();
+      if (input.value) {
+        sendTerminalInput(input.value.replace(/\n/g, '\r'));
+        input.value = '';
+        focusTerminal();
+      }
     };
 
     const handleBeforeInput = (event: InputEvent) => {
       if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') {
         event.preventDefault();
-        onInput?.('\r');
+        sendTerminalInput('\r');
         input.value = '';
       }
     };
@@ -428,7 +721,7 @@ export function TerminalView({
         const code = event.key.toUpperCase().charCodeAt(0);
         if (code >= 64 && code <= 95) {
           event.preventDefault();
-          onInput?.(String.fromCharCode(code - 64));
+          sendTerminalInput(String.fromCharCode(code - 64));
           return;
         }
       }
@@ -436,29 +729,29 @@ export function TerminalView({
       const arrows = cursorKeysApp ? APP_CURSOR_KEYS : NORMAL_CURSOR_KEYS;
       if (event.key in arrows) {
         event.preventDefault();
-        onInput?.(arrows[event.key as keyof typeof arrows]);
+        sendTerminalInput(arrows[event.key as keyof typeof arrows]);
         return;
       }
 
       switch (event.key) {
         case 'Enter':
           event.preventDefault();
-          onInput?.('\r');
+          sendTerminalInput('\r');
           input.value = '';
           return;
         case 'Backspace':
           event.preventDefault();
-          onInput?.('\x7f');
+          sendTerminalInput('\x7f');
           input.value = '';
           return;
         case 'Tab':
           event.preventDefault();
-          onInput?.('\t');
+          sendTerminalInput('\t');
           input.value = '';
           return;
         case 'Escape':
           event.preventDefault();
-          onInput?.('\x1b');
+          sendTerminalInput('\x1b');
           input.value = '';
           return;
         default:
@@ -479,127 +772,89 @@ export function TerminalView({
       input.removeEventListener('input', handleInput);
       input.removeEventListener('keydown', handleKeyDown);
     };
-  }, [cursorKeysApp, focusTerminal, onInput]);
+  }, [cursorKeysApp, focusTerminal, forceFollowViewport, onInput]);
 
   useEffect(() => {
-    lastViewportRef.current = null;
-    if (resizeCommitTimerRef.current) {
-      window.clearTimeout(resizeCommitTimerRef.current);
-      resizeCommitTimerRef.current = null;
+    if (!active || !allowDomFocus) {
+      return;
     }
-  }, [fontSize, sessionId]);
+    focusTerminal();
+  }, [active, allowDomFocus, focusNonce, focusTerminal]);
 
   useEffect(() => () => {
+    if (followFlushFrameRef.current !== null) {
+      window.cancelAnimationFrame(followFlushFrameRef.current);
+      followFlushFrameRef.current = null;
+    }
     if (resizeCommitTimerRef.current) {
       window.clearTimeout(resizeCommitTimerRef.current);
       resizeCommitTimerRef.current = null;
     }
   }, []);
 
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-
-    const frameA = window.requestAnimationFrame(syncViewport);
-    const frameB = window.requestAnimationFrame(() => window.requestAnimationFrame(syncViewport));
-    const timer = window.setTimeout(syncViewport, 120);
-    return () => {
-      window.cancelAnimationFrame(frameA);
-      window.cancelAnimationFrame(frameB);
-      window.clearTimeout(timer);
-    };
-  }, [active, sessionId, syncViewport]);
-
-  useEffect(() => {
-    const host = containerRef.current;
-    if (!host || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const observer = new ResizeObserver(() => syncViewport());
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, [sessionId, syncViewport]);
-
-  useEffect(() => {
-    const handleViewportChange = () => {
-      window.requestAnimationFrame(syncViewport);
-    };
-
-    window.addEventListener('resize', handleViewportChange);
-    return () => {
-      window.removeEventListener('resize', handleViewportChange);
-    };
-  }, [syncViewport]);
-
   return (
     <div
       ref={containerRef}
       className="wterm"
-      onPointerDownCapture={() => {
-        if (!allowDomFocus) {
-          inputRef.current?.blur();
+      data-terminal-session-id={sessionId || undefined}
+      onClick={focusTerminal}
+      onScroll={(event) => {
+        if (suppressProgrammaticScrollRef.current) {
+          return;
         }
-      }}
-      onTouchStartCapture={() => {
-        if (!allowDomFocus) {
-          inputRef.current?.blur();
-        }
+        applyScrollState((event.currentTarget as HTMLDivElement).scrollTop);
       }}
       style={{
-        position: 'relative',
-        display: 'block',
         width: '100%',
         height: '100%',
+        position: 'relative',
         backgroundColor: DEFAULT_BACKGROUND,
-        color: DEFAULT_FOREGROUND,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+        padding: '0',
+        borderRadius: '0',
+        boxShadow: 'none',
+        ['--term-font-family' as string]: TERMINAL_FONT_STACK,
+        ['--term-font-size' as string]: `${fontSize}px`,
+        ['--term-row-height' as string]: resolvedRowHeight || rowHeight,
         fontFamily: TERMINAL_FONT_STACK,
         fontSize: `${fontSize}px`,
-        lineHeight: rowHeight,
-        overflow: 'hidden',
-        overscrollBehavior: 'none',
-        padding: '0',
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          overflow: 'hidden',
-        }}
-      >
-        {renderRows.map(({ index, row }) => (
+      <div className="term-grid" data-cursor-source="buffer-store" style={{ paddingTop: `${renderStartOffset * rowHeightPx}px`, paddingBottom: `${Math.max(0, totalRows - renderEndOffset) * rowHeightPx}px` }}>
+        {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) => (
           <VisibleRow
-            key={`line-${index}`}
+            key={`row-${absoluteIndex}`}
+            absoluteIndex={absoluteIndex}
             row={row}
-            rowIndex={index}
-            rowHeight={resolvedRowHeight}
+            rowIndex={rowIndex}
+            rowHeight={resolvedRowHeight || rowHeight}
+            isGap={isGap}
           />
         ))}
       </div>
-
       <textarea
         ref={inputRef}
         data-wterm-input="true"
-        aria-hidden="true"
+        data-terminal-input-session-id={sessionId || undefined}
         autoCapitalize="off"
         autoCorrect="off"
+        autoComplete="off"
         spellCheck={false}
-        enterKeyHint="enter"
-        inputMode="text"
         style={{
-          position: 'fixed',
-          caretColor: 'transparent',
-          color: 'transparent',
-          background: 'transparent',
+          position: 'absolute',
+          left: '-9999px',
+          top: 0,
+          opacity: 0,
+          width: '1px',
+          height: '1px',
           border: '0',
-          padding: '0',
-          margin: '0',
-          outline: 'none',
+          padding: 0,
           resize: 'none',
-          whiteSpace: 'pre',
-          fontSize: '16px',
-          zIndex: 0,
+          background: 'transparent',
+          color: 'transparent',
+          caretColor: 'transparent',
         }}
       />
     </div>

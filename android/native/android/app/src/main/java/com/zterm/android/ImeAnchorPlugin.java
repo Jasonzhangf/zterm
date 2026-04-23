@@ -118,8 +118,6 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setInputType(
             InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
         );
         imeEditText.setSingleLine(false);
         imeEditText.setMinLines(1);
@@ -382,6 +380,16 @@ public class ImeAnchorPlugin extends Plugin {
                         return true;
                     }
                     return super.commitText(text, newCursorPosition);
+                }
+
+                @Override
+                public boolean finishComposingText() {
+                    Editable editable = getText();
+                    if (plugin != null && editable != null && editable.length() > 0) {
+                        plugin.emitInputText(editable.toString(), "finishComposingText");
+                        return true;
+                    }
+                    return super.finishComposingText();
                 }
 
             };

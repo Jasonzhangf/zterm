@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
@@ -25,7 +26,7 @@ import {
   sortHostsForPicker,
   type BridgeTarget,
 } from './lib/session-picker';
-import { STORAGE_KEYS, type Host } from './lib/types';
+import { STORAGE_KEYS, type Host, type PersistedOpenTab } from './lib/types';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -78,6 +79,81 @@ function readPersistedPageState(): AppPageState {
   return openConnectionsPage();
 }
 
+function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as Partial<PersistedOpenTab>;
+  const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId.trim() : '';
+  const hostId = typeof candidate.hostId === 'string' ? candidate.hostId.trim() : '';
+  const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
+  const sessionName = typeof candidate.sessionName === 'string' ? candidate.sessionName.trim() : '';
+  const connectionName = typeof candidate.connectionName === 'string' ? candidate.connectionName.trim() : '';
+
+  if (!sessionId || !bridgeHost || !sessionName) {
+    return null;
+  }
+
+  return {
+    sessionId,
+    hostId,
+    connectionName: connectionName || sessionName,
+    bridgeHost,
+    bridgePort:
+      typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
+        ? candidate.bridgePort
+        : 3333,
+    sessionName,
+    authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
+    autoCommand: typeof candidate.autoCommand === 'string' ? candidate.autoCommand : undefined,
+    customName: typeof candidate.customName === 'string' && candidate.customName.trim()
+      ? candidate.customName.trim()
+      : undefined,
+    createdAt:
+      typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
+        ? candidate.createdAt
+        : Date.now(),
+  };
+}
+
+function readPersistedOpenTabs() {
+  if (typeof window === 'undefined') {
+    return [] as PersistedOpenTab[];
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
+    if (!raw) {
+      return [] as PersistedOpenTab[];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [] as PersistedOpenTab[];
+    }
+    return parsed
+      .map(normalizePersistedOpenTab)
+      .filter((item): item is PersistedOpenTab => item !== null);
+  } catch (error) {
+    console.error('[App] Failed to restore open tabs:', error);
+    return [] as PersistedOpenTab[];
+  }
+}
+
+function readPersistedActiveSessionId() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION);
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+  } catch (error) {
+    console.error('[App] Failed to restore active session:', error);
+    return null;
+  }
+}
+
 export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   const {
     preferences: appUpdatePreferences,
@@ -96,6 +172,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   } = useAppUpdate();
   const {
     state,
+    scheduleStates = {},
     createSession,
     closeSession,
     switchSession,
@@ -106,8 +183,15 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     sendInput,
     sendImagePaste,
     resizeTerminal,
+    updateSessionViewport,
+    requestViewportPrefetch,
+    requestScheduleList,
+    upsertScheduleJob,
+    deleteScheduleJob,
+    toggleScheduleJob,
+    runScheduleJobNow,
   } = useSession();
-  const { hosts, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
+  const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
@@ -117,6 +201,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
   const restoredRouteHandledRef = useRef(false);
+  const restoredTabsHandledRef = useRef(false);
   const wasHiddenRef = useRef(false);
   const lastResumeAtRef = useRef(0);
 
@@ -125,6 +210,101 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     [state.activeSessionId, state.sessions],
   );
   const sessions = state.sessions;
+
+  useEffect(() => {
+    if (!restoredTabsHandledRef.current && sessions.length === 0) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const persistedTabs: PersistedOpenTab[] = sessions.map((session) => ({
+        sessionId: session.id,
+        hostId: session.hostId,
+        connectionName: session.connectionName,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+        sessionName: session.sessionName,
+        authToken: session.authToken,
+        autoCommand: session.autoCommand,
+        customName: session.customName,
+        createdAt: session.createdAt,
+      }));
+      localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(persistedTabs));
+      if (state.activeSessionId) {
+        localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, state.activeSessionId);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+      }
+    } catch (error) {
+      console.error('[App] Failed to persist open tabs:', error);
+    }
+  }, [sessions, state.activeSessionId]);
+
+  useEffect(() => {
+    if (restoredTabsHandledRef.current || !hostsLoaded) {
+      return;
+    }
+
+    if (sessions.length > 0) {
+      restoredTabsHandledRef.current = true;
+      return;
+    }
+
+    restoredTabsHandledRef.current = true;
+    const persistedTabs = readPersistedOpenTabs();
+    if (persistedTabs.length === 0) {
+      return;
+    }
+
+    const persistedActiveSessionId = readPersistedActiveSessionId();
+    for (const tab of persistedTabs) {
+      const existingHost = hosts.find((host) => host.id === tab.hostId) || null;
+      const host: Host = existingHost
+        ? {
+            ...existingHost,
+            name: existingHost.name || tab.connectionName,
+            bridgeHost: existingHost.bridgeHost || tab.bridgeHost,
+            bridgePort: existingHost.bridgePort || tab.bridgePort,
+            sessionName: existingHost.sessionName || tab.sessionName,
+            authToken: existingHost.authToken || tab.authToken,
+            autoCommand: existingHost.autoCommand || tab.autoCommand,
+          }
+        : {
+            id: tab.hostId || `restored:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
+            createdAt: tab.createdAt,
+            name: tab.connectionName,
+            bridgeHost: tab.bridgeHost,
+            bridgePort: tab.bridgePort,
+            sessionName: tab.sessionName,
+            authToken: tab.authToken,
+            autoCommand: tab.autoCommand,
+            authType: 'password',
+            password: undefined,
+            privateKey: undefined,
+            tags: [],
+            pinned: false,
+            lastConnected: tab.createdAt,
+          };
+
+      createSession(host, {
+        activate: false,
+        customName: tab.customName,
+        createdAt: tab.createdAt,
+        sessionId: tab.sessionId,
+      });
+    }
+
+    const nextActiveSessionId =
+      (persistedActiveSessionId && persistedTabs.some((tab) => tab.sessionId === persistedActiveSessionId)
+        ? persistedActiveSessionId
+        : persistedTabs[0]?.sessionId) || null;
+    if (nextActiveSessionId) {
+      switchSession(nextActiveSessionId);
+    }
+  }, [createSession, hosts, hostsLoaded, sessions.length, switchSession]);
 
   const findReusableSession = useCallback((target: Pick<Host, 'bridgeHost' | 'bridgePort' | 'sessionName'>) => {
     const resolvedSessionName = target.sessionName.trim() || target.bridgeHost.trim();
@@ -248,10 +428,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     };
 
     const onFocus = () => {
+      const hasConnectedSessions = sessions.some((session) => session.state === 'connected');
       runtimeDebug('app.window.focus', {
         wasHidden: wasHiddenRef.current,
+        hasConnectedSessions,
       });
-      if (wasHiddenRef.current) {
+      if (wasHiddenRef.current || hasConnectedSessions) {
         wasHiddenRef.current = false;
         notifyResume('focus', { force: true });
       }
@@ -264,7 +446,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     };
 
     const onPageShow = () => {
-      runtimeDebug('app.window.pageshow', {});
+      const hasConnectedSessions = sessions.some((session) => session.state === 'connected');
+      runtimeDebug('app.window.pageshow', {
+        hasConnectedSessions,
+      });
+      if (hasConnectedSessions) {
+        notifyResume('pageshow', { force: true });
+        return;
+      }
       notifyResume('pageshow');
     };
 
@@ -272,6 +461,19 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       runtimeDebug('app.window.online', {});
       notifyResume('online');
     };
+
+    const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      runtimeDebug('app.capacitor.appStateChange', {
+        isActive,
+        wasHidden: wasHiddenRef.current,
+      });
+      if (!isActive) {
+        markHidden();
+        return;
+      }
+      wasHiddenRef.current = false;
+      notifyResume('appStateChange', { force: true });
+    });
 
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onPageShow);
@@ -284,6 +486,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('online', onOnline);
+      void Promise.resolve(appStateListenerHandle)
+        .then((listener) => listener?.remove?.())
+        .catch(() => undefined);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
@@ -538,9 +743,64 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     }
   }, [bridgeSettings.servers, hosts, openDraftAsSession, recordSessionGroupOpen]);
 
-  const handleResize = useCallback((cols: number, rows: number) => {
-    console.log('[App] Terminal resize:', cols, rows);
-    resizeTerminal(cols, rows);
+  const handleLoadSavedTabList = useCallback((tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => {
+    let focusSessionId: string | null = null;
+
+    tabs.forEach((tab, index) => {
+      const existingHost = hosts.find((host) => host.id === tab.hostId) || null;
+      const host: Host = existingHost
+        ? {
+            ...existingHost,
+            name: existingHost.name || tab.connectionName,
+            bridgeHost: existingHost.bridgeHost || tab.bridgeHost,
+            bridgePort: existingHost.bridgePort || tab.bridgePort,
+            sessionName: existingHost.sessionName || tab.sessionName,
+            authToken: existingHost.authToken || tab.authToken,
+            autoCommand: existingHost.autoCommand || tab.autoCommand,
+          }
+        : {
+            id: tab.hostId || `saved:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
+            createdAt: tab.createdAt,
+            name: tab.connectionName,
+            bridgeHost: tab.bridgeHost,
+            bridgePort: tab.bridgePort,
+            sessionName: tab.sessionName,
+            authToken: tab.authToken,
+            autoCommand: tab.autoCommand,
+            authType: 'password',
+            password: undefined,
+            privateKey: undefined,
+            tags: [],
+            pinned: false,
+            lastConnected: Date.now(),
+          };
+
+      const opened = openDraftAsSession(host, {
+        rememberName: host.name,
+        activate: false,
+        navigate: false,
+      });
+
+      if (tab.customName?.trim()) {
+        renameSession(opened.sessionId, tab.customName.trim());
+      }
+
+      if (requestedActiveSessionId === tab.sessionId) {
+        focusSessionId = opened.sessionId;
+      } else if (!focusSessionId && index === 0) {
+        focusSessionId = opened.sessionId;
+      }
+    });
+
+    if (focusSessionId) {
+      switchSession(focusSessionId);
+      setPageState(openTerminalPage(focusSessionId));
+    }
+  }, [hosts, openDraftAsSession, renameSession, switchSession]);
+
+  const handleResize = useCallback((sessionId: string, cols: number, rows: number) => {
+    console.log('[App] Terminal resize:', sessionId, cols, rows);
+    resizeTerminal(sessionId, cols, rows);
   }, [resizeTerminal]);
 
   const handleAddNew = useCallback(() => {
@@ -569,8 +829,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     deleteHost(host.id);
   }, [deleteHost]);
 
-  const handleTerminalInput = useCallback((data: string) => {
-    sendInput(data);
+  const handleTerminalInput = useCallback((sessionId: string, data: string) => {
+    sendInput(sessionId, data);
   }, [sendInput]);
 
   const handleSendSessionDraft = useCallback((sessionId: string, value: string) => {
@@ -582,7 +842,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     if (activeSession?.id !== sessionId) {
       switchSession(sessionId);
     }
-    handleTerminalInput(payload);
+    handleTerminalInput(sessionId, payload);
     clearSessionDraft(sessionId);
   }, [activeSession?.id, clearSessionDraft, handleTerminalInput, switchSession]);
 
@@ -703,10 +963,21 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             onOpenQuickTabPicker={() => openSessionPicker('quick-tab')}
             onResize={handleResize}
             onTerminalInput={handleTerminalInput}
+            onTerminalViewportChange={(sessionId, viewState) => {
+              updateSessionViewport(sessionId, viewState);
+            }}
+            onTerminalViewportPrefetch={(sessionId, viewState) => {
+              requestViewportPrefetch(sessionId, viewState);
+            }}
             onImagePaste={sendImagePaste}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
-            onQuickActionInput={handleTerminalInput}
+            onQuickActionInput={(sequence) => {
+              if (!activeSession?.id) {
+                return;
+              }
+              handleTerminalInput(activeSession.id, sequence);
+            }}
             onQuickActionsChange={setQuickActions}
             onShortcutActionsChange={setShortcutActions}
             sessionDraft={activeSession ? (sessionDrafts[activeSession.id] || '') : ''}
@@ -722,6 +993,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
               }
               handleSendSessionDraft(activeSession.id, value);
             }}
+            onLoadSavedTabList={handleLoadSavedTabList}
+            scheduleState={activeSession ? scheduleStates[activeSession.id] || null : null}
+            onRequestScheduleList={requestScheduleList}
+            onUpsertScheduleJob={upsertScheduleJob}
+            onDeleteScheduleJob={deleteScheduleJob}
+            onToggleScheduleJob={toggleScheduleJob}
+            onRunScheduleJobNow={runScheduleJobNow}
           />
         )}
       </div>

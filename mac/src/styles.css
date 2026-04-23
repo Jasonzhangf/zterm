@@ -599,6 +599,172 @@ button {
   padding: 0 18px 18px;
 }
 
+.quick-connect-sheet {
+  width: min(1150px, calc(100vw - 48px));
+}
+
+.quick-connect-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick-connect-body {
+  padding: 18px;
+}
+
+.quick-connect-mode-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.quick-connect-entry-grid,
+.quick-connect-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.quick-connect-entry-card,
+.quick-connect-mini-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px 18px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(165, 185, 215, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: #e8f0fb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-connect-entry-card:hover,
+.quick-connect-mini-card:hover,
+.quick-connect-mini-card.active {
+  border-color: rgba(126, 160, 219, 0.28);
+  background: rgba(109, 138, 193, 0.1);
+}
+
+.quick-connect-entry-card strong,
+.quick-connect-mini-card strong,
+.quick-connect-check-copy strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.quick-connect-entry-card span,
+.quick-connect-mini-card span,
+.quick-connect-section-copy,
+.quick-connect-check-copy span,
+.quick-connect-selection-summary {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a4ba;
+}
+
+.quick-connect-entry-card em {
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 11px;
+  color: #bcd0eb;
+}
+
+.quick-connect-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(165, 185, 215, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.quick-connect-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quick-connect-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #eef4fd;
+}
+
+.quick-connect-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quick-connect-form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.quick-connect-form-grid.triple {
+  grid-template-columns: minmax(0, 1.4fr) minmax(120px, 0.5fr) minmax(0, 1fr);
+}
+
+.quick-connect-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quick-connect-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(165, 185, 215, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.quick-connect-check-item:hover,
+.quick-connect-check-item.active {
+  border-color: rgba(126, 160, 219, 0.28);
+  background: rgba(109, 138, 193, 0.1);
+}
+
+.quick-connect-check-item input[type='checkbox'] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: #7aa0dc;
+  flex: 0 0 auto;
+}
+
+.quick-connect-check-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quick-connect-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 14px;
+}
+
+.quick-connect-selection-summary {
+  min-width: 0;
+  flex: 1;
+}
+
 .shell-quick-tabs {
   display: inline-flex;
   gap: 6px;
