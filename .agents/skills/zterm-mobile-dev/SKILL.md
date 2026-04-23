@@ -25,10 +25,11 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 4. android/docs/spec.md     → 项目范围与验收
 5. android/docs/architecture.md → 模块边界与数据流
 6. android/docs/decisions/0001-cross-platform-layout-profile.md → 跨尺寸布局 / Mac 共享壳决策
-7. android/docs/dev-workflow.md → 执行门禁与验证
-8. android/task.md          → 当前任务板
-9. android/docs/ui-slices.md → 页面切片与 ownership
-10. 本 SKILL.md                     → 项目约束、可复用门禁
+7. android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md → terminal head / sparse buffer / render / UI 真源
+8. android/docs/dev-workflow.md → 执行门禁与验证
+9. android/task.md          → 当前任务板
+10. android/docs/ui-slices.md → 页面切片与 ownership
+11. 本 SKILL.md                     → 项目约束、可复用门禁
 ```
 
 ---
@@ -110,6 +111,10 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - terminal 持久化缓存不允许只拼 raw output chunk；应从本地 terminal buffer 抽取按行 snapshot（scrollback + visible rows）后再持久化
 - daemon 的 `sendInitialSnapshot()` 不能让 `tmux capture-pane` 异常冒泡到进程级；最多只允许日志告警 + fallback snapshot
 - daemon 的 buffer 真源必须按 **tmux session mirror** 维护：一个 websocket/tab 只是客户端，不得拥有自己的 authoritative buffer；客户端 detach/reattach 不能重建 session 镜像
+- 2026-04-23 新冻结：daemon 对外职责收敛为 **30Hz session head 广播 + range request 响应**；不再主动 push buffer 内容，consumer 不得把自己的消费状态写回 producer 作为长期真相
+- 2026-04-23 新冻结：client buffer 必须是 **sparse absolute-index buffer**，允许不连续；worker 不为“完整性”主动补洞，只围绕当前工作集补缺：follow 维护尾部 3 屏热区，reading 只补当前窗口
+- 2026-04-23 新冻结：renderer 只按 latest bottom-relative window 消费 buffer；UI shell 只负责容器位置/裁切；IME/keyboard 不得进入 buffer/render truth 链
+- runtime 远程排障接口应收敛到 daemon HTTP：client 侧 runtime debug 只负责上送有界日志队列，daemon 侧统一缓存并通过 `/debug/runtime`、`/debug/runtime/logs` 暴露现场快照；接口复用 daemon auth token，便于服务器端直接拉取现场证据
 - Node/daemon 侧若要复用 `packages/shared`，只允许 import **叶子模块**（如 `schedule/next-fire.ts`、`connection/types.ts`）；禁止从 `@zterm/shared` 根入口取模块，因为根入口会连带 React/CSS，直接把 daemon 运行时打崩
 - 悬浮球快捷菜单的语义是“文本 snippet 注入”；方向键 / Esc / Tab / Backspace 属于常驻快捷栏，不要和自定义 snippet 共用同一概念模型
 - session 级“定时发送”入口不要挂在 tab strip / header 这种易被理解成全局 tab 动作的位置；Android 侧优先放在当前 session 的 quick input/composer 入口里
@@ -117,13 +122,27 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 悬浮菜单打开时可以隐藏底部 shell rows，但关闭后必须立刻恢复；keyboard 弹起时只上抬 shell rows，本体悬浮球/面板不要跟着复用同一 transform
 - 悬浮菜单内的快捷输入列表点击语义是“立即发送 snippet”，默认补 `\r` 执行；只有剪贴板注入才追加到 draft，不要混成同一路径
 - terminal follow 态不要在每次 buffer/input 到来时直接同步硬改 `scrollTop`；应合并成单向 cadence（如 rAF）贴底，并屏蔽程序化 scroll 反向触发 onScroll，避免底部抖动/拉扯
+- `TerminalView` 的 follow 对齐若会被 active/reset/layout/audit 多个入口复用，必须先收成单一 helper；scrollTop -> follow/reading 判定也要保持纯 helper，避免同一真相在多个 effect 里分叉
+- `updateSessionViewport()` 这类 worker 入口必须对完全相同的 reading viewport 去重；若从 reading 切回 follow，要同步清掉已排队的 reading sync，不要让旧 request 在 follow 态晚到
+- follow viewport state / bootstrap 这类 transport 决策若会被 `active switch`、`follow reset` 等多个入口复用，必须先收成单点 helper；不要让同一 follow 真相在两个分支各算一遍
+- `connectSession` / reconnect 若重复的是 socket 握手、heartbeat、公共 message switch，就抽 transport helper；但 `connected` 后的状态推进、bucket 排队、副作用仍保留在各自分支，不要为了去重把两条链混成一条
+- 若 connect / reconnect 在 `connected` 后共享的是同一份 baseline 推进（connected state、schedule-list、active bootstrap、watchdog、connectedCount），可以再抽一层公共 helper；但 bucket reset / pending input drain / retry 队列推进仍留在各自外层
+- `finalizeFailure` 若共享的是完成位、cleanup、schedule error、manual-close 终止，也可以再抽一层 failure baseline；但 retry、bucket attempt、pending requeue 仍留在各自外层
+- `TerminalView` 缩 effect 面时，若重复的是 viewport refresh 调度或当前 viewport emit，先抽本地 helper（如 `scheduleViewportRefresh` / `emitCurrentViewportState`）；先单点化动作，再决定是否减少 effect 数量
+- 同理，reading viewport emit 若在 prepend 历史重锚和 near-edge reading 两处重复，也先抽本地 helper（如 `emitReadingViewportState`）；renderer 收口先做动作单点化，不急着硬合并 effect
+- follow reset、prepend 历史锚定、near-edge reading emit 这类 viewport action 若还散在 effect 里，也继续抽本地 action helper（如 `resetViewportToFollow` / `anchorReadingViewportAfterPrepend` / `emitReadingViewportIfNearEdge`）；先把动作名字化，再看 effect 是否还能继续收
+- 若 `becameActive` 与 `viewportResetNonce` 最终都只是在触发同一 follow reset 动作，可以继续并成一个 reset effect；但要保住 session 切换时 ref 初始化的语义，不要把 reset 信号提前吃掉
+- 同理，若‘当前 viewport emit’与‘reading near-edge emit’只是同一阶段里的两次 emit，也可并成一个 effect；前提是 `emitViewportState` 的 dedupe key 仍能兜住重复发送
 - tab strip / shell header 不要保留浏览器默认 focus ring；移动端若无键盘导航需求，容器与 tab 按钮默认 `tabIndex=-1 + blur + outline none`
 - 拖拽排序类交互若在 `pointerMove` 更新 React state、`pointerUp` 立即提交，必须用 ref 同步保存最新 dragState；release 不能只读 state 闭包，否则会出现“拖了但顺序没生效”
 - keyboard 关闭态不要在 quick bar / bottom overlay 外层保留空 `transform`（如 `translateY(0)`）；这会让内部 `position: fixed` 的悬浮球/面板改绑到容器坐标系，导致入口“消失”
 - 快捷按键编辑器里，组合键默认名必须来自最终组合 preview，而不是第一个被点击的 modifier token；否则 `Ctrl + C` 会被错误保存成 `Ctrl`
 - Android / Mac 若都要消费快捷按键组合规则，编码/反解/默认 label 必须下沉到 shared 纯函数；平台 UI 只保留 token 编辑与展示，禁止再复制一份组合算法
+- Android WebView 若出现“sheet/表单看起来不能滚”，先不要凭截图猜高度；应先附着 `webview_devtools_remote_<pid>` 给目标滚动容器打 `touchstart/touchmove/scrollTop` probe，并用 `adb logcat` 验证 `defaultPrevented` 与 `scrollTop` 是否真实变化，再决定改事件捕获还是布局
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
+- active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
+- `refreshSessionTail()` 若显式把 session sync state 切回 follow，UI renderer 也必须同步收到一个 follow-reset signal；只改 transport/store、不改 `TerminalView` 本地 `followMode/scrollTop`，就会出现“恢复后看到旧 buffer，输入一下才跳到最新”的假刷新
 - active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + gap marker；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
 - active 页的 gap repair 只针对 reading 态当前三屏窗口命中的缺口；不要从旧 stop point 连续追到最新，窗口外内容允许保持不连续以控制带宽
 - client 本地 cache window 必须围绕当前 reading viewport 动态移动；禁止 trim 时永远只保最新 tail，否则向前补到的历史会被立刻愚蠢扔掉
@@ -245,6 +264,64 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 | **L2: Function** | 模块主路径功能 | 浏览器手动验证 |
 | **L3: Orchestration** | 跨模块推进、多 Tab | 多场景手动验证 |
 | **L4: Runtime** | Android 运行态 | 模拟器/真机验证 |
+
+#### 远程 runtime 调试闭环（必须记住）
+
+当出现下面这类问题时，优先走 daemon 远程调试接口，而不是只靠猜：
+
+- active tab 假活 / 不主动刷新 / 只有输入后才刷新
+- 底部缺行 / prompt 漂移 / 键盘弹出后才正常
+- reconnect 看起来 connected，但 buffer 不推进
+- 想确认当前 client session / mirror / lastBufferSyncRequest 到底是什么
+
+**唯一真源入口：**
+
+- `GET /debug/runtime`
+  - 返回 daemon health + clientSessions + mirrors + clientDebug summary
+- `GET /debug/runtime/logs`
+  - 返回最近 client runtime debug entries，可按 `sessionId / tmuxSessionName / scope` 过滤
+- `GET /debug/runtime/control?enabled=1`
+  - 远程打开 client runtime debug
+
+**鉴权规则：**
+
+- 统一复用 daemon auth token
+- query 参数：`?token=<auth>`
+- 或 HTTP header：`Authorization: Bearer <auth>`
+
+**优先用脚本，不手搓 curl：**
+
+```bash
+cd android
+pnpm daemon:runtime:remote snapshot --host 100.x.x.x --port 3333 --token <auth>
+pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --limit 200
+pnpm daemon:runtime:remote enable --host 100.x.x.x --port 3333 --token <auth> --reason ime-refresh-debug
+pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --sessionId <session-id> --scope follow
+```
+
+**现场排障最小顺序：**
+
+1. 先 `snapshot`
+   - 看 `clientSessions[].state/streamMode/lastBufferSyncRequest`
+   - 看 `mirrors[].revision/bufferStartIndex/bufferEndIndex/lastFlushCompletedAt`
+2. 若日志不够，再 `enable`
+3. 在手机上复现一次
+4. 立刻 `logs`
+5. 只根据 snapshot + logs 下结论，不靠主观猜
+
+**针对当前两类高频问题的看法：**
+
+- “输入一下就恢复”  
+  先看：
+  - active session 是否真的处于 `streamMode=active`
+  - `lastBufferSyncRequest.mode` 是否仍在 `follow`
+  - mirror revision 是否在涨、但 client logs 没 follow sync
+
+- “键盘弹出就正常，不弹就不正常”  
+  先看：
+  - layout/viewport 相关日志是否只在 keyboard change 后出现
+  - follow viewport sync 是否漏了无键盘场景
+  - snapshot 里的 last request rows / viewportEndIndex 是否与当前真实底部一致
 
 #### 验证入口定义
 
@@ -618,6 +695,18 @@ android/
 - **解决方案**: outside-close 走 document capture 级监听；quick input / editor / floating panel 这类 fixed overlay 不再二次叠加 `keyboardInset`
 - **验证**: 点击面板外空白区应立即关闭；弹出输入法后面板主输入区和按钮区仍保持可见
 
+### 问题: Android bottom sheet 在输入法弹出后“看起来滑了但完全滚不动”
+- **触发信号**: 快捷输入设置 / 快捷键设置页触摸事件能收到，但 `scrollTop` 始终不变，尤其是真机 WebView + DOM input 聚焦后
+- **真源**: sheet 还在按 `100dvh` 定高，键盘把 `visualViewport` 压小后容器仍认为自己没有 overflow，最终出现 `scrollHeight == clientHeight`
+- **解决方案**: 先用 WebView devtools probe 证明不是 `preventDefault`；随后用 `visualViewport.height + offsetTop` 计算可见底，用 `layoutHeight - visibleBottom` 作为 bottom inset 抬升 sheet，不能只改 scroll 容器
+- **验证**: 键盘弹出后 editor sheet 高度应小于 layout viewport，且 `scrollHeight > clientHeight`，真机 swipe 后 `scrollTop` 能增长
+
+### 问题: 快捷键列表切到“添加快捷键”后内容从中段开始 / 看起来越界
+- **触发信号**: 列表页先滚过，再点 `+ 添加组合键` 或编辑项进入 form，首屏不是从顶部开始，顶部内容像被吞掉；同时悬浮球可能压在表单右侧
+- **真源**: list / form 复用同一个 `shortcut-editor-scroll`，mode 切换时继承了旧 `scrollTop`；此外 full-screen editor 打开时 floating bubble 没隐藏
+- **解决方案**: `shortcutEditorMode / shortcutEditorOpen / editingShortcutId` 变化时，通过 ref + rAF 把滚动容器重置到 `scrollTop=0`；editor 打开期间隐藏 floating bubble
+- **验证**: 人工先把列表滚出非零位置，再进 form；form 首屏应从顶部字段开始，`scrollTop=0`，且不再看到悬浮球覆盖
+
 ---
 
 ## 十、最佳实践（按需更新）
@@ -635,6 +724,66 @@ android/
 - **适用场景**: 多 tab 终端左右滑动切换
 - **动作**: `TerminalView` 只做 axis lock 与横向手势 delta 上报；`TerminalCanvas` 统一负责相邻 tab 预览、跟手位移、半屏阈值、回弹/完成动画与最终切 tab
 - **反模式**: 在单个 terminal view 内直接切 tab，会把手势判定、scroll 锚点和切换时序耦死，容易回归“瞬切/错位/滚动锚点跳变”
+
+### 模式: viewport refresh 调度只依赖动作，不依赖 followMode
+- **适用场景**: 收敛 `TerminalView` 的 layout refresh / session refresh / follow audit
+- **动作**: 先把 `syncViewport + 可选 follow 对齐` 收成单一 `runViewportRefresh()` 动作；scheduler/effect 只调这个动作，是否 follow 在执行时通过当前 latch/ref 判断
+- **反模式**: 让 `scheduleViewportRefresh()` 直接依赖 `followMode`，会导致 reading/follow 切换时把无关 refresh effect 全部重新建一遍
+
+### 模式: ResizeObserver 不走第二套 refresh 口径
+- **适用场景**: terminal 容器真实尺寸变化、横竖屏/分屏/键盘相关布局变化
+- **动作**: `ResizeObserver` 回调直接复用统一的 `runViewportRefresh()`，不要单独调用 `syncViewport()`
+- **反模式**: layout/session/audit 走统一 refresh 动作，但真实 resize 另走 `syncViewport()`；这样 follow 对齐逻辑会再次分叉
+
+### 模式: refresh effect 能并时并成 trigger effect
+- **适用场景**: `TerminalView` 里多个 effect 最终都只是在“判定某个 trigger 是否值得 schedule refresh”
+- **动作**: 保留显式 trigger 判定（如 `becameActive / sessionChanged / layoutChanged`），把 refresh 调度并到单一 effect；timeout 差异继续按 trigger 决定
+- **反模式**: 为了少一个 effect 直接抹平触发来源，或把 layout/session 时序差异删掉
+
+### 模式: 状态 effect 先动作名字化，不硬并
+- **适用场景**: `TerminalView` 剩下的 effect 已经承载 reading 锚定、viewport signal 这类真实状态语义
+- **动作**: 先把 effect 内动作抽成具名 helper（如 `reconcileViewportAfterBufferShift()`、`emitViewportSignalsForCurrentFrame()`），再让 effect 只做 trigger/state bridge
+- **反模式**: 只为了压 effect 数量，把 prepend 锚定、viewport signal 这种状态语义强行并进别的 refresh effect
+
+### 模式: renderer/page/context 共享接口类型下沉到 lib/types
+- **适用场景**: `TerminalView`、`TerminalPage`、`SessionContext`、相关测试都在重复声明 viewport/resize callback 的 shape
+- **动作**: 把共享 schema 与 handler 签名下沉到 `android/src/lib/types.ts`，其余层只 import 使用
+- **反模式**: 到处内联 `{ mode, viewportEndIndex, viewportRows }` 或 `(sessionId, cols, rows)`，后续改字段时四处漂移
+
+### 模式: renderer prop 面按“真实输入”裁剪
+- **适用场景**: 审计 `TerminalView` 之类 renderer component 的 props
+- **动作**: 区分哪些 prop 真正参与渲染/输入/状态机，哪些只是历史 dependency 残留；后者直接移除
+- **反模式**: prop 只剩 effect dependency 占位，却继续从 page/context/test 一路透传
+
+### 模式: renderer trigger 用语义名，不泄漏 worker 内部命名
+- **适用场景**: `SessionContext` / worker 内部状态名带实现细节，但 renderer 只关心触发语义
+- **动作**: 在 renderer API 层改成语义名（如 `followResetToken`），由 page/context 做一次最小映射
+- **反模式**: 把 `viewportResetNonce` 这种 worker 侧命名直接透传到 renderer prop，污染 consumer 心智
+
+### 模式: 小传播面的旧命名直接全链统一
+- **适用场景**: 旧字段名在 worker/store/page/renderer 之间只有少量闭合传播点
+- **动作**: 如果已确认是单条主链，就不要长期保留映射层；直接全链统一成语义名
+- **反模式**: 明知传播面很小，还让 page 层长期做“旧名 -> 新名”翻译
+
+### 模式: request payload builder 只留一个真源
+- **适用场景**: `SessionContext` 里普通 request 与 bootstrap request 只有少量字段差异
+- **动作**: 把共同部分收成单一 builder，用显式 options 覆盖差异（如 `forceBootstrap`、`modeOverride`）
+- **反模式**: 长期维护两份几乎一样的 payload builder，后续改字段容易一边改了另一边漏掉
+
+### 模式: viewport demand 入口只保留“写状态 + 触发”
+- **适用场景**: `updateSessionViewport()` 一类 worker 入口逐渐长出 normalize / 判等 / request scheduling 多重职责
+- **动作**: 拆成 normalize helper、equal helper、active-demand helper；入口函数只负责更新 view state 并触发 demand
+- **反模式**: 让入口函数长期同时处理数据归一化、去重、请求时序，后续 reading/follow 分叉会继续长回去
+
+### 模式: active 输入后不做本地回显，但必须立刻挂 tail refresh demand
+- **适用场景**: shell 输入后用户抱怨“没刷新”，但协议仍要求 server canonical buffer 是唯一真源
+- **动作**: `sendInput()` 只发送 input，不本地改 buffer；同时给 active session 标记 `input-tail-refresh` demand，由 client 本地 30fps head cadence 在 `minTailRefreshGapMs` 门限下主动发 follow `buffer-sync-request + ping`
+- **反模式**: 1) 为了“更快”做本地假回显 2) 完全被动等下一次 server head 才刷新 3) 每个输入字符都直接打一条 range request，退化成请求风暴
+
+### 模式: head 检查频率固定，真正拉取频率按网络分级
+- **适用场景**: 用户要求“本地 30fps 刷新 head”，同时又要控制带宽/请求频率
+- **动作**: active session 本地固定 `33ms` tick 只做 head freshness / demand 判定；真正的 tail range 拉取由 `resolveTerminalRefreshCadence()` 根据 `navigator.connection` / `saveData` 决定 `minTailRefreshGapMs` 与 reading delay
+- **反模式**: 把“30fps 检查”误做成“30fps 必拉 range”，会直接把带宽和抖动重新打爆
 
 ### 模式: 移动端发热先看 CPU/IO 真源
 - **触发信号**: 手机明显发热，但网络流量不大

@@ -8,7 +8,18 @@ import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
-import { STORAGE_KEYS, type PersistedOpenTab, type QuickAction, type SavedTabList, type Session, type SessionScheduleState, type ScheduleJobDraft, type TerminalShortcutAction } from '../lib/types';
+import {
+  STORAGE_KEYS,
+  type PersistedOpenTab,
+  type QuickAction,
+  type SavedTabList,
+  type Session,
+  type SessionScheduleState,
+  type ScheduleJobDraft,
+  type TerminalResizeHandler,
+  type TerminalShortcutAction,
+  type TerminalViewportChangeHandler,
+} from '../lib/types';
 
 type VirtualKeyboardApi = {
   overlaysContent: boolean;
@@ -54,10 +65,9 @@ interface TerminalPageProps {
   onCloseSession: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: () => void;
-  onResize?: (sessionId: string, cols: number, rows: number) => void;
+  onResize?: TerminalResizeHandler;
   onTerminalInput?: (sessionId: string, data: string) => void;
-  onTerminalViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
-  onTerminalViewportPrefetch?: (sessionId: string, viewState: { mode: 'reading'; viewportEndIndex: number; viewportRows: number; missingRanges?: { startIndex: number; endIndex: number }[] }) => void;
+  onTerminalViewportChange?: TerminalViewportChangeHandler;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
@@ -182,7 +192,6 @@ export function TerminalPage({
   onResize,
   onTerminalInput,
   onTerminalViewportChange,
-  onTerminalViewportPrefetch,
   onImagePaste,
   quickActions,
   shortcutActions,
@@ -536,7 +545,14 @@ export function TerminalPage({
 
   const terminalChromeBottomPx = Math.max(0, quickBarHeight);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset);
-  const terminalImeLiftPx = effectiveKeyboardLiftPx;
+  const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
+  const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
+  const terminalViewportLayoutNonce = [
+    activeSession?.id || 'none',
+    Math.round(terminalChromeBottomPx),
+    Math.round(terminalImeLiftPx),
+    terminalKeyboardRequested ? 1 : 0,
+  ].join(':');
   const networkBanner = !connectionIssueVisible
     ? null
     : !networkOnline
@@ -704,7 +720,7 @@ export function TerminalPage({
             right: 0,
             bottom: `${terminalChromeBottomPx}px`,
             display: 'flex',
-            transform: terminalImeLiftPx > 0 ? `translateY(-${terminalImeLiftPx}px)` : 'translateY(0)',
+            transform: terminalImeLiftPx > 0 ? `translateY(-${terminalImeLiftPx}px)` : undefined,
             transition: 'transform 180ms ease',
             willChange: terminalImeLiftPx > 0 ? 'transform' : undefined,
           }}
@@ -750,9 +766,10 @@ export function TerminalPage({
                       onResize={onResize}
                       onInput={onTerminalInput}
                       onViewportChange={onTerminalViewportChange}
-                      onViewportPrefetch={onTerminalViewportPrefetch}
                       onSwipeTab={handleSwipeTab}
                       focusNonce={isAndroid ? 0 : sessionActive ? focusNonce : 0}
+                      followResetToken={session.followResetToken || 0}
+                      viewportLayoutNonce={sessionActive ? terminalViewportLayoutNonce : 0}
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
                       themeId={terminalThemeId}
@@ -799,8 +816,8 @@ export function TerminalPage({
               }
             }}
             onImagePaste={onImagePaste}
-            keyboardVisible={keyboardInset > 0}
-            keyboardInsetPx={effectiveKeyboardLiftPx}
+            keyboardVisible={terminalImeActive && effectiveKeyboardLiftPx > 0}
+            keyboardInsetPx={terminalImeActive ? effectiveKeyboardLiftPx : 0}
             onToggleKeyboard={handleToggleKeyboard}
             onQuickActionsChange={onQuickActionsChange}
             onShortcutActionsChange={onShortcutActionsChange}

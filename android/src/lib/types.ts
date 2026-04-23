@@ -65,6 +65,24 @@ export interface SessionBufferState {
   revision: number;
 }
 
+export type TerminalViewportMode = 'follow' | 'reading';
+
+export interface TerminalViewportState {
+  mode: TerminalViewportMode;
+  viewportEndIndex: number;
+  viewportRows: number;
+}
+
+export interface TerminalViewportSize {
+  cols: number;
+  rows: number;
+}
+
+export type TerminalFollowResetToken = number;
+
+export type TerminalResizeHandler = (sessionId: string, cols: number, rows: number) => void;
+export type TerminalViewportChangeHandler = (sessionId: string, viewState: TerminalViewportState) => void;
+
 export interface Session {
   id: string;
   hostId: string;
@@ -80,6 +98,7 @@ export interface Session {
   hasUnread: boolean;        // 是否有未读输出
   customName?: string;       // 用户重命名的名称
   buffer: SessionBufferState;
+  followResetToken?: TerminalFollowResetToken;
   reconnectAttempt?: number;
   lastError?: string;
   createdAt: number;         // 创建时间戳
@@ -118,6 +137,12 @@ export interface BufferSyncRequestPayload {
   mode: 'follow' | 'reading';
   prefetch?: boolean;
   missingRanges?: TerminalGapRange[];
+}
+
+export interface BufferHeadPayload {
+  sessionId: string;
+  revision: number;
+  latestEndIndex: number;
 }
 
 export interface PasteImagePayload {
@@ -264,11 +289,12 @@ export type ServerMessage =
         };
       };
     }
+  | { type: 'buffer-head'; payload: BufferHeadPayload }
   | { type: 'sessions'; payload: { sessions: string[] } }
-  | { type: 'data'; payload: string }
   | { type: 'buffer-sync'; payload: TerminalBufferPayload }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
+  | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
@@ -354,15 +380,15 @@ export const STORAGE_KEYS = {
 export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [];
 
 export const DEFAULT_SHORTCUT_ACTIONS: TerminalShortcutAction[] = [
-  { id: 'shortcut-continue', label: '继续', sequence: '继续执行\r', order: 0, row: 'top-scroll' },
-  { id: 'shortcut-esc', label: 'Esc', sequence: '\x1b', order: 1, row: 'top-scroll' },
-  { id: 'shortcut-backspace', label: 'Bksp', sequence: '\x7f', order: 2, row: 'top-scroll' },
-  { id: 'shortcut-paste', label: 'Paste', sequence: '\x16', order: 3, row: 'top-scroll' },
-  { id: 'shortcut-tab', label: 'Tab', sequence: '\t', order: 0, row: 'bottom-scroll' },
-  { id: 'shortcut-enter', label: 'Enter', sequence: '\r', order: 1, row: 'bottom-scroll' },
-  { id: 'shortcut-space', label: 'Space', sequence: ' ', order: 2, row: 'bottom-scroll' },
-  { id: 'shortcut-shift-tab', label: 'S-Tab', sequence: '\x1b[Z', order: 3, row: 'bottom-scroll' },
-  { id: 'shortcut-shift-enter', label: 'S-Enter', sequence: '\n', order: 4, row: 'bottom-scroll' },
+  { id: 'shortcut-esc', label: 'Esc', sequence: '\x1b', order: 0, row: 'top-scroll' },
+  { id: 'shortcut-backspace', label: 'Bksp', sequence: '\x7f', order: 1, row: 'top-scroll' },
+  { id: 'shortcut-tab', label: 'Tab', sequence: '\t', order: 2, row: 'top-scroll' },
+  { id: 'shortcut-enter', label: 'Enter', sequence: '\r', order: 3, row: 'top-scroll' },
+  { id: 'shortcut-space', label: 'Space', sequence: ' ', order: 4, row: 'top-scroll' },
+  { id: 'shortcut-continue', label: '继续', sequence: '继续执行\r', order: 0, row: 'bottom-scroll' },
+  { id: 'shortcut-paste', label: 'Paste', sequence: '\x16', order: 1, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-tab', label: 'S-Tab', sequence: '\x1b[Z', order: 2, row: 'bottom-scroll' },
+  { id: 'shortcut-shift-enter', label: 'S-Enter', sequence: '\n', order: 3, row: 'bottom-scroll' },
 ];
 
 export const DEFAULT_WEBDAV_CONFIG: WebDAVConfig = {

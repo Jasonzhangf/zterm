@@ -3,10 +3,13 @@ import type {
   ScheduleJobDraft,
   SessionScheduleState,
   BufferSyncRequestPayload,
+  BufferHeadPayload,
+  BridgeServerMessage,
   EditableHost,
   Host,
   PasteImagePayload,
   TerminalRenderBufferProjection,
+  SessionBufferState,
 } from '@zterm/shared';
 import {
   buildEmptyScheduleState,
@@ -30,9 +33,16 @@ export interface TerminalRuntimeSnapshot {
   buffer: TerminalBufferStoreSnapshot;
   render: TerminalRenderBufferProjection;
   schedule: SessionScheduleState;
+  head: TerminalSessionHead | null;
 }
 
 export type TerminalRuntimeActivityMode = 'active' | 'idle';
+export interface TerminalSessionHead {
+  sessionId: string;
+  revision: number;
+  latestEndIndex: number;
+}
+
 export type TerminalRuntimeViewState = {
   mode: 'follow' | 'reading';
   viewportEndIndex: number;
@@ -66,7 +76,10 @@ const EMPTY_RUNTIME_SNAPSHOT: TerminalRuntimeSnapshot = {
   buffer: EMPTY_BUFFER_SNAPSHOT,
   render: EMPTY_BUFFER_SNAPSHOT.renderBuffer,
   schedule: buildEmptyScheduleState(''),
+  head: null,
 };
+
+const READING_SYNC_DELAY_MS = 24;
 
 function buildRuntimeRequestSignature(host: EditableHost | Host) {
   return JSON.stringify({
@@ -93,12 +106,34 @@ function normalizeMissingRanges(missingRanges: TerminalRuntimeViewState['missing
     : undefined;
 }
 
-function buildBufferSyncRequestPayload(snapshot: TerminalRuntimeSnapshot, viewState: TerminalRuntimeViewState, prefetch = false): BufferSyncRequestPayload {
+function normalizeViewState(viewState: TerminalRuntimeViewState): TerminalRuntimeViewState {
+  return {
+    mode: viewState.mode === 'reading' ? 'reading' : 'follow',
+    viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
+    viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
+    missingRanges: normalizeMissingRanges(viewState.missingRanges),
+  };
+}
+
+function normalizeHead(payload: BufferHeadPayload): TerminalSessionHead {
+  return {
+    sessionId: payload.sessionId,
+    revision: Math.max(0, Math.floor(payload.revision || 0)),
+    latestEndIndex: Math.max(0, Math.floor(payload.latestEndIndex || 0)),
+  };
+}
+
+function buildBufferSyncRequestPayload(
+  snapshot: TerminalRuntimeSnapshot,
+  viewState: TerminalRuntimeViewState,
+  head: TerminalSessionHead | null,
+  prefetch = false,
+): BufferSyncRequestPayload {
   const buffer = snapshot.buffer.canonicalBuffer;
   const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
   const mode = viewState.mode === 'reading' ? 'reading' : 'follow';
   const viewportEndIndex = mode === 'follow'
-    ? Math.max(0, Math.floor(buffer.viewportEndIndex || buffer.endIndex || 0))
+    ? Math.max(0, Math.floor(head?.latestEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0))
     : Math.max(0, Math.floor(viewState.viewportEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
 
   return {
@@ -111,6 +146,56 @@ function buildBufferSyncRequestPayload(snapshot: TerminalRuntimeSnapshot, viewSt
     prefetch,
     missingRanges: normalizeMissingRanges(viewState.missingRanges),
   };
+}
+
+function bufferHasGapInRange(buffer: SessionBufferState, startIndex: number, endIndex: number) {
+  return buffer.gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
+}
+
+function shouldRequestFollowSync(
+  snapshot: TerminalRuntimeSnapshot,
+  head: TerminalSessionHead | null,
+  viewState: TerminalRuntimeViewState,
+) {
+  const buffer = snapshot.buffer.canonicalBuffer;
+  const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
+  const desiredEndIndex = Math.max(0, Math.floor(head?.latestEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
+  const hotStartIndex = Math.max(0, desiredEndIndex - viewportRows * 3);
+
+  if (head && buffer.revision < head.revision) {
+    return true;
+  }
+
+  if (buffer.endIndex < desiredEndIndex) {
+    return true;
+  }
+
+  if (buffer.startIndex > hotStartIndex) {
+    return true;
+  }
+
+  return bufferHasGapInRange(buffer, hotStartIndex, desiredEndIndex);
+}
+
+function shouldRequestReadingSync(snapshot: TerminalRuntimeSnapshot, viewState: TerminalRuntimeViewState) {
+  const buffer = snapshot.buffer.canonicalBuffer;
+  const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
+  const viewportEndIndex = Math.max(0, Math.floor(viewState.viewportEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
+  const viewportStartIndex = Math.max(0, viewportEndIndex - viewportRows);
+
+  if ((viewState.missingRanges || []).length > 0) {
+    return true;
+  }
+
+  if (buffer.startIndex > viewportStartIndex) {
+    return true;
+  }
+
+  if (buffer.endIndex < viewportEndIndex) {
+    return true;
+  }
+
+  return bufferHasGapInRange(buffer, viewportStartIndex, viewportEndIndex);
 }
 
 export function createTerminalRuntime(): TerminalRuntimeController {
@@ -126,11 +211,15 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     viewportEndIndex: 0,
     viewportRows: 24,
   };
+  let head: TerminalSessionHead | null = null;
+  let readingSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastBufferSyncKey = '';
   let state: TerminalRuntimeSnapshot = {
     connection: bridgeTransport.getState(),
     buffer: bufferStore.getState(),
     render: bufferStore.getState().renderBuffer,
     schedule: bridgeTransport.getScheduleState(),
+    head: null,
   };
 
   const emit = () => {
@@ -144,16 +233,77 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       buffer,
       render: buffer.renderBuffer,
       schedule: activeTransport === bridgeTransport ? bridgeTransport.getScheduleState() : buildEmptyScheduleState(''),
+      head,
     };
     emit();
   };
 
-  const requestCurrentViewportSync = (prefetch = false) => {
+  const clearQueuedReadingSync = () => {
+    if (readingSyncTimer) {
+      clearTimeout(readingSyncTimer);
+      readingSyncTimer = null;
+    }
+  };
+
+  const requestCurrentViewportSync = (options?: { prefetch?: boolean; force?: boolean; reason?: string }) => {
+    if (activityMode !== 'active') {
+      return false;
+    }
+    const payload = buildBufferSyncRequestPayload(state, lastViewState, head, Boolean(options?.prefetch));
+    const key = JSON.stringify(payload);
+    if (!options?.force && key === lastBufferSyncKey) {
+      return false;
+    }
+    void options?.reason;
+    lastBufferSyncKey = key;
+    activeTransport.requestBufferSync(payload);
+    return true;
+  };
+
+  const scheduleReadingViewportSync = () => {
+    clearQueuedReadingSync();
+    readingSyncTimer = setTimeout(() => {
+      readingSyncTimer = null;
+      if (shouldRequestReadingSync(state, lastViewState)) {
+        requestCurrentViewportSync({ reason: 'reading-viewport' });
+      }
+    }, READING_SYNC_DELAY_MS);
+  };
+
+  const applyViewportDemand = () => {
     if (activityMode !== 'active') {
       return;
     }
-    const payload = buildBufferSyncRequestPayload(state, lastViewState, prefetch);
-    activeTransport.requestBufferSync(payload);
+    if (lastViewState.mode === 'reading') {
+      scheduleReadingViewportSync();
+      return;
+    }
+    clearQueuedReadingSync();
+    if (shouldRequestFollowSync(state, head, lastViewState)) {
+      requestCurrentViewportSync({ reason: 'follow-demand' });
+    }
+  };
+
+  const handleServerMessage = (message: BridgeServerMessage) => {
+    if (message.type === 'connected') {
+      lastBufferSyncKey = '';
+      requestCurrentViewportSync({ force: true, reason: 'connected-bootstrap' });
+      return;
+    }
+
+    if (message.type === 'buffer-head') {
+      head = normalizeHead(message.payload);
+      syncState();
+      if (lastViewState.mode === 'follow') {
+        applyViewportDemand();
+      }
+      return;
+    }
+
+    const applied = bufferStore.applyServerMessage(message);
+    if (applied && lastViewState.mode === 'follow' && shouldRequestFollowSync(state, head, lastViewState)) {
+      requestCurrentViewportSync({ reason: 'follow-catchup' });
+    }
   };
 
   const unsubscribeBridgeTransport = bridgeTransport.subscribe(syncState);
@@ -177,13 +327,14 @@ export function createTerminalRuntime(): TerminalRuntimeController {
         return;
       }
       lastRequestedSignature = nextSignature;
-      bufferStore.reset();
+      lastBufferSyncKey = '';
+      head = null;
+      clearQueuedReadingSync();
       activeTransport = bridgeTransport;
+      bufferStore.reset();
       localTransport.disconnect();
       bridgeTransport.connect(host, {
-        onServerMessage: (message) => {
-          bufferStore.applyServerMessage(message);
-        },
+        onServerMessage: handleServerMessage,
       });
     },
     connectLocalTmux: (target) => {
@@ -197,48 +348,57 @@ export function createTerminalRuntime(): TerminalRuntimeController {
         return;
       }
       lastRequestedSignature = nextSignature;
-      bufferStore.reset();
+      lastBufferSyncKey = '';
+      head = null;
+      clearQueuedReadingSync();
       bridgeTransport.disconnect();
       activeTransport = localTransport;
+      bufferStore.reset();
       state = {
         ...state,
         schedule: buildEmptyScheduleState(target.sessionName),
+        head: null,
       };
       localTransport.connect(target, {
-        onServerMessage: (message) => {
-          bufferStore.applyServerMessage(message);
-        },
+        onServerMessage: handleServerMessage,
       });
     },
     disconnect: () => {
+      clearQueuedReadingSync();
+      head = null;
+      lastBufferSyncKey = '';
       bridgeTransport.disconnect();
       localTransport.disconnect();
+      syncState();
     },
     setActivityMode: (mode) => {
       activityMode = mode;
       bridgeTransport.setActivityMode(mode);
       localTransport.setActivityMode(mode);
       if (mode === 'active') {
-        requestCurrentViewportSync(false);
+        applyViewportDemand();
+        return;
       }
+      clearQueuedReadingSync();
     },
     updateViewport: (viewState) => {
-      lastViewState = {
-        mode: viewState.mode === 'reading' ? 'reading' : 'follow',
-        viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
-        viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
-        missingRanges: normalizeMissingRanges(viewState.missingRanges),
-      };
-      requestCurrentViewportSync(false);
+      const normalizedViewState = normalizeViewState(viewState);
+      const previousKey = JSON.stringify(lastViewState);
+      const nextKey = JSON.stringify(normalizedViewState);
+      if (previousKey === nextKey) {
+        return;
+      }
+      lastViewState = normalizedViewState;
+      applyViewportDemand();
     },
     requestViewportPrefetch: (viewState) => {
-      lastViewState = {
+      lastViewState = normalizeViewState({
+        ...viewState,
         mode: 'reading',
-        viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
-        viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
-        missingRanges: normalizeMissingRanges(viewState.missingRanges),
-      };
-      requestCurrentViewportSync(true);
+      });
+      if (shouldRequestReadingSync(state, lastViewState)) {
+        requestCurrentViewportSync({ prefetch: true, reason: 'reading-prefetch' });
+      }
     },
     requestScheduleList: (sessionName) => {
       bridgeTransport.requestScheduleList(sessionName);
@@ -265,9 +425,10 @@ export function createTerminalRuntime(): TerminalRuntimeController {
         ...lastViewState,
         viewportRows: Math.max(1, Math.floor(rows || lastViewState.viewportRows || 24)),
       };
-      requestCurrentViewportSync(false);
+      applyViewportDemand();
     },
     dispose: () => {
+      clearQueuedReadingSync();
       unsubscribeBridgeTransport();
       unsubscribeLocalTransport();
       unsubscribeBuffer();

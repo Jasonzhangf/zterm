@@ -102,6 +102,12 @@ function indexedPayload(options: {
   };
 }
 
+function readSentMessages(ws: MockWebSocket) {
+  return ws.sent
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => JSON.parse(item));
+}
+
 const host: Host = {
   id: 'host-1',
   createdAt: 1,
@@ -122,7 +128,15 @@ const host2: Host = {
 };
 
 function SessionHarness() {
-  const { state, createSession, sendInput, sendImagePaste, reconnectSession, reconnectAllSessions } = useSession();
+  const {
+    state,
+    createSession,
+    sendInput,
+    sendImagePaste,
+    reconnectSession,
+    reconnectAllSessions,
+    updateSessionViewport,
+  } = useSession();
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -155,6 +169,26 @@ function SessionHarness() {
       </button>
       <button type="button" onClick={() => reconnectAllSessions()}>
         reconnect-all
+      </button>
+      <button
+        type="button"
+        onClick={() => updateSessionViewport('session-1', {
+          mode: 'reading',
+          viewportEndIndex: 80,
+          viewportRows: 24,
+        })}
+      >
+        viewport-reading
+      </button>
+      <button
+        type="button"
+        onClick={() => updateSessionViewport('session-1', {
+          mode: 'follow',
+          viewportEndIndex: 80,
+          viewportRows: 24,
+        })}
+      >
+        viewport-follow
       </button>
     </div>
   );
@@ -259,7 +293,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('does not re-send stream-mode or follow buffer requests on every incoming buffer-sync frame', async () => {
+  it('does not re-send follow buffer requests on every incoming buffer-sync frame', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -304,11 +338,160 @@ describe('SessionContext websocket dynamic refresh', () => {
     const sentTypes = ws.sent
       .filter((item): item is string => typeof item === 'string')
       .map((item) => JSON.parse(item).type);
-    expect(sentTypes).not.toContain('stream-mode');
     expect(sentTypes).not.toContain('buffer-sync-request');
   });
 
-  it('sends user input upstream without locally mutating session buffer', async () => {
+  it('sends legacy stream-mode active after the active session connects', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    const sentMessages = readSentMessages(ws);
+    expect(
+      sentMessages.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'active'),
+    ).toBe(true);
+  });
+
+  it('switches legacy stream-mode between active and idle tabs', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws2.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-2',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    ws1.sent.length = 0;
+    ws2.sent.length = 0;
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    const sent1 = readSentMessages(ws1);
+    const sent2 = readSentMessages(ws2);
+    expect(sent1.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'idle')).toBe(true);
+    expect(sent2.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'active')).toBe(true);
+  });
+
+  it('does not schedule duplicate reading range requests for the same viewport state', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('viewport-reading'));
+    fireEvent.click(screen.getByText('viewport-reading'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const sentMessages = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item));
+    expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+  });
+
+  it('cancels a queued reading range request once the same session returns to follow', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('viewport-reading'));
+    fireEvent.click(screen.getByText('viewport-follow'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const sentMessages = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item));
+    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+  });
+
+  it('accepts remote debug-control and flips the client runtime debug flag', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    ws.triggerMessage({
+      type: 'debug-control',
+      payload: {
+        enabled: true,
+        reason: 'test',
+      },
+    });
+
+    await waitFor(() => expect(window.localStorage.getItem('zterm:runtime-debug-log')).toBe('1'));
+  });
+
+  it('sends user input upstream, immediately requests active tail refresh, and does not locally mutate session buffer', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -335,14 +518,95 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('send-input'));
 
-    const sentMessages = ws.sent
-      .slice(sentCountBeforeInput)
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item));
-    expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
-    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+    await waitFor(() => {
+      const sentMessages = ws.sent
+        .slice(sentCountBeforeInput)
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item));
+      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+    });
+
     expect(screen.getByTestId('session-lines').textContent).not.toContain('typed-from-client');
     expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001');
+  });
+
+  it('coalesces burst input into a single in-flight active tail refresh request', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(['stable-line-001', 'stable-line-002'], 2, 1),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001'));
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('send-input'));
+    fireEvent.click(screen.getByText('send-input'));
+    fireEvent.click(screen.getByText('send-input'));
+
+    const sentMessages = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item));
+
+    expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(3);
+    expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 180));
+
+    const sentMessagesAfterTick = ws.sent
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item));
+    expect(sentMessagesAfterTick.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+  });
+
+  it('retries input tail refresh on the local 33ms cadence when the first request races ahead of daemon capture', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(['stable-line-001', 'stable-line-002'], 2, 1),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001'));
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('send-input'));
+    ws.triggerMessage({ type: 'pong' });
+
+    await waitFor(() => {
+      const sentMessages = ws.sent
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item));
+      expect(sentMessages.filter((item) => item.type === 'buffer-sync-request').length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 220 });
   });
 
   it('ignores stale websocket buffer-sync revisions after a newer active snapshot already landed', async () => {
@@ -629,10 +893,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('switch-second'));
 
     await waitFor(() => {
-      const sent1 = ws1.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
       const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
-      expect(sent1.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'idle')).toBe(true);
-      expect(sent2.some((item) => item.type === 'stream-mode' && item.payload?.mode === 'active')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
       const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
       expect(lastRequest?.payload).toMatchObject({

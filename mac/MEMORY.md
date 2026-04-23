@@ -2,6 +2,11 @@
 
 ## Key Decisions
 
+- [2026-04-24] Mac runtime 若只靠 renderer `onViewportChange` 驱动 `buffer-sync-request`，follow 会因为 renderer 的 follow 去重 key 不含动态 `viewportEndIndex` 而停在旧尾部；server `buffer-head.latestEndIndex` 必须进入 runtime follow planner，成为请求最新尾屏的主触发。
+
+- [2026-04-24] Jason 已明确授权 Mac 完全重写；当前第一刀先冻结与 Android 相同的 contract model（Server truth -> Client Buffer Worker -> Renderer Container -> UI Shell），再切 app shell 入口和 ownership，禁止继续在旧 `ShellWorkspace` / workspace 编排上叠 patch。
+- [2026-04-24] Mac 重写顺序冻结为：先 terminal-first 单工作区骨架 + launcher/editor + active tab 最小闭环，再继续切 runtime adapter / sparse buffer worker / split / local tmux；不要一上来把桌面功能和 terminal 真相混改。
+
 - [2026-04-20] Mac 第一阶段先做 Electron 最小可执行包，优先证明 build/package/window/stage 闭环，再逐步接业务能力
 - [2026-04-20] Mac 布局必须遵守仓库统一真源：默认一行多列、列与列之间垂直分屏、不以上下堆叠多 pane 为主方案
 - [2026-04-22] Jason 新冻结：Mac 改动默认必须先走“改代码 -> type-check/build -> 按需 package -> 退出旧 app -> 启动新包 -> 自己完成 smoke -> 落证据 -> 再汇报 Jason 手测”；未完成运行态证据闭环时，不得把基础验证转嫁给 Jason

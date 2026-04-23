@@ -43,26 +43,6 @@ export interface TerminalSnapshot {
   scrollbackStartIndex?: number;
 }
 
-export interface TerminalViewportRowPatch {
-  row: number;
-  cells: TerminalCell[];
-}
-
-export interface TerminalViewportUpdate {
-  cols: number;
-  rows: number;
-  rowsPatch: TerminalViewportRowPatch[];
-  cursor: TerminalCursor;
-  cursorKeysApp: boolean;
-}
-
-export interface TerminalScrollbackUpdate {
-  mode: 'append' | 'prepend' | 'reset';
-  lines: string[];
-  startIndex?: number;
-  remaining?: number;
-}
-
 export interface TerminalIndexedLine {
   index: number;
   cells: TerminalCell[];
@@ -93,6 +73,12 @@ export interface BufferSyncRequestPayload {
   mode: 'follow' | 'reading';
   prefetch?: boolean;
   missingRanges?: TerminalGapRange[];
+}
+
+export interface BufferHeadPayload {
+  sessionId: string;
+  revision: number;
+  latestEndIndex: number;
 }
 
 export interface SessionBufferState {

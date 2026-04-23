@@ -180,12 +180,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     renameSession,
     reconnectSession,
     reconnectAllSessions,
-    refreshSessionTail,
+    resetSessionViewportToFollow,
     sendInput,
     sendImagePaste,
     resizeTerminal,
     updateSessionViewport,
-    requestViewportPrefetch,
     requestScheduleList,
     upsertScheduleJob,
     deleteScheduleJob,
@@ -405,7 +404,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       if (activeSessionId) {
         const currentActiveSession = sessions.find((session) => session.id === activeSessionId) || null;
         if (currentActiveSession?.state === 'connected') {
-          didTailRefresh = refreshSessionTail(activeSessionId);
+          didTailRefresh = resetSessionViewportToFollow(activeSessionId);
           if (!didTailRefresh) {
             reconnectTargets.push(activeSessionId);
           }
@@ -526,7 +525,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
     };
-  }, [activeSession?.id, reconnectAllSessions, reconnectSession, refreshSessionTail, sessions, state.activeSessionId]);
+  }, [activeSession?.id, reconnectAllSessions, reconnectSession, resetSessionViewportToFollow, sessions, state.activeSessionId]);
 
   const sortedHosts = useMemo(() => sortHostsForPicker(hosts, pickerTarget), [hosts, pickerTarget]);
 
@@ -1004,9 +1003,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             onTerminalInput={handleTerminalInput}
             onTerminalViewportChange={(sessionId, viewState) => {
               updateSessionViewport(sessionId, viewState);
-            }}
-            onTerminalViewportPrefetch={(sessionId, viewState) => {
-              requestViewportPrefetch(sessionId, viewState);
             }}
             onImagePaste={sendImagePaste}
             quickActions={quickActions}

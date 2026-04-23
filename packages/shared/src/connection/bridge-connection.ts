@@ -12,7 +12,6 @@ export interface BridgeConnectionHandlers {
 }
 
 export interface BridgeConnectionOptions {
-  initialStreamMode?: 'active' | 'idle';
 }
 
 export function openBridgeConnection(
@@ -23,12 +22,11 @@ export function openBridgeConnection(
   overrideUrl?: string,
 ) {
   const ws = new WebSocket(buildBridgeUrlFromTarget(target, overrideUrl));
-  const initialStreamMode = options.initialStreamMode || 'active';
+  void options;
 
   ws.onopen = () => {
     handlers.onOpen?.();
     ws.send(JSON.stringify({ type: 'connect', payload: hostConfig }));
-    ws.send(JSON.stringify({ type: 'stream-mode', payload: { mode: initialStreamMode } }));
   };
 
   ws.onmessage = (event) => {

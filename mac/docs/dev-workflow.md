@@ -2,56 +2,79 @@
 
 ## 总原则
 
-- 先冻结真源，再写代码
-- 先证明最小可执行包，再加功能
-- 先验证构建/打包闭环，再扩展共享业务层
+- 先冻结真源，再改实现
+- Mac 只补平台壳，不另起 terminal 真相
+- 先切入口 ownership，再切 deeper runtime
+- 无运行态证据，不向 Jason 宣称“可以手测完整版”
 
 ## 标准流程
 
 ```text
-Review -> Freeze -> Implement -> Type-check -> Package -> Browser verify -> Quit old app -> Packaged-app smoke -> Evidence
+Review truth
+-> Freeze docs/task/cache
+-> Cut minimal shell slice
+-> type-check
+-> build
+-> packaged smoke（按需）
+-> Evidence
 ```
 
-## 本阶段验证入口
+## 本轮 rewrite 门禁
 
-### L1 Type-check
+### 1. 文档门禁
 
-- `pnpm --filter @zterm/mac type-check`
+先同步：
 
-### L2 Build
+- `mac/docs/spec.md`
+- `mac/docs/architecture.md`
+- `mac/docs/dev-workflow.md`
+- `mac/task.md`
+- `mac/CACHE.md`
 
-- `pnpm --filter @zterm/mac build`
+### 2. 代码门禁
 
-### L3 Package
+本轮只允许做：
 
-- `pnpm --filter @zterm/mac package`
+- App 入口切换
+- shell ownership 重建
+- launcher / editor / active tab 最小闭环
+- 与真实 runtime 的薄适配
 
-### L4 Browser verify renderer flow
+本轮不允许顺手做：
 
-- `pnpm --filter @zterm/mac dev`
-- 打开 `http://127.0.0.1:5174/`
-- 验证 Connections / Details / Terminal 三栏
-- 验证 connection 表单保存后，列表 / terminal / remembered server 同步更新
-- 验证 live bridge 主链：
-  - `connect(payload)`
-  - `stream-mode(active)`
-  - terminal pane 出现 snapshot 文本
-- 若使用本地 mock bridge 做验证，优先使用无敏感 token 的本地测试目标
+- split closeout
+- local tmux closeout
+- runtime 协议大杂烩式补丁
 
-### L5 Run packaged app
+### 3. 验证门禁
 
-- 必须先退出旧的 `ZTerm` 实例，再打开生成的 `.app` 或 unpacked 包
-- 确认窗口可见
-- 确认 stage 为单行多列 + 垂直分屏
-- 若需要重复验证，继续遵守“先 quit 旧实例，再 open 新包”，禁止叠多个 app 进程污染证据
+最低静态门槛：
+
+```bash
+pnpm --filter @zterm/mac type-check
+pnpm --filter @zterm/mac build
+```
+
+若改到 Electron shell / packaged 行为，再补：
+
+```bash
+pnpm --filter @zterm/mac package
+```
 
 ## 证据要求
 
+至少给出：
+
+- 改动文件
 - type-check 输出
 - build 输出
-- package 输出
-- 产物路径
-- 浏览器交互验证证据
-- live terminal render 证据
-- bridge endpoint 归一证据（host 自带端口时不再重复拼 port）
-- 必要时窗口截图
+- 若未做 packaged smoke，必须明确写“本轮仅完成静态闭环”
+
+## 汇报要求
+
+本轮只能按真实范围汇报：
+
+- 已切掉旧入口没有
+- 新 app shell 是否接上真实 runtime
+- 还没切掉的旧 runtime / buffer worker 在哪
+- 下一刀准备切什么

@@ -1,50 +1,22 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  drainRuntimeDebugEntries,
-  getPendingRuntimeDebugEntryCount,
-  MAX_RUNTIME_DEBUG_BATCH_ENTRIES,
-  MAX_RUNTIME_DEBUG_PAYLOAD_CHARS,
-  MAX_RUNTIME_DEBUG_QUEUE,
-  runtimeDebug,
-} from './runtime-debug';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { isRuntimeDebugEnabled, RUNTIME_DEBUG_STORAGE_KEY, setRuntimeDebugEnabled } from './runtime-debug';
 
-describe('runtime-debug queue', () => {
+describe('runtime debug storage flag', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    localStorage.clear();
-    localStorage.setItem('zterm:runtime-debug-log', '1');
-    vi.spyOn(console, 'debug').mockImplementation(() => {});
-    while (getPendingRuntimeDebugEntryCount() > 0) {
-      drainRuntimeDebugEntries();
-    }
+    window.localStorage.clear();
   });
 
-  it('truncates oversized payloads before enqueue', () => {
-    runtimeDebug('scope.a', 'x'.repeat(MAX_RUNTIME_DEBUG_PAYLOAD_CHARS + 100));
-    const entries = drainRuntimeDebugEntries();
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.payload?.length).toBeLessThanOrEqual(MAX_RUNTIME_DEBUG_PAYLOAD_CHARS);
-  });
+  it('toggles the runtime debug flag through storage', () => {
+    expect(isRuntimeDebugEnabled()).toBe(false);
 
-  it('caps in-memory queue and emits drop summary', () => {
-    for (let index = 0; index < MAX_RUNTIME_DEBUG_QUEUE + 5; index += 1) {
-      runtimeDebug(`scope.${index}`, { index });
-    }
+    setRuntimeDebugEnabled(true);
+    expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
+    expect(isRuntimeDebugEnabled()).toBe(true);
 
-    const firstBatch = drainRuntimeDebugEntries();
-    expect(firstBatch[0]?.scope).toBe('runtime.debug.drop-summary');
-    expect(firstBatch[0]?.payload).toContain('dropped=');
-  });
-
-  it('drains in bounded batches', () => {
-    for (let index = 0; index < MAX_RUNTIME_DEBUG_BATCH_ENTRIES + 3; index += 1) {
-      runtimeDebug(`scope.${index}`, { index });
-    }
-
-    const firstBatch = drainRuntimeDebugEntries();
-    expect(firstBatch.length).toBe(MAX_RUNTIME_DEBUG_BATCH_ENTRIES);
-    expect(getPendingRuntimeDebugEntryCount()).toBe(3);
+    setRuntimeDebugEnabled(false);
+    expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
+    expect(isRuntimeDebugEnabled()).toBe(false);
   });
 });

@@ -5,13 +5,14 @@
 1. `spec.md`：产品范围
 2. `architecture.md`：模块边界
 3. `docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局 / Mac 共享壳决策
-4. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
-5. `dev-workflow.md`：执行门禁
-6. `task.md`：当前任务
-7. `CACHE.md`：短期上下文
-8. `MEMORY.md`：长期经验
-9. `evidence/`：运行证据
-10. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+4. `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 唯一真源
+5. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
+6. `dev-workflow.md`：执行门禁
+7. `task.md`：当前任务
+8. `CACHE.md`：短期上下文
+9. `MEMORY.md`：长期经验
+10. `evidence/`：运行证据
+11. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
 
 ## 模块边界
 
@@ -177,12 +178,15 @@ render window = [viewportEndIndex - localViewportRows, viewportEndIndex)
 - daemon 只做两件事：1) mirror tmux truth；2) 按 zterm 已连接 client 的最小 geometry 通知 tmux resize
 - daemon 不改写 tmux 内容语义；它只发送控制（input/attach/resize 等）并读取 tmux truth，不允许在 daemon 侧二次改写/裁剪/重排 tmux 内容来“修显示”
 - daemon canonical line buffer 是 terminal 信息的唯一真源；client/debug/local state 都不得成为第二真源
+- daemon 的对外职责收敛为：**30Hz head 广播 + range request 响应**；不再主动 push buffer 内容
 - cursor 属于 canonical truth，本轮收敛下优先烘焙进 buffer cells，不走 client overlay 第二真源
-- client mirror buffer 只做 absolute-index merge
-- client render 只根据绝对窗口渲染，不自行解释 shell 内容
+- client mirror buffer 是 **sparse absolute-index buffer**，允许不连续；只围绕当前工作集补缺
+- client active session 本地固定 `33ms` cadence 只做 head freshness / demand 判定；真正的 tail / reading range 拉取频率由网络状况与配置决定，不把“30fps 检查”误做成“30fps 必拉 range”
+- `sendInput()` 不做本地回显；若当前是 active session，只挂 `input-tail-refresh` demand，再由本地 cadence 主动发 follow `buffer-sync-request + ping` 去拿 server canonical buffer
+- client render 只根据“latest bottom + relative offset”求绝对窗口并渲染，不自行解释 shell 内容
 - 已经进入 canonical buffer 的历史行视为 immutable fact；resize 只影响之后的新输出，不允许回写/重排旧事实
 - geometry 决策只看 zterm 自己的接入端；Termius/iTerm/iSSH 等外部 tmux client 不参与 daemon 的 geometry policy
-- 当前优先目标是“正确最后一屏”；reading / scroll 状态机后置
+- 当前优先目标是“正确最后一屏”；reading / scroll 状态机继续以“worker 补当前窗口缺口”实现，不再让 renderer 参与 transport
 
 ## Connection / Session 真源
 

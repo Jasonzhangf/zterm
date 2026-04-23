@@ -19,6 +19,7 @@
     "daemon:mirror:replay": "tsx scripts/client-mirror-replay.ts",
     "daemon:mirror:close-loop": "tsx scripts/daemon-mirror-close-loop.ts",
     "daemon:runtime:analyze": "tsx scripts/analyze-runtime-debug.ts",
+    "daemon:runtime:remote": "tsx scripts/runtime-debug-remote.ts",
     "daemon:install-global": "bash ./scripts/install-global-daemon-cli.sh",
     "daemon:install-service": "bash ./scripts/zterm-daemon.sh install-service",
     "daemon:service-status": "bash ./scripts/zterm-daemon.sh service-status",

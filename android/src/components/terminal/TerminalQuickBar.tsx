@@ -24,18 +24,18 @@ const MAX_CLIPBOARD_HISTORY = 100;
 const FLOATING_BUBBLE_POSITION_STORAGE_KEY = 'zterm:floating-bubble-position';
 
 const SHORTCUT_PRESETS: ShortcutPreset[] = [
-  { label: '继续', sequence: '继续执行\r', row: 'top-scroll' },
-  { label: 'Esc', sequence: '\x1b', row: 'top-scroll' },
-  { label: 'Bksp', sequence: '\x7f', row: 'top-scroll' },
-  { label: 'Paste', sequence: '\x16', row: 'top-scroll' },
-  { label: 'Tab', sequence: '\t', row: 'bottom-scroll' },
-  { label: 'Enter', sequence: '\r', row: 'bottom-scroll' },
-  { label: 'Space', sequence: ' ', row: 'bottom-scroll' },
-  { label: '↓', sequence: '\x1b[B', row: 'bottom-scroll' },
-  { label: '←', sequence: '\x1b[D', row: 'bottom-scroll' },
-  { label: '→', sequence: '\x1b[C', row: 'bottom-scroll' },
-  { label: 'S-Tab', sequence: '\x1b[Z', row: 'bottom-scroll' },
-  { label: 'S-Enter', sequence: '\n', row: 'bottom-scroll' },
+  { label: 'Esc', sequence: '\x1b', kind: 'key', row: 'top-scroll' },
+  { label: 'Bksp', sequence: '\x7f', kind: 'key', row: 'top-scroll' },
+  { label: 'Tab', sequence: '\t', kind: 'key', row: 'top-scroll' },
+  { label: 'Enter', sequence: '\r', kind: 'key', row: 'top-scroll' },
+  { label: 'Space', sequence: ' ', kind: 'key', row: 'top-scroll' },
+  { label: '继续', sequence: '继续执行\r', kind: 'text', row: 'bottom-scroll' },
+  { label: 'Paste', sequence: '\x16', kind: 'text', row: 'bottom-scroll' },
+  { label: 'S-Tab', sequence: '\x1b[Z', kind: 'text', row: 'bottom-scroll' },
+  { label: 'S-Enter', sequence: '\n', kind: 'text', row: 'bottom-scroll' },
+  { label: '↓', sequence: '\x1b[B', kind: 'key', row: 'top-scroll' },
+  { label: '←', sequence: '\x1b[D', kind: 'key', row: 'top-scroll' },
+  { label: '→', sequence: '\x1b[C', kind: 'key', row: 'top-scroll' },
 ];
 
 const BASE_ACTIONS = [
@@ -90,6 +90,39 @@ interface ShortcutPreset extends ShortcutToken {
 }
 
 type ShortcutEditorTab = 'keyboard' | 'common';
+type ShortcutEditorMode = 'list' | 'form';
+type ShortcutRow = 'top-scroll' | 'bottom-scroll';
+
+const SHORTCUT_ROW_ORDER: ShortcutRow[] = ['top-scroll', 'bottom-scroll'];
+
+const SHORTCUT_ROW_META: Record<
+  ShortcutRow,
+  {
+    title: string;
+    summary: string;
+    addLabel: string;
+    formTag: string;
+    formHint: string;
+    inputPlaceholder: string;
+  }
+> = {
+  'top-scroll': {
+    title: '第一行（单按键）',
+    summary: 'Esc / Tab / Enter / Space / 单个字符',
+    addLabel: '+ 添加单按键',
+    formTag: '当前编辑：第一行单按键',
+    formHint: '这里只放单个按键，不支持 Ctrl / Shift 等组合。',
+    inputPlaceholder: '输入单个字母/数字/符号',
+  },
+  'bottom-scroll': {
+    title: '第二行（组合键）',
+    summary: 'Ctrl + C / Shift + Tab / Continue / Paste',
+    addLabel: '+ 添加组合键',
+    formTag: '当前编辑：第二行组合键',
+    formHint: '这里放组合键或复合动作，单按键请放到第一行。',
+    inputPlaceholder: '输入组合键里的目标字符，例如 c',
+  },
+};
 
 const SHORTCUT_KEYBOARD_TOKENS: ShortcutToken[] = [
   { label: 'Ctrl', sequence: '__CTRL__', kind: 'modifier' },
@@ -126,7 +159,7 @@ const SHORTCUT_KEYBOARD_TOKENS: ShortcutToken[] = [
 
 const SHORTCUT_COMMON_TOKENS: ShortcutToken[] = [
   { label: '继续', sequence: '继续执行\r', kind: 'text' },
-  { label: 'Cmd+V', sequence: '\x16', kind: 'key' },
+  { label: 'Cmd+V', sequence: '\x16', kind: 'text' },
   { label: 'Bksp', sequence: '\x7f', kind: 'key' },
   { label: 'Esc', sequence: '\x1b', kind: 'key' },
   { label: 'Tab', sequence: '\t', kind: 'key' },
@@ -140,6 +173,37 @@ const SHORTCUT_COMMON_TOKENS: ShortcutToken[] = [
   { label: '→', sequence: '\x1b[C', kind: 'key' },
 ];
 
+const SIMPLE_SHORTCUT_PRESET_SEQUENCES = new Set([
+  '\x1b',
+  '\x7f',
+  '\t',
+  '\r',
+  ' ',
+  '\x1b[A',
+  '\x1b[B',
+  '\x1b[C',
+  '\x1b[D',
+  '\x1bOP',
+  '\x1bOQ',
+  '\x1bOR',
+  '\x1bOS',
+  '\x1b[15~',
+  '\x1b[17~',
+  '\x1b[18~',
+  '\x1b[19~',
+  '\x1b[20~',
+  '\x1b[21~',
+  '\x1b[23~',
+  '\x1b[24~',
+]);
+
+const MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS: Record<string, string> = {
+  Option: 'Opt',
+  Command: 'Cmd',
+  Return: 'Enter',
+  Delete: 'Del',
+};
+
 function editorInputStyle() {
   return {
     width: '100%',
@@ -151,6 +215,10 @@ function editorInputStyle() {
     color: '#fff',
     fontSize: '14px',
   } as const;
+}
+
+function resolveShortcutTokenDisplayLabel(label: string) {
+  return MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS[label] || label;
 }
 
 function createDraftActionId() {
@@ -185,6 +253,29 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
   const [item] = next.splice(fromIndex, 1);
   next.splice(toIndex, 0, item);
   return next;
+}
+
+function moveShortcutActionWithinRow(
+  actions: DraftShortcutAction[],
+  row: ShortcutRow,
+  fromIndex: number,
+  toIndex: number,
+) {
+  const rowItems = actions.filter((action) => action.row === row);
+  if (fromIndex === toIndex || toIndex < 0 || toIndex >= rowItems.length) {
+    return actions;
+  }
+
+  const movedRowItems = moveItem(rowItems, fromIndex, toIndex);
+  const rowQueues = new Map<string, DraftShortcutAction[]>();
+  rowQueues.set(row, [...movedRowItems]);
+
+  return actions.map((action) => {
+    if (action.row !== row) {
+      return action;
+    }
+    return rowQueues.get(row)?.shift() || action;
+  });
 }
 
 function blurCurrentTarget(target: EventTarget | null) {
@@ -247,6 +338,39 @@ function bubbleViewportRectWithInset(keyboardInsetPx: number) {
   };
 }
 
+function resolveOverlayViewportMetrics(keyboardInsetPx: number) {
+  if (typeof window === 'undefined') {
+    return {
+      sheetHeightPx: null as number | null,
+      bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)),
+    };
+  }
+
+  const layoutHeight = Math.max(0, Math.round(window.innerHeight || 0));
+  const visualViewport = window.visualViewport;
+  if (!visualViewport) {
+    return {
+      sheetHeightPx: Math.max(320, layoutHeight - 16),
+      bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)),
+    };
+  }
+
+  const visibleBottom = Math.max(
+    0,
+    Math.round((visualViewport.height || 0) + (visualViewport.offsetTop || 0)),
+  );
+  const occludedBottom = Math.max(0, layoutHeight - visibleBottom);
+  const bottomInsetPx = Math.max(
+    occludedBottom,
+    Math.max(0, Math.round(keyboardInsetPx || 0)),
+  );
+
+  return {
+    sheetHeightPx: Math.max(320, visibleBottom - 16),
+    bottomInsetPx,
+  };
+}
+
 function createShortcutActionId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -263,24 +387,76 @@ function normalizeSequenceForImmediateSend(value: string) {
   return /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
 }
 
+function isSingleShortcutToken(token: ShortcutToken) {
+  if (token.kind === 'modifier') {
+    return false;
+  }
+  if (token.kind === 'key') {
+    return true;
+  }
+  if (token.kind === 'text') {
+    return token.sequence.length === 1;
+  }
+  if (SIMPLE_SHORTCUT_PRESET_SEQUENCES.has(token.sequence)) {
+    return true;
+  }
+  return token.sequence.length === 1 && !/[\x00-\x1f]/.test(token.sequence);
+}
+
+function validateShortcutTokensForRow(
+  row: ShortcutRow,
+  tokens: ShortcutToken[],
+  built: ReturnType<typeof buildTerminalShortcutSequence>,
+) {
+  if (tokens.length === 0 || built.error) {
+    return '';
+  }
+
+  if (row === 'top-scroll') {
+    if (tokens.some((token) => token.kind === 'modifier')) {
+      return '第一行只支持单按键，不支持 Ctrl / Shift 等组合。';
+    }
+    if (tokens.length !== 1 || !isSingleShortcutToken(tokens[0])) {
+      return '第一行只支持单个按键。';
+    }
+    return '';
+  }
+
+  if (tokens.length === 1 && isSingleShortcutToken(tokens[0])) {
+    return '第二行用于组合键或复合动作，单按键请放到第一行。';
+  }
+
+  return '';
+}
+
+function inferShortcutRow(label: string, sequence: string): ShortcutRow {
+  const tokens = buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
+  const built = buildTerminalShortcutSequence(tokens);
+  return validateShortcutTokensForRow('top-scroll', tokens, built) ? 'bottom-scroll' : 'top-scroll';
+}
+
 function sortShortcutActions(actions: TerminalShortcutAction[]) {
   return [...actions].sort((left, right) => {
     if (left.row !== right.row) {
-      return left.row.localeCompare(right.row);
+      return SHORTCUT_ROW_ORDER.indexOf(left.row) - SHORTCUT_ROW_ORDER.indexOf(right.row);
     }
     return left.order - right.order;
   });
 }
 
 function normalizeShortcutActions(actions: DraftShortcutAction[]): TerminalShortcutAction[] {
-  const grouped = new Map<'top-scroll' | 'bottom-scroll', DraftShortcutAction[]>();
+  const grouped = new Map<ShortcutRow, DraftShortcutAction[]>();
   grouped.set('top-scroll', []);
   grouped.set('bottom-scroll', []);
   actions.forEach((action) => {
-    grouped.get(action.row)?.push(action);
+    const row = inferShortcutRow(action.label, action.sequence);
+    grouped.get(row)?.push({
+      ...action,
+      row,
+    });
   });
 
-  return (['top-scroll', 'bottom-scroll'] as const).flatMap((row) =>
+  return SHORTCUT_ROW_ORDER.flatMap((row) =>
     (grouped.get(row) || []).map((action, index) => ({
       ...action,
       order: index,
@@ -309,6 +485,7 @@ export function TerminalQuickBar({
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
+  const [shortcutEditorMode, setShortcutEditorMode] = useState<ShortcutEditorMode>('list');
   const [floatingMenuOpen, setFloatingMenuOpen] = useState(false);
   const [floatingPanelTab, setFloatingPanelTab] = useState<FloatingPanelTab>('quick-actions');
   const [draftActions, setDraftActions] = useState<DraftQuickAction[]>(() => toDraftActions(quickActions));
@@ -319,7 +496,7 @@ export function TerminalQuickBar({
   const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
   const [draftShortcutLabel, setDraftShortcutLabel] = useState('');
   const [draftShortcutSequence, setDraftShortcutSequence] = useState('');
-  const [draftShortcutRow, setDraftShortcutRow] = useState<'top-scroll' | 'bottom-scroll'>('bottom-scroll');
+  const [draftShortcutRow, setDraftShortcutRow] = useState<ShortcutRow>('top-scroll');
   const [draftShortcutTokens, setDraftShortcutTokens] = useState<ShortcutToken[]>([]);
   const [shortcutEditorTab, setShortcutEditorTab] = useState<ShortcutEditorTab>('keyboard');
   const [draftShortcutTextInput, setDraftShortcutTextInput] = useState('');
@@ -359,15 +536,35 @@ export function TerminalQuickBar({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
+  const shortcutEditorScrollRef = useRef<HTMLDivElement | null>(null);
   const domEditorFocusTimerRef = useRef<number | null>(null);
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
   const draftShortcutBuild = useMemo(() => buildTerminalShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
+  const draftShortcutRowError = useMemo(
+    () => validateShortcutTokensForRow(draftShortcutRow, draftShortcutTokens, draftShortcutBuild),
+    [draftShortcutBuild, draftShortcutRow, draftShortcutTokens],
+  );
+  const draftShortcutEffectiveError = draftShortcutBuild.error || draftShortcutRowError;
   const floatingPanelBottomPx = 124;
   const floatingBubbleBottomPx = 72;
   const editingIndex = editingId ? draftActions.findIndex((action) => action.id === editingId) : -1;
   const editingShortcutIndex = editingShortcutId ? draftShortcutActions.findIndex((action) => action.id === editingShortcutId) : -1;
+  const draftShortcutRowMeta = SHORTCUT_ROW_META[draftShortcutRow];
+  const availableKeyboardShortcutTokens = useMemo(
+    () => (draftShortcutRow === 'top-scroll' ? SHORTCUT_KEYBOARD_TOKENS.filter((token) => token.kind !== 'modifier') : SHORTCUT_KEYBOARD_TOKENS),
+    [draftShortcutRow],
+  );
+  const availableCommonShortcutTokens = useMemo(
+    () => (draftShortcutRow === 'top-scroll' ? SHORTCUT_COMMON_TOKENS.filter(isSingleShortcutToken) : SHORTCUT_COMMON_TOKENS),
+    [draftShortcutRow],
+  );
+  const [overlayViewportMetrics, setOverlayViewportMetrics] = useState(() => resolveOverlayViewportMetrics(keyboardInsetPx));
+  const overlaySheetHeightStyle = overlayViewportMetrics.sheetHeightPx !== null
+    ? `${overlayViewportMetrics.sheetHeightPx}px`
+    : 'calc(100dvh - 16px)';
+  const overlayBottomInsetStyle = `${overlayViewportMetrics.bottomInsetPx}px`;
 
   const appendToDraft = (value: string) => {
     onSessionDraftChange?.(`${sessionDraft || ''}${value}`);
@@ -713,6 +910,50 @@ export function TerminalQuickBar({
     };
   }, [floatingMenuOpen]);
 
+  useEffect(() => {
+    if (!shortcutEditorOpen || !shortcutEditorScrollRef.current) {
+      return;
+    }
+
+    const scrollElement = shortcutEditorScrollRef.current;
+    const resetScroll = () => {
+      scrollElement.scrollTop = 0;
+    };
+
+    resetScroll();
+    const rafId = window.requestAnimationFrame(resetScroll);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [editingShortcutId, shortcutEditorMode, shortcutEditorOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const syncOverlayViewportMetrics = () => {
+      const nextMetrics = resolveOverlayViewportMetrics(keyboardInsetPx);
+      setOverlayViewportMetrics((current) => (
+        current.sheetHeightPx === nextMetrics.sheetHeightPx
+        && current.bottomInsetPx === nextMetrics.bottomInsetPx
+          ? current
+          : nextMetrics
+      ));
+    };
+
+    syncOverlayViewportMetrics();
+    window.addEventListener('resize', syncOverlayViewportMetrics);
+    window.visualViewport?.addEventListener('resize', syncOverlayViewportMetrics);
+    window.visualViewport?.addEventListener('scroll', syncOverlayViewportMetrics);
+
+    return () => {
+      window.removeEventListener('resize', syncOverlayViewportMetrics);
+      window.visualViewport?.removeEventListener('resize', syncOverlayViewportMetrics);
+      window.visualViewport?.removeEventListener('scroll', syncOverlayViewportMetrics);
+    };
+  }, [keyboardInsetPx]);
+
   useEffect(() => () => {
     if (domEditorFocusTimerRef.current !== null) {
       window.clearTimeout(domEditorFocusTimerRef.current);
@@ -783,7 +1024,25 @@ export function TerminalQuickBar({
     setDraftShortcutSequence(built.sequence);
   };
 
-  const openShortcutEditor = (action?: DraftShortcutAction) => {
+  const resetShortcutForm = () => {
+    setEditingShortcutId(null);
+    setDraftShortcutLabel('');
+    setDraftShortcutSequence('');
+    setDraftShortcutRow('top-scroll');
+    setDraftShortcutTokens([]);
+    setShortcutEditorTab('keyboard');
+    setDraftShortcutTextInput('');
+  };
+
+  const openShortcutEditor = () => {
+    setDraftShortcutActions(sortShortcutActions(shortcutActions));
+    setFloatingMenuOpen(false);
+    resetShortcutForm();
+    setShortcutEditorMode('list');
+    setShortcutEditorOpen(true);
+  };
+
+  const openShortcutForm = (row: ShortcutRow, action?: DraftShortcutAction) => {
     setDraftShortcutActions(sortShortcutActions(shortcutActions));
     setFloatingMenuOpen(false);
     setShortcutEditorTab('keyboard');
@@ -796,21 +1055,22 @@ export function TerminalQuickBar({
     } else {
       setEditingShortcutId(null);
       setDraftShortcutLabel('');
-      setDraftShortcutRow('bottom-scroll');
+      setDraftShortcutRow(row);
       syncDraftShortcutTokens([]);
     }
+    setShortcutEditorMode('form');
     setShortcutEditorOpen(true);
+  };
+
+  const backToShortcutList = () => {
+    resetShortcutForm();
+    setShortcutEditorMode('list');
   };
 
   const closeShortcutEditor = () => {
     setShortcutEditorOpen(false);
-    setEditingShortcutId(null);
-    setDraftShortcutLabel('');
-    setDraftShortcutSequence('');
-    setDraftShortcutRow('bottom-scroll');
-    setDraftShortcutTokens([]);
-    setShortcutEditorTab('keyboard');
-    setDraftShortcutTextInput('');
+    setShortcutEditorMode('list');
+    resetShortcutForm();
   };
 
   const appendShortcutToken = (token: ShortcutToken, row?: 'top-scroll' | 'bottom-scroll') => {
@@ -841,7 +1101,7 @@ export function TerminalQuickBar({
 
   const saveShortcutForm = () => {
     const nextSequence = draftShortcutBuild.sequence;
-    if (!nextSequence || draftShortcutBuild.error) {
+    if (!nextSequence || draftShortcutEffectiveError) {
       return;
     }
 
@@ -865,7 +1125,7 @@ export function TerminalQuickBar({
         ];
 
     persistShortcutActions(nextActions);
-    closeShortcutEditor();
+    backToShortcutList();
   };
 
   const appendShortcutTextInput = () => {
@@ -1111,19 +1371,21 @@ export function TerminalQuickBar({
             backdropFilter: 'blur(10px)',
             display: 'flex',
             alignItems: 'flex-end',
-            paddingBottom: '0px',
+            paddingBottom: overlayBottomInsetStyle,
           }}
         >
           <div
             style={{
               width: '100%',
-              maxHeight: 'calc(100dvh - 16px)',
+              height: overlaySheetHeightStyle,
+              maxHeight: overlaySheetHeightStyle,
               borderRadius: '26px 26px 0 0',
               backgroundColor: '#f7f8fb',
               color: mobileTheme.colors.lightText,
               boxShadow: '0 -20px 50px rgba(0,0,0,0.28)',
               display: 'flex',
               flexDirection: 'column',
+              minHeight: 0,
               overflow: 'hidden',
             }}
           >
@@ -1168,9 +1430,15 @@ export function TerminalQuickBar({
             </div>
 
             <div
+              data-testid="quick-action-editor-scroll"
               style={{
+                flex: 1,
+                minHeight: 0,
                 padding: '16px',
                 overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                touchAction: 'pan-y',
+                overscrollBehaviorY: 'contain',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px',
@@ -1364,19 +1632,21 @@ export function TerminalQuickBar({
             backdropFilter: 'blur(10px)',
             display: 'flex',
             alignItems: 'flex-end',
-            paddingBottom: '0px',
+            paddingBottom: overlayBottomInsetStyle,
           }}
         >
           <div
             style={{
               width: '100%',
-              maxHeight: 'calc(100dvh - 16px)',
+              height: overlaySheetHeightStyle,
+              maxHeight: overlaySheetHeightStyle,
               borderRadius: '26px 26px 0 0',
               backgroundColor: '#f7f8fb',
               color: mobileTheme.colors.lightText,
               boxShadow: '0 -20px 50px rgba(0,0,0,0.28)',
               display: 'flex',
               flexDirection: 'column',
+              minHeight: 0,
               overflow: 'hidden',
             }}
           >
@@ -1397,6 +1667,34 @@ export function TerminalQuickBar({
                 }}
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {shortcutEditorMode === 'form' ? (
+                  <button
+                    onClick={backToShortcutList}
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '999px',
+                      border: 'none',
+                      backgroundColor: '#eef2f8',
+                      color: mobileTheme.colors.lightText,
+                      fontSize: '20px',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                    aria-label="返回快捷键列表"
+                  >
+                    ‹
+                  </button>
+                ) : (
+                  <div style={{ width: '34px', height: '34px', flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '20px', fontWeight: 800, textAlign: 'center' }}>
+                    {shortcutEditorMode === 'form'
+                      ? (editingShortcutIndex >= 0 ? '编辑快捷键' : '添加快捷键')
+                      : '快捷按键设置'}
+                  </div>
+                </div>
                 <button
                   onClick={closeShortcutEditor}
                   style={{
@@ -1410,300 +1708,381 @@ export function TerminalQuickBar({
                     cursor: 'pointer',
                     flexShrink: 0,
                   }}
+                  aria-label="关闭快捷键设置"
                 >
                   ×
                 </button>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '20px', fontWeight: 800 }}>快捷按键设置</div>
-                </div>
               </div>
             </div>
 
             <div
+              ref={shortcutEditorScrollRef}
+              data-testid="shortcut-editor-scroll"
               style={{
+                flex: 1,
+                minHeight: 0,
                 padding: '16px',
                 overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                touchAction: 'pan-y',
+                overscrollBehaviorY: 'contain',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px',
                 paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 700 }}>当前滚动快捷键</div>
-                  <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>特殊键和组合序列都从这里生成，不依赖输入法。</div>
-                </div>
-                <button
-                  onClick={() => openShortcutEditor()}
+              {shortcutEditorMode === 'list' ? (
+                <>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700 }}>当前滚动快捷键</div>
+                    <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                      两行分开管理：第一行只放单按键，第二行只放组合键 / 复合动作。
+                    </div>
+                  </div>
+
+                  {SHORTCUT_ROW_ORDER.map((row) => {
+                    const rowMeta = SHORTCUT_ROW_META[row];
+                    const rowActions = draftShortcutActions.filter((action) => action.row === row);
+                    return (
+                      <div
+                        key={row}
+                        style={{
+                          borderRadius: '20px',
+                          backgroundColor: '#fff',
+                          border: '1px solid rgba(23, 27, 45, 0.08)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '12px',
+                            backgroundColor: '#fff',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '16px', fontWeight: 800 }}>{rowMeta.title}</div>
+                            <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                              {rowMeta.summary}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => openShortcutForm(row)}
+                            style={{
+                              minHeight: '38px',
+                              padding: '0 14px',
+                              borderRadius: '999px',
+                              border: 'none',
+                              backgroundColor: 'rgba(22, 119, 255, 0.12)',
+                              color: '#1677ff',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {rowMeta.addLabel}
+                          </button>
+                        </div>
+
+                        {rowActions.length === 0 ? (
+                          <div
+                            style={{
+                              padding: '0 16px 18px',
+                              fontSize: '13px',
+                              color: mobileTheme.colors.lightMuted,
+                            }}
+                          >
+                            当前还没有内容，点右侧按钮进入详情页添加。
+                          </div>
+                        ) : (
+                          rowActions.map((action, index) => (
+                            <div
+                              key={action.id}
+                              style={{
+                                padding: '14px 16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                borderTop: '1px solid rgba(23, 27, 45, 0.08)',
+                              }}
+                            >
+                              <button
+                                onClick={() => openShortcutForm(row, action)}
+                                aria-label={`编辑 ${action.label || '未命名快捷键'}`}
+                                style={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  border: 'none',
+                                  background: 'transparent',
+                                  padding: 0,
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <div style={{ fontSize: '17px', fontWeight: 600, color: mobileTheme.colors.lightText }}>
+                                  {action.label || '未命名'}
+                                </div>
+                                <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                                  {formatSnippetPreview(action.sequence) || '(空)'}
+                                </div>
+                              </button>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                <button
+                                  onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index - 1))}
+                                  disabled={index === 0}
+                                  style={overlayIconButton(index === 0)}
+                                  aria-label={`上移 ${action.label}`}
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index + 1))}
+                                  disabled={index === rowActions.length - 1}
+                                  style={overlayIconButton(index === rowActions.length - 1)}
+                                  aria-label={`下移 ${action.label}`}
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  onClick={() => persistShortcutActions(draftShortcutActions.filter((item) => item.id !== action.id))}
+                                  style={overlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
+                                  aria-label={`删除 ${action.label}`}
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              ) : (
+                <div
                   style={{
-                    minHeight: '38px',
-                    padding: '0 14px',
-                    borderRadius: '999px',
-                    border: 'none',
-                    backgroundColor: 'rgba(22, 119, 255, 0.12)',
-                    color: '#1677ff',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    flexShrink: 0,
+                    borderRadius: '24px',
+                    backgroundColor: '#fff',
+                    border: '1px solid rgba(23, 27, 45, 0.08)',
+                    padding: '18px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
                   }}
                 >
-                  + 添加
-                </button>
-              </div>
-
-              <div
-                style={{
-                  borderRadius: '20px',
-                  backgroundColor: '#fff',
-                  border: '1px solid rgba(23, 27, 45, 0.08)',
-                  overflow: 'hidden',
-                }}
-              >
-                {draftShortcutActions.length === 0 ? (
-                  <div style={{ height: '12px' }} />
-                ) : (
-                  draftShortcutActions.map((action, index) => (
-                    <div
-                      key={action.id}
+                  <input
+                    value={draftShortcutLabel}
+                    onChange={(event) => setDraftShortcutLabel(event.target.value)}
+                    placeholder="快捷键名称 / 显示名称"
+                    style={lightEditorInputStyle()}
+                  />
+                  <div
+                    style={{
+                      borderRadius: '16px',
+                      backgroundColor: '#eef2f8',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                    }}
+                  >
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#1677ff' }}>{draftShortcutRowMeta.formTag}</div>
+                    <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+                      {draftShortcutRowMeta.formHint}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '8px',
+                      borderRadius: '18px',
+                      backgroundColor: '#eef2f5',
+                      padding: '6px',
+                    }}
+                  >
+                    <button
+                      onClick={() => setShortcutEditorTab('keyboard')}
                       style={{
-                        padding: '14px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        borderTop: index === 0 ? 'none' : '1px solid rgba(23, 27, 45, 0.08)',
+                        minHeight: '44px',
+                        borderRadius: '14px',
+                        border: 'none',
+                        backgroundColor: shortcutEditorTab === 'keyboard' ? '#ffffff' : 'transparent',
+                        color: shortcutEditorTab === 'keyboard' ? '#1677ff' : mobileTheme.colors.lightText,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: shortcutEditorTab === 'keyboard' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
                       }}
                     >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '17px', fontWeight: 600 }}>{action.label || '未命名'}</div>
-                        <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                          {action.row === 'top-scroll' ? '上栏滚动区' : '下栏滚动区'} · {formatSnippetPreview(action.sequence) || '(空)'}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                        <button
-                          onClick={() => persistShortcutActions(moveItem(draftShortcutActions, index, index - 1))}
-                          disabled={index === 0}
-                          style={overlayIconButton(index === 0)}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          onClick={() => persistShortcutActions(moveItem(draftShortcutActions, index, index + 1))}
-                          disabled={index === draftShortcutActions.length - 1}
-                          style={overlayIconButton(index === draftShortcutActions.length - 1)}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          onClick={() => openShortcutEditor(action)}
-                          style={overlayTextButton('#eef2f8', mobileTheme.colors.lightText)}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          onClick={() => persistShortcutActions(draftShortcutActions.filter((item) => item.id !== action.id))}
-                          style={overlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div
-                style={{
-                  borderRadius: '20px',
-                  backgroundColor: '#fff',
-                  border: '1px solid rgba(23, 27, 45, 0.08)',
-                  padding: '16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ fontSize: '16px', fontWeight: 700 }}>
-                  {editingShortcutIndex >= 0 ? '编辑快捷按键' : '新增快捷按键'}
-                </div>
-                <input
-                  value={draftShortcutLabel}
-                  onChange={(event) => setDraftShortcutLabel(event.target.value)}
-                  placeholder="显示名称"
-                  style={lightEditorInputStyle()}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => setDraftShortcutRow('top-scroll')}
-                    style={floatingPillButton(
-                      draftShortcutRow === 'top-scroll' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
-                      draftShortcutRow === 'top-scroll' ? '#1677ff' : mobileTheme.colors.lightText,
-                    )}
-                  >
-                    上栏
-                  </button>
-                  <button
-                    onClick={() => setDraftShortcutRow('bottom-scroll')}
-                    style={floatingPillButton(
-                      draftShortcutRow === 'bottom-scroll' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
-                      draftShortcutRow === 'bottom-scroll' ? '#1677ff' : mobileTheme.colors.lightText,
-                    )}
-                  >
-                    下栏
-                  </button>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => setShortcutEditorTab('keyboard')}
-                    style={floatingPillButton(
-                      shortcutEditorTab === 'keyboard' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
-                      shortcutEditorTab === 'keyboard' ? '#1677ff' : mobileTheme.colors.lightText,
-                    )}
-                  >
-                    键盘按键
-                  </button>
-                  <button
-                    onClick={() => setShortcutEditorTab('common')}
-                    style={floatingPillButton(
-                      shortcutEditorTab === 'common' ? 'rgba(22, 119, 255, 0.12)' : '#eef2f8',
-                      shortcutEditorTab === 'common' ? '#1677ff' : mobileTheme.colors.lightText,
-                    )}
-                  >
-                    常用动作
-                  </button>
-                </div>
-                <textarea
-                  value={draftShortcutBuild.preview || draftShortcutSequence}
-                  readOnly
-                  placeholder="点击下方按钮组合快捷键"
-                  style={{
-                    ...lightEditorInputStyle(),
-                    minHeight: '74px',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                />
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                  {draftShortcutTokens.length === 0 ? (
-                    <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>当前还没有加入特殊键</div>
-                  ) : (
-                    draftShortcutTokens.map((token, index) => (
-                      <button
-                        key={`${token.label}-${index}`}
-                        onClick={() => removeShortcutToken(index)}
-                        style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
-                      >
-                        {token.label} ×
-                      </button>
-                    ))
-                  )}
-                  <button
-                    onClick={clearShortcutTokens}
-                    disabled={draftShortcutTokens.length === 0}
-                    style={floatingPillButton(draftShortcutTokens.length === 0 ? '#f3f5f9' : '#eef2f8', draftShortcutTokens.length === 0 ? '#c3cad7' : mobileTheme.colors.lightText)}
-                  >
-                    清空
-                  </button>
-                </div>
-
-                {draftShortcutBuild.error ? (
-                  <div style={{ fontSize: '12px', color: mobileTheme.colors.danger, lineHeight: 1.5 }}>
-                    {draftShortcutBuild.error}
+                      键盘按键
+                    </button>
+                    <button
+                      onClick={() => setShortcutEditorTab('common')}
+                      style={{
+                        minHeight: '44px',
+                        borderRadius: '14px',
+                        border: 'none',
+                        backgroundColor: shortcutEditorTab === 'common' ? '#ffffff' : 'transparent',
+                        color: shortcutEditorTab === 'common' ? '#1677ff' : mobileTheme.colors.lightText,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: shortcutEditorTab === 'common' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                      }}
+                    >
+                      系统操作
+                    </button>
                   </div>
-                ) : null}
+                  <textarea
+                    value={draftShortcutBuild.preview || draftShortcutSequence}
+                    readOnly
+                    placeholder={draftShortcutRow === 'top-scroll' ? '点击下方按钮选择单个按键' : '点击下方按钮组合快捷键'}
+                    style={{
+                      ...lightEditorInputStyle(),
+                      minHeight: '74px',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  />
 
-                {shortcutEditorTab === 'keyboard' ? (
-                  <>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <input
-                        value={draftShortcutTextInput}
-                        onChange={(event) => setDraftShortcutTextInput(event.target.value)}
-                        placeholder="输入字母/数字/符号"
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                    {draftShortcutTokens.length === 0 ? (
+                      <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>当前还没有加入特殊键</div>
+                    ) : (
+                      draftShortcutTokens.map((token, index) => (
+                        <button
+                          key={`${token.label}-${index}`}
+                          onClick={() => removeShortcutToken(index)}
+                          style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
+                        >
+                          {token.label} ×
+                        </button>
+                      ))
+                    )}
+                    <button
+                      onClick={clearShortcutTokens}
+                      disabled={draftShortcutTokens.length === 0}
+                      style={floatingPillButton(draftShortcutTokens.length === 0 ? '#f3f5f9' : '#eef2f8', draftShortcutTokens.length === 0 ? '#c3cad7' : mobileTheme.colors.lightText)}
+                    >
+                      清空
+                    </button>
+                  </div>
+
+                  {draftShortcutEffectiveError ? (
+                    <div style={{ fontSize: '12px', color: mobileTheme.colors.danger, lineHeight: 1.5 }}>
+                      {draftShortcutEffectiveError}
+                    </div>
+                  ) : null}
+
+                  {shortcutEditorTab === 'keyboard' ? (
+                    <>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          value={draftShortcutTextInput}
+                          onChange={(event) => setDraftShortcutTextInput(event.target.value)}
+                          placeholder={draftShortcutRowMeta.inputPlaceholder}
+                          style={{
+                            ...lightEditorInputStyle(),
+                            minHeight: '40px',
+                            flex: 1,
+                          }}
+                        />
+                        <button
+                          onClick={appendShortcutTextInput}
+                          style={{
+                            minWidth: '84px',
+                            minHeight: '40px',
+                            border: 'none',
+                            borderRadius: '14px',
+                            backgroundColor: 'rgba(22, 119, 255, 0.12)',
+                            color: '#1677ff',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          加入
+                        </button>
+                      </div>
+
+                      <div
                         style={{
-                          ...lightEditorInputStyle(),
-                          minHeight: '40px',
-                          flex: 1,
-                        }}
-                      />
-                      <button
-                        onClick={appendShortcutTextInput}
-                        style={{
-                          minWidth: '84px',
-                          minHeight: '40px',
-                          border: 'none',
-                          borderRadius: '14px',
-                          backgroundColor: 'rgba(22, 119, 255, 0.12)',
-                          color: '#1677ff',
-                          fontWeight: 800,
-                          cursor: 'pointer',
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                          gap: '6px',
                         }}
                       >
-                        加入
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {SHORTCUT_KEYBOARD_TOKENS.map((token) => (
+                        {availableKeyboardShortcutTokens.map((token) => (
+                          <button
+                            key={`${token.label}-${token.sequence}`}
+                            onClick={() => appendShortcutToken(token)}
+                            aria-label={token.label}
+                            style={shortcutTokenGridButton(
+                              token.kind === 'modifier',
+                              draftShortcutTokens.some((current) => current.label === token.label && current.sequence === token.sequence),
+                            )}
+                          >
+                            <span
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                lineHeight: 1.1,
+                              }}
+                            >
+                              {resolveShortcutTokenDisplayLabel(token.label)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                        gap: '6px',
+                      }}
+                    >
+                      {availableCommonShortcutTokens.map((token) => (
                         <button
                           key={`${token.label}-${token.sequence}`}
                           onClick={() => appendShortcutToken(token)}
-                          style={floatingPillButton(token.kind === 'modifier' ? '#eef2f8' : 'rgba(22, 119, 255, 0.08)', token.kind === 'modifier' ? mobileTheme.colors.lightText : '#1677ff')}
+                          style={shortcutTokenGridButton(
+                            false,
+                            draftShortcutTokens.some((current) => current.label === token.label && current.sequence === token.sequence),
+                          )}
                         >
                           {token.label}
                         </button>
                       ))}
                     </div>
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {SHORTCUT_COMMON_TOKENS.map((token) => (
-                      <button
-                        key={`${token.label}-${token.sequence}`}
-                        onClick={() => appendShortcutToken(token)}
-                        style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
-                      >
-                        {token.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  )}
 
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button
-                    onClick={closeShortcutEditor}
-                    style={{
-                      flex: 1,
-                      minHeight: '44px',
-                      border: 'none',
-                      borderRadius: '14px',
-                      backgroundColor: '#eef2f8',
-                      color: mobileTheme.colors.lightText,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    取消
-                  </button>
                   <button
                     onClick={saveShortcutForm}
-                    disabled={!draftShortcutBuild.sequence || Boolean(draftShortcutBuild.error)}
+                    disabled={!draftShortcutBuild.sequence || Boolean(draftShortcutEffectiveError)}
                     style={{
-                      flex: 1,
-                      minHeight: '44px',
+                      width: '100%',
+                      minHeight: '52px',
                       border: 'none',
-                      borderRadius: '14px',
+                      borderRadius: '16px',
                       backgroundColor: '#1677ff',
                       color: '#fff',
                       fontWeight: 800,
-                      cursor: !draftShortcutBuild.sequence || draftShortcutBuild.error ? 'not-allowed' : 'pointer',
-                      opacity: !draftShortcutBuild.sequence || draftShortcutBuild.error ? 0.55 : 1,
+                      fontSize: '18px',
+                      cursor: !draftShortcutBuild.sequence || draftShortcutEffectiveError ? 'not-allowed' : 'pointer',
+                      opacity: !draftShortcutBuild.sequence || draftShortcutEffectiveError ? 0.55 : 1,
+                      marginTop: '6px',
                     }}
                   >
-                    {editingShortcutIndex >= 0 ? '应用修改' : '添加快捷按键'}
+                    {editingShortcutIndex >= 0 ? '保存快捷键' : '添加快捷键'}
                   </button>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -1737,6 +2116,7 @@ export function TerminalQuickBar({
               boxShadow: '0 20px 50px rgba(0,0,0,0.32)',
               display: 'flex',
               flexDirection: 'column',
+              minHeight: 0,
               overflow: 'hidden',
               border: '1px solid rgba(255,255,255,0.08)',
             }}
@@ -1913,7 +2293,10 @@ export function TerminalQuickBar({
             </div>
 
             <div
+              data-testid="floating-quick-menu-scroll"
               style={{
+                flex: 1,
+                minHeight: 0,
                 padding: '10px',
                 overflowY: 'auto',
                 WebkitOverflowScrolling: 'touch',
@@ -2048,7 +2431,7 @@ export function TerminalQuickBar({
         </>
       )}
 
-      {!editorOpen && (
+      {!editorOpen && !shortcutEditorOpen && (
         <button
           ref={floatingBubbleRef}
           data-quickbar-allow-pointer="true"
@@ -2319,5 +2702,26 @@ function floatingPillButton(backgroundColor: string, color: string) {
     cursor: 'pointer',
     fontWeight: 700,
     flexShrink: 0,
+  } as const;
+}
+
+function shortcutTokenGridButton(isModifier: boolean, active: boolean) {
+  return {
+    minHeight: '62px',
+    borderRadius: '14px',
+    border: active ? '1px solid rgba(22, 119, 255, 0.28)' : '1px solid rgba(23, 27, 45, 0.12)',
+    backgroundColor: active
+      ? 'rgba(22, 119, 255, 0.10)'
+      : isModifier
+        ? '#ffffff'
+        : '#f7f9fc',
+    color: active ? '#1677ff' : mobileTheme.colors.lightText,
+    cursor: 'pointer',
+    fontWeight: 700,
+    fontSize: '12px',
+    padding: '6px 4px',
+    textAlign: 'center',
+    boxShadow: active ? '0 4px 10px rgba(22, 119, 255, 0.08)' : 'none',
+    overflow: 'hidden',
   } as const;
 }

@@ -1,7 +1,7 @@
 export const MOBILE_BRIDGE_CONFIG = {
   defaultBridgePort: 3333,
   daemonHost: '0.0.0.0',
-  defaultTerminalCacheLines: 72,
+  defaultTerminalCacheLines: 3000,
 } as const;
 
 export const DEFAULT_BRIDGE_PORT = MOBILE_BRIDGE_CONFIG.defaultBridgePort;
@@ -17,6 +17,67 @@ export function buildDaemonSessionName(port: number = DEFAULT_DAEMON_PORT) {
 export const DEFAULT_DAEMON_SESSION_NAME = buildDaemonSessionName();
 export const BRIDGE_URL_PLACEHOLDER = `ws://host:${DEFAULT_BRIDGE_PORT}`;
 export const TERMINAL_CACHE_SCREENS = 3;
+export const ACTIVE_HEAD_REFRESH_TICK_MS = 33;
+
+export interface TerminalRefreshCadence {
+  headTickMs: number;
+  minTailRefreshGapMs: number;
+  headStalePingMs: number;
+  readingSyncDelayMs: number;
+}
+
+function readEffectiveNetworkProfile() {
+  if (typeof navigator === 'undefined') {
+    return {
+      effectiveType: '',
+      saveData: false,
+    };
+  }
+
+  const connection =
+    (navigator as Navigator & {
+      connection?: { effectiveType?: string; saveData?: boolean };
+      mozConnection?: { effectiveType?: string; saveData?: boolean };
+      webkitConnection?: { effectiveType?: string; saveData?: boolean };
+    }).connection
+    || (navigator as Navigator & { mozConnection?: { effectiveType?: string; saveData?: boolean } }).mozConnection
+    || (navigator as Navigator & { webkitConnection?: { effectiveType?: string; saveData?: boolean } }).webkitConnection
+    || null;
+
+  return {
+    effectiveType: String(connection?.effectiveType || '').toLowerCase(),
+    saveData: Boolean(connection?.saveData),
+  };
+}
+
+export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
+  const network = readEffectiveNetworkProfile();
+
+  if (network.saveData || network.effectiveType === 'slow-2g' || network.effectiveType === '2g') {
+    return {
+      headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+      minTailRefreshGapMs: 160,
+      headStalePingMs: 520,
+      readingSyncDelayMs: 72,
+    };
+  }
+
+  if (network.effectiveType === '3g') {
+    return {
+      headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+      minTailRefreshGapMs: 96,
+      headStalePingMs: 320,
+      readingSyncDelayMs: 48,
+    };
+  }
+
+  return {
+    headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+    minTailRefreshGapMs: 48,
+    headStalePingMs: 200,
+    readingSyncDelayMs: 24,
+  };
+}
 
 export function withDefaultBridgePort(port?: number | null) {
   return port || DEFAULT_BRIDGE_PORT;

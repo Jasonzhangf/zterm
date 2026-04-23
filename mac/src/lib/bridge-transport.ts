@@ -111,8 +111,6 @@ export function createBridgeTransportController(): BridgeTransportController {
   let heartbeatId: number | null = null;
   let lastPongAt = 0;
   let viewport = { cols: 80, rows: 24 };
-  let streamMode: BridgeStreamMode = 'active';
-
   const emit = () => {
     listeners.forEach((listener) => listener());
   };
@@ -165,11 +163,7 @@ export function createBridgeTransportController(): BridgeTransportController {
   };
 
   const setActivityMode = (mode: BridgeStreamMode) => {
-    if (streamMode === mode) {
-      return;
-    }
-    streamMode = mode;
-    void sendMessage({ type: 'stream-mode', payload: { mode } });
+    void mode;
   };
 
   return {
@@ -308,7 +302,7 @@ export function createBridgeTransportController(): BridgeTransportController {
           }
           handlers?.onServerMessage?.(message);
         },
-      }, { initialStreamMode: streamMode });
+      });
     },
     disconnect,
     setActivityMode,

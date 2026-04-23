@@ -18,11 +18,49 @@ class ResizeObserverMock {
   unobserve() {}
 }
 
+function stubVisualViewport(overrides?: Partial<VisualViewport>) {
+  const addEventListener = vi.fn();
+  const removeEventListener = vi.fn();
+  const visualViewport = {
+    offsetTop: 0,
+    offsetLeft: 0,
+    pageTop: 0,
+    pageLeft: 0,
+    scale: 1,
+    addEventListener,
+    removeEventListener,
+    ...overrides,
+  } as Record<string, unknown>;
+
+  if (!('width' in (overrides || {}))) {
+    Object.defineProperty(visualViewport, 'width', {
+      configurable: true,
+      get: () => window.innerWidth,
+    });
+  }
+
+  if (!('height' in (overrides || {}))) {
+    Object.defineProperty(visualViewport, 'height', {
+      configurable: true,
+      get: () => window.innerHeight,
+    });
+  }
+
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    writable: true,
+    value: visualViewport as unknown as VisualViewport,
+  });
+
+  return { visualViewport: visualViewport as unknown as VisualViewport, addEventListener, removeEventListener };
+}
+
 describe('TerminalQuickBar', () => {
   beforeEach(() => {
     cleanup();
     localStorage.clear();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+    stubVisualViewport();
     if (!HTMLElement.prototype.setPointerCapture) {
       HTMLElement.prototype.setPointerCapture = () => {};
     }
@@ -239,13 +277,21 @@ describe('TerminalQuickBar', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
     expect(screen.getByText('快捷按键设置')).not.toBeNull();
+    expect(screen.getByText('当前滚动快捷键')).not.toBeNull();
+    expect(screen.getByText('第一行（单按键）')).not.toBeNull();
+    expect(screen.getByText('第二行（组合键）')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 添加组合键' }));
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('快捷键名称 / 显示名称')).not.toBeNull();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Ctrl' }));
-    fireEvent.change(screen.getByPlaceholderText('输入字母/数字/符号'), {
+    fireEvent.change(screen.getByPlaceholderText('输入组合键里的目标字符，例如 c'), {
       target: { value: 'c' },
     });
     fireEvent.click(screen.getByRole('button', { name: '加入' }));
-    fireEvent.click(screen.getByRole('button', { name: '添加快捷按键' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加快捷键' }));
 
     await waitFor(() => {
       expect(onShortcutActionsChange).toHaveBeenCalled();
@@ -253,6 +299,211 @@ describe('TerminalQuickBar', () => {
       const latest = calls[calls.length - 1]?.[0];
       expect(Array.isArray(latest)).toBe(true);
       expect(latest[latest.length - 1]?.label).toBe('Ctrl + C');
+      expect(latest[latest.length - 1]?.row).toBe('bottom-scroll');
+    });
+  });
+
+  it('keeps single-key row and combo row separated in shortcut manager', async () => {
+    const onShortcutActionsChange = vi.fn();
+
+    renderQuickBar({
+      onShortcutActionsChange,
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 添加单按键' }));
+    await waitFor(() => {
+      expect(screen.getByText('当前编辑：第一行单按键')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加快捷键' }));
+
+    await waitFor(() => {
+      expect(onShortcutActionsChange).toHaveBeenCalled();
+      const calls = onShortcutActionsChange.mock.calls;
+      const latest = calls[calls.length - 1]?.[0];
+      expect(latest[latest.length - 1]?.label).toBe('Return');
+      expect(latest[latest.length - 1]?.row).toBe('top-scroll');
+    });
+  });
+
+  it('blocks saving multi-key content into first single-key row', async () => {
+    renderQuickBar();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '+ 添加单按键' }));
+
+    expect(screen.queryByRole('button', { name: 'Ctrl' })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText('输入单个字母/数字/符号'), {
+      target: { value: 'cd' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '加入' }));
+
+    expect(screen.getByText('第一行只支持单个按键。')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '添加快捷键' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('keeps enter decoded as single key when editing existing shortcut', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-enter',
+          label: 'Enter',
+          sequence: '\r',
+          order: 0,
+          row: 'top-scroll',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Enter' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('当前编辑：第一行单按键')).not.toBeNull();
+      expect((screen.getByPlaceholderText('快捷键名称 / 显示名称') as HTMLInputElement).value).toBe('Enter');
+      expect((screen.getByPlaceholderText('点击下方按钮选择单个按键') as HTMLTextAreaElement).value).toBe('Enter');
+    });
+  });
+
+  it('shows shortcut management list and allows delete from list page', async () => {
+    const onShortcutActionsChange = vi.fn();
+
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-1',
+          label: 'Ctrl + C',
+          sequence: '\u0003',
+          order: 0,
+          row: 'bottom-scroll',
+        },
+      ],
+      onShortcutActionsChange,
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    expect(screen.getByText('当前滚动快捷键')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '删除 Ctrl + C' })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 Ctrl + C' }));
+
+    await waitFor(() => {
+      expect(onShortcutActionsChange).toHaveBeenCalledWith([]);
+    });
+  });
+
+  it('uses a dedicated scroll container for shortcut settings sheet', async () => {
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 754,
+    });
+    stubVisualViewport({
+      width: 347.4285583496094,
+      height: 456.8571472167969,
+      offsetTop: 0,
+    });
+
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-1',
+          label: 'Ctrl + C',
+          sequence: '\u0003',
+          order: 0,
+          row: 'bottom-scroll',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    const scrollContainer = screen.getByTestId('shortcut-editor-scroll');
+    const sheet = scrollContainer.parentElement;
+    const overlay = sheet?.parentElement;
+    const style = scrollContainer.getAttribute('style') || '';
+    expect(style).toContain('flex: 1');
+    expect(style).toContain('min-height: 0');
+    expect(style).toContain('overflow-y: auto');
+    expect(style).toContain('touch-action: pan-y');
+    expect(sheet?.getAttribute('style') || '').toContain('height: 441px');
+    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 297px');
+  });
+
+  it('lifts quick action editor above visual viewport keyboard occlusion', async () => {
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 754,
+    });
+    stubVisualViewport({
+      width: 347.4285583496094,
+      height: 456.8571472167969,
+      offsetTop: 0,
+    });
+
+    renderQuickBar({
+      quickActions: [
+        {
+          id: 'qa-1',
+          label: 'ls',
+          sequence: 'ls -la',
+          order: 0,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('快捷输入设置')).not.toBeNull();
+    });
+
+    const scrollContainer = screen.getByTestId('quick-action-editor-scroll');
+    const sheet = scrollContainer.parentElement;
+    const overlay = sheet?.parentElement;
+    expect(sheet?.getAttribute('style') || '').toContain('height: 441px');
+    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 297px');
+  });
+
+  it('resets shortcut editor scrollTop when switching from list to form', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: 's1', label: 'Tab', sequence: '\t', order: 0, row: 'top-scroll' },
+        { id: 's2', label: 'Enter', sequence: '\r', order: 1, row: 'top-scroll' },
+        { id: 's3', label: 'Space', sequence: ' ', order: 2, row: 'top-scroll' },
+        { id: 's4', label: 'S-Enter', sequence: '\n', order: 0, row: 'bottom-scroll' },
+        { id: 's5', label: 'Esc', sequence: '\u001b', order: 1, row: 'bottom-scroll' },
+        { id: 's6', label: 'Bksp', sequence: '\u007f', order: 2, row: 'bottom-scroll' },
+        { id: 's7', label: 'Paste', sequence: '\u0016', order: 3, row: 'bottom-scroll' },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    const scrollContainer = screen.getByTestId('shortcut-editor-scroll');
+    scrollContainer.scrollTop = 188;
+    fireEvent.click(screen.getByRole('button', { name: '+ 添加组合键' }));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('快捷键名称 / 显示名称')).not.toBeNull();
+      expect(screen.getByTestId('shortcut-editor-scroll').scrollTop).toBe(0);
+    });
+  });
+
+  it('hides floating bubble while shortcut editor is open', async () => {
+    renderQuickBar();
+
+    expect(screen.getByRole('button', { name: 'Toggle floating quick menu' })).not.toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Toggle floating quick menu' })).toBeNull();
     });
   });
 

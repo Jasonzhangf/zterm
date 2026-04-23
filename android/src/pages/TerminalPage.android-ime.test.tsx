@@ -57,10 +57,18 @@ vi.mock('../components/terminal/TabManagerSheet', () => ({
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
   TerminalQuickBar: ({
     onEditorDomFocusChange,
+    keyboardVisible,
+    keyboardInsetPx,
   }: {
     onEditorDomFocusChange?: (active: boolean) => void;
+    keyboardVisible?: boolean;
+    keyboardInsetPx?: number;
   }) => (
-    <div data-testid="terminal-quickbar">
+    <div
+      data-testid="terminal-quickbar"
+      data-keyboard-visible={keyboardVisible ? 'true' : 'false'}
+      data-keyboard-inset={String(keyboardInsetPx || 0)}
+    >
       <button onClick={() => onEditorDomFocusChange?.(true)}>focus-quick-editor</button>
       <button onClick={() => onEditorDomFocusChange?.(false)}>blur-quick-editor</button>
     </div>
@@ -194,6 +202,13 @@ describe('TerminalPage Android IME bridge', () => {
       expect(ImeAnchor.blur).toHaveBeenCalled();
     });
 
+    keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 280 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('false');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('0');
+    });
+
     imeListeners.get('input')?.({ text: '不该发到 terminal' });
     expect(onTerminalInput).not.toHaveBeenCalled();
 
@@ -238,6 +253,9 @@ describe('TerminalPage Android IME bridge', () => {
     await waitFor(() => {
       expect(ImeAnchor.show).toHaveBeenCalled();
     });
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
   });
 });
 

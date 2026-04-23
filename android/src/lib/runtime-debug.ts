@@ -26,6 +26,22 @@ export function isRuntimeDebugEnabled() {
   return safeReadStorageFlag();
 }
 
+export function setRuntimeDebugEnabled(enabled: boolean) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (enabled) {
+      window.localStorage.setItem(RUNTIME_DEBUG_STORAGE_KEY, '1');
+      return;
+    }
+    window.localStorage.removeItem(RUNTIME_DEBUG_STORAGE_KEY);
+  } catch {
+    // no-op
+  }
+}
+
 function truncateString(value: string, maxChars: number) {
   if (value.length <= maxChars) {
     return value;

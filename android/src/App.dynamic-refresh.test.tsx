@@ -41,7 +41,7 @@ const sessionHarness = vi.hoisted(() => {
   let staleActiveSession = state.sessions[0];
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
-  const refreshSessionTail = vi.fn(() => true);
+  const resetSessionViewportToFollow = vi.fn(() => true);
   const createSession = vi.fn();
   const switchSession = vi.fn();
 
@@ -50,7 +50,7 @@ const sessionHarness = vi.hoisted(() => {
     readStaleActiveSession: () => staleActiveSession,
     reconnectAllSessions,
     reconnectSession,
-    refreshSessionTail,
+    resetSessionViewportToFollow,
     createSession,
     switchSession,
     update(next: typeof state, stale = staleActiveSession) {
@@ -66,8 +66,8 @@ const sessionHarness = vi.hoisted(() => {
       staleActiveSession = state.sessions[0];
       reconnectAllSessions.mockReset();
       reconnectSession.mockReset();
-      refreshSessionTail.mockReset();
-      refreshSessionTail.mockReturnValue(true);
+      resetSessionViewportToFollow.mockReset();
+      resetSessionViewportToFollow.mockReturnValue(true);
       createSession.mockReset();
       switchSession.mockReset();
     },
@@ -138,13 +138,12 @@ vi.mock('./contexts/SessionContext', () => ({
     renameSession: vi.fn(),
     reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
-    refreshSessionTail: sessionHarness.refreshSessionTail,
+    resetSessionViewportToFollow: sessionHarness.resetSessionViewportToFollow,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
     sendInput: vi.fn(),
     sendImagePaste: vi.fn(),
     resizeTerminal: vi.fn(),
     updateSessionViewport: vi.fn(),
-    requestViewportPrefetch: vi.fn(),
   }),
 }));
 
@@ -317,14 +316,14 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
-    expect(sessionHarness.refreshSessionTail).not.toHaveBeenCalled();
+    expect(sessionHarness.resetSessionViewportToFollow).not.toHaveBeenCalled();
 
     act(() => {
       window.dispatchEvent(new Event('pageshow'));
     });
 
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -354,8 +353,8 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -373,15 +372,15 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
 
   it('falls back to reconnect when tail refresh cannot run on foreground resume', async () => {
-    sessionHarness.refreshSessionTail.mockReturnValue(false);
+    sessionHarness.resetSessionViewportToFollow.mockReturnValue(false);
 
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
@@ -393,7 +392,7 @@ describe('App dynamic refresh matrix', () => {
       window.dispatchEvent(new Event('pageshow'));
     });
 
-    expect(sessionHarness.refreshSessionTail).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1');
   });

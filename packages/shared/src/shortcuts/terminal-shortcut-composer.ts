@@ -169,18 +169,18 @@ export function decodeCtrlShortcutTokens(sequence: string): TerminalShortcutToke
 export function buildTerminalShortcutTokensFromSequence(
   label: string,
   sequence: string,
-  presets: Array<Pick<TerminalShortcutToken, 'label' | 'sequence'>> = [],
+  presets: Array<Pick<TerminalShortcutToken, 'label' | 'sequence' | 'kind'>> = [],
 ): TerminalShortcutToken[] {
-  const ctrlTokens = decodeCtrlShortcutTokens(sequence);
-  if (ctrlTokens) {
-    return ctrlTokens;
-  }
-
   const matchedPreset = presets.find((preset) => preset.sequence === sequence)
     || (sequence.length === 1 && label.startsWith('Ctrl+') ? { label, sequence } : null);
 
   if (matchedPreset) {
-    return [{ label: matchedPreset.label, sequence: matchedPreset.sequence }];
+    return [{ label: matchedPreset.label, sequence: matchedPreset.sequence, kind: matchedPreset.kind }];
+  }
+
+  const ctrlTokens = decodeCtrlShortcutTokens(sequence);
+  if (ctrlTokens) {
+    return ctrlTokens;
   }
 
   return sequence

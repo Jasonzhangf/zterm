@@ -79,6 +79,17 @@
 - [x] T6 rename / kill / offline / daemon restart 边界 closeout
 - [x] T7 daemon + Android + Mac 联调验证与证据补齐
 
+## Epic-006 terminal head / sparse buffer / render container 重做
+
+- [x] T1 冻结 terminal 新真源文档（session head / sparse buffer / renderer / UI shell）
+- [x] T2 审计旧 daemon/client/render 链路，列出保留/删除清单
+- [x] T3 重做 server：30Hz head 广播 + range request 响应
+- [ ] T4 重做 client buffer worker：sparse absolute-index buffer + working-set diff
+- [ ] T5 重做 renderer container：bottom-relative render window，纯消费
+- [ ] T6 重做 UI shell：keyboard / crop / container presentation only
+- [ ] T7 回归验证：hidden/follow/reading/IME/foreground
+- [ ] T8 renderer 继续收敛：统一 follow 对齐 helper / reading 判定 helper，缩小 TerminalView 本地状态面
+
 ## 当前状态
 
 - 2026-04-20 当前切片：Connections 页按 server IP 聚合，支持 group 长按展开、多选 session、跨 group 同时打开
@@ -108,6 +119,10 @@
 - 2026-04-20 `mobile-14.1` 已完成：shared layout resolver + PaneStage 已抽到 `packages/shared/`
 - 2026-04-20 `mobile-14.4` 已完成：`/Volumes/extension/code/zterm/mac/out/mac-arm64/ZTerm.app` 可启动，已验证 shared pane stage 和真实 page slot
 - 2026-04-20 `mobile-14.2` 已完成当前目标：Android 的 Host / BridgeSettings / tmux session discovery / localStorage 真源已下沉到 `packages/shared/`，Mac 已接入真实 Connections / Details / Terminal 编排；浏览器验证已确认“填表 -> Save -> 列表/Terminal/Remembered Servers 回显”
+- 2026-04-23 Epic-006 进度：旧 server 主动 push / stream-mode 链已删除；daemon 现仅做 `buffer-head` 广播与 range request 响应；Android SessionContext 已最小接入 head 驱动请求，后续继续清理 renderer / viewport prefetch 旧链
+- 2026-04-23 Epic-006 追加进度：Android `TerminalView` / `TerminalPage` / `App` 已去掉 `viewport prefetch` 入口；renderer reset 信号已从 `followViewportNonce` 收窄成 `viewportResetNonce`
+- 2026-04-23 Epic-006 再追加：Android SessionContext 已把 bootstrap / normal follow sync 合并成单一 `requestSessionBufferSync`，App foreground 恢复口径也已切到 `resetSessionViewportToFollow`
+- 2026-04-23 Epic-006 再再追加：`TerminalView` 已把本地 follow 命名收敛成更清晰的 `readingMode` UI latch；验证结论是“follow 不能只靠 DOM `scrollTop` 纯推导”，否则会被 DOM bottom/逻辑 tail 偏差打坏
 - 2026-04-20 `mobile-14.3` 当前已推进到 Mac live render：shared websocket `connect + stream-mode(active)`、terminal buffer reducer、shared TerminalView 都已接入；浏览器 mock bridge 已看到 `connected + snapshot` 文本
 - 2026-04-20 shared bridge endpoint 已归一：`bridgeHost` 若显式带 `ws://host:port`，display / preset id / stored effective port 都以显式 URL 为真源，避免 `ws://127.0.0.1:4333:3334333` 这类双端口假象
 - 2026-04-20 packaged `ZTerm.app` 已按单实例规则复验：先 quit 旧实例，再 open 新包；窗口已显示最新标题 `Shared connection flow + live terminal render`
@@ -130,3 +145,26 @@
 - 2026-04-23 Android active tab buffer 刷新再补两处：`TerminalView` 不再因 visible gap 继续冻结上一帧；active/follow 态若当前三屏窗口有缺口，会只按窗口内 `missingRanges` 发 sparse prefetch，不再从旧 stop point 连续追最新；回归证据在 `android/evidence/2026-04-23-active-tab-gap-refresh/`，新 APK 已投放 `~/.wterm/updates/zterm-0.1.1.1143.apk`
 - 2026-04-23 terminal 主题已落地：新增 shared terminal theme 真源（默认前景/背景 + ANSI 16 色 preset），Android Settings 可切换 `Classic Dark / Tabby Relaxed / iTerm2 Light Background / Gruvbox Dark / Catppuccin Mocha`；Android 本地 TerminalView 与 Mac shared TerminalView 共用同一主题口径；证据目录 `android/evidence/2026-04-23-terminal-themes/`、`mac/evidence/2026-04-23-terminal-themes/`，Android 新 APK 已投放 `~/.wterm/updates/zterm-0.1.1.1147.apk`
 - 2026-04-23 terminal 主题持久化语义已修正：Settings 里点击主题卡片会立即写入 `BridgeSettings.terminalThemeId`，不再依赖顶部 Save；修复“卡片显示正在使用但切出去再回来恢复默认主题”的假激活问题；回归证据在 `android/evidence/2026-04-23-terminal-theme-persist/`，Android 新 APK 已投放 `~/.wterm/updates/zterm-0.1.1.1153.apk`
+- 2026-04-23 Epic-006 renderer 再收一轮：`TerminalView` 已把重复的 follow 贴底动作收成单一 `alignViewportToFollow()`，scroll 判定收成纯 helper `resolveViewportModeFromScroll()`；`TerminalView.dynamic-refresh` + `SessionContext.ws-refresh` + `App.dynamic-refresh` 共 35 tests 通过，`pnpm exec tsc --noEmit` 通过。
+- 2026-04-23 Epic-006 session worker 再收一轮：`updateSessionViewport()` 已对相同 reading viewport 去重，并在 `reading -> follow` 时清理排队中的 reading sync，避免多发/误发 `buffer-sync-request`；相关动态回归现为 37 tests 通过。
+- 2026-04-23 Epic-006 request/build 边界再收一轮：follow viewport state 与 bootstrap 决策已收成单点 helper，`active switch` 与 `follow reset` 复用同一口径，避免 follow 构造逻辑再次分叉；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 transport 再收一轮：`connectSession` / `drainReconnectBucket` 的公共 socket 握手、heartbeat、server message 分发已抽成共享 helper，保留各自的 connected 语义分支；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 connected-success 再收一轮：普通 connect / reconnect 在 `connected` 后共享同一份 baseline 状态推进（connected state、schedule-list、active bootstrap、watchdog、connectedCount），各自只保留额外 side effect；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 failure-path 再收一轮：普通 connect / reconnect 的 `finalizeFailure` 已共享同一份 baseline（完成位、cleanup、schedule error、manual-close 终止），各自只保留 retry/bucket 专属推进；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 renderer effect 面再收一轮：`TerminalView` 已把 viewport refresh 调度收成 `scheduleViewportRefresh()`，当前 viewport emit 收成 `emitCurrentViewportState()`；仍保持原有刷新语义，动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 renderer reading-emit 再收一轮：`TerminalView` 已把 reading viewport emit 收成 `emitReadingViewportState()`，历史 prepend 与 near-edge reading 两处共用同一入口；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 renderer viewport-actions 再收一轮：`TerminalView` 已把 follow reset、prepend 历史锚定、near-edge reading emit 分别收成 `resetViewportToFollow()` / `anchorReadingViewportAfterPrepend()` / `emitReadingViewportIfNearEdge()`；动态回归保持 37 tests 通过。
+- 2026-04-23 Epic-006 renderer reset-signal 再收一轮：`TerminalView` 已把 becameActive 与 `viewportResetNonce` 的 follow reset 信号并入同一个 effect，只保留一处 reset 判定；动态回归保持 37 tests 通过。
+- 2026-04-24 Epic-006 renderer emit-effect 再收一轮：`TerminalView` 已把当前 viewport emit 与 reading near-edge emit 合并到同一个 effect，继续依赖 emit 去重 key 保持原语义；动态回归保持 37 tests 通过。
+- 2026-04-24 Epic-006 renderer refresh-schedule 再收一轮：`TerminalView` 已把 layout/session refresh 与 follow audit 共用同一个 `runViewportRefresh()` 动作；refresh 调度不再因为 follow/reading 切换而重新建 callback，避免滚动状态翻转时重复重排 refresh 计时器；`tsc --noEmit` + 37 个动态回归通过。
+- 2026-04-24 Epic-006 renderer resize-observer 再收一轮：`ResizeObserver` 回调已不再直连 `syncViewport()`，而是复用同一个 `runViewportRefresh({ alignFollow: true })` 动作；新增 reading-resize 回归，验证 resize refresh 不会把 reading 态强行拉回 follow；`tsc --noEmit` + 动态回归现为 38 tests 通过。
+- 2026-04-24 Epic-006 renderer refresh-effect 再收一轮：`layout refresh` 与 `session refresh` 两个 effect 已合并成单一 trigger effect，通过 `becameActive/sessionChanged/layoutChanged` 判定触发原因，再统一调 `scheduleViewportRefresh()`；保留 `48ms(layout)` / `120ms(active|session)` 差异，不再维护两处平行 refresh effect；`tsc --noEmit` + 38 个动态回归通过。
+- 2026-04-24 Epic-006 renderer state-actions 再收一轮：`prepend/follow` 与 `viewport emit` 两个剩余状态 effect 已先收成 `reconcileViewportAfterBufferShift()` / `emitViewportSignalsForCurrentFrame()` 动作，再由 effect 只做触发；新增 reading + prepend 历史锚定回归，验证 `bufferStartIndex` 向前扩展时会按行高补偿 scrollTop；`tsc --noEmit` + 动态回归现为 39 tests 通过。
+- 2026-04-24 Epic-006 renderer/context interface 再收一轮：`TerminalViewportState` / `TerminalViewportSize` / `TerminalResizeHandler` / `TerminalViewportChangeHandler` 已下沉到 `android/src/lib/types.ts`，`TerminalView` / `TerminalPage` / `SessionContext` / tab-isolation test 不再各自内联 viewport/resize shape；`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Epic-006 renderer prop-face 再收一轮：`bufferRevision` 已从 `TerminalView` prop 面移除；renderer 不再把 revision 当输入，只保留真正必要的 `bufferViewportEndIndex / cursorKeysApp / viewportResetNonce`；`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Epic-006 renderer trigger 命名再收一轮：`TerminalView` renderer API 已把 `viewportResetNonce` 改成更语义化的 `followResetToken`，并在 `lib/types.ts` 下沉 `TerminalFollowResetToken`；Session store 仍保留 `session.viewportResetNonce` 作为内部状态名，通过 `TerminalPage` 做一次映射；`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Epic-006 follow-reset 真源再收一轮：`Session` / `SessionContext` 内部状态名也已从 `viewportResetNonce` 统一改成 `followResetToken`，renderer/page/context 现在共用同一语义名；`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Epic-006 request-builder 再收一轮：`SessionContext` 已把普通 `buffer-sync-request` 与 follow bootstrap 的 payload 构造统一到单一 `buildSessionBufferSyncRequestPayload()` helper，bootstrap 只通过 `forceBootstrap + modeOverride='follow'` 覆盖差异；`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Epic-006 viewport-demand 再收一轮：`SessionContext` 已把 viewport state 归一化 / 判等 / active demand 调度收成 `normalizeSessionSyncViewState()` / `sessionSyncViewStatesEqual()` / `applyActiveSessionViewportDemand()`；`updateSessionViewport()` 现只做“写状态 + 触发 demand”。`tsc --noEmit` + 41 个动态回归通过。
+- 2026-04-24 Android 测试包已更新：`pnpm build:android` 成功，生成 `android/update-dist/zterm-0.1.1.1171.apk`，并已投放到 `~/.wterm/updates/zterm-0.1.1.1171.apk`；manifest `latest.json` 同步更新，`sha256=99866d892500e804e1d353c96a9d3c7baf077ae27ab7d72e04898280d99ad6b5`。
+- 2026-04-24 Epic-006 buffer cadence 再收一轮：`SessionContext` 已补 active session 的本地 `33ms` head cadence；`sendInput()` 不做本地回显，但会挂 `input-tail-refresh` demand 并主动触发 follow `buffer-sync-request + ping`；真正 tail / reading 请求频率改由 `resolveTerminalRefreshCadence()` 按网络状况决定。`tsc --noEmit` + `TerminalView/App/SessionContext/TerminalPage` 动态回归现为 42 tests 通过。

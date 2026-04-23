@@ -1,9 +1,7 @@
 import type {
+  BufferHeadPayload,
   BufferSyncRequestPayload,
   TerminalBufferPayload,
-  TerminalScrollbackUpdate,
-  TerminalSnapshot,
-  TerminalViewportUpdate,
 } from './types';
 import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
 
@@ -30,7 +28,6 @@ export interface PasteImagePayload {
 
 export type BridgeClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'list-sessions' }
   | { type: 'schedule-list'; payload: { sessionName: string } }
@@ -45,11 +42,7 @@ export type BridgeClientMessage =
   | { type: 'close' };
 
 export type BridgeBufferMessage =
-  | { type: 'buffer-sync'; payload: TerminalBufferPayload }
-  | { type: 'data'; payload: string }
-  | { type: 'snapshot'; payload: TerminalSnapshot }
-  | { type: 'viewport-update'; payload: TerminalViewportUpdate }
-  | { type: 'scrollback-update'; payload: TerminalScrollbackUpdate };
+  | { type: 'buffer-sync'; payload: TerminalBufferPayload };
 
 export type BridgeServerControlMessage =
   | {
@@ -63,6 +56,7 @@ export type BridgeServerControlMessage =
         };
       };
     }
+  | { type: 'buffer-head'; payload: BufferHeadPayload }
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }

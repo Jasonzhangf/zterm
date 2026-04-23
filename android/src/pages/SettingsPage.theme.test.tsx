@@ -20,6 +20,42 @@ describe('SettingsPage terminal theme selection', () => {
     cleanup();
   });
 
+  it('renders the expanded built-in theme catalog', () => {
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Dracula')).toBeTruthy();
+    expect(screen.getByText('Solarized Dark')).toBeTruthy();
+    expect(screen.getByText('Solarized Light')).toBeTruthy();
+    expect(screen.getByText('Tokyo Night Storm')).toBeTruthy();
+    expect(screen.getByText('Monokai')).toBeTruthy();
+    expect(screen.getByText('Night Owl')).toBeTruthy();
+    expect(screen.getByText('Kanagawa Wave')).toBeTruthy();
+    expect(screen.getByText('Rose Pine Moon')).toBeTruthy();
+  });
+
   it('persists terminal theme immediately when a theme card is selected', () => {
     const onTerminalThemeChange = vi.fn();
 

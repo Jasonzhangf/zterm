@@ -1020,3 +1020,365 @@ button {
     flex-direction: column;
   }
 }
+
+.mac-shell-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.mac-shell-loading {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #99a7bc;
+}
+
+.mac-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(170, 188, 214, 0.12);
+  background: rgba(11, 15, 24, 0.92);
+}
+
+.mac-shell-header strong {
+  display: block;
+  font-size: 14px;
+}
+
+.mac-shell-header span {
+  display: block;
+  margin-top: 4px;
+  color: #8fa0b8;
+  font-size: 12px;
+}
+
+.mac-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mac-endpoint-pill,
+.mac-runtime-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 188, 214, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dce6f5;
+  font-size: 12px;
+}
+
+.mac-runtime-pill.connected,
+.mac-tab-dot.connected {
+  background: rgba(41, 169, 104, 0.14);
+  color: #6fe1a8;
+}
+
+.mac-runtime-pill.connecting,
+.mac-tab-dot.connecting {
+  background: rgba(232, 171, 67, 0.14);
+  color: #ffd57a;
+}
+
+.mac-runtime-pill.error,
+.mac-tab-dot.error {
+  background: rgba(209, 83, 99, 0.16);
+  color: #ff93a0;
+}
+
+.mac-primary-button,
+.mac-secondary-button,
+.mac-chip-button,
+.mac-tab-close,
+.mac-tab-button {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mac-primary-button,
+.mac-secondary-button,
+.mac-chip-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+
+.mac-primary-button {
+  color: #f7fbff;
+  background: linear-gradient(180deg, #6487d2, #4869ad);
+}
+
+.mac-secondary-button,
+.mac-chip-button {
+  color: #dce6f5;
+  border: 1px solid rgba(170, 188, 214, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mac-tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(170, 188, 214, 0.1);
+  background: rgba(9, 13, 22, 0.9);
+  overflow-x: auto;
+}
+
+.mac-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mac-tab.active {
+  background: rgba(95, 128, 190, 0.18);
+}
+
+.mac-tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  color: #dce6f5;
+  background: transparent;
+}
+
+.mac-tab-button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mac-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #5e6f87;
+  flex-shrink: 0;
+}
+
+.mac-tab-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: #dce6f5;
+  background: transparent;
+}
+
+.mac-terminal-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 188, 214, 0.1);
+  background: rgba(6, 9, 15, 0.92);
+}
+
+.mac-terminal-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #9eb0c9;
+  font-size: 12px;
+}
+
+.mac-terminal-error {
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #ffb3be;
+  background: rgba(153, 45, 58, 0.18);
+  border: 1px solid rgba(219, 88, 103, 0.2);
+}
+
+.mac-terminal-surface {
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(170, 188, 214, 0.08);
+  background: #0a0e14;
+}
+
+.mac-empty-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  border: 1px dashed rgba(133, 157, 196, 0.28);
+  background: radial-gradient(circle at top, rgba(91, 121, 180, 0.12), transparent 40%), rgba(7, 10, 16, 0.88);
+  color: #dce6f5;
+}
+
+.mac-empty-stage span,
+.mac-empty-stage strong {
+  display: block;
+}
+
+.mac-empty-plus {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.mac-launcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 7, 12, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.mac-launcher {
+  width: min(1080px, 100%);
+  max-height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 188, 214, 0.14);
+  background: rgba(11, 15, 24, 0.98);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.mac-launcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mac-launcher-header h2,
+.mac-launcher-header p {
+  margin: 0;
+}
+
+.mac-launcher-header p {
+  margin-top: 6px;
+  color: #8fa0b8;
+  font-size: 13px;
+}
+
+.mac-launcher-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 16px;
+}
+
+.mac-launcher-saved,
+.mac-launcher-editor {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(170, 188, 214, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mac-section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7f91ab;
+}
+
+.mac-saved-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.mac-saved-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(170, 188, 214, 0.08);
+  background: rgba(11, 15, 24, 0.7);
+}
+
+.mac-saved-open {
+  padding: 0;
+  text-align: left;
+  color: #dce6f5;
+  background: transparent;
+}
+
+.mac-saved-open strong,
+.mac-saved-open span {
+  display: block;
+}
+
+.mac-saved-open span,
+.mac-empty-copy {
+  margin-top: 4px;
+  color: #8fa0b8;
+  font-size: 12px;
+}
+
+.mac-saved-actions,
+.mac-launcher-actions,
+.mac-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.mac-field-row .mac-field {
+  flex: 1;
+}
+
+.mac-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mac-field span {
+  color: #8fa0b8;
+  font-size: 12px;
+}
+
+.mac-field input {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(170, 188, 214, 0.12);
+  color: #edf2fa;
+  background: rgba(5, 8, 14, 0.84);
+}

@@ -2,88 +2,103 @@
 
 ## 真源层级
 
-1. `mac/docs/spec.md`：Mac 最小包目标与验收
-2. `mac/docs/architecture.md`：Mac 模块边界
-3. `mac/docs/dev-workflow.md`：Mac 验证入口与证据要求
-4. `android/docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局与共享 pane 真源
-5. `android/task.md`：跨尺寸 / Mac 任务板与 Beads 映射
-6. `mac/MEMORY.md`：Mac 长期经验
-7. `mac/evidence/`：构建与打包证据
+1. `mac/docs/spec.md`：Mac 重写目标与阶段验收
+2. `mac/docs/architecture.md`：Mac 模块边界与 ownership
+3. `mac/docs/dev-workflow.md`：Mac 验证门禁
+4. `android/docs/architecture.md`：跨端共享 terminal ownership 真源
+5. `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 真源
+6. `.agents/skills/terminal-buffer-truth/SKILL.md`：buffer/render/scroll 硬门禁
+7. `mac/task.md`：Mac rewrite 任务板
+8. `mac/CACHE.md`：当前切片短期上下文
+9. `mac/MEMORY.md`：长期经验
+10. `mac/evidence/`：验证证据
 
-## 最小包模块边界
+## 核心模型
 
-- Main Process
-  - 创建 BrowserWindow
-  - 区分 dev / packaged 入口
-  - 生命周期管理
+Mac 与 Android 共享同一套四层模型：
 
-- Renderer App
-  - React 根组件
-  - terminal-first workspace：
-    - compact window chrome
-    - 极薄 workspace/tab strip（真实映射当前 target + split preset 状态）
-    - 默认单工作区；无连接时中央显示 `+`
-    - new/edit connection 走按需 modal / sheet，不常驻占位
-    - workspace 当前只做 vertical split
-    - 默认单 pane；split 时插入新的 column pane，初始均分
-    - pane ratio 支持 drag resize，但不做任意嵌套 / 横向分屏
-    - open target tabs 当前采用 `single runtime · multi tabs`：
-      - 可以同时维护多个 open target descriptor
-      - 每个 pane 内可以挂多个 tabs，空 tab 显示 `+`
-      - 但 app-level bridge websocket/runtime 同时只服务一个 active pane 的 active target
-      - 切 pane / 切 tab 时如 target 变更，则切换 active target 并重连
-    - 低频 profile / export 走顶部菜单，不常驻 rail
-    - 快捷输入 / 剪贴板走 overlay palette，不常驻右栏
-  - 单行多列 + 垂直分屏布局
-  - terminal pane 是主真相；连接配置只是进入动作，不是常驻主视图
+```text
+Server(session truth)
+  -> Client Buffer Worker
+  -> Renderer Container
+  -> UI Shell
+```
 
-- Shared Connection Truth
-  - `packages/shared/src/connection/*`
-  - `packages/shared/src/react/*`
-  - 统一承载 Host / BridgeSettings / bridge URL / tmux discovery / localStorage hook
-  - 统一承载 bridge endpoint 归一：
-    - `bridgeHost` 若已带 `ws://` / `wss://` 与端口，display / preset id / effective port 都以显式 URL 为真源
-    - 禁止再把独立 `bridgePort` 二次拼到文案或 key 上
+### 1. Server(session truth)
 
-- Shared Terminal Truth
-  - `packages/shared/src/connection/protocol.ts`
-  - `packages/shared/src/connection/bridge-connection.ts`
-  - `packages/shared/src/connection/terminal-buffer.ts`
-  - `packages/shared/src/react/terminal-view.tsx`
-  - 统一承载 websocket 协议、buffer reducer、snapshot render
-  - **协议必须与 daemon 同步演进**；客户端若仍只消费 `snapshot / viewport-update / scrollback-update`，而 daemon 已切到 `buffer-sync / buffer-delta / buffer-range`，就会出现“能列 session，但连接后黑屏”
+- tmux / daemon 是唯一 session truth
+- server 只负责 head broadcast + range response
+- server 不维护 Mac 专属 viewport / reading / shell state
 
-- Mac App-level Bridge Orchestration
-  - `mac/src/lib/use-bridge-terminal.ts`
-  - App 级持有 websocket 生命周期、heartbeat、buffer state、active target
-  - Details 只发 connect request，不再自己持有 socket
-  - Terminal 只消费 app-level bridge state 与 shared terminal view
+### 2. Client Buffer Worker
 
-- Build / Package
-  - Vite 构建 renderer
-  - TypeScript 构建 main/preload
-  - electron-builder 打包最小 `.app`
+- Mac 侧 buffer 只能是 sparse absolute-index mirror
+- hidden / inactive 只收 head，不后台偷偷补整段历史
+- buffer worker 不关心桌面 window chrome / launcher / modal
 
-## 布局原则
+### 3. Renderer Container
 
-- 直接复用仓库已冻结的跨尺寸布局决策：
-  - 默认一行多列
-  - pane 之间垂直分屏
-  - 不以上下堆叠多 pane 作为主方案
+- renderer 只消费当前 render window
+- renderer 只对接 projection，不直接碰 transport
+- renderer 不生产第二份 cursor / viewport 真相
 
-- Tabby 只作为桌面壳层参考，不作为布局真源：
-  - 可以借用紧凑 chrome、顶部 tab strip、主终端优先的视觉组织
-  - 不照搬其左 rail / inspector 常驻 / 自由拖拽布局
-  - 真正的 pane 编排仍由 shared `layout profile + PaneStage` 决定
+### 4. UI Shell
 
-- Mac 第一阶段只先做桌面壳上的 stage：
-  - 窄窗：单列
-  - 中窗：双列
-  - 大窗：三列
+- 只负责 header / tabs / launcher / editor / terminal surface 布局
+- 不负责 buffer 合并
+- 不负责 transport request 决策
+- 不把桌面 split/tab 行为回灌成 terminal 内容真相
 
-## 边界规则
+## Phase 1 当前模块边界
 
-- 现在已证明 shell / package / live render 主链闭环
-- 不复制 Android runtime 源码
-- 业务连接能力继续优先下沉到 shared app-layer
-- session discovery != live connect：`list-sessions` 只能证明可发现，真正 attach 必须显式发送 `connect + stream-mode(active)`
+### Electron Platform Shell
+
+- `mac/electron/*`
+- 负责窗口创建、preload、生命周期
+- 不承载 terminal truth
+
+### Mac App Shell
+
+- `mac/src/app/*`
+- 负责：
+  - terminal-first header
+  - minimal tab strip
+  - launcher / editor overlay
+  - active tab 选择
+- 不负责：
+  - buffer merge
+  - viewport sync 策略
+  - websocket 协议细节
+
+### Runtime Adapter（临时过渡层）
+
+- 当前仍复用 `mac/src/lib/terminal-runtime.ts`
+- 只作为 Phase 1 过渡，给新 app shell 提供一个真实 live runtime
+- 下一阶段要继续切成与 Android 一致的 session head / sparse buffer worker contract
+
+### Shared Truth
+
+- `packages/shared/src/connection/*`
+- `packages/shared/src/react/use-host-storage.ts`
+- `packages/shared/src/react/use-bridge-settings-storage.ts`
+- `packages/shared/src/react/terminal-view.tsx`
+
+shared 继续承载：
+
+- host / bridge settings
+- terminal theme
+- shared terminal renderer
+
+## 当前明确废止的旧方向
+
+1. 旧 `ShellWorkspace` 继续作为 Mac 主入口
+2. 用 workspace/profile/pane 编排组件顺手维护 terminal runtime 真相
+3. 在桌面壳层里混入第二套 terminal session ownership
+4. 先做大 split / profiles / local tmux，再回头补 contract
+
+## 当前切分顺序
+
+1. **切入口**：App -> 新 Mac App Shell
+2. **切 ownership**：tabs / launcher / active target 改由新 shell 持有
+3. **保 runtime**：先接旧 runtime adapter 保住真实 live terminal
+4. **再继续切**：buffer worker / split / local tmux

@@ -58,6 +58,10 @@
 - [2026-04-20] `android/evidence/` 是本地证据仓，不应把整批历史截图/日志直接推到 GitHub 主线；Git 中只保留 `README.md` 说明目录与取证规则
 - [2026-04-20] 跨尺寸布局真源必须统一成**一个 layout profile + pane stage**：phone / tablet / foldable / split-screen / future Mac 共用同一编排决策，页面语义不随平台分叉
 - [2026-04-20] Jason 补充冻结：大屏统一效果默认应是一行多列、列与列之间垂直分屏；不要把上下堆叠多 pane 当成主方案。future Mac 也沿同一单行多列编排复用 shared app-layer
+- [2026-04-23] terminal 新真源落地时，server 不能再按 client active/idle 状态主动 push buffer；唯一对外职责应收敛成 **30Hz `buffer-head` 广播 + 按 range 返回 `buffer-sync`**。client 是否拉取由自己的 buffer worker 决策，consumer 不得把消费状态写回 producer 当长期真相。
+- [2026-04-23] Android renderer 若继续暴露 `onViewportPrefetch / followViewportNonce` 这类 transport-aware 接口，会把 renderer 和 buffer worker 再次耦合回去；renderer 只保留窗口声明与 UI reset 信号，prefetch/range repair 必须留在 worker。
+- [2026-04-23] Android SessionContext 若同时保留 `sendTailBootstrapBufferSyncRequest / sendFollowRefreshBufferSyncRequest / refreshSessionTail` 三套近似入口，会继续把 sync 策略散成多真源；应先合并成单一 `requestSessionBufferSync` + 单一 viewport reset 入口，再继续拆 worker/renderer。
+- [2026-04-23] Terminal renderer 的 follow/read 不能只拿 DOM `scrollTop` 去纯推导：真实 DOM bottom 会短时小于逻辑 tail，导致 active follow 误判成 reading。正确边界是：buffer/render 真源仍分离，但 renderer 允许保留一个**最小 UI reading latch** 来表达“用户是否正在读历史”。
 - [2026-04-20] 当 Mac 需要移植 Android 连接配置流时，优先下沉纯逻辑到 `packages/shared/connection/*` 与 `packages/shared/react/*`（Host / BridgeSettings / tmux discovery / localStorage hook），而不是在桌面端复制一套 ad hoc 表单/存储实现
 - [2026-04-20] tmux session discovery 不是 live connect：桌面端如果只做 `list-sessions`，用户会看到“能找到 session 但连不上”。真正连接必须显式复用 Android 的 websocket 协议：`open ws -> send connect(payload) -> send stream-mode(active)`
 - [2026-04-20] 若 `bridgeHost` 已是显式 `ws://host:port` / `wss://host:port`，shared truth 必须把这个显式 endpoint 当成 display/preset key/store port 的真源；不要再额外拼接独立 `bridgePort`，否则会制造双端口假象并污染 remembered server key
@@ -82,6 +86,9 @@
 - [2026-04-23] foreground 恢复不要无差别重连所有 session；应先恢复 active session，其他 session 仅在本身非健康时补拉，否则 hidden tabs 也会被一并唤醒，徒增带宽且拖慢当前 tab 恢复。
 - [2026-04-23] 同 host 多 session 的统一 foreground reconnect 若仍保留串行 bucket，必须先重连 active session；否则当前 tab 会被隐藏 tab 的重连排队拖住，表现成“回前台后当前页假死”。
 - [2026-04-23] reconnect 成功后的 client 不能只等待服务端 live flush；应立即补一条 tail refresh request，否则 session 会先显示 `connected` 但本地 buffer 仍停在旧 revision，造成“假连接、不更新”。但 **hidden->active / foreground refresh** 不能无脑 bootstrap 整个 tail：若本地尾窗连续，应发送带本地 `revision + local window` 的 follow request；只有本地尾窗缺口/空 buffer 才 bootstrap。与此同时应补一发 `ping` + 短超时 watchdog，避免“激活了 tab 但没渲染也不重连”。
+- [2026-04-23] active + follow tab 还需要保留一个低频 tail probe（follow `buffer-sync-request` + `ping` + 短 watchdog）作为 observer 漏通知的自愈链路；否则 daemon 没再主动推时，客户端会误以为“没有新尾行”，表现成只有用户输入/切 tab 后才刷新。
+- [2026-04-23] runtime 远程排障真源应放在 daemon HTTP：client 只上送 bounded runtime debug entries，daemon 统一缓存并通过 `/debug/runtime` + `/debug/runtime/logs` 暴露 session/mirror 快照与最近日志；接口复用 daemon auth token，方便服务器端直接拉现场证据。
+- [2026-04-23] foreground/active refresh 不能只把 SessionContext 的 sync view 改成 `follow`；`TerminalView` 自己的 `followMode/scrollTop` 也必须收到显式 reset nonce。否则会出现“恢复后展示的是旧 scroll 位置的老 buffer，只有用户输入触发 `forceFollowViewport()` 才跳到最新”的假刷新/假黑屏。
 - [2026-04-23] active tab 的 terminal render 不允许在 visible/precheck window 有 gap 时继续复用上一帧；当前三屏窗口可以不连续，UI 应立即渲染最新 tail + gap marker，再对窗口内 missing ranges 发稀疏 prefetch。
 - [2026-04-23] follow 态的 gap repair 真源是“当前三屏窗口内 missing ranges”，不是“从旧 stop point 连续追到最新”；active 页只补当前窗口命中的缺口，hidden/窗口外内容允许继续缺失，以控制带宽。
 - [2026-04-23] terminal 主题真源要覆盖默认前景/背景 + ANSI 16 色，而不是只改背景色；theme choice 应持久化到 shared `BridgeSettings.terminalThemeId`，Settings 只负责切换 preset。
@@ -98,6 +105,31 @@
 - [2026-04-23] drag target 计算不能把正在拖的那一行自己也纳入候选；否则命中会持续偏向自身行，排序目标几乎不会变化。
 - [2026-04-23] keyboard 关闭态不能在 quick bar 外层保留 `transform: translateY(0)`；这会让其内部 `position: fixed` 悬浮层脱离视口坐标系，直接把悬浮球/快捷面板的位置算坏。
 - [2026-04-23] 快捷按键编辑器的“显示名称”若自动写入第一个 token（例如先点 `Ctrl` 就写成 `Ctrl`），会把组合键默认名污染掉；组合键的默认显示名必须来自最终 `preview`（如 `Ctrl + C`），不是来自首个 token。
+- [2026-04-23] Jason 冻结新的 terminal 真源：server 按 session 只做 **30Hz head 广播 + range request 响应**，不主动 push buffer 内容；client 侧拆成 sparse buffer worker / renderer container / UI shell 三层，consumer 不得改 source。
+- [2026-04-23] client buffer 真源必须允许不连续：follow 默认维护尾部 3 屏热区，reading 只在 renderer 当前窗口缺失时补缺；hidden tab 只收 head，不拉 range，不补缺口。
+- [2026-04-23] `TerminalView` 里凡是 active/reset/layout/audit 都会触发的 follow 贴底动作，必须收成单一 helper，再配合纯的 scroll->mode 判定 helper；否则同一 follow 真相会在多个 effect 中分叉，后续修一个入口很容易漏另一个入口。
+- [2026-04-23] client viewport worker 若已进入某个 reading window，就不要对完全相同的 viewport 再排队第二次 range request；同一 session 一旦回到 follow，必须同步清理之前排队的 reading sync，避免 stale request 白打到 daemon。
+- [2026-04-23] `active tab switch` 和 `follow reset` 若都要构造 follow viewport state / bootstrap 判定，必须复用同一 helper；否则 follow rows/endIndex/cache window 很容易在两个入口长歪成两套语义。
+- [2026-04-23] `connectSession` 与 reconnect bucket 可以共享 socket 握手、heartbeat、公共 server message 分发，但 `connected` 成功后的状态推进仍要保留各自分支：普通 connect 不该偷偷带入 reconnect bucket 的 side effect。
+- [2026-04-23] connect / reconnect 的 `connected` 成功后若有一大段完全相同的 baseline 动作（写 connected 状态、schedule-list、active bootstrap、watchdog、connectedCount），应先收成公共 helper，再把 bucket reset / queue drain 这类额外 side effect 挂在外层。
+- [2026-04-23] connect / reconnect 的 `finalizeFailure` 也应按同样方式拆：完成位、cleanup、schedule error、manual-close 终止属于公共 baseline；retry、bucket attempt、pending requeue 属于外层专属语义。
+- [2026-04-23] `TerminalView` 缩 effect 面时，先抽 `viewport refresh schedule` / `current viewport emit` 这类无语义 helper；不要一上来强行合并 effect，先把重复动作单点化再说。
+- [2026-04-23] `TerminalView` 里 reading viewport emit 若会在‘prepend 历史后重锚’与‘reading near edge 补拉提示’两处重复出现，也先抽本地 helper；renderer 收口优先顺序仍是动作单点化 > effect 合并。
+- [2026-04-23] `TerminalView` 再往下收时，follow reset、prepend 历史锚定、near-edge reading emit 这类 viewport action 也应先名字化成 helper；名字化后更容易看出哪些 effect 只是调度层、哪些才是状态层。
+- [2026-04-23] 当 `TerminalView` 里两个 effect 只是在分别守 `becameActive` 与 `viewportResetNonce` 这两种 follow reset 信号时，可以合并成一个 reset effect；前提是 session 切换时初始化 ref 的语义不变。
+- [2026-04-24] `TerminalView` 里若‘当前 viewport emit’与‘reading near-edge emit’只是同一渲染阶段里的两次 emit，可合并成一个 effect，前提是 `emitViewportState` 自身已有稳定的 dedupe key。
+- [2026-04-24] `TerminalView` 的 viewport refresh 调度若会被 layout/session 两类 effect 复用，就把 `sync + optional follow align` 收成单一动作，并在执行时再读取当前 reading/follow latch；不要让 scheduler callback 直接依赖 followMode，否则用户一滚动就会把无关 refresh effect 全部重新挂载。
+- [2026-04-24] `ResizeObserver` 也是 viewport refresh 链的一部分，不要单独直连 `syncViewport()`；它应复用同一 `runViewportRefresh()` 动作，这样 real resize、layout nonce、session refresh、follow audit 才不会长成四套 refresh 口径。
+- [2026-04-24] `layout refresh` 与 `session refresh` 若最终都只是“判定是否触发 refresh + 选择 timeout”，可以合并成单一 trigger effect；但 `becameActive / sessionChanged / layoutChanged` 仍要显式保留，不能为了少一个 effect 抹掉触发来源。
+- [2026-04-24] 当 `TerminalView` 里剩下的 effect 已不再只是调度，而是承担 `prepend 历史后的 reading 锚定`、`当前帧 viewport signal` 这种状态语义时，先把 effect 内动作名字化，再让 effect 只做 trigger/state bridge；不要为了“继续减少 effect 数量”硬把状态语义揉坏。
+- [2026-04-24] `TerminalView` / `TerminalPage` / `SessionContext` 若都在内联同一份 viewport/resize schema，应下沉到 `android/src/lib/types.ts` 做接口真源；这样后续再改 viewport 字段时，不会一边改 context 一边漏掉 renderer/test。
+- [2026-04-24] renderer prop 面也要按“真实输入”审计：如果某个字段只剩作为 dependency 占位，而不再参与渲染/输入/状态语义，就应从 prop 面移除；`bufferRevision` 就是这种可以安全删除的残留。
+- [2026-04-24] renderer trigger 命名也要按真实语义收口：如果 token 的作用是“把 terminal 拉回 follow”，renderer API 应直接叫 `followResetToken`；不要继续把 worker 内部的 `viewportResetNonce` 原样泄漏到 renderer prop 面。
+- [2026-04-24] 若 worker/store 内部的旧命名只剩少量闭合传播点，不要长期保留 page 层映射；直接把 `viewportResetNonce` 一并统一成 `followResetToken`，让 worker/page/renderer 共用同一语义名。
+- [2026-04-24] `SessionContext` 里 request payload builder 也要按“唯一构造点”收口：如果 bootstrap 只是普通 request 的少量字段覆盖，就改成单一 `buildSessionBufferSyncRequestPayload()`，不要长期并存两份 builder。
+- [2026-04-24] `updateSessionViewport()` 这类 worker 入口若同时在做 normalize、判等、调度请求，后面很容易再长分叉；应把这三层拆成 helper，让入口函数只做“写状态 + 触发 demand”。
+- [2026-04-24] active session 的“输入后刷新”不能靠本地回显，也不能完全被动等下一次 head；正确口径是 `sendInput()` 只发 input，同时挂 `input-tail-refresh` demand，由 client 本地 30fps head tick 在网络分级门限内主动打一条 follow `buffer-sync-request + ping`。
+- [2026-04-24] “本地 30fps 刷新 head”不等于 30fps 拉 range：固定 `33ms` tick 只做 head freshness / demand 判定；真正 range 请求频率要由网络状况和配置决定（如 `minTailRefreshGapMs`、reading delay），否则又会退化成请求风暴。
 
 ## Patterns & Learnings
 

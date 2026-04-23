@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../lib/types';
+import type { Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
@@ -50,8 +50,8 @@ vi.mock('../components/TerminalView', () => ({
     sessionId: string;
     active?: boolean;
     onInput?: (sessionId: string, data: string) => void;
-    onResize?: (sessionId: string, cols: number, rows: number) => void;
-    onViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
+    onResize?: TerminalResizeHandler;
+    onViewportChange?: TerminalViewportChangeHandler;
   }) => (
     <div data-testid={`terminal-view-${sessionId}`} data-active={active ? 'true' : 'false'}>
       <button type="button" onClick={() => onInput?.(sessionId, `typed:${sessionId}`)}>

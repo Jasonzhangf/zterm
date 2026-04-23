@@ -2,14 +2,14 @@ import {
   useBridgeSettingsStorage,
   useHostStorage,
 } from '@zterm/shared';
-import { ShellWorkspace } from './pages/ShellWorkspace';
+import { MacAppShell } from './app/MacAppShell';
 
 export default function App() {
   const { hosts, isLoaded, addHost, updateHost } = useHostStorage();
   const { settings, setSettings } = useBridgeSettingsStorage();
 
   return (
-    <ShellWorkspace
+    <MacAppShell
       hosts={hosts}
       isLoaded={isLoaded}
       bridgeSettings={settings}

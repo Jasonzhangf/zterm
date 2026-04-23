@@ -1,6 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTerminalThemePreset, type TerminalThemePreset } from '@zterm/shared';
-import type { TerminalCell, TerminalGapRange } from '../lib/types';
+import type {
+  TerminalCell,
+  TerminalFollowResetToken,
+  TerminalGapRange,
+  TerminalResizeHandler,
+  TerminalViewportChangeHandler,
+} from '../lib/types';
 
 interface TerminalViewProps {
   sessionId: string | null;
@@ -14,11 +20,12 @@ interface TerminalViewProps {
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
   onInput?: (sessionId: string, data: string) => void;
-  onResize?: (sessionId: string, cols: number, rows: number) => void;
-  onViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
-  onViewportPrefetch?: (sessionId: string, viewState: { mode: 'reading'; viewportEndIndex: number; viewportRows: number; missingRanges?: TerminalGapRange[] }) => void;
+  onResize?: TerminalResizeHandler;
+  onViewportChange?: TerminalViewportChangeHandler;
   onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
   focusNonce?: number;
+  followResetToken?: TerminalFollowResetToken;
+  viewportLayoutNonce?: number | string;
   fontSize?: number;
   rowHeight?: string;
   themeId?: string;
@@ -197,18 +204,6 @@ function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
 
-function collectIntersectingGapRanges(gapRanges: TerminalGapRange[], startIndex: number, endIndex: number) {
-  if (endIndex <= startIndex) {
-    return [] as TerminalGapRange[];
-  }
-  return gapRanges
-    .map((range) => ({
-      startIndex: Math.max(startIndex, range.startIndex),
-      endIndex: Math.min(endIndex, range.endIndex),
-    }))
-    .filter((range) => range.endIndex > range.startIndex);
-}
-
 function resolveDomBottomScrollTop(host: HTMLDivElement, fallbackScrollTop: number) {
   const safeFallbackScrollTop = Math.max(0, fallbackScrollTop);
   const domBottomScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
@@ -216,6 +211,21 @@ function resolveDomBottomScrollTop(host: HTMLDivElement, fallbackScrollTop: numb
     return safeFallbackScrollTop;
   }
   return Math.min(domBottomScrollTop, safeFallbackScrollTop);
+}
+
+function resolveViewportModeFromScroll(options: {
+  scrollTop: number;
+  maxScrollTop: number;
+  rowHeightPx: number;
+  followViewportTopOffset: number;
+}): { clampedScrollTop: number; mode: 'follow' | 'reading' } {
+  const clampedScrollTop = Math.max(0, Math.min(options.maxScrollTop, options.scrollTop));
+  const nextVisibleStart = Math.max(0, Math.floor(clampedScrollTop / options.rowHeightPx));
+  const distanceFromBottomRows = Math.max(0, options.followViewportTopOffset - nextVisibleStart);
+  return {
+    clampedScrollTop,
+    mode: distanceFromBottomRows <= 1 ? 'follow' : 'reading',
+  };
 }
 
 const VisibleRow = memo(function VisibleRow({
@@ -300,9 +310,10 @@ export function TerminalView({
   onInput,
   onResize,
   onViewportChange,
-  onViewportPrefetch,
   onSwipeTab,
   focusNonce = 0,
+  followResetToken = 0,
+  viewportLayoutNonce = 0,
   fontSize = 14,
   rowHeight = '17px',
   themeId,
@@ -320,13 +331,18 @@ export function TerminalView({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
   const resizeCommitTimerRef = useRef<number | null>(null);
+  const followViewportAuditTimerRef = useRef<number | null>(null);
   const previousBufferStartIndexRef = useRef(bufferStartIndex);
   const lastReportedViewportRef = useRef<string>('');
   const followFlushFrameRef = useRef<number | null>(null);
   const pendingFollowScrollTopRef = useRef<number | null>(null);
+  const readingModeRef = useRef(false);
   const suppressProgrammaticScrollRef = useRef(false);
   const wasActiveRef = useRef(active);
-  const lastPrefetchKeyRef = useRef('');
+  const lastAppliedFollowResetTokenRef = useRef(followResetToken);
+  const previousRefreshActiveRef = useRef(active);
+  const previousRefreshSessionIdRef = useRef<string | null>(sessionId);
+  const previousRefreshLayoutNonceRef = useRef<string | number>(viewportLayoutNonce);
   const touchGestureRef = useRef({
     active: false,
     pointerCaptured: false,
@@ -340,7 +356,7 @@ export function TerminalView({
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
   const [scrollTop, setScrollTop] = useState(0);
-  const [followMode, setFollowMode] = useState(true);
+  const [readingMode, setReadingMode] = useState(false);
 
   const rowHeightPx = Math.max(1, parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17);
   const totalRows = Math.max(
@@ -354,60 +370,55 @@ export function TerminalView({
     Math.min(totalRows - viewportRows, authoritativeViewportEndIndex - bufferStartIndex - viewportRows),
   );
   const maxScrollTop = Math.max(0, (totalRows - viewportRows) * rowHeightPx);
+  const currentScrollOffset = Math.max(0, Math.floor(scrollTop / rowHeightPx));
+  readingModeRef.current = readingMode;
+  const followMode = !readingMode;
   const visibleStartOffset = followMode
     ? followViewportTopOffset
-    : Math.max(0, Math.floor(scrollTop / rowHeightPx));
+    : currentScrollOffset;
   const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
   const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
+  const followVisibleDataRows = Math.max(
+    0,
+    Math.min(
+      viewportRows,
+      Math.max(0, authoritativeViewportEndIndex - bufferStartIndex),
+    ),
+  );
+  const followLeadingBlankRows = followMode
+    ? Math.max(0, viewportRows - followVisibleDataRows)
+    : 0;
+  const historyLoading = active
+    && !followMode
+    && visibleStartOffset <= 1
+    && bufferStartIndex > 0;
 
   const visibleRows = useMemo(() => {
-    const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean }> = [];
-    for (let offset = renderStartOffset; offset < renderEndOffset; offset += 1) {
-      const absoluteIndex = bufferStartIndex + offset;
-      const row = bufferLines[offset] || [];
+    const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean; viewportOffset: number }> = [];
+    for (let dataOffset = 0; dataOffset < bufferLines.length; dataOffset += 1) {
+      const viewportOffset = followLeadingBlankRows + dataOffset;
+      if (viewportOffset < renderStartOffset || viewportOffset >= renderEndOffset) {
+        continue;
+      }
+      const absoluteIndex = bufferStartIndex + dataOffset;
+      const row = bufferLines[dataOffset] || [];
       rows.push({
         absoluteIndex,
         row,
         isGap: isGapIndex(bufferGapRanges, absoluteIndex),
+        viewportOffset,
       });
     }
     return rows;
-  }, [bufferGapRanges, bufferLines, bufferStartIndex, renderEndOffset, renderStartOffset]);
-
-  const continuityCheck = useMemo(() => {
-    const visibleWindowStartIndex = bufferStartIndex + visibleStartOffset;
-    const visibleWindowEndIndex = Math.min(
-      effectiveBufferEndIndex,
-      visibleWindowStartIndex + viewportRows,
-    );
-    const precheckStartIndex = Math.max(
-      bufferStartIndex,
-      visibleWindowStartIndex - viewportRows * 2,
-    );
-
-    let visibleContinuous = true;
-    let precheckContinuous = true;
-    for (const range of bufferGapRanges) {
-      if (range.endIndex <= precheckStartIndex || range.startIndex >= visibleWindowEndIndex) {
-        continue;
-      }
-      precheckContinuous = false;
-      if (range.endIndex > visibleWindowStartIndex && range.startIndex < visibleWindowEndIndex) {
-        visibleContinuous = false;
-      }
-    }
-
-    return {
-      visibleContinuous,
-      precheckContinuous,
-      precheckStartIndex,
-      visibleWindowStartIndex,
-      visibleWindowEndIndex,
-      missingRanges: collectIntersectingGapRanges(bufferGapRanges, precheckStartIndex, visibleWindowEndIndex),
-    };
-  }, [bufferGapRanges, bufferStartIndex, effectiveBufferEndIndex, viewportRows, visibleStartOffset]);
+  }, [bufferGapRanges, bufferLines, bufferStartIndex, followLeadingBlankRows, renderEndOffset, renderStartOffset]);
 
   const renderRows = visibleRows;
+  const termGridPaddingTopPx = renderRows.length > 0
+    ? renderRows[0]!.viewportOffset * rowHeightPx
+    : totalRows * rowHeightPx;
+  const termGridPaddingBottomPx = renderRows.length > 0
+    ? Math.max(0, totalRows - (renderRows[renderRows.length - 1]!.viewportOffset + 1)) * rowHeightPx
+    : 0;
 
   const focusTerminal = useCallback(() => {
     if (!allowDomFocus) {
@@ -474,14 +485,20 @@ export function TerminalView({
   }, [active, authoritativeViewportEndIndex, bufferStartIndex, onViewportChange, rowHeightPx, sessionId, totalRows, viewportRows]);
 
   const applyScrollState = useCallback((nextScrollTop: number) => {
-    const clamped = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
-    setScrollTop(clamped);
-
-    const nextVisibleStart = Math.max(0, Math.floor(clamped / rowHeightPx));
-    const distanceFromBottomRows = Math.max(0, followViewportTopOffset - nextVisibleStart);
-    const nextMode: 'follow' | 'reading' = distanceFromBottomRows <= 1 ? 'follow' : 'reading';
-    setFollowMode(nextMode === 'follow');
-    emitViewportState(nextMode, clamped);
+    if (followFlushFrameRef.current !== null) {
+      window.cancelAnimationFrame(followFlushFrameRef.current);
+      followFlushFrameRef.current = null;
+    }
+    pendingFollowScrollTopRef.current = null;
+    const { clampedScrollTop, mode: nextMode } = resolveViewportModeFromScroll({
+      scrollTop: nextScrollTop,
+      maxScrollTop,
+      rowHeightPx,
+      followViewportTopOffset,
+    });
+    setScrollTop(clampedScrollTop);
+    setReadingMode(nextMode === 'reading');
+    emitViewportState(nextMode, clampedScrollTop);
   }, [emitViewportState, followViewportTopOffset, maxScrollTop, rowHeightPx]);
 
   const scheduleFollowViewportSync = useCallback((nextScrollTop: number) => {
@@ -513,12 +530,101 @@ export function TerminalView({
     }
   }, []);
 
-  const forceFollowViewport = useCallback(() => {
+  const alignViewportToFollow = useCallback((options?: { resetReportedViewport?: boolean }) => {
     const nextScrollTop = followViewportTopOffset * rowHeightPx;
-    setFollowMode(true);
+    if (options?.resetReportedViewport) {
+      lastReportedViewportRef.current = '';
+    }
+    setReadingMode(false);
+    setScrollTop(nextScrollTop);
     scheduleFollowViewportSync(nextScrollTop);
     emitViewportState('follow', nextScrollTop);
+    return nextScrollTop;
   }, [emitViewportState, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
+
+  const forceFollowViewport = useCallback(() => {
+    alignViewportToFollow();
+  }, [alignViewportToFollow]);
+
+  const resetViewportToFollow = useCallback(() => {
+    alignViewportToFollow({ resetReportedViewport: true });
+  }, [alignViewportToFollow]);
+
+  const emitCurrentViewportState = useCallback(() => {
+    emitViewportState(followMode ? 'follow' : 'reading', scrollTop);
+  }, [emitViewportState, followMode, scrollTop]);
+
+  const emitReadingViewportState = useCallback((nextScrollTop?: number) => {
+    emitViewportState('reading', nextScrollTop ?? scrollTop);
+  }, [emitViewportState, scrollTop]);
+
+  const anchorReadingViewportAfterPrepend = useCallback((host: HTMLDivElement, prependedRows: number) => {
+    const nextScrollTop = host.scrollTop + prependedRows * rowHeightPx;
+    host.scrollTop = nextScrollTop;
+    setScrollTop(nextScrollTop);
+    emitReadingViewportState(nextScrollTop);
+  }, [emitReadingViewportState, rowHeightPx]);
+
+  const emitReadingViewportIfNearEdge = useCallback(() => {
+    if (followMode) {
+      return;
+    }
+    const nearTop = visibleStartOffset <= PRELOAD_MARGIN_ROWS;
+    const nearBottom = followViewportTopOffset - visibleStartOffset <= PRELOAD_MARGIN_ROWS;
+    if (nearTop || nearBottom) {
+      emitReadingViewportState();
+    }
+  }, [emitReadingViewportState, followMode, followViewportTopOffset, visibleStartOffset]);
+
+  const reconcileViewportAfterBufferShift = useCallback(() => {
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+
+    if (!readingModeRef.current) {
+      alignViewportToFollow();
+      previousBufferStartIndexRef.current = bufferStartIndex;
+      return;
+    }
+
+    const previousStartIndex = previousBufferStartIndexRef.current;
+    if (bufferStartIndex < previousStartIndex) {
+      const prependedRows = previousStartIndex - bufferStartIndex;
+      anchorReadingViewportAfterPrepend(host, prependedRows);
+    }
+    previousBufferStartIndexRef.current = bufferStartIndex;
+  }, [alignViewportToFollow, anchorReadingViewportAfterPrepend, bufferStartIndex]);
+
+  const emitViewportSignalsForCurrentFrame = useCallback(() => {
+    emitCurrentViewportState();
+    if (!readingModeRef.current) {
+      return;
+    }
+    emitReadingViewportIfNearEdge();
+  }, [emitCurrentViewportState, emitReadingViewportIfNearEdge]);
+
+  const runViewportRefresh = useCallback((options?: {
+    alignFollow?: boolean;
+  }) => {
+    syncViewport();
+    if (options?.alignFollow && !readingModeRef.current) {
+      alignViewportToFollow();
+    }
+  }, [alignViewportToFollow, syncViewport]);
+
+  const scheduleViewportRefresh = useCallback((options?: {
+    alignFollow?: boolean;
+    timeoutMs?: number;
+  }) => {
+    const refreshViewport = () => runViewportRefresh(options);
+    const frame = window.requestAnimationFrame(refreshViewport);
+    const timer = window.setTimeout(refreshViewport, options?.timeoutMs ?? 48);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [runViewportRefresh]);
 
   const resetTouchGesture = useCallback(() => {
     touchGestureRef.current = {
@@ -533,132 +639,86 @@ export function TerminalView({
   }, []);
 
   useEffect(() => {
-    setFollowMode(true);
+    setReadingMode(false);
     setScrollTop(0);
     lastReportedViewportRef.current = '';
+    lastAppliedFollowResetTokenRef.current = followResetToken;
+    previousRefreshSessionIdRef.current = sessionId;
   }, [sessionId]);
 
   useEffect(() => {
     const becameActive = active && !wasActiveRef.current;
+    const followResetChanged = active && lastAppliedFollowResetTokenRef.current !== followResetToken;
     wasActiveRef.current = active;
-    if (!becameActive) {
-      return;
-    }
-
-    const nextScrollTop = followViewportTopOffset * rowHeightPx;
-    lastReportedViewportRef.current = '';
-    setFollowMode(true);
-    setScrollTop(nextScrollTop);
-    scheduleFollowViewportSync(nextScrollTop);
-    emitViewportState('follow', nextScrollTop);
-  }, [active, emitViewportState, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
-
-  useEffect(() => {
-    const host = containerRef.current;
-    if (!host) {
-      return;
-    }
-
-    if (followMode) {
-      const nextScrollTop = followViewportTopOffset * rowHeightPx;
-      scheduleFollowViewportSync(nextScrollTop);
-      emitViewportState('follow', nextScrollTop);
-      previousBufferStartIndexRef.current = bufferStartIndex;
-      return;
-    }
-
-    const previousStartIndex = previousBufferStartIndexRef.current;
-    if (bufferStartIndex < previousStartIndex) {
-      const prependedRows = previousStartIndex - bufferStartIndex;
-      const nextScrollTop = host.scrollTop + prependedRows * rowHeightPx;
-      host.scrollTop = nextScrollTop;
-      setScrollTop(nextScrollTop);
-      emitViewportState('reading', nextScrollTop);
-    }
-    previousBufferStartIndexRef.current = bufferStartIndex;
-  }, [bufferStartIndex, emitViewportState, followMode, followViewportTopOffset, rowHeightPx, scheduleFollowViewportSync]);
-
-  useEffect(() => {
     if (!active) {
       return;
     }
-    const host = containerRef.current;
-    if (!host) {
+    if (!becameActive && !followResetChanged) {
       return;
     }
-    const frame = window.requestAnimationFrame(syncViewport);
-    const timer = window.setTimeout(syncViewport, 120);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timer);
-    };
-  }, [active, sessionId, syncViewport]);
+    lastAppliedFollowResetTokenRef.current = followResetToken;
+    resetViewportToFollow();
+  }, [active, followResetToken, resetViewportToFollow]);
 
   useEffect(() => {
-    const host = containerRef.current;
-    if (!host) {
-      return;
-    }
-    const observer = new ResizeObserver(() => syncViewport());
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, [syncViewport]);
-
-  useEffect(() => {
+    const becameActive = active && !previousRefreshActiveRef.current;
+    const sessionChanged = previousRefreshSessionIdRef.current !== sessionId;
+    const layoutChanged = previousRefreshLayoutNonceRef.current !== viewportLayoutNonce;
+    previousRefreshActiveRef.current = active;
+    previousRefreshSessionIdRef.current = sessionId;
+    previousRefreshLayoutNonceRef.current = viewportLayoutNonce;
     if (!active) {
       return;
     }
-    emitViewportState(followMode ? 'follow' : 'reading', scrollTop);
-  }, [active, emitViewportState, followMode, scrollTop, viewportRows]);
-
-  useEffect(() => {
-    if (!active || followMode) {
+    if (!becameActive && !sessionChanged && !layoutChanged) {
       return;
     }
-    const nearTop = visibleStartOffset <= PRELOAD_MARGIN_ROWS;
-    const nearBottom = followViewportTopOffset - visibleStartOffset <= PRELOAD_MARGIN_ROWS;
-    if (nearTop || nearBottom) {
-      emitViewportState('reading', scrollTop);
-    }
-  }, [active, emitViewportState, followMode, followViewportTopOffset, scrollTop, visibleStartOffset]);
-
-  useEffect(() => {
-    if (!active || !sessionId || followMode) {
-      lastPrefetchKeyRef.current = '';
-      return;
-    }
-    if (continuityCheck.precheckContinuous) {
-      lastPrefetchKeyRef.current = '';
-      return;
-    }
-    const prefetchViewportEndIndex = continuityCheck.visibleWindowEndIndex;
-    const prefetchKey = [
-      sessionId,
-      'reading',
-      prefetchViewportEndIndex,
-      viewportRows,
-      continuityCheck.missingRanges.map((range) => `${range.startIndex}:${range.endIndex}`).join(','),
-    ].join('|');
-    if (lastPrefetchKeyRef.current === prefetchKey) {
-      return;
-    }
-    lastPrefetchKeyRef.current = prefetchKey;
-    onViewportPrefetch?.(sessionId, {
-      mode: 'reading',
-      viewportEndIndex: prefetchViewportEndIndex,
-      viewportRows,
-      missingRanges: continuityCheck.missingRanges,
+    return scheduleViewportRefresh({
+      alignFollow: true,
+      timeoutMs: layoutChanged ? 48 : 120,
     });
+  }, [active, scheduleViewportRefresh, sessionId, viewportLayoutNonce]);
+
+  useEffect(() => {
+    reconcileViewportAfterBufferShift();
+  }, [reconcileViewportAfterBufferShift]);
+
+  useEffect(() => {
+    if (!active || !followMode) {
+      return;
+    }
+    if (followViewportAuditTimerRef.current !== null) {
+      return;
+    }
+    followViewportAuditTimerRef.current = window.setTimeout(() => {
+      followViewportAuditTimerRef.current = null;
+      runViewportRefresh({ alignFollow: true });
+    }, 72);
   }, [
     active,
-    continuityCheck.missingRanges,
-    continuityCheck.precheckContinuous,
-    continuityCheck.visibleWindowEndIndex,
+    authoritativeViewportEndIndex,
+    bufferLines.length,
+    effectiveBufferEndIndex,
     followMode,
-    onViewportPrefetch,
-    sessionId,
-    viewportRows,
+    runViewportRefresh,
   ]);
+
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host) {
+      return;
+    }
+    const observer = new ResizeObserver(() => runViewportRefresh({ alignFollow: true }));
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [runViewportRefresh]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    emitViewportSignalsForCurrentFrame();
+  }, [active, emitViewportSignalsForCurrentFrame, viewportRows]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -814,6 +874,10 @@ export function TerminalView({
       window.cancelAnimationFrame(followFlushFrameRef.current);
       followFlushFrameRef.current = null;
     }
+    if (followViewportAuditTimerRef.current !== null) {
+      window.clearTimeout(followViewportAuditTimerRef.current);
+      followViewportAuditTimerRef.current = null;
+    }
     if (resizeCommitTimerRef.current) {
       window.clearTimeout(resizeCommitTimerRef.current);
       resizeCommitTimerRef.current = null;
@@ -910,7 +974,40 @@ export function TerminalView({
         fontSize: `${fontSize}px`,
       }}
     >
-      <div className="term-grid" data-cursor-source="buffer-store" style={{ paddingTop: `${renderStartOffset * rowHeightPx}px`, paddingBottom: `${Math.max(0, totalRows - renderEndOffset) * rowHeightPx}px` }}>
+      <div className="term-grid" data-cursor-source="buffer-store" style={{ paddingTop: `${termGridPaddingTopPx}px`, paddingBottom: `${termGridPaddingBottomPx}px` }}>
+        {historyLoading ? (
+          <div
+            data-terminal-history-loading="true"
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              height: rowHeightPx * 2,
+              color: theme.foreground,
+              background: `linear-gradient(180deg, ${theme.background} 0%, rgba(0,0,0,0) 100%)`,
+              fontSize: `${Math.max(11, fontSize - 1)}px`,
+              opacity: 0.88,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '999px',
+                border: `2px solid ${theme.colors[8]}`,
+                borderTopColor: theme.foreground,
+                animation: 'zterm-history-spin 0.8s linear infinite',
+                boxSizing: 'border-box',
+              }}
+            />
+            <span>加载历史…</span>
+          </div>
+        ) : null}
         {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) => (
           <VisibleRow
             key={`row-${absoluteIndex}`}
@@ -946,6 +1043,7 @@ export function TerminalView({
           caretColor: 'transparent',
         }}
       />
+      <style>{`@keyframes zterm-history-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }

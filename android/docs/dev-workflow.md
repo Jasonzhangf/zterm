@@ -50,11 +50,11 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 ## Terminal buffer 重构门禁
 
 - 任何 terminal buffer / scroll / cursor 改动，先更新：
-  - `docs/decisions/2026-04-21-terminal-buffer-render-separation.md`
+  - `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`
   - `.agents/skills/terminal-buffer-truth/SKILL.md`
 - 未完成 ownership 拆分前，禁止继续在 `TerminalView.tsx` 叠加 projection / anchor / scroll patch
-- daemon 侧提交前必须证明：它只维护和发送 canonical buffer，不承载显示逻辑
-- client 侧提交前必须证明：mirror buffer / render state / scroll state 已拆开
+- daemon 侧提交前必须证明：它只维护 session canonical truth、30Hz head 广播与 range 响应，不承载显示逻辑
+- client 侧提交前必须证明：buffer worker / renderer container / UI shell 已拆开，renderer 不直接驱动 transport
 
 ## 验证层级
 
