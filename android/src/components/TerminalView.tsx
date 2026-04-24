@@ -810,7 +810,7 @@ export function TerminalView({
     lastReportedViewportRef.current = '';
     lastAppliedFollowResetTokenRef.current = followResetToken;
     previousRefreshSessionIdRef.current = sessionId;
-  }, [authoritativeViewportEndIndex, sessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     const becameActive = active && !wasActiveRef.current;

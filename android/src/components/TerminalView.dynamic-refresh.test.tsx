@@ -614,6 +614,80 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
+  it('keeps reading mode pinned when live buffer updates advance the same session head', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      viewportEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.viewportEndIndex).toBe(24);
+    });
+    expect(readRenderedRows(view.container)).toContain('row-024');
+    expect(readRenderedRows(view.container)).not.toContain('row-080');
+
+    const nextSession = makeSession({
+      revision: 2,
+      lines: buildRows(81),
+      viewportEndIndex: 81,
+    });
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={nextSession.id}
+          initialBufferLines={nextSession.buffer.lines}
+          bufferStartIndex={nextSession.buffer.startIndex}
+          bufferEndIndex={nextSession.buffer.endIndex}
+          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferGapRanges={nextSession.buffer.gapRanges}
+          cursorKeysApp={nextSession.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.viewportEndIndex).toBe(24);
+    });
+    expect(scroller.scrollTop).toBe(0);
+    expect(readRenderedRows(view.container)).toContain('row-024');
+    expect(readRenderedRows(view.container)).not.toContain('row-081');
+  });
+
   it('anchors reading scroll position when older history rows are prepended', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({

@@ -121,6 +121,7 @@
 - [2026-04-23] 当 `TerminalView` 里两个 effect 只是在分别守 `becameActive` 与 `viewportResetNonce` 这两种 follow reset 信号时，可以合并成一个 reset effect；前提是 session 切换时初始化 ref 的语义不变。
 - [2026-04-24] `TerminalView` 里若‘当前 viewport emit’与‘reading near-edge emit’只是同一渲染阶段里的两次 emit，可合并成一个 effect，前提是 `emitViewportState` 自身已有稳定的 dedupe key。
 - [2026-04-24] `TerminalView` 的 viewport refresh 调度若会被 layout/session 两类 effect 复用，就把 `sync + optional follow align` 收成单一动作，并在执行时再读取当前 reading/follow latch；不要让 scheduler callback 直接依赖 followMode，否则用户一滚动就会把无关 refresh effect 全部重新挂载。
+- [2026-04-24] `TerminalView` 的“session 初始化/重置”effect 不能依赖 `authoritativeViewportEndIndex` 这类 live head；它只能由 `sessionId` 或显式 `followResetToken` 驱动，否则 reading 态会在每次尾部推进时被误重置到 follow。
 - [2026-04-24] `ResizeObserver` 也是 viewport refresh 链的一部分，不要单独直连 `syncViewport()`；它应复用同一 `runViewportRefresh()` 动作，这样 real resize、layout nonce、session refresh、follow audit 才不会长成四套 refresh 口径。
 - [2026-04-24] `layout refresh` 与 `session refresh` 若最终都只是“判定是否触发 refresh + 选择 timeout”，可以合并成单一 trigger effect；但 `becameActive / sessionChanged / layoutChanged` 仍要显式保留，不能为了少一个 effect 抹掉触发来源。
 - [2026-04-24] 当 `TerminalView` 里剩下的 effect 已不再只是调度，而是承担 `prepend 历史后的 reading 锚定`、`当前帧 viewport signal` 这种状态语义时，先把 effect 内动作名字化，再让 effect 只做 trigger/state bridge；不要为了“继续减少 effect 数量”硬把状态语义揉坏。

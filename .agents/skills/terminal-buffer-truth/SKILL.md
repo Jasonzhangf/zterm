@@ -25,6 +25,7 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 5. **render / scroll 解耦**：`renderBottomIndex`、mode(follow/reading)、DOM scroll 是三个层次；`renderTopIndex` 只能由 bottom 派生；不能混在一个组件里靠副作用凑。
 5.1 **渲染前必须校验绝对行号连续**：当前 render window 若绝对行号不连续，禁止直接渲染 gap/错屏；应保持上一帧稳定画面并触发按绝对行号的补拉。
 6. **reading 退出条件只允许两个**：滚回底部，或用户输入。除此之外任何 live update 都不能把用户拉回底部。
+6.1 **renderer 的 follow reset 只能由 session/follow-reset 信号触发**：初始化/重置 effect 禁止依赖 `authoritativeViewportEndIndex` 这类 live head；否则 reading 态会在每次新尾行到达时被误判成 session reset，直接被拉回底部。
 7. **禁止补丁式修 TerminalView**：出现滚动/底部问题，先检查 ownership 是否错，不能继续叠加 projection、anchor、scroll hack。
 8. **follow 底部优先吃 daemon viewport 真相**：client 不得只用 `availableEndIndex - rows` 猜“到底”；必须优先使用 daemon 给出的 viewport 底部事实，必要时补 virtual bottom padding。
 8.1 **最后一屏先用底部指针对齐**：在 Android 当前收敛阶段，client 渲染窗口先以 daemon `viewportEndIndex` 作为唯一底部指针，再按本地 `viewportRows` 自底向上切一屏；不要同时依赖顶部指针和本地高度去双向凑。
