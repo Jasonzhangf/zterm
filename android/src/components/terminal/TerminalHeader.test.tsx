@@ -130,4 +130,31 @@ describe('TerminalHeader split pane menu', () => {
 
     expect(onOpenTabManager).toHaveBeenCalledTimes(1);
   });
+
+  it('opens tab manager on long press of a tab when split is not visible', () => {
+    vi.useFakeTimers();
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onOpenTabManager = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={onOpenTabManager}
+        onSwitchSession={vi.fn()}
+        onRenameSession={vi.fn()}
+      />,
+    );
+
+    const targetTab = screen.getByRole('button', { name: /tmux-s2/i });
+    fireEvent.mouseDown(targetTab);
+    act(() => {
+      vi.advanceTimersByTime(700);
+    });
+    fireEvent.click(targetTab);
+
+    expect(onOpenTabManager).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1092,7 +1092,7 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
-  it('only prefetches older history once per stationary top-edge reading position', async () => {
+  it('continues prefetching older history after prepend when the three-screen reading window still reaches the cache head', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 1,
@@ -1164,8 +1164,8 @@ describe('TerminalView minimal mirror render', () => {
 
     await waitFor(() => {
       const prefetchCalls = onViewportChange.mock.calls.filter(([, payload]) => payload?.prefetch);
-      expect(prefetchCalls.length).toBe(prefetchCountBeforePrepend);
-      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
+      expect(prefetchCalls.length).toBeGreaterThan(prefetchCountBeforePrepend);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
     });
   });
 

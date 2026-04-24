@@ -135,4 +135,35 @@ describe('TerminalView terminal themes', () => {
     expect(cellNode.style.background).toBe('transparent');
     expect(scroller.style.backgroundColor).toBe(hexToRgbString('#ffffff'));
   });
+
+  it('renders newly added Tabby-inspired theme presets', () => {
+    const cell = {
+      char: 'C'.codePointAt(0) || 67,
+      fg: 2,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    };
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-s3"
+          initialBufferLines={[[cell]]}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          active
+          fontSize={5}
+          themeId="tabby-encom"
+        />
+      </div>,
+    );
+
+    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+
+    expect(cellNode.style.color).toBe(hexToRgbString('#008b00'));
+    expect(scroller.style.backgroundColor).toBe(hexToRgbString('#000000'));
+  });
 });

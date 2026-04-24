@@ -47,6 +47,11 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     expect(screen.getByText('Dracula')).toBeTruthy();
+    expect(screen.getByText('ENCOM')).toBeTruthy();
+    expect(screen.getByText('Homebrew')).toBeTruthy();
+    expect(screen.getByText('Cobalt2')).toBeTruthy();
+    expect(screen.getByText('GitHub Light')).toBeTruthy();
+    expect(screen.getByText('Light Owl')).toBeTruthy();
     expect(screen.getByText('Solarized Dark')).toBeTruthy();
     expect(screen.getByText('Solarized Light')).toBeTruthy();
     expect(screen.getByText('Tokyo Night Storm')).toBeTruthy();
@@ -84,7 +89,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Gruvbox Dark'));
-    expect(onTerminalThemeChange).toHaveBeenCalledWith('gruvbox-dark');
+    fireEvent.click(screen.getByText('Cobalt2'));
+    expect(onTerminalThemeChange).toHaveBeenCalledWith('tabby-cobalt2');
   });
 });

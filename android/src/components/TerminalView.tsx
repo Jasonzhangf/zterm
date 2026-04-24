@@ -226,7 +226,8 @@ function collectTopPrefetchRanges(
     return [] as TerminalGapRange[];
   }
 
-  if (visibleWindowStartIndex > bufferStartIndex + viewportRows) {
+  const precheckStartIndex = Math.max(0, visibleWindowStartIndex - (viewportRows * 2));
+  if (precheckStartIndex >= bufferStartIndex) {
     return [] as TerminalGapRange[];
   }
 
@@ -381,7 +382,7 @@ export function TerminalView({
   const pendingFollowScrollTopRef = useRef<number | null>(null);
   const readingModeRef = useRef(false);
   const suppressProgrammaticScrollRef = useRef(false);
-  const topPrefetchRequestRef = useRef<{ anchorKey: string; requestedBufferStartIndex: number } | null>(null);
+  const topPrefetchRequestRef = useRef<{ requestedBufferStartIndex: number } | null>(null);
   const wasActiveRef = useRef(active);
   const lastAppliedFollowResetTokenRef = useRef(followResetToken);
   const previousRefreshActiveRef = useRef(active);
@@ -402,11 +403,10 @@ export function TerminalView({
   const [renderBottomIndex, setRenderBottomIndex] = useState(bufferTailAnchorEndIndex);
   const [, setScrollTop] = useState(0);
   const [readingMode, setReadingMode] = useState(false);
-  const [topPrefetchLoadingAnchorKey, setTopPrefetchLoadingAnchorKey] = useState<string | null>(null);
+  const [topPrefetchLoadingStartIndex, setTopPrefetchLoadingStartIndex] = useState<number | null>(null);
   const previousReadingAnchorMetricsRef = useRef({
     sessionId,
     bufferStartIndex,
-    bufferEndIndex: effectiveBufferEndIndex,
     viewportRows: DEFAULT_ROWS,
   });
 
@@ -467,13 +467,10 @@ export function TerminalView({
     visibleWindowStartIndex,
     viewportRows,
   ), [bufferStartIndex, effectiveBufferHeadStartIndex, viewportRows, visibleWindowStartIndex]);
-  const currentTopPrefetchAnchorKey = !followMode && topPrefetchRanges.length > 0
-    ? `${sessionId || 'none'}:${visibleWindowStartIndex}:${viewportRows}`
-    : null;
   const historyLoading = active
     && !followMode
-    && currentTopPrefetchAnchorKey !== null
-    && topPrefetchLoadingAnchorKey === currentTopPrefetchAnchorKey;
+    && topPrefetchRanges.length > 0
+    && topPrefetchLoadingStartIndex === bufferStartIndex;
 
   const visibleRows = useMemo(() => {
     const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean; viewportOffset: number }> = [];
@@ -699,10 +696,8 @@ export function TerminalView({
       return;
     }
 
-    const shouldRequestTopPrefetch = Boolean(
-      currentTopPrefetchAnchorKey
-      && topPrefetchRequestRef.current?.anchorKey !== currentTopPrefetchAnchorKey,
-    );
+    const shouldRequestTopPrefetch = topPrefetchRanges.length > 0
+      && topPrefetchRequestRef.current?.requestedBufferStartIndex !== bufferStartIndex;
     const missingRanges = [
       ...(shouldRequestTopPrefetch ? topPrefetchRanges : []),
       ...continuityCheck.missingRanges,
@@ -718,22 +713,19 @@ export function TerminalView({
       viewportEndIndex: effectiveRenderBottomIndex,
     });
 
-    if (shouldRequestTopPrefetch && currentTopPrefetchAnchorKey) {
+    if (shouldRequestTopPrefetch) {
       topPrefetchRequestRef.current = {
-        anchorKey: currentTopPrefetchAnchorKey,
         requestedBufferStartIndex: bufferStartIndex,
       };
-      setTopPrefetchLoadingAnchorKey(currentTopPrefetchAnchorKey);
+      setTopPrefetchLoadingStartIndex(bufferStartIndex);
     }
   }, [
     active,
     bufferStartIndex,
     continuityCheck.missingRanges,
-    currentTopPrefetchAnchorKey,
     effectiveRenderBottomIndex,
     emitRenderDemand,
     followMode,
-    topPrefetchLoadingAnchorKey,
     topPrefetchRanges,
   ]);
 
@@ -746,12 +738,10 @@ export function TerminalView({
     const previousAnchorMetrics = previousReadingAnchorMetricsRef.current;
     const anchorMetricsChanged = previousAnchorMetrics.sessionId !== sessionId
       || previousAnchorMetrics.bufferStartIndex !== bufferStartIndex
-      || previousAnchorMetrics.bufferEndIndex !== effectiveBufferEndIndex
       || previousAnchorMetrics.viewportRows !== viewportRows;
     previousReadingAnchorMetricsRef.current = {
       sessionId,
       bufferStartIndex,
-      bufferEndIndex: effectiveBufferEndIndex,
       viewportRows,
     };
 
@@ -865,7 +855,7 @@ export function TerminalView({
     setRenderBottomIndex(bufferTailAnchorEndIndex);
     setScrollTop(0);
     topPrefetchRequestRef.current = null;
-    setTopPrefetchLoadingAnchorKey(null);
+    setTopPrefetchLoadingStartIndex(null);
     lastReportedViewportRef.current = '';
     lastAppliedFollowResetTokenRef.current = followResetToken;
     previousRefreshSessionIdRef.current = sessionId;
@@ -907,8 +897,16 @@ export function TerminalView({
   useEffect(() => {
     const pendingTopPrefetch = topPrefetchRequestRef.current;
     if (!pendingTopPrefetch) {
-      if (topPrefetchLoadingAnchorKey && (!currentTopPrefetchAnchorKey || currentTopPrefetchAnchorKey !== topPrefetchLoadingAnchorKey)) {
-        setTopPrefetchLoadingAnchorKey(null);
+      if (
+        topPrefetchLoadingStartIndex !== null
+        && (
+          !active
+          || followMode
+          || topPrefetchRanges.length === 0
+          || bufferStartIndex !== topPrefetchLoadingStartIndex
+        )
+      ) {
+        setTopPrefetchLoadingStartIndex(null);
       }
       return;
     }
@@ -916,32 +914,26 @@ export function TerminalView({
     if (
       !active
       || followMode
-      || !currentTopPrefetchAnchorKey
-      || currentTopPrefetchAnchorKey !== pendingTopPrefetch.anchorKey
       || topPrefetchRanges.length === 0
     ) {
       topPrefetchRequestRef.current = null;
-      if (topPrefetchLoadingAnchorKey !== null) {
-        setTopPrefetchLoadingAnchorKey(null);
+      if (topPrefetchLoadingStartIndex !== null) {
+        setTopPrefetchLoadingStartIndex(null);
       }
       return;
     }
 
     if (bufferStartIndex !== pendingTopPrefetch.requestedBufferStartIndex) {
-      topPrefetchRequestRef.current = {
-        anchorKey: pendingTopPrefetch.anchorKey,
-        requestedBufferStartIndex: bufferStartIndex,
-      };
-      if (topPrefetchLoadingAnchorKey !== null) {
-        setTopPrefetchLoadingAnchorKey(null);
+      topPrefetchRequestRef.current = null;
+      if (topPrefetchLoadingStartIndex !== null) {
+        setTopPrefetchLoadingStartIndex(null);
       }
     }
   }, [
     active,
     bufferStartIndex,
-    currentTopPrefetchAnchorKey,
     followMode,
-    topPrefetchLoadingAnchorKey,
+    topPrefetchLoadingStartIndex,
     topPrefetchRanges.length,
   ]);
 

@@ -70,7 +70,12 @@ export function TerminalHeader({
     clearLongPress();
     longPressTriggeredRef.current = false;
     longPressTimerRef.current = window.setTimeout(() => {
-      openPaneMenu(sessionId);
+      longPressTriggeredRef.current = true;
+      if (splitVisible) {
+        setPaneMenuSessionId(sessionId);
+        return;
+      }
+      onOpenTabManager();
     }, LONG_PRESS_MS);
   };
 
@@ -244,7 +249,9 @@ export function TerminalHeader({
                     alignItems: 'center',
                     gap: '6px',
                   }}
-                  title="Tap: switch · Double tap: rename · Long press tab: pane menu · Two-finger tap current tab: move menu"
+                  title={splitVisible
+                    ? 'Tap: switch · Double tap: rename · Long press tab: pane menu · Two-finger tap current tab: move menu'
+                    : 'Tap: switch · Double tap: rename · Long press tab: tab manager'}
                 >
                   {splitVisible ? (
                     <span
