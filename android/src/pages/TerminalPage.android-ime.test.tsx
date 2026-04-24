@@ -108,7 +108,8 @@ function makeSession(id: string): Session {
       gapRanges: [],
       startIndex: 0,
       endIndex: 0,
-      viewportEndIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
       cols: 80,
       rows: 24,
       cursorKeysApp: false,
@@ -260,7 +261,7 @@ describe('TerminalPage Android IME bridge', () => {
 });
 
 describe('resolveKeyboardLiftPx', () => {
-  it('returns zero when the visual viewport is already resized and no bottom occlusion remains', () => {
+  it('keeps the reported keyboard lift when WebView does not expose viewport occlusion', () => {
     const originalInnerHeight = window.innerHeight;
     const originalVisualViewport = window.visualViewport;
 
@@ -276,7 +277,7 @@ describe('resolveKeyboardLiftPx', () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320)).toBe(0);
+    expect(resolveKeyboardLiftPx(320)).toBe(320);
 
     Object.defineProperty(window, 'innerHeight', {
       configurable: true,

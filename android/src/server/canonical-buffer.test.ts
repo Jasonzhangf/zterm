@@ -6,6 +6,7 @@ import {
   resolveCanonicalAvailableLineCount,
   resolveClientIncrementalPatchRange,
   resolveFollowTailSyncPlan,
+  resolveReadingMissingRanges,
   resolveReadingWindow,
   resolveIncrementalSyncRange,
   trimTrailingDefaultCells,
@@ -273,7 +274,76 @@ describe('resolveReadingWindow', () => {
   });
 });
 
+describe('resolveReadingMissingRanges', () => {
+  it('still backfills older reading history when revision is unchanged', () => {
+    expect(resolveReadingMissingRanges({
+      desiredStartIndex: 100,
+      desiredEndIndex: 172,
+      localStartIndex: 124,
+      localEndIndex: 172,
+      knownRevision: 8,
+      currentRevision: 8,
+      lastDeltaFromRevision: 7,
+      lastDeltaToRevision: 8,
+      deltaRange: {
+        startIndex: 160,
+        endIndex: 172,
+      },
+    })).toEqual([
+      {
+        startIndex: 100,
+        endIndex: 124,
+      },
+    ]);
+  });
+
+  it('merges reading gap repair with current revision delta when both are needed', () => {
+    expect(resolveReadingMissingRanges({
+      desiredStartIndex: 92,
+      desiredEndIndex: 164,
+      localStartIndex: 110,
+      localEndIndex: 150,
+      knownRevision: 4,
+      currentRevision: 5,
+      lastDeltaFromRevision: 4,
+      lastDeltaToRevision: 5,
+      deltaRange: {
+        startIndex: 148,
+        endIndex: 164,
+      },
+    })).toEqual([
+      {
+        startIndex: 92,
+        endIndex: 110,
+      },
+      {
+        startIndex: 148,
+        endIndex: 164,
+      },
+    ]);
+  });
+});
+
 describe('resolveFollowTailSyncPlan', () => {
+  it('returns null when the local tail window is already complete at the current revision', () => {
+    expect(resolveFollowTailSyncPlan({
+      knownRevision: 5,
+      currentRevision: 5,
+      lastDeltaFromRevision: 4,
+      lastDeltaToRevision: 5,
+      lastDeltaRange: {
+        startIndex: 198,
+        endIndex: 200,
+      },
+      bufferStartIndex: 120,
+      bufferEndIndex: 200,
+      localStartIndex: 188,
+      localEndIndex: 200,
+      viewportRows: 4,
+      cacheLines: 12,
+    })).toBeNull();
+  });
+
   it('sends only the changed delta when the local tail window is already complete', () => {
     expect(resolveFollowTailSyncPlan({
       knownRevision: 4,

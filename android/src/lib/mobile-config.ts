@@ -56,7 +56,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
   if (network.saveData || network.effectiveType === 'slow-2g' || network.effectiveType === '2g') {
     return {
       headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
-      minTailRefreshGapMs: 160,
+      minTailRefreshGapMs: 120,
       headStalePingMs: 520,
       readingSyncDelayMs: 72,
     };
@@ -65,7 +65,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
   if (network.effectiveType === '3g') {
     return {
       headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
-      minTailRefreshGapMs: 96,
+      minTailRefreshGapMs: 66,
       headStalePingMs: 320,
       readingSyncDelayMs: 48,
     };
@@ -73,7 +73,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
 
   return {
     headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
-    minTailRefreshGapMs: 48,
+    minTailRefreshGapMs: ACTIVE_HEAD_REFRESH_TICK_MS,
     headStalePingMs: 200,
     readingSyncDelayMs: 24,
   };

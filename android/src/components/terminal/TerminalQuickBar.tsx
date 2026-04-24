@@ -71,6 +71,10 @@ interface TerminalQuickBarProps {
   onSessionDraftChange?: (value: string) => void;
   onSessionDraftSend?: (value: string) => void;
   onOpenScheduleComposer?: (text: string) => void;
+  splitAvailable?: boolean;
+  splitVisible?: boolean;
+  onToggleSplitLayout?: () => void;
+  onCycleSplitPane?: () => void;
   onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
 }
@@ -638,6 +642,10 @@ export function TerminalQuickBar({
   onSessionDraftChange,
   onSessionDraftSend,
   onOpenScheduleComposer,
+  splitAvailable = false,
+  splitVisible = false,
+  onToggleSplitLayout,
+  onCycleSplitPane,
   onEditorDomFocusChange,
   onMeasuredHeightChange,
 }: TerminalQuickBarProps) {
@@ -2471,6 +2479,49 @@ export function TerminalQuickBar({
                   发送
                 </button>
               </div>
+
+              {splitAvailable && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleSplitLayout?.();
+                      setFloatingMenuOpen(false);
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: '40px',
+                      border: '1px solid rgba(113, 164, 255, 0.24)',
+                      borderRadius: '14px',
+                      backgroundColor: splitVisible ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
+                      color: splitVisible ? '#8db7ff' : '#fff',
+                      fontWeight: 800,
+                    }}
+                  >
+                    {splitVisible ? '关闭分屏' : '开启分屏'}
+                  </button>
+                  {splitVisible && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCycleSplitPane?.();
+                        setFloatingMenuOpen(false);
+                      }}
+                      style={{
+                        width: '110px',
+                        minHeight: '40px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '14px',
+                        backgroundColor: 'rgba(22, 28, 41, 0.92)',
+                        color: '#fff',
+                        fontWeight: 700,
+                      }}
+                    >
+                      切换副屏
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ display: 'flex', gap: '8px', flex: 1, minWidth: 0 }}>

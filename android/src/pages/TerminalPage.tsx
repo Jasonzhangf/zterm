@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { TerminalView } from '../components/TerminalView';
@@ -8,15 +8,18 @@ import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
+import { resolveLayoutProfile, type LayoutProfile } from '../../../packages/shared/src/layout/profile';
 import {
   STORAGE_KEYS,
   type PersistedOpenTab,
   type QuickAction,
   type SavedTabList,
   type Session,
+  type SessionDraftMap,
   type SessionScheduleState,
   type ScheduleJobDraft,
   type TerminalResizeHandler,
+  type TerminalSplitPaneId,
   type TerminalShortcutAction,
   type TerminalViewportChangeHandler,
 } from '../lib/types';
@@ -30,6 +33,7 @@ type VirtualKeyboardApi = {
 
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
+const SPLIT_AUTO_CLOSE_DROP_PX = 96;
 
 export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
   const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
@@ -50,10 +54,40 @@ export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
   const occludedBottom = Math.max(0, layoutViewportHeight - visibleViewportBottom);
 
   if (occludedBottom <= 0) {
-    return 0;
+    return safeReportedInset;
   }
 
   return Math.min(safeReportedInset, occludedBottom);
+}
+
+function resolveWindowWidth() {
+  if (typeof window === 'undefined') {
+    return 0;
+  }
+  const visualWidth = Math.round(window.visualViewport?.width || 0);
+  return Math.max(visualWidth, Math.round(window.innerWidth || 0));
+}
+
+function resolvePaneId(
+  assignments: Partial<Record<string, TerminalSplitPaneId>>,
+  sessionId: string | null | undefined,
+): TerminalSplitPaneId {
+  if (!sessionId) {
+    return 'primary';
+  }
+  return assignments[sessionId] === 'secondary' ? 'secondary' : 'primary';
+}
+
+function findFirstSessionForPane(
+  sessions: Session[],
+  assignments: Partial<Record<string, TerminalSplitPaneId>>,
+  paneId: TerminalSplitPaneId,
+  excludeSessionId?: string | null,
+) {
+  return sessions.find((session) => (
+    session.id !== excludeSessionId
+    && resolvePaneId(assignments, session.id) === paneId
+  )) || null;
 }
 
 interface TerminalPageProps {
@@ -71,14 +105,16 @@ interface TerminalPageProps {
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
-  onQuickActionInput?: (sequence: string) => void;
+  onQuickActionInput?: (sequence: string, sessionId?: string) => void;
   onQuickActionsChange?: (actions: QuickAction[]) => void;
   onShortcutActionsChange?: (actions: TerminalShortcutAction[]) => void;
   sessionDraft: string;
-  onSessionDraftChange?: (value: string) => void;
-  onSessionDraftSend?: (value: string) => void;
+  sessionDrafts?: SessionDraftMap;
+  onSessionDraftChange?: (value: string, sessionId?: string) => void;
+  onSessionDraftSend?: (value: string, sessionId?: string) => void;
   onLoadSavedTabList: (tabs: PersistedOpenTab[], activeSessionId?: string) => void;
   scheduleState?: SessionScheduleState | null;
+  scheduleStateBySessionId?: Record<string, SessionScheduleState | null | undefined>;
   onRequestScheduleList?: (sessionId: string) => void;
   onUpsertScheduleJob?: (sessionId: string, job: ScheduleJobDraft) => void;
   onDeleteScheduleJob?: (sessionId: string, jobId: string) => void;
@@ -199,10 +235,12 @@ export function TerminalPage({
   onQuickActionsChange,
   onShortcutActionsChange,
   sessionDraft,
+  sessionDrafts,
   onSessionDraftChange,
   onSessionDraftSend,
   onLoadSavedTabList,
   scheduleState,
+  scheduleStateBySessionId,
   onRequestScheduleList,
   onUpsertScheduleJob,
   onDeleteScheduleJob,
@@ -223,11 +261,17 @@ export function TerminalPage({
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(null);
+  const [splitPaneAssignments, setSplitPaneAssignments] = useState<Partial<Record<string, TerminalSplitPaneId>>>({});
+  const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
+  const splitOpenWidthRef = useRef(0);
+  const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
 
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
@@ -278,10 +322,149 @@ export function TerminalPage({
     ) as HTMLTextAreaElement | null;
   };
 
+  const splitAvailable = sessions.length > 1 && Boolean(activeSession);
+  const activePaneId = resolvePaneId(splitPaneAssignments, activeSession?.id);
+  const passivePaneId: TerminalSplitPaneId = activePaneId === 'primary' ? 'secondary' : 'primary';
+  const primaryPaneSession = activeSession && activePaneId === 'primary'
+    ? activeSession
+    : findFirstSessionForPane(sessions, splitPaneAssignments, 'primary', activeSession?.id);
+  const secondarySession = activeSession && activePaneId === 'secondary'
+    ? activeSession
+    : (
+      sessions.find((session) => (
+        session.id === splitSecondarySessionId
+        && session.id !== activeSession?.id
+        && resolvePaneId(splitPaneAssignments, session.id) === 'secondary'
+      ))
+        || findFirstSessionForPane(sessions, splitPaneAssignments, 'secondary', activeSession?.id)
+    );
+  const splitVisible = splitEnabled
+    && Boolean(primaryPaneSession && secondarySession && primaryPaneSession.id !== secondarySession.id);
+  const visiblePaneSessionIds = activeSession
+    ? splitVisible
+      ? [primaryPaneSession!.id, secondarySession!.id]
+      : [activeSession.id]
+    : [];
+  const activeDraft = activeSession?.id && sessionDrafts ? sessionDrafts[activeSession.id] || '' : sessionDraft;
+  const activeScheduleState = activeSession?.id && scheduleStateBySessionId
+    ? scheduleStateBySessionId[activeSession.id] || null
+    : scheduleState || null;
+
+  useEffect(() => {
+    setSplitPaneAssignments((current) => {
+      const next: Partial<Record<string, TerminalSplitPaneId>> = {};
+      let primaryCount = 0;
+      let secondaryCount = 0;
+
+      for (const session of sessions) {
+        const existing = current[session.id];
+        const paneId = existing
+          || (activeSession?.id === session.id
+            ? 'primary'
+            : secondaryCount === 0
+              ? 'secondary'
+              : primaryCount <= secondaryCount
+                ? 'primary'
+                : 'secondary');
+        next[session.id] = paneId;
+        if (paneId === 'secondary') {
+          secondaryCount += 1;
+        } else {
+          primaryCount += 1;
+        }
+      }
+
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(next);
+      if (
+        currentKeys.length === nextKeys.length
+        && nextKeys.every((key) => current[key] === next[key])
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [activeSession?.id, sessions]);
+
+  useEffect(() => {
+    if (!splitAvailable) {
+      setSplitEnabled(false);
+      setSplitSecondarySessionId(null);
+      return;
+    }
+    if (splitSecondarySessionId && splitSecondarySessionId !== activeSession?.id) {
+      return;
+    }
+    const nextSecondary = sessions.find((session) => (
+      session.id !== activeSession?.id
+      && resolvePaneId(splitPaneAssignments, session.id) === 'secondary'
+    )) || sessions.find((session) => session.id !== activeSession?.id) || null;
+    setSplitSecondarySessionId(nextSecondary?.id || null);
+  }, [activeSession?.id, sessions, splitAvailable, splitPaneAssignments, splitSecondarySessionId]);
+
+  useEffect(() => {
+    if (!splitEnabled || !splitAvailable || !activeSession) {
+      return;
+    }
+    setSplitPaneAssignments((current) => {
+      const activePane = resolvePaneId(current, activeSession.id);
+      const oppositePane: TerminalSplitPaneId = activePane === 'primary' ? 'secondary' : 'primary';
+      const hasOpposite = sessions.some((session) => (
+        session.id !== activeSession.id
+        && resolvePaneId(current, session.id) === oppositePane
+      ));
+      if (hasOpposite) {
+        return current;
+      }
+      const candidate = sessions.find((session) => session.id !== activeSession.id);
+      if (!candidate) {
+        return current;
+      }
+      return {
+        ...current,
+        [candidate.id]: oppositePane,
+      };
+    });
+  }, [activeSession, splitAvailable, splitEnabled, sessions]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const syncViewportWidth = () => {
+      setViewportWidth(resolveWindowWidth());
+    };
+
+    syncViewportWidth();
+    window.addEventListener('resize', syncViewportWidth);
+    window.visualViewport?.addEventListener('resize', syncViewportWidth);
+    return () => {
+      window.removeEventListener('resize', syncViewportWidth);
+      window.visualViewport?.removeEventListener('resize', syncViewportWidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!splitVisible) {
+      return;
+    }
+    if (splitOpenProfileRef.current === 'phone-single') {
+      return;
+    }
+    const currentProfile = resolveLayoutProfile({ width: viewportWidth }).profile;
+    if (
+      currentProfile === 'phone-single'
+      && viewportWidth + SPLIT_AUTO_CLOSE_DROP_PX < splitOpenWidthRef.current
+    ) {
+      setSplitEnabled(false);
+    }
+  }, [splitVisible, viewportWidth]);
+
   const focusTerminalInput = () => {
     setFocusNonce((value) => value + 1);
 
-    const input = querySessionInput(activeSession?.id);
+    const input = querySessionInput(activeSession?.id || null);
     if (!input) {
       return;
     }
@@ -340,7 +523,7 @@ export function TerminalPage({
           console.warn('[TerminalPage] Keyboard.hide() failed:', error);
         }
       }
-      const input = querySessionInput(activeSession?.id);
+      const input = querySessionInput(activeSession?.id || null);
       input?.blur();
       return;
     }
@@ -426,7 +609,7 @@ export function TerminalPage({
       return;
     }
 
-    const input = querySessionInput(activeSession?.id);
+    const input = querySessionInput(activeSession?.id || null);
     input?.blur();
   }, [activeSession?.id, isAndroid]);
 
@@ -481,7 +664,7 @@ export function TerminalPage({
         void backspaceListener.remove().catch(() => undefined);
       }
     };
-  }, [isAndroid, quickBarEditorFocused]);
+  }, [activeSession?.id, isAndroid, quickBarEditorFocused, sessions]);
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {
@@ -584,12 +767,15 @@ export function TerminalPage({
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
   const handleSwipeTab = (sessionId: string, direction: 'previous' | 'next') => {
-    const currentIndex = sessions.findIndex((session) => session.id === sessionId);
+    const paneScopedSessions = splitVisible
+      ? sessions.filter((session) => resolvePaneId(splitPaneAssignments, session.id) === activePaneId)
+      : sessions;
+    const currentIndex = paneScopedSessions.findIndex((session) => session.id === sessionId);
     if (currentIndex < 0) {
       return;
     }
     const targetIndex = direction === 'previous' ? currentIndex - 1 : currentIndex + 1;
-    const targetSession = sessions[targetIndex] || null;
+    const targetSession = paneScopedSessions[targetIndex] || null;
     if (!targetSession || targetSession.id === sessionId) {
       return;
     }
@@ -662,6 +848,108 @@ export function TerminalPage({
     }
   };
 
+  const cycleSecondaryPane = () => {
+    if (!activeSession) {
+      return;
+    }
+    const candidates = sessions.filter((session) => (
+      session.id !== activeSession.id
+      && resolvePaneId(splitPaneAssignments, session.id) === passivePaneId
+    ));
+    if (candidates.length === 0) {
+      return;
+    }
+    const currentIndex = candidates.findIndex((session) => session.id === secondarySession?.id);
+    const nextSession = candidates[(currentIndex + 1) % candidates.length] || candidates[0];
+    setSplitSecondarySessionId(nextSession.id);
+  };
+
+  const assignSessionToPane = (sessionId: string, paneId: TerminalSplitPaneId) => {
+    setSplitPaneAssignments((current) => {
+      if (current[sessionId] === paneId) {
+        return current;
+      }
+      const next = {
+        ...current,
+        [sessionId]: paneId,
+      };
+      if (splitEnabled && activeSession?.id === sessionId) {
+        const oppositePane: TerminalSplitPaneId = paneId === 'primary' ? 'secondary' : 'primary';
+        const hasOpposite = sessions.some((session) => (
+          session.id !== sessionId
+          && resolvePaneId(next, session.id) === oppositePane
+        ));
+        if (!hasOpposite) {
+          const candidate = sessions.find((session) => session.id !== sessionId);
+          if (candidate) {
+            next[candidate.id] = oppositePane;
+          }
+        }
+      }
+      return next;
+    });
+  };
+
+  const moveSessionToOtherPane = (sessionId: string) => {
+    const currentPane = resolvePaneId(splitPaneAssignments, sessionId);
+    assignSessionToPane(sessionId, currentPane === 'primary' ? 'secondary' : 'primary');
+  };
+
+  const toggleSplitLayout = () => {
+    if (!splitVisible) {
+      const currentWidth = resolveWindowWidth();
+      splitOpenWidthRef.current = currentWidth;
+      splitOpenProfileRef.current = resolveLayoutProfile({ width: currentWidth }).profile;
+      if (activeSession) {
+        const activePane = resolvePaneId(splitPaneAssignments, activeSession.id);
+        const oppositePane: TerminalSplitPaneId = activePane === 'primary' ? 'secondary' : 'primary';
+        const hasOpposite = sessions.some((session) => (
+          session.id !== activeSession.id
+          && resolvePaneId(splitPaneAssignments, session.id) === oppositePane
+        ));
+        if (!hasOpposite) {
+          const candidate = sessions.find((session) => session.id !== activeSession.id);
+          if (candidate) {
+            assignSessionToPane(candidate.id, oppositePane);
+            setSplitSecondarySessionId(candidate.id);
+          }
+        }
+      }
+      setSplitEnabled(true);
+      return;
+    }
+
+    setSplitEnabled(false);
+  };
+
+  const terminalPaneStyle = (paneSessionId: string): CSSProperties => {
+    if (!splitVisible) {
+      return {
+        position: 'absolute',
+        inset: 0,
+      };
+    }
+    const paneIndex = visiblePaneSessionIds.indexOf(paneSessionId);
+    if (paneIndex < 0) {
+      return {
+        position: 'absolute',
+        inset: 0,
+        visibility: 'hidden',
+        pointerEvents: 'none',
+      };
+    }
+    return {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: paneIndex === 0 ? 0 : '50%',
+      width: '50%',
+      paddingLeft: paneIndex === 0 ? 0 : '4px',
+      paddingRight: paneIndex === 0 ? '4px' : 0,
+      boxSizing: 'border-box',
+    };
+  };
+
   return (
     <div
       style={{
@@ -682,6 +970,10 @@ export function TerminalPage({
           onOpenTabManager={() => setTabManagerOpen(true)}
           onSwitchSession={onSwitchSession}
           onRenameSession={onRenameSession}
+          splitVisible={splitVisible}
+          sessionPaneAssignments={splitPaneAssignments}
+          onAssignSessionToPane={assignSessionToPane}
+          onMoveSessionToOtherPane={moveSessionToOtherPane}
         />
       </div>
       {networkBanner && (
@@ -740,16 +1032,20 @@ export function TerminalPage({
           >
             {activeSession ? (
               sessions.map((session) => {
-                const sessionActive = session.id === activeSession.id;
+                const sessionVisible = visiblePaneSessionIds.includes(session.id);
+                const sessionIsActive = session.id === activeSession?.id;
                 return (
                   <div
                     key={session.id}
                     style={{
-                      position: 'absolute',
-                      inset: 0,
-                      opacity: sessionActive ? 1 : 0,
-                      pointerEvents: sessionActive ? 'auto' : 'none',
-                      visibility: sessionActive ? 'visible' : 'hidden',
+                      ...terminalPaneStyle(session.id),
+                      opacity: sessionVisible ? 1 : 0,
+                      pointerEvents: sessionVisible && sessionIsActive ? 'auto' : 'none',
+                      visibility: sessionVisible ? 'visible' : 'hidden',
+                      borderRadius: splitVisible ? '12px' : undefined,
+                      outline: splitVisible && sessionIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
+                      outlineOffset: splitVisible && sessionIsActive ? '-2px' : undefined,
+                      overflow: 'hidden',
                     }}
                   >
                     <TerminalView
@@ -757,19 +1053,20 @@ export function TerminalPage({
                       initialBufferLines={session.buffer.lines}
                       bufferStartIndex={session.buffer.startIndex}
                       bufferEndIndex={session.buffer.endIndex}
-                      bufferViewportEndIndex={session.buffer.viewportEndIndex}
+                      bufferHeadStartIndex={session.buffer.bufferHeadStartIndex}
+                      bufferTailEndIndex={session.buffer.bufferTailEndIndex}
                       bufferGapRanges={session.buffer.gapRanges}
                       cursorKeysApp={session.buffer.cursorKeysApp}
-                      active={sessionActive}
-                      allowDomFocus={isAndroid ? false : sessionActive && terminalKeyboardRequested}
+                      active={sessionIsActive}
+                      allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
                       domInputOffscreen={isAndroid}
-                      onResize={onResize}
-                      onInput={onTerminalInput}
-                      onViewportChange={onTerminalViewportChange}
-                      onSwipeTab={handleSwipeTab}
-                      focusNonce={isAndroid ? 0 : sessionActive ? focusNonce : 0}
-                      followResetToken={session.followResetToken || 0}
-                      viewportLayoutNonce={sessionActive ? terminalViewportLayoutNonce : 0}
+                      onResize={sessionIsActive ? onResize : undefined}
+                      onInput={sessionIsActive ? onTerminalInput : undefined}
+                      onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
+                      onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
+                      focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
+                      followResetToken={sessionIsActive ? session.followResetToken || 0 : 0}
+                      viewportLayoutNonce={sessionIsActive ? terminalViewportLayoutNonce : 0}
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
                       themeId={terminalThemeId}
@@ -810,7 +1107,7 @@ export function TerminalPage({
             shortcutActions={shortcutActions}
             onMeasuredHeightChange={setQuickBarHeight}
             onSendSequence={(sequence) => {
-              onQuickActionInput?.(sequence);
+              onQuickActionInput?.(sequence, activeSession?.id);
               if (terminalKeyboardRequested || keyboardInset > 0) {
                 keepTerminalInputFocused();
               }
@@ -821,25 +1118,30 @@ export function TerminalPage({
             onToggleKeyboard={handleToggleKeyboard}
             onQuickActionsChange={onQuickActionsChange}
             onShortcutActionsChange={onShortcutActionsChange}
-            sessionDraft={sessionDraft}
-            onSessionDraftChange={onSessionDraftChange}
+            sessionDraft={activeDraft}
+            onSessionDraftChange={(value) => onSessionDraftChange?.(value, activeSession?.id)}
             onSessionDraftSend={(value) => {
-              onSessionDraftSend?.(value);
+              onSessionDraftSend?.(value, activeSession?.id);
               if (terminalKeyboardRequested || keyboardInset > 0) {
                 keepTerminalInputFocused();
               }
             }}
             onOpenScheduleComposer={(text) => {
-              if (!activeSession?.id) {
+              const targetSessionId = activeSession?.id;
+              if (!targetSessionId) {
                 return;
               }
-              onRequestScheduleList?.(activeSession.id);
+              onRequestScheduleList?.(targetSessionId);
               setScheduleComposerSeed({
                 nonce: Date.now(),
                 text,
               });
               setScheduleOpen(true);
             }}
+            splitAvailable={splitAvailable}
+            splitVisible={splitVisible}
+            onToggleSplitLayout={toggleSplitLayout}
+            onCycleSplitPane={cycleSecondaryPane}
             onEditorDomFocusChange={setQuickBarEditorFocused}
           />
         </div>
@@ -869,7 +1171,7 @@ export function TerminalPage({
         <SessionScheduleSheet
           open={scheduleOpen}
           sessionName={activeSession.sessionName}
-          scheduleState={scheduleState || { sessionName: activeSession.sessionName, jobs: [], loading: false }}
+          scheduleState={activeScheduleState || { sessionName: activeSession.sessionName, jobs: [], loading: false }}
           composerSeedText={scheduleComposerSeed.text}
           composerSeedNonce={scheduleComposerSeed.nonce}
           onClose={() => {

@@ -86,7 +86,7 @@ describe('TerminalView terminal themes', () => {
           initialBufferLines={[[cell]]}
           bufferStartIndex={0}
           bufferEndIndex={1}
-          bufferViewportEndIndex={1}
+          bufferTailEndIndex={1}
           active
           fontSize={5}
           themeId="gruvbox-dark"
@@ -120,7 +120,7 @@ describe('TerminalView terminal themes', () => {
           initialBufferLines={[[cell]]}
           bufferStartIndex={0}
           bufferEndIndex={1}
-          bufferViewportEndIndex={1}
+          bufferTailEndIndex={1}
           active
           fontSize={5}
           themeId="iterm2-light"

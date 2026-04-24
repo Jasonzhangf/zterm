@@ -26,6 +26,7 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 5.1 **渲染前必须校验绝对行号连续**：当前 render window 若绝对行号不连续，禁止直接渲染 gap/错屏；应保持上一帧稳定画面并触发按绝对行号的补拉。
 6. **reading 退出条件只允许两个**：滚回底部，或用户输入。除此之外任何 live update 都不能把用户拉回底部。
 6.1 **renderer 的 follow reset 只能由 session/follow-reset 信号触发**：初始化/重置 effect 禁止依赖 `authoritativeViewportEndIndex` 这类 live head；否则 reading 态会在每次新尾行到达时被误判成 session reset，直接被拉回底部。
+6.2 **“滚到底”要先信真实可滚容器，再信数学 bottom**：若 terminal DOM 容器本身可滚动，reading -> follow 的退出判定优先看 `scrollHeight - clientHeight - scrollTop <= 1`；只有 DOM 指标不可用/不可滚时，才 fallback 到本地 `maxScrollTop` 推导。否则恢复态/补历史后很容易出现“肉眼已到底，但状态机仍卡在 reading”。
 7. **禁止补丁式修 TerminalView**：出现滚动/底部问题，先检查 ownership 是否错，不能继续叠加 projection、anchor、scroll hack。
 8. **follow 底部优先吃 daemon viewport 真相**：client 不得只用 `availableEndIndex - rows` 猜“到底”；必须优先使用 daemon 给出的 viewport 底部事实，必要时补 virtual bottom padding。
 8.1 **最后一屏先用底部指针对齐**：在 Android 当前收敛阶段，client 渲染窗口先以 daemon `viewportEndIndex` 作为唯一底部指针，再按本地 `viewportRows` 自底向上切一屏；不要同时依赖顶部指针和本地高度去双向凑。
@@ -35,12 +36,16 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 8.4 **daemon mirror 也不要固化 top pointer state**：server 内部若只是为了算当前 viewport top，应按 `availableEndIndex - rows` 临时派生；不要把顶部指针再存成第二真源状态。
 8.5 **active live 增量优先只发 changed-range**：只要 client 已持有连续本地 mirror，daemon follow 增量就不要再把整屏 viewport 一起回传；否则会把“连续渲染”误做成“整屏重拉”，直接抬高带宽与输入期延迟。若连续性失真，再由 client 触发补拉。
 8.6 **active live 默认只追尾部**：active tab 的 16ms refresh 只校验/刷新当前显示尾屏；只有 reading 且本地连续区间断裂时，才允许向前预拉两屏高度。
+8.6.1 **follow 激活/切回时若本地尾窗仍有 gap，必须强制 bootstrap**：`localStart/localEnd` 只表示窗口包围盒，不代表窗内连续；若当前 follow 可见窗或尾部 cache window 仍有 gap/缺口，不能继续走 delta-aware follow request，否则 UI 会一直看到“加载历史/整屏 gap”直到下一次输入或新输出。
+8.6.2 **历史 loading 不能靠 `local start > 0` 猜**：client 若不知道 daemon authoritative head start，就会把“本地已到 daemon 头部但绝对行号仍 > 0”误判成还有历史，导致 loading 常驻；worker 必须单独维护 `bufferHeadStartIndex` 这类 daemon head truth，renderer 只据此决定是否继续 prefetch/loading。
 8.7 **follow 态不能因每次尾部推进就重复 request**：follow bottom 的 `viewportEndIndex` 应由 server payload 推进；client 只在 connect/switch/input/resize/reading 切换时更新 request，不能在每个 live frame 后再回发一次 sync request。
 8.8 **follow 去重 key 不能带动态 viewportEndIndex**：client 若在 follow 态用 `viewportEndIndex` 参与 request 去重，会把每次 live append 误判成‘viewport 变化’，直接退化成 16ms request 风暴。follow 去重只能绑定模式 + viewportRows / geometry。
 8.9 **reading 补拉只在两种信号下发生**：1) 用户滚动进入 reading；2) 当前可见窗或向前两屏预校验发现绝对行号缺口。follow 态禁止触发 prefetch；reading 靠近本地窗口上下边界时只更新 viewport request，不直接整窗重拉。
 8.10 **缓存顶部不是滚动上限**：当 reading 贴近当前缓存顶部时，3 屏只是 cache window，不是硬上限；client 要先预取前两屏并展示 loading，再继续向上滚，不能用固定三屏把滚动卡死。
+8.11 **remote bridge 禁止 bootstrap/snapshot 语义**：active/connect/switch/reconnect 都只能发基于 `knownRevision + local range + viewport` 的 range request；不得把本地 revision/window 清零去换“整窗快照”。
 9. **daemon 要有内存边界**：orphan mirror 必须可回收；capture/reconcile 里的 scratch runtime 不能每次 flush 新建。
-9.1 **daemon reconcile 不能自旋成风暴**：fallback reconcile 只能当 observer 丢通知时兜底，不能对常驻连接无脑高频抓 tmux；至少要区分 active subscribers，并对 quiet mirrors 设更长的最小 capture 间隔。
+9.1 **daemon capture 不能自旋成风暴**：mirror 刷新必须按 active/idle subscribers 聚合后的 cadence 调度；active 才允许高频，quiet/inactive mirror 必须长间隔，禁止再保留全局高频 reconcile 定时器。
+9.1.1 **不要再挂 tmux control-mode observer**：`tmux -CC attach-session ... read-only` 也会新增 tmux client / crash 面；mirror 刷新统一改成按 client active/idle cadence 的 demand-driven capture。
 9.2 **runtime debug 回传也必须限流**：client -> daemon 的 debug 日志只能走 bounded queue + 小批量定时 flush + payload 截断；观测链本身不能制造第二场日志风暴。
 10. **tmux status line 要做 viewport 补偿**：client 上报的是可见 pane 行数；若 tmux `status=on`，daemon 给 PTY/tmux 的总行数必须加上 status line 行数，否则会稳定少 1 行并导致 buffer/render 错位。
 10.1 **最后一屏 oracle 要抓当前可见 screen**：凡是校验 “last screen / viewport tail / 当前底部”，本地 oracle 与 daemon authoritative capture 都应优先使用 `capture-pane -M`（必要时再配合 `-e/-N`）；不只 `top` / `vim`，attached tmux 下普通 shell 也可能因为默认 `capture-pane` 偏向历史而把正确 mirror 误判成 blank。

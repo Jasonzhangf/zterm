@@ -47,7 +47,7 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.startIndex).toBe(190);
     expect(next.endIndex).toBe(210);
-    expect(next.viewportEndIndex).toBe(210);
+    expect(next.bufferTailEndIndex).toBe(210);
     expect(next.lines).toHaveLength(20);
     expect(next.gapRanges).toEqual([]);
   });
@@ -57,7 +57,7 @@ describe('terminal-buffer canonical mirror patching', () => {
       lines: ['a', 'b', 'c', 'd'],
       startIndex: 100,
       endIndex: 104,
-      viewportEndIndex: 104,
+      bufferTailEndIndex: 104,
       rows: 4,
       cols: 80,
       cacheLines: 3000,
@@ -85,7 +85,7 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.startIndex).toBe(101);
     expect(next.endIndex).toBe(107);
-    expect(next.viewportEndIndex).toBe(107);
+    expect(next.bufferTailEndIndex).toBe(107);
     expect(next.lines).toHaveLength(6);
     expect(next.gapRanges).toEqual([]);
     expect(String.fromCodePoint(next.lines[0][0].char)).toBe('b');
@@ -137,7 +137,7 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.startIndex).toBe(2);
     expect(next.endIndex).toBe(6);
-    expect(next.viewportEndIndex).toBe(6);
+    expect(next.bufferTailEndIndex).toBe(6);
     expect(next.lines.map(cellsToLine)).toEqual(['line-2', 'line-3', 'line-4', 'line-5']);
   });
 
@@ -348,7 +348,7 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.startIndex).toBe(180);
     expect(next.endIndex).toBe(192);
-    expect(next.viewportEndIndex).toBe(188);
+    expect(next.bufferTailEndIndex).toBe(188);
     expect(next.lines.map(cellsToLine)).toEqual([
       'line-180', 'line-181', 'line-182', 'line-183',
       'line-184', 'line-185', 'line-186', 'line-187',

@@ -57,7 +57,8 @@ export interface SessionBufferState {
   gapRanges: TerminalGapRange[];    // absolute missing spans inside [startIndex, endIndex)
   startIndex: number;               // absolute index for the first locally cached row
   endIndex: number;                 // exclusive absolute index for the last locally cached row
-  viewportEndIndex: number;         // exclusive absolute row index for viewport tail
+  bufferHeadStartIndex: number;     // authoritative available buffer head start on daemon
+  bufferTailEndIndex: number;       // exclusive absolute row index for local buffer tail / follow anchor
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
@@ -66,6 +67,7 @@ export interface SessionBufferState {
 }
 
 export type TerminalViewportMode = 'follow' | 'reading';
+export type TerminalSplitPaneId = 'primary' | 'secondary';
 
 export interface TerminalViewportState {
   mode: TerminalViewportMode;
@@ -123,6 +125,7 @@ export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;               // authoritative available window start on daemon
   endIndex: number;                 // authoritative available window end on daemon (exclusive)
+  availableStartIndex?: number;     // authoritative daemon buffer head start (independent from sparse payload window)
   viewportEndIndex: number;         // authoritative viewport end absolute row
   cols: number;
   rows: number;
@@ -166,6 +169,11 @@ export interface RuntimeDebugLogEntry {
   ts: string;
   scope: string;
   payload?: string;
+}
+
+export interface StreamModePayload {
+  mode: 'active' | 'idle';
+  minCaptureIntervalMs?: number;
 }
 
 // ============================================
@@ -260,6 +268,7 @@ export interface CommandHistory {
 
 export type ClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
+  | { type: 'stream-mode'; payload: StreamModePayload }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }

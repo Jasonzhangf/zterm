@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
@@ -36,7 +36,41 @@ vi.mock('../components/terminal/TabManagerSheet', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: () => <div data-testid="terminal-quickbar" />,
+  TerminalQuickBar: ({
+    activeSessionId,
+    sessionDraft,
+    onSendSequence,
+    onSessionDraftChange,
+    onSessionDraftSend,
+    splitAvailable,
+    splitVisible,
+    onToggleSplitLayout,
+    onCycleSplitPane,
+  }: {
+    activeSessionId?: string;
+    sessionDraft?: string;
+    onSendSequence?: (sequence: string) => void;
+    onSessionDraftChange?: (value: string) => void;
+    onSessionDraftSend?: (value: string) => void;
+    splitAvailable?: boolean;
+    splitVisible?: boolean;
+    onToggleSplitLayout?: () => void;
+    onCycleSplitPane?: () => void;
+  }) => (
+    <div
+      data-testid="terminal-quickbar"
+      data-active-session-id={activeSessionId || ''}
+      data-session-draft={sessionDraft || ''}
+      data-split-available={splitAvailable ? 'true' : 'false'}
+      data-split-visible={splitVisible ? 'true' : 'false'}
+    >
+      <button type="button" onClick={() => onSendSequence?.('quick-seq')}>send-quick</button>
+      <button type="button" onClick={() => onSessionDraftChange?.('draft-next')}>change-draft</button>
+      <button type="button" onClick={() => onSessionDraftSend?.('draft-send')}>send-draft</button>
+      <button type="button" onClick={() => onToggleSplitLayout?.()}>toggle-split</button>
+      <button type="button" onClick={() => onCycleSplitPane?.()}>cycle-split</button>
+    </div>
+  ),
 }));
 
 vi.mock('../components/TerminalView', () => ({
@@ -46,14 +80,23 @@ vi.mock('../components/TerminalView', () => ({
     onInput,
     onResize,
     onViewportChange,
+    onSwipeTab,
   }: {
     sessionId: string;
     active?: boolean;
     onInput?: (sessionId: string, data: string) => void;
     onResize?: TerminalResizeHandler;
     onViewportChange?: TerminalViewportChangeHandler;
+    onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
   }) => (
-    <div data-testid={`terminal-view-${sessionId}`} data-active={active ? 'true' : 'false'}>
+    <div
+      data-testid={`terminal-view-${sessionId}`}
+      data-active={active ? 'true' : 'false'}
+      data-has-oninput={onInput ? 'true' : 'false'}
+      data-has-onresize={onResize ? 'true' : 'false'}
+      data-has-onviewport={onViewportChange ? 'true' : 'false'}
+      data-has-onswipetab={onSwipeTab ? 'true' : 'false'}
+    >
       <button type="button" onClick={() => onInput?.(sessionId, `typed:${sessionId}`)}>
         input-{sessionId}
       </button>
@@ -90,7 +133,8 @@ function makeSession(id: string): Session {
       gapRanges: [],
       startIndex: 0,
       endIndex: 0,
-      viewportEndIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
       cols: 80,
       rows: 24,
       cursorKeysApp: false,
@@ -191,5 +235,118 @@ describe('TerminalPage tab isolation', () => {
       viewportEndIndex: 120,
       viewportRows: 24,
     });
+  });
+
+  it('enables manual split regardless of width and keeps non-render logic bound to the active session', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 520 });
+    window.dispatchEvent(new Event('resize'));
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onQuickActionInput = vi.fn();
+    const onSessionDraftChange = vi.fn();
+    const onSessionDraftSend = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        onQuickActionInput={onQuickActionInput}
+        sessionDraft="draft-s1"
+        sessionDrafts={{ s1: 'draft-s1', s2: 'draft-s2' }}
+        onSessionDraftChange={onSessionDraftChange}
+        onSessionDraftSend={onSessionDraftSend}
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-oninput')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-oninput')).toBe('false');
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-available')).toBe('true');
+
+    fireEvent.click(screen.getByText('toggle-split'));
+
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-oninput')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onresize')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onviewport')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onswipetab')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-oninput')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onresize')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onviewport')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onswipetab')).toBe('false');
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-active-session-id')).toBe('s1');
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-session-draft')).toBe('draft-s1');
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
+
+    fireEvent.click(screen.getByText('send-quick'));
+    fireEvent.click(screen.getByText('change-draft'));
+    fireEvent.click(screen.getByText('send-draft'));
+
+    expect(onQuickActionInput).toHaveBeenCalledWith('quick-seq', 's1');
+    expect(onSessionDraftChange).toHaveBeenCalledWith('draft-next', 's1');
+    expect(onSessionDraftSend).toHaveBeenCalledWith('draft-send', 's1');
+  });
+
+  it('auto closes split when width shrinks back from wide profile to single-column', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 1200,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    const sessions = [makeSession('s1'), makeSession('s2')];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('toggle-split'));
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 900,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    fireEvent(window, new Event('resize'));
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
   });
 });

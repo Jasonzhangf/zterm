@@ -44,14 +44,16 @@ function buildRows(count: number, prefix = 'row') {
 function makeSession(options: {
   revision: number;
   lines: string[];
-  viewportEndIndex: number;
+  bufferTailEndIndex: number;
   startIndex?: number;
+  bufferHeadStartIndex?: number;
 }) {
   const buffer = createSessionBufferState({
     lines: options.lines,
     startIndex: options.startIndex ?? 0,
     endIndex: (options.startIndex ?? 0) + options.lines.length,
-    viewportEndIndex: options.viewportEndIndex,
+    bufferHeadStartIndex: options.bufferHeadStartIndex,
+    bufferTailEndIndex: options.bufferTailEndIndex,
     rows: 24,
     cols: 80,
     revision: options.revision,
@@ -137,11 +139,11 @@ describe('TerminalView minimal mirror render', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders exactly one bottom screen from viewportEndIndex', async () => {
+  it('renders exactly one bottom screen from buffer tail anchor', async () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -151,7 +153,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -170,7 +172,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: ['line-001', 'line-002', 'prompt-$'],
-      viewportEndIndex: 3,
+      bufferTailEndIndex: 3,
     });
 
     const view = render(
@@ -180,7 +182,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -201,7 +203,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: ['stable-line-001', 'stable-line-002'],
-      viewportEndIndex: 2,
+      bufferTailEndIndex: 2,
     });
 
     const view = render(
@@ -211,7 +213,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -240,7 +242,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -250,7 +252,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -283,12 +285,59 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
+  it('returns to follow when the user scrolls back to the bottom', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.viewportEndIndex).toBe(24);
+    });
+
+    scroller.scrollTop = 952;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('follow');
+      expect(lastCall?.viewportEndIndex).toBe(80);
+    });
+  });
+
   it('emits reading viewport updates and renders gap markers when local buffer has holes', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 1,
       lines: buildRows(40),
-      viewportEndIndex: 40,
+      bufferTailEndIndex: 40,
     });
     session.buffer.lines[5] = [];
     session.buffer.gapRanges = [{ startIndex: 5, endIndex: 6 }];
@@ -300,7 +349,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -328,7 +377,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -338,7 +387,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -354,7 +403,7 @@ describe('TerminalView minimal mirror render', () => {
     const nextSession = makeSession({
       revision: 2,
       lines: buildRows(81),
-      viewportEndIndex: 81,
+      bufferTailEndIndex: 81,
     });
     nextSession.buffer.lines[70] = [];
     nextSession.buffer.gapRanges = [{ startIndex: 70, endIndex: 71 }];
@@ -366,7 +415,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={nextSession.buffer.lines}
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
-          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -385,7 +434,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(120),
-      viewportEndIndex: 120,
+      bufferTailEndIndex: 120,
     });
     session.buffer.lines[20] = [];
     session.buffer.lines[60] = [];
@@ -403,7 +452,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -423,7 +472,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -433,7 +482,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -463,7 +512,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active={false}
@@ -482,7 +531,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -506,7 +555,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -516,7 +565,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -547,7 +596,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -572,7 +621,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(120),
-      viewportEndIndex: 120,
+      bufferTailEndIndex: 120,
     });
 
     const view = render(
@@ -582,7 +631,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -619,7 +668,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -629,7 +678,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -656,7 +705,7 @@ describe('TerminalView minimal mirror render', () => {
     const nextSession = makeSession({
       revision: 2,
       lines: buildRows(81),
-      viewportEndIndex: 81,
+      bufferTailEndIndex: 81,
     });
 
     view.rerender(
@@ -666,7 +715,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={nextSession.buffer.lines}
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
-          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -693,7 +742,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 100,
+      bufferTailEndIndex: 100,
       startIndex: 20,
     });
 
@@ -704,7 +753,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -728,7 +777,7 @@ describe('TerminalView minimal mirror render', () => {
     const nextSession = makeSession({
       revision: 2,
       lines: buildRows(84, 'hist'),
-      viewportEndIndex: 100,
+      bufferTailEndIndex: 100,
       startIndex: 16,
     });
 
@@ -739,7 +788,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={nextSession.buffer.lines}
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
-          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -763,7 +812,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -773,7 +822,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -801,7 +850,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -811,7 +860,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -839,7 +888,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -849,7 +898,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -876,7 +925,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -886,7 +935,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -908,7 +957,7 @@ describe('TerminalView minimal mirror render', () => {
     const nextSession = makeSession({
       revision: 2,
       lines: buildRows(81),
-      viewportEndIndex: 81,
+      bufferTailEndIndex: 81,
     });
 
     view.rerender(
@@ -918,7 +967,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={nextSession.buffer.lines}
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
-          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -939,7 +988,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
 
     const view = render(
@@ -949,7 +998,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -971,7 +1020,7 @@ describe('TerminalView minimal mirror render', () => {
     const nextSession = makeSession({
       revision: 2,
       lines: buildRows(81),
-      viewportEndIndex: 81,
+      bufferTailEndIndex: 81,
     });
 
     view.rerender(
@@ -981,7 +1030,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={nextSession.buffer.lines}
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
-          bufferViewportEndIndex={nextSession.buffer.viewportEndIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -1003,7 +1052,8 @@ describe('TerminalView minimal mirror render', () => {
       revision: 1,
       lines: buildRows(80),
       startIndex: 20,
-      viewportEndIndex: 100,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 100,
     });
 
     const view = render(
@@ -1013,7 +1063,8 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferHeadStartIndex={session.buffer.bufferHeadStartIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -1030,12 +1081,140 @@ describe('TerminalView minimal mirror render', () => {
     fireEvent.scroll(scroller);
 
     await waitFor(() => {
+      const readingCalls = onViewportChange.mock.calls
+        .map(([, payload]) => payload)
+        .filter((payload) => payload?.mode === 'reading');
+      const prefetchCall = readingCalls.find((payload) => payload?.prefetch);
+      expect(prefetchCall).toBeTruthy();
+      expect(prefetchCall?.missingRanges?.length).toBeGreaterThan(0);
+      expect(prefetchCall?.missingRanges?.[0]?.endIndex).toBe(session.buffer.startIndex);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
+    });
+  });
+
+  it('only prefetches older history once per stationary top-edge reading position', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      startIndex: 20,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 100,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferHeadStartIndex={session.buffer.bufferHeadStartIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const prefetchCalls = onViewportChange.mock.calls.filter(([, payload]) => payload?.prefetch);
+      expect(prefetchCalls.length).toBeGreaterThan(0);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
+    });
+
+    const prefetchCountBeforePrepend = onViewportChange.mock.calls.filter(([, payload]) => payload?.prefetch).length;
+
+    const nextSession = makeSession({
+      revision: 2,
+      lines: buildRows(90),
+      startIndex: 10,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 100,
+    });
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={nextSession.id}
+          initialBufferLines={nextSession.buffer.lines}
+          bufferStartIndex={nextSession.buffer.startIndex}
+          bufferEndIndex={nextSession.buffer.endIndex}
+          bufferHeadStartIndex={nextSession.buffer.bufferHeadStartIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+          bufferGapRanges={nextSession.buffer.gapRanges}
+          cursorKeysApp={nextSession.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const prefetchCalls = onViewportChange.mock.calls.filter(([, payload]) => payload?.prefetch);
+      expect(prefetchCalls.length).toBe(prefetchCountBeforePrepend);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
+    });
+  });
+
+  it('enters reading on a slight upward drag near bottom and keeps the pixel scroll position', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 1360;
+      },
+    });
+
+    await waitFor(() => {
+      expect(scroller.scrollTop).toBe(952);
+    });
+
+    scroller.scrollTop = 944;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
       expect(lastCall?.mode).toBe('reading');
-      expect(lastCall?.prefetch).toBe(true);
-      expect(lastCall?.missingRanges?.length).toBeGreaterThan(0);
-      expect(lastCall?.missingRanges?.[0]?.endIndex).toBe(session.buffer.startIndex);
-      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
+      expect(scroller.scrollTop).toBe(944);
     });
   });
 
@@ -1045,7 +1224,7 @@ describe('TerminalView minimal mirror render', () => {
       const session = makeSession({
         revision: 1,
         lines: buildRows(80),
-        viewportEndIndex: 80,
+        bufferTailEndIndex: 80,
       });
 
       const view = render(
@@ -1055,7 +1234,7 @@ describe('TerminalView minimal mirror render', () => {
             initialBufferLines={session.buffer.lines}
             bufferStartIndex={session.buffer.startIndex}
             bufferEndIndex={session.buffer.endIndex}
-            bufferViewportEndIndex={session.buffer.viewportEndIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
             bufferGapRanges={session.buffer.gapRanges}
             cursorKeysApp={session.buffer.cursorKeysApp}
             active
@@ -1077,7 +1256,7 @@ describe('TerminalView minimal mirror render', () => {
       const nextSession81 = makeSession({
         revision: 2,
         lines: buildRows(81),
-        viewportEndIndex: 81,
+        bufferTailEndIndex: 81,
       });
       view.rerender(
         <div style={{ width: '640px', height: '408px' }}>
@@ -1086,7 +1265,7 @@ describe('TerminalView minimal mirror render', () => {
             initialBufferLines={nextSession81.buffer.lines}
             bufferStartIndex={nextSession81.buffer.startIndex}
             bufferEndIndex={nextSession81.buffer.endIndex}
-            bufferViewportEndIndex={nextSession81.buffer.viewportEndIndex}
+            bufferTailEndIndex={nextSession81.buffer.bufferTailEndIndex}
             bufferGapRanges={nextSession81.buffer.gapRanges}
             cursorKeysApp={nextSession81.buffer.cursorKeysApp}
             active
@@ -1100,7 +1279,7 @@ describe('TerminalView minimal mirror render', () => {
       const nextSession82 = makeSession({
         revision: 3,
         lines: buildRows(82),
-        viewportEndIndex: 82,
+        bufferTailEndIndex: 82,
       });
       view.rerender(
         <div style={{ width: '640px', height: '408px' }}>
@@ -1109,7 +1288,7 @@ describe('TerminalView minimal mirror render', () => {
             initialBufferLines={nextSession82.buffer.lines}
             bufferStartIndex={nextSession82.buffer.startIndex}
             bufferEndIndex={nextSession82.buffer.endIndex}
-            bufferViewportEndIndex={nextSession82.buffer.viewportEndIndex}
+            bufferTailEndIndex={nextSession82.buffer.bufferTailEndIndex}
             bufferGapRanges={nextSession82.buffer.gapRanges}
             cursorKeysApp={nextSession82.buffer.cursorKeysApp}
             active
@@ -1134,7 +1313,7 @@ describe('TerminalView minimal mirror render', () => {
     const session = makeSession({
       revision: 1,
       lines: buildRows(80),
-      viewportEndIndex: 80,
+      bufferTailEndIndex: 80,
     });
     session.buffer.lines[79] = [];
     session.buffer.gapRanges = [{ startIndex: 79, endIndex: 80 }];
@@ -1146,7 +1325,7 @@ describe('TerminalView minimal mirror render', () => {
           initialBufferLines={session.buffer.lines}
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
-          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active

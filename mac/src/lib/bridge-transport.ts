@@ -16,6 +16,8 @@ import {
 
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
+const DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS = 33;
+const IDLE_CAPTURE_INTERVAL_MS = 1000;
 
 export interface ActiveBridgeTargetState {
   name: string;
@@ -111,6 +113,7 @@ export function createBridgeTransportController(): BridgeTransportController {
   let heartbeatId: number | null = null;
   let lastPongAt = 0;
   let viewport = { cols: 80, rows: 24 };
+  let activityMode: BridgeStreamMode = 'active';
   const emit = () => {
     listeners.forEach((listener) => listener());
   };
@@ -163,7 +166,17 @@ export function createBridgeTransportController(): BridgeTransportController {
   };
 
   const setActivityMode = (mode: BridgeStreamMode) => {
-    void mode;
+    if (activityMode === mode) {
+      return;
+    }
+    activityMode = mode;
+    void sendMessage({
+      type: 'stream-mode',
+      payload: {
+        mode,
+        minCaptureIntervalMs: mode === 'active' ? DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS : IDLE_CAPTURE_INTERVAL_MS,
+      },
+    });
   };
 
   return {
@@ -211,6 +224,13 @@ export function createBridgeTransportController(): BridgeTransportController {
           if (token !== connectionToken) {
             return;
           }
+          void sendMessage({
+            type: 'stream-mode',
+            payload: {
+              mode: activityMode,
+              minCaptureIntervalMs: activityMode === 'active' ? DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS : IDLE_CAPTURE_INTERVAL_MS,
+            },
+          });
           clearHeartbeat();
           lastPongAt = Date.now();
           heartbeatId = window.setInterval(() => {

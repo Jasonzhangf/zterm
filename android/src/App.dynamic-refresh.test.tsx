@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEYS } from './lib/types';
 
@@ -44,6 +44,7 @@ const sessionHarness = vi.hoisted(() => {
   const resetSessionViewportToFollow = vi.fn(() => true);
   const createSession = vi.fn();
   const switchSession = vi.fn();
+  const moveSession = vi.fn();
 
   return {
     readState: () => state,
@@ -53,6 +54,7 @@ const sessionHarness = vi.hoisted(() => {
     resetSessionViewportToFollow,
     createSession,
     switchSession,
+    moveSession,
     update(next: typeof state, stale = staleActiveSession) {
       state = next;
       staleActiveSession = stale;
@@ -70,6 +72,7 @@ const sessionHarness = vi.hoisted(() => {
       resetSessionViewportToFollow.mockReturnValue(true);
       createSession.mockReset();
       switchSession.mockReset();
+      moveSession.mockReset();
     },
   };
 });
@@ -134,7 +137,7 @@ vi.mock('./contexts/SessionContext', () => ({
     createSession: sessionHarness.createSession,
     closeSession: vi.fn(),
     switchSession: sessionHarness.switchSession,
-    moveSession: vi.fn(),
+    moveSession: sessionHarness.moveSession,
     renameSession: vi.fn(),
     reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
@@ -223,8 +226,44 @@ vi.mock('./pages/SettingsPage', () => ({
 }));
 
 vi.mock('./pages/TerminalPage', () => ({
-  TerminalPage: ({ activeSession }: { activeSession: { buffer: { revision: number } } | null }) => (
-    <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
+  TerminalPage: ({
+    activeSession,
+    sessions,
+    onSwitchSession,
+    onMoveSession,
+  }: {
+    activeSession: { id: string; buffer: { revision: number } } | null;
+    sessions: Array<{ id: string }>;
+    onSwitchSession: (sessionId: string) => void;
+    onMoveSession: (sessionId: string, toIndex: number) => void;
+  }) => (
+    <div>
+      <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <button
+        type="button"
+        data-testid="switch-second-tab"
+        onClick={() => {
+          const target = sessions[1];
+          if (target) {
+            onSwitchSession(target.id);
+          }
+        }}
+      >
+        switch-second
+      </button>
+      <button
+        type="button"
+        data-testid="move-second-tab-first"
+        onClick={() => {
+          const target = sessions[1];
+          if (target) {
+            onMoveSession(target.id, 0);
+          }
+        }}
+      >
+        move-second-first
+      </button>
+    </div>
   ),
 }));
 
@@ -470,5 +509,73 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 'tab-b', activate: false }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
+  });
+
+  it('persists current open tabs and active tab automatically', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionId: 's2' }),
+      ]);
+    });
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+  });
+
+  it('persists active tab switch immediately from terminal UI intent', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('switch-second-tab'));
+
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+  });
+
+  it('persists manual tab reorder immediately from terminal UI intent', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('move-second-tab-first'));
+
+    expect(sessionHarness.moveSession).toHaveBeenCalledWith('s2', 0);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
   });
 });

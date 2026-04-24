@@ -341,7 +341,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(sentTypes).not.toContain('buffer-sync-request');
   });
 
-  it('does not send legacy stream-mode after the active session connects', async () => {
+  it('sends stream-mode after the active session connects', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -361,12 +361,17 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
 
     const sentMessages = readSentMessages(ws);
-    expect(
-      sentMessages.some((item) => item.type === 'stream-mode'),
-    ).toBe(false);
+    const streamModeMessage = sentMessages.find((item) => item.type === 'stream-mode');
+    expect(streamModeMessage).toMatchObject({
+      type: 'stream-mode',
+      payload: {
+        mode: 'active',
+      },
+    });
+    expect(typeof streamModeMessage?.payload?.minCaptureIntervalMs).toBe('number');
   });
 
-  it('does not send legacy stream-mode when switching active tabs', async () => {
+  it('updates stream-mode when switching active tabs', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -401,8 +406,18 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     const sent1 = readSentMessages(ws1);
     const sent2 = readSentMessages(ws2);
-    expect(sent1.some((item) => item.type === 'stream-mode')).toBe(false);
-    expect(sent2.some((item) => item.type === 'stream-mode')).toBe(false);
+    expect(sent1.find((item) => item.type === 'stream-mode')).toMatchObject({
+      type: 'stream-mode',
+      payload: {
+        mode: 'idle',
+      },
+    });
+    expect(sent2.find((item) => item.type === 'stream-mode')).toMatchObject({
+      type: 'stream-mode',
+      payload: {
+        mode: 'active',
+      },
+    });
   });
 
   it('does not schedule duplicate reading range requests for the same viewport state', async () => {
@@ -609,6 +624,98 @@ describe('SessionContext websocket dynamic refresh', () => {
     }, { timeout: 220 });
   });
 
+  it('keeps input tail refresh demand alive when an old buffer payload arrives first', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(['stable-line-001', 'stable-line-002'], 2, 1),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001'));
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('send-input'));
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(['stable-line-001', 'stable-line-002'], 2, 1),
+    });
+
+    await waitFor(() => {
+      const sentMessages = ws.sent
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item));
+      expect(sentMessages.filter((item) => item.type === 'buffer-sync-request').length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 220 });
+  });
+
+
+  it('keeps active tail refresh on follow semantics even when renderer is currently reading', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws"> 
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(
+        Array.from({ length: 120 }, (_, index) => `row-${String(index + 1).padStart(3, '0')}`),
+        120,
+        5,
+      ),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('5'));
+
+    fireEvent.click(screen.getByText('viewport-reading'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 6,
+        latestEndIndex: 121,
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      const lastRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(lastRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 5,
+        localStartIndex: 0,
+        localEndIndex: 120,
+        viewportEndIndex: 120,
+      });
+    });
+  });
+
   it('forces active reading mode back to follow when the user sends input', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -651,7 +758,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('ignores stale websocket buffer-sync revisions after a newer active snapshot already landed', async () => {
+  it('ignores stale websocket buffer-sync revisions after newer active buffer truth already landed', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -802,7 +909,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('keeps latest mirror truth across reconnect and rejects stale post-reconnect snapshots', async () => {
+  it('keeps latest mirror truth across reconnect and rejects stale post-reconnect buffer-sync payloads', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -844,12 +951,12 @@ describe('SessionContext websocket dynamic refresh', () => {
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item));
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-      const tailBootstrapRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
-      expect(tailBootstrapRequest?.payload).toMatchObject({
+      const tailRefreshRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(tailRefreshRequest?.payload).toMatchObject({
         mode: 'follow',
-        knownRevision: 0,
+        knownRevision: 6,
         localStartIndex: 0,
-        localEndIndex: 0,
+        localEndIndex: 2,
       });
     });
 
@@ -873,7 +980,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('forces a bootstrap and accepts lower remote revisions after daemon revision reset', async () => {
+  it('accepts lower remote revisions after daemon revision reset without forcing a snapshot request', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -911,9 +1018,9 @@ describe('SessionContext websocket dynamic refresh', () => {
       const sentMessages = readSentMessages(ws);
       const lastRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
       expect(lastRequest?.payload).toMatchObject({
-        knownRevision: 0,
+        knownRevision: 10,
         localStartIndex: 0,
-        localEndIndex: 0,
+        localEndIndex: 4,
         mode: 'follow',
       });
     });
@@ -1009,7 +1116,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('still bootstraps when switching to a connected tab without a local tail window', async () => {
+  it('requests normal follow sync when switching to a connected tab without local lines', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -1038,7 +1145,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('bootstraps when switching to a connected tab whose local buffer does not cover the visible follow window', async () => {
+  it('forces follow bootstrap when switching to a connected tab whose local buffer misses the visible follow window', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -1078,6 +1185,52 @@ describe('SessionContext websocket dynamic refresh', () => {
         knownRevision: 0,
         localStartIndex: 0,
         localEndIndex: 0,
+        viewportEndIndex: 80,
+      });
+    });
+  });
+
+  it('forces follow bootstrap when switching to a connected tab whose local tail window still has visible gaps', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+    ws2.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 56,
+        endIndex: 80,
+        viewportEndIndex: 80,
+        revision: 6,
+        lines: Array.from({ length: 10 }, (_, offset) => [70 + offset, `tail-${70 + offset}`]),
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-2-revision').textContent).toBe('6');
+      expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+    });
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(lastRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 0,
+        localStartIndex: 0,
+        localEndIndex: 0,
+        viewportEndIndex: 80,
       });
     });
   });

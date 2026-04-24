@@ -70,15 +70,15 @@ interface QuickPaletteItem {
 type ConnectionRequest =
   | {
       kind: 'local-tmux';
-      tabId: string;
+      resourceKey: string;
       sessionName: string;
-      signature: string;
+      connectSignature: string;
     }
   | {
       kind: 'connection';
-      tabId: string;
+      resourceKey: string;
       target: EditableHost;
-      signature: string;
+      connectSignature: string;
     };
 
 const MAX_PANES = 3;
@@ -150,14 +150,18 @@ function resolveLocalSessionName(tab: ShellWorkspaceTab | null | undefined) {
   return tab?.kind === 'local-tmux' ? tab.localSessionName?.trim() || '' : '';
 }
 
-function buildRemoteTabSignature(tabId: string, target: EditableHost) {
+function buildRemoteSessionResourceKey(target: EditableHost) {
   return JSON.stringify({
     kind: 'remote',
-    tabId,
-    name: target.name,
     bridgeHost: target.bridgeHost,
     bridgePort: target.bridgePort,
     sessionName: target.sessionName,
+  });
+}
+
+function buildRemoteConnectSignature(target: EditableHost) {
+  return JSON.stringify({
+    kind: 'remote',
     authToken: target.authToken || '',
     authType: target.authType,
     password: target.password || '',
@@ -166,12 +170,25 @@ function buildRemoteTabSignature(tabId: string, target: EditableHost) {
   });
 }
 
-function buildLocalTabSignature(tabId: string, sessionName: string) {
+function buildLocalSessionResourceKey(sessionName: string) {
   return JSON.stringify({
     kind: 'local-tmux',
-    tabId,
     sessionName,
   });
+}
+
+function resolveRuntimeResourceKey(tab: ShellWorkspaceTab | null | undefined, hosts: Host[]) {
+  if (!tab || tab.kind === 'empty') {
+    return null;
+  }
+
+  if (tab.kind === 'local-tmux') {
+    const localSessionName = resolveLocalSessionName(tab);
+    return localSessionName ? buildLocalSessionResourceKey(localSessionName) : null;
+  }
+
+  const target = resolveTabTarget(tab, hosts);
+  return target ? buildRemoteSessionResourceKey(target) : null;
 }
 
 async function fileToBase64(file: File) {
@@ -348,7 +365,7 @@ export function ShellWorkspace({
 }: ShellWorkspaceProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const runtimeRegistryRef = useRef(new Map<string, TerminalRuntimeController>());
-  const connectedTabSignaturesRef = useRef(new Map<string, string>());
+  const connectedResourceSignaturesRef = useRef(new Map<string, string>());
   const [workspace, setWorkspace] = useState<ShellWorkspaceState>(() => loadShellWorkspaceState());
   const [profiles, setProfiles] = useState<ShellProfileRecord[]>(() => loadShellProfiles());
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -399,20 +416,21 @@ export function ShellWorkspace({
     saveShellProfiles(profiles);
   }, [profiles]);
 
-  const getRuntimeForTab = useCallback((tabId: string) => {
-    const existing = runtimeRegistryRef.current.get(tabId);
+  const getRuntimeForResource = useCallback((resourceKey: string) => {
+    const existing = runtimeRegistryRef.current.get(resourceKey);
     if (existing) {
       return existing;
     }
     const created = createTerminalRuntime();
-    runtimeRegistryRef.current.set(tabId, created);
+    runtimeRegistryRef.current.set(resourceKey, created);
     return created;
   }, []);
 
   const activeTab = useMemo(() => resolveActiveTab(workspace), [workspace]);
   const activeTarget = useMemo(() => resolveTabTarget(activeTab, hosts), [activeTab, hosts]);
   const activeLocalSessionName = useMemo(() => resolveLocalSessionName(activeTab), [activeTab]);
-  const activeRuntime = activeTab && activeTab.kind !== 'empty' ? getRuntimeForTab(activeTab.id) : null;
+  const activeRuntimeResourceKey = useMemo(() => resolveRuntimeResourceKey(activeTab, hosts), [activeTab, hosts]);
+  const activeRuntime = activeRuntimeResourceKey ? getRuntimeForResource(activeRuntimeResourceKey) : null;
   const activeRuntimeSnapshot = useTerminalRuntimeSnapshot(activeRuntime);
   const activeBridgeRuntime = useMemo<TerminalConnectionState>(() => {
     if (activeTab?.kind === 'connection') {
@@ -421,7 +439,7 @@ export function ShellWorkspace({
     return createIdleConnectionState();
   }, [activeRuntimeSnapshot.connection, activeTab?.kind]);
   const connectionRequests = useMemo<ConnectionRequest[]>(() => {
-    const requests: ConnectionRequest[] = [];
+    const requestMap = new Map<string, ConnectionRequest>();
     workspace.panes.forEach((pane) => {
       pane.tabs.forEach((tab) => {
         if (tab.kind === 'empty') {
@@ -432,11 +450,11 @@ export function ShellWorkspace({
           if (!localSessionName) {
             return;
           }
-          requests.push({
+          requestMap.set(buildLocalSessionResourceKey(localSessionName), {
             kind: 'local-tmux',
-            tabId: tab.id,
+            resourceKey: buildLocalSessionResourceKey(localSessionName),
             sessionName: localSessionName,
-            signature: buildLocalTabSignature(tab.id, localSessionName),
+            connectSignature: buildLocalSessionResourceKey(localSessionName),
           });
           return;
         }
@@ -444,71 +462,74 @@ export function ShellWorkspace({
         if (!target) {
           return;
         }
-        requests.push({
+        requestMap.set(buildRemoteSessionResourceKey(target), {
           kind: 'connection',
-          tabId: tab.id,
+          resourceKey: buildRemoteSessionResourceKey(target),
           target,
-          signature: buildRemoteTabSignature(tab.id, target),
+          connectSignature: buildRemoteConnectSignature(target),
         });
       });
     });
-    return requests;
+    return [...requestMap.values()];
   }, [hosts, workspace]);
 
   useEffect(() => {
-    const activeRuntimeIds = new Set(
-      workspace.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind !== 'empty').map((tab) => tab.id)),
+    const activeResourceKeys = new Set(
+      workspace.panes
+        .flatMap((pane) => pane.tabs)
+        .map((tab) => resolveRuntimeResourceKey(tab, hosts))
+        .filter((resourceKey): resourceKey is string => Boolean(resourceKey)),
     );
 
-    runtimeRegistryRef.current.forEach((runtime, tabId) => {
-      if (!activeRuntimeIds.has(tabId)) {
+    runtimeRegistryRef.current.forEach((runtime, resourceKey) => {
+      if (!activeResourceKeys.has(resourceKey)) {
         runtime.dispose();
-        runtimeRegistryRef.current.delete(tabId);
-        connectedTabSignaturesRef.current.delete(tabId);
+        runtimeRegistryRef.current.delete(resourceKey);
+        connectedResourceSignaturesRef.current.delete(resourceKey);
       }
     });
-  }, [workspace]);
+  }, [hosts, workspace]);
 
   useEffect(() => {
-    workspace.panes.forEach((pane) => {
-      pane.tabs.forEach((tab) => {
-        if (tab.kind === 'empty') {
-          return;
-        }
-        const runtime = getRuntimeForTab(tab.id);
-        const isVisible = pane.activeTabId === tab.id;
-        runtime.setActivityMode(isVisible ? 'active' : 'idle');
-      });
+    const activeVisibleResourceKeys = new Set(
+      workspace.panes
+        .map((pane) => pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null)
+        .map((tab) => resolveRuntimeResourceKey(tab, hosts))
+        .filter((resourceKey): resourceKey is string => Boolean(resourceKey)),
+    );
+
+    runtimeRegistryRef.current.forEach((runtime, resourceKey) => {
+      runtime.setActivityMode(activeVisibleResourceKeys.has(resourceKey) ? 'active' : 'idle');
     });
-  }, [getRuntimeForTab, workspace]);
+  }, [hosts, workspace]);
 
   useEffect(() => {
-    const activeRequestIds = new Set<string>();
+    const activeRequestKeys = new Set<string>();
     connectionRequests.forEach((request) => {
-      activeRequestIds.add(request.tabId);
-      const previousSignature = connectedTabSignaturesRef.current.get(request.tabId);
-      if (previousSignature === request.signature) {
+      activeRequestKeys.add(request.resourceKey);
+      const previousSignature = connectedResourceSignaturesRef.current.get(request.resourceKey);
+      if (previousSignature === request.connectSignature) {
         return;
       }
-      const runtime = getRuntimeForTab(request.tabId);
+      const runtime = getRuntimeForResource(request.resourceKey);
       if (request.kind === 'local-tmux') {
         runtime.connectLocalTmux({ sessionName: request.sessionName, title: request.sessionName });
       } else {
         runtime.connectRemote(request.target);
       }
-      connectedTabSignaturesRef.current.set(request.tabId, request.signature);
+      connectedResourceSignaturesRef.current.set(request.resourceKey, request.connectSignature);
     });
-    connectedTabSignaturesRef.current.forEach((_signature, tabId) => {
-      if (!activeRequestIds.has(tabId)) {
-        connectedTabSignaturesRef.current.delete(tabId);
+    connectedResourceSignaturesRef.current.forEach((_signature, resourceKey) => {
+      if (!activeRequestKeys.has(resourceKey)) {
+        connectedResourceSignaturesRef.current.delete(resourceKey);
       }
     });
-  }, [connectionRequests, getRuntimeForTab]);
+  }, [connectionRequests, getRuntimeForResource]);
 
   useEffect(() => () => {
     runtimeRegistryRef.current.forEach((runtime) => runtime.dispose());
     runtimeRegistryRef.current.clear();
-    connectedTabSignaturesRef.current.clear();
+    connectedResourceSignaturesRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -1004,7 +1025,8 @@ export function ShellWorkspace({
             pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
           );
           const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
-          const paneRuntime = paneActiveTab.kind !== 'empty' ? getRuntimeForTab(paneActiveTab.id) : null;
+          const paneRuntimeResourceKey = resolveRuntimeResourceKey(paneActiveTab, hosts);
+          const paneRuntime = paneRuntimeResourceKey ? getRuntimeForResource(paneRuntimeResourceKey) : null;
 
           return (
             <Fragment key={pane.id}>
@@ -1012,7 +1034,8 @@ export function ShellWorkspace({
                 <div className="shell-pane-tabs">
                   <div className="shell-pane-tablist">
                     {pane.tabs.map((tab) => {
-                      const tabRuntime = tab.kind !== 'empty' ? getRuntimeForTab(tab.id) : null;
+                      const tabRuntimeResourceKey = resolveRuntimeResourceKey(tab, hosts);
+                      const tabRuntime = tabRuntimeResourceKey ? getRuntimeForResource(tabRuntimeResourceKey) : null;
                       return (
                         <div
                           className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}

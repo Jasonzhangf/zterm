@@ -171,7 +171,8 @@ function buildSessionBufferState(options: {
   lines: TerminalCell[][];
   gapRanges: TerminalGapRange[];
   startIndex: number;
-  viewportEndIndex: number;
+  bufferHeadStartIndex: number;
+  bufferTailEndIndex: number;
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
@@ -184,7 +185,7 @@ function buildSessionBufferState(options: {
     options.lines,
     options.gapRanges,
     options.cacheLines,
-    options.viewportEndIndex,
+    options.bufferTailEndIndex,
     options.rows,
   );
   const endIndex = trimmed.startIndex + trimmed.lines.length;
@@ -194,7 +195,8 @@ function buildSessionBufferState(options: {
     gapRanges: trimmed.gapRanges,
     startIndex: trimmed.startIndex,
     endIndex,
-    viewportEndIndex: Math.max(trimmed.startIndex, Math.min(endIndex, Math.floor(options.viewportEndIndex))),
+    bufferHeadStartIndex: Math.max(0, Math.min(trimmed.startIndex, Math.floor(options.bufferHeadStartIndex))),
+    bufferTailEndIndex: Math.max(trimmed.startIndex, Math.min(endIndex, Math.floor(options.bufferTailEndIndex))),
     cols: Math.max(1, Math.floor(options.cols || 80)),
     rows: Math.max(1, Math.floor(options.rows || 24)),
     cursorKeysApp: Boolean(options.cursorKeysApp),
@@ -207,7 +209,8 @@ export function createSessionBufferState(options: {
   lines?: Array<TerminalCell[] | string>;
   startIndex?: number;
   endIndex?: number;
-  viewportEndIndex?: number;
+  bufferHeadStartIndex?: number;
+  bufferTailEndIndex?: number;
   cols?: number;
   rows?: number;
   cursorKeysApp?: boolean;
@@ -227,7 +230,10 @@ export function createSessionBufferState(options: {
     lines,
     gapRanges: [],
     startIndex: effectiveStartIndex,
-    viewportEndIndex: Number.isFinite(options.viewportEndIndex) ? Math.floor(options.viewportEndIndex!) : requestedEndIndex,
+    bufferHeadStartIndex: Number.isFinite(options.bufferHeadStartIndex)
+      ? Math.floor(options.bufferHeadStartIndex!)
+      : effectiveStartIndex,
+    bufferTailEndIndex: Number.isFinite(options.bufferTailEndIndex) ? Math.floor(options.bufferTailEndIndex!) : requestedEndIndex,
     cols: options.cols || 80,
     rows: options.rows || 24,
     cursorKeysApp: Boolean(options.cursorKeysApp),
@@ -337,7 +343,8 @@ export function applyBufferSyncToSessionBuffer(
       lines: [],
       startIndex: 0,
       endIndex: 0,
-      viewportEndIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
       cols: payload.cols,
       rows: payload.rows,
       cursorKeysApp: payload.cursorKeysApp,
@@ -352,7 +359,10 @@ export function applyBufferSyncToSessionBuffer(
     lines: patched.lines,
     gapRanges: patched.gapRanges,
     startIndex: patched.startIndex,
-    viewportEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : sparseWindow.endIndex,
+    bufferHeadStartIndex: Number.isFinite(payload.availableStartIndex)
+      ? Math.floor(payload.availableStartIndex!)
+      : current?.bufferHeadStartIndex ?? sparseWindow.startIndex,
+    bufferTailEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : sparseWindow.endIndex,
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
@@ -377,7 +387,8 @@ export function sessionBuffersEqual(left: SessionBufferState, right: SessionBuff
   if (
     left.startIndex !== right.startIndex
     || left.endIndex !== right.endIndex
-    || left.viewportEndIndex !== right.viewportEndIndex
+    || left.bufferHeadStartIndex !== right.bufferHeadStartIndex
+    || left.bufferTailEndIndex !== right.bufferTailEndIndex
     || left.cols !== right.cols
     || left.rows !== right.rows
     || left.cursorKeysApp !== right.cursorKeysApp

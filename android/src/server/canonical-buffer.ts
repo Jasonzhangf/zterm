@@ -374,6 +374,60 @@ export function resolveReadingWindow(options: {
   };
 }
 
+export function resolveReadingMissingRanges(options: {
+  desiredStartIndex: number;
+  desiredEndIndex: number;
+  localStartIndex: number;
+  localEndIndex: number;
+  knownRevision: number;
+  currentRevision: number;
+  lastDeltaFromRevision: number;
+  lastDeltaToRevision: number;
+  deltaRange: { startIndex: number; endIndex: number } | null;
+}) {
+  const safeDesiredStart = Math.max(0, Math.floor(options.desiredStartIndex));
+  const safeDesiredEnd = Math.max(safeDesiredStart, Math.floor(options.desiredEndIndex));
+  if (safeDesiredEnd <= safeDesiredStart) {
+    return [] as Array<{ startIndex: number; endIndex: number }>;
+  }
+
+  const ranges: Array<{ startIndex: number; endIndex: number }> = [];
+  const safeLocalStart = Math.max(0, Math.floor(options.localStartIndex || 0));
+  const safeLocalEnd = Math.max(safeLocalStart, Math.floor(options.localEndIndex || safeLocalStart));
+
+  if (safeDesiredStart < safeLocalStart) {
+    ranges.push({
+      startIndex: safeDesiredStart,
+      endIndex: Math.min(safeDesiredEnd, safeLocalStart),
+    });
+  }
+  if (safeDesiredEnd > safeLocalEnd) {
+    ranges.push({
+      startIndex: Math.max(safeDesiredStart, safeLocalEnd),
+      endIndex: safeDesiredEnd,
+    });
+  }
+
+  const safeKnownRevision = Math.max(0, Math.floor(options.knownRevision || 0));
+  const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision || 0));
+  const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision || 0));
+  const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision || 0));
+  if (
+    options.deltaRange
+    && safeKnownRevision < safeCurrentRevision
+    && safeKnownRevision === safeDeltaFromRevision
+    && safeCurrentRevision === safeDeltaToRevision
+  ) {
+    const startIndex = Math.max(safeDesiredStart, Math.floor(options.deltaRange.startIndex || 0));
+    const endIndex = Math.min(safeDesiredEnd, Math.floor(options.deltaRange.endIndex || 0));
+    if (endIndex > startIndex) {
+      ranges.push({ startIndex, endIndex });
+    }
+  }
+
+  return mergeIndexedRanges(ranges);
+}
+
 export function resolveFollowTailSyncPlan(options: {
   knownRevision: number;
   currentRevision: number;
@@ -401,11 +455,15 @@ export function resolveFollowTailSyncPlan(options: {
   const safeLocalEnd = Math.max(safeLocalStart, Math.floor(options.localEndIndex || safeLocalStart));
   const localCoversTail = safeLocalStart <= windowStartIndex && safeLocalEnd >= windowEndIndex;
 
-  let deltaRange: { startIndex: number; endIndex: number } | null = null;
   const safeKnownRevision = Math.max(0, Math.floor(options.knownRevision || 0));
   const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision || 0));
   const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision || 0));
   const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision || 0));
+  if (localCoversTail && safeKnownRevision >= safeCurrentRevision) {
+    return null;
+  }
+
+  let deltaRange: { startIndex: number; endIndex: number } | null = null;
   if (
     options.lastDeltaRange
     && safeKnownRevision < safeCurrentRevision

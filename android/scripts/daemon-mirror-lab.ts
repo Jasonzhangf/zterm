@@ -309,7 +309,7 @@ function replayClientMirrorCompare(
   const renderWindow = deriveRenderRows({
     lines: buffer.lines,
     startIndex: buffer.startIndex,
-    viewportEndIndex: buffer.viewportEndIndex,
+    viewportEndIndex: buffer.bufferTailEndIndex,
     viewportRows: oracle.paneRows,
   });
 

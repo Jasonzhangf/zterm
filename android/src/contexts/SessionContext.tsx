@@ -14,7 +14,7 @@ import type {
   Session,
   SessionScheduleState,
   SessionBufferState,
-  TerminalViewportMode,
+  StreamModePayload,
   TerminalViewportState,
   SessionState,
   TerminalBufferPayload,
@@ -48,6 +48,7 @@ const CLIENT_PONG_TIMEOUT_MS = 70000;
 const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 const BUFFER_RENDER_COMMIT_INTERVAL_MS = 16;
 const ACTIVE_TAIL_REFRESH_ACK_TIMEOUT_MS = 400;
+const IDLE_SESSION_CAPTURE_INTERVAL_MS = 1000;
 
 function resolveInitialViewportSize(
   viewportMap: Map<string, { cols: number; rows: number }>,
@@ -88,6 +89,21 @@ function summarizeSessions(sessions: Session[]) {
     state: session.state,
     revision: session.buffer.revision,
   }));
+}
+
+function buildStreamModePayload(mode: 'active' | 'idle'): StreamModePayload {
+  if (mode === 'idle') {
+    return {
+      mode,
+      minCaptureIntervalMs: IDLE_SESSION_CAPTURE_INTERVAL_MS,
+    };
+  }
+
+  const cadence = resolveTerminalRefreshCadence();
+  return {
+    mode,
+    minCaptureIntervalMs: cadence.headTickMs,
+  };
 }
 
 interface SessionManagerState {
@@ -208,7 +224,7 @@ interface SessionContextValue {
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
   resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
-  updateSessionViewport: (sessionId: string, viewState: SessionSyncViewState) => void;
+  updateSessionViewport: (sessionId: string, renderDemand: SessionRenderDemandState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
@@ -259,7 +275,7 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
-type SessionSyncViewState = TerminalViewportState;
+type SessionRenderDemandState = TerminalViewportState;
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
@@ -364,35 +380,113 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
   };
 }
 
+function buildBaseBufferSyncRequestPayload(
+  session: Session,
+  viewportRows: number,
+  options?: { forceBootstrap?: boolean },
+): Pick<
+  BufferSyncRequestPayload,
+  'knownRevision' | 'localStartIndex' | 'localEndIndex' | 'viewportRows'
+> {
+  const forceBootstrap = Boolean(options?.forceBootstrap);
+  return {
+    knownRevision: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.revision || 0)),
+    localStartIndex: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.startIndex || 0)),
+    localEndIndex: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.endIndex || 0)),
+    viewportRows: Math.max(1, Math.floor(viewportRows || session.buffer.rows || 24)),
+  };
+}
+
+function normalizeReadingMissingRanges(renderDemand?: SessionRenderDemandState) {
+  if (renderDemand?.mode !== 'reading' || !Array.isArray(renderDemand.missingRanges) || renderDemand.missingRanges.length === 0) {
+    return undefined;
+  }
+  const missingRanges = renderDemand.missingRanges.map((range) => ({
+    startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+    endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+  })).filter((range) => range.endIndex > range.startIndex);
+  return missingRanges.length > 0 ? missingRanges : undefined;
+}
+
+function hasGapInAbsoluteWindow(
+  gapRanges: SessionBufferState['gapRanges'],
+  startIndex: number,
+  endIndex: number,
+) {
+  if (endIndex <= startIndex) {
+    return false;
+  }
+  return gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
+}
+
+function shouldBootstrapTailRefreshRequest(
+  session: Session,
+  renderDemand: SessionRenderDemandState,
+  cacheLines: number,
+) {
+  const followWindowEndIndex = Math.max(0, Math.floor(renderDemand.viewportEndIndex || 0));
+  const visibleWindowRows = Math.max(1, Math.floor(renderDemand.viewportRows || session.buffer.rows || 1));
+  const visibleWindowStartIndex = Math.max(0, followWindowEndIndex - visibleWindowRows);
+  const followCacheWindowStartIndex = Math.max(
+    0,
+    followWindowEndIndex - Math.max(1, Math.floor(cacheLines || 1)),
+  );
+  const missesVisibleFollowWindow = (
+    session.buffer.startIndex > visibleWindowStartIndex
+    || session.buffer.endIndex < followWindowEndIndex
+    || hasGapInAbsoluteWindow(session.buffer.gapRanges, visibleWindowStartIndex, followWindowEndIndex)
+  );
+
+  return (
+    session.buffer.revision <= 0
+    || session.buffer.endIndex <= session.buffer.startIndex
+    || session.buffer.lines.length === 0
+    || missesVisibleFollowWindow
+    || hasGapInAbsoluteWindow(session.buffer.gapRanges, followCacheWindowStartIndex, followWindowEndIndex)
+  );
+}
+
+function buildTailRefreshBufferSyncRequestPayload(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+  options?: { forceBootstrap?: boolean },
+): BufferSyncRequestPayload {
+  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || session.buffer.rows || 24));
+  return {
+    ...buildBaseBufferSyncRequestPayload(session, viewportRows, options),
+    viewportEndIndex: Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
+    mode: 'follow',
+  };
+}
+
+function buildReadingBufferSyncRequestPayload(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+): BufferSyncRequestPayload {
+  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || session.buffer.rows || 24));
+  const missingRanges = normalizeReadingMissingRanges(renderDemand);
+  return {
+    ...buildBaseBufferSyncRequestPayload(session, viewportRows),
+    viewportEndIndex: Math.max(0, Math.floor(renderDemand?.viewportEndIndex || session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
+    viewportRows,
+    mode: 'reading',
+    prefetch: Boolean(renderDemand?.prefetch && missingRanges && missingRanges.length > 0),
+    missingRanges,
+  };
+}
+
 function buildSessionBufferSyncRequestPayload(
   session: Session,
-  viewState?: SessionSyncViewState,
+  renderDemand?: SessionRenderDemandState,
   options?: {
+    purpose?: 'tail-refresh' | 'reading-repair';
     forceBootstrap?: boolean;
-    modeOverride?: TerminalViewportMode;
   },
 ): BufferSyncRequestPayload {
-  const resolvedViewportRows = Math.max(1, Math.floor(viewState?.viewportRows || session.buffer.rows || 24));
-  const resolvedMode: TerminalViewportMode = options?.modeOverride || (viewState?.mode === 'reading' ? 'reading' : 'follow');
-  const resolvedViewportEndIndex = resolvedMode === 'follow'
-    ? Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0))
-    : Math.max(0, Math.floor(viewState?.viewportEndIndex || session.buffer.viewportEndIndex || session.buffer.endIndex || 0));
-
-  return {
-    knownRevision: options?.forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.revision || 0)),
-    localStartIndex: options?.forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.startIndex || 0)),
-    localEndIndex: options?.forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.endIndex || 0)),
-    viewportEndIndex: resolvedViewportEndIndex,
-    viewportRows: resolvedViewportRows,
-    mode: resolvedMode,
-    prefetch: resolvedMode === 'reading' ? Boolean(viewState?.prefetch) : undefined,
-    missingRanges: resolvedMode === 'reading' && Array.isArray(viewState?.missingRanges) && viewState!.missingRanges.length > 0
-      ? viewState!.missingRanges.map((range) => ({
-          startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-          endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-        })).filter((range) => range.endIndex > range.startIndex)
-      : undefined,
-  };
+  const purpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
+  return purpose === 'reading-repair'
+    ? buildReadingBufferSyncRequestPayload(session, renderDemand)
+    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand, { forceBootstrap: options?.forceBootstrap });
 }
 
 function buildHostConfigMessage(
@@ -415,19 +509,19 @@ function buildHostConfigMessage(
   };
 }
 
-function buildFollowSessionSyncViewState(session: Session, previousViewState?: SessionSyncViewState): SessionSyncViewState {
+function buildFollowRenderDemandState(session: Session, previousRenderDemand?: SessionRenderDemandState): SessionRenderDemandState {
   return {
     mode: 'follow',
-    viewportRows: Math.max(1, Math.floor(previousViewState?.viewportRows || session.buffer.rows || 24)),
-    viewportEndIndex: Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0)),
+    viewportRows: Math.max(1, Math.floor(previousRenderDemand?.viewportRows || session.buffer.rows || 24)),
+    viewportEndIndex: Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
     prefetch: false,
     missingRanges: [],
   };
 }
 
-function normalizeSessionSyncViewState(viewState: SessionSyncViewState): SessionSyncViewState {
-  const missingRanges = Array.isArray(viewState.missingRanges)
-    ? viewState.missingRanges
+function normalizeSessionRenderDemandState(renderDemand: SessionRenderDemandState): SessionRenderDemandState {
+  const missingRanges = Array.isArray(renderDemand.missingRanges)
+    ? renderDemand.missingRanges
         .map((range) => ({
           startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
           endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
@@ -435,15 +529,15 @@ function normalizeSessionSyncViewState(viewState: SessionSyncViewState): Session
         .filter((range) => range.endIndex > range.startIndex)
     : [];
   return {
-    mode: viewState.mode === 'reading' ? 'reading' : 'follow',
-    viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
-    viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
-    prefetch: viewState.mode === 'reading' ? Boolean(viewState.prefetch && missingRanges.length > 0) : false,
-    missingRanges: viewState.mode === 'reading' ? missingRanges : [],
+    mode: renderDemand.mode === 'reading' ? 'reading' : 'follow',
+    viewportEndIndex: Math.max(0, Math.floor(renderDemand.viewportEndIndex || 0)),
+    viewportRows: Math.max(1, Math.floor(renderDemand.viewportRows || 1)),
+    prefetch: renderDemand.mode === 'reading' ? Boolean(renderDemand.prefetch && missingRanges.length > 0) : false,
+    missingRanges: renderDemand.mode === 'reading' ? missingRanges : [],
   };
 }
 
-function sessionSyncViewStatesEqual(left?: SessionSyncViewState, right?: SessionSyncViewState) {
+function renderDemandStatesEqual(left?: SessionRenderDemandState, right?: SessionRenderDemandState) {
   if (!left || !right) {
     return false;
   }
@@ -471,47 +565,6 @@ function sessionSyncViewStatesEqual(left?: SessionSyncViewState, right?: Session
   return true;
 }
 
-function hasGapInAbsoluteWindow(
-  gapRanges: SessionBufferState['gapRanges'],
-  startIndex: number,
-  endIndex: number,
-) {
-  if (endIndex <= startIndex) {
-    return false;
-  }
-  return gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
-}
-
-function shouldBootstrapFollowSyncRequest(
-  session: Session,
-  followViewState: SessionSyncViewState,
-  cacheLines: number,
-) {
-  const followWindowEndIndex = Math.max(0, Math.floor(followViewState.viewportEndIndex || 0));
-  const visibleWindowRows = Math.max(1, Math.floor(followViewState.viewportRows || session.buffer.rows || 1));
-  const visibleWindowStartIndex = Math.max(
-    0,
-    followWindowEndIndex - visibleWindowRows,
-  );
-  const followCacheWindowStartIndex = Math.max(
-    0,
-    followWindowEndIndex - Math.max(1, Math.floor(cacheLines || 1)),
-  );
-  const missesVisibleFollowWindow = (
-    session.buffer.startIndex > visibleWindowStartIndex
-    || session.buffer.endIndex < followWindowEndIndex
-    || hasGapInAbsoluteWindow(session.buffer.gapRanges, visibleWindowStartIndex, followWindowEndIndex)
-  );
-
-  return (
-    session.buffer.revision <= 0
-    || session.buffer.endIndex <= session.buffer.startIndex
-    || session.buffer.lines.length === 0
-    || missesVisibleFollowWindow
-    || hasGapInAbsoluteWindow(session.buffer.gapRanges, followCacheWindowStartIndex, followWindowEndIndex)
-  );
-}
-
 function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
   if (!activeSessionId) {
     return sessions;
@@ -535,7 +588,8 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const wsRefs = useRef<Map<string, WebSocket>>(new Map());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const queuedBufferSyncTimers = useRef<Map<string, number>>(new Map());
-  const sessionSyncViewRef = useRef<Map<string, SessionSyncViewState>>(new Map());
+  // renderer -> worker declarative demand only; never producer/tail truth
+  const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
@@ -552,6 +606,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const lastHeadStalePingAtRef = useRef<Map<string, number>>(new Map());
   const pendingTailRefreshAckTimersRef = useRef<Map<string, number>>(new Map());
   const pendingTailRefreshAckNonceRef = useRef<Map<string, number>>(new Map());
+  const lastStreamModeSignatureRef = useRef('');
   const armTailRefreshAckWatchdogRef = useRef<(sessionId: string) => void>(() => undefined);
 
   const resolveSessionCacheLines = useCallback((rows?: number | null) => {
@@ -592,7 +647,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       type: 'debug-log',
       payload: { entries },
     } satisfies ClientMessage));
-  }, []);
+  }, [resolveSessionCacheLines]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -743,6 +798,12 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       type: 'connect',
       payload: buildHostConfigMessage(options.host, sessionName, viewport),
     }));
+    options.ws.send(JSON.stringify({
+      type: 'stream-mode',
+      payload: buildStreamModePayload(
+        stateRef.current.activeSessionId === options.sessionId ? 'active' : 'idle',
+      ),
+    } satisfies ClientMessage));
     runtimeDebug(`session.ws.${options.debugScope}.connect-sent`, {
       sessionId: options.sessionId,
       viewport,
@@ -753,8 +814,9 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
   const requestSessionBufferSync = useCallback((sessionId: string, options?: {
     ws?: WebSocket | null;
-    forceBootstrap?: boolean;
     reason?: string;
+    purpose?: 'tail-refresh' | 'reading-repair';
+    forceBootstrap?: boolean;
   }) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId);
     const targetWs = options?.ws || wsRefs.current.get(sessionId);
@@ -762,31 +824,34 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return false;
     }
 
-    const revisionResetExpectation = sessionRevisionResetRef.current.get(sessionId) || null;
+    const renderDemand = sessionRenderDemandRef.current.get(sessionId);
     const forceBootstrap = Boolean(
       options?.forceBootstrap
       || (
-        revisionResetExpectation
-        && revisionResetExpectation.revision < Math.max(0, Math.floor(session.buffer.revision || 0))
-      ),
+        (options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh')) === 'tail-refresh'
+        && renderDemand
+        && shouldBootstrapTailRefreshRequest(
+          session,
+          renderDemand,
+          resolveSessionCacheLines(renderDemand.viewportRows),
+        )
+      )
     );
-
     const payload = buildSessionBufferSyncRequestPayload(
       session,
-      sessionSyncViewRef.current.get(sessionId),
-      forceBootstrap
-        ? {
-            forceBootstrap: true,
-            modeOverride: 'follow',
-          }
-        : undefined,
+      renderDemand,
+      {
+        purpose: options?.purpose,
+        forceBootstrap,
+      },
     );
 
     runtimeDebug(forceBootstrap ? 'session.buffer.bootstrap-request' : 'session.buffer.request', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
       reason: options?.reason || null,
-      revisionResetExpectation,
+      purpose: options?.purpose || null,
+      forceBootstrap,
       payload,
     });
     targetWs.send(JSON.stringify({
@@ -823,7 +888,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
 
     clearQueuedBufferSync(sessionId);
-    const requested = requestSessionBufferSync(sessionId, { ws, reason });
+    const requested = requestSessionBufferSync(sessionId, {
+      ws,
+      reason,
+      purpose: 'tail-refresh',
+    });
     if (!requested) {
       return false;
     }
@@ -868,7 +937,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
             lines: [],
             startIndex: 0,
             endIndex: 0,
-            viewportEndIndex: 0,
+            bufferTailEndIndex: 0,
             cols: lowerRevisionPayload.cols,
             rows: lowerRevisionPayload.rows,
             cursorKeysApp: lowerRevisionPayload.cursorKeysApp,
@@ -974,7 +1043,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     clearPendingIncomingBuffer(sessionId);
     clearPendingTailRefreshAck(sessionId);
     clearTailRefreshRuntime(sessionId);
-    sessionSyncViewRef.current.delete(sessionId);
+    sessionRenderDemandRef.current.delete(sessionId);
   }, [clearHeartbeat, clearPendingIncomingBuffer, clearPendingTailRefreshAck, clearQueuedBufferSync, clearTailRefreshRuntime]);
 
   const drainReconnectBucket = useCallback((hostKey: string) => {
@@ -1501,6 +1570,18 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
   }, []);
 
+  const sendSessionStreamMode = useCallback((sessionId: string, mode: 'active' | 'idle', wsOverride?: WebSocket | null) => {
+    const ws = wsOverride || wsRefs.current.get(sessionId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    ws.send(JSON.stringify({
+      type: 'stream-mode',
+      payload: buildStreamModePayload(mode),
+    } satisfies ClientMessage));
+    return true;
+  }, []);
+
   const requestScheduleList = useCallback((sessionId: string) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
     if (!session) {
@@ -1602,7 +1683,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       latestEndIndex,
       localRevision,
       localEndIndex,
-      viewState: sessionSyncViewRef.current.get(sessionId) || null,
+      renderDemand: sessionRenderDemandRef.current.get(sessionId) || null,
     });
     markTailRefreshDemand(sessionId, 'active-head-refresh');
     requestActiveTailRefresh(sessionId, 'active-head-refresh');
@@ -1622,7 +1703,19 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         break;
       case 'buffer-sync':
         clearPendingTailRefreshAck(options.sessionId);
-        pendingTailRefreshDemandRef.current.delete(options.sessionId);
+        {
+          const currentSession = stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
+          const localRevision = Math.max(0, Math.floor(currentSession?.buffer.revision || 0));
+          const localEndIndex = Math.max(0, Math.floor(currentSession?.buffer.endIndex || 0));
+          const incomingRevision = Math.max(0, Math.floor(msg.payload.revision || 0));
+          const incomingEndIndex = Math.max(0, Math.floor(msg.payload.endIndex || 0));
+          if (
+            incomingRevision > localRevision
+            || (incomingRevision === localRevision && incomingEndIndex > localEndIndex)
+          ) {
+            pendingTailRefreshDemandRef.current.delete(options.sessionId);
+          }
+        }
         runtimeDebug(`session.ws.${options.debugScope}.buffer-sync`, {
           sessionId: options.sessionId,
           payload: summarizeBufferPayload(msg.payload),
@@ -1706,8 +1799,8 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     if (isActive) {
       requestSessionBufferSync(options.sessionId, {
         ws: options.ws,
-        forceBootstrap: true,
         reason: options.bootstrapReason,
+        purpose: 'tail-refresh',
       });
       options.ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
       armTailRefreshAckWatchdogRef.current(options.sessionId);
@@ -1755,18 +1848,18 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return false;
     }
 
-    const followViewState = buildFollowSessionSyncViewState(
+    const followRenderDemand = buildFollowRenderDemandState(
       session,
-      sessionSyncViewRef.current.get(sessionId),
+      sessionRenderDemandRef.current.get(sessionId),
     );
-    sessionSyncViewRef.current.set(sessionId, followViewState);
+    sessionRenderDemandRef.current.set(sessionId, followRenderDemand);
 
     const isActive = stateRef.current.activeSessionId === sessionId;
     clearQueuedBufferSync(sessionId);
     runtimeDebug('session.buffer.follow-reset', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
-      viewportRows: followViewState.viewportRows,
+      viewportRows: followRenderDemand.viewportRows,
       isActive,
       localRevision: session.buffer.revision,
       localStartIndex: session.buffer.startIndex,
@@ -1780,78 +1873,86 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
           followResetToken: (session.followResetToken || 0) + 1,
         },
       });
-      const shouldBootstrap = shouldBootstrapFollowSyncRequest(
-        session,
-        followViewState,
-        resolveSessionCacheLines(followViewState.viewportRows),
-      );
-      if (shouldBootstrap) {
-        requestSessionBufferSync(sessionId, {
-          ws,
-          forceBootstrap: true,
-          reason: 'follow-reset-bootstrap',
-        });
-      } else {
-        requestSessionBufferSync(sessionId, {
-          ws,
-          reason: 'follow-reset',
-        });
-      }
+      requestSessionBufferSync(sessionId, {
+        ws,
+        reason: 'follow-reset',
+        purpose: 'tail-refresh',
+      });
       ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
       armTailRefreshAckWatchdog(sessionId);
     }
     return true;
-  }, [armTailRefreshAckWatchdog, clearQueuedBufferSync, requestSessionBufferSync, resolveSessionCacheLines]);
+  }, [armTailRefreshAckWatchdog, clearQueuedBufferSync, requestSessionBufferSync]);
 
-  const scheduleBufferSyncRequest = useCallback((sessionId: string, options?: {
+  const scheduleReadingRepairRequest = useCallback((sessionId: string, options?: {
     delayMs?: number;
     reason?: string;
   }) => {
     clearQueuedBufferSync(sessionId);
     const timer = window.setTimeout(() => {
       queuedBufferSyncTimers.current.delete(sessionId);
-      requestSessionBufferSync(sessionId, { reason: options?.reason || 'scheduled-reading-sync' });
+      requestSessionBufferSync(sessionId, {
+        reason: options?.reason || 'scheduled-reading-sync',
+        purpose: 'reading-repair',
+      });
     }, Math.max(0, options?.delayMs ?? 0));
     queuedBufferSyncTimers.current.set(sessionId, timer);
   }, [clearQueuedBufferSync, requestSessionBufferSync]);
 
-  const applyActiveSessionViewportDemand = useCallback((sessionId: string, viewState: SessionSyncViewState) => {
-    if (viewState.mode === 'reading') {
+  const applyActiveSessionRenderDemand = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
+    if (renderDemand.mode === 'reading') {
       const cadence = resolveTerminalRefreshCadence();
-      scheduleBufferSyncRequest(sessionId, {
+      scheduleReadingRepairRequest(sessionId, {
         delayMs: cadence.readingSyncDelayMs,
         reason: 'scheduled-reading-sync',
       });
       return;
     }
     clearQueuedBufferSync(sessionId);
-  }, [clearQueuedBufferSync, scheduleBufferSyncRequest]);
+  }, [clearQueuedBufferSync, scheduleReadingRepairRequest]);
 
-  const updateSessionViewport = useCallback((sessionId: string, viewState: SessionSyncViewState) => {
-    const normalized = normalizeSessionSyncViewState(viewState);
-    const previous = sessionSyncViewRef.current.get(sessionId);
-    if (sessionSyncViewStatesEqual(previous, normalized)) {
+  const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
+    const normalized = normalizeSessionRenderDemandState(renderDemand);
+    const previous = sessionRenderDemandRef.current.get(sessionId);
+    if (renderDemandStatesEqual(previous, normalized)) {
       return;
     }
-    sessionSyncViewRef.current.set(sessionId, normalized);
+    sessionRenderDemandRef.current.set(sessionId, normalized);
     if (stateRef.current.activeSessionId !== sessionId) {
       return;
     }
-    applyActiveSessionViewportDemand(sessionId, normalized);
-  }, [applyActiveSessionViewportDemand]);
+    applyActiveSessionRenderDemand(sessionId, normalized);
+  }, [applyActiveSessionRenderDemand]);
+
+  useEffect(() => {
+    const signature = JSON.stringify({
+      activeSessionId: state.activeSessionId,
+      sessionIds: state.sessions.map((session) => session.id),
+    });
+    if (lastStreamModeSignatureRef.current === signature) {
+      return;
+    }
+    lastStreamModeSignatureRef.current = signature;
+    for (const session of state.sessions) {
+      sendSessionStreamMode(
+        session.id,
+        state.activeSessionId === session.id ? 'active' : 'idle',
+      );
+    }
+  }, [sendSessionStreamMode, state.activeSessionId, state.sessions]);
 
   const exitReadingOnUserInput = useCallback((sessionId: string, session: Session) => {
     if (stateRef.current.activeSessionId !== sessionId) {
       return false;
     }
 
-    const previousViewState = sessionSyncViewRef.current.get(sessionId);
-    if (!previousViewState || previousViewState.mode !== 'reading') {
+    const previousRenderDemand = sessionRenderDemandRef.current.get(sessionId);
+    if (!previousRenderDemand || previousRenderDemand.mode !== 'reading') {
       return false;
     }
 
-    const followViewState = buildFollowSessionSyncViewState(session, previousViewState);
-    sessionSyncViewRef.current.set(sessionId, followViewState);
+    const followRenderDemand = buildFollowRenderDemandState(session, previousRenderDemand);
+    sessionRenderDemandRef.current.set(sessionId, followRenderDemand);
     clearQueuedBufferSync(sessionId);
     dispatch({
       type: 'UPDATE_SESSION',
@@ -1863,8 +1964,8 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     runtimeDebug('session.buffer.input-follow-reset', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
-      previousViewState,
-      nextViewState: followViewState,
+      previousRenderDemand,
+      nextRenderDemand: followRenderDemand,
       localRevision: session.buffer.revision,
       localStartIndex: session.buffer.startIndex,
       localEndIndex: session.buffer.endIndex,
@@ -1883,9 +1984,9 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     lastActivatedSessionIdRef.current = state.activeSessionId;
     const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
     if (activeSession) {
-      sessionSyncViewRef.current.set(
+      sessionRenderDemandRef.current.set(
         state.activeSessionId,
-        buildFollowSessionSyncViewState(activeSession, sessionSyncViewRef.current.get(state.activeSessionId)),
+        buildFollowRenderDemandState(activeSession, sessionRenderDemandRef.current.get(state.activeSessionId)),
       );
     }
     const currentActiveSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
@@ -1893,11 +1994,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       resetSessionViewportToFollow(state.activeSessionId);
       return;
     }
-    scheduleBufferSyncRequest(state.activeSessionId, {
+    scheduleReadingRepairRequest(state.activeSessionId, {
       delayMs: 0,
       reason: 'active-session-sync',
     });
-  }, [resetSessionViewportToFollow, scheduleBufferSyncRequest, state.activeSessionId, state.sessions]);
+  }, [resetSessionViewportToFollow, scheduleReadingRepairRequest, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
