@@ -368,6 +368,51 @@ describe('TerminalQuickBar', () => {
     });
   });
 
+  it('allows renaming existing shortcut from explicit edit action', async () => {
+    const onShortcutActionsChange = vi.fn();
+
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-copy',
+          label: 'Ctrl + C',
+          sequence: '\u0003',
+          order: 0,
+          row: 'bottom-scroll',
+        },
+      ],
+      onShortcutActionsChange,
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Ctrl + C' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('编辑快捷键')).not.toBeNull();
+      expect((screen.getByPlaceholderText('快捷键名称 / 显示名称') as HTMLInputElement).value).toBe('Ctrl + C');
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('快捷键名称 / 显示名称'), {
+      target: { value: '复制当前行' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存快捷键' }));
+
+    await waitFor(() => {
+      expect(onShortcutActionsChange).toHaveBeenCalled();
+      const calls = onShortcutActionsChange.mock.calls;
+      const latest = calls[calls.length - 1]?.[0];
+      expect(latest).toEqual([
+        {
+          id: 'shortcut-copy',
+          label: '复制当前行',
+          sequence: '\u0003',
+          order: 0,
+          row: 'bottom-scroll',
+        },
+      ]);
+    });
+  });
+
   it('shows shortcut management list and allows delete from list page', async () => {
     const onShortcutActionsChange = vi.fn();
 
@@ -394,6 +439,60 @@ describe('TerminalQuickBar', () => {
     await waitFor(() => {
       expect(onShortcutActionsChange).toHaveBeenCalledWith([]);
     });
+  });
+
+  it('renders special shortcut keys with compact symbols instead of empty previews', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-tab',
+          label: 'Tab',
+          sequence: '\t',
+          order: 0,
+          row: 'top-scroll',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    const detailButton = screen.getByRole('button', { name: '查看 Tab 详情' });
+    expect(detailButton.querySelector('[data-shortcut-keycap="Tab"]')).not.toBeNull();
+    expect(detailButton.textContent).not.toContain('(空)');
+  });
+
+  it('renders terminal base special keys with familiar icon glyphs', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: 's-tab', label: 'Tab', sequence: '\t', order: 0, row: 'top-scroll' },
+        { id: 's-enter', label: 'Enter', sequence: '\r', order: 1, row: 'top-scroll' },
+        { id: 's-space', label: 'Space', sequence: ' ', order: 2, row: 'top-scroll' },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Tab' }).querySelector('[data-shortcut-keycap="Tab"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Enter' }).querySelector('[data-shortcut-keycap="Enter"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Space' }).querySelector('[data-shortcut-space-visual="true"]')).not.toBeNull();
+  });
+
+  it('renders space shortcut as a long narrow keycap visual in settings list', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        {
+          id: 'shortcut-space',
+          label: 'Space',
+          sequence: ' ',
+          order: 0,
+          row: 'top-scroll',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
+
+    const detailButton = screen.getByRole('button', { name: '查看 Space 详情' });
+    expect(detailButton.querySelector('[data-shortcut-space-visual="true"]')).not.toBeNull();
+    expect(detailButton.textContent).toContain('Space');
   });
 
   it('uses a dedicated scroll container for shortcut settings sheet', async () => {
@@ -429,9 +528,11 @@ describe('TerminalQuickBar', () => {
     expect(style).toContain('flex: 1');
     expect(style).toContain('min-height: 0');
     expect(style).toContain('overflow-y: auto');
+    expect(style).toContain('overflow-x: hidden');
     expect(style).toContain('touch-action: pan-y');
     expect(sheet?.getAttribute('style') || '').toContain('height: 441px');
     expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 297px');
+    expect(screen.getByTestId('shortcut-editor-list').getAttribute('style') || '').toContain('min-height: max-content');
   });
 
   it('lifts quick action editor above visual viewport keyboard occlusion', async () => {

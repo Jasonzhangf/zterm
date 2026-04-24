@@ -19,7 +19,7 @@ Server(session truth)
 1. **消费者只消费，不生产，不改源**
 2. **Server 不主动推 buffer 内容，只广播 head，并按 range 响应**
 3. **Client buffer 是 sparse buffer，可不连续，不为“完整性”主动补洞**
-4. **Renderer 只按 index window 渲染，不关心 buffer 是否完整**
+4. **Renderer 唯一状态是 `renderBottomIndex`；top 只能派生**
 5. **UI 只移动/裁切容器；IME/键盘不影响内容真相**
 
 ---
@@ -154,6 +154,7 @@ follow 态默认工作集冻结为：
 - reading 时不去拉全部历史
 - 只在滚到某个窗口、renderer 真正需要该窗口时，才补该窗口缺失部分
 - “滚到那里再补”是唯一规则
+- 当 reading 已经贴近当前缓存顶部时，3 屏只是 cache window，不是硬上限；client 需要预取更早的两屏并显示 loading，等补齐后再继续上滚
 
 ### 2.5 响应处理原则
 
@@ -200,8 +201,8 @@ renderer 是纯消费者。
 
 renderer 只管理：
 
-- 当前渲染相对于底部的位置
-- 当前需要的绝对 index window
+- 当前 `renderBottomIndex`
+- 由 `renderBottomIndex - viewportRows` 派生出的绝对 window
 - 当前窗口相对于 buffer 的命中情况
 
 它不管理：
@@ -211,28 +212,29 @@ renderer 只管理：
 - head 广播频率
 - server 状态
 
-### 3.2 bottom-relative window
+### 3.2 bottom-pointer window
 
-renderer 只从“当前底部”开始算窗口：
+renderer 的唯一真源冻结为：
 
 ```text
-latestEndIndex
-+ relative offset from bottom
-= render window
+renderBottomIndex
+renderTopIndex = renderBottomIndex - viewportRows
+renderWindow = [renderTopIndex, renderBottomIndex)
 ```
 
-也就是：
+规则：
 
-- latest：渲染最新窗口
-- reading：渲染“相对最新往前多少”的窗口
-
-renderer 不需要知道 buffer 全局是否完整。
+- `renderBottomIndex` 是 renderer 唯一可写状态
+- `renderTopIndex` 只是计算结果，不得落成第二状态
+- follow：`renderBottomIndex = latestEndIndex`
+- reading：只改 `renderBottomIndex`，不改 buffer 生产指针
+- renderer 不需要知道 buffer 全局是否完整
 
 ### 3.3 renderer 与 worker 的关系
 
 renderer 只声明：
 
-> “我现在要渲染 `[startIndex, endIndex)` 这个窗口。”
+> “我现在的 `renderBottomIndex` 是多少，这个 bottom-window 缺哪些行。”
 
 然后：
 
@@ -249,7 +251,19 @@ renderer 不冻结上一帧，不造假。
 
 - 已有的行先画
 - 缺失行显示 gap / loading 占位
+- renderer 不回写 buffer，不制造假行
 - 等 worker 补齐后再自然更新
+
+### 3.5 顶部边界的等待态
+
+当用户继续上滚但当前窗口已逼近缓存顶部时：
+
+- 先保留当前可见行
+- 显示 loading / 等待态
+- 由 worker 请求更早的两屏历史
+- 补齐后再继续跟随手势上滚
+
+这里的“3 屏”是缓存窗，不是滚动上限。
 
 ---
 

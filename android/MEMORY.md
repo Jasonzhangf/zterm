@@ -94,6 +94,8 @@
 - [2026-04-23] terminal 主题真源要覆盖默认前景/背景 + ANSI 16 色，而不是只改背景色；theme choice 应持久化到 shared `BridgeSettings.terminalThemeId`，Settings 只负责切换 preset。
 - [2026-04-23] Android / Mac 共用 terminal theme 时，preset 与颜色算法必须下沉到 shared 纯模块（如 `packages/shared/src/terminal/theme.ts`）；平台各自只消费 preset，禁止复制第二套 ANSI 映射表。
 - [2026-04-23] Settings 若把 terminal theme 卡片显示成“正在使用/Active”，该点击动作就必须立即持久化到真实 `BridgeSettings.terminalThemeId`；不能只改页面 draft 再等 Save，否则切页回来会回默认主题，制造“已生效”的假状态。
+- [2026-04-24] reading 滚到缓存顶部时，3 屏只是 cache window，不是滚动上限；client 要预取前两屏并显示 loading，补齐后再继续上滚，不能把顶部写死成停住
+- [2026-04-24] 手势滚动要跟手，不要靠固定步长/固定屏数硬跳；buffer 回补是边界处理，不是主滚动方式
 - [2026-04-23] Android 快捷输入面板的 outside-close 要走 document capture 级监听；仅靠面板外遮罩 click，在 quick bar 根节点有 pointer capture / preventDefault 时并不稳定。
 - [2026-04-23] session 级定时发送入口不能挂在 tab strip/header 这种易被理解成“tab 全局动作”的位置；Android 侧应放在当前 session 的 quick input/composer 入口内，明确“对当前 session 生效”。
 - [2026-04-23] 悬浮球若保存的是绝对 `left/top` 坐标，必须在 mount 和 viewport resize 时自动 re-clamp 到当前可视区；只在拖动时 clamp 会导致旋转/窗口变化后入口消失。

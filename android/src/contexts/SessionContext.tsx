@@ -90,17 +90,6 @@ function summarizeSessions(sessions: Session[]) {
   }));
 }
 
-function sendLegacyStreamMode(ws: WebSocket, mode: 'active' | 'idle') {
-  if (ws.readyState !== WebSocket.OPEN) {
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: 'stream-mode',
-    payload: { mode },
-  } satisfies ClientMessage));
-}
-
 interface SessionManagerState {
   sessions: Session[];
   activeSessionId: string | null;
@@ -264,6 +253,12 @@ interface TailRefreshDemandState {
   expireAt: number | null;
 }
 
+interface RevisionResetExpectation {
+  revision: number;
+  latestEndIndex: number;
+  seenAt: number;
+}
+
 type SessionSyncViewState = TerminalViewportState;
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -390,6 +385,13 @@ function buildSessionBufferSyncRequestPayload(
     viewportEndIndex: resolvedViewportEndIndex,
     viewportRows: resolvedViewportRows,
     mode: resolvedMode,
+    prefetch: resolvedMode === 'reading' ? Boolean(viewState?.prefetch) : undefined,
+    missingRanges: resolvedMode === 'reading' && Array.isArray(viewState?.missingRanges) && viewState!.missingRanges.length > 0
+      ? viewState!.missingRanges.map((range) => ({
+          startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+          endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+        })).filter((range) => range.endIndex > range.startIndex)
+      : undefined,
   };
 }
 
@@ -418,25 +420,55 @@ function buildFollowSessionSyncViewState(session: Session, previousViewState?: S
     mode: 'follow',
     viewportRows: Math.max(1, Math.floor(previousViewState?.viewportRows || session.buffer.rows || 24)),
     viewportEndIndex: Math.max(0, Math.floor(session.buffer.viewportEndIndex || session.buffer.endIndex || 0)),
+    prefetch: false,
+    missingRanges: [],
   };
 }
 
 function normalizeSessionSyncViewState(viewState: SessionSyncViewState): SessionSyncViewState {
+  const missingRanges = Array.isArray(viewState.missingRanges)
+    ? viewState.missingRanges
+        .map((range) => ({
+          startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+          endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+        }))
+        .filter((range) => range.endIndex > range.startIndex)
+    : [];
   return {
     mode: viewState.mode === 'reading' ? 'reading' : 'follow',
     viewportEndIndex: Math.max(0, Math.floor(viewState.viewportEndIndex || 0)),
     viewportRows: Math.max(1, Math.floor(viewState.viewportRows || 1)),
+    prefetch: viewState.mode === 'reading' ? Boolean(viewState.prefetch && missingRanges.length > 0) : false,
+    missingRanges: viewState.mode === 'reading' ? missingRanges : [],
   };
 }
 
 function sessionSyncViewStatesEqual(left?: SessionSyncViewState, right?: SessionSyncViewState) {
-  return Boolean(
-    left
-    && right
-    && left.mode === right.mode
-    && left.viewportEndIndex === right.viewportEndIndex
-    && left.viewportRows === right.viewportRows,
-  );
+  if (!left || !right) {
+    return false;
+  }
+  if (
+    left.mode !== right.mode
+    || left.viewportEndIndex !== right.viewportEndIndex
+    || left.viewportRows !== right.viewportRows
+    || Boolean(left.prefetch) !== Boolean(right.prefetch)
+  ) {
+    return false;
+  }
+  const leftRanges = left.missingRanges || [];
+  const rightRanges = right.missingRanges || [];
+  if (leftRanges.length !== rightRanges.length) {
+    return false;
+  }
+  for (let index = 0; index < leftRanges.length; index += 1) {
+    if (
+      leftRanges[index]?.startIndex !== rightRanges[index]?.startIndex
+      || leftRanges[index]?.endIndex !== rightRanges[index]?.endIndex
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function hasGapInAbsoluteWindow(
@@ -503,6 +535,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const pendingIncomingBufferTimersRef = useRef<Map<string, number>>(new Map());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
+  const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const pendingTailRefreshDemandRef = useRef<Map<string, TailRefreshDemandState>>(new Map());
   const lastTailRefreshRequestAtRef = useRef<Map<string, number>>(new Map());
   const lastHeadStalePingAtRef = useRef<Map<string, number>>(new Map());
@@ -615,6 +648,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const clearTailRefreshRuntime = useCallback((sessionId: string) => {
     pendingTailRefreshDemandRef.current.delete(sessionId);
     sessionBufferHeadsRef.current.delete(sessionId);
+    sessionRevisionResetRef.current.delete(sessionId);
     lastTailRefreshRequestAtRef.current.delete(sessionId);
     lastHeadStalePingAtRef.current.delete(sessionId);
   }, []);
@@ -717,10 +751,19 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return false;
     }
 
+    const revisionResetExpectation = sessionRevisionResetRef.current.get(sessionId) || null;
+    const forceBootstrap = Boolean(
+      options?.forceBootstrap
+      || (
+        revisionResetExpectation
+        && revisionResetExpectation.revision < Math.max(0, Math.floor(session.buffer.revision || 0))
+      ),
+    );
+
     const payload = buildSessionBufferSyncRequestPayload(
       session,
       sessionSyncViewRef.current.get(sessionId),
-      options?.forceBootstrap
+      forceBootstrap
         ? {
             forceBootstrap: true,
             modeOverride: 'follow',
@@ -728,10 +771,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         : undefined,
     );
 
-    runtimeDebug(options?.forceBootstrap ? 'session.buffer.bootstrap-request' : 'session.buffer.request', {
+    runtimeDebug(forceBootstrap ? 'session.buffer.bootstrap-request' : 'session.buffer.request', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
       reason: options?.reason || null,
+      revisionResetExpectation,
       payload,
     });
     targetWs.send(JSON.stringify({
@@ -802,13 +846,51 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return;
     }
 
-    let nextBuffer = session.buffer;
+    const revisionResetExpectation = sessionRevisionResetRef.current.get(sessionId) || null;
+    const lowerRevisionPayload = revisionResetExpectation
+      ? pendingPayloads.find((payload) => Math.max(0, Math.floor(payload.revision || 0)) <= Math.max(0, Math.floor(session.buffer.revision || 0)))
+      : null;
+
+    let nextBuffer = (
+      revisionResetExpectation && lowerRevisionPayload
+        ? createSessionBufferState({
+            lines: [],
+            startIndex: 0,
+            endIndex: 0,
+            viewportEndIndex: 0,
+            cols: lowerRevisionPayload.cols,
+            rows: lowerRevisionPayload.rows,
+            cursorKeysApp: lowerRevisionPayload.cursorKeysApp,
+            revision: 0,
+            cacheLines: resolveSessionCacheLines(lowerRevisionPayload.rows || session.buffer.rows),
+          })
+        : session.buffer
+    );
+
+    if (revisionResetExpectation && lowerRevisionPayload) {
+      runtimeDebug('session.buffer.revision-reset.apply', {
+        sessionId,
+        expectation: revisionResetExpectation,
+        localRevision: session.buffer.revision,
+        incomingRevision: lowerRevisionPayload.revision,
+        incomingStartIndex: lowerRevisionPayload.startIndex,
+        incomingEndIndex: lowerRevisionPayload.endIndex,
+      });
+    }
+
     for (const payload of pendingPayloads) {
       nextBuffer = applyBufferSyncToSessionBuffer(
         nextBuffer,
         payload,
         resolveSessionCacheLines(payload.rows || nextBuffer.rows),
       );
+    }
+
+    if (
+      revisionResetExpectation
+      && nextBuffer.revision >= 0
+    ) {
+      sessionRevisionResetRef.current.delete(sessionId);
     }
 
     if (sessionBuffersEqual(session.buffer, nextBuffer)) {
@@ -1478,7 +1560,26 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
     const localEndIndex = Math.max(0, Math.floor(session.buffer.endIndex || 0));
-    if (localRevision >= latestRevision && localEndIndex >= latestEndIndex) {
+    const revisionResetDetected = latestRevision < localRevision;
+    if (revisionResetDetected) {
+      sessionRevisionResetRef.current.set(sessionId, {
+        revision: latestRevision,
+        latestEndIndex,
+        seenAt: Date.now(),
+      });
+      runtimeDebug('session.buffer.revision-reset.detected', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        latestRevision,
+        latestEndIndex,
+        localRevision,
+        localEndIndex,
+      });
+    } else {
+      sessionRevisionResetRef.current.delete(sessionId);
+    }
+
+    if (!revisionResetDetected && localRevision >= latestRevision && localEndIndex >= latestEndIndex) {
       pendingTailRefreshDemandRef.current.delete(sessionId);
       return;
     }
@@ -1591,7 +1692,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       payload: { sessionName: options.sessionName },
     } satisfies ClientMessage));
     const isActive = stateRef.current.activeSessionId === options.sessionId;
-    sendLegacyStreamMode(options.ws, isActive ? 'active' : 'idle');
     if (isActive) {
       requestSessionBufferSync(options.sessionId, {
         ws: options.ws,
@@ -1729,6 +1829,38 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     applyActiveSessionViewportDemand(sessionId, normalized);
   }, [applyActiveSessionViewportDemand]);
 
+  const exitReadingOnUserInput = useCallback((sessionId: string, session: Session) => {
+    if (stateRef.current.activeSessionId !== sessionId) {
+      return false;
+    }
+
+    const previousViewState = sessionSyncViewRef.current.get(sessionId);
+    if (!previousViewState || previousViewState.mode !== 'reading') {
+      return false;
+    }
+
+    const followViewState = buildFollowSessionSyncViewState(session, previousViewState);
+    sessionSyncViewRef.current.set(sessionId, followViewState);
+    clearQueuedBufferSync(sessionId);
+    dispatch({
+      type: 'UPDATE_SESSION',
+      id: sessionId,
+      updates: {
+        followResetToken: (session.followResetToken || 0) + 1,
+      },
+    });
+    runtimeDebug('session.buffer.input-follow-reset', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      previousViewState,
+      nextViewState: followViewState,
+      localRevision: session.buffer.revision,
+      localStartIndex: session.buffer.startIndex,
+      localEndIndex: session.buffer.endIndex,
+    });
+    return true;
+  }, [clearQueuedBufferSync]);
+
   useEffect(() => {
     if (!state.activeSessionId) {
       lastActivatedSessionIdRef.current = null;
@@ -1755,19 +1887,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       reason: 'active-session-sync',
     });
   }, [resetSessionViewportToFollow, scheduleBufferSyncRequest, state.activeSessionId, state.sessions]);
-
-  useEffect(() => {
-    for (const session of state.sessions) {
-      if (session.state !== 'connected') {
-        continue;
-      }
-      const ws = wsRefs.current.get(session.id);
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        continue;
-      }
-      sendLegacyStreamMode(ws, state.activeSessionId === session.id ? 'active' : 'idle');
-    }
-  }, [state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -1888,8 +2007,9 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       });
       ws.send(JSON.stringify({ type: 'input', payload: data }));
       if (stateRef.current.activeSessionId === targetSessionId && session.state === 'connected') {
+        const forcedFollow = exitReadingOnUserInput(targetSessionId, session);
         markTailRefreshDemand(targetSessionId, 'input-tail-refresh', 420);
-        requestActiveTailRefresh(targetSessionId, 'input-tail-refresh');
+        requestActiveTailRefresh(targetSessionId, forcedFollow ? 'input-follow-reset' : 'input-tail-refresh');
       }
       return;
     }
@@ -1900,7 +2020,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       preview: data.slice(0, 32),
     });
     enqueuePendingInput(targetSessionId, data);
-  }, [enqueuePendingInput, markTailRefreshDemand, requestActiveTailRefresh]);
+  }, [enqueuePendingInput, exitReadingOnUserInput, markTailRefreshDemand, requestActiveTailRefresh]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {

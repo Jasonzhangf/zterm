@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from './TerminalView';
 import { createSessionBufferState } from '../lib/terminal-buffer';
@@ -921,6 +921,139 @@ describe('TerminalView minimal mirror render', () => {
     await waitFor(() => {
       expect(scroller.scrollTop).toBe(969);
     });
+  });
+
+  it('prefetches older history and shows loading when reading reaches the cached top boundary', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      startIndex: 20,
+      viewportEndIndex: 100,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferViewportEndIndex={session.buffer.viewportEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.prefetch).toBe(true);
+      expect(lastCall?.missingRanges?.length).toBeGreaterThan(0);
+      expect(lastCall?.missingRanges?.[0]?.endIndex).toBe(session.buffer.startIndex);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
+    });
+  });
+
+  it('uses the latest follow tail when multiple refreshes arrive before the audit timer fires', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        viewportEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferViewportEndIndex={session.buffer.viewportEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return 1394;
+        },
+      });
+
+      const nextSession81 = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        viewportEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession81.id}
+            initialBufferLines={nextSession81.buffer.lines}
+            bufferStartIndex={nextSession81.buffer.startIndex}
+            bufferEndIndex={nextSession81.buffer.endIndex}
+            bufferViewportEndIndex={nextSession81.buffer.viewportEndIndex}
+            bufferGapRanges={nextSession81.buffer.gapRanges}
+            cursorKeysApp={nextSession81.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const nextSession82 = makeSession({
+        revision: 3,
+        lines: buildRows(82),
+        viewportEndIndex: 82,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession82.id}
+            initialBufferLines={nextSession82.buffer.lines}
+            bufferStartIndex={nextSession82.buffer.startIndex}
+            bufferEndIndex={nextSession82.buffer.endIndex}
+            bufferViewportEndIndex={nextSession82.buffer.viewportEndIndex}
+            bufferGapRanges={nextSession82.buffer.gapRanges}
+            cursorKeysApp={nextSession82.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(986);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps rendering current rows instead of going full black when the first visible frame contains a gap', async () => {

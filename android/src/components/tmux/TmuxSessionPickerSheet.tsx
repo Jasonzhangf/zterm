@@ -4,17 +4,14 @@ import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
-import type { Host } from '../../lib/types';
 
 interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
   open: boolean;
-  hosts: Host[];
   servers: BridgeServerPreset[];
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
   onClose: () => void;
-  onSelectHistoryHost: (host: Host) => void;
   onOpenTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   onOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   onSelectCleanSession: (target: BridgeTarget) => void;
@@ -61,12 +58,10 @@ function formatRefreshClock(ts?: number | null) {
 export function TmuxSessionPickerSheet({
   mode,
   open,
-  hosts,
   servers,
   initialTarget,
   initialSelectedSessions = [],
   onClose,
-  onSelectHistoryHost,
   onOpenTmuxSession,
   onOpenMultipleTmuxSessions,
   onSelectCleanSession,
@@ -114,7 +109,6 @@ export function TmuxSessionPickerSheet({
     setLastRefreshedAt(null);
   }, [open, selectedTarget.authToken, selectedTarget.bridgeHost, selectedTarget.bridgePort]);
 
-  const historyHosts = useMemo(() => hosts.slice(0, 10), [hosts]);
   const sortedServers = useMemo(() => sortBridgeServers(servers), [servers]);
   const selectedCount = selectedSessions.length;
   const statusTone =
@@ -452,54 +446,6 @@ export function TmuxSessionPickerSheet({
             })}
           </div>
         </div>
-
-        {mode !== 'new-connection' && (
-          <div
-            style={{
-              borderRadius: '22px',
-              padding: '16px',
-              backgroundColor: '#ffffff',
-              boxShadow: mobileTheme.shadow.soft,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-            }}
-          >
-            <SectionTitle title="History" subtitle="优先显示历史连接；Tailscale IP 会比局域网目标更靠前。" />
-            {historyHosts.length === 0 ? (
-              <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>当前没有历史连接。</div>
-            ) : (
-              historyHosts.map((host) => (
-                <button
-                  key={host.id}
-                  onClick={() => onSelectHistoryHost(host)}
-                  style={{
-                    border: 'none',
-                    borderRadius: '18px',
-                    padding: '12px 14px',
-                    backgroundColor:
-                      host.bridgeHost === selectedTarget.bridgeHost && host.bridgePort === selectedTarget.bridgePort
-                        ? 'rgba(31, 214, 122, 0.14)'
-                        : '#f6f8fb',
-                    color: mobileTheme.colors.lightText,
-                    textAlign: 'left',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                    <div style={{ fontWeight: 800 }}>{host.name}</div>
-                    <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>{host.sessionName || host.name}</div>
-                  </div>
-                  <div style={{ marginTop: '5px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
-                    {host.bridgeHost}:{host.bridgePort}
-                  </div>
-                  <div style={{ marginTop: '4px', fontSize: '10px', color: mobileTheme.colors.lightMuted }}>
-                    {formatTargetBadge(host.bridgeHost)} · {host.authToken ? 'Auth' : 'No auth'}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
 
         <div
           style={{

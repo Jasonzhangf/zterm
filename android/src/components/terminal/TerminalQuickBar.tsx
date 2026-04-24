@@ -204,6 +204,26 @@ const MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS: Record<string, string> = {
   Delete: 'Del',
 };
 
+const SHORTCUT_VISUAL_LABELS: Record<string, string> = {
+  Esc: 'Esc',
+  Tab: 'Tab',
+  Enter: '↩',
+  Return: '↩',
+  Space: 'Space',
+  Bksp: '⌫',
+  Delete: '⌫',
+  Ctrl: 'Ctrl',
+  Control: 'Ctrl',
+  Shift: 'Shift',
+  Option: 'Opt',
+  Opt: 'Opt',
+  Alt: 'Alt',
+  Command: 'Cmd',
+  Cmd: 'Cmd',
+  'S-Tab': '⇧ Tab',
+  'S-Enter': '⇧ ↩',
+};
+
 function editorInputStyle() {
   return {
     width: '100%',
@@ -219,6 +239,144 @@ function editorInputStyle() {
 
 function resolveShortcutTokenDisplayLabel(label: string) {
   return MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS[label] || label;
+}
+
+function resolveShortcutVisualLabel(label: string) {
+  const normalized = resolveShortcutTokenDisplayLabel(label);
+  return SHORTCUT_VISUAL_LABELS[label] || SHORTCUT_VISUAL_LABELS[normalized] || normalized;
+}
+
+function isSpaceShortcutLabel(label: string) {
+  return resolveShortcutTokenDisplayLabel(label) === 'Space';
+}
+
+function shouldRenderShortcutKeycap(label: string) {
+  const normalized = resolveShortcutTokenDisplayLabel(label);
+  return isSpaceShortcutLabel(label) || Object.prototype.hasOwnProperty.call(SHORTCUT_VISUAL_LABELS, label) || Object.prototype.hasOwnProperty.call(SHORTCUT_VISUAL_LABELS, normalized);
+}
+
+function renderShortcutVisualNode(label: string, variant: 'button' | 'list' | 'token' = 'button') {
+  if (!shouldRenderShortcutKeycap(label)) {
+    return resolveShortcutVisualLabel(label);
+  }
+
+  const metrics = variant === 'list'
+    ? { minWidth: '44px', height: '30px', padding: '0 12px', borderWidth: '2px', fontSize: '18px', fontWeight: 800, radius: '10px' }
+    : variant === 'token'
+      ? { minWidth: '34px', height: '24px', padding: '0 8px', borderWidth: '1.8px', fontSize: '13px', fontWeight: 800, radius: '8px' }
+      : { minWidth: '30px', height: '22px', padding: '0 8px', borderWidth: '1.8px', fontSize: '13px', fontWeight: 800, radius: '8px' };
+
+  if (isSpaceShortcutLabel(label)) {
+    const spaceMetrics = variant === 'list'
+      ? { width: '52px', height: '20px' }
+      : variant === 'token'
+        ? { width: '40px', height: '18px' }
+        : { width: '38px', height: '16px' };
+
+    return (
+      <span
+        data-shortcut-keycap="space"
+        data-shortcut-space-visual="true"
+        aria-hidden="true"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: spaceMetrics.width,
+          height: spaceMetrics.height,
+          borderRadius: variant === 'list' ? '10px' : '8px',
+          border: `${metrics.borderWidth} solid currentColor`,
+          boxSizing: 'border-box',
+          verticalAlign: 'middle',
+          backgroundColor: 'rgba(255,255,255,0.05)',
+          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)',
+        }}
+      >
+        <span
+          style={{
+            display: 'block',
+            width: variant === 'list' ? '28px' : variant === 'token' ? '22px' : '20px',
+            height: variant === 'list' ? '3px' : '2.5px',
+            borderRadius: '999px',
+            backgroundColor: 'currentColor',
+            opacity: 0.92,
+          }}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      data-shortcut-keycap={resolveShortcutTokenDisplayLabel(label)}
+      aria-hidden="true"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: metrics.minWidth,
+        height: metrics.height,
+        padding: metrics.padding,
+        borderRadius: metrics.radius,
+        border: `${metrics.borderWidth} solid currentColor`,
+        boxSizing: 'border-box',
+        verticalAlign: 'middle',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)',
+        fontSize: metrics.fontSize,
+        fontWeight: metrics.fontWeight,
+        letterSpacing: resolveShortcutVisualLabel(label).length > 2 ? '-0.01em' : 0,
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {resolveShortcutVisualLabel(label)}
+    </span>
+  );
+}
+
+function formatShortcutSequencePreview(label: string, sequence: string) {
+  const tokens = buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
+  if (tokens.length > 0) {
+    return tokens
+      .map((token) => resolveShortcutVisualLabel(token.label))
+      .join(tokens.length > 1 ? ' ' : '')
+      .trim();
+  }
+
+  return formatSnippetPreview(sequence);
+}
+
+function resolveShortcutDisplayMeta(label: string, sequence: string) {
+  const normalizedLabel = resolveShortcutTokenDisplayLabel(label || '');
+  const visualLabel = resolveShortcutVisualLabel(label || '');
+  const preview = formatShortcutSequencePreview(label || '', sequence);
+  const titleUsesKeycap = Boolean(label) && shouldRenderShortcutKeycap(label);
+
+  if (!label) {
+    return {
+      title: '未命名',
+      subtitle: preview || '(空)',
+      titleUsesKeycap: false,
+      titleSourceLabel: '',
+    };
+  }
+
+  if (titleUsesKeycap) {
+    return {
+      title: visualLabel,
+      subtitle: isSpaceShortcutLabel(label) ? normalizedLabel : '',
+      titleUsesKeycap: true,
+      titleSourceLabel: normalizedLabel,
+    };
+  }
+
+  return {
+    title: label,
+    subtitle: preview || '(空)',
+    titleUsesKeycap: false,
+    titleSourceLabel: label,
+  };
 }
 
 function createDraftActionId() {
@@ -1146,6 +1304,8 @@ export function TerminalQuickBar({
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
     const repeatActive = repeatingActionId === action.id;
+    const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
+    const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
       <button
         key={action.id}
@@ -1211,11 +1371,20 @@ export function TerminalQuickBar({
           triggerActionSequence(action);
         }}
         onFocus={(event) => event.currentTarget.blur()}
+        aria-label={action.label}
         aria-pressed={repeatActive}
         style={{
           minHeight: compact ? '32px' : '34px',
           width: fixed ? '100%' : undefined,
-          minWidth: fixed ? `${FIXED_BUTTON_MIN_WIDTH}px` : action.label.length > 4 ? '58px' : action.label.length > 2 ? '48px' : '34px',
+          minWidth: fixed
+            ? `${FIXED_BUTTON_MIN_WIDTH}px`
+            : actionUsesSpaceBarVisual
+              ? '58px'
+              : actionDisplayLabel.length > 3
+                ? '58px'
+                : actionDisplayLabel.length > 1
+                  ? '48px'
+                  : '34px',
           padding: fixed ? '0 6px' : '0 10px',
           border: 'none',
           outline: 'none',
@@ -1229,7 +1398,7 @@ export function TerminalQuickBar({
                 ? 'rgba(22, 28, 41, 0.92)'
                 : 'rgba(31, 38, 53, 0.82)',
           color: repeatActive ? '#bcd3ff' : action.id === 'keyboard' && keyboardVisible ? mobileTheme.colors.accent : '#fff',
-          fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : action.label.length > 3 ? '11px' : '14px',
+          fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : actionDisplayLabel.length > 3 ? '11px' : '14px',
           fontWeight: 700,
           cursor: 'pointer',
           flexShrink: 0,
@@ -1242,7 +1411,7 @@ export function TerminalQuickBar({
           boxShadow: repeatActive ? 'inset 0 0 0 1px rgba(141,183,255,0.55)' : 'none',
         }}
       >
-        {action.label}
+        {renderShortcutVisualNode(action.label, 'button')}
       </button>
     );
   };
@@ -1723,17 +1892,23 @@ export function TerminalQuickBar({
                 minHeight: 0,
                 padding: '16px',
                 overflowY: 'auto',
+                overflowX: 'hidden',
                 WebkitOverflowScrolling: 'touch',
                 touchAction: 'pan-y',
                 overscrollBehaviorY: 'contain',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
                 paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
               }}
             >
               {shortcutEditorMode === 'list' ? (
-                <>
+                <div
+                  data-testid="shortcut-editor-list"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    minHeight: 'max-content',
+                  }}
+                >
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: 700 }}>当前滚动快捷键</div>
                     <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
@@ -1799,69 +1974,106 @@ export function TerminalQuickBar({
                             当前还没有内容，点右侧按钮进入详情页添加。
                           </div>
                         ) : (
-                          rowActions.map((action, index) => (
-                            <div
-                              key={action.id}
-                              style={{
-                                padding: '14px 16px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '12px',
-                                borderTop: '1px solid rgba(23, 27, 45, 0.08)',
-                              }}
-                            >
-                              <button
-                                onClick={() => openShortcutForm(row, action)}
-                                aria-label={`编辑 ${action.label || '未命名快捷键'}`}
+                          rowActions.map((action, index) => {
+                            const displayMeta = resolveShortcutDisplayMeta(action.label, action.sequence);
+                            return (
+                              <div
+                                key={action.id}
                                 style={{
-                                  flex: 1,
-                                  minWidth: 0,
-                                  border: 'none',
-                                  background: 'transparent',
-                                  padding: 0,
-                                  textAlign: 'left',
-                                  cursor: 'pointer',
+                                  padding: '12px 14px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  borderTop: '1px solid rgba(23, 27, 45, 0.08)',
                                 }}
                               >
-                                <div style={{ fontSize: '17px', fontWeight: 600, color: mobileTheme.colors.lightText }}>
-                                  {action.label || '未命名'}
+                                <button
+                                  onClick={() => openShortcutForm(row, action)}
+                                  aria-label={`查看 ${action.label || '未命名快捷键'} 详情`}
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    padding: 0,
+                                    textAlign: 'left',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: displayMeta.titleUsesKeycap ? '28px' : '16px',
+                                      lineHeight: displayMeta.titleUsesKeycap ? 1 : 1.2,
+                                      fontWeight: displayMeta.titleUsesKeycap ? 700 : 600,
+                                      color: mobileTheme.colors.lightText,
+                                    }}
+                                  >
+                                    {displayMeta.titleUsesKeycap
+                                      ? renderShortcutVisualNode(displayMeta.titleSourceLabel, 'list')
+                                      : displayMeta.title}
+                                  </div>
+                                  {displayMeta.subtitle ? (
+                                    <div
+                                      style={{
+                                        fontSize: '12px',
+                                        color: mobileTheme.colors.lightMuted,
+                                        marginTop: displayMeta.titleUsesKeycap ? '4px' : '3px',
+                                        lineHeight: 1.2,
+                                      }}
+                                    >
+                                      {displayMeta.subtitle}
+                                    </div>
+                                  ) : null}
+                                </button>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    gap: '6px',
+                                    flexWrap: 'wrap',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <button
+                                    onClick={() => openShortcutForm(row, action)}
+                                    style={compactOverlayTextButton('rgba(22, 119, 255, 0.12)', '#1677ff')}
+                                    aria-label={`编辑 ${action.label || '未命名快捷键'}`}
+                                  >
+                                    编辑
+                                  </button>
+                                  <button
+                                    onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index - 1))}
+                                    disabled={index === 0}
+                                    style={compactOverlayIconButton(index === 0)}
+                                    aria-label={`上移 ${action.label}`}
+                                  >
+                                    ↑
+                                  </button>
+                                  <button
+                                    onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index + 1))}
+                                    disabled={index === rowActions.length - 1}
+                                    style={compactOverlayIconButton(index === rowActions.length - 1)}
+                                    aria-label={`下移 ${action.label}`}
+                                  >
+                                    ↓
+                                  </button>
+                                  <button
+                                    onClick={() => persistShortcutActions(draftShortcutActions.filter((item) => item.id !== action.id))}
+                                    style={compactOverlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
+                                    aria-label={`删除 ${action.label}`}
+                                  >
+                                    删除
+                                  </button>
                                 </div>
-                                <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                                  {formatSnippetPreview(action.sequence) || '(空)'}
-                                </div>
-                              </button>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                                <button
-                                  onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index - 1))}
-                                  disabled={index === 0}
-                                  style={overlayIconButton(index === 0)}
-                                  aria-label={`上移 ${action.label}`}
-                                >
-                                  ↑
-                                </button>
-                                <button
-                                  onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index + 1))}
-                                  disabled={index === rowActions.length - 1}
-                                  style={overlayIconButton(index === rowActions.length - 1)}
-                                  aria-label={`下移 ${action.label}`}
-                                >
-                                  ↓
-                                </button>
-                                <button
-                                  onClick={() => persistShortcutActions(draftShortcutActions.filter((item) => item.id !== action.id))}
-                                  style={overlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
-                                  aria-label={`删除 ${action.label}`}
-                                >
-                                  删除
-                                </button>
                               </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     );
                   })}
-                </>
+                </div>
               ) : (
                 <div
                   style={{
@@ -2027,13 +2239,11 @@ export function TerminalQuickBar({
                               style={{
                                 display: 'block',
                                 width: '100%',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
                                 lineHeight: 1.1,
+                                textAlign: 'center',
                               }}
                             >
-                              {resolveShortcutTokenDisplayLabel(token.label)}
+                              {renderShortcutVisualNode(token.label, 'token')}
                             </span>
                           </button>
                         ))}
@@ -2677,6 +2887,15 @@ function overlayIconButton(disabled: boolean) {
   } as const;
 }
 
+function compactOverlayIconButton(disabled: boolean) {
+  return {
+    ...overlayIconButton(disabled),
+    width: '30px',
+    height: '30px',
+    fontSize: '16px',
+  } as const;
+}
+
 function overlayTextButton(backgroundColor: string, color: string) {
   return {
     minHeight: '34px',
@@ -2688,6 +2907,15 @@ function overlayTextButton(backgroundColor: string, color: string) {
     cursor: 'pointer',
     fontWeight: 700,
     flexShrink: 0,
+  } as const;
+}
+
+function compactOverlayTextButton(backgroundColor: string, color: string) {
+  return {
+    ...overlayTextButton(backgroundColor, color),
+    minHeight: '30px',
+    padding: '0 10px',
+    fontSize: '14px',
   } as const;
 }
 

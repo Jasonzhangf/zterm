@@ -623,10 +623,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     );
   }, [activeSession, bridgeSettings]);
 
-  const handleConnect = useCallback((host: Host) => {
-    openDraftAsSession(host, { rememberName: host.name, activate: true, navigate: true });
-  }, [openDraftAsSession]);
-
   const handleQuickConnectDraft = useCallback((draft: Omit<Host, 'id' | 'createdAt'>, rememberName?: string) => {
     return openDraftAsSession(draft, { rememberName, activate: true, navigate: true }).sessionId;
   }, [openDraftAsSession]);
@@ -878,22 +874,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     clearSessionDraft(sessionId);
   }, [activeSession?.id, clearSessionDraft, handleTerminalInput, switchSession]);
 
-  const handleSelectHistoryHost = useCallback((host: Host) => {
-    setPickerMode(null);
-    if (pickerMode === 'quick-tab') {
-      handleConnect(host);
-      return;
-    }
-    if (pickerMode === 'edit-group') {
-      setPickerMode('edit-group');
-      setPickerTarget(normalizeBridgeTarget(host));
-      setPickerInitialSessions([host.sessionName]);
-      return;
-    }
-    rememberBridgeTarget(normalizeBridgeTarget(host), host.name);
-    setPageState(openConnectionPropertiesPage({ draft: host }));
-  }, [handleConnect, pickerMode, rememberBridgeTarget]);
-
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
     const draft = buildCleanDraft(target);
@@ -1043,12 +1023,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       <TmuxSessionPickerSheet
         mode={pickerMode === 'quick-tab' ? 'quick-tab' : pickerMode === 'edit-group' ? 'edit-group' : 'new-connection'}
         open={pickerMode !== null}
-        hosts={sortedHosts}
         servers={bridgeSettings.servers}
         initialTarget={pickerTarget}
         initialSelectedSessions={pickerInitialSessions}
         onClose={() => setPickerMode(null)}
-        onSelectHistoryHost={handleSelectHistoryHost}
         onOpenTmuxSession={handleOpenSingleTmuxSession}
         onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
         onSelectCleanSession={handleSelectCleanSession}

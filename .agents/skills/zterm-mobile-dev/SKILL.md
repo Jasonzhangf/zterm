@@ -142,9 +142,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
+- 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `stream-mode` / `scheduleMirrorFlush`）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`，不要继续让客户端保留 legacy fallback
 - `refreshSessionTail()` 若显式把 session sync state 切回 follow，UI renderer 也必须同步收到一个 follow-reset signal；只改 transport/store、不改 `TerminalView` 本地 `followMode/scrollTop`，就会出现“恢复后看到旧 buffer，输入一下才跳到最新”的假刷新
+- Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source
 - active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + gap marker；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
 - active 页的 gap repair 只针对 reading 态当前三屏窗口命中的缺口；不要从旧 stop point 连续追到最新，窗口外内容允许保持不连续以控制带宽
+- reading 贴近缓存顶部时，3 屏只是 cache window，不是滚动上限；要先预取前两屏并显示 loading，再继续上滚，不能把顶部卡成固定三屏
 - client 本地 cache window 必须围绕当前 reading viewport 动态移动；禁止 trim 时永远只保最新 tail，否则向前补到的历史会被立刻愚蠢扔掉
 - terminal 主题切换的真源是“默认前景/背景 + ANSI 16 色 preset”，不是只换容器背景；主题 id 应持久化到 shared `BridgeSettings`，Settings 只做 preset 选择
 - Android / Mac 若都要支持 terminal 主题，preset 与颜色算法必须下沉到 shared 纯模块，平台 TerminalView 只消费同一份 preset，避免 ANSI 映射再次分叉

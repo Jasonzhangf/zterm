@@ -71,6 +71,8 @@ export interface TerminalViewportState {
   mode: TerminalViewportMode;
   viewportEndIndex: number;
   viewportRows: number;
+  prefetch?: boolean;
+  missingRanges?: TerminalGapRange[];
 }
 
 export interface TerminalViewportSize {
@@ -258,7 +260,6 @@ export interface CommandHistory {
 
 export type ClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'stream-mode'; payload: { mode: 'active' | 'idle' } }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }

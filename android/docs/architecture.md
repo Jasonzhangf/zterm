@@ -22,7 +22,7 @@
 - Session/Transport：WebSocket、tmux bridge 会话状态
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
-- Client Render Window：只根据 daemon viewport bottom pointer + 本地 viewportRows 取绝对窗口
+- Client Render Window：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
@@ -167,7 +167,9 @@ daemon tmux mirror
                 ↓
       client mirror buffer (absolute-indexed)
                 ↓
-render window = [viewportEndIndex - localViewportRows, viewportEndIndex)
+renderBottomIndex (唯一渲染锚点)
+renderTopIndex = renderBottomIndex - localViewportRows
+render window = [renderTopIndex, renderBottomIndex)
                 ↓
       render container position only
 ```
@@ -183,7 +185,9 @@ render window = [viewportEndIndex - localViewportRows, viewportEndIndex)
 - client mirror buffer 是 **sparse absolute-index buffer**，允许不连续；只围绕当前工作集补缺
 - client active session 本地固定 `33ms` cadence 只做 head freshness / demand 判定；真正的 tail / reading range 拉取频率由网络状况与配置决定，不把“30fps 检查”误做成“30fps 必拉 range”
 - `sendInput()` 不做本地回显；若当前是 active session，只挂 `input-tail-refresh` demand，再由本地 cadence 主动发 follow `buffer-sync-request + ping` 去拿 server canonical buffer
-- client render 只根据“latest bottom + relative offset”求绝对窗口并渲染，不自行解释 shell 内容
+- client render 只维护自己的 `renderBottomIndex`；follow 时对齐 daemon bottom，reading 时只改自己的 bottom pointer，top 只做派生计算
+- render 不得参与 buffer 生产；它只能声明“当前 bottom-window 命中了哪些行、缺了哪些行”
+- reading 滚到当前缓存窗顶部时，3 屏只是 cache window，不是硬上限；client 需要预取上方两屏并展示 loading，再继续向上滚，不允许把顶部硬卡死
 - 已经进入 canonical buffer 的历史行视为 immutable fact；resize 只影响之后的新输出，不允许回写/重排旧事实
 - geometry 决策只看 zterm 自己的接入端；Termius/iTerm/iSSH 等外部 tmux client 不参与 daemon 的 geometry policy
 - 当前优先目标是“正确最后一屏”；reading / scroll 状态机继续以“worker 补当前窗口缺口”实现，不再让 renderer 参与 transport
