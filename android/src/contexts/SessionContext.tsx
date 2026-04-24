@@ -488,16 +488,27 @@ function shouldBootstrapFollowSyncRequest(
   cacheLines: number,
 ) {
   const followWindowEndIndex = Math.max(0, Math.floor(followViewState.viewportEndIndex || 0));
-  const followWindowStartIndex = Math.max(
-    session.buffer.startIndex,
+  const visibleWindowRows = Math.max(1, Math.floor(followViewState.viewportRows || session.buffer.rows || 1));
+  const visibleWindowStartIndex = Math.max(
+    0,
+    followWindowEndIndex - visibleWindowRows,
+  );
+  const followCacheWindowStartIndex = Math.max(
+    0,
     followWindowEndIndex - Math.max(1, Math.floor(cacheLines || 1)),
+  );
+  const missesVisibleFollowWindow = (
+    session.buffer.startIndex > visibleWindowStartIndex
+    || session.buffer.endIndex < followWindowEndIndex
+    || hasGapInAbsoluteWindow(session.buffer.gapRanges, visibleWindowStartIndex, followWindowEndIndex)
   );
 
   return (
     session.buffer.revision <= 0
     || session.buffer.endIndex <= session.buffer.startIndex
     || session.buffer.lines.length === 0
-    || hasGapInAbsoluteWindow(session.buffer.gapRanges, followWindowStartIndex, followWindowEndIndex)
+    || missesVisibleFollowWindow
+    || hasGapInAbsoluteWindow(session.buffer.gapRanges, followCacheWindowStartIndex, followWindowEndIndex)
   );
 }
 

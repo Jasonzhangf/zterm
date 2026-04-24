@@ -1038,6 +1038,50 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
+  it('bootstraps when switching to a connected tab whose local buffer does not cover the visible follow window', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+    ws2.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 70,
+        endIndex: 80,
+        viewportEndIndex: 80,
+        revision: 6,
+        lines: Array.from({ length: 10 }, (_, offset) => [70 + offset, `tail-${70 + offset}`]),
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-2-revision').textContent).toBe('6');
+      expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+    });
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const lastRequest = [...sent2].reverse().find((item) => item.type === 'buffer-sync-request');
+      expect(lastRequest?.payload).toMatchObject({
+        mode: 'follow',
+        knownRevision: 0,
+        localStartIndex: 0,
+        localEndIndex: 0,
+      });
+    });
+  });
+
   it('reconnects the newly activated tab when refresh request gets neither buffer-sync nor pong', async () => {
     vi.useFakeTimers();
     try {
