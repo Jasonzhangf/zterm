@@ -88,7 +88,7 @@
 - [x] T1 冻结 terminal 新真源文档（server / buffer manager / renderer / UI shell）
 - [x] T2 审计旧 daemon/client/render 链路，列出保留/删除清单
 - [x] T3 重做 server：只回答 `buffer-head-request` / `buffer-sync-request`，每次回复都带 head，删除策略逻辑（`mobile-15.2`）
-- [x] T4 重做 client buffer manager：独立 timer、head-first、3000 行 sliding sparse buffer、三屏重锚 / diff / reading gap repair（`mobile-15.3`）
+- [x] T4 重做 client buffer manager：独立 timer、head-first、1000 行 sliding sparse buffer、三屏重锚 / diff / reading gap repair（`mobile-15.3`）
 - [x] T5 重做 renderer container：`follow / reading + renderBottomIndex`，纯消费本地内容池（`mobile-15.4`）
 - [x] T6 重做 UI shell：keyboard / crop / container presentation only（`mobile-15.5`）
 - [x] T7 真实回归验证：initial / resume / input / reading / daemon-restart（`mobile-15.8`）
@@ -132,9 +132,11 @@
 
 - [ ] mobile-15.9 真机 closeout：收敛 `head -> buffer-sync -> local apply -> renderer commit` 断链（当前 1258 现场表现为 `session.buffer.request` 后无 `buffer-sync/render` 证据，首屏空白但 daemon direct probe 正常）
 - [ ] mobile-15.10 Android IME closeout：修正 `ImeAnchor` 的 stale show / 前台自动弹键盘 / 异常九宫格态，保证只有显式点键盘按钮才 show，且输入后必须进入 `input -> head -> buffer-sync -> render` 闭环
-- [ ] mobile-15.11 buffer store closeout：把 client 本地 buffer trim 真相从“3 屏”改回“3000 行 sliding window”，请求窗口仍保持三屏，不再混用
+- [ ] mobile-15.11 buffer store closeout：把 client 本地 buffer trim 真相从“3 屏”改回“1000 行 sliding window”，请求窗口仍保持三屏，不再混用
 - [ ] mobile-15.12 daemon mirror lifecycle closeout：daemon mirror 不能再跟 subscriber 生命周期绑定；当前 `orphan destroy -> mirror recreate` 会把 `revision/latestEndIndex` 重置，破坏 daemon 绝对行号真相并触发 client revision-reset 链路
 - [ ] mobile-15.13 daemon client-session bookkeeping closeout：`destroyMirror()` 当前会把 subscriber 标成 `closed` 但不 `sessions.delete()`，现场 `/health` 已出现 `170 total / 1 connected`
+- [ ] mobile-15.14 terminal 测试矩阵 closeout：把 checklist 映射到现有自动测试与缺口，固定补测顺序（voice/CJK commit、follow overdrag blank-frame、buffer truth reset violation、payload inflation）
+- [ ] mobile-15.15 renderer follow-state closeout：live tail refresh / pending follow realign 不得把底部 follow 自动打进 reading；先补本地回归，再修 renderer 状态机
 
 - 若继续发新 APK，补 `foreground / reading / input` 真机专项证据
 - 单独审 daemon `health.sessions.total` bookkeeping 偏大问题

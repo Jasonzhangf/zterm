@@ -43,6 +43,11 @@ tmux truth
 
 禁止只拿其中任意一层当“修好”。
 
+补充：
+
+- 具体 case 列表、现场判断口径、语音输入法专项、白屏/花屏/5MB 峰值专项，一律按 `docs/terminal-test-loop-checklist.md`
+- 本文聚焦“daemon/tmux mirror 闭环”；不要再把 client buffer truth / renderer truth / IME truth 混到 daemon 判责里
+
 ## 唯一 oracle
 
 本地测试里，tmux 本身就是唯一 oracle。

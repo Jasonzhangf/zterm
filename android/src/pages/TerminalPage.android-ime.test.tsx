@@ -83,13 +83,16 @@ vi.mock('../components/TerminalView', () => ({
   TerminalView: ({
     sessionId,
     allowDomFocus,
+    onActivateInput,
   }: {
     sessionId: string;
     allowDomFocus?: boolean;
+    onActivateInput?: () => void;
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-allow-dom-focus={allowDomFocus ? 'true' : 'false'}
+      onClick={() => onActivateInput?.()}
     />
   ),
 }));
@@ -205,6 +208,7 @@ describe('TerminalPage Android IME bridge', () => {
 
     await waitFor(() => {
       expect(ImeAnchor.blur).toHaveBeenCalled();
+      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
     });
 
     keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 280 });
@@ -217,18 +221,89 @@ describe('TerminalPage Android IME bridge', () => {
     imeListeners.get('input')?.({ text: '不该发到 terminal' });
     expect(onTerminalInput).not.toHaveBeenCalled();
 
-    vi.mocked(ImeAnchor.show).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'blur-quick-editor' }));
-
-    await waitFor(() => {
-      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
-    });
 
     imeListeners.get('input')?.({ text: '恢复路由' });
 
     await waitFor(() => {
       expect(onTerminalInput).toHaveBeenCalledWith('s1', '恢复路由');
     });
+    expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({ active: false });
+  });
+
+  it('re-activates ImeAnchor routing when quick editor yields focus while terminal keyboard is already visible', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
+    });
+
+    keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 280 });
+    fireEvent.click(screen.getByRole('button', { name: 'focus-quick-editor' }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.blur).toHaveBeenCalled();
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    vi.mocked(ImeAnchor.setEditorActive).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'blur-quick-editor' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({ active: false });
+    });
+  });
+
+  it('toggles native editor-active state while handing IME focus between terminal and quick editor', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'focus-quick-editor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'blur-quick-editor' }));
+
+    const calls = vi.mocked(ImeAnchor.setEditorActive).mock.calls.map(([payload]) => payload?.active);
+    expect(calls).toContain(true);
+    expect(calls[calls.length - 1]).toBe(false);
   });
 
   it('only shows ImeAnchor once when explicitly toggling the Android keyboard', async () => {
@@ -275,7 +350,7 @@ describe('TerminalPage Android IME bridge', () => {
     }
   });
 
-  it('does not re-show ImeAnchor when Android keyboard actually shows', async () => {
+  it('re-activates ImeAnchor routing when tapping the Android terminal surface while keyboard stays visible', async () => {
     const session = makeSession('s1');
 
     render(
@@ -302,14 +377,78 @@ describe('TerminalPage Android IME bridge', () => {
       expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
     });
 
-    vi.mocked(ImeAnchor.show).mockClear();
     keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 320 });
-
     await waitFor(() => {
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
-      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
     });
-    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByTestId('terminal-view-s1'));
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('re-activates ImeAnchor routing when the active terminal session changes while the Android keyboard is already visible', async () => {
+    const sessionOne = makeSession('s1');
+    const sessionTwo = makeSession('s2');
+
+    const view = render(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionOne}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
+    });
+
+    keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 320 });
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    vi.mocked(ImeAnchor.setEditorActive).mockClear();
+
+    view.rerender(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionTwo}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({ active: false });
+    });
   });
 
   it('uses native ImeAnchor keyboardState to raise terminal chrome on Android', async () => {
@@ -411,6 +550,110 @@ describe('TerminalPage Android IME bridge', () => {
 
     expect(vi.mocked(ImeAnchor.addListener).mock.calls.length).toBe(addListenerCallsBeforeRerender);
     expect(onTerminalInput).toHaveBeenCalledWith('s1', 'still-immediate');
+  });
+
+  it('keeps native IME routing alive after a voice-style CJK commit without needing an extra priming character', async () => {
+    const session = makeSession('s1');
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+    });
+
+    imeListeners.get('input')?.({ text: '语音识别结果' });
+    imeListeners.get('input')?.({ text: '!' });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', '语音识别结果');
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', '!');
+    });
+  });
+
+  it('keeps routing later native IME input after a buffer rerender that follows a voice-style commit', async () => {
+    const session = makeSession('s1');
+    const onTerminalInput = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+    });
+
+    imeListeners.get('input')?.({ text: '语音识别结果' });
+
+    const updatedSession: Session = {
+      ...session,
+      buffer: {
+        ...session.buffer,
+        revision: 2,
+        endIndex: 1,
+      },
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[updatedSession]}
+        activeSession={updatedSession}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    imeListeners.get('input')?.({ text: '继续输入' });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', '语音识别结果');
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', '继续输入');
+    });
   });
 });
 

@@ -425,4 +425,113 @@ describe('App Android IME input closed loop', () => {
       expect(view.container.textContent).toContain('prompt-before-inputls');
     });
   });
+
+  it('commits voice-style CJK text and keeps terminal input live without requiring an extra character', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+
+    const view = render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitFor(() => expect(imeListeners.has('input')).toBe(true));
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 3,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: fullTailWindowPayload({
+        revision: 3,
+        startIndex: 45,
+        endIndex: 240,
+        tailLine: 'prompt-before-voice',
+      }),
+    });
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('prompt-before-voice');
+    });
+
+    ws.sent.length = 0;
+    imeListeners.get('input')?.({ text: '语音识别结果' });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'input' && item.payload === '语音识别结果')).toBe(true);
+      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 4,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 3)).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: fullTailWindowPayload({
+        revision: 4,
+        startIndex: 45,
+        endIndex: 240,
+        tailLine: 'prompt-before-voice语音识别结果',
+      }),
+    });
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('prompt-before-voice语音识别结果');
+    });
+
+    ws.sent.length = 0;
+    imeListeners.get('input')?.({ text: '!' });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'input' && item.payload === '!')).toBe(true);
+      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+  });
 });

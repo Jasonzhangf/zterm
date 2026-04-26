@@ -73,6 +73,14 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - 按绝对行号存储
 - 可以是 sparse，不要求永远连续
 - 历史超出窗口后滑走，但**不是单次 payload 来了就把本地历史裁掉**
+- **已有 absolute-index 内容不能因为窗口判断错误而被逻辑清空**
+
+### 2.1.1 本地 buffer 不变量
+
+- `local window invalid` 只说明“当前工作窗口理解错了”，**不说明已有 buffer truth 作废**
+- `anchor mismatch` / `head mismatch` 也一样；它们只影响下一次 request plan，不影响已有 absolute-index 内容的存在性
+- buffer manager **没有权利**把已有本地 buffer 先 reset 成空窗再重拉
+- 正确动作只能是：保留已有内容 -> 计算缺口/新窗口 -> 请求 range -> merge -> 通知 renderer
 
 ### 2.2 follow 路径
 每次 tick：
@@ -99,6 +107,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - buffer manager 不能替 renderer 改 mode
 - 不能因为本地历史有 gap，就在 follow 下回补整段历史
 - 不能把 snapshot / patch-middle / fallback 再塞回来
+- 不能把 `local window invalid` / `anchor mismatch` / `head mismatch` 实现成“先清空已有本地 buffer 再重拉”
 - buffer manager 也必须 **读写解耦**：
   - 写侧：同步 daemon -> 更新本地 sparse buffer
   - 读侧：renderer 只消费当前本地 buffer
@@ -126,6 +135,8 @@ renderer 只看两件事：
 - reading 时只改自己的 `renderBottomIndex`
 - 申请的是“reading head 往回 3 屏”的渲染窗口
 - buffer 更新只会让 renderer 重绘当前窗口，**不会自动滚动**
+- 即使当前窗口不连续，renderer 也只能把缺口画成 gap / blank marker；不能把已有 absolute-index 内容当成不存在
+- follow 态若只是因为 live tail refresh / pending follow realign / programmatic scroll 导致 DOM 暂时没贴底，**不得自动进入 reading**；进入 reading 只能由用户滚动手势触发
 
 ### 3.3 reading 退出条件
 只允许三种：
@@ -160,6 +171,9 @@ UI 只负责容器位置与裁切：
 - renderer 直接 request buffer
 - buffer manager 直接改 renderer follow/reading
 - follow 下因为历史 gap 去回补整段旧历史
+- `local window invalid -> empty local buffer -> full reanchor`
+- `anchor mismatch -> clear local truth`
+- `head mismatch -> treat local content as lost`
 - 初次连接或恢复连接时，两三 K 两三 K 慢慢追历史
 - 任何 fallback / 降级 / 第二语义
 
@@ -173,6 +187,11 @@ UI 只负责容器位置与裁切：
 ```
 
 顺序错了，视为没按真源做。
+
+其中测试与检查清单真源固定为：
+
+- `android/docs/daemon-mirror-test-plan.md`
+- `android/docs/terminal-test-loop-checklist.md`
 
 ## 7. 必跑真回环
 
@@ -236,4 +255,5 @@ tmux truth
 - 用户现场若给的是 **ADB device 地址**，不要误判成 daemon 地址；先从 Android WebView localStorage 真源读取当前 `bridgeHost / bridgePort / authToken`，再去打 `/health`、`/debug/runtime`、WebSocket probe
 - 若怀疑“是 daemon 慢”，必须补一个 **independent direct daemon probe**：临时 tmux session 上测 `connect -> head -> input -> head change`；如果 direct probe 是几十毫秒，而现场 session 仍是几十秒，就先把 generic daemon 基线排除，转查现场 session / IME / active transport 链路
 - 若真机现场出现 `session.buffer.request` 已发出、daemon direct probe 也能直接拿到非空 range，但 APK 仍首屏空白/`R=0`，优先判定为 **client 侧 `buffer-sync -> local apply -> renderer commit` 断链**；先补本地结构化证据，不要再回头怪 daemon
+- 若现场出现“本地窗口判断错后直接白屏/大包重拉”，优先判定为 **client 侧越权清空已有 absolute-index buffer truth**；这不是 daemon 问题，也不是 buffer 真丢了，而是 client 把“窗口规划错误”实现成了“truth reset”
 - 若 Android 真机出现“未点键盘却前台自动弹 IME”或 IME 在九宫格/QWERTY 间异常切换，优先查 `ImeAnchor` 的 stale show/focus 状态是否跨前后台遗留；**只有显式 keyboard action 才允许 show IME**

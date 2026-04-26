@@ -53,6 +53,7 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
   - `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`
   - `.agents/skills/terminal-buffer-truth/SKILL.md`
   - `docs/daemon-mirror-test-plan.md`
+  - `docs/terminal-test-loop-checklist.md`
 - 未完成 ownership 拆分前，禁止继续在 `TerminalView.tsx` 叠加 projection / anchor / scroll patch
 - daemon 侧提交前必须证明：它只维护 session canonical truth，只回答 head / range，且每次回复都带 head；不承载显示逻辑，不承载策略
 - client 侧提交前必须证明：buffer worker / renderer container / UI shell 已拆开，renderer 不直接驱动 transport
@@ -83,6 +84,13 @@ terminal 修复完成前，必须同时给出以下证据：
 3. client buffer worker logs
 4. renderer commit logs
 5. Android APK 真实安装态结果
+
+并按 `docs/terminal-test-loop-checklist.md` 回答：
+
+- 角色不变量有没有被违反
+- 当前问题属于哪一层
+- 本轮自动回归覆盖了哪些 case
+- 哪些 still manual / still missing
 
 缺任意一层都不允许宣称修复完成。
 
@@ -120,6 +128,10 @@ terminal 修复完成前，必须同时给出以下证据：
 8. daemon restart recover
 
 如果某个线上问题不能被本地自动回归稳定复现，就不允许进入“已修复”口径。
+
+另外新增一条硬规则：
+
+- 若问题表现为“白屏 / 花屏 / 输入后再也不能输 / 语音转文字后不自动刷新 / 5MB 峰值”，必须同时补 `docs/terminal-test-loop-checklist.md` 里的专项检查项，不能只跑通用 regression。
 
 ## 验证层级
 

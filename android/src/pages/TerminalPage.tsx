@@ -380,7 +380,6 @@ export function TerminalPage({
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
-  const previousQuickBarEditorFocusedRef = useRef(quickBarEditorFocused);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const splitOpenWidthRef = useRef(0);
   const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
@@ -618,6 +617,15 @@ export function TerminalPage({
     pendingAndroidImeFocusTimerRef.current = null;
   }, []);
 
+  const setAndroidEditorActive = useCallback((active: boolean) => {
+    if (!isAndroid) {
+      return;
+    }
+    void ImeAnchor.setEditorActive({ active }).catch((error) => {
+      console.warn(`[TerminalPage] ImeAnchor.setEditorActive(${active ? 'true' : 'false'}) failed:`, error);
+    });
+  }, [isAndroid]);
+
   const requestAndroidImeFocus = useCallback(() => {
     if (!isAndroid || quickBarEditorFocusedRef.current) {
       return;
@@ -628,11 +636,22 @@ export function TerminalPage({
       if (quickBarEditorFocusedRef.current) {
         return;
       }
+      setAndroidEditorActive(false);
       void ImeAnchor.show().catch((error) => {
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });
     }, 0);
-  }, [clearPendingAndroidImeFocus, isAndroid]);
+  }, [clearPendingAndroidImeFocus, isAndroid, setAndroidEditorActive]);
+
+  const restoreAndroidTerminalImeRoute = useCallback(() => {
+    if (!isAndroid || quickBarEditorFocusedRef.current) {
+      return;
+    }
+    if (!(terminalKeyboardRequested || keyboardInset > 0)) {
+      return;
+    }
+    requestAndroidImeFocus();
+  }, [isAndroid, keyboardInset, requestAndroidImeFocus, terminalKeyboardRequested]);
 
   const keepTerminalInputFocused = () => {
     if (quickBarEditorFocused) {
@@ -640,7 +659,7 @@ export function TerminalPage({
     }
 
     if (isAndroid) {
-      requestAndroidImeFocus();
+      restoreAndroidTerminalImeRoute();
       return;
     }
 
@@ -681,7 +700,6 @@ export function TerminalPage({
 
     setTerminalKeyboardRequested(true);
     if (isAndroid) {
-      requestAndroidImeFocus();
       return;
     }
 
@@ -705,7 +723,29 @@ export function TerminalPage({
         logAsyncCleanupFailure('Keyboard.show retry(120ms)', error);
       });
     }, 120);
-  }, [activeSession?.id, clearPendingAndroidImeFocus, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested]);
+  }, [activeSession?.id, clearPendingAndroidImeFocus, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, terminalKeyboardRequested]);
+
+  const handleQuickBarEditorDomFocusChange = useCallback((active: boolean) => {
+    quickBarEditorFocusedRef.current = active;
+    setQuickBarEditorFocused(active);
+    setAndroidEditorActive(active);
+    if (active || !isAndroid) {
+      return;
+    }
+    if (terminalKeyboardRequested || keyboardInset > 0) {
+      requestAndroidImeFocus();
+    }
+  }, [isAndroid, keyboardInset, requestAndroidImeFocus, setAndroidEditorActive, terminalKeyboardRequested]);
+
+  useEffect(() => {
+    if (!isAndroid || quickBarEditorFocused || !activeSession?.id) {
+      return;
+    }
+    if (!(terminalKeyboardRequested || keyboardInset > 0)) {
+      return;
+    }
+    requestAndroidImeFocus();
+  }, [activeSession?.id, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested]);
 
   useEffect(() => {
     const syncOnlineState = () => {
@@ -851,37 +891,18 @@ export function TerminalPage({
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {
-      if (!isAndroid) {
-        return;
-      }
-      const wasQuickBarEditorFocused = previousQuickBarEditorFocusedRef.current;
-      previousQuickBarEditorFocusedRef.current = quickBarEditorFocused;
-      void ImeAnchor.setEditorActive({ active: false })
-        .then(() => {
-          if (!wasQuickBarEditorFocused) {
-            return;
-          }
-          requestAndroidImeFocus();
-        })
-        .catch((error) => {
-          console.warn('[TerminalPage] ImeAnchor.setEditorActive(false) failed:', error);
-        });
       return;
     }
 
-    previousQuickBarEditorFocusedRef.current = quickBarEditorFocused;
     setTerminalKeyboardRequested(false);
     clearPendingAndroidImeFocus();
-    // ImeAnchor.blur() removed: editor overlay needs keyboard to stay open.
-    // setEditorActive(true) below disables ImeAnchor focus-stealing without hiding keyboard.
-    void ImeAnchor.setEditorActive({ active: true }).catch((error) => {
-      console.warn('[TerminalPage] ImeAnchor.setEditorActive(true) failed:', error);
+    void ImeAnchor.blur().catch((error) => {
+      console.warn('[TerminalPage] ImeAnchor.blur() failed:', error);
     });
   }, [
     clearPendingAndroidImeFocus,
     isAndroid,
     quickBarEditorFocused,
-    requestAndroidImeFocus,
   ]);
 
   useEffect(() => () => {
@@ -1275,6 +1296,7 @@ export function TerminalPage({
                       inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
                       allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
                       domInputOffscreen={isAndroid}
+                      onActivateInput={isAndroid && sessionIsActive ? () => restoreAndroidTerminalImeRoute() : undefined}
                       onResize={sessionIsActive ? onResize : undefined}
                       onInput={sessionIsActive ? onTerminalInput : undefined}
                       onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
@@ -1436,7 +1458,7 @@ export function TerminalPage({
             splitVisible={splitVisible}
             onToggleSplitLayout={toggleSplitLayout}
             onCycleSplitPane={cycleSecondaryPane}
-            onEditorDomFocusChange={setQuickBarEditorFocused}
+            onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
           />
         </div>
       </div>

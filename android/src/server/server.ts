@@ -292,6 +292,8 @@ function summarizePayload(message: ServerMessage) {
   }
 
   const payload = message.payload;
+  const firstLine = payload.lines[0];
+  const lastLine = payload.lines[payload.lines.length - 1];
   return {
     revision: payload.revision,
     startIndex: payload.startIndex,
@@ -299,8 +301,8 @@ function summarizePayload(message: ServerMessage) {
     rows: payload.rows,
     cols: payload.cols,
     lineCount: payload.lines.length,
-    firstLineIndex: payload.lines[0]?.index ?? null,
-    lastLineIndex: payload.lines[payload.lines.length - 1]?.index ?? null,
+    firstLineIndex: firstLine ? ('i' in firstLine ? firstLine.i : firstLine.index) : null,
+    lastLineIndex: lastLine ? ('i' in lastLine ? lastLine.i : lastLine.index) : null,
   };
 }
 

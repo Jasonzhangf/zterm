@@ -92,6 +92,34 @@ buffer manager 是客户端唯一 buffer worker。
 - 允许 sparse
 - 历史超出窗口后再滑走
 - 单次 payload 不是“重建本地 buffer”的命令
+- **已有绝对行号内容一旦进入本地 buffer truth，就不能因为窗口判断而被逻辑清空**
+
+### 2.2.1 本地 buffer 不变量
+
+下面几条是硬规则：
+
+1. **窗口错不等于 buffer 作废**
+2. **anchor 错不等于 buffer 作废**
+3. **head 对不上不等于 buffer 作废**
+4. buffer manager **没有权利**因为“当前工作窗口理解错了”，就把已有本地 buffer truth 清空、重置成空窗、假装丢失
+
+正确语义只能是：
+
+```text
+已有 absolute-index buffer truth 继续保留
+-> 重新理解当前工作窗口 / 缺口
+-> 请求缺的 range
+-> 按绝对行号 merge
+-> 通知 renderer
+```
+
+绝不允许：
+
+```text
+窗口判断异常
+-> 先把已有本地 buffer truth 清空
+-> 再从空窗重拉
+```
 
 ### 2.3 follow 主路径
 
@@ -125,6 +153,8 @@ reading 不改变 head-first 主循环。
 - 不直接修改 renderer 的 mode
 - 不在 follow 下因为历史 gap 去回补整段旧历史
 - 不允许 snapshot / patch-middle / fallback
+- 不允许因为 `local window invalid` / `anchor mismatch` / `head mismatch` 把已有本地 buffer truth 重置成空窗
+- 不允许把“请求规划错误”实现成“先销毁已有本地内容再重拉”
 
 ---
 
@@ -171,6 +201,8 @@ renderWindow = [renderTopIndex, renderBottomIndex)
 - 不决定 buffer pull
 - 不修改 buffer 内容
 - 不因为 buffer 变化自动滚动
+- 不允许把“窗口不连续”解释成“已有内容不存在”
+- 当前窗口缺行时，应继续消费已有 absolute-index 内容，并把缺口显式视为 gap / blank marker，而不是把整屏当空
 
 ---
 

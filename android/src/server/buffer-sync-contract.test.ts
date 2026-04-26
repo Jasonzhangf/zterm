@@ -65,7 +65,7 @@ describe('buildRequestedRangeBufferPayload', () => {
       availableStartIndex: 100,
       availableEndIndex: 103,
     });
-    expect(payload.lines.map((line) => line.index)).toEqual([100, 101, 102]);
+    expect(payload.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([100, 101, 102]);
   });
 
   it('still returns buffer-sync semantics for zero-width requests instead of forcing head-only semantics', () => {

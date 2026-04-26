@@ -142,6 +142,24 @@ export interface TerminalIndexedLine {
   cells: TerminalCell[];
 }
 
+/**
+ * Compact wire format for a single line.
+ * Replaces TerminalIndexedLine on the wire to cut payload size ~95%.
+ *
+ *   i = absolute line index
+ *   t = text content (codePoints, width-0 continuation cells skipped)
+ *   s = optional sparse style spans [startCol, endCol, fg, bg]
+ *       absent or empty = all default (fg=15, bg=0, flags=0, width=1)
+ */
+export interface CompactIndexedLine {
+  i: number;
+  t: string;
+  s?: [number, number, number, number][];
+}
+
+/** Wire format: either compact (new) or legacy full-cell (old). */
+export type WireIndexedLine = CompactIndexedLine | TerminalIndexedLine;
+
 export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;               // authoritative available window start on daemon
@@ -151,7 +169,7 @@ export interface TerminalBufferPayload {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
-  lines: TerminalIndexedLine[];     // concrete rows carried by this message; may be full window or subset
+  lines: WireIndexedLine[];         // concrete rows carried by this message; compact preferred, legacy accepted
 }
 
 export interface BufferSyncRequestPayload {

@@ -22,6 +22,7 @@
 - Session/Transport：WebSocket、tmux bridge 会话状态
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
+- Client Mirror Buffer 不变量：窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相；client 不得先清空已有本地 buffer 再重拉
 - Client Render Window：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
@@ -194,6 +195,7 @@ daemon server
 - 若本地为空、失真或离 head 超过三屏：直接请求最新三屏并移动本地窗口；中间不补
 - 若本地仍接近 head：只补 diff
 - reading 时若 renderer 当前窗口不连续：只补 reading gap
+- 即使本地工作窗口判断错误，也只能重算 request plan / 缺口；**不能**把已有 absolute-index 本地 buffer truth 清空成空窗
 - renderer 只有 `follow / reading` 两种模式，只维护 `renderBottomIndex`
 - renderer 不修改 buffer，不参与 transport 规划，不直接 request daemon
 - 用户上滚进入 reading；重新进入 / 下滚到底 / 输入退出 reading 回 follow

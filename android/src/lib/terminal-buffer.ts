@@ -1,10 +1,13 @@
-import type {
+import {
   SessionBufferState,
   TerminalBufferPayload,
   TerminalCell,
   TerminalGapRange,
-  TerminalIndexedLine,
+  type TerminalIndexedLine,
+  type WireIndexedLine,
 } from './types';
+
+import { expandCompactLine, isCompactLine } from '../server/buffer-sync-contract';
 
 const EMPTY_ROW: TerminalCell[] = [];
 
@@ -48,14 +51,28 @@ export function normalizeBufferLines(lines: Array<TerminalCell[] | string>, cach
   return normalized.slice(normalized.length - cacheLines);
 }
 
-function normalizeIndexedLines(lines: TerminalIndexedLine[]) {
-  return lines
-    .filter((line) => line && Number.isFinite(line.index))
-    .map((line) => ({
-      index: Math.max(0, Math.floor(line.index)),
-      cells: line.cells || EMPTY_ROW,
-    }))
-    .sort((left, right) => left.index - right.index);
+/**
+ * Normalize wire lines (compact or legacy) into canonical TerminalIndexedLine[].
+ * Compact lines are expanded via expandCompactLine; legacy lines pass through.
+ */
+export function normalizeWireLines(lines: WireIndexedLine[], cols: number): TerminalIndexedLine[] {
+  const result: TerminalIndexedLine[] = [];
+  for (const line of lines) {
+    if (isCompactLine(line)) {
+      const index = Math.max(0, Math.floor(line.i));
+      const cells = expandCompactLine(line, cols);
+      result.push({ index, cells });
+    } else {
+      const legacy = line as TerminalIndexedLine;
+      if (legacy && Number.isFinite(legacy.index)) {
+        result.push({
+          index: Math.max(0, Math.floor(legacy.index)),
+          cells: legacy.cells || EMPTY_ROW,
+        });
+      }
+    }
+  }
+  return result.sort((left, right) => left.index - right.index);
 }
 
 function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
@@ -268,7 +285,7 @@ export function createSessionBufferState(options: {
 }
 
 function payloadToSparseWindow(payload: TerminalBufferPayload) {
-  const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  const normalizedLines = normalizeWireLines(payload.lines || [], payload.cols || 80);
   const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
   const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
 

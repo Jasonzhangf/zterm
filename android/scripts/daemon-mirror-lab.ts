@@ -9,6 +9,7 @@ import {
   applyBufferSyncToSessionBuffer,
   cellsToLine,
   createSessionBufferState,
+  normalizeWireLines,
 } from '../src/lib/terminal-buffer';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
 
@@ -467,7 +468,7 @@ function compareTail(oracle: OracleSnapshot, payload: TerminalBufferPayload | nu
   );
   const startIndex = Math.max(0, viewportBottom - rowCount);
   const linesByIndex = new Map<number, string>();
-  for (const line of payload.lines) {
+  for (const line of normalizeWireLines(payload.lines, payload.cols || oracle.paneCols)) {
     linesByIndex.set(line.index, cellsToText(line.cells));
   }
 
@@ -503,7 +504,7 @@ function payloadCoversVisibleViewport(oracle: OracleSnapshot, payload: TerminalB
     Number.isFinite(payload.availableEndIndex) ? payload.availableEndIndex! : payload.endIndex,
   );
   const startIndex = Math.max(0, viewportBottom - rowCount);
-  const indices = new Set(payload.lines.map((line) => line.index));
+  const indices = new Set(normalizeWireLines(payload.lines, payload.cols || oracle.paneCols).map((line) => line.index));
   for (let index = startIndex; index < viewportBottom; index += 1) {
     if (!indices.has(index)) {
       return false;
@@ -897,7 +898,9 @@ class DaemonProbe {
 
   async waitForMarker(marker: string, timeoutMs: number = WAIT_TIMEOUT_MS) {
     return this.waitForPayload(`marker ${marker}`, (payload) => {
-      const joined = payload.lines.map((line) => cellsToText(line.cells)).join('\n');
+      const joined = normalizeWireLines(payload.lines, payload.cols || LAB_COLS)
+        .map((line) => cellsToText(line.cells))
+        .join('\n');
       return joined.includes(marker);
     }, timeoutMs);
   }

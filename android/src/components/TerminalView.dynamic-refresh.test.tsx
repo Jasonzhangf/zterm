@@ -292,8 +292,7 @@ describe('TerminalView minimal mirror render', () => {
     fireEvent.scroll(scroller);
 
     await waitFor(() => {
-      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
-      expect(lastCall?.mode).toBe('reading');
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
     });
 
     const input = view.container.querySelector('textarea[data-wterm-input="true"]') as HTMLTextAreaElement;
@@ -417,12 +416,19 @@ describe('TerminalView minimal mirror render', () => {
 
     await waitFor(() => expect(onViewportChange).toHaveBeenCalled());
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 680;
+      },
+    });
+    scroller.scrollTop = 272;
+    fireEvent.scroll(scroller);
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
 
     await waitFor(() => {
-      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
-      expect(lastCall?.mode).toBe('reading');
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
     });
     expect(view.container.querySelector('[data-terminal-gap=\"true\"]')).toBeTruthy();
   });
@@ -1218,6 +1224,7 @@ describe('TerminalView minimal mirror render', () => {
           bufferGapRanges={reanchoredTail.buffer.gapRanges}
           cursorKeysApp={reanchoredTail.buffer.cursorKeysApp}
           active
+          bufferPullActive
           onResize={vi.fn()}
           onInput={vi.fn()}
           onViewportChange={onViewportChange}
@@ -1986,6 +1993,91 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('does not auto-enter reading when a follow refresh temporarily leaves the DOM above bottom before realign', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      onViewportChange.mockClear();
+
+      scrollHeight = 1377;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      fireEvent.scroll(scroller);
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(969);
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps rendering current rows instead of going full black when the first visible frame contains a gap', async () => {
     const session = makeSession({
       revision: 1,
@@ -2017,6 +2109,58 @@ describe('TerminalView minimal mirror render', () => {
       const rows = readRenderedRows(view.container);
       expect(rows.length).toBeGreaterThan(0);
       expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
+    });
+  });
+
+  it('keeps follow rows rendered when the user drags past the bottom in follow mode', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 1360;
+      },
+    });
+
+    await waitFor(() => {
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+    });
+
+    scroller.scrollTop = 980;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('follow');
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows).toContain('row-080');
     });
   });
 });

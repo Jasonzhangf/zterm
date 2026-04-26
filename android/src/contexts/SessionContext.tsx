@@ -35,6 +35,7 @@ import { drainRuntimeDebugEntries, getPendingRuntimeDebugEntryCount, isRuntimeDe
 import {
   applyBufferSyncToSessionBuffer,
   createSessionBufferState,
+  normalizeWireLines,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
@@ -71,6 +72,8 @@ function emitSessionStatus(sessionId: string, type: 'closed' | 'error', message?
 }
 
 function summarizeBufferPayload(payload: TerminalBufferPayload) {
+  const firstLine = payload.lines[0];
+  const lastLine = payload.lines[payload.lines.length - 1];
   return {
     revision: payload.revision,
     startIndex: payload.startIndex,
@@ -78,8 +81,8 @@ function summarizeBufferPayload(payload: TerminalBufferPayload) {
     cols: payload.cols,
     rows: payload.rows,
     lineCount: payload.lines.length,
-    firstLineIndex: payload.lines[0]?.index ?? null,
-    lastLineIndex: payload.lines[payload.lines.length - 1]?.index ?? null,
+    firstLineIndex: firstLine ? ('i' in firstLine ? firstLine.i : firstLine.index) : null,
+    lastLineIndex: lastLine ? ('i' in lastLine ? lastLine.i : lastLine.index) : null,
   };
 }
 
@@ -259,6 +262,12 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
+interface SessionReconnectDecisionOptions {
+  hasSession: boolean;
+  wsReadyState: number | null;
+  reconnectInFlight: boolean;
+}
+
 interface SessionWireStatsSnapshot {
   txBytes: number;
   rxBytes: number;
@@ -298,6 +307,28 @@ function createReconnectBucket(): ReconnectBucket {
 
 function computeReconnectDelay(attempt: number) {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
+}
+
+export function shouldReconnectActivatedSession(options: SessionReconnectDecisionOptions) {
+  const transportClosed = (
+    options.wsReadyState === null
+    || options.wsReadyState === WebSocket.CLOSING
+    || options.wsReadyState === WebSocket.CLOSED
+  );
+  return options.hasSession && transportClosed && !options.reconnectInFlight;
+}
+
+export function shouldReconnectQueuedActiveInput(options: {
+  isActiveTarget: boolean;
+  wsReadyState: number | null;
+  reconnectInFlight: boolean;
+}) {
+  const transportClosed = (
+    options.wsReadyState === null
+    || options.wsReadyState === WebSocket.CLOSING
+    || options.wsReadyState === WebSocket.CLOSED
+  );
+  return options.isActiveTarget && transportClosed && !options.reconnectInFlight;
 }
 
 function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
@@ -362,13 +393,9 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
     rows,
     cursorKeysApp: Boolean(input.cursorKeysApp),
     lines: Array.isArray(input.lines)
-      ? input.lines
-          .filter((line) => line && typeof line === 'object')
+      ? normalizeWireLines(input.lines, typeof input.cols === 'number' && Number.isFinite(input.cols) ? Math.max(1, Math.floor(input.cols)) : 80)
           .map((line) => ({
-            index:
-              typeof line.index === 'number' && Number.isFinite(line.index)
-                ? Math.max(0, Math.floor(line.index))
-                : 0,
+            index: line.index,
             cells: normalizeTerminalCellRow(line.cells),
           }))
       : [],
@@ -399,6 +426,22 @@ function resolveRequestedBufferWindow(
   const cacheLines = resolveTerminalRequestWindowLines(safeViewportRows);
   const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
   const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
+  return {
+    requestStartIndex,
+    requestEndIndex,
+  };
+}
+
+function resolveVisibleViewportWindow(
+  endIndex: number,
+  viewportRows: number,
+  minStartIndex = 0,
+) {
+  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
+  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
+  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
+  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
+  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - safeViewportRows);
   return {
     requestStartIndex,
     requestEndIndex,
@@ -460,6 +503,7 @@ function collectIntersectingGapRanges(
 function collectReadingRepairRanges(
   session: Session,
   renderDemand?: SessionRenderDemandState,
+  liveHead?: SessionBufferHeadState | null,
 ) {
   if (renderDemand?.mode !== 'reading') {
     return [] as TerminalGapRange[];
@@ -472,10 +516,11 @@ function collectReadingRepairRanges(
     || session.buffer.endIndex
     || 0,
   ));
+  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead);
   const requestWindow = resolveRequestedBufferWindow(
     viewportEndIndex,
     viewportRows,
-    session.buffer.bufferHeadStartIndex,
+    availableStartIndex,
   );
   const requestStartIndex = requestWindow.requestStartIndex;
   const requestEndIndex = requestWindow.requestEndIndex;
@@ -509,6 +554,11 @@ function collectReadingRepairRanges(
 function buildTailRefreshBufferSyncRequestPayload(
   session: Session,
   renderDemand?: SessionRenderDemandState,
+  options?: {
+    liveHead?: SessionBufferHeadState | null;
+    forceSameEndRefresh?: boolean;
+    invalidLocalWindow?: boolean;
+  },
 ): BufferSyncRequestPayload {
   const viewportRows = resolveDemandViewportRows(session, renderDemand);
   const viewportEndIndex = Math.max(0, Math.floor(
@@ -519,34 +569,51 @@ function buildTailRefreshBufferSyncRequestPayload(
     || 0,
   ));
   const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
-  const authoritativeHeadStartIndex = Math.max(0, Math.floor(session.buffer.bufferHeadStartIndex || 0));
+  const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead);
+  const authoritativeHeadStartIndex = availableStartIndex;
   const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
   const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
   const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
   const localHasWindow = localEndIndex > localStartIndex;
   const distanceToHead = Math.max(0, viewportEndIndex - localEndIndex);
+  const invalidLocalWindow = Boolean(options?.invalidLocalWindow);
   const sameEndRevisionAdvanced = (
     localHasWindow
     && distanceToHead === 0
     && daemonRevision > localRevision
   );
-  const needsTailReanchor = (
-    !localHasWindow
-    || distanceToHead > cacheLines
-    || sameEndRevisionAdvanced
-  );
+  let window: { requestStartIndex: number; requestEndIndex: number };
 
-  const window = needsTailReanchor
-    ? resolveRequestedBufferWindow(
-        viewportEndIndex,
-        viewportRows,
-        authoritativeHeadStartIndex,
-      )
-    : {
-        requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
-        requestEndIndex: viewportEndIndex,
-      };
+  if (!localHasWindow || invalidLocalWindow || distanceToHead > cacheLines) {
+    window = resolveRequestedBufferWindow(
+      viewportEndIndex,
+      viewportRows,
+      authoritativeHeadStartIndex,
+    );
+  } else if (localEndIndex < viewportEndIndex) {
+    window = {
+      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
+      requestEndIndex: viewportEndIndex,
+    };
+  } else if (sameEndRevisionAdvanced) {
+    window = options?.forceSameEndRefresh
+      ? resolveRequestedBufferWindow(
+          viewportEndIndex,
+          viewportRows,
+          authoritativeHeadStartIndex,
+        )
+      : resolveVisibleViewportWindow(
+          viewportEndIndex,
+          viewportRows,
+          authoritativeHeadStartIndex,
+        );
+  } else {
+    window = {
+      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
+      requestEndIndex: viewportEndIndex,
+    };
+  }
   return {
     ...buildBaseBufferSyncRequestPayload(session),
     requestStartIndex: window.requestStartIndex,
@@ -557,6 +624,7 @@ function buildTailRefreshBufferSyncRequestPayload(
 function buildReadingBufferSyncRequestPayload(
   session: Session,
   renderDemand?: SessionRenderDemandState,
+  liveHead?: SessionBufferHeadState | null,
 ): BufferSyncRequestPayload {
   const viewportRows = resolveDemandViewportRows(session, renderDemand);
   const viewportEndIndex = Math.max(0, Math.floor(
@@ -565,16 +633,17 @@ function buildReadingBufferSyncRequestPayload(
     || session.buffer.endIndex
     || 0,
   ));
+  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead);
   const window = resolveRequestedBufferWindow(
     viewportEndIndex,
     viewportRows,
-    session.buffer.bufferHeadStartIndex,
+    availableStartIndex,
   );
   return {
     ...buildBaseBufferSyncRequestPayload(session),
     requestStartIndex: window.requestStartIndex,
     requestEndIndex: window.requestEndIndex,
-    missingRanges: collectReadingRepairRanges(session, renderDemand),
+    missingRanges: collectReadingRepairRanges(session, renderDemand, liveHead),
   };
 }
 
@@ -584,12 +653,14 @@ function buildSessionBufferSyncRequestPayload(
   options?: {
     purpose?: 'tail-refresh' | 'reading-repair';
     forceSameEndRefresh?: boolean;
+    liveHead?: SessionBufferHeadState | null;
+    invalidLocalWindow?: boolean;
   },
 ): BufferSyncRequestPayload {
   const purpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
   return purpose === 'reading-repair'
-    ? buildReadingBufferSyncRequestPayload(session, renderDemand)
-    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand);
+    ? buildReadingBufferSyncRequestPayload(session, renderDemand, options?.liveHead)
+    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand, options);
 }
 
 function buildHostConfigMessage(
@@ -726,8 +797,9 @@ function shouldCatchUpFollowTailAfterBufferApply(
 function shouldPullReadingBuffer(
   session: Session,
   renderDemand?: SessionRenderDemandState,
+  liveHead?: SessionBufferHeadState | null,
 ) {
-  return collectReadingRepairRanges(session, renderDemand).length > 0;
+  return collectReadingRepairRanges(session, renderDemand, liveHead).length > 0;
 }
 
 function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
@@ -787,26 +859,6 @@ function hasImpossibleLocalWindow(
     || localHeadStartIndex > availableEndIndex
     || localTailEndIndex > availableEndIndex
   );
-}
-
-function buildDaemonAnchoredEmptyBuffer(
-  session: Session,
-  liveHead: SessionBufferHeadState,
-  cacheLines: number,
-) {
-  const { availableStartIndex, availableEndIndex } = resolveHeadAvailableBounds(session, liveHead);
-  return createSessionBufferState({
-    lines: [],
-    startIndex: availableEndIndex,
-    endIndex: availableEndIndex,
-    bufferHeadStartIndex: availableStartIndex,
-    bufferTailEndIndex: availableEndIndex,
-    cols: session.buffer.cols,
-    rows: session.buffer.rows,
-    cursorKeysApp: session.buffer.cursorKeysApp,
-    revision: Math.max(0, Math.floor(session.buffer.revision || 0)),
-    cacheLines,
-  });
 }
 
 function hasActiveSessionPullState(pullStates?: SessionPullStates | null) {
@@ -873,6 +925,16 @@ function settleSessionPullStatesWithBufferSync(
   return next;
 }
 
+function doesSessionPullStateCoverRequest(
+  pullState: SessionPullState,
+  payload: BufferSyncRequestPayload,
+) {
+  return (
+    pullState.targetStartIndex <= Math.max(0, Math.floor(payload.requestStartIndex || 0))
+    && pullState.targetEndIndex >= Math.max(0, Math.floor(payload.requestEndIndex || 0))
+  );
+}
+
 export function SessionProvider({
   children,
   wsUrl,
@@ -909,6 +971,25 @@ export function SessionProvider({
 
   const isSessionTransportActive = useCallback((sessionId: string) => {
     return stateRef.current.activeSessionId === sessionId;
+  }, []);
+
+  const isReconnectInFlight = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+    const host = sessionHostRef.current.get(sessionId)
+      || (session
+        ? {
+            bridgeHost: session.bridgeHost,
+            bridgePort: session.bridgePort,
+          }
+        : null);
+    if (!host) {
+      return false;
+    }
+    const bucket = reconnectBucketsRef.current.get(toHostKey(host)) || null;
+    if (!bucket) {
+      return false;
+    }
+    return bucket.activeSessionId === sessionId || bucket.pending.includes(sessionId);
   }, []);
 
   const resolveSessionCacheLines = useCallback((rows?: number | null) => {
@@ -1240,6 +1321,8 @@ export function SessionProvider({
     reason?: string;
     purpose?: SessionPullPurpose;
     sessionOverride?: Session | null;
+    liveHead?: SessionBufferHeadState | null;
+    invalidLocalWindow?: boolean;
   }) => {
     const session = options?.sessionOverride || stateRef.current.sessions.find((item) => item.id === sessionId);
     const targetWs = options?.ws || wsRefs.current.get(sessionId);
@@ -1257,10 +1340,6 @@ export function SessionProvider({
           daemonHeadEndIndex: liveHead.latestEndIndex,
         }
       : session;
-    const inFlightPull = (sessionPullStateRef.current.get(sessionId) || null)?.[requestPurpose] || null;
-    if (inFlightPull) {
-      return false;
-    }
     const payload = buildSessionBufferSyncRequestPayload(
       effectiveSession,
       renderDemand,
@@ -1270,8 +1349,30 @@ export function SessionProvider({
           pendingInputTailRefreshRef.current.has(sessionId)
           || pendingConnectTailRefreshRef.current.has(sessionId)
           || pendingResumeTailRefreshRef.current.has(sessionId),
+        liveHead: options?.liveHead || liveHead || null,
+        invalidLocalWindow: Boolean(options?.invalidLocalWindow),
       },
     );
+    const inFlightPull = (sessionPullStateRef.current.get(sessionId) || null)?.[requestPurpose] || null;
+    if (inFlightPull) {
+      const targetHeadRevision = Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0));
+      if (doesSessionPullStateCoverRequest(inFlightPull, payload)) {
+        return false;
+      }
+      runtimeDebug('session.buffer.pull.superseded', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        reason: options?.reason || null,
+        purpose: requestPurpose,
+        previous: inFlightPull,
+        next: {
+          targetHeadRevision,
+          requestStartIndex: payload.requestStartIndex,
+          requestEndIndex: payload.requestEndIndex,
+        },
+      });
+      clearSessionPullState(sessionId, requestPurpose);
+    }
 
     runtimeDebug('session.buffer.request', {
       sessionId,
@@ -1296,7 +1397,7 @@ export function SessionProvider({
       )),
     });
     return true;
-  }, [sendSocketPayload]);
+  }, [clearSessionPullState, sendSocketPayload]);
 
   const requestSessionBufferHead = useCallback((sessionId: string, ws?: BridgeTransportSocket | null, options?: {
     force?: boolean;
@@ -1452,7 +1553,7 @@ export function SessionProvider({
       return;
     }
 
-    if (renderDemand.mode !== 'reading' || !shouldPullReadingBuffer(nextSession, renderDemand)) {
+    if (renderDemand.mode !== 'reading' || !shouldPullReadingBuffer(nextSession, renderDemand, liveHead)) {
       return;
     }
 
@@ -2128,7 +2229,6 @@ export function SessionProvider({
     });
     lastHeadRequestAtRef.current.delete(sessionId);
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
-    const tailPullState = (sessionPullStateRef.current.get(sessionId) || null)?.['tail-refresh'] || null;
     if (
       session.daemonHeadRevision !== latestRevision
       || session.daemonHeadEndIndex !== latestEndIndex
@@ -2141,9 +2241,6 @@ export function SessionProvider({
           daemonHeadEndIndex: latestEndIndex,
         },
       });
-    }
-    if (tailPullState) {
-      return;
     }
     if (!isSessionTransportActive(sessionId)) {
       return;
@@ -2184,43 +2281,27 @@ export function SessionProvider({
       renderDemand: sessionRenderDemandRef.current.get(sessionId) || null,
     });
 
-    let demandSession: Session = {
+    const demandSession: Session = {
       ...session,
       daemonHeadRevision: latestRevision,
       daemonHeadEndIndex: latestEndIndex,
     };
     if (localWindowInvalid && liveHead) {
-      const resetBuffer = buildDaemonAnchoredEmptyBuffer(
-        session,
-        liveHead,
-        resolveSessionCacheLines(session.buffer.rows),
-      );
-      demandSession = {
-        ...demandSession,
-        buffer: resetBuffer,
-      };
-      if (!sessionBuffersEqual(session.buffer, resetBuffer)) {
-        runtimeDebug('session.buffer.window.invalid', {
-          sessionId,
-          activeSessionId: stateRef.current.activeSessionId,
-          latestRevision,
-          latestEndIndex,
-          availableStartIndex: liveHead.availableStartIndex ?? null,
-          availableEndIndex: liveHead.availableEndIndex ?? null,
-          localStartIndex: session.buffer.startIndex,
-          localEndIndex: session.buffer.endIndex,
-          localBufferHeadStartIndex: session.buffer.bufferHeadStartIndex,
-          localBufferTailEndIndex: session.buffer.bufferTailEndIndex,
-        });
-        dispatch({
-          type: 'UPDATE_SESSION',
-          id: sessionId,
-          updates: { buffer: resetBuffer },
-        });
-      }
+      runtimeDebug('session.buffer.window.invalid', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        latestRevision,
+        latestEndIndex,
+        availableStartIndex: liveHead.availableStartIndex ?? null,
+        availableEndIndex: liveHead.availableEndIndex ?? null,
+        localStartIndex: session.buffer.startIndex,
+        localEndIndex: session.buffer.endIndex,
+        localBufferHeadStartIndex: session.buffer.bufferHeadStartIndex,
+        localBufferTailEndIndex: session.buffer.bufferTailEndIndex,
+      });
     }
     const renderDemand = sessionRenderDemandRef.current.get(sessionId) || buildFollowRenderDemandState(session);
-    const needsTailRefresh = revisionResetDetected || shouldPullFollowBuffer(demandSession, renderDemand);
+    const needsTailRefresh = revisionResetDetected || localWindowInvalid || shouldPullFollowBuffer(demandSession, renderDemand);
     if (needsTailRefresh) {
       requestSessionBufferSync(sessionId, {
         reason:
@@ -2229,6 +2310,8 @@ export function SessionProvider({
           : 'buffer-head-update',
         purpose: 'tail-refresh',
         sessionOverride: demandSession,
+        liveHead,
+        invalidLocalWindow: localWindowInvalid,
       });
       return;
     }
@@ -2237,7 +2320,7 @@ export function SessionProvider({
       return;
     }
 
-    const needsReadingRepair = shouldPullReadingBuffer(demandSession, renderDemand);
+    const needsReadingRepair = shouldPullReadingBuffer(demandSession, renderDemand, liveHead);
     if (!needsReadingRepair) {
       return;
     }
@@ -2443,7 +2526,8 @@ export function SessionProvider({
       return;
     }
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-    if (!session || !shouldPullReadingBuffer(session, normalized)) {
+    const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
+    if (!session || !shouldPullReadingBuffer(session, normalized, liveHead)) {
       return;
     }
     requestSessionBufferSync(sessionId, {
@@ -2468,15 +2552,14 @@ export function SessionProvider({
     if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
       return;
     }
-    if (
-      activeSession
-      && activeSession.state !== 'connecting'
-      && activeSession.state !== 'reconnecting'
-      && (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED)
-    ) {
+    if (shouldReconnectActivatedSession({
+      hasSession: Boolean(activeSession),
+      wsReadyState: ws?.readyState ?? null,
+      reconnectInFlight: isReconnectInFlight(activeSessionId),
+    })) {
       reconnectSession(activeSessionId);
     }
-  }, [reconnectSession, requestSessionBufferHead, state.activeSessionId, state.sessions]);
+  }, [isReconnectInFlight, reconnectSession, requestSessionBufferHead, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2563,7 +2646,6 @@ export function SessionProvider({
       return;
     }
 
-    const pendingBefore = pendingInputQueueRef.current.get(targetSessionId)?.length || 0;
     runtimeDebug('session.input.queue', {
       sessionId: targetSessionId,
       size: data.length,
@@ -2571,14 +2653,15 @@ export function SessionProvider({
     });
     enqueuePendingInput(targetSessionId, data);
     const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
-    const shouldForceReconnect =
-      isActiveTarget
-      && pendingBefore === 0
-      && (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED);
+    const shouldForceReconnect = shouldReconnectQueuedActiveInput({
+      isActiveTarget,
+      wsReadyState: ws?.readyState ?? null,
+      reconnectInFlight: isReconnectInFlight(targetSessionId),
+    });
     if (shouldForceReconnect) {
       reconnectSession(targetSessionId);
     }
-  }, [enqueuePendingInput, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
+  }, [enqueuePendingInput, isReconnectInFlight, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {
