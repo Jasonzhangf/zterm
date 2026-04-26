@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
+    "prebuild": "pnpm run test:terminal:regression",
     "dev": "portless android.zterm vite",
     "build": "node ./scripts/bump-build-version.mjs && tsc && vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
+    "test:terminal:contracts": "pnpm exec vitest run src/server/buffer-sync-contract.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx",
+    "test:terminal:regression": "pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run daemon:mirror:close-loop && pnpm run test:relay:smoke",
     "serve:server": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; tsx src/server/server.ts",
     "daemon": "bash ./scripts/zterm-daemon.sh",
     "daemon:start": "./scripts/start-tmux-daemon.sh",
@@ -27,7 +30,10 @@
     "sync:android": "npx cap sync android",
     "run:android": "npx cap run android",
     "build:android": "./scripts/build-android-debug.sh",
-    "prepare:update-bundle": "node ./scripts/prepare-update-bundle.mjs"
+    "prepare:update-bundle": "node ./scripts/prepare-update-bundle.mjs",
+    "test:common-user-flows": "pnpm exec vitest run src/lib/tmux-sessions.test.ts src/pages/ConnectionPropertiesPage.test.tsx src/pages/ConnectionsPage.test.tsx src/server/schedule-store.test.ts src/server/schedule-dispatch.test.ts",
+    "test:relay:smoke": "tsx scripts/traversal-relay-local-smoke.ts",
+    "test:android:apk-smoke": "tsx scripts/android-apk-smoke.ts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
@@ -39,6 +45,7 @@
     "@jsonstudio/wtermmod-core": "^0.1.9",
     "@jsonstudio/wtermmod-dom": "^0.1.9",
     "@jsonstudio/wtermmod-react": "^0.1.9",
+    "@roamhq/wrtc": "^0.10.0",
     "@zterm/shared": "workspace:*",
     "node-pty": "^1.1.0",
     "react": "^19.0.0",

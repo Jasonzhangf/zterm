@@ -5,6 +5,12 @@ import { buildDaemonStartCommand, formatBridgeTarget, normalizeBridgeSettings, s
 const baseSettings = {
   targetHost: '',
   targetPort: DEFAULT_BRIDGE_PORT,
+  targetAuthToken: '',
+  signalUrl: '',
+  turnServerUrl: '',
+  turnUsername: '',
+  turnCredential: '',
+  transportMode: 'auto' as const,
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark' as const,
   servers: [],
@@ -33,6 +39,19 @@ describe('bridge-settings helpers', () => {
     expect(formatBridgeTarget(settings)).toBe('ws://127.0.0.1:4333');
   });
 
+  it('splits raw host:port into normalized host + effective port', () => {
+    const settings = upsertBridgeServer(baseSettings, {
+      name: 'Tailnet',
+      targetHost: '100.127.23.27:40807',
+      targetPort: DEFAULT_BRIDGE_PORT,
+    });
+
+    expect(settings.targetHost).toBe('100.127.23.27');
+    expect(settings.targetPort).toBe(40807);
+    expect(settings.defaultServerId).toBe('100.127.23.27:40807');
+    expect(formatBridgeTarget(settings)).toBe('100.127.23.27:40807');
+  });
+
   it('remembers bridge servers and can switch default', () => {
     const settings = upsertBridgeServer(
       baseSettings,
@@ -51,7 +70,7 @@ describe('bridge-settings helpers', () => {
     expect(switched.defaultServerId).toBe(`192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
   });
 
-  it('normalizes terminal theme id and falls back for unknown values', () => {
+  it('normalizes terminal theme id and uses default for unknown values', () => {
     expect(normalizeBridgeSettings({
       ...baseSettings,
       terminalThemeId: 'tabby-relaxed',

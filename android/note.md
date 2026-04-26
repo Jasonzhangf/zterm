@@ -1,0 +1,44 @@
+# note
+- Jason 2026-04-25 新冻结:
+  - server 的唯一职责：mirror tmux truth，回答 head 和 ranges
+  - server 不得碰：策略、渲染、follow、reading、patch 规划
+  - 多 session = 多个并行 canonical buffer；server 不替 client 规划行为
+  - client buffer worker 只做：定时问 head、按需请求区间 buffer
+  - renderer 只做：follow / reading、维护 renderBottomIndex、消费 buffer
+- 目标: client 不持有 session 真源；render 只吃 daemon mirror + absolute rows
+- 假设: 仍有 Android 本地恢复/渲染残留导致旧 session 或错误 viewport 被重用
+- 验证入口: rg 残留字段 + SessionContext/Terminal* 代码审计 + build/test
+- 新确认: 当前 TerminalPage 只挂 activeSession 的 TerminalView，违背“tab=session 常驻隔离”规则；切 tab 实际是在 remount 单一 view
+- 新确认: App/Session 层的 input/resize/viewport 仍以 activeSession 作为隐式目标，而不是显式 sessionId；这会让切 tab 过程中旧 view 的异步回调污染新 session
+- 修复方向: 1) callback 全改显式 sessionId；2) TerminalPage 常驻每个 tab 的 TerminalView，仅 active 控制可见/刷新频率；3) focus/query 也改按 sessionId 定位 active textarea
+- Jason 2026-04-22 新冻结: hidden tab 完全冻结，不收 live buffer；切到 active 再单次同步
+- Jason 2026-04-22 新冻结: active tab live 只追尾部最新连续区间，默认本地累计拼接，不做全窗口全量刷新
+- Jason 2026-04-22 新冻结: reading 态只有在本地连续区间断裂时才向前预拉，窗口=两屏高度
+- Jason 2026-04-22 新冻结: buffer/store/render 禁止 row 级深拷贝；只保留引用 + absolute indices + gap metadata
+- Jason 2026-04-24 新冻结: refresh 与 scroll 必须解耦；Android 界面刷新是 buffer 的消费者，只读取当前 mirror / render window，不直接参与 buffer 生产或 merge
+- Jason 2026-04-24 新冻结: scroll 属于 UI/render 状态机，不属于 buffer 状态；用户一旦向上回滚即进入 reading 模式，live buffer 更新不能反向改写当前滚动意图
+- Jason 2026-04-24 新冻结: reading/follow 的切换只更新 renderer 的 `renderBottomIndex`（底部指针），再由 renderer 按当前 viewport 重算 render window 并刷新界面；禁止把该指针写回 buffer worker 真源
+- Jason 2026-04-24 新冻结: buffer update -> renderer refresh -> DOM/UI scroll 三层单向；刷新只消费 buffer 结果，滚动只驱动 renderer 底部指针与界面重绘，二者都不反向耦合 buffer 维护
+- Jason 2026-04-24 调查: tmux 最近多次崩溃，先确认 daemon 是否会通过 attach/resize/input/reconcile 高频控制影响 tmux 稳定性
+- Jason 2026-04-24 假设: 若 daemon 存在高频 resize、重复 attach、observer/reconcile 风暴，可能诱发 tmux 卡死或异常退出；需用代码路径 + 本地日志双证据确认
+- Jason 2026-04-24 验证入口: daemon 源码/脚本审计 + tmux/daemon 日志 + 当前系统 tmux server/client 进程状态
+- Jason 2026-04-24 结论: daemon 确实会直接影响 tmux；它不仅 `send-keys/resize/new-session`，还会以 `tmux -CC attach-session -f ignore-size,read-only` 作为 control observer 挂到 tmux 上
+- Jason 2026-04-24 证据: `tmux-2026-04-23-070736.ips` 的 crash coalition=`com.zterm.android.daemon`、responsibleProc=`node`，栈顶是 `control_write -> control_notify_session_created`
+- Jason 2026-04-24 证据: `tmux-2026-04-24-104638.ips` 同一 crash 栈但 coalition=`com.googlecode.iterm2`；说明问题不一定 daemon 独有，但 control-mode attach 路径会触发 tmux 崩溃面
+- Jason 2026-04-24 新判断: 当前代码没有固定 resize 定时风暴；resize 只在 attach/geometry 变化时触发，但 observer 通知 + 补偿式 reconcile 会持续 capture tmux，busy mirror 下频率很高
+- Jason 2026-04-24 新假设: tmux 不是被普通 refresh/resize 打死，而是“分屏新增改动”让新 pane/新 client 创建额外 tmux client（尤其 control-mode attach），直接触发 tmux `session_created` crash 面
+- Jason 2026-04-24 新冻结: split 只是显示/渲染端变化；两个分屏只是两个独立 tab/pane 的 UI 编排，不得触发新的 tmux client、副 attach、daemon mirror 重建或 session 级副作用
+- Jason 2026-04-24 新冻结: daemon 对 tmux 的非用户显式动作必须收敛为只读获取；split/refresh/reading/follow/render 相关流程禁止修改 tmux 状态
+- Jason 2026-04-24 新冻结: 禁止任何自动 kill tmux session/server 的实现；关闭 tab / 切 split / pane 回收 只能回收本地 client/runtime，不得回收 tmux session
+- Jason 2026-04-24 新冻结: 高频打 tmux 不允许；tmux 只能按需获取，不能把 UI cadence / refresh cadence / split 编排直接投射成 tmux 调用频率
+- Jason 2026-04-24 新冻结: `tmux kill-session` 只能存在于用户显式 kill 请求入口；禁止抽成可被 split/close/recycle/cleanup 复用的通用 helper
+- Jason 2026-04-24 新冻结: 多 session 允许并存访问，但同一时刻只有 active session 允许高频 diff；inactive session 只能低频获取（目标 1s 一次）
+- Jason 2026-04-24 新冻结: client buffer 先命中 daemon mirror；命中后不再回打 tmux。切 active session 后也仍然只允许一个 30fps 级高频 buffer 链路
+- Jason 2026-04-24 新冻结: daemon 频率必须受 client 实际消费频率约束；网络/客户端降频后，daemon 也必须同步降频，避免无意义高频 capture/broadcast
+- Jason 2026-04-24 新冻结: daemon 不再使用 `tmux -CC attach-session ... read-only` control observer；tmux 外部变化统一靠 mirror 自身的 active/idle cadence capture 检测，避免新增第二个 tmux client 崩溃面
+- Jason 2026-04-24 新冻结: active/idle cadence 由 client 显式上报；daemon 只按 session subscriber 聚合后的 cadence 调度 capture，不再保留全局 33ms head 广播 / 补偿式 reconcile 定时器
+- Jason 2026-04-24 新冻结: remote daemon / client 活跃刷新链禁止 snapshot/整窗初始化请求；client 只做 head 查询与显式区间请求，daemon 只回答 head 与 ranges，不允许整窗快照语义
+- Jason 2026-04-24 traversal close-loop 新目标: 本地先完成“独立 traversal relay 模块”闭环，再做一键部署到 Claw，随后验证 register/login 与 rtc relay
+- 新根因确认: 当前已落地的 `/signal` 仍挂在目标 daemon 本身，只适用于“已能直达 daemon”的场景；对真正 NAT/内网目标无效，因为 signaling 本身先被直连阻断
+- 修复方向: 新增独立 relay service（账户 + signaling broker + TURN 配置下发），daemon 改为主动出站注册到 relay service；client 通过 relay service 转发 SDP/ICE，WebRTC 仍只做链路层
+- 部署约束: Claw 当前 `3478/udp` 已被 `derper` 占用，coturn 不能复用该端口；需选非冲突 TURN 监听端口并避免影响现有 sing-box/nginx 栈

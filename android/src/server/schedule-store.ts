@@ -38,12 +38,10 @@ export function loadScheduleStore(storePath = getScheduleStorePath()): ScheduleS
           ? parsed.updatedAt
           : new Date().toISOString(),
     };
-  } catch {
-    return {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      jobs: [],
-      updatedAt: new Date().toISOString(),
-    };
+  } catch (error) {
+    throw new Error(
+      `[schedule-store] Failed to load ${storePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 

@@ -25,7 +25,7 @@ export function ConnectionSectionFields({
         <input
           value={bridgeHost}
           onChange={(event) => onBridgeHostChange(event.target.value)}
-          placeholder="100.127.23.27 或 macstudio.tailnet"
+          placeholder="100.127.23.27[:40807] 或 macstudio.tailnet"
           style={inputStyle()}
         />
       </div>

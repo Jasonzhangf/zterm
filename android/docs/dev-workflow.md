@@ -52,9 +52,74 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - 任何 terminal buffer / scroll / cursor 改动，先更新：
   - `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`
   - `.agents/skills/terminal-buffer-truth/SKILL.md`
+  - `docs/daemon-mirror-test-plan.md`
 - 未完成 ownership 拆分前，禁止继续在 `TerminalView.tsx` 叠加 projection / anchor / scroll patch
-- daemon 侧提交前必须证明：它只维护 session canonical truth、30Hz head 广播与 range 响应，不承载显示逻辑
+- daemon 侧提交前必须证明：它只维护 session canonical truth，只回答 head / range，且每次回复都带 head；不承载显示逻辑，不承载策略
 - client 侧提交前必须证明：buffer worker / renderer container / UI shell 已拆开，renderer 不直接驱动 transport
+
+### Terminal 真回环门禁（新增硬规则）
+
+任何 terminal 相关修复，顺序必须是：
+
+```text
+先落测试真源文档 / skill
+-> 再补测试
+-> 再改代码
+-> 再跑真实回环
+```
+
+禁止反过来：
+
+```text
+先改代码
+-> 再补解释性测试
+-> 最后靠用户手试
+```
+
+terminal 修复完成前，必须同时给出以下证据：
+
+1. tmux oracle
+2. daemon runtime logs
+3. client buffer worker logs
+4. renderer commit logs
+5. Android APK 真实安装态结果
+
+缺任意一层都不允许宣称修复完成。
+
+### Terminal 自动回归门禁（新增硬规则）
+
+任何 terminal 相关改动，在重新 build APK 前必须先跑完**本地自动回归闭环**。
+
+固定顺序：
+
+```text
+先复现
+-> 再写/补自动测试
+-> 自动测试先失败
+-> 再改代码
+-> 自动测试转绿
+-> 再跑 daemon/tmux 真回环
+-> 最后才 build APK
+```
+
+禁止：
+
+- 先改代码，再补“解释性测试”
+- 只靠人工手机点点点判断是否修好
+- 自动测试没覆盖输入/刷新主链就直接发 APK
+
+每次编译前至少要自动验证：
+
+1. initial connect
+2. foreground resume
+3. cold start -> 进入单个 active tab -> 无输入等待首屏刷新
+4. 进入一个 tab 后切到另一个 tab -> 新 active tab 首屏刷新
+5. input -> head -> buffer-sync -> render commit
+6. reading 上滚与 gap repair
+7. input exits reading
+8. daemon restart recover
+
+如果某个线上问题不能被本地自动回归稳定复现，就不允许进入“已修复”口径。
 
 ## 验证层级
 
@@ -85,6 +150,27 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - 检查安全区、顶部点击区、底部快捷栏可用性
 - 若 Android 需要直接连 `ws://` tmux bridge，Capacitor WebView 必须允许 cleartext：`androidScheme=http` + `usesCleartextTraffic=true`
 
+### L5 Terminal closed loop（terminal 改动必跑）
+
+按 `docs/daemon-mirror-test-plan.md` 至少跑：
+
+- initial connect
+- cold start single tab first paint
+- switch to another tab first paint
+- foreground resume
+- input latency
+- reading scroll
+- input exits reading
+- daemon restart recover
+
+并且每个 case 都要同时对齐：
+
+- tmux truth
+- daemon head/range
+- client buffer
+- renderer commit
+- 真机画面
+
 ## 证据要求
 
 - 截图
@@ -100,6 +186,19 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - 命令输出
 - APK 路径
 - 必要时 logcat
+
+### Terminal 修复的额外最低标准
+
+若本轮改动涉及 terminal buffer / render / input / foreground：
+
+- 必须附 `timeline.txt` 或同等时间线证据
+- 必须附 client runtime 结构化日志
+- 必须证明没有：
+  - `localEndIndex > daemon.availableEndIndex`
+  - `requestStartIndex == requestEndIndex`
+  - `buffer-head` 误当 pull ack
+  - `buffer-sync-request` 因 head-only reply 卡住 in-flight pull
+  - cold start / tab switch 后 `pullHz == 0 && renderHz == 0`
 
 ## UI 结构变更的附加证据
 

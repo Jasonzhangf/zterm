@@ -34,10 +34,10 @@
 - 当前主链路也不再消费这些消息
 - 保留只会继续污染协议心智模型
 
-说明：
+说明（历史背景，现已收口）：
 
-- `TerminalSnapshot` 暂未删除，因为 Mac 本地 tmux transport 仍在内部使用它做过渡桥接
-- 但 `snapshot` 已不再属于共享 websocket bridge 协议真源
+- 当时 `TerminalSnapshot` 还残留在 Mac 本地 tmux 过渡链路里
+- 现在终端活代码已经不再保留 `TerminalSnapshot` 作为协议或 runtime 真源
 
 ---
 
@@ -51,9 +51,9 @@
 
 - 自己维护 `followMode`
 - 自己发 `onViewportChange`
-- 自己发 `onViewportPrefetch`
+- 自己挂旧式 `prefetch` 侧路
 - 自己带 `followViewportNonce / viewportLayoutNonce`
-- 自己把 scroll / prefetch / viewport / follow reset 搅在一起
+- 自己把 scroll / 旧式补拉 / viewport / follow reset 搅在一起
 
 为什么必须删：
 
@@ -61,7 +61,7 @@
   - bottom-relative render window
   - consume current sparse buffer
   - 缺失则报“当前窗口缺口”
-- 它不该再承担 transport / prefetch / follow 状态机
+- 它不该再承担 transport / 补拉策略 / follow 状态机
 
 结论：
 
@@ -75,11 +75,11 @@
 - 同时维护：
   - websocket lifecycle
   - reconnect
-  - stream-mode
-  - buffer-sync-request planner
-  - tail bootstrap
+  - 旧 `stream-mode`
+  - 旧 buffer-sync 请求规划
+  - 旧 tail bootstrap
   - tail probe
-  - viewport prefetch
+  - 旧 viewport prefetch
   - follow reset nonce
   - render cadence buffering
 
@@ -102,7 +102,7 @@
 当前问题：
 
 - 保存 `lastBufferSyncRequest`
-- `stream-mode active/idle`
+- 旧 `stream-mode active/idle`
 - `scheduleMirrorFlush`
 - `flushMirrorUpdates`
 - `buildLiveBufferPayloadForSession`
@@ -112,7 +112,7 @@
 为什么必须删：
 
 - 新真源里 daemon 只做：
-  - 30Hz head broadcast
+  - head 查询响应
   - range request response
 - daemon 不该按 client 消费状态持续推数据
 
@@ -125,7 +125,7 @@
 
 当前问题：
 
-- 和 Android 版一样，仍然是老式 follow/prefetch/viewport-change renderer
+- 和 Android 版一样，仍然是老式 follow / 旧式补拉 / viewport-change renderer
 - Mac 还在消费这套旧 renderer
 
 结论：
@@ -144,9 +144,9 @@
 
 当前问题：
 
-- 仍沿用 `onViewportChange / onViewportPrefetch`
+- 当时仍沿用 `onViewportChange / onViewportPrefetch`
 - 仍消费旧 shared TerminalView
-- 本地 tmux transport 仍带有旧 snapshot 转 buffer-sync 的过渡桥
+- 当时本地 tmux transport 仍带有旧 snapshot 转 buffer-sync 的过渡桥
 
 结论：
 
@@ -184,9 +184,9 @@
 
 1. `android/src/components/TerminalView.tsx`
 2. `android/src/contexts/SessionContext.tsx`
-3. `android/src/server/server.ts` 中 active-push / stream-mode / request-coupled push 部分
+3. `android/src/server/server.ts` 中 active-push / 旧 stream-mode / request-coupled push 部分
 4. `packages/shared/src/react/terminal-view.tsx`
-5. Mac 侧 old viewport/prefetch runtime 接口
+5. Mac 侧 old viewport / old prefetch runtime 接口
 
 ### 不允许的做法
 
@@ -200,8 +200,7 @@
 
 1. 删除 daemon 主动 push 链
 2. 删除 client renderer 反向驱动 transport 链
-3. 重建 session head protocol
+3. 重建 session head/range protocol
 4. 重建 sparse buffer worker
 5. 重建纯 renderer container
 6. 最后把 UI shell 接回去
-

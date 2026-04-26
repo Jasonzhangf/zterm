@@ -83,7 +83,7 @@ describe('daemon config', () => {
     expect(config.authSource).toBe('env');
   });
 
-  it('falls back to defaults when ~/.wterm/config.json is absent', () => {
+  it('uses defaults when ~/.wterm/config.json is absent', () => {
     const homeDir = createTempHome();
     const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
 

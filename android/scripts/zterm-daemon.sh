@@ -63,7 +63,7 @@ Usage:
 
 Behavior:
   - `run` keeps daemon in foreground (for launchd autostart)
-  - start/stop/restart manage launchd service if installed, otherwise fallback to tmux daemon session
+  - start/stop/restart manage launchd service if installed, otherwise use tmux daemon session
   - host / port / auth token are read from ~/.wterm/config.json
   - env still overrides config when explicitly provided
 EOF
@@ -127,14 +127,70 @@ resolve_esbuild_bin() {
   return 1
 }
 
+resolve_node_package_dir() {
+  local package_name="${1:-}"
+  [[ -n "${package_name}" ]] || return 1
+  if "$NODE_BIN" - "$ROOT_DIR" "$WORKSPACE_ROOT" "$package_name" <<'EOF'
+const path = require('path');
+
+const [rootDir, workspaceRoot, packageName] = process.argv.slice(2);
+let lastError = null;
+for (const base of [rootDir, workspaceRoot]) {
+  try {
+    const resolved = require.resolve(`${packageName}/package.json`, { paths: [base] });
+    console.log(path.dirname(resolved));
+    process.exit(0);
+  } catch (error) {
+    lastError = error;
+  }
+}
+if (lastError) {
+  console.error(`[zterm-daemon] unable to resolve ${packageName}: ${lastError.message || String(lastError)}`);
+}
+process.exit(1);
+EOF
+  then
+    return 0
+  fi
+
+  local namespace package_basename candidate
+  namespace="${package_name%/*}"
+  package_basename="${package_name##*/}"
+  candidate="$(
+    {
+      find "${ROOT_DIR}/node_modules/.pnpm" -path "*/node_modules/${namespace}/${package_basename}" -type d 2>/dev/null || true
+      find "${WORKSPACE_ROOT}/node_modules/.pnpm" -path "*/node_modules/${namespace}/${package_basename}" -type d 2>/dev/null || true
+    } | sort -V | tail -n 1
+  )"
+  if [[ -n "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_wrtc_platform_package_name() {
+  "$NODE_BIN" -e "console.log('@roamhq/wrtc-' + process.platform + '-' + process.arch)"
+}
+
 stage_daemon_runtime() {
-  local esbuild_bin
+  local esbuild_bin wrtc_package_dir wrtc_platform_package_name wrtc_platform_package_dir
   esbuild_bin="$(resolve_esbuild_bin)" || {
     echo "missing esbuild binary under ${ROOT_DIR}/node_modules/.pnpm or ${WORKSPACE_ROOT}/node_modules/.pnpm" >&2
     return 1
   }
+  wrtc_package_dir="$(resolve_node_package_dir '@roamhq/wrtc')" || {
+    echo "missing @roamhq/wrtc package in ${ROOT_DIR} or ${WORKSPACE_ROOT}" >&2
+    return 1
+  }
+  wrtc_platform_package_name="$(resolve_wrtc_platform_package_name)"
+  wrtc_platform_package_dir="$(resolve_node_package_dir "${wrtc_platform_package_name}")" || {
+    echo "missing ${wrtc_platform_package_name} package in ${ROOT_DIR} or ${WORKSPACE_ROOT}" >&2
+    return 1
+  }
 
-  mkdir -p "${DAEMON_RUNTIME_DIR}/node_modules"
+  mkdir -p "${DAEMON_RUNTIME_DIR}/node_modules" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq"
   "${esbuild_bin}" "${DAEMON_ENTRY}" \
     --bundle \
     --platform=node \
@@ -144,6 +200,9 @@ stage_daemon_runtime() {
     --external:node-pty >/dev/null
   rm -rf "${DAEMON_RUNTIME_DIR}/node_modules/node-pty"
   cp -RL "${ROOT_DIR}/node_modules/node-pty" "${DAEMON_RUNTIME_DIR}/node_modules/"
+  rm -rf "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  cp -RL "${wrtc_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc"
+  cp -RL "${wrtc_platform_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 }
 

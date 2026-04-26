@@ -41,20 +41,24 @@ const sessionHarness = vi.hoisted(() => {
   let staleActiveSession = state.sessions[0];
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
-  const resetSessionViewportToFollow = vi.fn(() => true);
+  const resumeActiveSessionTransport = vi.fn(() => true);
   const createSession = vi.fn();
+  const closeSession = vi.fn();
   const switchSession = vi.fn();
   const moveSession = vi.fn();
+  const sendInput = vi.fn();
 
   return {
     readState: () => state,
     readStaleActiveSession: () => staleActiveSession,
     reconnectAllSessions,
     reconnectSession,
-    resetSessionViewportToFollow,
+    resumeActiveSessionTransport,
     createSession,
+    closeSession,
     switchSession,
     moveSession,
+    sendInput,
     update(next: typeof state, stale = staleActiveSession) {
       state = next;
       staleActiveSession = stale;
@@ -68,11 +72,13 @@ const sessionHarness = vi.hoisted(() => {
       staleActiveSession = state.sessions[0];
       reconnectAllSessions.mockReset();
       reconnectSession.mockReset();
-      resetSessionViewportToFollow.mockReset();
-      resetSessionViewportToFollow.mockReturnValue(true);
+      resumeActiveSessionTransport.mockReset();
+      resumeActiveSessionTransport.mockReturnValue(true);
       createSession.mockReset();
+      closeSession.mockReset();
       switchSession.mockReset();
       moveSession.mockReset();
+      sendInput.mockReset();
     },
   };
 });
@@ -134,16 +140,17 @@ vi.mock('./contexts/SessionContext', () => ({
   SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSession: () => ({
     state: sessionHarness.readState(),
+    sessionDebugMetrics: {},
     createSession: sessionHarness.createSession,
-    closeSession: vi.fn(),
+    closeSession: sessionHarness.closeSession,
     switchSession: sessionHarness.switchSession,
     moveSession: sessionHarness.moveSession,
     renameSession: vi.fn(),
     reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
-    resetSessionViewportToFollow: sessionHarness.resetSessionViewportToFollow,
+    resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
-    sendInput: vi.fn(),
+    sendInput: sessionHarness.sendInput,
     sendImagePaste: vi.fn(),
     resizeTerminal: vi.fn(),
     updateSessionViewport: vi.fn(),
@@ -229,16 +236,34 @@ vi.mock('./pages/TerminalPage', () => ({
   TerminalPage: ({
     activeSession,
     sessions,
+    inputResetEpochBySession,
     onSwitchSession,
     onMoveSession,
+    onCloseSession,
+    onTerminalInput,
   }: {
     activeSession: { id: string; buffer: { revision: number } } | null;
     sessions: Array<{ id: string }>;
+    inputResetEpochBySession?: Record<string, number>;
     onSwitchSession: (sessionId: string) => void;
     onMoveSession: (sessionId: string, toIndex: number) => void;
+    onCloseSession: (sessionId: string) => void;
+    onTerminalInput?: (sessionId: string, data: string) => void;
   }) => (
     <div>
       <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="terminal-input-reset-epoch">{activeSession ? (inputResetEpochBySession?.[activeSession.id] || 0) : -1}</div>
+      <button
+        type="button"
+        data-testid="close-active-tab"
+        onClick={() => {
+          if (activeSession) {
+            onCloseSession(activeSession.id);
+          }
+        }}
+      >
+        close-active
+      </button>
       <button
         type="button"
         data-testid="switch-second-tab"
@@ -262,6 +287,17 @@ vi.mock('./pages/TerminalPage', () => ({
         }}
       >
         move-second-first
+      </button>
+      <button
+        type="button"
+        data-testid="send-active-input"
+        onClick={() => {
+          if (activeSession) {
+            onTerminalInput?.(activeSession.id, 'typed-from-terminal');
+          }
+        }}
+      >
+        send-active-input
       </button>
     </div>
   ),
@@ -342,7 +378,22 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('9'));
   });
 
-  it('reconnects on pageshow foreground restore but ignores plain online noise', async () => {
+  it('bumps the active session input reset epoch before forwarding terminal input', async () => {
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-input-reset-epoch').textContent).toBe('0'));
+
+    fireEvent.click(screen.getByTestId('send-active-input'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-input-reset-epoch').textContent).toBe('1');
+    });
+    expect(sessionHarness.sendInput).toHaveBeenCalledWith('s1', 'typed-from-terminal');
+  });
+
+  it('ignores plain online noise and only resumes on real foreground restore', async () => {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -355,14 +406,26 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
-    expect(sessionHarness.resetSessionViewportToFollow).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
 
     act(() => {
-      window.dispatchEvent(new Event('pageshow'));
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -388,12 +451,11 @@ describe('App dynamic refresh matrix', () => {
         get: () => 'visible',
       });
       document.dispatchEvent(new Event('visibilitychange'));
-      window.dispatchEvent(new Event('focus'));
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -411,15 +473,64 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
+  it('does not reconnect hidden unhealthy tabs during foreground resume', async () => {
+    sessionHarness.update(
+      {
+        sessions: [
+          makeSession('s1', 1),
+          {
+            ...makeSession('s2', 2),
+            state: 'closed',
+          },
+        ],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      makeSession('s1', 1),
+    );
 
-  it('falls back to reconnect when tail refresh cannot run on foreground resume', async () => {
-    sessionHarness.resetSessionViewportToFollow.mockReturnValue(false);
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    sessionHarness.reconnectSession.mockClear();
+
+    act(() => {
+      document.dispatchEvent(new Event('resume'));
+    });
+
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('reconnects only the active tab when foreground resume finds the active session disconnected', async () => {
+    sessionHarness.update(
+      {
+        sessions: [
+          {
+            ...makeSession('s1', 1),
+            state: 'closed',
+          },
+          {
+            ...makeSession('s2', 2),
+            state: 'closed',
+          },
+        ],
+        activeSessionId: 's1',
+        connectedCount: 0,
+      } as any,
+      {
+        ...makeSession('s1', 1),
+        state: 'closed',
+      } as any,
+    );
 
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
@@ -428,12 +539,66 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
 
     act(() => {
-      window.dispatchEvent(new Event('pageshow'));
+      document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resetSessionViewportToFollow).toHaveBeenCalledWith('s1');
-    expect(sessionHarness.reconnectSession).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession).toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession.mock.calls.every(([sessionId]) => sessionId === 's1')).toBe(true);
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+  });
+
+
+  it('reconnects the active session when foreground resume cannot immediately poke transport', async () => {
+    sessionHarness.resumeActiveSessionTransport.mockReturnValue(false);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+
+    act(() => {
+      document.dispatchEvent(new Event('resume'));
+    });
+
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('registers Capacitor appStateChange only once across session rerenders', async () => {
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(capacitorAppHarness.addListener).toHaveBeenCalledTimes(1));
+
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 2)],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      makeSession('s1', 2),
+    );
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s2', 3)],
+        activeSessionId: 's2',
+        connectedCount: 1,
+      } as any,
+      makeSession('s2', 3),
+    );
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    expect(capacitorAppHarness.addListener).toHaveBeenCalledTimes(1);
   });
 
   it('restores persisted open tabs using the stored latest tab set and active tab id', async () => {
@@ -501,14 +666,39 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ id: 'host-a', sessionName: 'alpha' }),
-      expect.objectContaining({ sessionId: 'tab-a', activate: false }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: false }),
     );
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
-      expect.objectContaining({ sessionId: 'tab-b', activate: false }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: true, connect: true }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
+  });
+
+  it('reconnects the active tab when the restored active session is closed', async () => {
+    sessionHarness.update(
+      {
+        sessions: [
+          {
+            ...makeSession('s1', 1),
+            state: 'closed',
+          },
+        ],
+        activeSessionId: 's1',
+        connectedCount: 0,
+      } as any,
+      {
+        ...makeSession('s1', 1),
+        state: 'closed',
+      } as any,
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1'));
   });
 
   it('persists current open tabs and active tab automatically', async () => {
@@ -577,5 +767,47 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 's2' }),
       expect.objectContaining({ sessionId: 's1' }),
     ]);
+  });
+
+  it('persists closed tabs immediately and does not restore them on next launch', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s1');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+
+    view.unmount();
+    sessionHarness.reset();
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionName: 'session-s2' }),
+      expect.objectContaining({ sessionId: 's2', activate: true, connect: true }),
+    );
   });
 });

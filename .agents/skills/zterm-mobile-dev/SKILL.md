@@ -91,16 +91,23 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
 - 若 `bridgeHost` 已显式写成 `ws://host:port` / `wss://host:port`，Android / Mac / shared storage 都必须把这个 endpoint 当成 display / preset id / effective port 的唯一真源；表单也要同步把 `Bridge Port` 刷成同一个端口，禁止出现双端口假象
+- 若用户在 `bridgeHost` 直接输入原始 `host:port`（如 `100.127.23.27:40807`），shared endpoint 真源也必须当场拆成 `bridgeHost=100.127.23.27` 与 `bridgePort=40807`；禁止再把它和独立 `bridgePort` 二次拼接成非法 ws URL
 
 ### 2.10 daemon 收敛规则
 - server 侧启动入口要收敛成单一 daemon CLI，默认监听地址/端口由统一配置真源决定（当前 `0.0.0.0:3333`）
 - 验证过程中产生的临时 tmux session 需要及时清掉，只保留一个明确实验 session，避免把测试垃圾当成真实 session 列表
 - `bridgePort` / daemon 端口 / daemon tmux session 名必须共用同一配置真源；不要在 UI、server、shell script、文案里散落硬编码
 - daemon restart/status 只证明 tmux session 存在，不等于 socket 已 ready；验证时至少补一次端口监听检查或真实 WebSocket probe
+- daemon 的唯一职责是 **维护 tmux truth mirror**；它不关心 client 本地 buffer、follow/reading、首屏、gap、渲染窗口
+- daemon 内部必须 **writer / store / reader 解耦**：
+  - writer：tmux sync / input / resize / live tick 更新 mirror
+  - store：维护 canonical buffer、absolute line index、revision、available range
+  - reader：`buffer-head-request` / `buffer-sync-request` 只读取当前 mirror store
+- **禁止 read request 触发 write path**：任何 `head/range` 请求都不得 `await` tmux capture / canonical rebuild
 - terminal 排版真源在 daemon / tmux；client 只上报 viewport(`cols / rows`) 并渲染镜像，不能在 keyboard 显隐 / pinch / rotate 时自行 replay buffer
 - `wterm daemon start/restart/install-service` 不能只看 launchd loaded；必须至少等到 daemon 端口真正监听，再允许回报 ready，避免手机首连撞启动窗口
 - websocket bridge 必须做双向 heartbeat：client 需要 `pong timeout -> close -> reconnect`，server 需要 protocol ping/pong 回收僵尸 socket；不能让失联 tab 长时间占住 session
-- websocket reconnect 的 `ws.onopen` 必须同步发送 `stream-mode`，否则 active tab 会暂时退化成 idle/backfill 频率，表现为“秒级延迟”
+- websocket reconnect / 首次 connect 完成后，active tab 必须立刻恢复 **head-first** 主循环（先 `buffer-head-request`，再按本地 buffer 状态决定 diff / 三屏重锚 / reading gap repair）；不能再依赖第二套 active/idle 语义
 - scrollback 若通过 DOM prepend/trim 历史行，client 在“未贴底”时必须保 scrollTop 锚点；否则持续输出后回滚会像 buffer 丢失
 - 手势滚动进入历史阅读态后，scroll lock 要做成 latch，直到真实输入发生才允许恢复 bottom-follow；不能靠“回到底部”自动解锁
 - terminal 单指手势要先做 axis lock：竖向滚动在“确认纵向手势的那一刻”重取 `startScrollTop`，横向手势再切 tab；否则会出现“不是从当前底部开始滚”的跳变
@@ -108,10 +115,10 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - mobile 光标不要额外开本地 blink 动画；只消费 bridge/buffer 的 cursor 位置，避免字体/viewport 变化后出现视觉错位
 - 若要让 mobile 光标忠实镜像 tmux，`CellData` 真源必须包含 `width(0/1/2)`：client 只能按远程 cell 宽度/continuation 渲染 cursor，不能再按本地字符宽度猜位置
 - 多 tab terminal 不允许只保留一个 active TerminalView 再靠 `outputHistory` replay；每个 session 必须常驻自己的 terminal 实例和本地 buffer
-- terminal 持久化缓存不允许只拼 raw output chunk；应从本地 terminal buffer 抽取按行 snapshot（scrollback + visible rows）后再持久化
-- daemon 的 `sendInitialSnapshot()` 不能让 `tmux capture-pane` 异常冒泡到进程级；最多只允许日志告警 + fallback snapshot
+- terminal 持久化缓存不允许只拼 raw output chunk；应从本地 **absolute-index sliding buffer state** 按行持久化
+- daemon 的初次 canonical capture 不能静默失败；capture 出错必须显式报错/记证据，但 daemon 仍只保留 `head + range` 读接口，不补第二份语义
 - daemon 的 buffer 真源必须按 **tmux session mirror** 维护：一个 websocket/tab 只是客户端，不得拥有自己的 authoritative buffer；客户端 detach/reattach 不能重建 session 镜像
-- 2026-04-23 新冻结：daemon 对外职责收敛为 **30Hz session head 广播 + range request 响应**；不再主动 push buffer 内容，consumer 不得把自己的消费状态写回 producer 作为长期真相
+- 2026-04-23 新冻结：daemon 对外职责收敛为 **只回答 `buffer-head-request` / `buffer-sync-request`**；client 自己 33ms tick 问 head，daemon 不主动替 client 做消费策略
 - 2026-04-23 新冻结：client buffer 必须是 **sparse absolute-index buffer**，允许不连续；worker 不为“完整性”主动补洞，只围绕当前工作集补缺：follow 维护尾部 3 屏热区，reading 只补当前窗口
 - 2026-04-23 新冻结：renderer 只按 latest bottom-relative window 消费 buffer；UI shell 只负责容器位置/裁切；IME/keyboard 不得进入 buffer/render truth 链
 - runtime 远程排障接口应收敛到 daemon HTTP：client 侧 runtime debug 只负责上送有界日志队列，daemon 侧统一缓存并通过 `/debug/runtime`、`/debug/runtime/logs` 暴露现场快照；接口复用 daemon auth token，便于服务器端直接拉取现场证据
@@ -142,8 +149,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
-- 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `stream-mode` / `scheduleMirrorFlush`）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`，不要继续让客户端保留 legacy fallback
-- `refreshSessionTail()` 若显式把 session sync state 切回 follow，UI renderer 也必须同步收到一个 follow-reset signal；只改 transport/store、不改 `TerminalView` 本地 `followMode/scrollTop`，就会出现“恢复后看到旧 buffer，输入一下才跳到最新”的假刷新
+- 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
+- buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source
 - active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + gap marker；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
 - active 页的 gap repair 只针对 reading 态当前三屏窗口命中的缺口；不要从旧 stop point 连续追到最新，窗口外内容允许保持不连续以控制带宽
@@ -304,19 +311,19 @@ pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --se
 
 **现场排障最小顺序：**
 
-1. 先 `snapshot`
-   - 看 `clientSessions[].state/streamMode/lastBufferSyncRequest`
+1. 先拉 runtime state（命令子名仍是 `snapshot`，语义是 runtime 状态快照，不是 terminal buffer 快照链路）
+   - 看 `clientSessions[].state/lastBufferSyncRequest/lastHeadRequestAt`
    - 看 `mirrors[].revision/bufferStartIndex/bufferEndIndex/lastFlushCompletedAt`
 2. 若日志不够，再 `enable`
 3. 在手机上复现一次
 4. 立刻 `logs`
-5. 只根据 snapshot + logs 下结论，不靠主观猜
+5. 只根据 runtime state + logs 下结论，不靠主观猜
 
 **针对当前两类高频问题的看法：**
 
 - “输入一下就恢复”  
   先看：
-  - active session 是否真的处于 `streamMode=active`
+  - active session 是否真的在跑 head-first 主循环（`lastHeadRequestAt` 是否持续推进）
   - `lastBufferSyncRequest.mode` 是否仍在 `follow`
   - mirror revision 是否在涨、但 client logs 没 follow sync
 
@@ -324,7 +331,7 @@ pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --se
   先看：
   - layout/viewport 相关日志是否只在 keyboard change 后出现
   - follow viewport sync 是否漏了无键盘场景
-  - snapshot 里的 last request rows / viewportEndIndex 是否与当前真实底部一致
+  - runtime state 里的 last request rows / viewportEndIndex 是否与当前真实底部一致
 
 #### 验证入口定义
 
@@ -791,7 +798,7 @@ android/
 ### 模式: 移动端发热先看 CPU/IO 真源
 - **触发信号**: 手机明显发热，但网络流量不大
 - **动作**: 先抓 `adb shell dumpsys cpuinfo`、`top -H -p <pid>`、`dumpsys gfxinfo`；重点看 `Chrome_IOThread` / `RenderThread` / `Slow issue draw commands`
-- **高频真源**: 1) server 端空刷 viewport（例如把 `cursor.visible` 当变化条件导致每 96ms 发包） 2) client 端每帧 `localStorage.setItem(JSON.stringify(buffer/snapshot))` 3) 全量 scrollback DOM + 常驻 blur
+- **高频真源**: 1) server 端空刷 viewport（例如把 `cursor.visible` 当变化条件导致每 96ms 发包） 2) client 端每帧 `localStorage.setItem(JSON.stringify(buffer/state))` 3) 全量 scrollback DOM + 常驻 blur
 
 ### 模式: Electron 桌面壳验证分层
 - **适用场景**: future Mac / Win 壳移植 Android app-layer 流程
@@ -799,7 +806,7 @@ android/
 
 ### 模式: tmux discovery 不等于 live connect
 - **触发信号**: UI 能列出 tmux sessions，但用户仍反馈“无法连接”
-- **动作**: 检查客户端是否真的走了 Android 同构协议：`ws open -> send connect(payload) -> send stream-mode(active)`；仅有 `list-sessions` 只能证明 bridge 可达，不能证明 session 已 attach
+- **动作**: 检查客户端是否真的走了 Android 同构协议：`ws open -> send connect(payload) -> recv connected -> send buffer-head-request`；仅有 `list-sessions` 只能证明 bridge 可达，不能证明 session 已 attach
 
 ### 模式: 悬浮球拖动与点击分离
 - **适用场景**: terminal 悬浮球 / 浮动入口既要支持点按开关，又要支持拖动 reposition

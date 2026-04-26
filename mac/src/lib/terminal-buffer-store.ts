@@ -32,7 +32,7 @@ function projectRenderBuffer(buffer: SessionBufferState): TerminalRenderBufferPr
     gapRanges: buffer.gapRanges,
     startIndex: buffer.startIndex,
     endIndex: buffer.endIndex,
-    viewportEndIndex: buffer.viewportEndIndex,
+    viewportEndIndex: buffer.bufferTailEndIndex,
     cols: buffer.cols,
     rows: buffer.rows,
     cursorKeysApp: buffer.cursorKeysApp,

@@ -141,56 +141,64 @@ mobile file picker -> websocket paste-image -> daemon temp file
 
 ## Terminal viewport / buffer 规则
 
-- client 不负责 shell 排版；client 只负责：
-  1. 连接初始化时上报当前 viewport `cols / rows`
-  2. 把 daemon canonical buffer 镜像到本地
-  3. 用 daemon 给出的 viewport 底部指针渲染最后一屏
-- daemon / tmux 是 shell 排版真源；同一个 session 的 tmux geometry 应按多 client 的**最小 geometry**收敛
-- IME / keyboard show/hide 只允许改变 render container 位置，不属于 tmux geometry change
+- tmux / daemon 是 shell 排版真源；client 不负责 shell 排版
+- client 连接初始化时只上报真实 geometry `cols / rows`
+- keyboard / IME 只允许改变 UI shell 的位置与裁切，不属于 tmux geometry change
 - pinch zoom / orientation / real container resize 才属于 geometry 变化候选
-- viewport 变化时不允许：
+- viewport / geometry 变化时不允许：
   - clear terminal
   - replay `outputHistory`
   - 重建 session
   - 本地重排旧 buffer 作为真相
-  - 因 IME 动画而持续修改 tmux 高度
+  - 因 IME 动画持续修改 tmux 高度
 
 ## Terminal canonical buffer ownership
 
 ```text
 tmux truth
     ↓
-daemon tmux mirror
-    ├─ canonical line buffer (唯一真源)
-    ├─ canonical cursor/view bottom
-    └─ zterm clients min(cols, rows) -> tmux resize
+daemon server
+    ├─ session canonical buffer
+    └─ replies:
+         - head 在哪里
+         - 请求区间的 buffer（每次回复都带 head）
                 ↓
-      client mirror buffer (absolute-indexed)
+      client buffer manager
+        ├─ 自己起 timer
+        ├─ 定时先问 head
+        ├─ 比较 local buffer 与 daemon head
+        ├─ 决定补 diff / 直接跳到最新三屏 / reading gap repair
+        └─ 维护本地 3000 行 sparse sliding buffer
                 ↓
-renderBottomIndex (唯一渲染锚点)
-renderTopIndex = renderBottomIndex - localViewportRows
-render window = [renderTopIndex, renderBottomIndex)
+      renderer
+        ├─ follow / reading
+        ├─ renderBottomIndex
+        └─ render window
                 ↓
-      render container position only
+      UI shell
+        └─ 容器位置 / 裁切 / IME 抬升
 ```
 
 规则：
 
-- daemon 是 tmux 的 mirror，不是 input relay，不是本地 pty output projection
-- daemon 只做两件事：1) mirror tmux truth；2) 按 zterm 已连接 client 的最小 geometry 通知 tmux resize
-- daemon 不改写 tmux 内容语义；它只发送控制（input/attach/resize 等）并读取 tmux truth，不允许在 daemon 侧二次改写/裁剪/重排 tmux 内容来“修显示”
-- daemon canonical line buffer 是 terminal 信息的唯一真源；client/debug/local state 都不得成为第二真源
-- daemon 的对外职责收敛为：**30Hz head 广播 + range request 响应**；不再主动 push buffer 内容
-- cursor 属于 canonical truth，本轮收敛下优先烘焙进 buffer cells，不走 client overlay 第二真源
-- client mirror buffer 是 **sparse absolute-index buffer**，允许不连续；只围绕当前工作集补缺
-- client active session 本地固定 `33ms` cadence 只做 head freshness / demand 判定；真正的 tail / reading range 拉取频率由网络状况与配置决定，不把“30fps 检查”误做成“30fps 必拉 range”
-- `sendInput()` 不做本地回显；若当前是 active session，只挂 `input-tail-refresh` demand，再由本地 cadence 主动发 follow `buffer-sync-request + ping` 去拿 server canonical buffer
-- client render 只维护自己的 `renderBottomIndex`；follow 时对齐 daemon bottom，reading 时只改自己的 bottom pointer，top 只做派生计算
-- render 不得参与 buffer 生产；它只能声明“当前 bottom-window 命中了哪些行、缺了哪些行”
-- reading 滚到当前缓存窗顶部时，3 屏只是 cache window，不是硬上限；client 需要预取上方两屏并展示 loading，再继续向上滚，不允许把顶部硬卡死
-- 已经进入 canonical buffer 的历史行视为 immutable fact；resize 只影响之后的新输出，不允许回写/重排旧事实
-- geometry 决策只看 zterm 自己的接入端；Termius/iTerm/iSSH 等外部 tmux client 不参与 daemon 的 geometry policy
-- 当前优先目标是“正确最后一屏”；reading / scroll 状态机继续以“worker 补当前窗口缺口”实现，不再让 renderer 参与 transport
+- daemon 是 tmux mirror；只回答 head 和 range，不做策略
+- daemon 不得碰：
+  - follow / reading
+  - renderer
+  - planner / prefetch / snapshot / fallback
+  - gap 判断与客户端拉取策略
+- daemon 每个 session 只维护自己的 canonical buffer；多 session = 多个并行 canonical buffer
+- 任何 daemon 回复都必须带当前 head；但 daemon 不关心客户端为何请求这个区间
+- client buffer manager 是独立 worker，只关心 daemon 同步，不关心渲染
+- client buffer manager 每轮都先问 head，再决定请求范围
+- 若本地为空、失真或离 head 超过三屏：直接请求最新三屏并移动本地窗口；中间不补
+- 若本地仍接近 head：只补 diff
+- reading 时若 renderer 当前窗口不连续：只补 reading gap
+- renderer 只有 `follow / reading` 两种模式，只维护 `renderBottomIndex`
+- renderer 不修改 buffer，不参与 transport 规划，不直接 request daemon
+- 用户上滚进入 reading；重新进入 / 下滚到底 / 输入退出 reading 回 follow
+- buffer manager 只通知“head 变了 / buffer 变了 / gap ready 了”，renderer 自己决定是否刷新当前窗口
+- UI shell 只移动容器；IME 不得进入 buffer / render 真相链
 
 ## Connection / Session 真源
 
@@ -226,7 +234,7 @@ render window = [renderTopIndex, renderBottomIndex)
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
 - websocket 会话采用双向保活：client 负责 app-level `ping + pong timeout`，server 负责 ws protocol heartbeat；任一侧失联后都要自动 close 并进入 host 级串行指数回退重连
-- `sendInitialSnapshot()` 中任何 `tmux capture-pane` 失败都只能降级为 bridge snapshot；不允许因为初始滚动缓冲获取失败而让 daemon 进程退出
+- daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 
 ## 当前实现与目标差距
 

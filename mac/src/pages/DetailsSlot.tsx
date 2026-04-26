@@ -347,7 +347,7 @@ export function DetailsSlot({
 
         <Section
           title="Tmux Session"
-          description="Optional tmux session name. Leave empty to fall back to the connection name."
+          description="Optional tmux session name. Leave empty to use the connection name."
         >
           <Field label="Session Name">
             <input

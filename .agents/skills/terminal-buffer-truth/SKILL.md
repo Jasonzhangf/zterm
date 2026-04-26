@@ -6,74 +6,229 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 # terminal-buffer-truth
 
 ## 适用场景
-- 终端 buffer / scroll / render / cursor 相关 bug
-- 出现“看不到底部”“回滚被拉回”“历史拼错”“光标错位”
-- 任何想在 TerminalView 里继续补 projection / scroll hack 的时刻
+- terminal buffer / render / scroll / input 延迟问题
+- 出现“初次连接慢、输入不刷新、reading 拉不动、回到底部不 follow、带宽异常”
+- 任何想在 server / buffer manager / renderer 之间加补丁、fallback、第二语义的时候
 
-## 必守规则
-1. **single canonical buffer**：daemon 只维护、更新、发送一套 canonical buffer。
-2. **cursor 在 buffer 里**：cursor 不是第二路 metadata 真相，不允许 daemon/client 各自猜。
-3. **daemon 只做 buffer**：daemon 不承载显示逻辑，不承载客户端交互状态，不根据 UI 状态改 buffer 语义。
-3.1 **daemon 是 tmux mirror，不是 input relay**：daemon 观察 tmux truth，本地输入只是写入方式之一，不是更新真源。
-3.2 **server 只做两件事**：1) mirror tmux truth；2) 以 zterm 活跃 clients 的最小 geometry 通知 tmux resize。
-3.3 **geometry 只看 zterm clients**：Termius、iTerm2 等外部 tmux clients 不参与 daemon geometry policy。
-3.4 **daemon 不改写 tmux 内容**：daemon 只发送控制（input/attach/resize 等）并读取 truth；禁止在 daemon 侧二次改写/裁剪/重排 tmux 内容来修复显示。
-4. **client 只读 mirror**：client 只按绝对行号合并 daemon buffer，不反向影响 daemon。
-4.2 **session 级回调必须显式带 sessionId**：input / resize / viewport / focus 相关回调禁止在 App 层按 `activeSession` 隐式路由；切 tab 期间任何异步回调都只能写回自己的 session。
-4.1 **历史 buffer immutable**：一旦某行进入 canonical buffer，就视为已发生事实；后续 resize 只影响新输出，不回改旧历史。
-4.3 **hidden tab 完全冻结**：inactive tab 不收 live buffer、不做 merge、不做 render 刷新；切回 active 后再单次拉当前真相。
-5. **render / scroll 解耦**：`renderBottomIndex`、mode(follow/reading)、DOM scroll 是三个层次；`renderTopIndex` 只能由 bottom 派生；不能混在一个组件里靠副作用凑。
-5.1 **渲染前必须校验绝对行号连续**：当前 render window 若绝对行号不连续，禁止直接渲染 gap/错屏；应保持上一帧稳定画面并触发按绝对行号的补拉。
-6. **reading 退出条件只允许三种显式信号**：1) 滚回底部；2) 用户输入；3) 重新进入 / 显式 follow reset。除此之外任何 live update、补历史、尾部推进都不能把用户拉回底部。
-6.1 **renderer 的 follow reset 只能由 session/follow-reset 信号触发**：初始化/重置 effect 禁止依赖 `authoritativeViewportEndIndex` 这类 live head；否则 reading 态会在每次新尾行到达时被误判成 session reset，直接被拉回底部。
-6.2 **“滚到底”要先信真实可滚容器，再信数学 bottom**：若 terminal DOM 容器本身可滚动，reading -> follow 的退出判定优先看 `scrollHeight - clientHeight - scrollTop <= 1`；只有 DOM 指标不可用/不可滚时，才 fallback 到本地 `maxScrollTop` 推导。否则恢复态/补历史后很容易出现“肉眼已到底，但状态机仍卡在 reading”。
-7. **禁止补丁式修 TerminalView**：出现滚动/底部问题，先检查 ownership 是否错，不能继续叠加 projection、anchor、scroll hack。
-8. **follow 底部优先吃 daemon viewport 真相**：client 不得只用 `availableEndIndex - rows` 猜“到底”；必须优先使用 daemon 给出的 viewport 底部事实，必要时补 virtual bottom padding。
-8.1 **最后一屏先用底部指针对齐**：在 Android 当前收敛阶段，client 渲染窗口先以 daemon `viewportEndIndex` 作为唯一底部指针，再按本地 `viewportRows` 自底向上切一屏；不要同时依赖顶部指针和本地高度去双向凑。
-8.1.1 **renderer 只写 bottom pointer**：follow 时把 `renderBottomIndex` 对齐 daemon bottom；reading 时 renderer 只改自己的 `renderBottomIndex`，不得把 buffer 生产指针写回去。
-8.2 **client / wire 不再依赖 viewportStart**：Android 本地 mirror 只保留绝对 cached window + `viewportEndIndex`；顶部指针不能再进入 client render state，也不应再作为 Android wire truth 的必要字段。
-8.3 **不要再分第二种 live buffer 消息**：Android 当前 mirror 收敛阶段，live refresh 统一走 `buffer-sync`；禁止再引入 `buffer-delta` 这类第二套 live 更新语义去分叉 client merge 逻辑。
-8.4 **daemon mirror 也不要固化 top pointer state**：server 内部若只是为了算当前 viewport top，应按 `availableEndIndex - rows` 临时派生；不要把顶部指针再存成第二真源状态。
-8.5 **active live 增量优先只发 changed-range**：只要 client 已持有连续本地 mirror，daemon follow 增量就不要再把整屏 viewport 一起回传；否则会把“连续渲染”误做成“整屏重拉”，直接抬高带宽与输入期延迟。若连续性失真，再由 client 触发补拉。
-8.6 **active live 默认只追尾部**：active tab 的 16ms refresh 只校验/刷新当前显示尾屏；只有 reading 且本地连续区间断裂时，才允许向前预拉两屏高度。
-8.6.1 **follow 激活/切回时若本地尾窗仍有 gap，必须强制 bootstrap**：`localStart/localEnd` 只表示窗口包围盒，不代表窗内连续；若当前 follow 可见窗或尾部 cache window 仍有 gap/缺口，不能继续走 delta-aware follow request，否则 UI 会一直看到“加载历史/整屏 gap”直到下一次输入或新输出。
-8.6.2 **历史 loading 不能靠 `local start > 0` 猜**：client 若不知道 daemon authoritative head start，就会把“本地已到 daemon 头部但绝对行号仍 > 0”误判成还有历史，导致 loading 常驻；worker 必须单独维护 `bufferHeadStartIndex` 这类 daemon head truth，renderer 只据此决定是否继续 prefetch/loading。
-8.7 **follow 态不能因每次尾部推进就重复 request**：follow bottom 的 `viewportEndIndex` 应由 server payload 推进；client 只在 connect/switch/input/resize/reading 切换时更新 request，不能在每个 live frame 后再回发一次 sync request。
-8.8 **follow 去重 key 不能带动态 viewportEndIndex**：client 若在 follow 态用 `viewportEndIndex` 参与 request 去重，会把每次 live append 误判成‘viewport 变化’，直接退化成 16ms request 风暴。follow 去重只能绑定模式 + viewportRows / geometry。
-8.9 **reading 补拉只在两种信号下发生**：1) 用户滚动进入 reading；2) 当前可见窗或向前两屏预校验发现绝对行号缺口。follow 态禁止触发 prefetch；reading 靠近本地窗口上下边界时只更新 viewport request，不直接整窗重拉。
-8.10 **缓存顶部不是滚动上限**：当 reading 贴近当前缓存顶部时，3 屏只是 cache window，不是硬上限；client 要先预取前两屏并展示 loading，再继续向上滚，不能用固定三屏把滚动卡死。
-8.11 **remote bridge 禁止 bootstrap/snapshot 语义**：active/connect/switch/reconnect 都只能发基于 `knownRevision + local range + viewport` 的 range request；不得把本地 revision/window 清零去换“整窗快照”。
-9. **daemon 要有内存边界**：orphan mirror 必须可回收；capture/reconcile 里的 scratch runtime 不能每次 flush 新建。
-9.1 **daemon capture 不能自旋成风暴**：mirror 刷新必须按 active/idle subscribers 聚合后的 cadence 调度；active 才允许高频，quiet/inactive mirror 必须长间隔，禁止再保留全局高频 reconcile 定时器。
-9.1.1 **不要再挂 tmux control-mode observer**：`tmux -CC attach-session ... read-only` 也会新增 tmux client / crash 面；mirror 刷新统一改成按 client active/idle cadence 的 demand-driven capture。
-9.2 **runtime debug 回传也必须限流**：client -> daemon 的 debug 日志只能走 bounded queue + 小批量定时 flush + payload 截断；观测链本身不能制造第二场日志风暴。
-10. **tmux status line 要做 viewport 补偿**：client 上报的是可见 pane 行数；若 tmux `status=on`，daemon 给 PTY/tmux 的总行数必须加上 status line 行数，否则会稳定少 1 行并导致 buffer/render 错位。
-10.1 **最后一屏 oracle 要抓当前可见 screen**：凡是校验 “last screen / viewport tail / 当前底部”，本地 oracle 与 daemon authoritative capture 都应优先使用 `capture-pane -M`（必要时再配合 `-e/-N`）；不只 `top` / `vim`，attached tmux 下普通 shell 也可能因为默认 `capture-pane` 偏向历史而把正确 mirror 误判成 blank。
-10.2 **动态刷新必须逐步验，不只看最终一帧**：`vim/top/external writer` 这类连续变化 case，必须把每个中间 step 的 tmux oracle、daemon payload、client mirror replay 都逐步对齐；只做 final frame replay 不能证明刷新链稳定。
-11. **跨 geometry 不盲信 daemon viewport**：若 daemon payload 的 `rows` 与 client 当前 `viewportRows` 不一致，client 不得继续把 `viewportStartIndex` 当作当前渲染真底；应退回本地 `availableEndIndex - viewportRows`，否则会凭空渲染出一屏 blank rows。
-12. **IME 只抬渲染不改 buffer**：输入法弹起/收起期间，允许 shell / canvas 做视觉位移，但禁止把 visual viewport 变化回灌成 daemon resize；否则 composition 期间会触发 buffer/viewport 抖动。
-13. **quick bar 高度只能扣一次**：如果 terminal canvas 已经位于 quick bar 之上的剩余高度内，就不能再给 terminal content 额外加同等 `paddingBottom/inset`；否则会稳定吃掉尾部几行。
-14. **键盘不改 terminal 显示高度**：软键盘弹起/收起时，terminal 容器高度保持稳定；只允许做整体视觉上抬，不能把 keyboard inset 变成 terminal 高度变化。
-15. **客户端不再本地画光标**：client 只能渲染 buffer cells；任何基于 `cursorRow/cursorCol` 的额外 outline/overlay 都属于残留逻辑，必须删。
-16. **geometry 只在真实尺寸变化时上报**：连接初始化必须上报当前尺寸；IME show/hide 只改容器位置，不触发 tmux resize。多 client 共享 session 时，daemon 应收敛到最小 geometry。
-17. **唯一信息真源必须先冻结**：开始修 buffer/render/daemon 前，先把 tmux truth -> daemon mirror -> client mirror 的 ownership 写入 architecture/decision/skill，后续实现不得偏离。
+## 冻结角色边界
 
-## 推荐执行顺序
-1. 先确认 daemon canonical buffer 结构
-2. 先用本地 attached TUI case 验证 daemon mirror（`top` / `vim` 优先，detached shell case 只作最小链路探测）
-3. 再确认 client mirror merge
-4. 再确认 render state
-5. 最后接 DOM scroll / gesture
+```text
+tmux truth
+  -> daemon server
+  -> client buffer manager
+  -> renderer
+  -> UI shell
+```
 
-## TUI-first 验证流程
-1. 固定一个 tmux session 作为实验场
-2. 先让 Codex/本地 PTY attach 到这个 session，跑 `vim -Nu NONE`、`top` 等真实 TUI
-3. daemon probe 只负责抓 websocket payload；tmux `capture-pane + display-message` 仍是唯一 oracle
-4. 只有 `top` / `vim` 稳定后，才允许进入 Android 手工 smoke
-5. detached `tmux send-keys` 只能验证最小 shell 链路，不能替代 TUI 验证
+四层只允许单向依赖，禁止越层漂移。
 
-## 反模式
-- 在 daemon 烘焙 client 显示逻辑
-- 用两个 buffer source（history vs latest / snapshot vs delta）拼 UI
-- 用 DOM scrollTop 充当业务真源
-- 本地根据输入法/光标状态猜终端内容
+## 1. daemon server
+
+server 是独立层，只做：
+
+1. mirror tmux truth
+2. 回 `buffer-head-request`
+3. 回 `buffer-sync-request`
+4. 处理 connect / input / resize 这类基础控制
+
+### 1.0 daemon 唯一心智
+
+```text
+tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
+```
+
+- daemon **不关心客户端**
+- daemon 只维护自己的 tmux mirror truth
+- daemon 内部也必须 **读写解耦**
+  - 写侧：`tmux -> mirror store`
+  - 读侧：`mirror store -> head/range reply`
+- `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
+- **请求不得触发 tmux capture / canonical rebuild / planner**
+
+硬规则：
+- server 不做 follow / reading 策略
+- server 不做 renderer 策略
+- server 不做 planner / prefetch / snapshot / fallback
+- server 不替客户端判断 gap，不替客户端决定该拉哪段
+- server 不关心 client 本地 buffer 是否为空、是否 gap、是否 follow/reading、是否首屏
+- server 不允许在 `head/range` 请求路径里“先同步 tmux 再回复”
+- **每次回复都带当前 head**，避免客户端额外猜
+- mirror 生命周期也必须独立：
+  - client 断开 / 切 tab / 暂时没有 subscriber，不得销毁 mirror truth 再重建
+  - 否则 reconnect 后出现 `revision -> 1` / `latestEndIndex` 回退，不是 tmux 变了，而是 daemon 自己把 absolute truth 丢了
+
+## 2. client buffer manager
+
+buffer manager 是独立 worker，不归 daemon、不归 renderer。
+
+它的唯一职责：
+1. 自己起 timer
+2. 定时先问 head
+3. 自己比较 local buffer 和 daemon head
+4. 自己决定请求哪段 buffer
+5. head 变了或 gap 补齐了，就通知 renderer
+
+### 2.1 本地 buffer 真相
+- 本地维护一个 sliding buffer，默认保留 **3000 行**
+- 按绝对行号存储
+- 可以是 sparse，不要求永远连续
+- 历史超出窗口后滑走，但**不是单次 payload 来了就把本地历史裁掉**
+
+### 2.2 follow 路径
+每次 tick：
+1. 先问 head
+2. 比较本地尾部与 daemon head
+3. 若本地为空、失真，或离 head **超过 3 屏**：
+   - 直接请求 **head 往回 3 屏**
+   - 移动本地 sliding window 到最新尾部
+   - **中间缺口不补**
+4. 若离 head 不远：
+   - 只补 diff
+
+### 2.3 reading 路径
+- reading 不改变 buffer manager 的 head-first 主循环
+- 只是额外多一个输入：renderer 当前 reading window
+- 若 reading window 三屏内不连续，buffer manager 才请求 gap
+- **gap repair 只属于 reading**
+
+### 2.4 禁止事项
+- renderer 不能直接触发 transport pull
+- buffer manager 不能替 renderer 改 mode
+- 不能因为本地历史有 gap，就在 follow 下回补整段历史
+- 不能把 snapshot / patch-middle / fallback 再塞回来
+- buffer manager 也必须 **读写解耦**：
+  - 写侧：同步 daemon -> 更新本地 sparse buffer
+  - 读侧：renderer 只消费当前本地 buffer
+- buffer manager 不关心 renderer 如何滚动、如何绘制、如何布局
+
+## 3. renderer
+
+renderer 只看两件事：
+1. `buffer head`：内容池最新底部
+2. `renderBottomIndex`：当前要显示窗口的底部
+
+它不关心：
+- transport
+- daemon 策略
+- buffer 拉取策略
+- 输入法
+
+### 3.1 follow
+- follow 只是在收到 head / buffer 更新后
+- 把 `renderBottomIndex` 对齐到最新底部
+- 然后从本地内容池取当前窗口来画
+
+### 3.2 reading
+- 用户上滚立即进入 reading
+- reading 时只改自己的 `renderBottomIndex`
+- 申请的是“reading head 往回 3 屏”的渲染窗口
+- buffer 更新只会让 renderer 重绘当前窗口，**不会自动滚动**
+
+### 3.3 reading 退出条件
+只允许三种：
+1. 重新进入
+2. 下滚到底部
+3. 用户输入
+
+除此之外，live update / 补 gap / 尾部推进，都不能把用户拉回 follow。
+
+## 4. UI shell
+
+UI 只负责容器位置与裁切：
+- terminal 容器放在哪里
+- keyboard / IME 弹起后容器怎么上抬
+- 终端可见区域是多少
+
+硬规则：
+- IME 只移动容器，不改变内容
+- renderer 只在容器里画，不关心输入法
+- keyboard / IME 不得回灌成 buffer / render 真相
+
+## 5. 反模式清单
+
+以下一律视为错误实现：
+- snapshot
+- stream-mode
+- planner
+- viewport prefetch 第二链路
+- daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture
+- daemon 根据 client 状态决定“要不要先刷新一下 mirror 再回复”
+- daemon 因 subscriber 归零就销毁 mirror，导致 reconnect 后 revision / absolute head 重置
+- renderer 直接 request buffer
+- buffer manager 直接改 renderer follow/reading
+- follow 下因为历史 gap 去回补整段旧历史
+- 初次连接或恢复连接时，两三 K 两三 K 慢慢追历史
+- 任何 fallback / 降级 / 第二语义
+
+## 6. 必须遵守的开发顺序
+
+```text
+先落 docs / AGENTS / skill
+-> 再补测试
+-> 再改代码
+-> 再跑真实回环
+```
+
+顺序错了，视为没按真源做。
+
+## 7. 必跑真回环
+
+```text
+tmux truth
+-> daemon log
+-> client buffer manager log
+-> renderer commit log
+-> Android APK 真实画面
+```
+
+最少覆盖：
+1. 初次连接
+2. 冷启动进入单个 active tab，等待首屏刷新
+3. 进入一个 tab 后切换到另一个 active tab，等待首屏刷新
+4. 后台恢复
+5. 输入英文 / 数字 / 空格 / 回车
+6. reading 连续上滚
+7. 输入退出 reading
+8. daemon 重启恢复
+
+## 7.1 必须沉淀成自动回归
+
+上述 case 不能只靠人工重试。
+
+必须把问题收敛成：
+
+```text
+可复现的本地 case
+-> 可失败的自动测试
+-> 修复后稳定转绿
+-> 纳入每次编译前回归
+```
+
+只要某个 terminal 线上问题还不能被本地自动 case 复现，就不允许说“根因已收敛”。
+
+最低自动回归覆盖：
+- server contract：head / range reply 语义
+- buffer manager：head-first / far jump / reading gap / in-flight closeout
+- renderer：follow commit / reading hold / input reset follow
+- daemon mirror close loop：`top` / `vim` / input echo
+- Android 首屏：cold start single tab / switch to another tab 的 first paint
+
+新增门禁精华：
+- cold-start / foreground resume 的 transport gate 必须优先 active tab；若 hidden tabs 跟着一起 eager reconnect，active tab 的首屏会被排队拖慢。除非已有被验证的 hidden low-frequency 设计，否则 hidden tab 默认只保留 runtime shell，等显式激活再 reconnect。
+
+## 8. 现场判断口径
+
+看到这些现象，优先判对应层：
+- 初次连接慢慢追历史：buffer manager 错
+- 输入发出去几分钟不刷新：buffer manager / renderer 通知链错
+- reading 一滚就被拉回：renderer mode 错
+- 带宽异常大：仍有 snapshot / 整窗重拉 / payload 误裁
+- keyboard 影响内容或行数：UI shell 越层
+- 收到 head 以后长期不再拉新 buffer：优先查 buffer manager 的 in-flight pull 是否死锁
+- `pullHz == 0 && renderHz == 0`：优先查 active tab 首次激活后是否根本没进入 head-first 主循环
+- foreground / cold-start 后 active tab 长时间 `connecting` 且 hidden tabs 同时在连：优先查 active-only transport gate 是否被破坏
+- Android 若 `ImeAnchor` 已经产生日志，但 client 侧出现 `session.input.queue` 且长期无刷新：先判定为 **active transport 已死**，不是 IME 问题；active tab 在 `resume / switch / input` 这三个动作上，只要发现没有 live ws，就必须立即 reconnect，不能只排队等下一次偶然恢复
+- 用户现场若给的是 **ADB device 地址**，不要误判成 daemon 地址；先从 Android WebView localStorage 真源读取当前 `bridgeHost / bridgePort / authToken`，再去打 `/health`、`/debug/runtime`、WebSocket probe
+- 若怀疑“是 daemon 慢”，必须补一个 **independent direct daemon probe**：临时 tmux session 上测 `connect -> head -> input -> head change`；如果 direct probe 是几十毫秒，而现场 session 仍是几十秒，就先把 generic daemon 基线排除，转查现场 session / IME / active transport 链路
+- 若真机现场出现 `session.buffer.request` 已发出、daemon direct probe 也能直接拿到非空 range，但 APK 仍首屏空白/`R=0`，优先判定为 **client 侧 `buffer-sync -> local apply -> renderer commit` 断链**；先补本地结构化证据，不要再回头怪 daemon
+- 若 Android 真机出现“未点键盘却前台自动弹 IME”或 IME 在九宫格/QWERTY 间异常切换，优先查 `ImeAnchor` 的 stale show/focus 状态是否跨前后台遗留；**只有显式 keyboard action 才允许 show IME**

@@ -3,6 +3,7 @@ package com.zterm.android;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.Rect;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Spannable;
@@ -12,6 +13,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputConnectionWrapper;
@@ -29,10 +31,16 @@ public class ImeAnchorPlugin extends Plugin {
     private static final String TAG = "ImeAnchor";
 
     private ImeAnchorEditText imeEditText;
+    private FrameLayout rootView;
+    private ViewTreeObserver.OnGlobalLayoutListener keyboardLayoutListener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean suppressTextChange = false;
     private boolean pendingShowRequest = false;
-    private boolean suppressCommitFallback = false;
+    private boolean suppressCommittedTextEcho = false;
+    private String lastObservedEditableText = "";
+    private boolean lastObservedEditableWasImmediate = false;
+    private boolean lastKeyboardVisible = false;
+    private int lastKeyboardHeight = 0;
 
     @Override
     public void load() {
@@ -96,7 +104,8 @@ public class ImeAnchorPlugin extends Plugin {
             return;
         }
 
-        FrameLayout rootView = getActivity().findViewById(android.R.id.content);
+        rootView = getActivity().findViewById(android.R.id.content);
+        ensureKeyboardObserver();
         if (rootView == null) {
             Log.w(TAG, "ensureImeAnchor(): rootView is null");
             return;
@@ -114,9 +123,11 @@ public class ImeAnchorPlugin extends Plugin {
             EditorInfo.IME_FLAG_NO_EXTRACT_UI
                 | EditorInfo.IME_FLAG_NO_FULLSCREEN
                 | EditorInfo.IME_FLAG_NAVIGATE_NEXT
+                | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
         );
         imeEditText.setInputType(
             InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
         );
         imeEditText.setSingleLine(false);
@@ -159,27 +170,89 @@ public class ImeAnchorPlugin extends Plugin {
         Log.i(TAG, "ensureImeAnchor(): anchor attached");
     }
 
+    private void ensureKeyboardObserver() {
+        if (rootView == null || keyboardLayoutListener != null) {
+            return;
+        }
+
+        keyboardLayoutListener = () -> {
+            if (rootView == null) {
+                return;
+            }
+
+            Rect visibleFrame = new Rect();
+            rootView.getWindowVisibleDisplayFrame(visibleFrame);
+            int occludedHeight = Math.max(0, rootView.getRootView().getHeight() - visibleFrame.bottom);
+            boolean keyboardVisible = occludedHeight > dpToPx(80);
+            int keyboardHeight = keyboardVisible ? occludedHeight : 0;
+
+            if (keyboardVisible == lastKeyboardVisible && keyboardHeight == lastKeyboardHeight) {
+                return;
+            }
+
+            lastKeyboardVisible = keyboardVisible;
+            lastKeyboardHeight = keyboardHeight;
+            Log.i(TAG, "keyboardState(): visible=" + keyboardVisible + " height=" + keyboardHeight);
+            JSObject payload = new JSObject();
+            payload.put("visible", keyboardVisible);
+            payload.put("height", keyboardHeight);
+            notifyListeners("keyboardState", payload);
+        };
+
+        rootView.getViewTreeObserver().addOnGlobalLayoutListener(keyboardLayoutListener);
+    }
+
     private void handleEditableChanged(Editable editable) {
         if (suppressTextChange || imeEditText == null) {
             return;
         }
 
-        if (hasComposingText(editable)) {
-            Log.i(TAG, "handleEditableChanged(): composing length=" + editable.length());
+        String currentText = editable.toString();
+        if (currentText.isEmpty()) {
+            lastObservedEditableText = "";
+            lastObservedEditableWasImmediate = false;
             return;
         }
 
-        String committed = editable.toString();
-        if (committed.isEmpty()) {
+        boolean composing = hasComposingText(editable);
+        if (composing) {
+            boolean immediate = isImmediateTerminalComposition(currentText);
+            Log.i(TAG, "handleEditableChanged(): composing length=" + editable.length() + " immediate=" + immediate);
+            if (immediate) {
+                emitImmediateTextDelta(lastObservedEditableText, currentText, "editableComposing");
+            }
+            lastObservedEditableText = currentText;
+            lastObservedEditableWasImmediate = immediate;
             return;
         }
 
-        if (suppressCommitFallback) {
-            Log.i(TAG, "handleEditableChanged(): skip fallback committed=" + committed);
+        if (suppressCommittedTextEcho) {
+            Log.i(TAG, "handleEditableChanged(): skip committed echo=" + currentText);
             return;
         }
 
-        emitInputText(committed, "editableFallback");
+        if (lastObservedEditableWasImmediate) {
+            emitImmediateTextDelta(lastObservedEditableText, currentText, "editableCommit");
+            clearImeEditText();
+            return;
+        }
+
+        emitInputText(currentText, "editableCommitBuffer");
+    }
+
+    private void clearImeEditText() {
+        if (imeEditText == null || imeEditText.getText() == null) {
+            lastObservedEditableText = "";
+            lastObservedEditableWasImmediate = false;
+            return;
+        }
+        lastObservedEditableText = "";
+        lastObservedEditableWasImmediate = false;
+        suppressCommittedTextEcho = true;
+        suppressTextChange = true;
+        imeEditText.getText().clear();
+        suppressTextChange = false;
+        suppressCommittedTextEcho = false;
     }
 
     void emitBackspace(int count) {
@@ -187,6 +260,7 @@ public class ImeAnchorPlugin extends Plugin {
         JSObject payload = new JSObject();
         payload.put("count", Math.max(1, count));
         notifyListeners("backspace", payload);
+        clearImeEditText();
     }
 
     void emitInputText(String text, String source) {
@@ -198,14 +272,61 @@ public class ImeAnchorPlugin extends Plugin {
         JSObject payload = new JSObject();
         payload.put("text", text);
         notifyListeners("input", payload);
+        clearImeEditText();
+    }
 
-        if (imeEditText != null && imeEditText.getText() != null) {
-            suppressCommitFallback = true;
-            suppressTextChange = true;
-            imeEditText.getText().clear();
-            suppressTextChange = false;
-            suppressCommitFallback = false;
+    private void emitImmediateTextDelta(String previousText, String nextText, String source) {
+        String previous = previousText == null ? "" : previousText;
+        String next = nextText == null ? "" : nextText;
+        if (previous.equals(next)) {
+            return;
         }
+
+        if (next.startsWith(previous)) {
+            String delta = next.substring(previous.length());
+            if (!delta.isEmpty()) {
+                JSObject payload = new JSObject();
+                payload.put("text", delta);
+                Log.i(TAG, "emitImmediateTextDelta(): source=" + source + " delta=" + delta);
+                notifyListeners("input", payload);
+            }
+            return;
+        }
+
+        if (previous.startsWith(next)) {
+            int deleteCount = previous.length() - next.length();
+            if (deleteCount > 0) {
+                emitBackspace(deleteCount);
+            }
+            return;
+        }
+
+        if (!previous.isEmpty()) {
+            emitBackspace(previous.length());
+        }
+        if (!next.isEmpty()) {
+            JSObject payload = new JSObject();
+            payload.put("text", next);
+            Log.i(TAG, "emitImmediateTextDelta(): source=" + source + " reset=" + next);
+            notifyListeners("input", payload);
+        }
+    }
+
+    private boolean isImmediateTerminalComposition(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            i += Character.charCount(codePoint);
+            if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t') {
+                continue;
+            }
+            if (codePoint < 0x20 || codePoint > 0x7e) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean hasComposingText(Editable editable) {
@@ -376,7 +497,13 @@ public class ImeAnchorPlugin extends Plugin {
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
                     if (plugin != null && text != null && text.length() > 0) {
-                        plugin.emitInputText(text.toString(), "commitText");
+                        String committed = text.toString();
+                        if (plugin.lastObservedEditableWasImmediate) {
+                            plugin.emitImmediateTextDelta(plugin.lastObservedEditableText, committed, "commitText");
+                            plugin.clearImeEditText();
+                            return true;
+                        }
+                        plugin.emitInputText(committed, "commitText");
                         return true;
                     }
                     return super.commitText(text, newCursorPosition);
@@ -386,7 +513,13 @@ public class ImeAnchorPlugin extends Plugin {
                 public boolean finishComposingText() {
                     Editable editable = getText();
                     if (plugin != null && editable != null && editable.length() > 0) {
-                        plugin.emitInputText(editable.toString(), "finishComposingText");
+                        String committed = editable.toString();
+                        if (plugin.lastObservedEditableWasImmediate) {
+                            plugin.emitImmediateTextDelta(plugin.lastObservedEditableText, committed, "finishComposingText");
+                            plugin.clearImeEditText();
+                            return true;
+                        }
+                        plugin.emitInputText(committed, "finishComposingText");
                         return true;
                     }
                     return super.finishComposingText();

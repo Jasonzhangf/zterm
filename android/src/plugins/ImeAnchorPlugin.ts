@@ -14,6 +14,10 @@ export interface ImeAnchorPlugin {
     eventName: 'backspace',
     listenerFunc: (event: { count?: number }) => void,
   ): Promise<{ remove: () => Promise<void> }>;
+  addListener(
+    eventName: 'keyboardState',
+    listenerFunc: (event: { visible?: boolean; height?: number }) => void,
+  ): Promise<{ remove: () => Promise<void> }>;
 }
 
 export const ImeAnchor = registerPlugin<ImeAnchorPlugin>('ImeAnchor');

@@ -166,7 +166,9 @@ export function sliceIndexedLines(
   return toIndexedLines(actualStart, bufferLines.slice(startOffset, endOffset));
 }
 
-export function findChangedIndexedRange(options: {
+type IndexedRange = { startIndex: number; endIndex: number };
+
+export function findChangedIndexedRanges(options: {
   previousStartIndex: number;
   previousLines: TerminalCell[][];
   nextStartIndex: number;
@@ -174,7 +176,9 @@ export function findChangedIndexedRange(options: {
 }) {
   const nextEndIndex = options.nextStartIndex + options.nextLines.length;
 
-  let firstChangedIndex: number | null = null;
+  const changedRanges: IndexedRange[] = [];
+  let activeRangeStart: number | null = null;
+
   for (let index = options.nextStartIndex; index < nextEndIndex; index += 1) {
     const previousOffset = index - options.previousStartIndex;
     const nextOffset = index - options.nextStartIndex;
@@ -188,373 +192,29 @@ export function findChangedIndexedRange(options: {
         : null;
 
     if (!rowsEqual(previousRow, nextRow)) {
-      firstChangedIndex = index;
-      break;
-    }
-  }
-
-  if (firstChangedIndex === null) {
-    return null;
-  }
-
-  let lastChangedIndex = firstChangedIndex;
-  for (let index = nextEndIndex - 1; index >= firstChangedIndex; index -= 1) {
-    const previousOffset = index - options.previousStartIndex;
-    const nextOffset = index - options.nextStartIndex;
-    const previousRow =
-      previousOffset >= 0 && previousOffset < options.previousLines.length
-        ? options.previousLines[previousOffset]
-        : null;
-    const nextRow =
-      nextOffset >= 0 && nextOffset < options.nextLines.length
-        ? options.nextLines[nextOffset]
-        : null;
-
-    if (!rowsEqual(previousRow, nextRow)) {
-      lastChangedIndex = index;
-      break;
-    }
-  }
-
-  return {
-    startIndex: firstChangedIndex,
-    endIndex: lastChangedIndex + 1,
-  };
-}
-
-export function resolveIncrementalSyncRange(options: {
-  changedRange: { startIndex: number; endIndex: number } | null;
-  bufferStartIndex: number;
-  bufferEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-}) {
-  if (!options.changedRange) {
-    return null;
-  }
-
-  const safeBufferStart = Math.max(0, Math.floor(options.bufferStartIndex));
-  const safeBufferEnd = Math.max(safeBufferStart, Math.floor(options.bufferEndIndex));
-  if (safeBufferEnd <= safeBufferStart) {
-    return null;
-  }
-
-  const changedStart = Math.max(safeBufferStart, Math.min(safeBufferEnd, Math.floor(options.changedRange.startIndex)));
-  const changedEnd = Math.max(changedStart, Math.min(safeBufferEnd, Math.floor(options.changedRange.endIndex)));
-  if (changedEnd <= changedStart) {
-    return null;
-  }
-
-  return {
-    startIndex: changedStart,
-    endIndex: changedEnd,
-  };
-}
-
-export function resolveClientIncrementalPatchRange(options: {
-  knownRevision: number;
-  currentRevision: number;
-  lastDeltaFromRevision: number;
-  lastDeltaToRevision: number;
-  lastDeltaRange: { startIndex: number; endIndex: number } | null;
-  bufferStartIndex: number;
-  bufferEndIndex: number;
-  localStartIndex: number;
-  localEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-}) {
-  const safeBufferStart = Math.max(0, Math.floor(options.bufferStartIndex));
-  const safeBufferEnd = Math.max(safeBufferStart, Math.floor(options.bufferEndIndex));
-  if (safeBufferEnd <= safeBufferStart || !options.lastDeltaRange) {
-    return null;
-  }
-
-  const safeKnownRevision = Math.max(0, Math.floor(options.knownRevision));
-  const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision));
-  const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision));
-  const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision));
-
-  if (
-    safeKnownRevision >= safeCurrentRevision
-    || safeKnownRevision !== safeDeltaFromRevision
-    || safeCurrentRevision !== safeDeltaToRevision
-  ) {
-    return null;
-  }
-
-  const safeLocalStart = Math.max(0, Math.floor(options.localStartIndex));
-  const safeLocalEnd = Math.max(safeLocalStart, Math.floor(options.localEndIndex));
-  const overlapStart = Math.max(safeBufferStart, safeLocalStart);
-  const overlapEnd = Math.min(safeBufferEnd, safeLocalEnd);
-  if (overlapEnd <= overlapStart) {
-    return null;
-  }
-
-  const changedStart = Math.max(
-    safeBufferStart,
-    Math.min(safeBufferEnd, Math.floor(options.lastDeltaRange.startIndex)),
-  );
-  const changedEnd = Math.max(
-    changedStart,
-    Math.min(safeBufferEnd, Math.floor(options.lastDeltaRange.endIndex)),
-  );
-  if (changedEnd <= changedStart) {
-    return null;
-  }
-
-  return resolveIncrementalSyncRange({
-    changedRange: {
-      startIndex: changedStart,
-      endIndex: changedEnd,
-    },
-    bufferStartIndex: safeBufferStart,
-    bufferEndIndex: safeBufferEnd,
-    viewportEndIndex: options.viewportEndIndex,
-    viewportRows: options.viewportRows,
-  });
-}
-
-function mergeIndexedRanges(ranges: Array<{ startIndex: number; endIndex: number }>) {
-  const merged: Array<{ startIndex: number; endIndex: number }> = [];
-  const sorted = [...ranges]
-    .filter((range) => range.endIndex > range.startIndex)
-    .sort((left, right) => left.startIndex - right.startIndex);
-
-  for (const range of sorted) {
-    const last = merged[merged.length - 1];
-    if (!last || range.startIndex > last.endIndex) {
-      merged.push({ ...range });
+      if (activeRangeStart === null) {
+        activeRangeStart = index;
+      }
       continue;
     }
-    last.endIndex = Math.max(last.endIndex, range.endIndex);
-  }
 
-  return merged;
-}
-
-
-export function resolveReadingWindow(options: {
-  bufferStartIndex: number;
-  bufferEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-  cacheLines: number;
-}) {
-  const safeBufferStart = Math.max(0, Math.floor(options.bufferStartIndex));
-  const safeBufferEnd = Math.max(safeBufferStart, Math.floor(options.bufferEndIndex));
-  if (safeBufferEnd <= safeBufferStart) {
-    return {
-      startIndex: safeBufferStart,
-      endIndex: safeBufferStart,
-      viewportEndIndex: safeBufferStart,
-    };
-  }
-
-  const safeViewportEndIndex = Math.max(
-    safeBufferStart,
-    Math.min(safeBufferEnd, Math.floor(options.viewportEndIndex || safeBufferEnd)),
-  );
-  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
-  const cacheLines = Math.max(viewportRows, Math.floor(options.cacheLines || viewportRows));
-  const trailingContextRows = Math.min(viewportRows, Math.max(0, cacheLines - viewportRows));
-
-  let endIndex = Math.min(safeBufferEnd, safeViewportEndIndex + trailingContextRows);
-  let startIndex = Math.max(safeBufferStart, endIndex - cacheLines);
-
-  if (endIndex - startIndex < cacheLines) {
-    endIndex = Math.min(safeBufferEnd, startIndex + cacheLines);
-    startIndex = Math.max(safeBufferStart, endIndex - cacheLines);
-  }
-
-  return {
-    startIndex,
-    endIndex,
-    viewportEndIndex: safeViewportEndIndex,
-  };
-}
-
-export function resolveReadingMissingRanges(options: {
-  desiredStartIndex: number;
-  desiredEndIndex: number;
-  localStartIndex: number;
-  localEndIndex: number;
-  knownRevision: number;
-  currentRevision: number;
-  lastDeltaFromRevision: number;
-  lastDeltaToRevision: number;
-  deltaRange: { startIndex: number; endIndex: number } | null;
-}) {
-  const safeDesiredStart = Math.max(0, Math.floor(options.desiredStartIndex));
-  const safeDesiredEnd = Math.max(safeDesiredStart, Math.floor(options.desiredEndIndex));
-  if (safeDesiredEnd <= safeDesiredStart) {
-    return [] as Array<{ startIndex: number; endIndex: number }>;
-  }
-
-  const ranges: Array<{ startIndex: number; endIndex: number }> = [];
-  const safeLocalStart = Math.max(0, Math.floor(options.localStartIndex || 0));
-  const safeLocalEnd = Math.max(safeLocalStart, Math.floor(options.localEndIndex || safeLocalStart));
-
-  if (safeDesiredStart < safeLocalStart) {
-    ranges.push({
-      startIndex: safeDesiredStart,
-      endIndex: Math.min(safeDesiredEnd, safeLocalStart),
-    });
-  }
-  if (safeDesiredEnd > safeLocalEnd) {
-    ranges.push({
-      startIndex: Math.max(safeDesiredStart, safeLocalEnd),
-      endIndex: safeDesiredEnd,
-    });
-  }
-
-  const safeKnownRevision = Math.max(0, Math.floor(options.knownRevision || 0));
-  const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision || 0));
-  const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision || 0));
-  const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision || 0));
-  if (
-    options.deltaRange
-    && safeKnownRevision < safeCurrentRevision
-    && safeKnownRevision === safeDeltaFromRevision
-    && safeCurrentRevision === safeDeltaToRevision
-  ) {
-    const startIndex = Math.max(safeDesiredStart, Math.floor(options.deltaRange.startIndex || 0));
-    const endIndex = Math.min(safeDesiredEnd, Math.floor(options.deltaRange.endIndex || 0));
-    if (endIndex > startIndex) {
-      ranges.push({ startIndex, endIndex });
+    if (activeRangeStart !== null) {
+      changedRanges.push({
+        startIndex: activeRangeStart,
+        endIndex: index,
+      });
+      activeRangeStart = null;
     }
   }
 
-  return mergeIndexedRanges(ranges);
-}
-
-export function resolveFollowTailSyncPlan(options: {
-  knownRevision: number;
-  currentRevision: number;
-  lastDeltaFromRevision: number;
-  lastDeltaToRevision: number;
-  lastDeltaRange: { startIndex: number; endIndex: number } | null;
-  bufferStartIndex: number;
-  bufferEndIndex: number;
-  localStartIndex: number;
-  localEndIndex: number;
-  viewportRows: number;
-  cacheLines: number;
-}) {
-  const safeBufferStart = Math.max(0, Math.floor(options.bufferStartIndex));
-  const safeBufferEnd = Math.max(safeBufferStart, Math.floor(options.bufferEndIndex));
-  if (safeBufferEnd <= safeBufferStart) {
-    return null;
-  }
-
-  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
-  const cacheLines = Math.max(viewportRows, Math.floor(options.cacheLines || viewportRows));
-  const windowStartIndex = Math.max(safeBufferStart, safeBufferEnd - cacheLines);
-  const windowEndIndex = safeBufferEnd;
-  const safeLocalStart = Math.max(0, Math.floor(options.localStartIndex || 0));
-  const safeLocalEnd = Math.max(safeLocalStart, Math.floor(options.localEndIndex || safeLocalStart));
-  const localCoversTail = safeLocalStart <= windowStartIndex && safeLocalEnd >= windowEndIndex;
-
-  const safeKnownRevision = Math.max(0, Math.floor(options.knownRevision || 0));
-  const safeCurrentRevision = Math.max(0, Math.floor(options.currentRevision || 0));
-  const safeDeltaFromRevision = Math.max(0, Math.floor(options.lastDeltaFromRevision || 0));
-  const safeDeltaToRevision = Math.max(0, Math.floor(options.lastDeltaToRevision || 0));
-  if (localCoversTail && safeKnownRevision >= safeCurrentRevision) {
-    return null;
-  }
-
-  let deltaRange: { startIndex: number; endIndex: number } | null = null;
-  if (
-    options.lastDeltaRange
-    && safeKnownRevision < safeCurrentRevision
-    && safeKnownRevision === safeDeltaFromRevision
-    && safeCurrentRevision === safeDeltaToRevision
-  ) {
-    const startIndex = Math.max(windowStartIndex, Math.floor(options.lastDeltaRange.startIndex || 0));
-    const endIndex = Math.min(windowEndIndex, Math.floor(options.lastDeltaRange.endIndex || 0));
-    if (endIndex > startIndex) {
-      deltaRange = { startIndex, endIndex };
-    }
-  }
-
-  if (localCoversTail && deltaRange) {
-    return {
-      windowStartIndex,
-      windowEndIndex,
-      ranges: [deltaRange],
-    };
-  }
-
-  const ranges: Array<{ startIndex: number; endIndex: number }> = [];
-  if (safeLocalStart > windowStartIndex) {
-    ranges.push({
-      startIndex: windowStartIndex,
-      endIndex: Math.min(safeLocalStart, windowEndIndex),
+  if (activeRangeStart !== null) {
+    changedRanges.push({
+      startIndex: activeRangeStart,
+      endIndex: nextEndIndex,
     });
   }
-  if (safeLocalEnd < windowEndIndex) {
-    ranges.push({
-      startIndex: Math.max(safeLocalEnd, windowStartIndex),
-      endIndex: windowEndIndex,
-    });
-  }
-  if (deltaRange) {
-    ranges.push(deltaRange);
-  }
 
-  const mergedRanges = mergeIndexedRanges(ranges);
-  if (mergedRanges.length > 0) {
-    return {
-      windowStartIndex,
-      windowEndIndex,
-      ranges: mergedRanges,
-    };
-  }
-
-  return {
-    windowStartIndex,
-    windowEndIndex,
-    ranges: [{ startIndex: windowStartIndex, endIndex: windowEndIndex }],
-  };
-}
-
-export function advanceKnownLocalWindowRange(options: {
-  localStartIndex: number;
-  localEndIndex: number;
-  payloadStartIndex: number;
-  payloadEndIndex: number;
-}) {
-  const localStartIndex = Math.max(0, Math.floor(options.localStartIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(options.localEndIndex || localStartIndex));
-  const payloadStartIndex = Math.max(0, Math.floor(options.payloadStartIndex || 0));
-  const payloadEndIndex = Math.max(payloadStartIndex, Math.floor(options.payloadEndIndex || payloadStartIndex));
-
-  if (payloadEndIndex <= payloadStartIndex) {
-    return {
-      startIndex: localStartIndex,
-      endIndex: localEndIndex,
-    };
-  }
-
-  if (localEndIndex <= localStartIndex) {
-    return {
-      startIndex: payloadStartIndex,
-      endIndex: payloadEndIndex,
-    };
-  }
-
-  const overlapsOrTouches = payloadStartIndex <= localEndIndex && payloadEndIndex >= localStartIndex;
-  if (!overlapsOrTouches) {
-    return {
-      startIndex: payloadStartIndex,
-      endIndex: payloadEndIndex,
-    };
-  }
-
-  return {
-    startIndex: Math.min(localStartIndex, payloadStartIndex),
-    endIndex: Math.max(localEndIndex, payloadEndIndex),
-  };
+  return changedRanges;
 }
 
 export function resolveCanonicalAvailableLineCount(options: {

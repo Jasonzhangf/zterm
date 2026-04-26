@@ -5,7 +5,7 @@ import { LocalTmuxManager } from './local-tmux.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; viewportEndIndex: number; viewportRows: number; mode: 'follow' | 'reading'; prefetch?: boolean; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
+type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 
 const localTmuxManager = new LocalTmuxManager();
 
@@ -52,6 +52,8 @@ app.whenReady().then(() => {
     localTmuxManager.setActivityMode(payload.clientId, payload.mode));
   ipcMain.handle('zterm:local-tmux:resize', (_event, payload: { clientId: string; cols: number; rows: number }) =>
     localTmuxManager.resize(payload.clientId, payload.cols, payload.rows));
+  ipcMain.handle('zterm:local-tmux:buffer-head-request', (_event, payload: { clientId: string }) =>
+    localTmuxManager.requestBufferHead(payload.clientId));
   ipcMain.handle('zterm:local-tmux:buffer-sync-request', (_event, payload: { clientId: string; request: LocalBufferSyncRequestPayload }) =>
     localTmuxManager.requestBufferSync(payload.clientId, payload.request));
 

@@ -35,6 +35,23 @@ function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatResolvedPath(path?: Session['resolvedPath']) {
+  switch (path) {
+    case 'tailscale':
+      return 'Tailscale';
+    case 'ipv6':
+      return 'IPv6';
+    case 'ipv4':
+      return 'IPv4';
+    case 'rtc-direct':
+      return 'RTC Direct';
+    case 'rtc-relay':
+      return 'TURN Relay';
+    default:
+      return null;
+  }
+}
+
 function moveSessionItem(sessions: Session[], sessionId: string, toIndex: number) {
   const currentIndex = sessions.findIndex((session) => session.id === sessionId);
   if (currentIndex < 0) {
@@ -435,6 +452,7 @@ export function TabManagerSheet({
                     </div>
                     <div style={{ marginTop: '4px', fontSize: '11px', color: mobileTheme.colors.lightMuted }}>
                       {session.bridgeHost}:{session.bridgePort} · {session.sessionName}
+                      {formatResolvedPath(session.resolvedPath) ? ` · ${formatResolvedPath(session.resolvedPath)}` : ''}
                     </div>
                   </button>
                   <button
@@ -480,7 +498,9 @@ export function TabManagerSheet({
                       }, DRAG_HANDLE_LONG_PRESS_MS);
                       try {
                         event.currentTarget.setPointerCapture(event.pointerId);
-                      } catch {}
+                      } catch (error) {
+                        console.warn('[TabManagerSheet] Failed to set pointer capture:', error);
+                      }
                     }}
                     onPointerMove={(event) => {
                       const currentDragState = dragStateRef.current;
@@ -506,7 +526,9 @@ export function TabManagerSheet({
                       }
                       try {
                         event.currentTarget.releasePointerCapture(event.pointerId);
-                      } catch {}
+                      } catch (error) {
+                        console.warn('[TabManagerSheet] Failed to release pointer capture on pointer up:', error);
+                      }
                     }}
                     onPointerCancel={(event) => {
                       clearDragTimer();
@@ -516,7 +538,9 @@ export function TabManagerSheet({
                       }
                       try {
                         event.currentTarget.releasePointerCapture(event.pointerId);
-                      } catch {}
+                      } catch (error) {
+                        console.warn('[TabManagerSheet] Failed to release pointer capture on cancel:', error);
+                      }
                     }}
                     style={{
                       width: '36px',

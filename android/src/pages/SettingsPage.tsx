@@ -64,7 +64,8 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
     const protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
     const port = parsed.port || String(targetPort || 3333);
     return `${protocol}//${parsed.hostname}:${port}/updates/latest.json`;
-  } catch {
+  } catch (error) {
+    console.warn('[SettingsPage] Failed to derive daemon update manifest URL:', error);
     return '';
   }
 }
@@ -320,6 +321,85 @@ export function SettingsPage({
                   terminalCacheLines: Math.max(200, Number.parseInt(event.target.value, 10) || current.terminalCacheLines),
                 }))
               }
+              style={inputStyle()}
+            />
+          </div>
+        </div>
+
+        <div style={sectionStyle()}>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>Remote Access</div>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            连接顺序固定为 Tailscale → IPv6 → IPv4 → TURN relay。这里配置 signaling/TURN 默认值，本地持久化保存。
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Transport Mode</div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {(['auto', 'websocket', 'webrtc'] as const).map((mode) => {
+                const active = draft.transportMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setDraft((current) => ({ ...current, transportMode: mode }))}
+                    style={{
+                      flex: 1,
+                      minHeight: '48px',
+                      borderRadius: '16px',
+                      border: 'none',
+                      backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
+                      color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {mode === 'auto' ? 'Auto' : mode === 'websocket' ? 'WS Only' : 'RTC First'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Signal URL</div>
+            <input
+              type="url"
+              value={draft.signalUrl}
+              onChange={(event) => setDraft((current) => ({ ...current, signalUrl: event.target.value }))}
+              placeholder="wss://signal.example.com/signal"
+              style={inputStyle()}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN URL</div>
+            <input
+              type="text"
+              value={draft.turnServerUrl}
+              onChange={(event) => setDraft((current) => ({ ...current, turnServerUrl: event.target.value }))}
+              placeholder="turn:example.com:3478?transport=udp"
+              style={inputStyle()}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN Username</div>
+            <input
+              type="text"
+              value={draft.turnUsername}
+              onChange={(event) => setDraft((current) => ({ ...current, turnUsername: event.target.value }))}
+              placeholder="coturn username"
+              style={inputStyle()}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN Credential</div>
+            <input
+              type="password"
+              value={draft.turnCredential}
+              onChange={(event) => setDraft((current) => ({ ...current, turnCredential: event.target.value }))}
+              placeholder="coturn password"
               style={inputStyle()}
             />
           </div>

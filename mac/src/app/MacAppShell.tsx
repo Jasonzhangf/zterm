@@ -14,7 +14,7 @@ import {
 import { ConnectionLauncher } from '../components/ConnectionLauncher';
 import {
   createTerminalRuntime,
-  useTerminalRuntimeSnapshot,
+  useTerminalRuntimeState,
   type TerminalRuntimeController,
 } from '../lib/terminal-runtime';
 import {
@@ -84,7 +84,7 @@ export function MacAppShell({
     runtimeRef.current = createTerminalRuntime();
   }
   const runtime = runtimeRef.current;
-  const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
+  const runtimeState = useTerminalRuntimeState(runtime);
 
   const activeTab = useMemo(
     () => workbench.tabs.find((tab) => tab.id === workbench.activeTabId) ?? workbench.tabs[0] ?? null,
@@ -199,7 +199,7 @@ export function MacAppShell({
           return (
             <div className={`mac-tab ${selected ? 'active' : ''}`} key={tab.id}>
               <button type="button" className="mac-tab-button" onClick={() => setWorkbench((current) => activateTab(current, tab.id))}>
-                <span className={`mac-tab-dot ${selected ? runtimeSnapshot.connection.status : 'idle'}`} />
+                <span className={`mac-tab-dot ${selected ? runtimeState.connection.status : 'idle'}`} />
                 <span>{tab.title}</span>
               </button>
               {workbench.tabs.length > 1 ? (
@@ -216,22 +216,21 @@ export function MacAppShell({
         {activeTarget ? (
           <>
             <div className="mac-terminal-meta">
-              <span className={`mac-runtime-pill ${runtimeSnapshot.connection.status}`}>{runtimeSnapshot.connection.status}</span>
+              <span className={`mac-runtime-pill ${runtimeState.connection.status}`}>{runtimeState.connection.status}</span>
               <span>{formatBridgeSessionTarget(activeTarget)}</span>
-              <span>{runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(activeTarget)}</span>
+              <span>{runtimeState.connection.connectedSessionId || getResolvedSessionName(activeTarget)}</span>
             </div>
-            {runtimeSnapshot.connection.error ? <div className="mac-terminal-error">{runtimeSnapshot.connection.error}</div> : null}
+            {runtimeState.connection.error ? <div className="mac-terminal-error">{runtimeState.connection.error}</div> : null}
             <div className="mac-terminal-surface">
               <TerminalView
-                sessionId={runtimeSnapshot.connection.connectedSessionId || getResolvedSessionName(activeTarget)}
-                projection={runtimeSnapshot.render}
+                sessionId={runtimeState.connection.connectedSessionId || getResolvedSessionName(activeTarget)}
+                projection={runtimeState.render}
                 active
                 allowDomFocus
                 themeId={bridgeSettings.terminalThemeId}
                 onInput={(data) => runtime.sendInput(data)}
                 onResize={(cols, rows) => runtime.resizeTerminal(cols, rows)}
                 onViewportChange={(viewState) => runtime.updateViewport(viewState)}
-                onViewportPrefetch={(viewState) => runtime.requestViewportPrefetch(viewState)}
               />
             </div>
           </>

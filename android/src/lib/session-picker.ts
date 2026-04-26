@@ -7,6 +7,11 @@ export interface BridgeTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+  tailscaleHost?: string;
+  ipv6Host?: string;
+  ipv4Host?: string;
+  signalUrl?: string;
+  transportMode?: 'auto' | 'websocket' | 'webrtc';
 }
 
 export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
@@ -16,20 +21,25 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
     bridgeHost: target?.bridgeHost?.trim() || '',
     bridgePort: target?.bridgePort || DEFAULT_BRIDGE_PORT,
     authToken: target?.authToken?.trim() || '',
+    tailscaleHost: target?.tailscaleHost?.trim() || '',
+    ipv6Host: target?.ipv6Host?.trim() || '',
+    ipv4Host: target?.ipv4Host?.trim() || '',
+    signalUrl: target?.signalUrl?.trim() || '',
+    transportMode: target?.transportMode || 'auto',
   };
 }
 
 export function buildPreferredTarget(
   presets: BridgeServerPreset[],
-  fallbackTarget?: Partial<BridgeTarget> | null,
+  initialTarget?: Partial<BridgeTarget> | null,
   activeSession?: Pick<Session, 'bridgeHost' | 'bridgePort'> | null,
 ): BridgeTarget {
   if (activeSession?.bridgeHost?.trim()) {
     return normalizeBridgeTarget(activeSession);
   }
 
-  if (fallbackTarget?.bridgeHost?.trim()) {
-    return normalizeBridgeTarget(fallbackTarget);
+  if (initialTarget?.bridgeHost?.trim()) {
+    return normalizeBridgeTarget(initialTarget);
   }
 
   if (presets[0]) {
@@ -40,7 +50,7 @@ export function buildPreferredTarget(
     });
   }
 
-  return normalizeBridgeTarget(fallbackTarget);
+  return normalizeBridgeTarget(initialTarget);
 }
 
 export function sortHostsForPicker(hosts: Host[], target?: Partial<BridgeTarget> | null) {
@@ -92,6 +102,11 @@ export function buildDraftFromTmuxSession(
       bridgePort: existing.bridgePort,
       sessionName: existing.sessionName,
       authToken: existing.authToken,
+      tailscaleHost: existing.tailscaleHost,
+      ipv6Host: existing.ipv6Host,
+      ipv4Host: existing.ipv4Host,
+      signalUrl: existing.signalUrl,
+      transportMode: existing.transportMode,
       authType: existing.authType,
       password: existing.password,
       privateKey: existing.privateKey,
@@ -111,6 +126,11 @@ export function buildDraftFromTmuxSession(
     bridgePort: target.bridgePort,
     sessionName,
     authToken: target.authToken || preset?.authToken || '',
+    tailscaleHost: target.tailscaleHost || '',
+    ipv6Host: target.ipv6Host || '',
+    ipv4Host: target.ipv4Host || '',
+    signalUrl: target.signalUrl || '',
+    transportMode: target.transportMode || 'auto',
     authType: 'password',
     password: undefined,
     privateKey: undefined,
@@ -128,6 +148,11 @@ export function buildCleanDraft(target: BridgeTarget): HostDraft {
     bridgePort: target.bridgePort,
     sessionName: '',
     authToken: target.authToken || '',
+    tailscaleHost: target.tailscaleHost || '',
+    ipv6Host: target.ipv6Host || '',
+    ipv4Host: target.ipv4Host || '',
+    signalUrl: target.signalUrl || '',
+    transportMode: target.transportMode || 'auto',
     authType: 'password',
     password: undefined,
     privateKey: undefined,

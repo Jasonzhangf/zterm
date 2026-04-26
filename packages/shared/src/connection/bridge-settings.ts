@@ -6,6 +6,7 @@ import {
   buildBridgeEndpointKey,
   formatBridgeEndpointLabel,
   resolveEffectiveBridgePort,
+  resolveNormalizedBridgeHost,
 } from './bridge-endpoint';
 
 export interface BridgeServerPreset {
@@ -20,6 +21,11 @@ export interface BridgeSettings {
   targetHost: string;
   targetPort: number;
   targetAuthToken?: string;
+  signalUrl: string;
+  turnServerUrl: string;
+  turnUsername: string;
+  turnCredential: string;
+  transportMode: 'auto' | 'websocket' | 'webrtc';
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
   servers: BridgeServerPreset[];
@@ -30,6 +36,11 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   targetHost: '',
   targetPort: DEFAULT_BRIDGE_PORT,
   targetAuthToken: '',
+  signalUrl: '',
+  turnServerUrl: '',
+  turnUsername: '',
+  turnCredential: '',
+  transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
   servers: [],
@@ -83,10 +94,14 @@ export function upsertBridgeServer(
   settings: BridgeSettings,
   input: { name?: string; targetHost: string; targetPort: number; authToken?: string },
 ): BridgeSettings {
-  const targetHost = input.targetHost.trim();
+  const rawTargetHost = input.targetHost.trim();
   const targetPort = resolveEffectiveBridgePort({
-    bridgeHost: targetHost,
+    bridgeHost: rawTargetHost,
     bridgePort: input.targetPort || DEFAULT_BRIDGE_PORT,
+  });
+  const targetHost = resolveNormalizedBridgeHost({
+    bridgeHost: rawTargetHost,
+    bridgePort: targetPort,
   });
   const authToken = input.authToken?.trim() || '';
 
@@ -154,14 +169,18 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       }
 
       const server = item as Partial<BridgeServerPreset>;
-      const targetHost = typeof server.targetHost === 'string' ? server.targetHost.trim() : '';
+      const rawTargetHost = typeof server.targetHost === 'string' ? server.targetHost.trim() : '';
       const targetPort =
         typeof server.targetPort === 'number' && Number.isFinite(server.targetPort)
           ? resolveEffectiveBridgePort({
-              bridgeHost: targetHost,
+              bridgeHost: rawTargetHost,
               bridgePort: server.targetPort,
             })
           : DEFAULT_BRIDGE_SETTINGS.targetPort;
+      const targetHost = resolveNormalizedBridgeHost({
+        bridgeHost: rawTargetHost,
+        bridgePort: targetPort,
+      });
       if (!targetHost) {
         continue;
       }
@@ -179,15 +198,19 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     }
   }
 
-  const targetHost =
+  const rawTargetHost =
     typeof candidate.targetHost === 'string' ? candidate.targetHost.trim() : DEFAULT_BRIDGE_SETTINGS.targetHost;
   const targetPort =
     typeof candidate.targetPort === 'number' && Number.isFinite(candidate.targetPort)
       ? resolveEffectiveBridgePort({
-          bridgeHost: targetHost,
+          bridgeHost: rawTargetHost,
           bridgePort: candidate.targetPort,
         })
       : DEFAULT_BRIDGE_SETTINGS.targetPort;
+  const targetHost = resolveNormalizedBridgeHost({
+    bridgeHost: rawTargetHost,
+    bridgePort: targetPort,
+  });
   const targetAuthToken =
     typeof candidate.targetAuthToken === 'string'
       ? candidate.targetAuthToken
@@ -196,6 +219,26 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     typeof candidate.terminalCacheLines === 'number' && Number.isFinite(candidate.terminalCacheLines)
       ? Math.max(200, Math.floor(candidate.terminalCacheLines))
       : DEFAULT_TERMINAL_CACHE_LINES;
+  const signalUrl =
+    typeof candidate.signalUrl === 'string'
+      ? candidate.signalUrl.trim()
+      : DEFAULT_BRIDGE_SETTINGS.signalUrl;
+  const turnServerUrl =
+    typeof candidate.turnServerUrl === 'string'
+      ? candidate.turnServerUrl.trim()
+      : DEFAULT_BRIDGE_SETTINGS.turnServerUrl;
+  const turnUsername =
+    typeof candidate.turnUsername === 'string'
+      ? candidate.turnUsername
+      : DEFAULT_BRIDGE_SETTINGS.turnUsername;
+  const turnCredential =
+    typeof candidate.turnCredential === 'string'
+      ? candidate.turnCredential
+      : DEFAULT_BRIDGE_SETTINGS.turnCredential;
+  const transportMode =
+    candidate.transportMode === 'websocket' || candidate.transportMode === 'webrtc'
+      ? candidate.transportMode
+      : DEFAULT_BRIDGE_SETTINGS.transportMode;
   const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
   const mergedServers =
     targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
@@ -215,6 +258,11 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     targetHost,
     targetPort,
     targetAuthToken,
+    signalUrl,
+    turnServerUrl,
+    turnUsername,
+    turnCredential,
+    transportMode,
     terminalCacheLines,
     terminalThemeId,
     servers: mergedServers,

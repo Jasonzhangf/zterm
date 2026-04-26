@@ -6,6 +6,7 @@ import { SessionScheduleSheet } from '../components/terminal/SessionScheduleShee
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
+import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { resolveLayoutProfile, type LayoutProfile } from '../../../packages/shared/src/layout/profile';
@@ -15,9 +16,11 @@ import {
   type QuickAction,
   type SavedTabList,
   type Session,
+  type SessionDebugOverlayMetrics,
   type SessionDraftMap,
   type SessionScheduleState,
   type ScheduleJobDraft,
+  type TerminalLayoutState,
   type TerminalResizeHandler,
   type TerminalSplitPaneId,
   type TerminalShortcutAction,
@@ -34,6 +37,10 @@ type VirtualKeyboardApi = {
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
 const SPLIT_AUTO_CLOSE_DROP_PX = 96;
+
+function logAsyncCleanupFailure(scope: string, error: unknown) {
+  console.warn(`[TerminalPage] ${scope} failed:`, error);
+}
 
 export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
   const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
@@ -90,9 +97,64 @@ function findFirstSessionForPane(
   )) || null;
 }
 
+function normalizeTerminalLayoutState(input: unknown): TerminalLayoutState | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as Partial<TerminalLayoutState>;
+  const assignmentsInput = candidate.splitPaneAssignments;
+  const splitPaneAssignments: Partial<Record<string, TerminalSplitPaneId>> = {};
+  if (assignmentsInput && typeof assignmentsInput === 'object') {
+    for (const [sessionId, paneId] of Object.entries(assignmentsInput)) {
+      if (!sessionId.trim()) {
+        continue;
+      }
+      splitPaneAssignments[sessionId] = paneId === 'secondary' ? 'secondary' : 'primary';
+    }
+  }
+
+  return {
+    splitEnabled: Boolean(candidate.splitEnabled),
+    splitSecondarySessionId:
+      typeof candidate.splitSecondarySessionId === 'string' && candidate.splitSecondarySessionId.trim()
+        ? candidate.splitSecondarySessionId.trim()
+        : null,
+    splitPaneAssignments,
+  };
+}
+
+function readPersistedTerminalLayoutState(): TerminalLayoutState | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
+    return normalizeTerminalLayoutState(raw ? JSON.parse(raw) : null);
+  } catch (error) {
+    console.error('[TerminalPage] Failed to load terminal layout:', error);
+    return null;
+  }
+}
+
+function persistTerminalLayoutState(layout: TerminalLayoutState) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(layout));
+  } catch (error) {
+    console.error('[TerminalPage] Failed to persist terminal layout:', error);
+  }
+}
+
 interface TerminalPageProps {
   sessions: Session[];
   activeSession: Session | null;
+  sessionDebugMetrics?: Record<string, SessionDebugOverlayMetrics | undefined>;
+  inputResetEpochBySession?: Record<string, number>;
   onSwitchSession: (id: string) => void;
   onMoveSession: (id: string, toIndex: number) => void;
   onRenameSession: (id: string, name: string) => void;
@@ -181,6 +243,46 @@ function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
   };
 }
 
+function formatDebugRate(bytesPerSecond: number) {
+  const safeValue = Math.max(0, Number.isFinite(bytesPerSecond) ? bytesPerSecond : 0);
+  if (safeValue >= 1024 * 1024) {
+    return `${(safeValue / (1024 * 1024)).toFixed(2)} MB/s`;
+  }
+  if (safeValue >= 1024) {
+    return `${(safeValue / 1024).toFixed(1)} KB/s`;
+  }
+  return `${Math.round(safeValue)} B/s`;
+}
+
+function formatDebugHz(value: number) {
+  const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
+  return `${safeValue.toFixed(1)} Hz`;
+}
+
+function resolveDebugStatus(
+  session: Session | null,
+  metrics?: SessionDebugOverlayMetrics,
+): SessionDebugOverlayMetrics['status'] {
+  if (metrics?.status) {
+    return metrics.status;
+  }
+  if (!session) {
+    return 'waiting';
+  }
+  switch (session.state) {
+    case 'error':
+      return 'error';
+    case 'closed':
+      return 'closed';
+    case 'reconnecting':
+      return 'reconnecting';
+    case 'connecting':
+      return 'connecting';
+    default:
+      return 'waiting';
+  }
+}
+
 function normalizeSavedTabList(input: unknown): SavedTabList | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -219,6 +321,8 @@ function normalizeSavedTabList(input: unknown): SavedTabList | null {
 export function TerminalPage({
   sessions,
   activeSession,
+  sessionDebugMetrics,
+  inputResetEpochBySession,
   onSwitchSession,
   onMoveSession,
   onRenameSession,
@@ -249,6 +353,7 @@ export function TerminalPage({
   terminalThemeId,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
+  const persistedLayoutRef = useRef<TerminalLayoutState | null>(readPersistedTerminalLayoutState());
   const [focusNonce, setFocusNonce] = useState(0);
   const terminalFontSize = 10;
   const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
@@ -261,14 +366,20 @@ export function TerminalPage({
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [splitEnabled, setSplitEnabled] = useState(false);
-  const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(null);
-  const [splitPaneAssignments, setSplitPaneAssignments] = useState<Partial<Record<string, TerminalSplitPaneId>>>({});
+  const [splitEnabled, setSplitEnabled] = useState(() => persistedLayoutRef.current?.splitEnabled || false);
+  const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(
+    () => persistedLayoutRef.current?.splitSecondarySessionId || null,
+  );
+  const [splitPaneAssignments, setSplitPaneAssignments] = useState<Partial<Record<string, TerminalSplitPaneId>>>(
+    () => persistedLayoutRef.current?.splitPaneAssignments || {},
+  );
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
+  const [debugOverlayVisible, setDebugOverlayVisible] = useState(true);
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
+  const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const splitOpenWidthRef = useRef(0);
   const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
@@ -280,6 +391,10 @@ export function TerminalPage({
   useEffect(() => {
     terminalInputHandlerRef.current = onTerminalInput;
   }, [onTerminalInput]);
+
+  useEffect(() => {
+    quickBarEditorFocusedRef.current = quickBarEditorFocused;
+  }, [quickBarEditorFocused]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -428,6 +543,22 @@ export function TerminalPage({
   }, [activeSession, splitAvailable, splitEnabled, sessions]);
 
   useEffect(() => {
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    const persistedAssignments = Object.fromEntries(
+      Object.entries(splitPaneAssignments).filter(([sessionId]) => sessionIds.has(sessionId)),
+    ) as Partial<Record<string, TerminalSplitPaneId>>;
+
+    persistTerminalLayoutState({
+      splitEnabled: splitEnabled && sessions.length > 1 && Boolean(activeSession),
+      splitSecondarySessionId:
+        splitSecondarySessionId && sessionIds.has(splitSecondarySessionId)
+          ? splitSecondarySessionId
+          : null,
+      splitPaneAssignments: persistedAssignments,
+    });
+  }, [activeSession, sessions, splitEnabled, splitPaneAssignments, splitSecondarySessionId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -474,23 +605,22 @@ export function TerminalPage({
     input.setSelectionRange(end, end);
   };
 
+  const requestAndroidImeFocus = () => {
+    if (!isAndroid || quickBarEditorFocusedRef.current) {
+      return;
+    }
+    void ImeAnchor.show().catch((error) => {
+      console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
+    });
+  };
+
   const keepTerminalInputFocused = () => {
     if (quickBarEditorFocused) {
       return;
     }
 
     if (isAndroid) {
-      window.setTimeout(() => {
-        void ImeAnchor.show().catch((error) => {
-          console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
-        });
-      }, 0);
-      window.setTimeout(() => {
-        void ImeAnchor.show().catch(() => undefined);
-      }, 32);
-      window.setTimeout(() => {
-        void ImeAnchor.show().catch(() => undefined);
-      }, 120);
+      requestAndroidImeFocus();
       return;
     }
 
@@ -530,9 +660,7 @@ export function TerminalPage({
 
     setTerminalKeyboardRequested(true);
     if (isAndroid) {
-      void ImeAnchor.show().catch((error) => {
-        console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
-      });
+      requestAndroidImeFocus();
       return;
     }
 
@@ -545,12 +673,16 @@ export function TerminalPage({
 
     window.setTimeout(() => {
       focusTerminalInput();
-      void Keyboard.show().catch(() => undefined);
+      void Keyboard.show().catch((error) => {
+        logAsyncCleanupFailure('Keyboard.show retry(32ms)', error);
+      });
     }, 32);
 
     window.setTimeout(() => {
       focusTerminalInput();
-      void Keyboard.show().catch(() => undefined);
+      void Keyboard.show().catch((error) => {
+        logAsyncCleanupFailure('Keyboard.show retry(120ms)', error);
+      });
     }, 120);
   };
 
@@ -621,10 +753,11 @@ export function TerminalPage({
     let disposed = false;
     let inputListener: { remove: () => Promise<void> } | null = null;
     let backspaceListener: { remove: () => Promise<void> } | null = null;
+    let keyboardStateListener: { remove: () => Promise<void> } | null = null;
 
     const emitToActiveSession = (data: string) => {
       const sessionId = activeSessionIdRef.current;
-      if (!sessionId || !data || quickBarEditorFocused) {
+      if (!sessionId || !data || quickBarEditorFocusedRef.current) {
         return;
       }
       terminalInputHandlerRef.current?.(sessionId, data);
@@ -636,7 +769,9 @@ export function TerminalPage({
           emitToActiveSession((event.text || '').replace(/\n/g, '\r'));
         });
         if (disposed) {
-          void inputListener.remove().catch(() => undefined);
+          void inputListener.remove().catch((error) => {
+            logAsyncCleanupFailure('ImeAnchor input listener remove after dispose', error);
+          });
           inputListener = null;
           return;
         }
@@ -645,8 +780,25 @@ export function TerminalPage({
           emitToActiveSession('\x7f'.repeat(count));
         });
         if (disposed) {
-          void backspaceListener.remove().catch(() => undefined);
+          void backspaceListener.remove().catch((error) => {
+            logAsyncCleanupFailure('ImeAnchor backspace listener remove after dispose', error);
+          });
           backspaceListener = null;
+          return;
+        }
+        keyboardStateListener = await ImeAnchor.addListener('keyboardState', (event) => {
+          const visible = Boolean(event.visible);
+          const height = Math.max(0, Math.round(event.height || 0));
+          setKeyboardInset(height);
+          if (!quickBarEditorFocusedRef.current) {
+            setTerminalKeyboardRequested(visible);
+          }
+        });
+        if (disposed) {
+          void keyboardStateListener.remove().catch((error) => {
+            logAsyncCleanupFailure('ImeAnchor keyboardState listener remove after dispose', error);
+          });
+          keyboardStateListener = null;
         }
       } catch (error) {
         console.warn('[TerminalPage] Failed to attach ImeAnchor listeners:', error);
@@ -658,13 +810,22 @@ export function TerminalPage({
     return () => {
       disposed = true;
       if (inputListener) {
-        void inputListener.remove().catch(() => undefined);
+        void inputListener.remove().catch((error) => {
+          logAsyncCleanupFailure('ImeAnchor input listener remove', error);
+        });
       }
       if (backspaceListener) {
-        void backspaceListener.remove().catch(() => undefined);
+        void backspaceListener.remove().catch((error) => {
+          logAsyncCleanupFailure('ImeAnchor backspace listener remove', error);
+        });
+      }
+      if (keyboardStateListener) {
+        void keyboardStateListener.remove().catch((error) => {
+          logAsyncCleanupFailure('ImeAnchor keyboardState listener remove', error);
+        });
       }
     };
-  }, [activeSession?.id, isAndroid, quickBarEditorFocused, sessions]);
+  }, [isAndroid]);
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {
@@ -685,7 +846,6 @@ export function TerminalPage({
         setKeyboardInset(Math.max(0, Math.round(info.keyboardHeight || 0)));
         if (isAndroid && !quickBarEditorFocused) {
           setTerminalKeyboardRequested(true);
-          keepTerminalInputFocused();
         }
       }
     });
@@ -698,8 +858,16 @@ export function TerminalPage({
 
     return () => {
       disposed = true;
-      void showListenerPromise.then((listener) => listener.remove());
-      void hideListenerPromise.then((listener) => listener.remove());
+      void showListenerPromise
+        .then((listener) => listener.remove())
+        .catch((error) => {
+          logAsyncCleanupFailure('keyboardDidShow listener remove', error);
+        });
+      void hideListenerPromise
+        .then((listener) => listener.remove())
+        .catch((error) => {
+          logAsyncCleanupFailure('keyboardDidHide listener remove', error);
+        });
     };
   }, [isAndroid, quickBarEditorFocused]);
 
@@ -730,12 +898,8 @@ export function TerminalPage({
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
-  const terminalViewportLayoutNonce = [
-    activeSession?.id || 'none',
-    Math.round(terminalChromeBottomPx),
-    Math.round(terminalImeLiftPx),
-    terminalKeyboardRequested ? 1 : 0,
-  ].join(':');
+  const activeSessionMetrics = activeSession ? sessionDebugMetrics?.[activeSession.id] : undefined;
+  const activeSessionDebugStatus = resolveDebugStatus(activeSession, activeSessionMetrics);
   const networkBanner = !connectionIssueVisible
     ? null
     : !networkOnline
@@ -1055,9 +1219,13 @@ export function TerminalPage({
                       bufferEndIndex={session.buffer.endIndex}
                       bufferHeadStartIndex={session.buffer.bufferHeadStartIndex}
                       bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+                      daemonHeadRevision={session.daemonHeadRevision || 0}
+                      daemonHeadEndIndex={session.daemonHeadEndIndex || session.buffer.bufferTailEndIndex}
                       bufferGapRanges={session.buffer.gapRanges}
                       cursorKeysApp={session.buffer.cursorKeysApp}
                       active={sessionIsActive}
+                      bufferPullActive={Boolean(sessionDebugMetrics?.[session.id]?.bufferPullActive)}
+                      inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
                       allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
                       domInputOffscreen={isAndroid}
                       onResize={sessionIsActive ? onResize : undefined}
@@ -1065,8 +1233,6 @@ export function TerminalPage({
                       onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
                       onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
                       focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
-                      followResetToken={sessionIsActive ? session.followResetToken || 0 : 0}
-                      viewportLayoutNonce={sessionIsActive ? terminalViewportLayoutNonce : 0}
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
                       themeId={terminalThemeId}
@@ -1092,6 +1258,87 @@ export function TerminalPage({
             )}
           </div>
         </div>
+        {activeSession && debugOverlayVisible ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              zIndex: 12,
+              minWidth: '88px',
+              maxWidth: '96px',
+              padding: '5px 6px',
+              borderRadius: '10px',
+              border: `1.5px solid ${activeSessionMetrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.92)' : 'rgba(83, 139, 255, 0.92)'}`,
+              background: 'rgba(10, 16, 26, 0.46)',
+              boxShadow: '0 8px 18px rgba(0, 0, 0, 0.14)',
+              color: '#e7eefc',
+              fontSize: '8px',
+              lineHeight: 1.25,
+              backdropFilter: 'blur(8px)',
+              pointerEvents: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
+              <span>状态</span>
+              <button
+                type="button"
+                aria-label="关闭调试浮窗"
+                onClick={() => setDebugOverlayVisible(false)}
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  padding: 0,
+                  border: 'none',
+                  borderRadius: '999px',
+                  background: 'rgba(255,255,255,0.14)',
+                  color: '#e7eefc',
+                  fontSize: '9px',
+                  lineHeight: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
+              <span>模式</span>
+              <span style={{ color: activeSessionMetrics?.bufferPullActive ? '#86efac' : '#93c5fd' }}>{activeSessionDebugStatus}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+              <span>↑</span>
+              <span>{formatDebugRate(activeSessionMetrics?.uplinkBps || 0)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+              <span>↓</span>
+              <span>{formatDebugRate(activeSessionMetrics?.downlinkBps || 0)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+              <span>R</span>
+              <span>{formatDebugHz(activeSessionMetrics?.renderHz || 0)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+              <span>P</span>
+              <span>{formatDebugHz(activeSessionMetrics?.pullHz || 0)}</span>
+            </div>
+            <div
+              style={{
+                marginTop: '2px',
+                paddingTop: '2px',
+                borderTop: '1px solid rgba(255,255,255,0.12)',
+                color: 'rgba(231, 238, 252, 0.82)',
+                fontSize: '7px',
+                lineHeight: 1.2,
+                wordBreak: 'break-all',
+              }}
+            >
+              V {APP_VERSION} / {APP_VERSION_CODE}
+            </div>
+          </div>
+        ) : null}
         <div
           style={{
             position: 'absolute',

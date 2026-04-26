@@ -8,6 +8,11 @@ export interface Host {
   bridgePort: number;
   sessionName: string;
   authToken?: string;
+  tailscaleHost?: string;
+  ipv6Host?: string;
+  ipv4Host?: string;
+  signalUrl?: string;
+  transportMode?: 'auto' | 'websocket' | 'webrtc';
   authType: 'password' | 'key';
   password?: string;
   privateKey?: string;
@@ -33,16 +38,6 @@ export interface TerminalCursor {
   visible: boolean;
 }
 
-export interface TerminalSnapshot {
-  cols: number;
-  rows: number;
-  viewport: TerminalCell[][];
-  cursor: TerminalCursor;
-  cursorKeysApp: boolean;
-  scrollbackLines?: string[];
-  scrollbackStartIndex?: number;
-}
-
 export interface TerminalIndexedLine {
   index: number;
   cells: TerminalCell[];
@@ -57,7 +52,8 @@ export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;
   endIndex: number;
-  viewportEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
@@ -68,10 +64,8 @@ export interface BufferSyncRequestPayload {
   knownRevision: number;
   localStartIndex: number;
   localEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-  mode: 'follow' | 'reading';
-  prefetch?: boolean;
+  requestStartIndex: number;
+  requestEndIndex: number;
   missingRanges?: TerminalGapRange[];
 }
 
@@ -79,6 +73,8 @@ export interface BufferHeadPayload {
   sessionId: string;
   revision: number;
   latestEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
 }
 
 export interface SessionBufferState {
@@ -86,7 +82,8 @@ export interface SessionBufferState {
   gapRanges: TerminalGapRange[];
   startIndex: number;
   endIndex: number;
-  viewportEndIndex: number;
+  bufferHeadStartIndex: number;
+  bufferTailEndIndex: number;
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
@@ -125,6 +122,11 @@ export const DEFAULT_HOST_DRAFT: EditableHost = {
   bridgePort: DEFAULT_BRIDGE_PORT,
   sessionName: '',
   authToken: '',
+  tailscaleHost: '',
+  ipv6Host: '',
+  ipv4Host: '',
+  signalUrl: '',
+  transportMode: 'auto',
   authType: 'password',
   password: '',
   privateKey: '',

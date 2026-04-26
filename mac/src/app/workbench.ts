@@ -90,9 +90,9 @@ export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchS
   }
 
   const nextTabs = normalizeTabs(state.tabs.filter((tab) => tab.id !== tabId));
-  const fallbackIndex = Math.max(0, Math.min(currentIndex - 1, nextTabs.length - 1));
+  const previousIndex = Math.max(0, Math.min(currentIndex - 1, nextTabs.length - 1));
   const nextActiveId = state.activeTabId === tabId
-    ? nextTabs[fallbackIndex]?.id || nextTabs[0].id
+    ? nextTabs[previousIndex]?.id || nextTabs[0].id
     : state.activeTabId;
 
   return {

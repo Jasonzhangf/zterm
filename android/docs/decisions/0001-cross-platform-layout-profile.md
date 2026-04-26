@@ -54,7 +54,7 @@
   - 单行三列，三个 pane 并排，中间垂直分屏。
   - 适用于大 pad / future Mac / 足够宽的桌面窗口。
 
-- `compact-fallback`
+- `compact-reduced`
   - 当 split-screen 或小窗过窄时回退到单列或更少列数。
   - 这是容量回退，不是主视觉方案。
 

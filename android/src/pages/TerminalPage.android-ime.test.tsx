@@ -57,10 +57,12 @@ vi.mock('../components/terminal/TabManagerSheet', () => ({
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
   TerminalQuickBar: ({
     onEditorDomFocusChange,
+    onToggleKeyboard,
     keyboardVisible,
     keyboardInsetPx,
   }: {
     onEditorDomFocusChange?: (active: boolean) => void;
+    onToggleKeyboard?: () => void;
     keyboardVisible?: boolean;
     keyboardInsetPx?: number;
   }) => (
@@ -71,6 +73,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     >
       <button onClick={() => onEditorDomFocusChange?.(true)}>focus-quick-editor</button>
       <button onClick={() => onEditorDomFocusChange?.(false)}>blur-quick-editor</button>
+      <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
     </div>
   ),
 }));
@@ -221,7 +224,43 @@ describe('TerminalPage Android IME bridge', () => {
     });
   });
 
-  it('re-focuses ImeAnchor when Android keyboard actually shows', async () => {
+  it('only shows ImeAnchor once when explicitly toggling the Android keyboard', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.show).toHaveBeenCalled();
+    });
+    expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-show ImeAnchor when Android keyboard actually shows', async () => {
     const session = makeSession('s1');
 
     render(
@@ -252,11 +291,111 @@ describe('TerminalPage Android IME bridge', () => {
     keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 320 });
 
     await waitFor(() => {
-      expect(ImeAnchor.show).toHaveBeenCalled();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
+    });
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+  });
+
+  it('uses native ImeAnchor keyboardState to raise terminal chrome on Android', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('keyboardState')).toBe(true);
     });
 
-    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
-    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
+    imeListeners.get('keyboardState')?.({ visible: true, height: 320 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
+    });
+  });
+
+  it('does not reattach native IME listeners on buffer rerenders and still routes to latest active session', async () => {
+    const session = makeSession('s1');
+    const onTerminalInput = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+      expect(imeListeners.has('backspace')).toBe(true);
+    });
+    const addListenerCallsBeforeRerender = vi.mocked(ImeAnchor.addListener).mock.calls.length;
+
+    const updatedSession: Session = {
+      ...session,
+      buffer: {
+        ...session.buffer,
+        revision: 2,
+        endIndex: 1,
+      },
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[updatedSession]}
+        activeSession={updatedSession}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    imeListeners.get('input')?.({ text: 'still-immediate' });
+
+    expect(vi.mocked(ImeAnchor.addListener).mock.calls.length).toBe(addListenerCallsBeforeRerender);
+    expect(onTerminalInput).toHaveBeenCalledWith('s1', 'still-immediate');
   });
 });
 

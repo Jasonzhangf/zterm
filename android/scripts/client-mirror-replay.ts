@@ -77,7 +77,12 @@ function readCaseFiles(caseDir: string) {
   let stepResults: ReplayStepResult[] = [];
   try {
     stepResults = JSON.parse(readFileSync(stepResultsPath, 'utf8')) as ReplayStepResult[];
-  } catch {}
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      throw error;
+    }
+    console.warn(`[client-mirror-replay] missing optional step-results.json in ${caseDir}`);
+  }
 
   return {
     history,

@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const LOCAL_TMUX_EVENT = 'zterm:local-tmux-event';
 type LocalTmuxPayload = { clientId: string; message: unknown };
 type LocalTmuxConnectPayload = { clientId: string; sessionName: string; cols: number; rows: number; mode?: 'active' | 'idle' };
-type LocalTmuxRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; viewportEndIndex: number; viewportRows: number; mode: 'follow' | 'reading'; prefetch?: boolean; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
+type LocalTmuxRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 
 contextBridge.exposeInMainWorld('ztermMac', {
   platform: 'mac',
@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('ztermMac', {
     sendInput: (clientId: string, data: string) => ipcRenderer.invoke('zterm:local-tmux:input', { clientId, data }),
     setActivityMode: (clientId: string, mode: 'active' | 'idle') => ipcRenderer.invoke('zterm:local-tmux:set-activity-mode', { clientId, mode }),
     resize: (clientId: string, cols: number, rows: number) => ipcRenderer.invoke('zterm:local-tmux:resize', { clientId, cols, rows }),
+    requestBufferHead: (clientId: string) => ipcRenderer.invoke('zterm:local-tmux:buffer-head-request', { clientId }),
     requestBufferSync: (clientId: string, request: LocalTmuxRequestPayload) => ipcRenderer.invoke('zterm:local-tmux:buffer-sync-request', { clientId, request }),
     subscribe: (listener: (payload: LocalTmuxPayload) => void) => {
       const handler = (_event: unknown, payload: LocalTmuxPayload) => {

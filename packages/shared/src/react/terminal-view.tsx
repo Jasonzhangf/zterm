@@ -20,7 +20,6 @@ interface TerminalViewProps {
   onImagePaste?: (file: File) => void | Promise<void>;
   onResize?: (cols: number, rows: number) => void;
   onViewportChange?: (viewState: ViewState) => void;
-  onViewportPrefetch?: (viewState: ViewState) => void;
   fontSize?: number;
   rowHeight?: string;
   themeId?: string;
@@ -93,7 +92,8 @@ function safeCodePointToString(code: number) {
   }
   try {
     return String.fromCodePoint(code);
-  } catch {
+  } catch (error) {
+    console.warn('[shared-terminal-view] Failed to render code point:', { code, error });
     return ' ';
   }
 }
@@ -289,7 +289,6 @@ export function TerminalView({
   onImagePaste,
   onResize,
   onViewportChange,
-  onViewportPrefetch,
   fontSize = 13,
   rowHeight = '16px',
   themeId,
@@ -308,6 +307,7 @@ export function TerminalView({
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
   const resizeCommitTimerRef = useRef<number | null>(null);
   const previousBufferStartIndexRef = useRef(bufferStartIndex);
+  const previousActiveRef = useRef(active);
   const lastReportedViewportRef = useRef<string>('');
   const lastRenderableRowsRef = useRef<Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean }>>([]);
   const composingRef = useRef(false);
@@ -422,7 +422,7 @@ export function TerminalView({
     }, 60);
   }, [active, fontSize, onResize, rowHeight, sessionId]);
 
-  const emitViewportState = useCallback((nextMode: 'follow' | 'reading', nextScrollTop: number) => {
+  const emitViewportState = useCallback((nextMode: 'follow' | 'reading', nextScrollTop: number, missingRanges?: TerminalGapRange[]) => {
     if (!active || !sessionId || !onViewportChange) {
       return;
     }
@@ -433,12 +433,17 @@ export function TerminalView({
       : bufferStartIndex + Math.min(totalRows, viewportTopOffset + viewportRows);
     const key = nextMode === 'follow'
       ? `${nextMode}:${viewportRows}`
-      : `${nextMode}:${viewportEndIndex}:${viewportRows}`;
+      : `${nextMode}:${viewportEndIndex}:${viewportRows}:${(missingRanges || []).map((range) => `${range.startIndex}-${range.endIndex}`).join(',')}`;
     if (lastReportedViewportRef.current === key) {
       return;
     }
     lastReportedViewportRef.current = key;
-    onViewportChange({ mode: nextMode, viewportEndIndex, viewportRows });
+    onViewportChange({
+      mode: nextMode,
+      viewportEndIndex,
+      viewportRows,
+      missingRanges: nextMode === 'reading' ? (missingRanges || []) : [],
+    });
   }, [active, authoritativeViewportEndIndex, bufferStartIndex, onViewportChange, rowHeightPx, sessionId, totalRows, viewportRows]);
 
   const applyScrollState = useCallback((nextScrollTop: number) => {
@@ -468,6 +473,16 @@ export function TerminalView({
     setScrollTop(0);
     lastReportedViewportRef.current = '';
   }, [sessionId]);
+
+  useEffect(() => {
+    const becameActive = active && !previousActiveRef.current;
+    previousActiveRef.current = active;
+    if (!becameActive) {
+      return;
+    }
+    lastReportedViewportRef.current = '';
+    forceFollowViewport();
+  }, [active, forceFollowViewport]);
 
   useEffect(() => {
     const host = containerRef.current;
@@ -549,20 +564,15 @@ export function TerminalView({
     if (!active || !sessionId || followMode || continuityCheck.precheckContinuous) {
       return;
     }
-    onViewportPrefetch?.({
-      mode: 'reading',
-      viewportEndIndex: continuityCheck.visibleWindowEndIndex,
-      viewportRows,
-      missingRanges: continuityCheck.missingRanges,
-    });
+    emitViewportState('reading', scrollTop, continuityCheck.missingRanges);
   }, [
     active,
+    emitViewportState,
     continuityCheck.missingRanges,
     continuityCheck.precheckContinuous,
-    continuityCheck.visibleWindowEndIndex,
     followMode,
-    onViewportPrefetch,
     sessionId,
+    scrollTop,
     viewportRows,
   ]);
 

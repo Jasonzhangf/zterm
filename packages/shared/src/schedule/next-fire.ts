@@ -255,7 +255,8 @@ export function computeNextFireAtForJob(job: ScheduleJob, now = new Date()) {
 export function resolveScheduleTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
-  } catch {
+  } catch (error) {
+    console.warn('[schedule] Failed to resolve timezone, using default UTC:', error);
     return DEFAULT_TIMEZONE;
   }
 }
@@ -360,4 +361,3 @@ export function mergeScheduleEventState(
     lastEvent: event,
   };
 }
-

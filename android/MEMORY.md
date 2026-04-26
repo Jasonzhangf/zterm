@@ -32,7 +32,7 @@
 - [2026-04-19] daemon / connection 鉴权真源使用共享 token：server 优先读 `~/.wterm/config.json -> zterm.android.daemon.authToken`，`ZTERM_AUTH_TOKEN` 只作显式 override；client 从 remembered target / host `authToken` 透传到 websocket query
 - [2026-04-19] launchd 管理的 mobile daemon 不能只凭 `launchctl loaded` 判定 ready；`wterm daemon start/restart/install-service` 需要等待监听端口就绪，否则手机首连会撞空窗期误判“根本连不上”
 - [2026-04-19] 悬浮球快捷菜单语义已冻结为“文本 snippet 注入”；方向键 / Esc / Backspace / 键盘切换只保留在常驻栏，自定义项默认不再预置 Ctrl 组合键
-- [2026-04-19] daemon 稳定性门禁：`tmux capture-pane` 只能作为增强快照，失败时必须 fallback，绝不能把整个 bridge 进程打挂
+- [2026-04-19] daemon 稳定性门禁：`tmux capture-pane` 只能作为增强快照，失败时必须显式暴露错误并修真源，绝不能把整个 bridge 进程打挂
 - [2026-04-19] 断线恢复门禁：client 不能只发 ping 不管 pong；必须有 `pong timeout -> 主动断开 -> host 级串行指数回退重连`，server 也要用 ws heartbeat 回收僵尸 socket
 - [2026-04-19] session picker 的多选不能只靠整行高亮，必须给明确 checkbox；输入 IP 后要显式展示 bridge 测试/刷新状态、最后刷新时间和自动轮询说明，否则用户无法判断 tmux 列表是否已实时刷新
 - [2026-04-19] terminal 若通过 DOM prepend 新增 scrollback 行，在“用户已离开底部”场景必须同步修正 scrollTop 锚点；否则继续输出后再回滚会出现 buffer 丢失/跳页错觉
@@ -50,7 +50,7 @@
 - [2026-04-20] 多 tab 的 hidden terminal 不能在后台继续按 `bufferUpdateKind` 推导 scroll 锚点；切回 active 时只允许两种恢复：原本贴底就贴底，原本看历史就恢复之前的 `scrollTop`。同时，scrollback/viewport 真源只能取 `remoteSnapshot`，不能再从 `bufferLines` 反推。
 - [2026-04-20] 多 tab 左右跟手切换的真源应放在 `TerminalCanvas`：由 canvas 同时渲染 active + 相邻 tab，按手势 delta 做 translate，手指离开后再根据半屏阈值决定完成切换或回弹；`TerminalView` 只上报横向手势，不直接切 tab。
 - [2026-04-20] mobile 发热要优先区分网络 vs CPU/IO：若流量不大但 `Chrome_IOThread` / `RenderThread` 高，占优先级最高的真源通常是“空 viewport 刷包”或“每帧 localStorage 持久化大 buffer”
-- [2026-04-20] websocket reconnect 的 onopen 也必须显式同步 `stream-mode`；否则 active session 会短暂留在 idle/backfill 频率，肉眼看起来像秒级延迟
+- [2026-04-20] websocket reconnect / 首次 connect 完成后，active tab 必须立即恢复 **head-first** 主循环：先 `buffer-head-request`，再按本地 sparse buffer 状态决定 diff / 三屏重锚 / reading gap repair；不要再依赖第二套 active/idle 语义
 - [2026-04-20] terminal 手势滚动锁应是 latch：一旦进入历史阅读态，直到真实输入发生前都不应自动恢复 bottom-follow；“滚回底部”本身不等于解锁
 - [2026-04-20] scrollback 的 startIndex 必须是 mirror 生命周期内单调递增的绝对行号；client 只能持有一个连续区间，merge 出现 gap 时要丢弃断裂前缀，只保留最新连续尾段，再靠 backfill 补历史，不能把稀疏索引压成连续数组
 - [2026-04-20] Connections 里的 remembered session group 真源必须按 `bridgeHost + bridgePort` 归并成“每台服务器一份选择”，不能再按“某次打开时的 session 组合”累积历史；否则会出现旧筛选残留、history-only group 无法编辑/删除
@@ -58,12 +58,12 @@
 - [2026-04-20] `android/evidence/` 是本地证据仓，不应把整批历史截图/日志直接推到 GitHub 主线；Git 中只保留 `README.md` 说明目录与取证规则
 - [2026-04-20] 跨尺寸布局真源必须统一成**一个 layout profile + pane stage**：phone / tablet / foldable / split-screen / future Mac 共用同一编排决策，页面语义不随平台分叉
 - [2026-04-20] Jason 补充冻结：大屏统一效果默认应是一行多列、列与列之间垂直分屏；不要把上下堆叠多 pane 当成主方案。future Mac 也沿同一单行多列编排复用 shared app-layer
-- [2026-04-23] terminal 新真源落地时，server 不能再按 client active/idle 状态主动 push buffer；唯一对外职责应收敛成 **30Hz `buffer-head` 广播 + 按 range 返回 `buffer-sync`**。client 是否拉取由自己的 buffer worker 决策，consumer 不得把消费状态写回 producer 当长期真相。
+- [2026-04-23] terminal 新真源落地时，server 不能再按 client active/idle 状态主动 push buffer；唯一对外职责应收敛成 **显式 `buffer-head-request` / `buffer-sync-request` contract**，client 是否拉取由自己的 buffer worker 决策，consumer 不得把消费状态写回 producer 当长期真相。
 - [2026-04-23] Android renderer 若继续暴露 `onViewportPrefetch / followViewportNonce` 这类 transport-aware 接口，会把 renderer 和 buffer worker 再次耦合回去；renderer 只保留窗口声明与 UI reset 信号，prefetch/range repair 必须留在 worker。
 - [2026-04-23] Android SessionContext 若同时保留 `sendTailBootstrapBufferSyncRequest / sendFollowRefreshBufferSyncRequest / refreshSessionTail` 三套近似入口，会继续把 sync 策略散成多真源；应先合并成单一 `requestSessionBufferSync` + 单一 viewport reset 入口，再继续拆 worker/renderer。
 - [2026-04-23] Terminal renderer 的 follow/read 不能只拿 DOM `scrollTop` 去纯推导：真实 DOM bottom 会短时小于逻辑 tail，导致 active follow 误判成 reading。正确边界是：buffer/render 真源仍分离，但 renderer 允许保留一个**最小 UI reading latch** 来表达“用户是否正在读历史”。
 - [2026-04-20] 当 Mac 需要移植 Android 连接配置流时，优先下沉纯逻辑到 `packages/shared/connection/*` 与 `packages/shared/react/*`（Host / BridgeSettings / tmux discovery / localStorage hook），而不是在桌面端复制一套 ad hoc 表单/存储实现
-- [2026-04-20] tmux session discovery 不是 live connect：桌面端如果只做 `list-sessions`，用户会看到“能找到 session 但连不上”。真正连接必须显式复用 Android 的 websocket 协议：`open ws -> send connect(payload) -> send stream-mode(active)`
+- [2026-04-20] tmux session discovery 不是 live connect：桌面端如果只做 `list-sessions`，用户会看到“能找到 session 但连不上”。真正连接必须显式复用 Android 的 websocket 协议：`open ws -> send connect(payload) -> 进入 head-first loop`
 - [2026-04-20] 若 `bridgeHost` 已是显式 `ws://host:port` / `wss://host:port`，shared truth 必须把这个显式 endpoint 当成 display/preset key/store port 的真源；不要再额外拼接独立 `bridgePort`，否则会制造双端口假象并污染 remembered server key
 - [2026-04-20] endpoint 归一不能只修 Mac；Android 的 `bridge-settings / bridge-url / connection-target / storage hooks / Connection Properties` 也要直接复用同一个 shared truth，否则桌面和移动端会再次在显式 `ws://host:port` 场景下分叉
 - [2026-04-21] Jason 明确认可当前快捷栏/按钮视觉方向：后续 mobile UI 默认沿用“简洁、闭合、分区明确”的 capsule/block 设计语言——低噪声配色、清晰边界、成组区域、按钮闭合感优先；新增页面/组件若无特殊原因，应沿这个方向统一
@@ -133,6 +133,8 @@
 - [2026-04-24] `updateSessionViewport()` 这类 worker 入口若同时在做 normalize、判等、调度请求，后面很容易再长分叉；应把这三层拆成 helper，让入口函数只做“写状态 + 触发 demand”。
 - [2026-04-24] active session 的“输入后刷新”不能靠本地回显，也不能完全被动等下一次 head；正确口径是 `sendInput()` 只发 input，同时挂 `input-tail-refresh` demand，由 client 本地 30fps head tick 在网络分级门限内主动打一条 follow `buffer-sync-request + ping`。
 - [2026-04-24] “本地 30fps 刷新 head”不等于 30fps 拉 range：固定 `33ms` tick 只做 head freshness / demand 判定；真正 range 请求频率要由网络状况和配置决定（如 `minTailRefreshGapMs`、reading delay），否则又会退化成请求风暴。
+- [2026-04-26] mobile-15 首屏慢的已验证根因之一：restore / foreground resume 若把 hidden tabs 一起 eager reconnect，会把 active tab 首刷排队拖死；transport gate 必须保证 cold-start / resume 时 **只允许 active tab eager connect / poke**，hidden tabs 仅在显式激活时再 reconnect，除非后续有被证实正确的 hidden low-frequency 设计。
+- [2026-04-26] mobile-15 本轮收口确认：server 不再主动 push `buffer-head`，renderer 不再上送 `missingRanges` / prefetch 规划，reading gap repair 只由 buffer worker 基于本地 sparse buffer 计算；IME/layout nonce 也不得再回灌 renderer refresh。
 
 ## Patterns & Learnings
 

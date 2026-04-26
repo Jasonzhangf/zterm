@@ -11,9 +11,7 @@ import type {
   TerminalRenderBufferProjection,
   SessionBufferState,
 } from '@zterm/shared';
-import {
-  buildEmptyScheduleState,
-} from '@zterm/shared';
+import { buildEmptyScheduleState } from '@zterm/shared';
 import {
   createBridgeTransportController,
   createIdleConnectionState,
@@ -28,7 +26,7 @@ import {
 } from './local-tmux-transport';
 import { createTerminalBufferStore, type TerminalBufferStore, type TerminalBufferStoreSnapshot } from './terminal-buffer-store';
 
-export interface TerminalRuntimeSnapshot {
+export interface TerminalRuntimeState {
   connection: TerminalConnectionState | LocalTmuxConnectionState;
   buffer: TerminalBufferStoreSnapshot;
   render: TerminalRenderBufferProjection;
@@ -41,6 +39,8 @@ export interface TerminalSessionHead {
   sessionId: string;
   revision: number;
   latestEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
 }
 
 export type TerminalRuntimeViewState = {
@@ -50,15 +50,20 @@ export type TerminalRuntimeViewState = {
   missingRanges?: Array<{ startIndex: number; endIndex: number }>;
 };
 
+type RuntimeSyncState = {
+  buffer: SessionBufferState;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+};
+
 export interface TerminalRuntimeController {
-  getState: () => TerminalRuntimeSnapshot;
+  getState: () => TerminalRuntimeState;
   subscribe: (listener: () => void) => () => void;
   connectRemote: (host: EditableHost | Host) => void;
   connectLocalTmux: (target: { sessionName: string; title?: string }) => void;
   disconnect: () => void;
   setActivityMode: (mode: TerminalRuntimeActivityMode) => void;
   updateViewport: (viewState: TerminalRuntimeViewState) => void;
-  requestViewportPrefetch: (viewState: TerminalRuntimeViewState) => void;
   requestScheduleList: (sessionName: string) => void;
   upsertScheduleJob: (job: ScheduleJobDraft) => void;
   deleteScheduleJob: (jobId: string) => void;
@@ -71,7 +76,7 @@ export interface TerminalRuntimeController {
 }
 
 const EMPTY_BUFFER_SNAPSHOT = createTerminalBufferStore().getState();
-const EMPTY_RUNTIME_SNAPSHOT: TerminalRuntimeSnapshot = {
+const EMPTY_RUNTIME_STATE: TerminalRuntimeState = {
   connection: createIdleConnectionState(),
   buffer: EMPTY_BUFFER_SNAPSHOT,
   render: EMPTY_BUFFER_SNAPSHOT.renderBuffer,
@@ -79,6 +84,7 @@ const EMPTY_RUNTIME_SNAPSHOT: TerminalRuntimeSnapshot = {
   head: null,
 };
 
+const HEAD_TICK_MS = 33;
 const READING_SYNC_DELAY_MS = 24;
 
 function buildRuntimeRequestSignature(host: EditableHost | Host) {
@@ -115,87 +121,140 @@ function normalizeViewState(viewState: TerminalRuntimeViewState): TerminalRuntim
   };
 }
 
+function bufferHasGapInRange(
+  buffer: SessionBufferState,
+  startIndex: number,
+  endIndex: number,
+) {
+  return buffer.gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
+}
+
+function shouldPullFollowBuffer(
+  state: RuntimeSyncState,
+  renderDemand?: TerminalRuntimeViewState,
+) {
+  const buffer = state.buffer;
+  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || buffer.rows || 24));
+  const desiredEndIndex = Math.max(0, Math.floor(
+    state.daemonHeadEndIndex
+    || renderDemand?.viewportEndIndex
+    || buffer.bufferTailEndIndex
+    || buffer.endIndex
+    || 0,
+  ));
+  const hotStartIndex = Math.max(
+    Math.floor(buffer.bufferHeadStartIndex || 0),
+    desiredEndIndex - viewportRows * 3,
+  );
+  const daemonRevision = Math.max(0, Math.floor(state.daemonHeadRevision || 0));
+  const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
+
+  if (daemonRevision > localRevision) {
+    return true;
+  }
+  if (buffer.endIndex < desiredEndIndex) {
+    return true;
+  }
+  if (buffer.startIndex > hotStartIndex) {
+    return true;
+  }
+  return bufferHasGapInRange(buffer, hotStartIndex, desiredEndIndex);
+}
+
+function shouldPullReadingBuffer(
+  state: RuntimeSyncState,
+  renderDemand?: TerminalRuntimeViewState,
+) {
+  const buffer = state.buffer;
+  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || buffer.rows || 24));
+  const viewportEndIndex = Math.max(0, Math.floor(
+    renderDemand?.viewportEndIndex
+    || buffer.bufferTailEndIndex
+    || buffer.endIndex
+    || 0,
+  ));
+  const viewportStartIndex = Math.max(
+    Math.floor(buffer.bufferHeadStartIndex || 0),
+    viewportEndIndex - viewportRows,
+  );
+  const missingRanges = normalizeMissingRanges(renderDemand?.missingRanges) || [];
+
+  if (missingRanges.length > 0) {
+    return true;
+  }
+  if (buffer.startIndex > viewportStartIndex) {
+    return true;
+  }
+  if (buffer.endIndex < viewportEndIndex) {
+    return true;
+  }
+  return bufferHasGapInRange(buffer, viewportStartIndex, viewportEndIndex);
+}
+
 function normalizeHead(payload: BufferHeadPayload): TerminalSessionHead {
   return {
     sessionId: payload.sessionId,
     revision: Math.max(0, Math.floor(payload.revision || 0)),
     latestEndIndex: Math.max(0, Math.floor(payload.latestEndIndex || 0)),
+    availableStartIndex: Number.isFinite(payload.availableStartIndex)
+      ? Math.max(0, Math.floor(payload.availableStartIndex || 0))
+      : undefined,
+    availableEndIndex: Number.isFinite(payload.availableEndIndex)
+      ? Math.max(0, Math.floor(payload.availableEndIndex || 0))
+      : undefined,
+  };
+}
+
+function buildWorkerSyncState(state: TerminalRuntimeState, head: TerminalSessionHead | null): RuntimeSyncState {
+  return {
+    buffer: state.buffer.canonicalBuffer,
+    daemonHeadRevision: head?.revision,
+    daemonHeadEndIndex: head?.latestEndIndex,
+  };
+}
+
+function resolveRequestedBufferWindow(
+  endIndex: number,
+  viewportRows: number,
+  minStartIndex = 0,
+) {
+  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
+  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
+  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
+  const cacheLines = Math.max(safeViewportRows, safeViewportRows * 3);
+  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
+  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
+  return {
+    requestStartIndex,
+    requestEndIndex,
   };
 }
 
 function buildBufferSyncRequestPayload(
-  snapshot: TerminalRuntimeSnapshot,
+  state: TerminalRuntimeState,
   viewState: TerminalRuntimeViewState,
   head: TerminalSessionHead | null,
-  prefetch = false,
 ): BufferSyncRequestPayload {
-  const buffer = snapshot.buffer.canonicalBuffer;
+  const buffer = state.buffer.canonicalBuffer;
   const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
   const mode = viewState.mode === 'reading' ? 'reading' : 'follow';
   const viewportEndIndex = mode === 'follow'
-    ? Math.max(0, Math.floor(head?.latestEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0))
-    : Math.max(0, Math.floor(viewState.viewportEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
+    ? Math.max(0, Math.floor(head?.latestEndIndex || buffer.bufferTailEndIndex || buffer.endIndex || 0))
+    : Math.max(0, Math.floor(viewState.viewportEndIndex || buffer.bufferTailEndIndex || buffer.endIndex || 0));
+  const requestedWindow = resolveRequestedBufferWindow(
+    viewportEndIndex,
+    viewportRows,
+    buffer.bufferHeadStartIndex,
+  );
 
   return {
     knownRevision: Math.max(0, Math.floor(buffer.revision || 0)),
     localStartIndex: Math.max(0, Math.floor(buffer.startIndex || 0)),
     localEndIndex: Math.max(0, Math.floor(buffer.endIndex || 0)),
-    viewportEndIndex,
-    viewportRows,
-    mode,
-    prefetch,
+    requestStartIndex: requestedWindow.requestStartIndex,
+    requestEndIndex: requestedWindow.requestEndIndex,
     missingRanges: normalizeMissingRanges(viewState.missingRanges),
   };
-}
-
-function bufferHasGapInRange(buffer: SessionBufferState, startIndex: number, endIndex: number) {
-  return buffer.gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
-}
-
-function shouldRequestFollowSync(
-  snapshot: TerminalRuntimeSnapshot,
-  head: TerminalSessionHead | null,
-  viewState: TerminalRuntimeViewState,
-) {
-  const buffer = snapshot.buffer.canonicalBuffer;
-  const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
-  const desiredEndIndex = Math.max(0, Math.floor(head?.latestEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
-  const hotStartIndex = Math.max(0, desiredEndIndex - viewportRows * 3);
-
-  if (head && buffer.revision < head.revision) {
-    return true;
-  }
-
-  if (buffer.endIndex < desiredEndIndex) {
-    return true;
-  }
-
-  if (buffer.startIndex > hotStartIndex) {
-    return true;
-  }
-
-  return bufferHasGapInRange(buffer, hotStartIndex, desiredEndIndex);
-}
-
-function shouldRequestReadingSync(snapshot: TerminalRuntimeSnapshot, viewState: TerminalRuntimeViewState) {
-  const buffer = snapshot.buffer.canonicalBuffer;
-  const viewportRows = Math.max(1, Math.floor(viewState.viewportRows || buffer.rows || 24));
-  const viewportEndIndex = Math.max(0, Math.floor(viewState.viewportEndIndex || buffer.viewportEndIndex || buffer.endIndex || 0));
-  const viewportStartIndex = Math.max(0, viewportEndIndex - viewportRows);
-
-  if ((viewState.missingRanges || []).length > 0) {
-    return true;
-  }
-
-  if (buffer.startIndex > viewportStartIndex) {
-    return true;
-  }
-
-  if (buffer.endIndex < viewportEndIndex) {
-    return true;
-  }
-
-  return bufferHasGapInRange(buffer, viewportStartIndex, viewportEndIndex);
 }
 
 export function createTerminalRuntime(): TerminalRuntimeController {
@@ -213,8 +272,10 @@ export function createTerminalRuntime(): TerminalRuntimeController {
   };
   let head: TerminalSessionHead | null = null;
   let readingSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let headTickTimer: ReturnType<typeof setInterval> | null = null;
+  let lastHeadRequestAt = 0;
   let lastBufferSyncKey = '';
-  let state: TerminalRuntimeSnapshot = {
+  let state: TerminalRuntimeState = {
     connection: bridgeTransport.getState(),
     buffer: bufferStore.getState(),
     render: bufferStore.getState().renderBuffer,
@@ -245,16 +306,49 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     }
   };
 
-  const requestCurrentViewportSync = (options?: { prefetch?: boolean; force?: boolean; reason?: string }) => {
+  const stopHeadTick = () => {
+    if (headTickTimer) {
+      clearInterval(headTickTimer);
+      headTickTimer = null;
+    }
+  };
+
+  const requestCurrentHead = (options?: { force?: boolean }) => {
     if (activityMode !== 'active') {
       return false;
     }
-    const payload = buildBufferSyncRequestPayload(state, lastViewState, head, Boolean(options?.prefetch));
+    const connection = activeTransport.getState();
+    if (connection.status !== 'connected' && connection.status !== 'connecting') {
+      return false;
+    }
+    const now = Date.now();
+    if (!options?.force && now - lastHeadRequestAt < HEAD_TICK_MS) {
+      return false;
+    }
+    lastHeadRequestAt = now;
+    activeTransport.requestBufferHead();
+    return true;
+  };
+
+  const startHeadTick = () => {
+    stopHeadTick();
+    if (activityMode !== 'active') {
+      return;
+    }
+    headTickTimer = setInterval(() => {
+      void requestCurrentHead();
+    }, HEAD_TICK_MS);
+  };
+
+  const requestCurrentViewportSync = (options?: { force?: boolean }) => {
+    if (activityMode !== 'active') {
+      return false;
+    }
+    const payload = buildBufferSyncRequestPayload(state, lastViewState, head);
     const key = JSON.stringify(payload);
     if (!options?.force && key === lastBufferSyncKey) {
       return false;
     }
-    void options?.reason;
     lastBufferSyncKey = key;
     activeTransport.requestBufferSync(payload);
     return true;
@@ -264,8 +358,9 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     clearQueuedReadingSync();
     readingSyncTimer = setTimeout(() => {
       readingSyncTimer = null;
-      if (shouldRequestReadingSync(state, lastViewState)) {
-        requestCurrentViewportSync({ reason: 'reading-viewport' });
+      const demandState = buildWorkerSyncState(state, head);
+      if (shouldPullReadingBuffer(demandState, lastViewState)) {
+        requestCurrentViewportSync();
       }
     }, READING_SYNC_DELAY_MS);
   };
@@ -274,20 +369,21 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     if (activityMode !== 'active') {
       return;
     }
+    const demandState = buildWorkerSyncState(state, head);
     if (lastViewState.mode === 'reading') {
       scheduleReadingViewportSync();
       return;
     }
     clearQueuedReadingSync();
-    if (shouldRequestFollowSync(state, head, lastViewState)) {
-      requestCurrentViewportSync({ reason: 'follow-demand' });
+    if (shouldPullFollowBuffer(demandState, lastViewState)) {
+      requestCurrentViewportSync();
     }
   };
 
   const handleServerMessage = (message: BridgeServerMessage) => {
     if (message.type === 'connected') {
       lastBufferSyncKey = '';
-      requestCurrentViewportSync({ force: true, reason: 'connected-bootstrap' });
+      requestCurrentHead({ force: true });
       return;
     }
 
@@ -301,8 +397,11 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     }
 
     const applied = bufferStore.applyServerMessage(message);
-    if (applied && lastViewState.mode === 'follow' && shouldRequestFollowSync(state, head, lastViewState)) {
-      requestCurrentViewportSync({ reason: 'follow-catchup' });
+    if (applied && lastViewState.mode === 'follow') {
+      const demandState = buildWorkerSyncState(state, head);
+      if (shouldPullFollowBuffer(demandState, lastViewState)) {
+        requestCurrentViewportSync();
+      }
     }
   };
 
@@ -328,6 +427,7 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       }
       lastRequestedSignature = nextSignature;
       lastBufferSyncKey = '';
+      lastHeadRequestAt = 0;
       head = null;
       clearQueuedReadingSync();
       activeTransport = bridgeTransport;
@@ -336,6 +436,7 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       bridgeTransport.connect(host, {
         onServerMessage: handleServerMessage,
       });
+      startHeadTick();
     },
     connectLocalTmux: (target) => {
       const nextSignature = JSON.stringify({ localTmux: target.sessionName });
@@ -349,6 +450,7 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       }
       lastRequestedSignature = nextSignature;
       lastBufferSyncKey = '';
+      lastHeadRequestAt = 0;
       head = null;
       clearQueuedReadingSync();
       bridgeTransport.disconnect();
@@ -362,10 +464,13 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       localTransport.connect(target, {
         onServerMessage: handleServerMessage,
       });
+      startHeadTick();
     },
     disconnect: () => {
       clearQueuedReadingSync();
+      stopHeadTick();
       head = null;
+      lastHeadRequestAt = 0;
       lastBufferSyncKey = '';
       bridgeTransport.disconnect();
       localTransport.disconnect();
@@ -376,9 +481,12 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       bridgeTransport.setActivityMode(mode);
       localTransport.setActivityMode(mode);
       if (mode === 'active') {
+        startHeadTick();
+        requestCurrentHead({ force: true });
         applyViewportDemand();
         return;
       }
+      stopHeadTick();
       clearQueuedReadingSync();
     },
     updateViewport: (viewState) => {
@@ -390,15 +498,6 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       }
       lastViewState = normalizedViewState;
       applyViewportDemand();
-    },
-    requestViewportPrefetch: (viewState) => {
-      lastViewState = normalizeViewState({
-        ...viewState,
-        mode: 'reading',
-      });
-      if (shouldRequestReadingSync(state, lastViewState)) {
-        requestCurrentViewportSync({ prefetch: true, reason: 'reading-prefetch' });
-      }
     },
     requestScheduleList: (sessionName) => {
       bridgeTransport.requestScheduleList(sessionName);
@@ -417,6 +516,7 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     },
     sendInput: (data) => {
       activeTransport.sendInput(data);
+      requestCurrentHead({ force: true });
     },
     pasteImage: (payload) => activeTransport.pasteImage(payload),
     resizeTerminal: (cols, rows) => {
@@ -425,10 +525,13 @@ export function createTerminalRuntime(): TerminalRuntimeController {
         ...lastViewState,
         viewportRows: Math.max(1, Math.floor(rows || lastViewState.viewportRows || 24)),
       };
+      lastBufferSyncKey = '';
+      requestCurrentHead({ force: true });
       applyViewportDemand();
     },
     dispose: () => {
       clearQueuedReadingSync();
+      stopHeadTick();
       unsubscribeBridgeTransport();
       unsubscribeLocalTransport();
       unsubscribeBuffer();
@@ -444,10 +547,10 @@ function subscribeNoop() {
 }
 
 function getEmptySnapshot() {
-  return EMPTY_RUNTIME_SNAPSHOT;
+  return EMPTY_RUNTIME_STATE;
 }
 
-export function useTerminalRuntimeSnapshot(runtime: TerminalRuntimeController | null | undefined) {
+export function useTerminalRuntimeState(runtime: TerminalRuntimeController | null | undefined) {
   return useSyncExternalStore(
     runtime ? runtime.subscribe : subscribeNoop,
     runtime ? runtime.getState : getEmptySnapshot,

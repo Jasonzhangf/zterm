@@ -17,7 +17,8 @@ function safeReadStorageFlag() {
 
   try {
     return window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY) === '1';
-  } catch {
+  } catch (error) {
+    console.warn('[runtime-debug] Failed to read runtime debug flag:', error);
     return false;
   }
 }
@@ -37,8 +38,8 @@ export function setRuntimeDebugEnabled(enabled: boolean) {
       return;
     }
     window.localStorage.removeItem(RUNTIME_DEBUG_STORAGE_KEY);
-  } catch {
-    // no-op
+  } catch (error) {
+    console.warn('[runtime-debug] Failed to update runtime debug flag:', error);
   }
 }
 
@@ -65,8 +66,9 @@ function normalizePayload(payload: unknown): string | undefined {
     }
     return truncateString(serialized, MAX_RUNTIME_DEBUG_PAYLOAD_CHARS);
   } catch (error) {
-    const fallback = error instanceof Error ? error.message : String(error);
-    return truncateString(`[unserializable:${fallback}]`, MAX_RUNTIME_DEBUG_PAYLOAD_CHARS);
+    const errorSummary = error instanceof Error ? error.message : String(error);
+    console.warn('[runtime-debug] Failed to serialize payload:', error);
+    return truncateString(`[unserializable:${errorSummary}]`, MAX_RUNTIME_DEBUG_PAYLOAD_CHARS);
   }
 }
 

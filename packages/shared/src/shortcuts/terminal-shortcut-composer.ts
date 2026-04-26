@@ -188,6 +188,6 @@ export function buildTerminalShortcutTokensFromSequence(
     : [];
 }
 
-export function resolveTerminalShortcutLabel(manualLabel: string, preview: string, fallback = '新按键') {
-  return manualLabel.trim() || preview || fallback;
+export function resolveTerminalShortcutLabel(manualLabel: string, preview: string, defaultLabel = '新按键') {
+  return manualLabel.trim() || preview || defaultLabel;
 }

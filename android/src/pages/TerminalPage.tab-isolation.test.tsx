@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
+import { STORAGE_KEYS, type Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
@@ -147,6 +147,7 @@ function makeSession(id: string): Session {
 describe('TerminalPage tab isolation', () => {
   afterEach(() => {
     cleanup();
+    localStorage.clear();
   });
 
   it('keeps every tab view mounted and only flips active visibility on switch', () => {
@@ -348,5 +349,114 @@ describe('TerminalPage tab isolation', () => {
     fireEvent(window, new Event('resize'));
 
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
+  });
+
+  it('persists split layout and restores it on remount', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const view = render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('toggle-split'));
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT) || '{}')).toMatchObject({
+      splitEnabled: true,
+      splitSecondarySessionId: 's2',
+    });
+
+    view.unmount();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
+  });
+
+  it('prunes closed sessions from persisted split layout', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const view = render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('toggle-split'));
+
+    view.rerender(
+      <TerminalPage
+        sessions={[sessions[0]]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT) || '{}')).toEqual({
+      splitEnabled: false,
+      splitSecondarySessionId: null,
+      splitPaneAssignments: {
+        s1: 'primary',
+      },
+    });
   });
 });

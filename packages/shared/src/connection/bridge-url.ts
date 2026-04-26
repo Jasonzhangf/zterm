@@ -18,6 +18,23 @@ function appendAuthToken(url: URL, authToken?: string) {
   return url;
 }
 
+function normalizeWsHostLiteral(rawHost: string) {
+  const host = rawHost.trim();
+  if (!host) {
+    return host;
+  }
+  if (host.includes('://')) {
+    return host;
+  }
+  if (host.startsWith('[') && host.endsWith(']')) {
+    return host;
+  }
+  if (host.includes(':') && !host.includes('.')) {
+    return `[${host}]`;
+  }
+  return host;
+}
+
 export function buildBridgeUrlFromTarget(target: BridgeTargetLike, overrideUrl?: string) {
   if (overrideUrl) {
     const url = new URL(overrideUrl);
@@ -35,7 +52,7 @@ export function buildBridgeUrlFromTarget(target: BridgeTargetLike, overrideUrl?:
   }
 
   return appendAuthToken(
-    new URL(`ws://${rawHost}:${resolved.effectivePort || DEFAULT_BRIDGE_PORT}`),
+    new URL(`ws://${normalizeWsHostLiteral(resolved.normalizedHost)}:${resolved.effectivePort || DEFAULT_BRIDGE_PORT}`),
     target.authToken,
   ).toString();
 }

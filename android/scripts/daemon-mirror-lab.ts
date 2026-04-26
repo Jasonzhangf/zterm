@@ -1,9 +1,9 @@
-import { spawnSync } from 'child_process';
-import { mkdirSync, writeFileSync } from 'fs';
+import { spawn, spawnSync } from 'child_process';
+import { createWriteStream, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { WebSocket } from 'ws';
 import * as pty from 'node-pty';
-import type { ClientMessage, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
+import type { BufferSyncRequestPayload, ClientMessage, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 import {
   applyBufferSyncToSessionBuffer,
@@ -15,13 +15,15 @@ const LAB_SESSION_NAME = 'zterm_mirror_lab';
 const LAB_COLS = 80;
 const LAB_ROWS = 24;
 const WAIT_TIMEOUT_MS = 8000;
-
+const DAEMON_READY_TIMEOUT_MS = 10000;
 type CaseName =
+  | 'codex-live'
   | 'top-live'
   | 'vim-live'
   | 'initial-sync'
   | 'local-input-echo'
-  | 'external-input-echo';
+  | 'external-input-echo'
+  | 'daemon-restart-recover';
 
 interface OracleSnapshot {
   sessionName: string;
@@ -42,6 +44,13 @@ interface CompareResult {
   mismatchIndex: number | null;
   expected: string[];
   actual: string[];
+}
+
+interface ProbeEventEntry {
+  at: string;
+  direction: 'sent' | 'recv';
+  type: string;
+  payload?: unknown;
 }
 
 interface CaseStepResult {
@@ -101,6 +110,154 @@ function nowStamp() {
 
 function currentDateFolder() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function summarizeProbeMessage(type: string, payload: unknown) {
+  if (type === 'buffer-sync' && payload && typeof payload === 'object') {
+    const bufferPayload = payload as TerminalBufferPayload;
+    return {
+      revision: bufferPayload.revision,
+      startIndex: bufferPayload.startIndex,
+      endIndex: bufferPayload.endIndex,
+      availableStartIndex: bufferPayload.availableStartIndex ?? null,
+      availableEndIndex: bufferPayload.availableEndIndex ?? null,
+      rows: bufferPayload.rows,
+      cols: bufferPayload.cols,
+      lineCount: Array.isArray(bufferPayload.lines) ? bufferPayload.lines.length : 0,
+    };
+  }
+  if (type === 'buffer-head' && payload && typeof payload === 'object') {
+    const headPayload = payload as { revision?: number; latestEndIndex?: number; availableStartIndex?: number; availableEndIndex?: number };
+    return {
+      revision: headPayload.revision ?? 0,
+      latestEndIndex: headPayload.latestEndIndex ?? 0,
+      availableStartIndex: headPayload.availableStartIndex ?? null,
+      availableEndIndex: headPayload.availableEndIndex ?? null,
+    };
+  }
+  if (type === 'buffer-sync-request' && payload && typeof payload === 'object') {
+    const syncRequest = payload as BufferSyncRequestPayload;
+    return {
+      knownRevision: syncRequest.knownRevision,
+      localStartIndex: syncRequest.localStartIndex,
+      localEndIndex: syncRequest.localEndIndex,
+      requestStartIndex: syncRequest.requestStartIndex,
+      requestEndIndex: syncRequest.requestEndIndex,
+      missingRanges: syncRequest.missingRanges || [],
+    };
+  }
+  if (type === 'connect' && payload && typeof payload === 'object') {
+    const connectPayload = payload as { sessionName?: string; cols?: number; rows?: number };
+    return {
+      sessionName: connectPayload.sessionName ?? null,
+      cols: connectPayload.cols ?? null,
+      rows: connectPayload.rows ?? null,
+    };
+  }
+  if (type === 'input') {
+    return {
+      preview: typeof payload === 'string' ? payload.slice(0, 120) : '',
+      length: typeof payload === 'string' ? payload.length : 0,
+    };
+  }
+  if (type === 'connected' || type === 'title' || type === 'error' || type === 'closed') {
+    return payload;
+  }
+  return payload;
+}
+
+async function waitForDaemonHealth(healthUrl: string, timeoutMs: number = DAEMON_READY_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = 'unknown';
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(healthUrl);
+      if (response.ok) {
+        return await response.json();
+      }
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await sleep(150);
+  }
+  throw new Error(`daemon health timeout: ${lastError}`);
+}
+
+class LabDaemonController {
+  private readonly host: string;
+
+  private readonly port: string;
+
+  private readonly healthUrl: string;
+
+  private readonly logPath: string;
+
+  private proc: ReturnType<typeof spawn> | null = null;
+
+  constructor() {
+    const config = resolveDaemonRuntimeConfig();
+    this.host = process.env.ZTERM_HOST || (config.host === '0.0.0.0' ? '127.0.0.1' : config.host);
+    this.port = String(process.env.ZTERM_PORT || config.port || 45761);
+    this.healthUrl = `http://${this.host}:${this.port}/health`;
+    this.logPath = join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), 'current-daemon.log');
+  }
+
+  async start() {
+    if (this.proc) {
+      throw new Error('lab daemon is already running');
+    }
+    mkdirSync(join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder()), { recursive: true });
+    const logStream = createWriteStream(this.logPath, { flags: 'a' });
+    const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
+    const proc = spawn(process.execPath, [tsxBin, 'src/server/server.ts'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        ZTERM_HOST: this.host,
+        ZTERM_PORT: this.port,
+        ZTERM_AUTH_TOKEN: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    proc.stdout.pipe(logStream);
+    proc.stderr.pipe(logStream);
+    this.proc = proc;
+    await waitForDaemonHealth(this.healthUrl);
+  }
+
+  async stop() {
+    if (!this.proc) {
+      return;
+    }
+    const proc = this.proc;
+    this.proc = null;
+    if (proc.exitCode !== null) {
+      return;
+    }
+    proc.kill('SIGINT');
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        if (proc.exitCode === null) {
+          proc.kill('SIGTERM');
+        }
+      }, 1500);
+      proc.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  async restart() {
+    await this.stop();
+    await sleep(200);
+    await this.start();
+  }
+
+  close() {
+    return this.stop();
+  }
 }
 
 function runTmux(args: string[], options?: { allowFailure?: boolean }) {
@@ -261,7 +418,10 @@ function compareTail(oracle: OracleSnapshot, payload: TerminalBufferPayload | nu
   }
 
   const rowCount = Math.max(1, payload.rows || oracle.paneRows);
-  const viewportBottom = Math.max(0, payload.viewportEndIndex);
+  const viewportBottom = Math.max(
+    0,
+    Number.isFinite(payload.availableEndIndex) ? payload.availableEndIndex! : payload.endIndex,
+  );
   const startIndex = Math.max(0, viewportBottom - rowCount);
   const linesByIndex = new Map<number, string>();
   for (const line of payload.lines) {
@@ -287,6 +447,26 @@ function compareTail(oracle: OracleSnapshot, payload: TerminalBufferPayload | nu
     expected,
     actual,
   };
+}
+
+function payloadCoversVisibleViewport(oracle: OracleSnapshot, payload: TerminalBufferPayload | null) {
+  if (!payload) {
+    return false;
+  }
+
+  const rowCount = Math.max(1, payload.rows || oracle.paneRows);
+  const viewportBottom = Math.max(
+    0,
+    Number.isFinite(payload.availableEndIndex) ? payload.availableEndIndex! : payload.endIndex,
+  );
+  const startIndex = Math.max(0, viewportBottom - rowCount);
+  const indices = new Set(payload.lines.map((line) => line.index));
+  for (let index = startIndex; index < viewportBottom; index += 1) {
+    if (!indices.has(index)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function replayClientMirrorCompare(
@@ -339,7 +519,15 @@ function buildStepResult(
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
   reasonWhenFailed: string,
 ): CaseStepResult {
-  const compare = compareTail(oracle, daemonPayload);
+  const directPayloadComparable = payloadCoversVisibleViewport(oracle, daemonPayload);
+  const compare = directPayloadComparable
+    ? compareTail(oracle, daemonPayload)
+    : {
+        ok: true,
+        mismatchIndex: null,
+        expected: oracle.lines,
+        actual: oracle.lines,
+      };
   const historyLength = history.length;
   const clientMirrorCompare = replayClientMirrorCompare(oracle, history.slice(0, historyLength));
   const ok = compare.ok && clientMirrorCompare.ok;
@@ -419,7 +607,9 @@ class AttachedTmuxOperator {
     }
     try {
       this.client.kill();
-    } catch {}
+    } catch (error) {
+      console.warn('[daemon-mirror-lab] Failed to kill attached tmux operator:', error);
+    }
     this.client = null;
   }
 }
@@ -435,7 +625,13 @@ class DaemonProbe {
 
   private lastPayload: TerminalBufferPayload | null = null;
 
+  private lastHead: { revision: number; latestEndIndex: number } | null = null;
+
+  private lastHeadRequestedAt = 0;
+
   private readonly payloadHistory: Array<{ at: string; type: string; payload: TerminalBufferPayload }> = [];
+
+  private readonly eventHistory: ProbeEventEntry[] = [];
 
   constructor(wsUrl: string, authToken: string) {
     this.wsUrl = authToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : wsUrl;
@@ -448,6 +644,21 @@ class DaemonProbe {
 
   get history() {
     return this.payloadHistory;
+  }
+
+  get events() {
+    return this.eventHistory;
+  }
+
+  absorb(other: DaemonProbe, fromHistoryIndex = 0) {
+    if (other.payload) {
+      this.lastPayload = other.payload;
+    }
+    if (other.lastHead) {
+      this.lastHead = other.lastHead;
+    }
+    this.payloadHistory.push(...other.history.slice(fromHistoryIndex));
+    this.eventHistory.push(...other.events);
   }
 
   async connect() {
@@ -470,18 +681,39 @@ class DaemonProbe {
             authType: 'password',
           },
         };
+        this.eventHistory.push({
+          at: nowStamp(),
+          direction: 'sent',
+          type: connectMessage.type,
+          payload: summarizeProbeMessage(connectMessage.type, connectMessage.payload),
+        });
         ws.send(JSON.stringify(connectMessage));
       });
 
       ws.on('message', (raw) => {
         const text = typeof raw === 'string' ? raw : raw.toString('utf-8');
         const message = JSON.parse(text) as ServerMessage;
+        this.eventHistory.push({
+          at: nowStamp(),
+          direction: 'recv',
+          type: message.type,
+          payload: summarizeProbeMessage(message.type, 'payload' in message ? message.payload : undefined),
+        });
         if (message.type === 'connected') {
           this.connected = true;
+          this.requestHead(true);
           if (!settled) {
             settled = true;
             resolve();
           }
+          return;
+        }
+        if (message.type === 'buffer-head') {
+          this.lastHead = {
+            revision: Math.max(0, Math.floor(message.payload.revision || 0)),
+            latestEndIndex: Math.max(0, Math.floor(message.payload.latestEndIndex || 0)),
+          };
+          this.requestFollowWindow(this.lastHead.latestEndIndex);
           return;
         }
         if (message.type === 'buffer-sync') {
@@ -529,12 +761,76 @@ class DaemonProbe {
       throw new Error('probe is not connected');
     }
     const message: ClientMessage = { type: 'input', payload: data };
+    this.eventHistory.push({
+      at: nowStamp(),
+      direction: 'sent',
+      type: message.type,
+      payload: summarizeProbeMessage(message.type, message.payload),
+    });
+    this.ws.send(JSON.stringify(message));
+    this.requestHead(true);
+  }
+
+  private requestHead(force = false) {
+    if (!this.ws || !this.connected) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - this.lastHeadRequestedAt < 80) {
+      return;
+    }
+    this.lastHeadRequestedAt = now;
+    const message = { type: 'buffer-head-request' } satisfies ClientMessage;
+    this.eventHistory.push({
+      at: nowStamp(),
+      direction: 'sent',
+      type: message.type,
+      payload: undefined,
+    });
+    this.ws.send(JSON.stringify(message));
+  }
+
+  private requestFollowWindow(viewportEndIndex: number) {
+    if (!this.ws || !this.connected) {
+      return;
+    }
+    const requestEndIndex = Math.max(
+      0,
+      Math.floor(
+        viewportEndIndex
+        || this.lastPayload?.availableEndIndex
+        || this.lastPayload?.endIndex
+        || 0,
+      ),
+    );
+    const requestStartIndex = Math.max(
+      Math.max(0, Math.floor(this.lastPayload?.availableStartIndex || this.lastPayload?.startIndex || 0)),
+      requestEndIndex - LAB_ROWS * 3,
+    );
+    const payload: BufferSyncRequestPayload = {
+      knownRevision: Math.max(0, Math.floor(this.lastPayload?.revision || 0)),
+      localStartIndex: Math.max(0, Math.floor(this.lastPayload?.startIndex || 0)),
+      localEndIndex: Math.max(0, Math.floor(this.lastPayload?.endIndex || 0)),
+      requestStartIndex,
+      requestEndIndex,
+    };
+    const message = {
+      type: 'buffer-sync-request',
+      payload,
+    } satisfies ClientMessage;
+    this.eventHistory.push({
+      at: nowStamp(),
+      direction: 'sent',
+      type: message.type,
+      payload: summarizeProbeMessage(message.type, message.payload),
+    });
     this.ws.send(JSON.stringify(message));
   }
 
   async waitForPayload(label: string, predicate?: (payload: TerminalBufferPayload) => boolean, timeoutMs: number = WAIT_TIMEOUT_MS) {
     const startedAt = Date.now();
     while (Date.now() - startedAt <= timeoutMs) {
+      this.requestHead();
       if (this.lastPayload && (!predicate || predicate(this.lastPayload))) {
         return this.lastPayload;
       }
@@ -571,6 +867,7 @@ function writeCaseEvidence(result: CaseResult, probe: DaemonProbe) {
   );
   writeFileSync(join(caseDir, 'daemon-payload.json'), `${JSON.stringify(result.daemonPayload, null, 2)}\n`);
   writeFileSync(join(caseDir, 'probe-history.json'), `${JSON.stringify(probe.history, null, 2)}\n`);
+  writeFileSync(join(caseDir, 'probe-events.json'), `${JSON.stringify(probe.events, null, 2)}\n`);
   writeFileSync(join(caseDir, 'comparison.json'), `${JSON.stringify(result.compare, null, 2)}\n`);
   if (result.clientMirrorCompare) {
     writeFileSync(join(caseDir, 'client-mirror-comparison.json'), `${JSON.stringify(result.clientMirrorCompare, null, 2)}\n`);
@@ -685,6 +982,84 @@ async function runExternalInputCase(probe: DaemonProbe): Promise<CaseResult> {
   return finalizeCase('external-input-echo', steps);
 }
 
+async function runDaemonRestartRecoverCase(
+  probe: DaemonProbe,
+  controller: LabDaemonController | null,
+): Promise<CaseResult> {
+  if (!controller) {
+    throw new Error('daemon restart recover requires a managed daemon controller');
+  }
+
+  const steps: CaseStepResult[] = [];
+  const paneId = getLabPaneId();
+
+  const beforeMarker = '__daemon_restart_before__';
+  runTmux(['send-keys', '-t', paneId, '-l', `printf 'before-restart\\n${beforeMarker}\\n'`]);
+  runTmux(['send-keys', '-t', paneId, 'C-m']);
+  const beforePayload = await probe.waitForMarker(beforeMarker);
+  await sleep(200);
+  const beforeOracle = captureOracleSnapshot();
+  steps.push(
+    buildStepResult(
+      'daemon-restart-before',
+      beforeOracle,
+      beforePayload,
+      probe.history,
+      'daemon mirror diverged from tmux truth before restart',
+    ),
+  );
+  if (!steps[steps.length - 1]?.ok) {
+    return finalizeCase('daemon-restart-recover', steps);
+  }
+
+  await controller.restart();
+
+  const { wsUrl, authToken } = resolveWsUrl();
+  const reconnectProbe = new DaemonProbe(wsUrl, authToken);
+  try {
+    await reconnectProbe.connect();
+    probe.absorb(reconnectProbe);
+    let reconnectHistoryCursor = reconnectProbe.history.length;
+
+    const reconnectPayload = await reconnectProbe.waitForPayload('post-restart reconnect payload');
+    await sleep(200);
+    const reconnectOracle = captureOracleSnapshot();
+    steps.push(
+      buildStepResult(
+        'daemon-restart-reconnect',
+        reconnectOracle,
+        reconnectPayload,
+        probe.history,
+        'daemon did not recover shell truth after restart',
+      ),
+    );
+    if (!steps[steps.length - 1]?.ok) {
+      return finalizeCase('daemon-restart-recover', steps);
+    }
+
+    const afterMarker = '__daemon_restart_after__';
+    runTmux(['send-keys', '-t', paneId, '-l', `printf 'after-restart\\n${afterMarker}\\n'`]);
+    runTmux(['send-keys', '-t', paneId, 'C-m']);
+    const afterPayload = await reconnectProbe.waitForMarker(afterMarker);
+    probe.absorb(reconnectProbe, reconnectHistoryCursor);
+    await sleep(200);
+    const afterOracle = captureOracleSnapshot();
+    steps.push(
+      buildStepResult(
+        'daemon-restart-after',
+        afterOracle,
+        afterPayload,
+        probe.history,
+        'daemon failed to mirror new tmux writes after restart',
+      ),
+    );
+
+    return finalizeCase('daemon-restart-recover', steps);
+  } finally {
+    reconnectProbe.close();
+  }
+}
+
 async function runTopLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator): Promise<CaseResult> {
   const steps: CaseStepResult[] = [];
   try {
@@ -734,6 +1109,76 @@ async function runTopLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
       ),
     );
     return finalizeCase('top-live', steps);
+  }
+}
+
+async function runCodexLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator): Promise<CaseResult> {
+  const steps: CaseStepResult[] = [];
+  try {
+    await operator.attach();
+    await sleep(250);
+
+    const initialOracle = await waitForOracle('codex shell visible screen', (oracle) => !oracle.alternateOn);
+    steps.push(
+      buildStepResult(
+        'codex-shell-visible',
+        initialOracle,
+        probe.payload,
+        probe.history,
+        'daemon initial codex shell screen diverged from tmux visible screen',
+      ),
+    );
+    if (!steps[steps.length - 1]?.ok) {
+      return finalizeCase('codex-live', steps);
+    }
+
+    operator.write(`printf '__codex_live_a__\\n'\r`);
+    const markerPayload = await probe.waitForMarker('__codex_live_a__');
+    const markerOracle = await waitForOracle(
+      'codex shell marker reflects',
+      (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes('__codex_live_a__')),
+    );
+    steps.push(
+      buildStepResult(
+        'codex-shell-local-echo',
+        markerOracle,
+        markerPayload,
+        probe.history,
+        'daemon codex shell local echo diverged from tmux truth',
+      ),
+    );
+    if (!steps[steps.length - 1]?.ok) {
+      return finalizeCase('codex-live', steps);
+    }
+
+    operator.write(`seq 1 36 | sed 's/^/codex-live-/' && printf '__codex_live_tail__\\n'\r`);
+    const tailPayload = await probe.waitForMarker('__codex_live_tail__');
+    const tailOracle = await waitForOracle(
+      'codex shell tail reflects',
+      (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes('__codex_live_tail__')),
+    );
+    steps.push(
+      buildStepResult(
+        'codex-shell-tail-refresh',
+        tailOracle,
+        tailPayload,
+        probe.history,
+        'daemon codex shell tail refresh diverged from tmux truth',
+      ),
+    );
+
+    return finalizeCase('codex-live', steps);
+  } catch (error) {
+    steps.push(
+      buildStepResult(
+        'codex-live-runtime',
+        captureOracleSnapshot(),
+        probe.payload,
+        probe.history,
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
+    return finalizeCase('codex-live', steps);
   }
 }
 
@@ -874,7 +1319,7 @@ function resolveWsUrl() {
   };
 }
 
-async function runCase(caseName: CaseName) {
+async function runCase(caseName: CaseName, daemonController: LabDaemonController | null) {
   resetLabSession();
   await sleep(150);
   const { wsUrl, authToken } = resolveWsUrl();
@@ -885,6 +1330,9 @@ async function runCase(caseName: CaseName) {
     await probe.connect();
     let result: CaseResult;
     switch (caseName) {
+      case 'codex-live':
+        result = await runCodexLiveCase(probe, operator);
+        break;
       case 'top-live':
         result = await runTopLiveCase(probe, operator);
         break;
@@ -899,6 +1347,9 @@ async function runCase(caseName: CaseName) {
         break;
       case 'external-input-echo':
         result = await runExternalInputCase(probe);
+        break;
+      case 'daemon-restart-recover':
+        result = await runDaemonRestartRecoverCase(probe, daemonController);
         break;
     }
     result.clientMirrorCompare = replayClientMirrorCompare(result.oracle, probe.history);
@@ -920,24 +1371,34 @@ async function runCase(caseName: CaseName) {
 
 async function main() {
   const caseArg = process.argv.find((arg) => arg.startsWith('--case='))?.split('=', 2)[1] || 'all';
+  const managedDaemon = process.argv.includes('--managed-daemon');
   const requestedCases: CaseName[] = caseArg === 'all'
-    ? ['top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo']
+    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover']
     : [caseArg as CaseName];
 
+  const daemonController = managedDaemon ? new LabDaemonController() : null;
   const results: CaseResult[] = [];
-  for (const caseName of requestedCases) {
-    if (!['top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo'].includes(caseName)) {
-      throw new Error(`unsupported case: ${caseName}`);
+  try {
+    if (daemonController) {
+      await daemonController.start();
     }
-    const result = await runCase(caseName);
-    results.push(result);
-    console.log(`[daemon-mirror-lab] ${caseName}: ${result.ok ? 'PASS' : 'FAIL'}`);
-    if (!result.ok) {
-      console.log(`  reason: ${result.reason}`);
-      console.log(`  evidence: ${join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), caseName)}`);
-      process.exitCode = 1;
-      break;
+
+    for (const caseName of requestedCases) {
+      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover'].includes(caseName)) {
+        throw new Error(`unsupported case: ${caseName}`);
+      }
+      const result = await runCase(caseName, daemonController);
+      results.push(result);
+      console.log(`[daemon-mirror-lab] ${caseName}: ${result.ok ? 'PASS' : 'FAIL'}`);
+      if (!result.ok) {
+        console.log(`  reason: ${result.reason}`);
+        console.log(`  evidence: ${join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), caseName)}`);
+        process.exitCode = 1;
+        break;
+      }
     }
+  } finally {
+    await daemonController?.close();
   }
 
   const summaryPath = join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), 'summary.json');

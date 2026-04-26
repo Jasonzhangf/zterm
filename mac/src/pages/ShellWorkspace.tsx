@@ -13,7 +13,7 @@ import {
 } from '@zterm/shared';
 import {
   createTerminalRuntime,
-  useTerminalRuntimeSnapshot,
+  useTerminalRuntimeState,
   type TerminalRuntimeController,
 } from '../lib/terminal-runtime';
 import { createIdleConnectionState, type TerminalConnectionState } from '../lib/bridge-transport';
@@ -278,8 +278,8 @@ function PaneTabStatus({
   tab: ShellWorkspaceTab;
   runtime: TerminalRuntimeController | null;
 }) {
-  const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
-  const runtimeStatus = tab.kind !== 'empty' ? runtimeSnapshot.connection.status : 'idle';
+  const runtimeState = useTerminalRuntimeState(runtime);
+  const runtimeStatus = tab.kind !== 'empty' ? runtimeState.connection.status : 'idle';
   return <span className={`shell-tab-dot ${runtimeStatus}`} />;
 }
 
@@ -302,7 +302,7 @@ function PaneSurface({
   onOpenConnection: () => void;
   terminalThemeId?: string;
 }) {
-  const runtimeSnapshot = useTerminalRuntimeSnapshot(runtime);
+  const runtimeState = useTerminalRuntimeState(runtime);
 
   if (tab.kind === 'empty' || (tab.kind === 'connection' && !target) || (tab.kind === 'local-tmux' && !localSessionName)) {
     return <EmptyPane onOpen={onOpenConnection} />;
@@ -310,22 +310,22 @@ function PaneSurface({
 
   return (
     <div className="shell-terminal-live">
-      {runtimeSnapshot.connection.error ? <div className="shell-terminal-banner error">{runtimeSnapshot.connection.error}</div> : null}
+      {runtimeState.connection.error ? <div className="shell-terminal-banner error">{runtimeState.connection.error}</div> : null}
       <div className="shell-terminal-statusbar">
-        <span className={`shell-runtime-pill ${runtimeSnapshot.connection.status}`}>{runtimeSnapshot.connection.status}</span>
+        <span className={`shell-runtime-pill ${runtimeState.connection.status}`}>{runtimeState.connection.status}</span>
         <span>{tab.kind === 'local-tmux' ? `Local tmux · ${localSessionName}` : formatBridgeSessionTarget(target!)}</span>
         <span>
-          {runtimeSnapshot.connection.connectedSessionId
+          {runtimeState.connection.connectedSessionId
             || (tab.kind === 'local-tmux' ? localSessionName : getResolvedSessionName(target!))}
         </span>
       </div>
       <div className="shell-terminal-canvas">
         <TerminalView
           sessionId={
-            runtimeSnapshot.connection.connectedSessionId
+            runtimeState.connection.connectedSessionId
             || (tab.kind === 'local-tmux' ? localSessionName : getResolvedSessionName(target!))
           }
-          projection={runtimeSnapshot.render}
+          projection={runtimeState.render}
           active={isVisible}
           allowDomFocus={isInputFocused}
           onInput={(data) => runtime?.sendInput(data)}
@@ -347,7 +347,6 @@ function PaneSurface({
           }
           onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
           onViewportChange={(viewState) => runtime?.updateViewport(viewState)}
-          onViewportPrefetch={(viewState) => runtime?.requestViewportPrefetch(viewState)}
           themeId={terminalThemeId}
         />
       </div>
@@ -431,13 +430,13 @@ export function ShellWorkspace({
   const activeLocalSessionName = useMemo(() => resolveLocalSessionName(activeTab), [activeTab]);
   const activeRuntimeResourceKey = useMemo(() => resolveRuntimeResourceKey(activeTab, hosts), [activeTab, hosts]);
   const activeRuntime = activeRuntimeResourceKey ? getRuntimeForResource(activeRuntimeResourceKey) : null;
-  const activeRuntimeSnapshot = useTerminalRuntimeSnapshot(activeRuntime);
+  const activeRuntimeState = useTerminalRuntimeState(activeRuntime);
   const activeBridgeRuntime = useMemo<TerminalConnectionState>(() => {
     if (activeTab?.kind === 'connection') {
-      return activeRuntimeSnapshot.connection as TerminalConnectionState;
+      return activeRuntimeState.connection as TerminalConnectionState;
     }
     return createIdleConnectionState();
-  }, [activeRuntimeSnapshot.connection, activeTab?.kind]);
+  }, [activeRuntimeState.connection, activeTab?.kind]);
   const connectionRequests = useMemo<ConnectionRequest[]>(() => {
     const requestMap = new Map<string, ConnectionRequest>();
     workspace.panes.forEach((pane) => {
@@ -881,14 +880,14 @@ export function ShellWorkspace({
 
   const applyQuickPaletteItem = useCallback(
     async (item: QuickPaletteItem) => {
-      if (activeRuntime && activeRuntimeSnapshot.connection.status === 'connected') {
+      if (activeRuntime && activeRuntimeState.connection.status === 'connected') {
         activeRuntime.sendInput(`${item.value}\r`);
       } else {
         await navigator.clipboard.writeText(item.value);
       }
       setQuickPaletteOpen(false);
     },
-    [activeRuntime, activeRuntimeSnapshot.connection.status],
+    [activeRuntime, activeRuntimeState.connection.status],
   );
 
   const exportWorkspaceProfile = useCallback((name: string, targetWorkspace: ShellWorkspaceState) => {
@@ -1189,7 +1188,7 @@ export function ShellWorkspace({
         <SessionScheduleModal
           open={scheduleModalOpen}
           sessionName={getResolvedSessionName(activeTarget)}
-          scheduleState={activeRuntimeSnapshot.schedule}
+          scheduleState={activeRuntimeState.schedule}
           onClose={() => setScheduleModalOpen(false)}
           onRefresh={() => activeRuntime.requestScheduleList(getResolvedSessionName(activeTarget))}
           onSave={(job) => activeRuntime.upsertScheduleJob(job)}

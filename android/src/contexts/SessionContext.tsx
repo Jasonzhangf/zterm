@@ -2,7 +2,7 @@
  * SessionContext - 管理 Session 状态、重连和持久化
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
 import type {
   BufferSyncRequestPayload,
   ClientMessage,
@@ -12,16 +12,17 @@ import type {
   ScheduleJobDraft,
   ServerMessage,
   Session,
+  SessionDebugOverlayMetrics,
   SessionScheduleState,
   SessionBufferState,
-  StreamModePayload,
   TerminalViewportState,
   SessionState,
   TerminalBufferPayload,
   TerminalCell,
+  TerminalGapRange,
 } from '../lib/types';
 import { buildEmptyScheduleState } from '@zterm/shared';
-import { buildBridgeUrl } from '../lib/bridge-url';
+import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
 import { getResolvedSessionName } from '../lib/connection-target';
 import { getDefaultTerminalViewportSize } from '../lib/default-terminal-viewport';
 import {
@@ -36,6 +37,9 @@ import {
   createSessionBufferState,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
+import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
+import { TraversalSocket } from '../lib/traversal/socket';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
 
@@ -47,8 +51,6 @@ const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
 const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 const BUFFER_RENDER_COMMIT_INTERVAL_MS = 16;
-const ACTIVE_TAIL_REFRESH_ACK_TIMEOUT_MS = 400;
-const IDLE_SESSION_CAPTURE_INTERVAL_MS = 1000;
 
 function resolveInitialViewportSize(
   viewportMap: Map<string, { cols: number; rows: number }>,
@@ -59,9 +61,9 @@ function resolveInitialViewportSize(
     return current;
   }
 
-  const fallback = getDefaultTerminalViewportSize();
-  viewportMap.set(sessionId, fallback);
-  return fallback;
+  const initialViewport = getDefaultTerminalViewportSize();
+  viewportMap.set(sessionId, initialViewport);
+  return initialViewport;
 }
 
 function emitSessionStatus(sessionId: string, type: 'closed' | 'error', message?: string) {
@@ -74,7 +76,6 @@ function summarizeBufferPayload(payload: TerminalBufferPayload) {
     revision: payload.revision,
     startIndex: payload.startIndex,
     endIndex: payload.endIndex,
-    viewportEndIndex: payload.viewportEndIndex,
     cols: payload.cols,
     rows: payload.rows,
     lineCount: payload.lines.length,
@@ -89,21 +90,6 @@ function summarizeSessions(sessions: Session[]) {
     state: session.state,
     revision: session.buffer.revision,
   }));
-}
-
-function buildStreamModePayload(mode: 'active' | 'idle'): StreamModePayload {
-  if (mode === 'idle') {
-    return {
-      mode,
-      minCaptureIntervalMs: IDLE_SESSION_CAPTURE_INTERVAL_MS,
-    };
-  }
-
-  const cadence = resolveTerminalRefreshCadence();
-  return {
-    mode,
-    minCaptureIntervalMs: cadence.headTickMs,
-  };
 }
 
 interface SessionManagerState {
@@ -212,6 +198,7 @@ function sessionReducer(state: SessionManagerState, action: SessionAction): Sess
 interface SessionContextValue {
   state: SessionManagerState;
   scheduleStates: Record<string, SessionScheduleState>;
+  sessionDebugMetrics: Record<string, SessionDebugOverlayMetrics | undefined>;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string) => void;
   switchSession: (id: string) => void;
@@ -219,7 +206,7 @@ interface SessionContextValue {
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
-  resetSessionViewportToFollow: (id: string) => boolean;
+  resumeActiveSessionTransport: (id: string) => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
@@ -239,10 +226,12 @@ interface SessionProviderProps {
   children: React.ReactNode;
   wsUrl?: string;
   terminalCacheLines?: number;
+  bridgeSettings?: BridgeSettings;
 }
 
 interface CreateSessionOptions {
   activate?: boolean;
+  connect?: boolean;
   customName?: string;
   buffer?: SessionBufferState;
   createdAt?: number;
@@ -260,13 +249,9 @@ interface ReconnectBucket {
 interface SessionBufferHeadState {
   revision: number;
   latestEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
   seenAt: number;
-}
-
-interface TailRefreshDemandState {
-  reason: string;
-  priority: number;
-  expireAt: number | null;
 }
 
 interface RevisionResetExpectation {
@@ -274,6 +259,25 @@ interface RevisionResetExpectation {
   latestEndIndex: number;
   seenAt: number;
 }
+
+interface SessionWireStatsSnapshot {
+  txBytes: number;
+  rxBytes: number;
+  renderCommits: number;
+  pullRequests: number;
+}
+
+type SessionPullPurpose = 'tail-refresh' | 'reading-repair';
+
+interface SessionPullState {
+  purpose: SessionPullPurpose;
+  startedAt: number;
+  targetHeadRevision: number;
+  targetStartIndex: number;
+  targetEndIndex: number;
+}
+
+type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullState>>;
 
 type SessionRenderDemandState = TerminalViewportState;
 
@@ -295,17 +299,6 @@ function createReconnectBucket(): ReconnectBucket {
 
 function computeReconnectDelay(attempt: number) {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
-}
-
-function getTailRefreshDemandPriority(reason: string) {
-  switch (reason) {
-    case 'input-tail-refresh':
-      return 3;
-    case 'active-head-refresh':
-      return 2;
-    default:
-      return 1;
-  }
 }
 
 function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
@@ -347,10 +340,6 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
     typeof input.rows === 'number' && Number.isFinite(input.rows)
       ? Math.max(1, Math.floor(input.rows))
       : 24;
-  const viewportEndIndex =
-    typeof input.viewportEndIndex === 'number' && Number.isFinite(input.viewportEndIndex)
-      ? Math.max(startIndex, Math.floor(input.viewportEndIndex))
-      : endIndex;
 
   return {
     revision:
@@ -359,7 +348,14 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
         : 0,
     startIndex,
     endIndex,
-    viewportEndIndex,
+    availableStartIndex:
+      typeof input.availableStartIndex === 'number' && Number.isFinite(input.availableStartIndex)
+        ? Math.max(0, Math.floor(input.availableStartIndex))
+        : undefined,
+    availableEndIndex:
+      typeof input.availableEndIndex === 'number' && Number.isFinite(input.availableEndIndex)
+        ? Math.max(startIndex, Math.floor(input.availableEndIndex))
+        : undefined,
     cols:
       typeof input.cols === 'number' && Number.isFinite(input.cols)
         ? Math.max(1, Math.floor(input.cols))
@@ -382,80 +378,202 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
 
 function buildBaseBufferSyncRequestPayload(
   session: Session,
-  viewportRows: number,
-  options?: { forceBootstrap?: boolean },
 ): Pick<
   BufferSyncRequestPayload,
-  'knownRevision' | 'localStartIndex' | 'localEndIndex' | 'viewportRows'
+  'knownRevision' | 'localStartIndex' | 'localEndIndex'
 > {
-  const forceBootstrap = Boolean(options?.forceBootstrap);
   return {
-    knownRevision: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.revision || 0)),
-    localStartIndex: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.startIndex || 0)),
-    localEndIndex: forceBootstrap ? 0 : Math.max(0, Math.floor(session.buffer.endIndex || 0)),
-    viewportRows: Math.max(1, Math.floor(viewportRows || session.buffer.rows || 24)),
+    knownRevision: Math.max(0, Math.floor(session.buffer.revision || 0)),
+    localStartIndex: Math.max(0, Math.floor(session.buffer.startIndex || 0)),
+    localEndIndex: Math.max(0, Math.floor(session.buffer.endIndex || 0)),
   };
 }
 
-function normalizeReadingMissingRanges(renderDemand?: SessionRenderDemandState) {
-  if (renderDemand?.mode !== 'reading' || !Array.isArray(renderDemand.missingRanges) || renderDemand.missingRanges.length === 0) {
-    return undefined;
-  }
-  const missingRanges = renderDemand.missingRanges.map((range) => ({
-    startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-    endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-  })).filter((range) => range.endIndex > range.startIndex);
-  return missingRanges.length > 0 ? missingRanges : undefined;
+function resolveRequestedBufferWindow(
+  endIndex: number,
+  viewportRows: number,
+  minStartIndex = 0,
+) {
+  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
+  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
+  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
+  const cacheLines = resolveTerminalCacheLines(safeViewportRows);
+  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
+  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
+  return {
+    requestStartIndex,
+    requestEndIndex,
+  };
 }
 
-function hasGapInAbsoluteWindow(
-  gapRanges: SessionBufferState['gapRanges'],
+function resolveDemandViewportRows(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+) {
+  if (typeof renderDemand?.viewportRows === 'number' && Number.isFinite(renderDemand.viewportRows) && renderDemand.viewportRows > 0) {
+    return Math.max(1, Math.floor(renderDemand.viewportRows));
+  }
+  if (typeof session.buffer.rows === 'number' && Number.isFinite(session.buffer.rows) && session.buffer.rows > 0) {
+    return Math.max(1, Math.floor(session.buffer.rows));
+  }
+  throw new Error(`Session ${session.id} is missing viewportRows truth for buffer request`);
+}
+
+function mergeGapRanges(ranges: TerminalGapRange[]) {
+  if (ranges.length <= 1) {
+    return ranges;
+  }
+  const sorted = [...ranges]
+    .map((range) => ({
+      startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+      endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+    }))
+    .filter((range) => range.endIndex > range.startIndex)
+    .sort((left, right) => left.startIndex - right.startIndex);
+  const merged: TerminalGapRange[] = [];
+  for (const range of sorted) {
+    const current = merged[merged.length - 1];
+    if (!current || range.startIndex > current.endIndex) {
+      merged.push({ ...range });
+      continue;
+    }
+    current.endIndex = Math.max(current.endIndex, range.endIndex);
+  }
+  return merged;
+}
+
+function collectIntersectingGapRanges(
+  gapRanges: TerminalGapRange[],
   startIndex: number,
   endIndex: number,
 ) {
   if (endIndex <= startIndex) {
-    return false;
+    return [] as TerminalGapRange[];
   }
-  return gapRanges.some((range) => range.endIndex > startIndex && range.startIndex < endIndex);
+  return gapRanges
+    .map((range) => ({
+      startIndex: Math.max(startIndex, range.startIndex),
+      endIndex: Math.min(endIndex, range.endIndex),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
 }
 
-function shouldBootstrapTailRefreshRequest(
+function collectReadingRepairRanges(
   session: Session,
-  renderDemand: SessionRenderDemandState,
-  cacheLines: number,
+  renderDemand?: SessionRenderDemandState,
 ) {
-  const followWindowEndIndex = Math.max(0, Math.floor(renderDemand.viewportEndIndex || 0));
-  const visibleWindowRows = Math.max(1, Math.floor(renderDemand.viewportRows || session.buffer.rows || 1));
-  const visibleWindowStartIndex = Math.max(0, followWindowEndIndex - visibleWindowRows);
-  const followCacheWindowStartIndex = Math.max(
-    0,
-    followWindowEndIndex - Math.max(1, Math.floor(cacheLines || 1)),
-  );
-  const missesVisibleFollowWindow = (
-    session.buffer.startIndex > visibleWindowStartIndex
-    || session.buffer.endIndex < followWindowEndIndex
-    || hasGapInAbsoluteWindow(session.buffer.gapRanges, visibleWindowStartIndex, followWindowEndIndex)
-  );
+  if (renderDemand?.mode !== 'reading') {
+    return [] as TerminalGapRange[];
+  }
 
-  return (
-    session.buffer.revision <= 0
-    || session.buffer.endIndex <= session.buffer.startIndex
-    || session.buffer.lines.length === 0
-    || missesVisibleFollowWindow
-    || hasGapInAbsoluteWindow(session.buffer.gapRanges, followCacheWindowStartIndex, followWindowEndIndex)
+  const viewportRows = resolveDemandViewportRows(session, renderDemand);
+  const viewportEndIndex = Math.max(0, Math.floor(
+    renderDemand.viewportEndIndex
+    || session.buffer.bufferTailEndIndex
+    || session.buffer.endIndex
+    || 0,
+  ));
+  const requestWindow = resolveRequestedBufferWindow(
+    viewportEndIndex,
+    viewportRows,
+    session.buffer.bufferHeadStartIndex,
   );
+  const requestStartIndex = requestWindow.requestStartIndex;
+  const requestEndIndex = requestWindow.requestEndIndex;
+  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
+  const missingRanges: TerminalGapRange[] = [];
+
+  if (localStartIndex > requestStartIndex) {
+    missingRanges.push({
+      startIndex: requestStartIndex,
+      endIndex: Math.min(localStartIndex, requestEndIndex),
+    });
+  }
+
+  missingRanges.push(...collectIntersectingGapRanges(
+    session.buffer.gapRanges,
+    requestStartIndex,
+    requestEndIndex,
+  ));
+
+  if (localEndIndex < requestEndIndex) {
+    missingRanges.push({
+      startIndex: Math.max(localEndIndex, requestStartIndex),
+      endIndex: requestEndIndex,
+    });
+  }
+
+  return mergeGapRanges(missingRanges);
+}
+
+function hasCompleteFollowTailWindow(
+  session: Session,
+  viewportEndIndex: number,
+  viewportRows: number,
+) {
+  const requestWindow = resolveRequestedBufferWindow(
+    viewportEndIndex,
+    viewportRows,
+    session.buffer.bufferHeadStartIndex,
+  );
+  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
+  if (localStartIndex > requestWindow.requestStartIndex || localEndIndex < requestWindow.requestEndIndex) {
+    return false;
+  }
+  return collectIntersectingGapRanges(
+    session.buffer.gapRanges,
+    requestWindow.requestStartIndex,
+    requestWindow.requestEndIndex,
+  ).length === 0;
 }
 
 function buildTailRefreshBufferSyncRequestPayload(
   session: Session,
   renderDemand?: SessionRenderDemandState,
-  options?: { forceBootstrap?: boolean },
+  options?: {
+    forceSameEndRefresh?: boolean;
+  },
 ): BufferSyncRequestPayload {
-  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || session.buffer.rows || 24));
+  const viewportRows = resolveDemandViewportRows(session, renderDemand);
+  const viewportEndIndex = Math.max(0, Math.floor(
+    session.daemonHeadEndIndex
+    || renderDemand?.viewportEndIndex
+    || session.buffer.bufferTailEndIndex
+    || session.buffer.endIndex
+    || 0,
+  ));
+  const cacheLines = resolveTerminalCacheLines(viewportRows);
+  const authoritativeHeadStartIndex = Math.max(0, Math.floor(session.buffer.bufferHeadStartIndex || 0));
+  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
+  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
+  const localHasWindow = localEndIndex > localStartIndex;
+  const distanceToHead = Math.max(0, viewportEndIndex - localEndIndex);
+  const followWindowCovered = hasCompleteFollowTailWindow(session, viewportEndIndex, viewportRows);
+  const needsTailReanchor = (
+    !localHasWindow
+    || distanceToHead > cacheLines
+    || !followWindowCovered
+    || (Boolean(options?.forceSameEndRefresh) && daemonRevision > localRevision && distanceToHead === 0)
+  );
+
+  const window = needsTailReanchor
+    ? resolveRequestedBufferWindow(
+        viewportEndIndex,
+        viewportRows,
+        authoritativeHeadStartIndex,
+      )
+    : {
+        requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
+        requestEndIndex: viewportEndIndex,
+      };
   return {
-    ...buildBaseBufferSyncRequestPayload(session, viewportRows, options),
-    viewportEndIndex: Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
-    mode: 'follow',
+    ...buildBaseBufferSyncRequestPayload(session),
+    requestStartIndex: window.requestStartIndex,
+    requestEndIndex: window.requestEndIndex,
   };
 }
 
@@ -463,15 +581,23 @@ function buildReadingBufferSyncRequestPayload(
   session: Session,
   renderDemand?: SessionRenderDemandState,
 ): BufferSyncRequestPayload {
-  const viewportRows = Math.max(1, Math.floor(renderDemand?.viewportRows || session.buffer.rows || 24));
-  const missingRanges = normalizeReadingMissingRanges(renderDemand);
-  return {
-    ...buildBaseBufferSyncRequestPayload(session, viewportRows),
-    viewportEndIndex: Math.max(0, Math.floor(renderDemand?.viewportEndIndex || session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
+  const viewportRows = resolveDemandViewportRows(session, renderDemand);
+  const viewportEndIndex = Math.max(0, Math.floor(
+    renderDemand?.viewportEndIndex
+    || session.buffer.bufferTailEndIndex
+    || session.buffer.endIndex
+    || 0,
+  ));
+  const window = resolveRequestedBufferWindow(
+    viewportEndIndex,
     viewportRows,
-    mode: 'reading',
-    prefetch: Boolean(renderDemand?.prefetch && missingRanges && missingRanges.length > 0),
-    missingRanges,
+    session.buffer.bufferHeadStartIndex,
+  );
+  return {
+    ...buildBaseBufferSyncRequestPayload(session),
+    requestStartIndex: window.requestStartIndex,
+    requestEndIndex: window.requestEndIndex,
+    missingRanges: collectReadingRepairRanges(session, renderDemand),
   };
 }
 
@@ -480,13 +606,15 @@ function buildSessionBufferSyncRequestPayload(
   renderDemand?: SessionRenderDemandState,
   options?: {
     purpose?: 'tail-refresh' | 'reading-repair';
-    forceBootstrap?: boolean;
+    forceSameEndRefresh?: boolean;
   },
 ): BufferSyncRequestPayload {
   const purpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
   return purpose === 'reading-repair'
     ? buildReadingBufferSyncRequestPayload(session, renderDemand)
-    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand, { forceBootstrap: options?.forceBootstrap });
+    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand, {
+        forceSameEndRefresh: options?.forceSameEndRefresh,
+      });
 }
 
 function buildHostConfigMessage(
@@ -512,28 +640,24 @@ function buildHostConfigMessage(
 function buildFollowRenderDemandState(session: Session, previousRenderDemand?: SessionRenderDemandState): SessionRenderDemandState {
   return {
     mode: 'follow',
-    viewportRows: Math.max(1, Math.floor(previousRenderDemand?.viewportRows || session.buffer.rows || 24)),
-    viewportEndIndex: Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || session.buffer.endIndex || 0)),
-    prefetch: false,
-    missingRanges: [],
+    viewportRows:
+      typeof previousRenderDemand?.viewportRows === 'number' && Number.isFinite(previousRenderDemand.viewportRows) && previousRenderDemand.viewportRows > 0
+        ? Math.max(1, Math.floor(previousRenderDemand.viewportRows))
+        : resolveDemandViewportRows(session),
+    viewportEndIndex: Math.max(0, Math.floor(
+      session.daemonHeadEndIndex
+      || session.buffer.bufferTailEndIndex
+      || session.buffer.endIndex
+      || 0,
+    )),
   };
 }
 
 function normalizeSessionRenderDemandState(renderDemand: SessionRenderDemandState): SessionRenderDemandState {
-  const missingRanges = Array.isArray(renderDemand.missingRanges)
-    ? renderDemand.missingRanges
-        .map((range) => ({
-          startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-          endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-        }))
-        .filter((range) => range.endIndex > range.startIndex)
-    : [];
   return {
     mode: renderDemand.mode === 'reading' ? 'reading' : 'follow',
     viewportEndIndex: Math.max(0, Math.floor(renderDemand.viewportEndIndex || 0)),
     viewportRows: Math.max(1, Math.floor(renderDemand.viewportRows || 1)),
-    prefetch: renderDemand.mode === 'reading' ? Boolean(renderDemand.prefetch && missingRanges.length > 0) : false,
-    missingRanges: renderDemand.mode === 'reading' ? missingRanges : [],
   };
 }
 
@@ -545,24 +669,85 @@ function renderDemandStatesEqual(left?: SessionRenderDemandState, right?: Sessio
     left.mode !== right.mode
     || left.viewportEndIndex !== right.viewportEndIndex
     || left.viewportRows !== right.viewportRows
-    || Boolean(left.prefetch) !== Boolean(right.prefetch)
   ) {
     return false;
   }
-  const leftRanges = left.missingRanges || [];
-  const rightRanges = right.missingRanges || [];
-  if (leftRanges.length !== rightRanges.length) {
-    return false;
-  }
-  for (let index = 0; index < leftRanges.length; index += 1) {
-    if (
-      leftRanges[index]?.startIndex !== rightRanges[index]?.startIndex
-      || leftRanges[index]?.endIndex !== rightRanges[index]?.endIndex
-    ) {
-      return false;
-    }
-  }
   return true;
+}
+
+function shouldPullFollowBuffer(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+  options?: {
+    inputTailRefreshPending?: boolean;
+  },
+) {
+  const buffer = session.buffer;
+  const viewportRows = resolveDemandViewportRows(session, renderDemand);
+  const desiredEndIndex = Math.max(0, Math.floor(
+    session.daemonHeadEndIndex
+    || renderDemand?.viewportEndIndex
+    || buffer.bufferTailEndIndex
+    || buffer.endIndex
+    || 0,
+  ));
+  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
+  const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
+  const localHasWindow = localEndIndex > localStartIndex;
+  const cacheLines = resolveTerminalCacheLines(viewportRows);
+  const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
+
+  if (!localHasWindow) {
+    return true;
+  }
+  if (distanceToHead > cacheLines) {
+    return true;
+  }
+  if (localEndIndex < desiredEndIndex) {
+    return true;
+  }
+  return Boolean(options?.inputTailRefreshPending) && daemonRevision > localRevision;
+}
+
+function shouldCatchUpFollowTailAfterBufferApply(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+  options?: {
+    inputTailRefreshPending?: boolean;
+  },
+) {
+  const buffer = session.buffer;
+  const viewportRows = resolveDemandViewportRows(session, renderDemand);
+  const desiredEndIndex = Math.max(0, Math.floor(
+    session.daemonHeadEndIndex
+    || renderDemand?.viewportEndIndex
+    || buffer.bufferTailEndIndex
+    || buffer.endIndex
+    || 0,
+  ));
+  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
+  const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
+  const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
+  const localHasWindow = localEndIndex > localStartIndex;
+  const cacheLines = resolveTerminalCacheLines(viewportRows);
+  const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
+
+  return (
+    !localHasWindow
+    || distanceToHead > cacheLines
+    || localEndIndex < desiredEndIndex
+    || (Boolean(options?.inputTailRefreshPending) && daemonRevision > localRevision)
+  );
+}
+
+function shouldPullReadingBuffer(
+  session: Session,
+  renderDemand?: SessionRenderDemandState,
+) {
+  return collectReadingRepairRanges(session, renderDemand).length > 0;
 }
 
 function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
@@ -580,14 +765,147 @@ function orderSessionsForReconnect(sessions: Session[], activeSessionId: string 
   });
 }
 
-export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES }: SessionProviderProps) {
+function resolveHeadAvailableBounds(
+  session: Session,
+  liveHead?: SessionBufferHeadState | null,
+) {
+  const availableEndIndex = Math.max(0, Math.floor(
+    liveHead?.availableEndIndex
+    ?? liveHead?.latestEndIndex
+    ?? session.daemonHeadEndIndex
+    ?? session.buffer.bufferTailEndIndex
+    ?? session.buffer.endIndex
+    ?? 0,
+  ));
+  const availableStartIndex = Math.max(0, Math.min(
+    availableEndIndex,
+    Math.floor(
+      liveHead?.availableStartIndex
+      ?? session.buffer.bufferHeadStartIndex
+      ?? 0
+    ),
+  ));
+  return {
+    availableStartIndex,
+    availableEndIndex,
+  };
+}
+
+function hasImpossibleLocalWindow(
+  session: Session,
+  liveHead?: SessionBufferHeadState | null,
+) {
+  const { availableEndIndex } = resolveHeadAvailableBounds(session, liveHead);
+  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
+  const localEndIndex = Math.max(0, Math.floor(session.buffer.endIndex || 0));
+  const localHeadStartIndex = Math.max(0, Math.floor(session.buffer.bufferHeadStartIndex || 0));
+  const localTailEndIndex = Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || 0));
+
+  return (
+    localStartIndex > availableEndIndex
+    || localEndIndex > availableEndIndex
+    || localHeadStartIndex > availableEndIndex
+    || localTailEndIndex > availableEndIndex
+  );
+}
+
+function buildDaemonAnchoredEmptyBuffer(
+  session: Session,
+  liveHead: SessionBufferHeadState,
+  cacheLines: number,
+) {
+  const { availableStartIndex, availableEndIndex } = resolveHeadAvailableBounds(session, liveHead);
+  return createSessionBufferState({
+    lines: [],
+    startIndex: availableEndIndex,
+    endIndex: availableEndIndex,
+    bufferHeadStartIndex: availableStartIndex,
+    bufferTailEndIndex: availableEndIndex,
+    cols: session.buffer.cols,
+    rows: session.buffer.rows,
+    cursorKeysApp: session.buffer.cursorKeysApp,
+    revision: Math.max(0, Math.floor(session.buffer.revision || 0)),
+    cacheLines,
+  });
+}
+
+function hasActiveSessionPullState(pullStates?: SessionPullStates | null) {
+  return Boolean(pullStates?.['tail-refresh'] || pullStates?.['reading-repair']);
+}
+
+function getPrimarySessionPullState(pullStates?: SessionPullStates | null) {
+  return pullStates?.['reading-repair'] || pullStates?.['tail-refresh'] || null;
+}
+
+function clearSessionPullStateEntry(
+  pullStates: SessionPullStates | null | undefined,
+  purpose: SessionPullPurpose,
+) {
+  if (!pullStates || !pullStates[purpose]) {
+    return pullStates || null;
+  }
+  const next = { ...pullStates };
+  delete next[purpose];
+  return hasActiveSessionPullState(next) ? next : null;
+}
+
+function doesBufferSyncSatisfyPullState(
+  pullState: SessionPullState,
+  payload: TerminalBufferPayload,
+) {
+  const payloadRevision = Math.max(0, Math.floor(payload.revision || 0));
+  const payloadStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const payloadEndIndex = Math.max(payloadStartIndex, Math.floor(payload.endIndex || 0));
+  return (
+    payloadRevision >= pullState.targetHeadRevision
+    && payloadStartIndex <= pullState.targetStartIndex
+    && payloadEndIndex >= pullState.targetEndIndex
+  );
+}
+
+function settleSessionPullStatesWithBufferSync(
+  pullStates: SessionPullStates | null | undefined,
+  payload: TerminalBufferPayload,
+) {
+  if (!pullStates || !hasActiveSessionPullState(pullStates)) {
+    return null;
+  }
+
+  const activePulls = Object.values(pullStates)
+    .filter((item): item is SessionPullState => Boolean(item))
+    .sort((left, right) => left.startedAt - right.startedAt);
+
+  if (activePulls.length === 0) {
+    return null;
+  }
+
+  if ((payload.lines?.length || 0) === 0) {
+    return clearSessionPullStateEntry(pullStates, activePulls[0]!.purpose);
+  }
+
+  let next: SessionPullStates | null = pullStates;
+  for (const pullState of activePulls) {
+    if (!doesBufferSyncSatisfyPullState(pullState, payload)) {
+      continue;
+    }
+    next = clearSessionPullStateEntry(next, pullState.purpose);
+  }
+  return next;
+}
+
+export function SessionProvider({
+  children,
+  wsUrl,
+  terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES,
+  bridgeSettings = DEFAULT_BRIDGE_SETTINGS,
+}: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
-  const [scheduleStates, setScheduleStates] = React.useState<Record<string, SessionScheduleState>>({});
+  const [scheduleStates, setScheduleStates] = useState<Record<string, SessionScheduleState>>({});
+  const [sessionDebugMetrics, setSessionDebugMetrics] = useState<Record<string, SessionDebugOverlayMetrics | undefined>>({});
   const stateRef = useRef(state);
   const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
-  const wsRefs = useRef<Map<string, WebSocket>>(new Map());
+  const wsRefs = useRef<Map<string, BridgeTransportSocket>>(new Map());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
-  const queuedBufferSyncTimers = useRef<Map<string, number>>(new Map());
   // renderer -> worker declarative demand only; never producer/tail truth
   const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
@@ -601,13 +919,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
-  const pendingTailRefreshDemandRef = useRef<Map<string, TailRefreshDemandState>>(new Map());
-  const lastTailRefreshRequestAtRef = useRef<Map<string, number>>(new Map());
-  const lastHeadStalePingAtRef = useRef<Map<string, number>>(new Map());
-  const pendingTailRefreshAckTimersRef = useRef<Map<string, number>>(new Map());
-  const pendingTailRefreshAckNonceRef = useRef<Map<string, number>>(new Map());
-  const lastStreamModeSignatureRef = useRef('');
-  const armTailRefreshAckWatchdogRef = useRef<(sessionId: string) => void>(() => undefined);
+  const pendingInputTailRefreshRef = useRef<Map<string, { requestedAt: number; localRevision: number }>>(new Map());
+  const lastHeadRequestAtRef = useRef<Map<string, number>>(new Map());
+  const sessionWireStatsRef = useRef<Map<string, SessionWireStatsSnapshot>>(new Map());
+  const sessionWireStatsPreviousRef = useRef<Map<string, { sample: SessionWireStatsSnapshot; at: number }>>(new Map());
+  const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
+
+  const isSessionTransportActive = useCallback((sessionId: string) => {
+    return stateRef.current.activeSessionId === sessionId;
+  }, []);
 
   const resolveSessionCacheLines = useCallback((rows?: number | null) => {
     const viewportRows =
@@ -621,6 +941,126 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     return Math.max(threeScreenLines, Math.floor(terminalCacheLines));
   }, [terminalCacheLines]);
 
+  const estimateWireBytes = useCallback((data: string | ArrayBuffer) => {
+    if (typeof data === 'string') {
+      return new TextEncoder().encode(data).byteLength;
+    }
+    return data.byteLength;
+  }, []);
+
+  const ensureSessionWireStats = useCallback((sessionId: string) => {
+    const current = sessionWireStatsRef.current.get(sessionId);
+    if (current) {
+      return current;
+    }
+    const initial: SessionWireStatsSnapshot = {
+      txBytes: 0,
+      rxBytes: 0,
+      renderCommits: 0,
+      pullRequests: 0,
+    };
+    sessionWireStatsRef.current.set(sessionId, initial);
+    return initial;
+  }, []);
+
+  const recordSessionTx = useCallback((sessionId: string, data: string | ArrayBuffer, options?: {
+    pullPurpose?: SessionPullPurpose;
+    targetHeadRevision?: number;
+    targetStartIndex?: number;
+    targetEndIndex?: number;
+  }) => {
+    const current = ensureSessionWireStats(sessionId);
+    current.txBytes += estimateWireBytes(data);
+    if (options?.pullPurpose) {
+      current.pullRequests += 1;
+      const nextPullStates = {
+        ...(sessionPullStateRef.current.get(sessionId) || {}),
+        [options.pullPurpose]: {
+          purpose: options.pullPurpose,
+          startedAt: Date.now(),
+          targetHeadRevision: Math.max(0, Math.floor(options.targetHeadRevision || 0)),
+          targetStartIndex: Math.max(0, Math.floor(options.targetStartIndex || 0)),
+          targetEndIndex: Math.max(0, Math.floor(options.targetEndIndex || 0)),
+        },
+      } satisfies SessionPullStates;
+      sessionPullStateRef.current.set(sessionId, nextPullStates);
+    }
+  }, [ensureSessionWireStats, estimateWireBytes]);
+
+  const recordSessionRx = useCallback((sessionId: string, data: string | ArrayBuffer) => {
+    const current = ensureSessionWireStats(sessionId);
+    current.rxBytes += estimateWireBytes(data);
+  }, [ensureSessionWireStats, estimateWireBytes]);
+
+  const recordSessionRenderCommit = useCallback((sessionId: string) => {
+    const current = ensureSessionWireStats(sessionId);
+    current.renderCommits += 1;
+  }, [ensureSessionWireStats]);
+
+  const markPendingInputTailRefresh = useCallback((sessionId: string, localRevision: number) => {
+    pendingInputTailRefreshRef.current.set(sessionId, {
+      requestedAt: Date.now(),
+      localRevision: Math.max(0, Math.floor(localRevision || 0)),
+    });
+  }, []);
+
+  const clearSessionPullState = useCallback((sessionId: string, purpose?: SessionPullPurpose) => {
+    if (!purpose) {
+      sessionPullStateRef.current.delete(sessionId);
+      return;
+    }
+    const nextPullStates = clearSessionPullStateEntry(
+      sessionPullStateRef.current.get(sessionId) || null,
+      purpose,
+    );
+    if (!nextPullStates) {
+      sessionPullStateRef.current.delete(sessionId);
+      return;
+    }
+    sessionPullStateRef.current.set(sessionId, nextPullStates);
+  }, []);
+
+  const settleSessionPullState = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
+    const nextPullStates = settleSessionPullStatesWithBufferSync(
+      sessionPullStateRef.current.get(sessionId) || null,
+      payload,
+    );
+    if (!nextPullStates) {
+      sessionPullStateRef.current.delete(sessionId);
+      return;
+    }
+    sessionPullStateRef.current.set(sessionId, nextPullStates);
+  }, []);
+
+  const sendSocketPayload = useCallback((sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, options?: {
+    pullPurpose?: SessionPullPurpose;
+    targetHeadRevision?: number;
+    targetStartIndex?: number;
+    targetEndIndex?: number;
+  }) => {
+    recordSessionTx(sessionId, data, options);
+    ws.send(data);
+  }, [recordSessionTx]);
+
+  const buildTraversalSocketForHost = useCallback((host: Host) => {
+    const traversal = resolveTraversalConfigFromHost(host, bridgeSettings);
+    return new TraversalSocket(traversal.target, traversal.settings, { overrideUrl: wsUrl });
+  }, [bridgeSettings, wsUrl]);
+
+  const applyTransportDiagnostics = useCallback((sessionId: string, socket: BridgeTransportSocket) => {
+    const diagnostics = socket.getDiagnostics();
+    dispatch({
+      type: 'UPDATE_SESSION',
+      id: sessionId,
+      updates: {
+        resolvedPath: diagnostics.resolvedPath,
+        resolvedEndpoint: diagnostics.resolvedEndpoint,
+        lastConnectStage: diagnostics.stage,
+        lastError: diagnostics.reason || undefined,
+      },
+    });
+  }, []);
+
   const flushRuntimeDebugLogs = useCallback(() => {
     if (!isRuntimeDebugEnabled() || getPendingRuntimeDebugEntryCount() === 0) {
       return;
@@ -629,11 +1069,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     const activeWs = stateRef.current.activeSessionId
       ? wsRefs.current.get(stateRef.current.activeSessionId) || null
       : null;
-    const fallbackWs = [...wsRefs.current.values()].find((ws) => ws.readyState === WebSocket.OPEN) || null;
-    const targetWs =
-      activeWs && activeWs.readyState === WebSocket.OPEN
-        ? activeWs
-        : fallbackWs;
+    const targetWs = activeWs && activeWs.readyState === WebSocket.OPEN ? activeWs : null;
     if (!targetWs || targetWs.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -643,11 +1079,12 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return;
     }
 
-    targetWs.send(JSON.stringify({
+    const frame = JSON.stringify({
       type: 'debug-log',
       payload: { entries },
-    } satisfies ClientMessage));
-  }, [resolveSessionCacheLines]);
+    } satisfies ClientMessage);
+    sendSocketPayload(stateRef.current.activeSessionId || 'debug-log', targetWs, frame);
+  }, [sendSocketPayload]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -657,6 +1094,58 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     scheduleStatesRef.current = scheduleStates;
   }, [scheduleStates]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const nextMetrics: Record<string, SessionDebugOverlayMetrics | undefined> = {};
+
+      for (const session of stateRef.current.sessions) {
+        const current = sessionWireStatsRef.current.get(session.id) || {
+          txBytes: 0,
+          rxBytes: 0,
+          renderCommits: 0,
+          pullRequests: 0,
+        };
+        const previous = sessionWireStatsPreviousRef.current.get(session.id);
+        const deltaMs = previous ? Math.max(250, now - previous.at) : 1000;
+        const deltaSeconds = deltaMs / 1000;
+        const txBytesDelta = current.txBytes - (previous?.sample.txBytes || 0);
+        const rxBytesDelta = current.rxBytes - (previous?.sample.rxBytes || 0);
+        const renderDelta = current.renderCommits - (previous?.sample.renderCommits || 0);
+        const pullDelta = current.pullRequests - (previous?.sample.pullRequests || 0);
+        const pullStates = sessionPullStateRef.current.get(session.id) || null;
+        const pullState = getPrimarySessionPullState(pullStates);
+        const status: SessionDebugOverlayMetrics['status'] =
+          session.state === 'error' ? 'error'
+          : session.state === 'closed' ? 'closed'
+          : session.state === 'reconnecting' ? 'reconnecting'
+          : session.state === 'connecting' ? 'connecting'
+          : pullState?.purpose === 'reading-repair' ? 'loading'
+          : pullState ? 'refreshing'
+          : 'waiting';
+
+        nextMetrics[session.id] = {
+          uplinkBps: Math.max(0, Math.round(txBytesDelta / deltaSeconds)),
+          downlinkBps: Math.max(0, Math.round(rxBytesDelta / deltaSeconds)),
+          renderHz: Math.max(0, Number((renderDelta / deltaSeconds).toFixed(1))),
+          pullHz: Math.max(0, Number((pullDelta / deltaSeconds).toFixed(1))),
+          bufferPullActive: hasActiveSessionPullState(pullStates),
+          status,
+          updatedAt: now,
+        };
+
+        sessionWireStatsPreviousRef.current.set(session.id, {
+          sample: { ...current },
+          at: now,
+        });
+      }
+
+      setSessionDebugMetrics(nextMetrics);
+    }, 500);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   const setScheduleStateForSession = useCallback((
     sessionId: string,
     nextState:
@@ -664,10 +1153,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       | ((current: SessionScheduleState) => SessionScheduleState),
   ) => {
     setScheduleStates((current) => {
-      const fallback = buildEmptyScheduleState(
+      const emptyScheduleState = buildEmptyScheduleState(
         stateRef.current.sessions.find((session) => session.id === sessionId)?.sessionName || '',
       );
-      const resolvedCurrent = current[sessionId] || fallback;
+      const resolvedCurrent = current[sessionId] || emptyScheduleState;
       const resolved = typeof nextState === 'function' ? nextState(resolvedCurrent) : nextState;
       return {
         ...current,
@@ -685,14 +1174,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     lastPongAtRef.current.delete(sessionId);
   }, []);
 
-  const clearQueuedBufferSync = useCallback((sessionId: string) => {
-    const timer = queuedBufferSyncTimers.current.get(sessionId);
-    if (timer) {
-      window.clearTimeout(timer);
-      queuedBufferSyncTimers.current.delete(sessionId);
-    }
-  }, []);
-
   const clearPendingIncomingBuffer = useCallback((sessionId: string) => {
     const timer = pendingIncomingBufferTimersRef.current.get(sessionId);
     if (timer) {
@@ -702,43 +1183,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     pendingIncomingBufferPayloadsRef.current.delete(sessionId);
   }, []);
 
-  const clearPendingTailRefreshAck = useCallback((sessionId: string) => {
-    const timer = pendingTailRefreshAckTimersRef.current.get(sessionId);
-    if (timer) {
-      window.clearTimeout(timer);
-      pendingTailRefreshAckTimersRef.current.delete(sessionId);
-    }
-    pendingTailRefreshAckNonceRef.current.delete(sessionId);
-  }, []);
-
   const clearTailRefreshRuntime = useCallback((sessionId: string) => {
-    pendingTailRefreshDemandRef.current.delete(sessionId);
     sessionBufferHeadsRef.current.delete(sessionId);
     sessionRevisionResetRef.current.delete(sessionId);
-    lastTailRefreshRequestAtRef.current.delete(sessionId);
-    lastHeadStalePingAtRef.current.delete(sessionId);
-  }, []);
-
-  const markTailRefreshDemand = useCallback((sessionId: string, reason: string, ttlMs?: number | null) => {
-    const nextPriority = getTailRefreshDemandPriority(reason);
-    const current = pendingTailRefreshDemandRef.current.get(sessionId);
-    if (current && current.priority > nextPriority) {
-      return;
-    }
-    const expireAt =
-      typeof ttlMs === 'number' && Number.isFinite(ttlMs) && ttlMs > 0
-        ? Date.now() + ttlMs
-        : null;
-    pendingTailRefreshDemandRef.current.set(sessionId, {
-      reason,
-      priority: nextPriority,
-      expireAt,
-    });
+    lastHeadRequestAtRef.current.delete(sessionId);
   }, []);
 
   const startSocketHeartbeat = useCallback((
     sessionId: string,
-    ws: WebSocket,
+    ws: BridgeTransportSocket,
     finalizeFailure: (message: string, retryable: boolean) => void,
   ) => {
     const pingInterval = setInterval(() => {
@@ -755,20 +1208,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         return;
       }
 
-      ws.send(JSON.stringify({ type: 'ping' }));
+      sendSocketPayload(sessionId, ws, JSON.stringify({ type: 'ping' }));
     }, CLIENT_PING_INTERVAL_MS);
     pingIntervals.current.set(sessionId, pingInterval);
-  }, []);
+  }, [sendSocketPayload]);
 
   function buildConnectedSessionUpdates(sessionId: string) {
-    const currentSession = stateRef.current.sessions.find((item) => item.id === sessionId);
-    const currentFollowResetToken = currentSession?.followResetToken || 0;
+    void sessionId;
     return {
       state: 'connected' as const,
-      followResetToken:
-        stateRef.current.activeSessionId === sessionId
-          ? currentFollowResetToken + 1
-          : currentFollowResetToken,
       reconnectAttempt: 0,
       lastError: undefined,
     };
@@ -777,7 +1225,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   function openSocketConnectHandshake(options: {
     sessionId: string;
     host: Host;
-    ws: WebSocket;
+    ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
     activate?: boolean;
     finalizeFailure: (message: string, retryable: boolean) => void;
@@ -794,16 +1242,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         : { targetSessionName: sessionName }),
     });
     options.onBeforeConnectSend?.({ sessionName, viewport });
-    options.ws.send(JSON.stringify({
+    sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
       type: 'connect',
       payload: buildHostConfigMessage(options.host, sessionName, viewport),
     }));
-    options.ws.send(JSON.stringify({
-      type: 'stream-mode',
-      payload: buildStreamModePayload(
-        stateRef.current.activeSessionId === options.sessionId ? 'active' : 'idle',
-      ),
-    } satisfies ClientMessage));
     runtimeDebug(`session.ws.${options.debugScope}.connect-sent`, {
       sessionId: options.sessionId,
       viewport,
@@ -813,104 +1255,87 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   }
 
   const requestSessionBufferSync = useCallback((sessionId: string, options?: {
-    ws?: WebSocket | null;
+    ws?: BridgeTransportSocket | null;
     reason?: string;
-    purpose?: 'tail-refresh' | 'reading-repair';
-    forceBootstrap?: boolean;
+    purpose?: SessionPullPurpose;
+    sessionOverride?: Session | null;
   }) => {
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const session = options?.sessionOverride || stateRef.current.sessions.find((item) => item.id === sessionId);
     const targetWs = options?.ws || wsRefs.current.get(sessionId);
     if (!session || !targetWs || targetWs.readyState !== WebSocket.OPEN) {
       return false;
     }
 
     const renderDemand = sessionRenderDemandRef.current.get(sessionId);
-    const forceBootstrap = Boolean(
-      options?.forceBootstrap
-      || (
-        (options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh')) === 'tail-refresh'
-        && renderDemand
-        && shouldBootstrapTailRefreshRequest(
-          session,
-          renderDemand,
-          resolveSessionCacheLines(renderDemand.viewportRows),
-        )
-      )
-    );
+    const requestPurpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
+    const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
+    const effectiveSession = liveHead
+      ? {
+          ...session,
+          daemonHeadRevision: liveHead.revision,
+          daemonHeadEndIndex: liveHead.latestEndIndex,
+        }
+      : session;
+    const inFlightPull = (sessionPullStateRef.current.get(sessionId) || null)?.[requestPurpose] || null;
+    if (inFlightPull) {
+      return false;
+    }
     const payload = buildSessionBufferSyncRequestPayload(
-      session,
+      effectiveSession,
       renderDemand,
       {
         purpose: options?.purpose,
-        forceBootstrap,
       },
     );
 
-    runtimeDebug(forceBootstrap ? 'session.buffer.bootstrap-request' : 'session.buffer.request', {
+    runtimeDebug('session.buffer.request', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
-      reason: options?.reason || null,
-      purpose: options?.purpose || null,
-      forceBootstrap,
-      payload,
-    });
-    targetWs.send(JSON.stringify({
+        reason: options?.reason || null,
+        purpose: requestPurpose,
+        payload,
+      });
+    sendSocketPayload(sessionId, targetWs, JSON.stringify({
       type: 'buffer-sync-request',
       payload,
-    } satisfies ClientMessage));
+    } satisfies ClientMessage), {
+      pullPurpose: requestPurpose,
+      targetHeadRevision: Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
+      targetStartIndex: Math.max(0, Math.floor(payload.requestStartIndex || 0)),
+      targetEndIndex: Math.max(0, Math.floor(
+        effectiveSession.daemonHeadEndIndex
+        || payload.requestEndIndex
+        || effectiveSession.buffer.bufferTailEndIndex
+        || effectiveSession.buffer.endIndex
+        || 0
+      )),
+    });
     return true;
-  }, []);
+  }, [sendSocketPayload]);
 
-  const requestActiveTailRefresh = useCallback((sessionId: string, reason: string) => {
+  const requestSessionBufferHead = useCallback((sessionId: string, ws?: BridgeTransportSocket | null, options?: {
+    force?: boolean;
+  }) => {
+    const targetWs = ws || wsRefs.current.get(sessionId) || null;
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-    const ws = wsRefs.current.get(sessionId) || null;
     if (
       !session
-      || stateRef.current.activeSessionId !== sessionId
-      || session.state !== 'connected'
-      || !ws
-      || ws.readyState !== WebSocket.OPEN
+      || (session.state !== 'connected' && session.state !== 'connecting' && session.state !== 'reconnecting')
+      || !targetWs
+      || targetWs.readyState !== WebSocket.OPEN
     ) {
       return false;
     }
-
-    if (pendingTailRefreshAckTimersRef.current.has(sessionId)) {
-      markTailRefreshDemand(sessionId, reason);
-      return false;
-    }
-
     const cadence = resolveTerminalRefreshCadence();
     const now = Date.now();
-    const lastRequestedAt = lastTailRefreshRequestAtRef.current.get(sessionId) || 0;
-    if (now - lastRequestedAt < cadence.minTailRefreshGapMs) {
-      markTailRefreshDemand(sessionId, reason);
+    const lastRequestedAt = lastHeadRequestAtRef.current.get(sessionId) || 0;
+    if (!options?.force && now - lastRequestedAt < cadence.headTickMs) {
       return false;
     }
-
-    clearQueuedBufferSync(sessionId);
-    const requested = requestSessionBufferSync(sessionId, {
-      ws,
-      reason,
-      purpose: 'tail-refresh',
-    });
-    if (!requested) {
-      return false;
-    }
-
-    runtimeDebug('session.buffer.active-tail-refresh', {
-      sessionId,
-      reason,
-      activeSessionId: stateRef.current.activeSessionId,
-      localRevision: session.buffer.revision,
-      localStartIndex: session.buffer.startIndex,
-      localEndIndex: session.buffer.endIndex,
-      cadence,
-    });
-    lastTailRefreshRequestAtRef.current.set(sessionId, now);
-    ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
-    armTailRefreshAckWatchdogRef.current(sessionId);
+    lastHeadRequestAtRef.current.set(sessionId, now);
+    sendSocketPayload(sessionId, targetWs, JSON.stringify({ type: 'buffer-head-request' } satisfies ClientMessage));
     return true;
-  }, [clearQueuedBufferSync, markTailRefreshDemand, requestSessionBufferSync]);
+  }, [sendSocketPayload]);
 
   const flushPendingIncomingBuffer = useCallback((sessionId: string) => {
     pendingIncomingBufferTimersRef.current.delete(sessionId);
@@ -973,6 +1398,19 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       sessionRevisionResetRef.current.delete(sessionId);
     }
 
+    const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
+    const inputTailRefresh = pendingInputTailRefreshRef.current.get(sessionId) || null;
+    if (
+      inputTailRefresh
+      && (
+        nextBuffer.revision > Math.max(0, Math.floor(session.buffer.revision || 0))
+        || nextBuffer.endIndex !== session.buffer.endIndex
+        || (liveHead && nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
+      )
+    ) {
+      pendingInputTailRefreshRef.current.delete(sessionId);
+    }
+
     if (sessionBuffersEqual(session.buffer, nextBuffer)) {
       return;
     }
@@ -982,7 +1420,46 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       id: sessionId,
       updates: { buffer: nextBuffer },
     });
-  }, [resolveSessionCacheLines]);
+    recordSessionRenderCommit(sessionId);
+
+    if (!isSessionTransportActive(sessionId)) {
+      return;
+    }
+
+    const nextSession: Session = {
+      ...session,
+      buffer: nextBuffer,
+      daemonHeadRevision: liveHead?.revision ?? session.daemonHeadRevision,
+      daemonHeadEndIndex: liveHead?.latestEndIndex ?? session.daemonHeadEndIndex,
+    };
+    const renderDemand = sessionRenderDemandRef.current.get(sessionId) || buildFollowRenderDemandState(nextSession);
+
+    if (shouldCatchUpFollowTailAfterBufferApply(nextSession, renderDemand, {
+      inputTailRefreshPending: pendingInputTailRefreshRef.current.has(sessionId),
+    })) {
+      requestSessionBufferSync(sessionId, {
+        reason: 'buffer-sync-catchup',
+        purpose: 'tail-refresh',
+        sessionOverride: nextSession,
+      });
+      return;
+    }
+
+    if (renderDemand.mode !== 'reading' || !shouldPullReadingBuffer(nextSession, renderDemand)) {
+      return;
+    }
+
+    requestSessionBufferSync(sessionId, {
+      reason: 'buffer-sync-reading-repair-catchup',
+      purpose: 'reading-repair',
+      sessionOverride: nextSession,
+    });
+  }, [
+    isSessionTransportActive,
+    recordSessionRenderCommit,
+    requestSessionBufferSync,
+    resolveSessionCacheLines,
+  ]);
 
   const queueIncomingBufferSync = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
     const pending = pendingIncomingBufferPayloadsRef.current.get(sessionId) || [];
@@ -1039,12 +1516,11 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     }
 
     clearHeartbeat(sessionId);
-    clearQueuedBufferSync(sessionId);
     clearPendingIncomingBuffer(sessionId);
-    clearPendingTailRefreshAck(sessionId);
     clearTailRefreshRuntime(sessionId);
+    clearSessionPullState(sessionId);
     sessionRenderDemandRef.current.delete(sessionId);
-  }, [clearHeartbeat, clearPendingIncomingBuffer, clearPendingTailRefreshAck, clearQueuedBufferSync, clearTailRefreshRuntime]);
+  }, [clearHeartbeat, clearPendingIncomingBuffer, clearSessionPullState, clearTailRefreshRuntime]);
 
   const drainReconnectBucket = useCallback((hostKey: string) => {
     const bucket = reconnectBucketsRef.current.get(hostKey);
@@ -1087,7 +1563,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         },
       });
 
-      const ws = new WebSocket(buildBridgeUrl(targetHost, wsUrl));
+      const ws = buildTraversalSocketForHost(targetHost);
       runtimeDebug('session.ws.reconnect.opening', {
         sessionId: nextSessionId,
         host: targetHost.bridgeHost,
@@ -1095,7 +1571,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         sessionName: getResolvedSessionName(targetHost),
       });
       wsRefs.current.set(nextSessionId, ws);
-      dispatch({ type: 'UPDATE_SESSION', id: nextSessionId, updates: { ws } });
+      dispatch({ type: 'UPDATE_SESSION', id: nextSessionId, updates: { ws: null } });
       lastPongAtRef.current.set(nextSessionId, Date.now());
 
       let completed = false;
@@ -1153,6 +1629,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       };
 
       ws.onopen = () => {
+        applyTransportDiagnostics(nextSessionId, ws);
         openSocketConnectHandshake({
           sessionId: nextSessionId,
           host: targetHost,
@@ -1179,6 +1656,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
       ws.onmessage = (event) => {
         try {
+          recordSessionRx(nextSessionId, event.data);
+          if (typeof event.data !== 'string') {
+            return;
+          }
           const msg: ServerMessage = JSON.parse(event.data);
           handleSocketServerMessage({
             sessionId: nextSessionId,
@@ -1199,7 +1680,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
                 sessionId: nextSessionId,
                 sessionName: connectedSessionName,
                 ws,
-                bootstrapReason: 'reconnect-open',
               });
               flushPendingInputQueue(nextSessionId);
               setTimeout(() => drainReconnectBucket(hostKey), POST_SUCCESS_NEXT_RETRY_DELAY_MS);
@@ -1211,10 +1691,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         }
       };
 
-      ws.onerror = () => finalizeFailure('WebSocket error', true);
-      ws.onclose = () => finalizeFailure('socket closed', true);
+      ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
+      ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
     }, delay);
-  }, [cleanupSocket, clearPendingTailRefreshAck, requestSessionBufferSync, resolveSessionCacheLines, wsUrl]);
+  }, [applyTransportDiagnostics, buildTraversalSocketForHost, cleanupSocket, recordSessionRx, requestSessionBufferSync, resolveSessionCacheLines, wsUrl]);
 
   const scheduleReconnect = useCallback((
     sessionId: string,
@@ -1269,38 +1749,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     drainReconnectBucket(hostKey);
   }, [drainReconnectBucket]);
 
-  const armTailRefreshAckWatchdog = useCallback((sessionId: string) => {
-    clearPendingTailRefreshAck(sessionId);
-    const nextNonce = (pendingTailRefreshAckNonceRef.current.get(sessionId) || 0) + 1;
-    pendingTailRefreshAckNonceRef.current.set(sessionId, nextNonce);
-    const timer = window.setTimeout(() => {
-      const currentNonce = pendingTailRefreshAckNonceRef.current.get(sessionId);
-      if (currentNonce !== nextNonce) {
-        return;
-      }
-
-      const currentSession = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-      const currentWs = wsRefs.current.get(sessionId);
-      const isStillActive = stateRef.current.activeSessionId === sessionId;
-      if (!currentSession || currentSession.state !== 'connected' || !currentWs || currentWs.readyState !== WebSocket.OPEN || !isStillActive) {
-        clearPendingTailRefreshAck(sessionId);
-        return;
-      }
-
-      runtimeDebug('session.buffer.tail-refresh.timeout', {
-        sessionId,
-        activeSessionId: stateRef.current.activeSessionId,
-        revision: currentSession.buffer.revision,
-        startIndex: currentSession.buffer.startIndex,
-        endIndex: currentSession.buffer.endIndex,
-      });
-      cleanupSocket(sessionId, true);
-      scheduleReconnect(sessionId, 'tail refresh timeout', true, { immediate: true, resetAttempt: true });
-    }, ACTIVE_TAIL_REFRESH_ACK_TIMEOUT_MS);
-    pendingTailRefreshAckTimersRef.current.set(sessionId, timer);
-  }, [clearPendingTailRefreshAck, cleanupSocket, scheduleReconnect]);
-  armTailRefreshAckWatchdogRef.current = armTailRefreshAckWatchdog;
-
   const connectSession = useCallback((sessionId: string, host: Host, activate: boolean) => {
     clearReconnectForSession(sessionId);
     cleanupSocket(sessionId, true);
@@ -1331,7 +1779,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       dispatch({ type: 'SET_ACTIVE_SESSION', id: sessionId });
     }
 
-    const ws = new WebSocket(buildBridgeUrl(host, wsUrl));
+    const ws = buildTraversalSocketForHost(host);
     runtimeDebug('session.ws.connect.opening', {
       sessionId,
       host: host.bridgeHost,
@@ -1340,7 +1788,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       activate,
     });
     wsRefs.current.set(sessionId, ws);
-    dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws } });
+    dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
     lastPongAtRef.current.set(sessionId, Date.now());
 
     let completed = false;
@@ -1364,6 +1812,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     };
 
     ws.onopen = () => {
+      applyTransportDiagnostics(sessionId, ws);
       openSocketConnectHandshake({
         sessionId,
         host,
@@ -1376,6 +1825,10 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     ws.onmessage = (event) => {
       try {
+        recordSessionRx(sessionId, event.data);
+        if (typeof event.data !== 'string') {
+          return;
+        }
         const msg: ServerMessage = JSON.parse(event.data);
         handleSocketServerMessage({
           sessionId,
@@ -1394,7 +1847,6 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
               sessionId,
               sessionName: connectedSessionName,
               ws,
-              bootstrapReason: 'connect-open',
             });
           },
           onFailure: finalizeFailure,
@@ -1404,13 +1856,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       }
     };
 
-    ws.onerror = () => finalizeFailure('WebSocket error', true);
-    ws.onclose = () => finalizeFailure('socket closed', true);
-  }, [armTailRefreshAckWatchdog, cleanupSocket, clearPendingTailRefreshAck, clearReconnectForSession, requestSessionBufferSync, resolveSessionCacheLines, scheduleReconnect, wsUrl]);
+    ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
+    ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+  }, [applyTransportDiagnostics, buildTraversalSocketForHost, cleanupSocket, clearReconnectForSession, recordSessionRx, requestSessionBufferSync, resolveSessionCacheLines, scheduleReconnect, wsUrl]);
 
   const createSession = useCallback((host: Host, options?: CreateSessionOptions): string => {
     const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const sessionName = getResolvedSessionName(host);
+    const initialViewport = getDefaultTerminalViewportSize();
+    const shouldConnect = options?.connect !== false;
     const session: Session = {
       id: sessionId,
       hostId: host.id,
@@ -1422,20 +1876,25 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       autoCommand: host.autoCommand,
       title: options?.customName?.trim() || sessionName,
       ws: null,
-      state: 'connecting',
+      state: shouldConnect ? 'connecting' : 'closed',
       hasUnread: false,
       customName: options?.customName?.trim() || undefined,
       buffer: options?.buffer || createSessionBufferState({
         lines: [],
-        cacheLines: resolveSessionCacheLines(getDefaultTerminalViewportSize().rows),
+        cols: initialViewport.cols,
+        rows: initialViewport.rows,
+        cacheLines: resolveSessionCacheLines(initialViewport.rows),
       }),
-      followResetToken: 0,
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: options?.createdAt || Date.now(),
     };
 
     dispatch({ type: 'CREATE_SESSION', session, activate: options?.activate !== false });
-    connectSession(sessionId, host, options?.activate !== false);
+    if (shouldConnect) {
+      connectSession(sessionId, host, options?.activate !== false);
+    }
     return sessionId;
   }, [connectSession, resolveSessionCacheLines]);
 
@@ -1446,11 +1905,22 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     const ws = wsRefs.current.get(id);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'close' }));
+      sendSocketPayload(id, ws, JSON.stringify({ type: 'close' }));
     }
     cleanupSocket(id, true);
     sessionHostRef.current.delete(id);
     viewportSizeRef.current.delete(id);
+    pendingInputTailRefreshRef.current.delete(id);
+    sessionWireStatsRef.current.delete(id);
+    sessionWireStatsPreviousRef.current.delete(id);
+    setSessionDebugMetrics((current) => {
+      if (!(id in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     setScheduleStates((current) => {
       if (!(id in current)) {
         return current;
@@ -1460,7 +1930,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return next;
     });
     dispatch({ type: 'DELETE_SESSION', id });
-  }, [cleanupSocket, clearReconnectForSession]);
+  }, [cleanupSocket, clearReconnectForSession, sendSocketPayload]);
 
   const switchSession = useCallback((id: string) => dispatch({ type: 'SET_ACTIVE_SESSION', id }), []);
 
@@ -1566,21 +2036,9 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   const sendMessage = useCallback((sessionId: string, msg: ClientMessage) => {
     const ws = wsRefs.current.get(sessionId);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
+      sendSocketPayload(sessionId, ws, JSON.stringify(msg));
     }
-  }, []);
-
-  const sendSessionStreamMode = useCallback((sessionId: string, mode: 'active' | 'idle', wsOverride?: WebSocket | null) => {
-    const ws = wsOverride || wsRefs.current.get(sessionId);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return false;
-    }
-    ws.send(JSON.stringify({
-      type: 'stream-mode',
-      payload: buildStreamModePayload(mode),
-    } satisfies ClientMessage));
-    return true;
-  }, []);
+  }, [sendSocketPayload]);
 
   const requestScheduleList = useCallback((sessionId: string) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
@@ -1635,23 +2093,56 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     sendMessage(sessionId, { type: 'schedule-run-now', payload: { jobId } });
   }, [sendMessage, setScheduleStateForSession]);
 
-  const handleBufferHead = useCallback((sessionId: string, latestRevision: number, latestEndIndex: number) => {
+  const handleBufferHead = useCallback((
+    sessionId: string,
+    latestRevision: number,
+    latestEndIndex: number,
+    availableStartIndex?: number,
+    availableEndIndex?: number,
+  ) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId);
     const ws = wsRefs.current.get(sessionId);
-    if (!session || session.state !== 'connected' || !ws || ws.readyState !== WebSocket.OPEN) {
+    if (
+      !session
+      || (session.state !== 'connected' && session.state !== 'connecting' && session.state !== 'reconnecting')
+      || !ws
+      || ws.readyState !== WebSocket.OPEN
+    ) {
       return;
     }
     sessionBufferHeadsRef.current.set(sessionId, {
       revision: latestRevision,
       latestEndIndex,
+      availableStartIndex: Number.isFinite(availableStartIndex) ? Math.max(0, Math.floor(availableStartIndex || 0)) : undefined,
+      availableEndIndex: Number.isFinite(availableEndIndex) ? Math.max(0, Math.floor(availableEndIndex || 0)) : undefined,
       seenAt: Date.now(),
     });
-    if (stateRef.current.activeSessionId !== sessionId) {
+    lastHeadRequestAtRef.current.delete(sessionId);
+    const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
+    const tailPullState = (sessionPullStateRef.current.get(sessionId) || null)?.['tail-refresh'] || null;
+    if (
+      session.daemonHeadRevision !== latestRevision
+      || session.daemonHeadEndIndex !== latestEndIndex
+    ) {
+      dispatch({
+        type: 'UPDATE_SESSION',
+        id: sessionId,
+        updates: {
+          daemonHeadRevision: latestRevision,
+          daemonHeadEndIndex: latestEndIndex,
+        },
+      });
+    }
+    if (tailPullState) {
+      return;
+    }
+    if (!isSessionTransportActive(sessionId)) {
       return;
     }
 
     const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
     const localEndIndex = Math.max(0, Math.floor(session.buffer.endIndex || 0));
+    const localWindowInvalid = hasImpossibleLocalWindow(session, liveHead);
     const revisionResetDetected = latestRevision < localRevision;
     if (revisionResetDetected) {
       sessionRevisionResetRef.current.set(sessionId, {
@@ -1671,51 +2162,110 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       sessionRevisionResetRef.current.delete(sessionId);
     }
 
-    if (!revisionResetDetected && localRevision >= latestRevision && localEndIndex >= latestEndIndex) {
-      pendingTailRefreshDemandRef.current.delete(sessionId);
-      return;
-    }
-
     runtimeDebug('session.buffer.head', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
       latestRevision,
       latestEndIndex,
+      availableStartIndex: liveHead?.availableStartIndex ?? null,
+      availableEndIndex: liveHead?.availableEndIndex ?? null,
       localRevision,
       localEndIndex,
+      localWindowInvalid,
       renderDemand: sessionRenderDemandRef.current.get(sessionId) || null,
     });
-    markTailRefreshDemand(sessionId, 'active-head-refresh');
-    requestActiveTailRefresh(sessionId, 'active-head-refresh');
-  }, [markTailRefreshDemand, requestActiveTailRefresh]);
+
+    let demandSession: Session = {
+      ...session,
+      daemonHeadRevision: latestRevision,
+      daemonHeadEndIndex: latestEndIndex,
+    };
+    if (localWindowInvalid && liveHead) {
+      const resetBuffer = buildDaemonAnchoredEmptyBuffer(
+        session,
+        liveHead,
+        resolveSessionCacheLines(session.buffer.rows),
+      );
+      demandSession = {
+        ...demandSession,
+        buffer: resetBuffer,
+      };
+      if (!sessionBuffersEqual(session.buffer, resetBuffer)) {
+        runtimeDebug('session.buffer.window.invalid', {
+          sessionId,
+          activeSessionId: stateRef.current.activeSessionId,
+          latestRevision,
+          latestEndIndex,
+          availableStartIndex: liveHead.availableStartIndex ?? null,
+          availableEndIndex: liveHead.availableEndIndex ?? null,
+          localStartIndex: session.buffer.startIndex,
+          localEndIndex: session.buffer.endIndex,
+          localBufferHeadStartIndex: session.buffer.bufferHeadStartIndex,
+          localBufferTailEndIndex: session.buffer.bufferTailEndIndex,
+        });
+        dispatch({
+          type: 'UPDATE_SESSION',
+          id: sessionId,
+          updates: { buffer: resetBuffer },
+        });
+      }
+    }
+    const renderDemand = sessionRenderDemandRef.current.get(sessionId) || buildFollowRenderDemandState(session);
+    const needsTailRefresh = revisionResetDetected || shouldPullFollowBuffer(demandSession, renderDemand, {
+      inputTailRefreshPending: pendingInputTailRefreshRef.current.has(sessionId),
+    });
+    if (needsTailRefresh) {
+      requestSessionBufferSync(sessionId, {
+        reason:
+          revisionResetDetected ? 'buffer-head-revision-reset'
+          : localWindowInvalid ? 'buffer-head-invalid-local-window'
+          : 'buffer-head-update',
+        purpose: 'tail-refresh',
+        sessionOverride: demandSession,
+      });
+      return;
+    }
+
+    if (renderDemand.mode !== 'reading') {
+      return;
+    }
+
+    const needsReadingRepair = shouldPullReadingBuffer(demandSession, renderDemand);
+    if (!needsReadingRepair) {
+      return;
+    }
+
+    requestSessionBufferSync(sessionId, {
+      reason: 'buffer-head-reading-repair',
+      purpose: 'reading-repair',
+      sessionOverride: demandSession,
+    });
+  }, [clearSessionPullState, isSessionTransportActive, requestSessionBufferSync, resolveSessionCacheLines]);
 
   const handleSocketServerMessage = useCallback((options: {
     sessionId: string;
     host: Host;
-    ws: WebSocket;
+    ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
   }, msg: ServerMessage) => {
+    const currentSession = stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
+    const shouldPromoteConnectedFromLiveBuffer =
+      Boolean(currentSession)
+      && currentSession!.state !== 'connected'
+      && (msg.type === 'buffer-sync' || msg.type === 'buffer-head');
+
     switch (msg.type) {
       case 'connected':
         options.onConnected();
         break;
       case 'buffer-sync':
-        clearPendingTailRefreshAck(options.sessionId);
-        {
-          const currentSession = stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
-          const localRevision = Math.max(0, Math.floor(currentSession?.buffer.revision || 0));
-          const localEndIndex = Math.max(0, Math.floor(currentSession?.buffer.endIndex || 0));
-          const incomingRevision = Math.max(0, Math.floor(msg.payload.revision || 0));
-          const incomingEndIndex = Math.max(0, Math.floor(msg.payload.endIndex || 0));
-          if (
-            incomingRevision > localRevision
-            || (incomingRevision === localRevision && incomingEndIndex > localEndIndex)
-          ) {
-            pendingTailRefreshDemandRef.current.delete(options.sessionId);
-          }
+        if (shouldPromoteConnectedFromLiveBuffer) {
+          options.onConnected();
         }
+        lastHeadRequestAtRef.current.delete(options.sessionId);
+        settleSessionPullState(options.sessionId, msg.payload);
         runtimeDebug(`session.ws.${options.debugScope}.buffer-sync`, {
           sessionId: options.sessionId,
           payload: summarizeBufferPayload(msg.payload),
@@ -1724,10 +2274,15 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         queueIncomingBufferSync(options.sessionId, normalizeIncomingBufferPayload(msg.payload));
         break;
       case 'buffer-head':
+        if (shouldPromoteConnectedFromLiveBuffer) {
+          options.onConnected();
+        }
         handleBufferHead(
           options.sessionId,
           Math.max(0, Math.floor(msg.payload.revision || 0)),
           Math.max(0, Math.floor(msg.payload.latestEndIndex || 0)),
+          Number.isFinite(msg.payload.availableStartIndex) ? Math.max(0, Math.floor(msg.payload.availableStartIndex || 0)) : undefined,
+          Number.isFinite(msg.payload.availableEndIndex) ? Math.max(0, Math.floor(msg.payload.availableEndIndex || 0)) : undefined,
         );
         break;
       case 'schedule-state':
@@ -1768,18 +2323,17 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       case 'sessions':
         break;
       case 'pong':
-        clearPendingTailRefreshAck(options.sessionId);
         lastPongAtRef.current.set(options.sessionId, Date.now());
         break;
     }
-  }, [clearPendingTailRefreshAck, handleBufferHead, queueIncomingBufferSync, setScheduleStateForSession]);
+  }, [handleBufferHead, queueIncomingBufferSync, setScheduleStateForSession, settleSessionPullState]);
 
   const handleSocketConnectedBaseline = useCallback((options: {
     sessionId: string;
     sessionName: string;
-    ws: WebSocket;
-    bootstrapReason: 'connect-open' | 'reconnect-open';
+    ws: BridgeTransportSocket;
   }) => {
+    applyTransportDiagnostics(options.sessionId, options.ws);
     dispatch({
       type: 'UPDATE_SESSION',
       id: options.sessionId,
@@ -1791,22 +2345,16 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       loading: true,
       error: undefined,
     }));
-    options.ws.send(JSON.stringify({
+    sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
       type: 'schedule-list',
       payload: { sessionName: options.sessionName },
     } satisfies ClientMessage));
-    const isActive = stateRef.current.activeSessionId === options.sessionId;
-    if (isActive) {
-      requestSessionBufferSync(options.sessionId, {
-        ws: options.ws,
-        reason: options.bootstrapReason,
-        purpose: 'tail-refresh',
-      });
-      options.ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
-      armTailRefreshAckWatchdogRef.current(options.sessionId);
+  const shouldLiveRefresh = isSessionTransportActive(options.sessionId);
+    if (shouldLiveRefresh) {
+      requestSessionBufferHead(options.sessionId, options.ws, { force: true });
     }
     dispatch({ type: 'INCREMENT_CONNECTED' });
-  }, [requestSessionBufferSync, setScheduleStateForSession]);
+  }, [applyTransportDiagnostics, isSessionTransportActive, requestSessionBufferHead, setScheduleStateForSession]);
 
   const finalizeSocketFailureBaseline = useCallback((options: {
     sessionId: string;
@@ -1834,82 +2382,38 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     };
   }, [cleanupSocket, setScheduleStateForSession]);
 
-  const resetSessionViewportToFollow = useCallback((sessionId: string) => {
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
-    const ws = wsRefs.current.get(sessionId);
-    if (!session || session.state !== 'connected' || !ws || ws.readyState !== WebSocket.OPEN) {
-      runtimeDebug('session.buffer.follow-reset.skip', {
+  const resumeActiveSessionTransport = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+    const ws = wsRefs.current.get(sessionId) || null;
+    const isActive = stateRef.current.activeSessionId === sessionId;
+    if (
+      !session
+      || session.state !== 'connected'
+      || !ws
+      || ws.readyState !== WebSocket.OPEN
+      || !isActive
+    ) {
+      runtimeDebug('session.transport.resume-active.skip', {
         sessionId,
         activeSessionId: stateRef.current.activeSessionId,
         hasSession: Boolean(session),
         sessionState: session?.state ?? null,
         wsReadyState: ws?.readyState ?? null,
+        isActive,
       });
       return false;
     }
 
-    const followRenderDemand = buildFollowRenderDemandState(
-      session,
-      sessionRenderDemandRef.current.get(sessionId),
-    );
-    sessionRenderDemandRef.current.set(sessionId, followRenderDemand);
-
-    const isActive = stateRef.current.activeSessionId === sessionId;
-    clearQueuedBufferSync(sessionId);
-    runtimeDebug('session.buffer.follow-reset', {
+    runtimeDebug('session.transport.resume-active', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
-      viewportRows: followRenderDemand.viewportRows,
-      isActive,
       localRevision: session.buffer.revision,
       localStartIndex: session.buffer.startIndex,
       localEndIndex: session.buffer.endIndex,
     });
-    if (isActive) {
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: {
-          followResetToken: (session.followResetToken || 0) + 1,
-        },
-      });
-      requestSessionBufferSync(sessionId, {
-        ws,
-        reason: 'follow-reset',
-        purpose: 'tail-refresh',
-      });
-      ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
-      armTailRefreshAckWatchdog(sessionId);
-    }
+    requestSessionBufferHead(sessionId, ws, { force: true });
     return true;
-  }, [armTailRefreshAckWatchdog, clearQueuedBufferSync, requestSessionBufferSync]);
-
-  const scheduleReadingRepairRequest = useCallback((sessionId: string, options?: {
-    delayMs?: number;
-    reason?: string;
-  }) => {
-    clearQueuedBufferSync(sessionId);
-    const timer = window.setTimeout(() => {
-      queuedBufferSyncTimers.current.delete(sessionId);
-      requestSessionBufferSync(sessionId, {
-        reason: options?.reason || 'scheduled-reading-sync',
-        purpose: 'reading-repair',
-      });
-    }, Math.max(0, options?.delayMs ?? 0));
-    queuedBufferSyncTimers.current.set(sessionId, timer);
-  }, [clearQueuedBufferSync, requestSessionBufferSync]);
-
-  const applyActiveSessionRenderDemand = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
-    if (renderDemand.mode === 'reading') {
-      const cadence = resolveTerminalRefreshCadence();
-      scheduleReadingRepairRequest(sessionId, {
-        delayMs: cadence.readingSyncDelayMs,
-        reason: 'scheduled-reading-sync',
-      });
-      return;
-    }
-    clearQueuedBufferSync(sessionId);
-  }, [clearQueuedBufferSync, scheduleReadingRepairRequest]);
+  }, [requestSessionBufferHead]);
 
   const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
     const normalized = normalizeSessionRenderDemandState(renderDemand);
@@ -1918,60 +2422,19 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return;
     }
     sessionRenderDemandRef.current.set(sessionId, normalized);
-    if (stateRef.current.activeSessionId !== sessionId) {
+    if (!isSessionTransportActive(sessionId) || normalized.mode !== 'reading') {
       return;
     }
-    applyActiveSessionRenderDemand(sessionId, normalized);
-  }, [applyActiveSessionRenderDemand]);
-
-  useEffect(() => {
-    const signature = JSON.stringify({
-      activeSessionId: state.activeSessionId,
-      sessionIds: state.sessions.map((session) => session.id),
-    });
-    if (lastStreamModeSignatureRef.current === signature) {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+    if (!session || !shouldPullReadingBuffer(session, normalized)) {
       return;
     }
-    lastStreamModeSignatureRef.current = signature;
-    for (const session of state.sessions) {
-      sendSessionStreamMode(
-        session.id,
-        state.activeSessionId === session.id ? 'active' : 'idle',
-      );
-    }
-  }, [sendSessionStreamMode, state.activeSessionId, state.sessions]);
-
-  const exitReadingOnUserInput = useCallback((sessionId: string, session: Session) => {
-    if (stateRef.current.activeSessionId !== sessionId) {
-      return false;
-    }
-
-    const previousRenderDemand = sessionRenderDemandRef.current.get(sessionId);
-    if (!previousRenderDemand || previousRenderDemand.mode !== 'reading') {
-      return false;
-    }
-
-    const followRenderDemand = buildFollowRenderDemandState(session, previousRenderDemand);
-    sessionRenderDemandRef.current.set(sessionId, followRenderDemand);
-    clearQueuedBufferSync(sessionId);
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id: sessionId,
-      updates: {
-        followResetToken: (session.followResetToken || 0) + 1,
-      },
+    requestSessionBufferSync(sessionId, {
+      reason: 'viewport-reading-demand',
+      purpose: 'reading-repair',
+      sessionOverride: session,
     });
-    runtimeDebug('session.buffer.input-follow-reset', {
-      sessionId,
-      activeSessionId: stateRef.current.activeSessionId,
-      previousRenderDemand,
-      nextRenderDemand: followRenderDemand,
-      localRevision: session.buffer.revision,
-      localStartIndex: session.buffer.startIndex,
-      localEndIndex: session.buffer.endIndex,
-    });
-    return true;
-  }, [clearQueuedBufferSync]);
+  }, [isSessionTransportActive, requestSessionBufferSync]);
 
   useEffect(() => {
     if (!state.activeSessionId) {
@@ -1982,23 +2445,21 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return;
     }
     lastActivatedSessionIdRef.current = state.activeSessionId;
-    const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
-    if (activeSession) {
-      sessionRenderDemandRef.current.set(
-        state.activeSessionId,
-        buildFollowRenderDemandState(activeSession, sessionRenderDemandRef.current.get(state.activeSessionId)),
-      );
-    }
-    const currentActiveSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
-    if (currentActiveSession?.state === 'connected') {
-      resetSessionViewportToFollow(state.activeSessionId);
+    const activeSessionId = state.activeSessionId;
+    const activeSession = state.sessions.find((item) => item.id === activeSessionId) || null;
+    const ws = wsRefs.current.get(activeSessionId) || null;
+    if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
       return;
     }
-    scheduleReadingRepairRequest(state.activeSessionId, {
-      delayMs: 0,
-      reason: 'active-session-sync',
-    });
-  }, [resetSessionViewportToFollow, scheduleReadingRepairRequest, state.activeSessionId, state.sessions]);
+    if (
+      activeSession
+      && activeSession.state !== 'connecting'
+      && activeSession.state !== 'reconnecting'
+      && (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED)
+    ) {
+      reconnectSession(activeSessionId);
+    }
+  }, [reconnectSession, requestSessionBufferHead, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2007,11 +2468,16 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       return;
     }
 
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
     pendingInputQueueRef.current.delete(sessionId);
     for (const payload of queued) {
-      ws.send(JSON.stringify({ type: 'input', payload }));
+      sendSocketPayload(sessionId, ws, JSON.stringify({ type: 'input', payload }));
     }
-  }, []);
+    if (session) {
+      markPendingInputTailRefresh(sessionId, session.buffer.revision);
+    }
+    requestSessionBufferHead(sessionId, ws, { force: true });
+  }, [markPendingInputTailRefresh, requestSessionBufferHead, sendSocketPayload]);
 
   const enqueuePendingInput = useCallback((sessionId: string, payload: string) => {
     const current = pendingInputQueueRef.current.get(sessionId) || [];
@@ -2031,64 +2497,21 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       if (!activeSessionId) {
         return;
       }
-
       const session = stateRef.current.sessions.find((item) => item.id === activeSessionId) || null;
       const ws = wsRefs.current.get(activeSessionId) || null;
       if (
         !session
-        || session.state !== 'connected'
         || !ws
         || ws.readyState !== WebSocket.OPEN
       ) {
         return;
       }
 
-      const headState = sessionBufferHeadsRef.current.get(activeSessionId) || null;
-      const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
-      const localEndIndex = Math.max(0, Math.floor(session.buffer.endIndex || 0));
-      const now = Date.now();
-      const rawPendingDemand = pendingTailRefreshDemandRef.current.get(activeSessionId) || null;
-      const pendingDemand =
-        rawPendingDemand && rawPendingDemand.expireAt && rawPendingDemand.expireAt <= now
-          ? (pendingTailRefreshDemandRef.current.delete(activeSessionId), null)
-          : rawPendingDemand;
-      const headAhead = Boolean(
-        headState
-        && (headState.revision > localRevision || headState.latestEndIndex > localEndIndex),
-      );
-
-      if (pendingDemand || headAhead) {
-        requestActiveTailRefresh(
-          activeSessionId,
-          pendingDemand?.reason || 'active-head-refresh',
-        );
-        return;
-      }
-
-      if (!headState) {
-        return;
-      }
-
-      const cadence = resolveTerminalRefreshCadence();
-      const lastPingAt = lastHeadStalePingAtRef.current.get(activeSessionId) || 0;
-      if (now - headState.seenAt < cadence.headStalePingMs || now - lastPingAt < cadence.headStalePingMs) {
-        return;
-      }
-
-      runtimeDebug('session.buffer.head-stale-ping', {
-        sessionId: activeSessionId,
-        activeSessionId: stateRef.current.activeSessionId,
-        headSeenAt: headState.seenAt,
-        localRevision,
-        localEndIndex,
-        cadence,
-      });
-      lastHeadStalePingAtRef.current.set(activeSessionId, now);
-      ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
+      requestSessionBufferHead(activeSessionId, ws);
     }, ACTIVE_HEAD_REFRESH_TICK_MS);
 
     return () => window.clearInterval(timer);
-  }, [requestActiveTailRefresh]);
+  }, [requestSessionBufferHead]);
 
   const sendInput = useCallback((sessionId: string, data: string) => {
     const targetSessionId = sessionId.trim();
@@ -2117,22 +2540,28 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         size: data.length,
         preview: data.slice(0, 32),
       });
-      ws.send(JSON.stringify({ type: 'input', payload: data }));
-      if (stateRef.current.activeSessionId === targetSessionId && session.state === 'connected') {
-        const forcedFollow = exitReadingOnUserInput(targetSessionId, session);
-        markTailRefreshDemand(targetSessionId, 'input-tail-refresh', 420);
-        requestActiveTailRefresh(targetSessionId, forcedFollow ? 'input-follow-reset' : 'input-tail-refresh');
-      }
+      markPendingInputTailRefresh(targetSessionId, session.buffer.revision);
+      sendSocketPayload(targetSessionId, ws, JSON.stringify({ type: 'input', payload: data }));
+      requestSessionBufferHead(targetSessionId, ws, { force: true });
       return;
     }
 
+    const pendingBefore = pendingInputQueueRef.current.get(targetSessionId)?.length || 0;
     runtimeDebug('session.input.queue', {
       sessionId: targetSessionId,
       size: data.length,
       preview: data.slice(0, 32),
     });
     enqueuePendingInput(targetSessionId, data);
-  }, [enqueuePendingInput, exitReadingOnUserInput, markTailRefreshDemand, requestActiveTailRefresh]);
+    const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
+    const shouldForceReconnect =
+      isActiveTarget
+      && pendingBefore === 0
+      && (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED);
+    if (shouldForceReconnect) {
+      reconnectSession(targetSessionId);
+    }
+  }, [enqueuePendingInput, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {
@@ -2192,12 +2621,12 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
       pasteSequence: '\x16',
     };
 
-    ws.send(JSON.stringify({
+    sendSocketPayload(targetSessionId, ws, JSON.stringify({
       type: 'paste-image-start',
       payload,
     } satisfies ClientMessage));
-    ws.send(fileBuffer);
-  }, [ensureSessionReadyForPaste, sendMessage]);
+    sendSocketPayload(targetSessionId, ws, fileBuffer);
+  }, [ensureSessionReadyForPaste, sendSocketPayload]);
 
   const resizeTerminal = useCallback((sessionId: string, cols: number, rows: number) => {
     const targetSessionId = sessionId.trim();
@@ -2226,25 +2655,27 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
   }, []);
 
   useEffect(() => () => {
-    for (const timer of queuedBufferSyncTimers.current.values()) {
-      window.clearTimeout(timer);
-    }
     for (const timer of pingIntervals.current.values()) {
       clearInterval(timer);
+    }
+    for (const timer of pendingIncomingBufferTimersRef.current.values()) {
+      window.clearTimeout(timer);
     }
     for (const bucket of reconnectBucketsRef.current.values()) {
       if (bucket.timer) {
         clearTimeout(bucket.timer);
       }
     }
-    for (const ws of wsRefs.current.values()) {
-      ws.close();
+    for (const session of stateRef.current.sessions) {
+      manualCloseRef.current.add(session.id);
+      cleanupSocket(session.id, true);
     }
-  }, []);
+  }, [cleanupSocket]);
 
   const value: SessionContextValue = {
     state,
     scheduleStates,
+    sessionDebugMetrics,
     createSession,
     closeSession,
     switchSession,
@@ -2252,7 +2683,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
     renameSession,
     reconnectSession,
     reconnectAllSessions,
-    resetSessionViewportToFollow,
+    resumeActiveSessionTransport,
     sendMessage,
     sendInput,
     sendImagePaste,

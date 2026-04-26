@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { LOCAL_TMUX_EVENT } from './local-tmux.js';
 
-type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; viewportEndIndex: number; viewportRows: number; mode: 'follow' | 'reading'; prefetch?: boolean; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
-type LocalTerminalBufferPayload = { revision: number; startIndex: number; endIndex: number; viewportEndIndex: number; cols: number; rows: number; cursorKeysApp: boolean; lines: Array<{ index: number; cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> }> };
+type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
+type LocalTerminalBufferPayload = { revision: number; startIndex: number; endIndex: number; availableStartIndex?: number; availableEndIndex?: number; cols: number; rows: number; cursorKeysApp: boolean; lines: Array<{ index: number; cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> }> };
 
 contextBridge.exposeInMainWorld('ztermMac', {
   platform: 'mac',
@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('ztermMac', {
       ipcRenderer.invoke('zterm:local-tmux:set-activity-mode', { clientId, mode }) as Promise<void>,
     resize: (clientId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('zterm:local-tmux:resize', { clientId, cols, rows }) as Promise<void>,
+    requestBufferHead: (clientId: string) =>
+      ipcRenderer.invoke('zterm:local-tmux:buffer-head-request', { clientId }) as Promise<{ sessionId: string; revision: number; latestEndIndex: number; availableStartIndex?: number; availableEndIndex?: number } | null>,
     requestBufferSync: (clientId: string, request: LocalBufferSyncRequestPayload) =>
       ipcRenderer.invoke('zterm:local-tmux:buffer-sync-request', { clientId, request }) as Promise<LocalTerminalBufferPayload | null>,
     subscribe: (

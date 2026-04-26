@@ -16,6 +16,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync, writ
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { basename, extname, join, resolve } from 'path';
 import { homedir } from 'os';
+import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
 import type {
   BufferHeadPayload,
   BufferSyncRequestPayload,
@@ -27,7 +28,6 @@ import type {
   ScheduleStatePayload,
   TerminalBufferPayload,
   TerminalCell,
-  TerminalIndexedLine,
 } from '../lib/types';
 import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
 import {
@@ -35,22 +35,20 @@ import {
   DEFAULT_BRIDGE_PORT,
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_SESSION_NAME,
-  resolveTerminalCacheLines,
   WTERM_CONFIG_DISPLAY_PATH,
 } from '../lib/mobile-config';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
+import { createTraversalRelayHostClient } from './relay-client';
 import {
-  findChangedIndexedRange,
+  findChangedIndexedRanges,
   normalizeCapturedLineBlock,
   paintCursorIntoViewport,
   resolveCanonicalAvailableLineCount,
-  resolveFollowTailSyncPlan,
-  resolveReadingMissingRanges,
-  resolveReadingWindow,
-  sliceIndexedLines,
   trimTrailingDefaultCells,
   trimCanonicalBufferWindow,
 } from './canonical-buffer';
+import { buildBufferHeadPayload, buildRequestedRangeBufferPayload } from './buffer-sync-contract';
+import { closeMirrorSubscribers, detachMirrorSubscriber } from './mirror-lifecycle';
 import { dispatchScheduledJob } from './schedule-dispatch';
 import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug-store';
 import { ScheduleEngine } from './schedule-engine';
@@ -66,14 +64,17 @@ interface TmuxConnectPayload {
   autoCommand?: string;
 }
 
-interface StreamModePayload {
-  mode: 'active' | 'idle';
-  minCaptureIntervalMs?: number;
+interface ClientSessionTransport {
+  kind: 'ws' | 'rtc';
+  readyState: number;
+  sendText: (text: string) => void;
+  close: (reason?: string) => void;
+  ping?: () => void;
 }
 
 interface ClientSession {
   id: string;
-  ws: WebSocket;
+  transport: ClientSessionTransport;
   requestOrigin: string;
   state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   title: string;
@@ -82,10 +83,6 @@ interface ClientSession {
   cols: number;
   rows: number;
   wsAlive: boolean;
-  streamMode: 'active' | 'idle';
-  streamModeExplicit: boolean;
-  minCaptureIntervalMs: number;
-  lastDemandAt: number;
   pendingPasteImage: PasteImageStartPayload | null;
 }
 
@@ -100,21 +97,14 @@ interface SessionMirror {
   rows: number;
   cursorKeysApp: boolean;
   revision: number;
-  lastDeltaFromRevision: number;
-  lastDeltaToRevision: number;
-  lastDeltaRange: { startIndex: number; endIndex: number } | null;
   lastScrollbackCount: number;
   bufferStartIndex: number;
   bufferLines: TerminalCell[][];
-  scheduledCaptureAt: number | null;
   lastFlushStartedAt: number;
   lastFlushCompletedAt: number;
-  flushTimer: ReturnType<typeof setTimeout> | null;
   flushInFlight: boolean;
-  flushRequestedWhileBusy: boolean;
-  flushRequestedImmediate: boolean;
-  destroyTimer: ReturnType<typeof setTimeout> | null;
-  orphanedAt: number | null;
+  flushPromise: Promise<boolean> | null;
+  liveSyncTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;
 }
 
@@ -135,7 +125,7 @@ interface TmuxCursorState {
 
 type ClientMessage =
   | { type: 'connect'; payload: TmuxConnectPayload }
-  | { type: 'stream-mode'; payload: StreamModePayload }
+  | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }
@@ -205,11 +195,6 @@ const DAEMON_SESSION_NAME = DAEMON_CONFIG.sessionName || buildDaemonSessionName(
 const HIDDEN_TMUX_SESSIONS = new Set([DAEMON_SESSION_NAME, DEFAULT_DAEMON_SESSION_NAME]);
 const AUTO_COMMAND_DELAY_MS = 180;
 const REQUIRED_AUTH_TOKEN = DAEMON_CONFIG.authToken;
-const MIRROR_CAPTURE_DEBOUNCE_MS = 16;
-const ACTIVE_CAPTURE_MIN_INTERVAL_MS = 33;
-const ACTIVE_CAPTURE_MAX_INTERVAL_MS = 1000;
-const DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS = ACTIVE_CAPTURE_MIN_INTERVAL_MS;
-const IDLE_CAPTURE_INTERVAL_MS = 1000;
 const MAX_CAPTURED_SCROLLBACK_LINES = DAEMON_CONFIG.terminalCacheLines;
 const WTERM_HOME_DIR = getWtermHomeDir(homedir());
 const UPDATES_DIR = getWtermUpdatesDir(homedir());
@@ -220,7 +205,6 @@ const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || ''
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
 const WS_HEARTBEAT_INTERVAL_MS = 30000;
 const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
-const ORPHAN_MIRROR_TTL_MS = 2 * 60 * 1000;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
 const MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
 const MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS = 900;
@@ -232,7 +216,6 @@ const sessions = new Map<string, ClientSession>();
 const mirrors = new Map<string, SessionMirror>();
 const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
-let legacyActiveSessionId: string | null = null;
 
 function resolveMirrorCacheLines(rows: number) {
   const viewportRows = Math.max(1, Math.floor(rows || 1));
@@ -240,33 +223,6 @@ function resolveMirrorCacheLines(rows: number) {
     return viewportRows;
   }
   return Math.max(viewportRows, Math.floor(MAX_CAPTURED_SCROLLBACK_LINES));
-}
-
-function resolveWireFollowCacheLines(rows: number) {
-  return Math.max(1, resolveTerminalCacheLines(rows));
-}
-
-function normalizeActiveCaptureIntervalMs(value?: number) {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS;
-  }
-  return Math.max(
-    ACTIVE_CAPTURE_MIN_INTERVAL_MS,
-    Math.min(ACTIVE_CAPTURE_MAX_INTERVAL_MS, Math.floor(value || DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS)),
-  );
-}
-
-function normalizeStreamModePayload(payload?: StreamModePayload): {
-  mode: 'active' | 'idle';
-  minCaptureIntervalMs: number;
-} {
-  const mode = payload?.mode === 'idle' ? 'idle' : 'active';
-  return {
-    mode,
-    minCaptureIntervalMs: mode === 'active'
-      ? normalizeActiveCaptureIntervalMs(payload?.minCaptureIntervalMs)
-      : IDLE_CAPTURE_INTERVAL_MS,
-  };
 }
 
 function daemonRuntimeDebug(scope: string, payload?: unknown) {
@@ -340,7 +296,6 @@ function summarizePayload(message: ServerMessage) {
     revision: payload.revision,
     startIndex: payload.startIndex,
     endIndex: payload.endIndex,
-    viewportEndIndex: payload.viewportEndIndex,
     rows: payload.rows,
     cols: payload.cols,
     lineCount: payload.lines.length,
@@ -381,15 +336,54 @@ function getMirrorKey(sessionName: string) {
 }
 
 function normalizeViewportCols(cols: number | undefined) {
-  return Math.max(1, Math.floor(cols || 80));
+  if (!Number.isFinite(cols) || cols! <= 0) {
+    throw new Error('viewport cols must be a finite positive number');
+  }
+  return Math.max(1, Math.floor(cols!));
 }
 
 function normalizeViewportRows(rows: number | undefined) {
-  return Math.max(1, Math.floor(rows || 24));
+  if (!Number.isFinite(rows) || rows! <= 0) {
+    throw new Error('viewport rows must be a finite positive number');
+  }
+  return Math.max(1, Math.floor(rows!));
+}
+
+function createWebSocketSessionTransport(ws: WebSocket): ClientSessionTransport {
+  return {
+    kind: 'ws',
+    get readyState() {
+      return ws.readyState;
+    },
+    sendText(text: string) {
+      ws.send(text);
+    },
+    close(reason?: string) {
+      ws.close(1000, reason);
+    },
+    ping() {
+      ws.ping();
+    },
+  };
+}
+
+function createRtcSessionTransport(transport: RtcServerTransport): ClientSessionTransport {
+  return {
+    kind: 'rtc',
+    get readyState() {
+      return transport.readyState;
+    },
+    sendText(text: string) {
+      transport.sendText(text);
+    },
+    close(reason?: string) {
+      transport.close(reason);
+    },
+  };
 }
 
 function sendMessage(session: ClientSession, message: ServerMessage) {
-  if (session.ws.readyState === WebSocket.OPEN) {
+  if (session.transport.readyState === WebSocket.OPEN) {
     if (message.type === 'buffer-sync' || message.type === 'connected') {
       daemonRuntimeDebug('send', {
         sessionId: session.id,
@@ -398,7 +392,7 @@ function sendMessage(session: ClientSession, message: ServerMessage) {
         payload: summarizePayload(message),
       });
     }
-    session.ws.send(JSON.stringify(message));
+    session.transport.sendText(JSON.stringify(message));
   }
 }
 
@@ -474,7 +468,6 @@ function writeToLiveMirror(sessionName: string, payload: string) {
     return false;
   }
   mirror.ptyProcess.write(payload);
-  scheduleMirrorCapture(mirror);
   return true;
 }
 
@@ -601,7 +594,6 @@ function buildRuntimeHealthSnapshot(request: IncomingMessage) {
     mirrors: {
       total: mirrorEntries.length,
       connected: mirrorEntries.filter((mirror) => mirror.state === 'connected').length,
-      orphaned: mirrorEntries.filter((mirror) => mirror.subscribers.size === 0).length,
       subscribers: mirrorEntries.reduce((sum, mirror) => sum + mirror.subscribers.size, 0),
     },
   };
@@ -653,13 +645,9 @@ function buildDebugRuntimeSnapshot(request: IncomingMessage) {
       cols: session.cols,
       rows: session.rows,
       wsAlive: session.wsAlive,
-      streamMode: session.streamMode,
-      minCaptureIntervalMs: session.minCaptureIntervalMs,
-      lastDemandAt: session.lastDemandAt,
       requestOrigin: session.requestOrigin,
     })),
     mirrors: mirrorEntries.map((mirror) => ({
-      captureState: resolveMirrorCaptureState(mirror),
       key: mirror.key,
       sessionName: mirror.sessionName,
       state: mirror.state,
@@ -673,10 +661,9 @@ function buildDebugRuntimeSnapshot(request: IncomingMessage) {
       bufferedLines: mirror.bufferLines.length,
       cursorKeysApp: mirror.cursorKeysApp,
       subscribers: Array.from(mirror.subscribers),
-      scheduledCaptureAt: mirror.scheduledCaptureAt,
       lastFlushStartedAt: mirror.lastFlushStartedAt,
       lastFlushCompletedAt: mirror.lastFlushCompletedAt,
-      orphanedAt: mirror.orphanedAt,
+      flushInFlight: mirror.flushInFlight,
     })),
   };
 }
@@ -833,8 +820,8 @@ function runCommand(command: string, args: string[]) {
 }
 
 function sanitizeUploadFileName(input?: string) {
-  const fallback = `upload-${Date.now()}`;
-  const candidate = (input || fallback).trim() || fallback;
+  const generatedName = `upload-${Date.now()}`;
+  const candidate = (input || generatedName).trim() || generatedName;
   return candidate.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
@@ -894,6 +881,14 @@ function persistClipboardImage(payload: PasteImagePayload) {
   );
 }
 
+function logCleanupFailure(scope: string, filePath: string, error: unknown) {
+  console.warn(
+    `[${new Date().toISOString()}] ${scope} cleanup failed for ${filePath}: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+}
+
 function listTmuxSessions() {
   const result = runTmux(['list-sessions', '-F', '#S']);
 
@@ -907,7 +902,12 @@ function readTmuxStatusLineCount() {
   try {
     const result = runTmux(['display-message', '-p', '#{?status,1,0}']);
     return result.stdout.trim() === '1' ? 1 : 0;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[${new Date().toISOString()}] failed to read tmux status line count; defaulting to 0: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return 0;
   }
 }
@@ -919,12 +919,17 @@ function resolveRequestedTmuxRows(contentRows: number) {
 
 function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
   const result = runTmux(['display-message', '-p', '-t', sessionName, '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}']);
-  const [paneIdRaw = '', historyRaw = '0', rowsRaw = '24', colsRaw = '80', alternateOnRaw = '0'] = result.stdout.trim().split('\t');
+  const [paneIdRaw, historyRaw, rowsRaw, colsRaw, alternateOnRaw] = result.stdout.trim().split('\t');
+  const paneRows = Number.parseInt(rowsRaw ?? '', 10);
+  const paneCols = Number.parseInt(colsRaw ?? '', 10);
+  if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
+    throw new Error(`tmux returned invalid pane metrics for ${sessionName}: rows=${rowsRaw ?? ''} cols=${colsRaw ?? ''}`);
+  }
   return {
-    paneId: paneIdRaw.trim() || sessionName,
-    historySize: Math.max(0, Number.parseInt(historyRaw, 10) || 0),
-    paneRows: Math.max(1, Number.parseInt(rowsRaw, 10) || 24),
-    paneCols: Math.max(1, Number.parseInt(colsRaw, 10) || 80),
+    paneId: paneIdRaw?.trim() || sessionName,
+    historySize: Math.max(0, Number.parseInt(historyRaw ?? '', 10) || 0),
+    paneRows,
+    paneCols,
     alternateOn: alternateOnRaw === '1',
   };
 }
@@ -1068,47 +1073,10 @@ function renameTmuxSession(currentName?: string, nextName?: string) {
   return nextSessionName;
 }
 
-function clearMirrorFlushTimer(mirror: SessionMirror) {
-  if (mirror.flushTimer) {
-    clearTimeout(mirror.flushTimer);
-    mirror.flushTimer = null;
-  }
-  mirror.scheduledCaptureAt = null;
-}
-
-function clearMirrorDestroyTimer(mirror: SessionMirror) {
-  if (mirror.destroyTimer) {
-    clearTimeout(mirror.destroyTimer);
-    mirror.destroyTimer = null;
-  }
-}
-
-function scheduleMirrorDestroyIfOrphaned(mirror: SessionMirror, reason: string) {
-  if (mirror.state === 'closed' || mirror.subscribers.size > 0) {
-    clearMirrorDestroyTimer(mirror);
-    mirror.orphanedAt = mirror.subscribers.size > 0 ? null : mirror.orphanedAt;
-    return;
-  }
-
-  mirror.orphanedAt = Date.now();
-  clearMirrorDestroyTimer(mirror);
-  mirror.destroyTimer = setTimeout(() => {
-    mirror.destroyTimer = null;
-    if (mirror.state === 'closed' || mirror.subscribers.size > 0) {
-      if (mirror.subscribers.size > 0) {
-        mirror.orphanedAt = null;
-      }
-      return;
-    }
-    destroyMirror(mirror, reason, false);
-  }, ORPHAN_MIRROR_TTL_MS);
-  mirror.destroyTimer.unref?.();
-}
-
-function createClientSession(ws: WebSocket, requestOrigin: string): ClientSession {
+function createClientSession(transport: ClientSessionTransport, requestOrigin: string): ClientSession {
   const session: ClientSession = {
     id: uuidv4(),
-    ws,
+    transport,
     requestOrigin,
     state: 'idle',
     title: 'Terminal',
@@ -1117,10 +1085,6 @@ function createClientSession(ws: WebSocket, requestOrigin: string): ClientSessio
     cols: 80,
     rows: 24,
     wsAlive: true,
-    streamMode: 'idle',
-    streamModeExplicit: false,
-    minCaptureIntervalMs: IDLE_CAPTURE_INTERVAL_MS,
-    lastDemandAt: 0,
     pendingPasteImage: null,
   };
   sessions.set(session.id, session);
@@ -1131,18 +1095,26 @@ function normalizeBufferSyncRequestPayload(
   session: ClientSession,
   request: BufferSyncRequestPayload,
 ): BufferSyncRequestPayload {
-  const localStartIndex = Math.max(0, Math.floor(request.localStartIndex || 0));
-  const mirror = getClientMirror(session);
-  const fallbackRows = mirror?.rows || session.rows || 24;
-  const fallbackEndIndex = mirror ? getMirrorAvailableEndIndex(mirror) : 0;
+  const localStartIndex = Number.isFinite(request.localStartIndex)
+    ? Math.max(0, Math.floor(request.localStartIndex))
+    : 0;
+  if (!Number.isFinite(request.requestStartIndex) || !Number.isFinite(request.requestEndIndex)) {
+    throw new Error(`buffer-sync-request missing request window for session ${session.id}`);
+  }
+  const requestStartIndex = Math.max(0, Math.floor(request.requestStartIndex));
+  const requestEndIndex = Math.max(0, Math.floor(request.requestEndIndex));
 
   return {
-    knownRevision: Math.max(0, Math.floor(request.knownRevision || 0)),
+    knownRevision: Number.isFinite(request.knownRevision)
+      ? Math.max(0, Math.floor(request.knownRevision))
+      : 0,
     localStartIndex,
-    localEndIndex: Math.max(localStartIndex, Math.floor(request.localEndIndex || localStartIndex)),
-    viewportEndIndex: Math.max(0, Math.floor(request.viewportEndIndex || fallbackEndIndex)),
-    viewportRows: Math.max(1, Math.floor(request.viewportRows || fallbackRows)),
-    mode: request.mode === 'reading' ? 'reading' : 'follow',
+    localEndIndex: Number.isFinite(request.localEndIndex)
+      ? Math.max(localStartIndex, Math.floor(request.localEndIndex))
+      : localStartIndex,
+    requestStartIndex,
+    requestEndIndex: Math.max(requestStartIndex, requestEndIndex),
+    missingRanges: request.missingRanges,
   };
 }
 
@@ -1159,21 +1131,14 @@ function createMirror(sessionName: string): SessionMirror {
     rows: 24,
     cursorKeysApp: false,
     revision: 0,
-    lastDeltaFromRevision: 0,
-    lastDeltaToRevision: 0,
-    lastDeltaRange: null,
     lastScrollbackCount: -1,
     bufferStartIndex: 0,
     bufferLines: [],
-    scheduledCaptureAt: null,
     lastFlushStartedAt: 0,
     lastFlushCompletedAt: 0,
-    flushTimer: null,
     flushInFlight: false,
-    flushRequestedWhileBusy: false,
-    flushRequestedImmediate: false,
-    destroyTimer: null,
-    orphanedAt: null,
+    flushPromise: null,
+    liveSyncTimer: null,
     subscribers: new Set(),
   };
   mirrors.set(key, mirror);
@@ -1194,8 +1159,9 @@ function detachClientSession(session: ClientSession, reason: string, notifyClien
 
   const mirror = getClientMirror(session);
   if (mirror) {
-    mirror.subscribers.delete(session.id);
-    if (mirror.subscribers.size > 0) {
+    const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
+    mirror.subscribers = detachResult.nextSubscribers;
+    if (detachResult.shouldReconcileGeometry) {
       void reconcileMirrorGeometry(mirror).catch((error) => {
         console.error(
           `[${new Date().toISOString()}] failed to reconcile mirror geometry after detach for ${mirror.sessionName}: ${
@@ -1203,16 +1169,11 @@ function detachClientSession(session: ClientSession, reason: string, notifyClien
           }`,
         );
       });
-      scheduleMirrorCapture(mirror);
     }
-    scheduleMirrorDestroyIfOrphaned(mirror, 'orphaned mirror reaped after client disconnect');
   }
 
   session.mirrorKey = null;
   session.state = 'closed';
-  if (legacyActiveSessionId === session.id) {
-    legacyActiveSessionId = null;
-  }
 
   if (notifyClient) {
     sendMessage(session, { type: 'closed', payload: { reason } });
@@ -1227,8 +1188,6 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
   }
 
   mirror.state = 'closed';
-  clearMirrorFlushTimer(mirror);
-  clearMirrorDestroyTimer(mirror);
 
   if (mirror.ptyProcess) {
     try {
@@ -1251,18 +1210,20 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
     }
   }
 
+  closeMirrorSubscribers(sessions, mirror.subscribers);
   mirror.subscribers.clear();
   mirror.scratchBridge = null;
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
-  mirror.scheduledCaptureAt = null;
   mirror.lastFlushStartedAt = 0;
-  mirror.lastDeltaFromRevision = 0;
-  mirror.lastDeltaToRevision = 0;
-  mirror.lastDeltaRange = null;
+  mirror.lastFlushCompletedAt = 0;
   mirror.lastScrollbackCount = -1;
-  mirror.flushRequestedImmediate = false;
-  mirror.orphanedAt = null;
+  mirror.flushInFlight = false;
+  mirror.flushPromise = null;
+  if (mirror.liveSyncTimer) {
+    clearTimeout(mirror.liveSyncTimer);
+    mirror.liveSyncTimer = null;
+  }
   mirrors.delete(mirror.key);
 }
 
@@ -1308,7 +1269,7 @@ function getMirrorAvailableEndIndex(mirror: SessionMirror) {
 
 function resolveMirrorTargetGeometry(
   mirror: SessionMirror,
-  fallback: { cols: number; rows: number } = { cols: mirror.cols, rows: mirror.rows },
+  baselineGeometry: { cols: number; rows: number } = { cols: mirror.cols, rows: mirror.rows },
 ) {
   let minCols = Number.POSITIVE_INFINITY;
   let minRows = Number.POSITIVE_INFINITY;
@@ -1324,8 +1285,8 @@ function resolveMirrorTargetGeometry(
 
   if (!Number.isFinite(minCols) || !Number.isFinite(minRows)) {
     return {
-      cols: normalizeViewportCols(fallback.cols),
-      rows: normalizeViewportRows(fallback.rows),
+      cols: normalizeViewportCols(baselineGeometry.cols),
+      rows: normalizeViewportRows(baselineGeometry.rows),
     };
   }
 
@@ -1350,276 +1311,17 @@ function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: nu
   return lines;
 }
 
-function hasMirrorSubscribers(mirror: SessionMirror) {
-  return mirror.subscribers.size > 0;
-}
-
-function markClientDemand(session: ClientSession, options?: { promoteLegacyActive?: boolean }) {
-  session.lastDemandAt = Date.now();
-  if (options?.promoteLegacyActive && !session.streamModeExplicit) {
-    legacyActiveSessionId = session.id;
-  }
-}
-
-function resolveMirrorCaptureState(mirror: SessionMirror) {
-  let activeIntervalMs = Number.POSITIVE_INFINITY;
-  let hasIdleSubscriber = false;
-
-  for (const sessionId of mirror.subscribers) {
-    const session = sessions.get(sessionId);
-    if (!session || session.state === 'closed') {
-      continue;
-    }
-
-    const stickyLegacyActive = session.id === legacyActiveSessionId;
-    if (session.streamMode === 'active' || (!session.streamModeExplicit && stickyLegacyActive)) {
-      activeIntervalMs = Math.min(
-        activeIntervalMs,
-        session.streamMode === 'active'
-          ? normalizeActiveCaptureIntervalMs(session.minCaptureIntervalMs)
-          : DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS,
-      );
-      continue;
-    }
-
-    hasIdleSubscriber = true;
-  }
-
-  if (Number.isFinite(activeIntervalMs)) {
-    return {
-      mode: 'active' as const,
-      intervalMs: activeIntervalMs,
-    };
-  }
-
-  if (hasIdleSubscriber) {
-    return {
-      mode: 'idle' as const,
-      intervalMs: IDLE_CAPTURE_INTERVAL_MS,
-    };
-  }
-
-  return {
-    mode: 'dormant' as const,
-    intervalMs: 0,
-  };
-}
-
-function buildBufferPayload(
-  mirror: SessionMirror,
-  lines: TerminalIndexedLine[],
-): TerminalBufferPayload | null {
-  const viewportEndIndex = getMirrorAvailableEndIndex(mirror);
-
-  return {
-    revision: mirror.revision,
-    startIndex: mirror.bufferStartIndex,
-    endIndex: getMirrorAvailableEndIndex(mirror),
-    availableStartIndex: mirror.bufferStartIndex,
-    viewportEndIndex,
-    cols: mirror.cols,
-    rows: mirror.rows,
-    cursorKeysApp: mirror.cursorKeysApp,
-    lines: lines.map((line) => ({ index: line.index, cells: line.cells })),
-  };
-}
-
-function resolveTailWindow(
-  mirror: SessionMirror,
-  viewportRows: number,
-) {
-  const bufferEndIndex = getMirrorAvailableEndIndex(mirror);
-  const cacheLines = resolveWireFollowCacheLines(viewportRows);
-  return {
-    startIndex: Math.max(mirror.bufferStartIndex, bufferEndIndex - cacheLines),
-    endIndex: bufferEndIndex,
-    viewportEndIndex: bufferEndIndex,
-  };
-}
-
 function mirrorBufferChanged(
   mirror: SessionMirror,
   previousStartIndex: number,
   previousLines: TerminalCell[][],
 ) {
-  return findChangedIndexedRange({
+  return findChangedIndexedRanges({
     previousStartIndex,
     previousLines,
     nextStartIndex: mirror.bufferStartIndex,
     nextLines: mirror.bufferLines,
   });
-}
-
-function normalizeRequestedMissingRanges(
-  missingRanges: BufferSyncRequestPayload['missingRanges'],
-  startIndex: number,
-  endIndex: number,
-) {
-  if (!Array.isArray(missingRanges) || endIndex <= startIndex) {
-    return [] as Array<{ startIndex: number; endIndex: number }>;
-  }
-  return missingRanges
-    .map((range) => ({
-      startIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.startIndex || 0))),
-      endIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.endIndex || 0))),
-    }))
-    .filter((range) => range.endIndex > range.startIndex);
-}
-
-function buildMissingRangeBufferSyncPayload(
-  mirror: SessionMirror,
-  window: { startIndex: number; endIndex: number; viewportEndIndex: number },
-  missingRanges: Array<{ startIndex: number; endIndex: number }>,
-) {
-  if (missingRanges.length === 0 || window.endIndex <= window.startIndex) {
-    return null;
-  }
-  const indexedLines = missingRanges.flatMap((range) => sliceIndexedLines(
-    mirror.bufferStartIndex,
-    mirror.bufferLines,
-    range.startIndex,
-    range.endIndex,
-  ));
-  const payload = buildBufferPayload(mirror, indexedLines);
-  if (!payload) {
-    return null;
-  }
-  payload.startIndex = window.startIndex;
-  payload.endIndex = window.endIndex;
-  payload.viewportEndIndex = Math.max(window.startIndex, Math.floor(window.viewportEndIndex));
-  return payload;
-}
-
-function buildSparseWindowBufferSyncPayload(
-  mirror: SessionMirror,
-  window: { startIndex: number; endIndex: number; viewportEndIndex: number },
-  lineRanges: Array<{ startIndex: number; endIndex: number }>,
-) {
-  if (lineRanges.length === 0 || window.endIndex <= window.startIndex) {
-    return null;
-  }
-
-  const indexedLines = lineRanges.flatMap((range) => sliceIndexedLines(
-    mirror.bufferStartIndex,
-    mirror.bufferLines,
-    range.startIndex,
-    range.endIndex,
-  ));
-  const payload = buildBufferPayload(mirror, indexedLines);
-  if (!payload) {
-    return null;
-  }
-
-  payload.startIndex = window.startIndex;
-  payload.endIndex = window.endIndex;
-  payload.viewportEndIndex = Math.max(window.startIndex, Math.floor(window.viewportEndIndex));
-  return payload;
-}
-
-function buildClientRequestedBufferPayload(
-  mirror: SessionMirror,
-  request: BufferSyncRequestPayload,
-) {
-  const knownRevision = Math.max(0, Math.floor(request.knownRevision || 0));
-  const mirrorStartIndex = mirror.bufferStartIndex;
-  const mirrorEndIndex = getMirrorAvailableEndIndex(mirror);
-  if (mirrorEndIndex <= mirrorStartIndex) {
-    return null;
-  }
-
-  const localStartIndex = Math.max(0, Math.floor(request.localStartIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(request.localEndIndex || localStartIndex));
-  const viewportRows = Math.max(1, Math.floor(request.viewportRows || mirror.rows || 1));
-  const mode = request.mode === 'reading' ? 'reading' : 'follow';
-  const requestedViewportEndIndex = mode === 'follow'
-    ? mirrorEndIndex
-    : Math.max(
-        mirrorStartIndex,
-        Math.min(mirrorEndIndex, Math.floor(request.viewportEndIndex || mirrorEndIndex)),
-      );
-  if (mode === 'reading') {
-    const readingWindow = resolveReadingWindow({
-      bufferStartIndex: mirrorStartIndex,
-      bufferEndIndex: mirrorEndIndex,
-      viewportEndIndex: requestedViewportEndIndex,
-      viewportRows,
-      cacheLines: resolveWireFollowCacheLines(viewportRows),
-    });
-    const viewportStartIndex = Math.max(mirrorStartIndex, requestedViewportEndIndex - viewportRows);
-    if (request.prefetch) {
-      const preloadRows = Math.max(viewportRows * 2, 48);
-      const readingWindowStartIndex = Math.max(mirrorStartIndex, viewportStartIndex - preloadRows);
-      const readingWindowEndIndex = Math.max(readingWindowStartIndex, requestedViewportEndIndex);
-      const missingRanges = normalizeRequestedMissingRanges(
-        request.missingRanges,
-        readingWindowStartIndex,
-        readingWindowEndIndex,
-      );
-
-      if (missingRanges.length > 0) {
-        return buildMissingRangeBufferSyncPayload(mirror, {
-          startIndex: readingWindowStartIndex,
-          endIndex: readingWindowEndIndex,
-          viewportEndIndex: requestedViewportEndIndex,
-        }, missingRanges);
-      }
-
-      return null;
-    }
-
-    const readingMissingRanges = resolveReadingMissingRanges({
-      desiredStartIndex: readingWindow.startIndex,
-      desiredEndIndex: readingWindow.endIndex,
-      localStartIndex,
-      localEndIndex,
-      knownRevision,
-      deltaRange: mirror.lastDeltaRange,
-      currentRevision: mirror.revision,
-      lastDeltaFromRevision: mirror.lastDeltaFromRevision,
-      lastDeltaToRevision: mirror.lastDeltaToRevision,
-    });
-    if (readingMissingRanges.length > 0) {
-      return buildMissingRangeBufferSyncPayload(mirror, {
-        startIndex: readingWindow.startIndex,
-        endIndex: readingWindow.endIndex,
-        viewportEndIndex: readingWindow.viewportEndIndex,
-      }, readingMissingRanges);
-    }
-
-    return null;
-  }
-
-  const tailWindow = resolveTailWindow(mirror, viewportRows);
-  const followPlan = resolveFollowTailSyncPlan({
-    knownRevision,
-    currentRevision: mirror.revision,
-    lastDeltaFromRevision: mirror.lastDeltaFromRevision,
-    lastDeltaToRevision: mirror.lastDeltaToRevision,
-    lastDeltaRange: mirror.lastDeltaRange,
-    bufferStartIndex: tailWindow.startIndex,
-    bufferEndIndex: tailWindow.endIndex,
-    localStartIndex,
-    localEndIndex,
-    viewportRows,
-    cacheLines: resolveWireFollowCacheLines(viewportRows),
-  });
-  if (!followPlan) {
-    return null;
-  }
-
-  return buildSparseWindowBufferSyncPayload(mirror, {
-    startIndex: followPlan.windowStartIndex,
-    endIndex: followPlan.windowEndIndex,
-    viewportEndIndex: tailWindow.viewportEndIndex,
-  }, followPlan.ranges);
-}
-
-function buildBufferHeadPayload(session: ClientSession, mirror: SessionMirror): BufferHeadPayload {
-  return {
-    sessionId: session.id,
-    revision: Math.max(0, Math.floor(mirror.revision || 0)),
-    latestEndIndex: Math.max(0, getMirrorAvailableEndIndex(mirror)),
-  };
 }
 
 function ensureSessionConnected(session: ClientSession, mirror: SessionMirror) {
@@ -1638,28 +1340,92 @@ function ensureSessionConnected(session: ClientSession, mirror: SessionMirror) {
   }
 }
 
-function sendBufferHeadToSession(session: ClientSession, mirror: SessionMirror) {
-  if (session.state === 'closed' || session.ws.readyState !== WebSocket.OPEN) {
+function announceMirrorSubscribersReady(mirror: SessionMirror) {
+  for (const sessionId of mirror.subscribers) {
+    const session = sessions.get(sessionId);
+    if (!session || session.state === 'closed') {
+      continue;
+    }
+    ensureSessionConnected(session, mirror);
+  }
+}
+
+function sendBufferHeadToSession(
+  session: ClientSession,
+  mirror: SessionMirror,
+) {
+  if (session.state === 'closed' || session.transport.readyState !== WebSocket.OPEN) {
     return;
   }
   ensureSessionConnected(session, mirror);
   sendMessage(session, {
     type: 'buffer-head',
-    payload: buildBufferHeadPayload(session, mirror),
+    payload: buildBufferHeadPayload(session.id, mirror),
   });
 }
 
-function broadcastMirrorHead(mirror: SessionMirror) {
-  if (!hasMirrorSubscribers(mirror)) {
+async function syncMirrorCanonicalBuffer(
+  mirror: SessionMirror,
+  options?: { forceRevision?: boolean },
+) {
+  if (mirror.state !== 'connected') {
+    return false;
+  }
+
+  if (mirror.flushPromise) {
+    return mirror.flushPromise;
+  }
+
+  const previousStartIndex = mirror.bufferStartIndex;
+  const previousLines = mirror.bufferLines.slice();
+  const forceRevision = Boolean(options?.forceRevision);
+
+  mirror.lastFlushStartedAt = Date.now();
+  mirror.flushInFlight = true;
+  const capturePromise = captureMirrorAuthoritativeBufferFromTmux(mirror)
+    .then((captured) => {
+      if (!captured) {
+        throw new Error('tmux capture returned no canonical buffer');
+      }
+
+      const changedRanges = mirrorBufferChanged(mirror, previousStartIndex, previousLines);
+      if (forceRevision || changedRanges.length > 0) {
+        mirror.revision += 1;
+      }
+
+      return true;
+    })
+    .catch((error) => {
+      console.error(
+        `[${new Date().toISOString()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    })
+    .finally(() => {
+      mirror.lastFlushCompletedAt = Date.now();
+      mirror.flushInFlight = false;
+      mirror.flushPromise = null;
+    });
+
+  mirror.flushPromise = capturePromise;
+  return capturePromise;
+}
+
+function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = 12) {
+  if (mirror.state !== 'connected') {
     return;
   }
-  for (const sessionId of mirror.subscribers) {
-    const session = sessions.get(sessionId);
-    if (!session) {
-      continue;
-    }
-    sendBufferHeadToSession(session, mirror);
+
+  if (mirror.liveSyncTimer) {
+    clearTimeout(mirror.liveSyncTimer);
   }
+
+  mirror.liveSyncTimer = setTimeout(() => {
+    mirror.liveSyncTimer = null;
+    void syncMirrorCanonicalBuffer(mirror);
+  }, Math.max(0, delayMs));
 }
 
 async function resizeConnectedMirror(mirror: SessionMirror, cols: number, rows: number) {
@@ -1674,17 +1440,10 @@ async function resizeConnectedMirror(mirror: SessionMirror, cols: number, rows: 
   mirror.lastScrollbackCount = -1;
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
-  clearMirrorFlushTimer(mirror);
-  const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+  const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
   if (!captured) {
     throw new Error('Failed to capture canonical tmux buffer after resize');
   }
-  mirror.lastDeltaFromRevision = mirror.revision;
-  mirror.revision += 1;
-  mirror.lastDeltaToRevision = mirror.revision;
-  mirror.lastDeltaRange = null;
-  broadcastMirrorHead(mirror);
-  scheduleMirrorCapture(mirror);
 }
 
 async function reconcileMirrorGeometry(mirror: SessionMirror) {
@@ -1704,102 +1463,6 @@ async function reconcileMirrorGeometry(mirror: SessionMirror) {
   return true;
 }
 
-function flushMirrorUpdates(mirror: SessionMirror) {
-  mirror.flushTimer = null;
-  mirror.scheduledCaptureAt = null;
-
-  if (mirror.state !== 'connected') {
-    return;
-  }
-
-  const captureState = resolveMirrorCaptureState(mirror);
-  if (captureState.mode === 'dormant') {
-    return;
-  }
-
-  mirror.lastFlushStartedAt = Date.now();
-  mirror.flushInFlight = true;
-  mirror.flushRequestedWhileBusy = false;
-  mirror.flushRequestedImmediate = false;
-  const previousStartIndex = mirror.bufferStartIndex;
-  const previousLines = mirror.bufferLines.slice();
-
-  void captureMirrorAuthoritativeBufferFromTmux(mirror)
-    .then((captured) => {
-      if (!captured) {
-        throw new Error('tmux capture returned no canonical buffer');
-      }
-
-      const changedRange = mirrorBufferChanged(mirror, previousStartIndex, previousLines);
-      if (changedRange) {
-        mirror.lastDeltaFromRevision = mirror.revision;
-        mirror.lastDeltaToRevision = mirror.revision + 1;
-        mirror.lastDeltaRange = changedRange;
-        mirror.revision += 1;
-        broadcastMirrorHead(mirror);
-      } else {
-        mirror.lastDeltaRange = null;
-      }
-    })
-    .catch((error) => {
-      console.error(
-        `[${new Date().toISOString()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    })
-    .finally(() => {
-      mirror.lastFlushCompletedAt = Date.now();
-      mirror.flushInFlight = false;
-      if (mirror.flushRequestedWhileBusy) {
-        const immediate = mirror.flushRequestedImmediate;
-        mirror.flushRequestedWhileBusy = false;
-        mirror.flushRequestedImmediate = false;
-        scheduleMirrorCapture(mirror, { immediate });
-        return;
-      }
-      scheduleMirrorCapture(mirror);
-    });
-}
-
-function scheduleMirrorCapture(mirror: SessionMirror, options?: { immediate?: boolean }) {
-  if (mirror.state !== 'connected') {
-    clearMirrorFlushTimer(mirror);
-    return;
-  }
-
-  const captureState = resolveMirrorCaptureState(mirror);
-  if (captureState.mode === 'dormant') {
-    clearMirrorFlushTimer(mirror);
-    return;
-  }
-
-  if (mirror.flushInFlight) {
-    mirror.flushRequestedWhileBusy = true;
-    mirror.flushRequestedImmediate = mirror.flushRequestedImmediate || Boolean(options?.immediate);
-    return;
-  }
-
-  const now = Date.now();
-  const minIntervalMs = options?.immediate ? MIRROR_CAPTURE_DEBOUNCE_MS : captureState.intervalMs;
-  const baseline = Math.max(mirror.lastFlushStartedAt, mirror.lastFlushCompletedAt, 0);
-  const dueAt = options?.immediate
-    ? now + MIRROR_CAPTURE_DEBOUNCE_MS
-    : Math.max(now, baseline + minIntervalMs);
-  if (
-    mirror.flushTimer
-    && mirror.scheduledCaptureAt !== null
-    && mirror.scheduledCaptureAt <= dueAt
-  ) {
-    return;
-  }
-
-  clearMirrorFlushTimer(mirror);
-  mirror.scheduledCaptureAt = dueAt;
-  mirror.flushTimer = setTimeout(() => flushMirrorUpdates(mirror), Math.max(0, dueAt - now));
-  mirror.flushTimer.unref?.();
-}
-
 async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   if (mirror.state === 'connected' || mirror.state === 'connecting') {
     return;
@@ -1810,7 +1473,6 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.lastScrollbackCount = -1;
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
-  clearMirrorFlushTimer(mirror);
   const targetGeometry = resolveMirrorTargetGeometry(mirror);
   mirror.cols = targetGeometry.cols;
   mirror.rows = targetGeometry.rows;
@@ -1842,8 +1504,8 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.ptyProcess = ptyProcess;
   mirror.state = 'connected';
 
-  ptyProcess.onData((data: string) => {
-    void data;
+  ptyProcess.onData((_data: string) => {
+    scheduleMirrorLiveSync(mirror, 12);
   });
 
   ptyProcess.onExit(({ exitCode, signal }) => {
@@ -1853,59 +1515,39 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
 
   try {
     await new Promise((resolve) => setTimeout(resolve, 80));
-    const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
+    const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
     if (!captured) {
       throw new Error('Failed to capture canonical tmux buffer during initial sync');
     }
-    mirror.revision += 1;
-    broadcastMirrorHead(mirror);
+    announceMirrorSubscribersReady(mirror);
   } catch (error) {
+    mirror.state = 'error';
     console.error(
       `[${new Date().toISOString()}] initial buffer sync failed for ${mirror.sessionName}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-
-    try {
-      mirror.lastScrollbackCount = -1;
-      mirror.bufferLines = [];
-      mirror.bufferStartIndex = 0;
-      const captured = await captureMirrorAuthoritativeBufferFromTmux(mirror);
-      if (!captured) {
-        throw new Error('Failed to capture canonical tmux buffer during fallback sync');
+    for (const sessionId of mirror.subscribers) {
+      const subscriber = sessions.get(sessionId);
+      if (!subscriber) {
+        continue;
       }
-      mirror.revision += 1;
-      for (const sessionId of mirror.subscribers) {
-        const session = sessions.get(sessionId);
-        if (!session) {
-          continue;
-        }
-        session.title = mirror.title;
-        session.sessionName = mirror.sessionName;
-        if (session.state !== 'connected') {
-          session.state = 'connected';
-          sendMessage(session, { type: 'connected', payload: buildConnectedPayload(session.id, session.requestOrigin) });
-        }
-        sendMessage(session, { type: 'title', payload: mirror.title });
-        sendBufferHeadToSession(session, mirror);
-      }
-    } catch (fallbackError) {
-      console.error(
-        `[${new Date().toISOString()}] fallback buffer sync failed for ${mirror.sessionName}: ${
-          fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-        }`,
-      );
+      subscriber.state = 'error';
+      sendMessage(subscriber, {
+        type: 'error',
+        payload: {
+          message: `Initial canonical sync failed: ${error instanceof Error ? error.message : String(error)}`,
+          code: 'initial_buffer_sync_failed',
+        },
+      });
     }
   }
-
-  scheduleMirrorCapture(mirror);
 
   if (autoCommand?.trim()) {
     const command = autoCommand.endsWith('\r') ? autoCommand : `${autoCommand}\r`;
     setTimeout(() => {
       if (mirror.state === 'connected' && mirror.ptyProcess) {
         mirror.ptyProcess.write(command);
-        scheduleMirrorCapture(mirror, { immediate: true });
       }
     }, AUTO_COMMAND_DELAY_MS);
   }
@@ -1921,8 +1563,9 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
 
   const previousMirror = getClientMirror(session);
   if (previousMirror) {
-    previousMirror.subscribers.delete(session.id);
-    if (previousMirror.subscribers.size > 0) {
+    const detachResult = detachMirrorSubscriber(previousMirror.subscribers, session.id);
+    previousMirror.subscribers = detachResult.nextSubscribers;
+    if (detachResult.shouldReconcileGeometry) {
       void reconcileMirrorGeometry(previousMirror).catch((error) => {
         console.error(
           `[${new Date().toISOString()}] failed to reconcile mirror geometry after session switch for ${previousMirror.sessionName}: ${
@@ -1930,9 +1573,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
           }`,
         );
       });
-      scheduleMirrorCapture(previousMirror);
     }
-    scheduleMirrorDestroyIfOrphaned(previousMirror, 'orphaned mirror reaped after session switch');
   }
 
   session.state = 'connecting';
@@ -1941,16 +1582,12 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   session.mirrorKey = nextMirrorKey;
   session.cols = requestedCols;
   session.rows = requestedRows;
-  markClientDemand(session, { promoteLegacyActive: true });
 
   let mirror = mirrors.get(nextMirrorKey);
   if (!mirror) {
     mirror = createMirror(nextSessionName);
   }
   mirror.subscribers.add(session.id);
-  clearMirrorDestroyTimer(mirror);
-  mirror.orphanedAt = null;
-  scheduleMirrorCapture(mirror);
   if (mirror.state !== 'connected') {
     const targetGeometry = resolveMirrorTargetGeometry(mirror, { cols: requestedCols, rows: requestedRows });
     mirror.cols = targetGeometry.cols;
@@ -1963,7 +1600,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
     if (resized) {
       return;
     }
-    sendBufferHeadToSession(session, mirror);
+    ensureSessionConnected(session, mirror);
     return;
   }
 
@@ -1973,33 +1610,18 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
 async function handleResize(session: ClientSession, cols: number, rows: number) {
   session.cols = normalizeViewportCols(cols);
   session.rows = normalizeViewportRows(rows);
-  markClientDemand(session, { promoteLegacyActive: true });
   const mirror = getClientMirror(session);
   if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
     return;
   }
   await reconcileMirrorGeometry(mirror);
-  scheduleMirrorCapture(mirror, { immediate: true });
-}
-
-function handleStreamMode(session: ClientSession, payload: StreamModePayload) {
-  const normalized = normalizeStreamModePayload(payload);
-  session.streamModeExplicit = true;
-  session.streamMode = normalized.mode;
-  session.minCaptureIntervalMs = normalized.minCaptureIntervalMs;
-  markClientDemand(session);
-  const mirror = getClientMirror(session);
-  if (mirror) {
-    scheduleMirrorCapture(mirror, { immediate: normalized.mode === 'active' });
-  }
 }
 
 function handleInput(session: ClientSession, data: string) {
-  markClientDemand(session, { promoteLegacyActive: true });
   const mirror = getClientMirror(session);
   if (mirror?.state === 'connected' && mirror.ptyProcess) {
     mirror.ptyProcess.write(data);
-    scheduleMirrorCapture(mirror, { immediate: true });
+    scheduleMirrorLiveSync(mirror, 12);
   }
 }
 
@@ -2014,8 +1636,7 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
     const { sourcePath, pngPath, bytes } = persistClipboardImage(payload);
     const pasteSequence = payload.pasteSequence || '\x16';
     mirror.ptyProcess.write(pasteSequence);
-    markClientDemand(session, { promoteLegacyActive: true });
-    scheduleMirrorCapture(mirror, { immediate: true });
+    scheduleMirrorLiveSync(mirror, 12);
     sendMessage(session, {
       type: 'image-pasted',
       payload: {
@@ -2026,10 +1647,14 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
     });
     try {
       unlinkSync(sourcePath);
-    } catch {}
+    } catch (error) {
+      logCleanupFailure('paste-image', sourcePath, error);
+    }
     try {
       unlinkSync(pngPath);
-    } catch {}
+    } catch (error) {
+      logCleanupFailure('paste-image', pngPath, error);
+    }
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     sendMessage(session, { type: 'error', payload: { message: `Failed to paste image: ${err}`, code: 'paste_image_failed' } });
@@ -2061,8 +1686,6 @@ function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
     );
     const pasteSequence = pending.pasteSequence || '\x16';
     mirror.ptyProcess.write(pasteSequence);
-    markClientDemand(session, { promoteLegacyActive: true });
-    scheduleMirrorCapture(mirror, { immediate: true });
     sendMessage(session, {
       type: 'image-pasted',
       payload: {
@@ -2073,17 +1696,21 @@ function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
     });
     try {
       unlinkSync(sourcePath);
-    } catch {}
+    } catch (error) {
+      logCleanupFailure('paste-image-binary', sourcePath, error);
+    }
     try {
       unlinkSync(pngPath);
-    } catch {}
+    } catch (error) {
+      logCleanupFailure('paste-image-binary', pngPath, error);
+    }
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     sendMessage(session, { type: 'error', payload: { message: `Failed to paste image: ${err}`, code: 'paste_image_failed' } });
   }
 }
 
-function handleMessage(session: ClientSession, rawData: RawData, isBinary = false) {
+async function handleMessage(session: ClientSession, rawData: RawData, isBinary = false) {
   if (isBinary) {
     const binaryBuffer = Buffer.isBuffer(rawData)
       ? rawData
@@ -2105,7 +1732,7 @@ function handleMessage(session: ClientSession, rawData: RawData, isBinary = fals
   let message: ClientMessage;
   try {
     message = JSON.parse(text) as ClientMessage;
-  } catch {
+  } catch (_parseError) {
     handleInput(session, text);
     return;
   }
@@ -2161,9 +1788,14 @@ function handleMessage(session: ClientSession, rawData: RawData, isBinary = fals
     case 'connect':
       void attachTmux(session, message.payload);
       break;
-    case 'stream-mode':
-      handleStreamMode(session, message.payload);
+    case 'buffer-head-request': {
+      const mirror = getClientMirror(session);
+      if (!mirror || mirror.state !== 'connected') {
+        break;
+      }
+      sendBufferHeadToSession(session, mirror);
       break;
+    }
     case 'paste-image-start':
       session.pendingPasteImage = message.payload;
       break;
@@ -2172,13 +1804,21 @@ function handleMessage(session: ClientSession, rawData: RawData, isBinary = fals
       if (!mirror || mirror.state !== 'connected') {
         break;
       }
-      markClientDemand(session, { promoteLegacyActive: true });
-      scheduleMirrorCapture(mirror);
-      const request = normalizeBufferSyncRequestPayload(session, message.payload);
-      const payload = buildClientRequestedBufferPayload(mirror, request);
-      if (payload) {
-        sendMessage(session, { type: 'buffer-sync', payload });
+      let request: BufferSyncRequestPayload;
+      try {
+        request = normalizeBufferSyncRequestPayload(session, message.payload);
+      } catch (error) {
+        sendMessage(session, {
+          type: 'error',
+          payload: {
+            message: error instanceof Error ? error.message : 'Invalid buffer-sync-request',
+            code: 'buffer_sync_request_invalid',
+          },
+        });
+        break;
       }
+      const payload = buildRequestedRangeBufferPayload(mirror, request);
+      sendMessage(session, { type: 'buffer-sync', payload });
       break;
     }
     case 'debug-log':
@@ -2251,19 +1891,20 @@ function handleMessage(session: ClientSession, rawData: RawData, isBinary = fals
       void handleResize(session, message.payload.cols, message.payload.rows);
       break;
     case 'ping': {
-      const mirror = getClientMirror(session);
-      markClientDemand(session, { promoteLegacyActive: true });
-      if (mirror) {
-        scheduleMirrorCapture(mirror);
-      }
       sendMessage(session, { type: 'pong' });
       break;
     }
     case 'close':
       detachClientSession(session, 'client requested close', false);
       try {
-        session.ws.close(1000, 'client requested close');
-      } catch {}
+        session.transport.close('client requested close');
+      } catch (error) {
+        console.warn(
+          `[${new Date().toISOString()}] failed to close client transport for ${session.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
       break;
   }
 }
@@ -2279,11 +1920,47 @@ const wss = new WebSocketServer({
   },
 });
 
+const rtcBridgeServer = createRtcBridgeServer({
+  onTransportOpen: (transport) => {
+    const session = createClientSession(createRtcSessionTransport(transport), transport.requestOrigin);
+    console.log(`[${new Date().toISOString()}] rtc client session ${session.id} created`);
+    return {
+      onMessage: (_transportId, data, isBinary) => {
+        session.wsAlive = true;
+        void handleMessage(session, data, isBinary);
+      },
+      onClose: (_transportId, reason) => {
+        console.log(`[${new Date().toISOString()}] rtc client session ${session.id} closed: ${reason}`);
+        detachClientSession(session, reason, false);
+      },
+      onError: (_transportId, message) => {
+        console.error(`[${new Date().toISOString()}] rtc client session ${session.id} error: ${message}`);
+        detachClientSession(session, `rtc error: ${message}`, false);
+      },
+    };
+  },
+});
+
+const relayHostClient = createTraversalRelayHostClient({
+  config: DAEMON_CONFIG.relay,
+  handleRelaySignal: async (peerId, message, emitSignal) => {
+    await rtcBridgeServer.handleRelaySignal(peerId, 'relay-host', message as SignalMessage, emitSignal);
+  },
+  closeRelayPeer: (peerId, reason) => {
+    rtcBridgeServer.closeRelayPeer(peerId, reason);
+  },
+});
+
 function extractAuthToken(rawUrl?: string) {
   try {
     const url = new URL(rawUrl || '/', 'ws://localhost');
     return url.searchParams.get('token')?.trim() || '';
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[${new Date().toISOString()}] failed to parse websocket auth token from "${rawUrl || ''}": ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return '';
   }
 }
@@ -2297,7 +1974,7 @@ wss.on('connection', (ws: WebSocket, request) => {
     return;
   }
 
-  const session = createClientSession(ws, resolveRequestOrigin(request));
+  const session = createClientSession(createWebSocketSessionTransport(ws), resolveRequestOrigin(request));
   console.log(`[${new Date().toISOString()}] client session ${session.id} created`);
 
   ws.on('pong', () => {
@@ -2306,7 +1983,7 @@ wss.on('connection', (ws: WebSocket, request) => {
 
   ws.on('message', (rawData, isBinary) => {
     session.wsAlive = true;
-    handleMessage(session, rawData, isBinary);
+    void handleMessage(session, rawData, isBinary);
   });
 
   ws.on('close', () => {
@@ -2322,26 +1999,26 @@ wss.on('connection', (ws: WebSocket, request) => {
 
 const heartbeatTimer = setInterval(() => {
   for (const session of sessions.values()) {
-    if (session.ws.readyState !== WebSocket.OPEN) {
+    if (session.transport.kind !== 'ws' || session.transport.readyState !== WebSocket.OPEN) {
       continue;
     }
 
     if (!session.wsAlive) {
       console.warn(`[${new Date().toISOString()}] client session ${session.id} heartbeat timeout`);
-      session.ws.close(4000, 'heartbeat timeout');
+      session.transport.close('heartbeat timeout');
       continue;
     }
 
     session.wsAlive = false;
     try {
-      session.ws.ping();
+      session.transport.ping?.();
     } catch (error) {
       console.warn(
         `[${new Date().toISOString()}] client session ${session.id} heartbeat ping failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      session.ws.close(4000, 'heartbeat ping failed');
+      session.transport.close('heartbeat ping failed');
     }
   }
 }, WS_HEARTBEAT_INTERVAL_MS);
@@ -2360,14 +2037,15 @@ function shutdownDaemon(reason: string, exitCode = 0) {
   clearInterval(heartbeatTimer);
   clearInterval(memoryGuardTimer);
   scheduleEngine.dispose();
+  relayHostClient.dispose();
 
   for (const session of sessions.values()) {
     try {
-      if (session.ws.readyState < WebSocket.CLOSING) {
-        session.ws.close(1001, reason);
+      if (session.transport.readyState < WebSocket.CLOSING) {
+        session.transport.close(reason);
       }
     } catch (error) {
-      console.warn(`[${new Date().toISOString()}] failed to close websocket for session ${session.id}:`, error);
+      console.warn(`[${new Date().toISOString()}] failed to close transport for session ${session.id}:`, error);
     }
   }
 
@@ -2413,6 +2091,8 @@ wss.on('close', () => {
   clearInterval(heartbeatTimer);
   clearInterval(memoryGuardTimer);
   scheduleEngine.dispose();
+  relayHostClient.dispose();
+  rtcBridgeServer.dispose();
 });
 
 server.on('error', (error) => {
@@ -2434,6 +2114,19 @@ server.on('upgrade', (request, socket, head) => {
   const origin = resolveRequestOrigin(request);
   const pathname = new URL(request.url || '/', origin).pathname;
 
+  if (pathname === '/signal') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      const providedToken = extractAuthToken(request.url);
+      if (REQUIRED_AUTH_TOKEN && providedToken !== REQUIRED_AUTH_TOKEN) {
+        ws.send(JSON.stringify({ type: 'rtc-error', payload: { message: 'Unauthorized bridge token' } }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      rtcBridgeServer.handleSignalConnection(ws, origin);
+    });
+    return;
+  }
+
   if (pathname !== '/' && pathname !== '/ws') {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.destroy();
@@ -2446,8 +2139,10 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 server.listen(PORT, HOST, () => {
+  relayHostClient.start();
   console.log(`[${new Date().toISOString()}] zterm tmux bridge listening on ws://${HOST}:${PORT}`);
   console.log(`  - health: http://${HOST}:${PORT}/health`);
+  console.log(`  - rtc signal: ws://${HOST}:${PORT}/signal${REQUIRED_AUTH_TOKEN ? '?token=<auth>' : ''}`);
   console.log(`  - runtime debug snapshot: http://${HOST}:${PORT}/debug/runtime${REQUIRED_AUTH_TOKEN ? '?token=<auth>' : ''}`);
   console.log(`  - runtime debug logs: http://${HOST}:${PORT}/debug/runtime/logs${REQUIRED_AUTH_TOKEN ? '?token=<auth>&limit=200' : '?limit=200'}`);
   console.log(`  - runtime debug control: http://${HOST}:${PORT}/debug/runtime/control${REQUIRED_AUTH_TOKEN ? '?token=<auth>&enabled=1' : '?enabled=1'}`);
@@ -2459,6 +2154,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  - auth: ${REQUIRED_AUTH_TOKEN ? `enabled (${DAEMON_CONFIG.authSource})` : 'disabled'}`);
   console.log(`  - config: ${DAEMON_CONFIG.configFound ? WTERM_CONFIG_DISPLAY_PATH : `${WTERM_CONFIG_DISPLAY_PATH} (not found)`}`);
   console.log(`  - terminal cache lines: ${MAX_CAPTURED_SCROLLBACK_LINES}`);
+  console.log(`  - traversal relay: ${DAEMON_CONFIG.relay ? `${DAEMON_CONFIG.relay.relayUrl} (host=${DAEMON_CONFIG.relay.hostId})` : 'disabled'}`);
 });
 
 process.on('SIGINT', () => shutdownDaemon('SIGINT', 0));

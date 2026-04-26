@@ -475,7 +475,8 @@ function readStoredBubblePosition() {
     const x = typeof parsed.x === 'number' && Number.isFinite(parsed.x) ? parsed.x : null;
     const y = typeof parsed.y === 'number' && Number.isFinite(parsed.y) ? parsed.y : null;
     return { x, y };
-  } catch {
+  } catch (error) {
+    console.warn('[TerminalQuickBar] Failed to read stored floating bubble position:', error);
     return { x: null, y: null };
   }
 }
@@ -2769,7 +2770,9 @@ export function TerminalQuickBar({
             floatingBubbleDragRef.current.pointerId = -1;
             try {
               event.currentTarget.releasePointerCapture(event.pointerId);
-            } catch {}
+            } catch (error) {
+              console.warn('[TerminalQuickBar] Failed to release floating bubble pointer capture:', error);
+            }
           }}
           onClick={() => {
             if (suppressBubbleClickRef.current) {

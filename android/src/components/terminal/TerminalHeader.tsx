@@ -20,6 +20,23 @@ interface TerminalHeaderProps {
   onMoveSessionToOtherPane?: (id: string) => void;
 }
 
+function formatResolvedPath(path?: Session['resolvedPath']) {
+  switch (path) {
+    case 'tailscale':
+      return 'TS';
+    case 'ipv6':
+      return 'IPv6';
+    case 'ipv4':
+      return 'IPv4';
+    case 'rtc-direct':
+      return 'RTC';
+    case 'rtc-relay':
+      return 'TURN';
+    default:
+      return null;
+  }
+}
+
 export function TerminalHeader({
   sessions,
   activeSession,
@@ -196,6 +213,7 @@ export function TerminalHeader({
             const paneId = resolveSessionPane(session.id);
             const paneLabel = paneId === 'secondary' ? '右' : '左';
             const menuOpen = paneMenuSessionId === session.id;
+            const resolvedPathLabel = formatResolvedPath(session.resolvedPath);
             return (
               <div
                 key={session.id}
@@ -277,9 +295,28 @@ export function TerminalHeader({
                       minWidth: 0,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
                     }}
                   >
-                    {session.customName || session.sessionName}
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {session.customName || session.sessionName}
+                    </span>
+                    {active && resolvedPathLabel ? (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          padding: '2px 6px',
+                          borderRadius: '999px',
+                          backgroundColor: 'rgba(255,255,255,0.14)',
+                          fontSize: '9px',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {resolvedPathLabel}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
                 {menuOpen ? (

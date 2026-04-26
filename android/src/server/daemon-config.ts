@@ -13,6 +13,13 @@ export const WTERM_HOME_DIRNAME = '.wterm';
 export const WTERM_CONFIG_FILENAME = 'config.json';
 export const WTERM_UPDATES_DIRNAME = 'updates';
 
+interface WtermRelayConfig {
+  relayUrl?: unknown;
+  username?: unknown;
+  password?: unknown;
+  hostId?: unknown;
+}
+
 interface WtermConfigFile {
   mobile?: {
     daemon?: {
@@ -22,6 +29,7 @@ interface WtermConfigFile {
       terminalCacheLines?: unknown;
       sessionName?: unknown;
     };
+    relay?: WtermRelayConfig;
   };
   zterm?: {
     android?: {
@@ -32,8 +40,16 @@ interface WtermConfigFile {
         terminalCacheLines?: unknown;
         sessionName?: unknown;
       };
+      relay?: WtermRelayConfig;
     };
   };
+}
+
+export interface TraversalRelayRuntimeConfig {
+  relayUrl: string;
+  username: string;
+  password: string;
+  hostId: string;
 }
 
 export interface DaemonRuntimeConfig {
@@ -45,6 +61,7 @@ export interface DaemonRuntimeConfig {
   configPath: string;
   configFound: boolean;
   authSource: 'env' | 'config' | 'default';
+  relay: TraversalRelayRuntimeConfig | null;
 }
 
 type DaemonEnv = Record<string, string | undefined>;
@@ -116,6 +133,7 @@ export function resolveDaemonRuntimeConfig(options?: {
   const homeDir = options?.homeDir || homedir();
   const { config, found, path } = readWtermConfigFile(homeDir);
   const daemonConfig = config.zterm?.android?.daemon || config.mobile?.daemon || {};
+  const relayConfig = config.zterm?.android?.relay || config.mobile?.relay || {};
 
   const host =
     asString(env.ZTERM_HOST) ||
@@ -148,6 +166,19 @@ export function resolveDaemonRuntimeConfig(options?: {
     asString(daemonConfig.sessionName) ||
     buildDaemonSessionName(port);
 
+  const relayUrl = asString(env.ZTERM_TRAVERSAL_RELAY_URL) || asString(relayConfig.relayUrl);
+  const relayUsername = asString(env.ZTERM_TRAVERSAL_USERNAME) || asString(relayConfig.username);
+  const relayPassword = asString(env.ZTERM_TRAVERSAL_PASSWORD) || asString(relayConfig.password);
+  const relayHostId = asString(env.ZTERM_TRAVERSAL_HOST_ID) || asString(relayConfig.hostId);
+  const relay = relayUrl && relayUsername && relayPassword && relayHostId
+    ? {
+        relayUrl,
+        username: relayUsername,
+        password: relayPassword,
+        hostId: relayHostId,
+      }
+    : null;
+
   return {
     host,
     port,
@@ -157,5 +188,6 @@ export function resolveDaemonRuntimeConfig(options?: {
     configPath: path,
     configFound: found,
     authSource,
+    relay,
   };
 }

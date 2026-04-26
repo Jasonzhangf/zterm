@@ -74,7 +74,7 @@ wterm daemon status
 - Session picker / Connection Properties 改为**显式 Connect** 流程：填写 `host + token` 后手动点击 Connect / Refresh，不再自动探测 / 自动刷新
 - `wterm daemon start|restart|install-service` 会等待 3333 端口真正监听后再返回，避免“服务刚启动但还没 ready”导致手机侧首连失败
 - daemon / client 都带心跳：server 会回收失联 websocket，client 会在 pong 超时后主动断开并进入指数回退重连，避免死连接占住 session
-- daemon 初始 snapshot 若 `tmux capture-pane` 失败，会自动降级为 bridge snapshot，而不会直接崩整个服务
+- daemon canonical mirror 若 `tmux capture-pane` 失败，会显式记录错误；服务继续保留 `buffer-head-request` / `buffer-sync-request` 读接口，但不会引入第二套 snapshot / fallback 语义
 
 ## 约束
 

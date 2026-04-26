@@ -3,6 +3,7 @@ import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import {
   formatBridgeEndpointLabel,
   resolveEffectiveBridgePort,
+  resolveNormalizedBridgeHost,
 } from './bridge-endpoint';
 
 interface LegacyStoredHost {
@@ -13,6 +14,11 @@ interface LegacyStoredHost {
   bridgePort?: unknown;
   sessionName?: unknown;
   authToken?: unknown;
+  tailscaleHost?: unknown;
+  ipv6Host?: unknown;
+  ipv4Host?: unknown;
+  signalUrl?: unknown;
+  transportMode?: unknown;
   host?: unknown;
   port?: unknown;
   username?: unknown;
@@ -25,12 +31,12 @@ interface LegacyStoredHost {
   autoCommand?: unknown;
 }
 
-function asString(value: unknown, fallback = '') {
-  return typeof value === 'string' ? value : fallback;
+function asString(value: unknown, defaultValue = '') {
+  return typeof value === 'string' ? value : defaultValue;
 }
 
-function asNumber(value: unknown, fallback: number) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+function asNumber(value: unknown, defaultValue: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : defaultValue;
 }
 
 function buildId() {
@@ -43,8 +49,8 @@ export function getResolvedSessionName(target: { sessionName?: string; name?: st
     return explicit;
   }
 
-  const fallbackName = target.name?.trim();
-  return fallbackName || 'zterm';
+  const derivedName = target.name?.trim();
+  return derivedName || 'zterm';
 }
 
 export function formatBridgeEndpoint(target: { bridgeHost: string; bridgePort: number }) {
@@ -67,7 +73,15 @@ export function normalizeHost(input: unknown): Host | null {
 
   const candidate = input as LegacyStoredHost;
   const name = asString(candidate.name).trim();
-  const bridgeHost = asString(candidate.bridgeHost ?? candidate.host).trim();
+  const rawBridgeHost = asString(candidate.bridgeHost ?? candidate.host).trim();
+  const bridgePort = resolveEffectiveBridgePort({
+    bridgeHost: rawBridgeHost,
+    bridgePort: asNumber(candidate.bridgePort ?? candidate.port, DEFAULT_BRIDGE_PORT),
+  });
+  const bridgeHost = resolveNormalizedBridgeHost({
+    bridgeHost: rawBridgeHost,
+    bridgePort,
+  });
 
   if (!name || !bridgeHost) {
     return null;
@@ -78,12 +92,17 @@ export function normalizeHost(input: unknown): Host | null {
     createdAt: asNumber(candidate.createdAt, Date.now()),
     name,
     bridgeHost,
-    bridgePort: resolveEffectiveBridgePort({
-      bridgeHost,
-      bridgePort: asNumber(candidate.bridgePort ?? candidate.port, DEFAULT_BRIDGE_PORT),
-    }),
+    bridgePort,
     sessionName: asString(candidate.sessionName ?? candidate.username).trim(),
     authToken: asString(candidate.authToken).trim(),
+    tailscaleHost: asString(candidate.tailscaleHost).trim() || undefined,
+    ipv6Host: asString(candidate.ipv6Host).trim() || undefined,
+    ipv4Host: asString(candidate.ipv4Host).trim() || undefined,
+    signalUrl: asString(candidate.signalUrl).trim() || undefined,
+    transportMode:
+      candidate.transportMode === 'websocket' || candidate.transportMode === 'webrtc'
+        ? candidate.transportMode
+        : 'auto',
     authType: candidate.authType === 'key' ? 'key' : 'password',
     password: asString(candidate.password).trim() || undefined,
     privateKey: asString(candidate.privateKey).trim() || undefined,
@@ -100,14 +119,24 @@ export function normalizeHost(input: unknown): Host | null {
 }
 
 export function buildStoredHost(host: EditableHost): Host {
-  const bridgeHost = host.bridgeHost.trim();
+  const rawBridgeHost = host.bridgeHost.trim();
+  const bridgePort = resolveEffectiveBridgePort({
+    bridgeHost: rawBridgeHost,
+    bridgePort: host.bridgePort,
+  });
+  const bridgeHost = resolveNormalizedBridgeHost({
+    bridgeHost: rawBridgeHost,
+    bridgePort,
+  });
   return {
     ...host,
     bridgeHost,
-    bridgePort: resolveEffectiveBridgePort({
-      bridgeHost,
-      bridgePort: host.bridgePort,
-    }),
+    bridgePort,
+    tailscaleHost: host.tailscaleHost?.trim() || undefined,
+    ipv6Host: host.ipv6Host?.trim() || undefined,
+    ipv4Host: host.ipv4Host?.trim() || undefined,
+    signalUrl: host.signalUrl?.trim() || undefined,
+    transportMode: host.transportMode === 'websocket' || host.transportMode === 'webrtc' ? host.transportMode : 'auto',
     id: buildId(),
     createdAt: Date.now(),
   };

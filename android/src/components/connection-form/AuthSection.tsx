@@ -10,7 +10,7 @@ export function AuthSection({
   onSessionNameChange,
 }: AuthSectionProps) {
   return (
-    <ConnectionSection title="Tmux Session" description="Optional tmux session name. Leave empty to fall back to the connection name.">
+    <ConnectionSection title="Tmux Session" description="Optional tmux session name. Leave empty to use the connection name.">
       <div>
         <FieldLabel>Session Name</FieldLabel>
         <input value={sessionName} onChange={(event) => onSessionNameChange(event.target.value)} placeholder="例如：fin" style={inputStyle()} />

@@ -122,8 +122,10 @@ function trimToCache(
   lines: TerminalCell[][],
   gapRanges: TerminalGapRange[],
   cacheLines: number,
-  viewportEndIndex: number,
-  viewportRows: number,
+  options?: {
+    preferredStartIndex?: number;
+    preferredEndIndex?: number;
+  },
 ) {
   const safeStartIndex = Math.max(0, Math.floor(startIndex));
   const safeCacheLines = Math.max(1, Math.floor(cacheLines || 1));
@@ -136,19 +138,23 @@ function trimToCache(
   }
 
   const safeEndIndex = safeStartIndex + lines.length;
-  const safeViewportEndIndex = Math.max(
-    safeStartIndex,
-    Math.min(safeEndIndex, Math.floor(viewportEndIndex || safeEndIndex)),
-  );
-  const safeViewportRows = Math.max(1, Math.min(safeCacheLines, Math.floor(viewportRows || 1)));
-  const trailingContextRows = Math.min(safeViewportRows, Math.max(0, safeCacheLines - safeViewportRows));
-
-  let nextEndIndex = Math.min(safeEndIndex, safeViewportEndIndex + trailingContextRows);
+  let nextEndIndex = safeEndIndex;
   let nextStartIndex = Math.max(safeStartIndex, nextEndIndex - safeCacheLines);
 
-  if (nextEndIndex - nextStartIndex < safeCacheLines) {
-    nextEndIndex = Math.min(safeEndIndex, nextStartIndex + safeCacheLines);
-    nextStartIndex = Math.max(safeStartIndex, nextEndIndex - safeCacheLines);
+  if (Number.isFinite(options?.preferredStartIndex)) {
+    const candidateStartIndex = Math.max(
+      safeStartIndex,
+      Math.min(Math.floor(options!.preferredStartIndex!), Math.max(safeStartIndex, safeEndIndex - safeCacheLines)),
+    );
+    nextStartIndex = candidateStartIndex;
+    nextEndIndex = Math.min(safeEndIndex, candidateStartIndex + safeCacheLines);
+  } else if (Number.isFinite(options?.preferredEndIndex)) {
+    const candidateEndIndex = Math.min(
+      safeEndIndex,
+      Math.max(Math.floor(options!.preferredEndIndex!), Math.min(safeEndIndex, safeStartIndex + safeCacheLines)),
+    );
+    nextEndIndex = candidateEndIndex;
+    nextStartIndex = Math.max(safeStartIndex, candidateEndIndex - safeCacheLines);
   }
 
   const sliceStart = Math.max(0, nextStartIndex - safeStartIndex);
@@ -171,6 +177,8 @@ function buildSessionBufferState(options: {
   lines: TerminalCell[][];
   gapRanges: TerminalGapRange[];
   startIndex: number;
+  preferredStartIndex?: number;
+  preferredEndIndex?: number;
   bufferHeadStartIndex: number;
   bufferTailEndIndex: number;
   cols: number;
@@ -185,10 +193,18 @@ function buildSessionBufferState(options: {
     options.lines,
     options.gapRanges,
     options.cacheLines,
-    options.bufferTailEndIndex,
-    options.rows,
+    {
+      preferredStartIndex: options.preferredStartIndex,
+      preferredEndIndex: options.preferredEndIndex,
+    },
   );
   const endIndex = trimmed.startIndex + trimmed.lines.length;
+  if (!Number.isFinite(options.cols) || options.cols <= 0) {
+    throw new Error('buildSessionBufferState requires finite cols');
+  }
+  if (!Number.isFinite(options.rows) || options.rows <= 0) {
+    throw new Error('buildSessionBufferState requires finite rows');
+  }
 
   return {
     lines: trimmed.lines,
@@ -196,9 +212,9 @@ function buildSessionBufferState(options: {
     startIndex: trimmed.startIndex,
     endIndex,
     bufferHeadStartIndex: Math.max(0, Math.min(trimmed.startIndex, Math.floor(options.bufferHeadStartIndex))),
-    bufferTailEndIndex: Math.max(trimmed.startIndex, Math.min(endIndex, Math.floor(options.bufferTailEndIndex))),
-    cols: Math.max(1, Math.floor(options.cols || 80)),
-    rows: Math.max(1, Math.floor(options.rows || 24)),
+    bufferTailEndIndex: Math.max(0, Math.floor(options.bufferTailEndIndex)),
+    cols: Math.max(1, Math.floor(options.cols)),
+    rows: Math.max(1, Math.floor(options.rows)),
     cursorKeysApp: Boolean(options.cursorKeysApp),
     updateKind: options.updateKind,
     revision: Math.max(0, Math.floor(options.revision || 0)),
@@ -217,6 +233,14 @@ export function createSessionBufferState(options: {
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
+  if (!Number.isFinite(options.cols) || options.cols! <= 0) {
+    throw new Error('createSessionBufferState requires finite cols');
+  }
+  if (!Number.isFinite(options.rows) || options.rows! <= 0) {
+    throw new Error('createSessionBufferState requires finite rows');
+  }
+  const cols = Math.max(1, Math.floor(options.cols!));
+  const rows = Math.max(1, Math.floor(options.rows!));
   const startIndex = Number.isFinite(options.startIndex) ? Math.max(0, Math.floor(options.startIndex!)) : 0;
   const normalizedLines = normalizeBufferLines(options.lines || [], options.cacheLines);
   const requestedEndIndex = Number.isFinite(options.endIndex)
@@ -234,8 +258,8 @@ export function createSessionBufferState(options: {
       ? Math.floor(options.bufferHeadStartIndex!)
       : effectiveStartIndex,
     bufferTailEndIndex: Number.isFinite(options.bufferTailEndIndex) ? Math.floor(options.bufferTailEndIndex!) : requestedEndIndex,
-    cols: options.cols || 80,
-    rows: options.rows || 24,
+    cols,
+    rows,
     cursorKeysApp: Boolean(options.cursorKeysApp),
     revision: options.revision ?? 0,
     cacheLines: options.cacheLines,
@@ -263,8 +287,111 @@ function payloadToSparseWindow(payload: TerminalBufferPayload) {
     ok: true as const,
     startIndex: expectedStartIndex,
     endIndex: expectedEndIndex,
+    coversWholeWindow: rowsByIndex.size === Math.max(0, expectedEndIndex - expectedStartIndex),
     rowsByIndex,
   };
+}
+
+function resolveAuthoritativeHeadStartIndex(
+  current: SessionBufferState | undefined,
+  sparseWindow: { startIndex: number },
+  payload: TerminalBufferPayload,
+) {
+  if (Number.isFinite(payload.availableStartIndex)) {
+    return Math.max(0, Math.floor(payload.availableStartIndex!));
+  }
+  if (!current || current.endIndex <= current.startIndex) {
+    return Math.max(0, sparseWindow.startIndex);
+  }
+  return Math.max(0, Math.min(current?.bufferHeadStartIndex ?? sparseWindow.startIndex, sparseWindow.startIndex));
+}
+
+function resolveAuthoritativeTailEndIndex(
+  current: SessionBufferState | undefined,
+  sparseWindow: { endIndex: number },
+  payload: TerminalBufferPayload,
+) {
+  if (Number.isFinite(payload.availableEndIndex)) {
+    return Math.max(0, Math.floor(payload.availableEndIndex!));
+  }
+  return Math.max(
+    current?.bufferTailEndIndex ?? 0,
+    sparseWindow.endIndex,
+  );
+}
+
+function clampWindowToBounds(options: {
+  desiredStartIndex: number;
+  desiredEndIndex: number;
+  authoritativeHeadStartIndex: number;
+  authoritativeTailEndIndex: number;
+  cacheLines: number;
+}) {
+  const safeHead = Math.max(0, Math.floor(options.authoritativeHeadStartIndex));
+  const safeTail = Math.max(safeHead, Math.floor(options.authoritativeTailEndIndex));
+  const safeCacheLines = Math.max(1, Math.floor(options.cacheLines || 1));
+  let startIndex = Math.max(safeHead, Math.floor(options.desiredStartIndex));
+  let endIndex = Math.max(startIndex, Math.floor(options.desiredEndIndex));
+
+  startIndex = Math.min(startIndex, safeTail);
+  endIndex = Math.min(endIndex, safeTail);
+
+  if (endIndex - startIndex > safeCacheLines) {
+    endIndex = Math.min(safeTail, Math.max(startIndex, startIndex + safeCacheLines));
+    startIndex = Math.max(safeHead, endIndex - safeCacheLines);
+  }
+
+  if (endIndex < startIndex) {
+    endIndex = startIndex;
+  }
+
+  return {
+    startIndex,
+    endIndex,
+  };
+}
+
+function resolveDesiredLocalWindow(options: {
+  current: SessionBufferState | undefined;
+  sparseWindow: { startIndex: number; endIndex: number };
+  authoritativeHeadStartIndex: number;
+  authoritativeTailEndIndex: number;
+  cacheLines: number;
+}) {
+  const safeHead = Math.max(0, Math.floor(options.authoritativeHeadStartIndex));
+  const safeTail = Math.max(safeHead, Math.floor(options.authoritativeTailEndIndex));
+  const safeCacheLines = Math.max(1, Math.floor(options.cacheLines || 1));
+
+  const currentHasWindow = Boolean(options.current && options.current.endIndex > options.current.startIndex);
+  if (!currentHasWindow) {
+    return clampWindowToBounds({
+      desiredStartIndex: Math.max(safeHead, options.sparseWindow.endIndex - safeCacheLines),
+      desiredEndIndex: options.sparseWindow.endIndex,
+      authoritativeHeadStartIndex: safeHead,
+      authoritativeTailEndIndex: safeTail,
+      cacheLines: safeCacheLines,
+    });
+  }
+
+  const current = options.current!;
+  let desiredStartIndex = current.startIndex;
+  let desiredEndIndex = current.endIndex;
+
+  if (options.sparseWindow.startIndex < current.startIndex) {
+    desiredStartIndex = options.sparseWindow.startIndex;
+    desiredEndIndex = desiredStartIndex + safeCacheLines;
+  } else if (options.sparseWindow.endIndex > current.endIndex) {
+    desiredEndIndex = options.sparseWindow.endIndex;
+    desiredStartIndex = desiredEndIndex - safeCacheLines;
+  }
+
+  return clampWindowToBounds({
+    desiredStartIndex,
+    desiredEndIndex,
+    authoritativeHeadStartIndex: safeHead,
+    authoritativeTailEndIndex: safeTail,
+    cacheLines: safeCacheLines,
+  });
 }
 
 function buildPatchedWindowFromCurrent(
@@ -274,37 +401,43 @@ function buildPatchedWindowFromCurrent(
     endIndex: number;
     rowsByIndex: Map<number, TerminalCell[]>;
   },
+  desiredWindow: {
+    startIndex: number;
+    endIndex: number;
+  },
 ) {
-  const nextLength = Math.max(0, sparseWindow.endIndex - sparseWindow.startIndex);
+  const nextStartIndex = Math.max(0, Math.floor(desiredWindow.startIndex));
+  const nextEndIndex = Math.max(nextStartIndex, Math.floor(desiredWindow.endIndex));
+  const nextLength = Math.max(0, nextEndIndex - nextStartIndex);
   const nextRows: Array<TerminalCell[] | undefined> = Array.from({ length: nextLength }, () => undefined);
 
   if (current && current.lines.length > 0) {
-    const overlapStart = Math.max(current.startIndex, sparseWindow.startIndex);
-    const overlapEnd = Math.min(current.endIndex, sparseWindow.endIndex);
-
-    for (let absoluteIndex = overlapStart; absoluteIndex < overlapEnd; absoluteIndex += 1) {
+    for (let absoluteIndex = current.startIndex; absoluteIndex < current.endIndex; absoluteIndex += 1) {
+      if (absoluteIndex < nextStartIndex || absoluteIndex >= nextEndIndex) {
+        continue;
+      }
       if (isGapIndex(current.gapRanges, absoluteIndex)) {
         continue;
       }
       const currentOffset = absoluteIndex - current.startIndex;
-      const nextOffset = absoluteIndex - sparseWindow.startIndex;
+      const nextOffset = absoluteIndex - nextStartIndex;
       nextRows[nextOffset] = current.lines[currentOffset] || EMPTY_ROW;
     }
   }
 
   for (const [absoluteIndex, row] of sparseWindow.rowsByIndex.entries()) {
-    const nextOffset = absoluteIndex - sparseWindow.startIndex;
+    const nextOffset = absoluteIndex - nextStartIndex;
     if (nextOffset < 0 || nextOffset >= nextRows.length) {
       continue;
     }
     nextRows[nextOffset] = row;
   }
 
-  const gapRanges = collectGapRanges(nextRows, sparseWindow.startIndex);
+  const gapRanges = collectGapRanges(nextRows, nextStartIndex);
   const lines = nextRows.map((row) => (row ? row : EMPTY_ROW));
 
   return {
-    startIndex: sparseWindow.startIndex,
+    startIndex: nextStartIndex,
     lines,
     gapRanges,
   };
@@ -353,16 +486,23 @@ export function applyBufferSyncToSessionBuffer(
     });
   }
 
-  const patched = buildPatchedWindowFromCurrent(current, sparseWindow);
+  const authoritativeHeadStartIndex = resolveAuthoritativeHeadStartIndex(current, sparseWindow, payload);
+  const authoritativeTailEndIndex = resolveAuthoritativeTailEndIndex(current, sparseWindow, payload);
+  const desiredWindow = resolveDesiredLocalWindow({
+    current,
+    sparseWindow,
+    authoritativeHeadStartIndex,
+    authoritativeTailEndIndex,
+    cacheLines,
+  });
+  const patched = buildPatchedWindowFromCurrent(current, sparseWindow, desiredWindow);
 
   return buildSessionBufferState({
     lines: patched.lines,
     gapRanges: patched.gapRanges,
     startIndex: patched.startIndex,
-    bufferHeadStartIndex: Number.isFinite(payload.availableStartIndex)
-      ? Math.floor(payload.availableStartIndex!)
-      : current?.bufferHeadStartIndex ?? sparseWindow.startIndex,
-    bufferTailEndIndex: Number.isFinite(payload.viewportEndIndex) ? Math.floor(payload.viewportEndIndex) : sparseWindow.endIndex,
+    bufferHeadStartIndex: authoritativeHeadStartIndex,
+    bufferTailEndIndex: authoritativeTailEndIndex,
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
@@ -385,7 +525,9 @@ export function sessionBufferToHistory(buffer: SessionBufferState, cacheLines: n
 
 export function sessionBuffersEqual(left: SessionBufferState, right: SessionBufferState) {
   if (
-    left.startIndex !== right.startIndex
+    left.revision !== right.revision
+    || left.updateKind !== right.updateKind
+    || left.startIndex !== right.startIndex
     || left.endIndex !== right.endIndex
     || left.bufferHeadStartIndex !== right.bufferHeadStartIndex
     || left.bufferTailEndIndex !== right.bufferTailEndIndex

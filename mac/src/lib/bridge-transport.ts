@@ -16,8 +16,6 @@ import {
 
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
-const DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS = 33;
-const IDLE_CAPTURE_INTERVAL_MS = 1000;
 
 export interface ActiveBridgeTargetState {
   name: string;
@@ -45,6 +43,7 @@ export interface BridgeTransportController {
   connect: (host: EditableHost | Host, handlers?: { onServerMessage?: (message: BridgeServerMessage) => void }) => void;
   disconnect: () => void;
   setActivityMode: (mode: BridgeStreamMode) => void;
+  requestBufferHead: () => void;
   requestBufferSync: (payload: BufferSyncRequestPayload) => void;
   requestScheduleList: (sessionName: string) => void;
   upsertScheduleJob: (job: ScheduleJobDraft) => void;
@@ -166,17 +165,7 @@ export function createBridgeTransportController(): BridgeTransportController {
   };
 
   const setActivityMode = (mode: BridgeStreamMode) => {
-    if (activityMode === mode) {
-      return;
-    }
     activityMode = mode;
-    void sendMessage({
-      type: 'stream-mode',
-      payload: {
-        mode,
-        minCaptureIntervalMs: mode === 'active' ? DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS : IDLE_CAPTURE_INTERVAL_MS,
-      },
-    });
   };
 
   return {
@@ -224,13 +213,6 @@ export function createBridgeTransportController(): BridgeTransportController {
           if (token !== connectionToken) {
             return;
           }
-          void sendMessage({
-            type: 'stream-mode',
-            payload: {
-              mode: activityMode,
-              minCaptureIntervalMs: activityMode === 'active' ? DEFAULT_ACTIVE_CAPTURE_INTERVAL_MS : IDLE_CAPTURE_INTERVAL_MS,
-            },
-          });
           clearHeartbeat();
           lastPongAt = Date.now();
           heartbeatId = window.setInterval(() => {
@@ -326,6 +308,9 @@ export function createBridgeTransportController(): BridgeTransportController {
     },
     disconnect,
     setActivityMode,
+    requestBufferHead: () => {
+      void sendMessage({ type: 'buffer-head-request' });
+    },
     requestBufferSync: (payload) => {
       void sendMessage({ type: 'buffer-sync-request', payload });
     },

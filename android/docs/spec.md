@@ -36,7 +36,7 @@
   - 同一 session 被多个客户端 attach
 
 
-- daemon / client 的终端真源必须是 **single canonical buffer**；不允许 latest/history/snapshot 各走一套结构
+- daemon / client 的终端真源必须是 **single canonical buffer**；不允许 latest/history/整窗快照 各走一套结构
 - cursor 必须属于 canonical buffer 本身；daemon 与 client 都不允许本地猜 cursor
 - 用户手动回滚进入 reading 后，live update 期间不能再被强制拉回底部；只有“滚回底部 / 用户输入”能恢复 follow
 - “到底”必须对齐 daemon canonical buffer 的真实尾部，不能只到客户端当前 slice 的底部
@@ -156,7 +156,7 @@
 - 全局 daemon CLI 入口为 `zterm-daemon ...`，并支持 `start / stop / restart / status / install-service / uninstall-service / service-status`
 - `zterm-daemon start / restart / install-service` 必须等待 daemon 端口真正 ready，再回报成功；不能只以 launchd 已加载为准
 - websocket bridge 必须做双向保活：client 定时 ping 并校验 pong 超时，server 也要做 ws heartbeat；任一侧丢心跳后都应自动回收并进入重连，不允许死连接长期占住 session
-- daemon 初始快照失败时不能崩进程；`capture-pane` 失败只允许降级快照，不允许把整个 bridge 打挂
+- daemon canonical mirror 初始化失败时不能崩进程；`capture-pane` 失败必须显式报错并保留后续 `head + range` 读能力，不允许引入第二套快照/降级语义
 - daemon 鉴权真源必须落到 `~/.wterm/config.json`；至少支持 `mobile.daemon.authToken`
 - client 必须按服务器维度记住鉴权配置：`bridgeHost + bridgePort + authToken`
 - 定时发送真源必须在 daemon；Android / Mac 不得各自维护第二套本地调度器

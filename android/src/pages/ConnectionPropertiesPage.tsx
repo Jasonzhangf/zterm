@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { resolveEffectiveBridgePort } from '@zterm/shared';
+import { resolveEffectiveBridgePort, resolveNormalizedBridgeHost } from '@zterm/shared';
 import { AppearanceSection } from '../components/connection-form/AppearanceSection';
 import { AuthSection } from '../components/connection-form/AuthSection';
 import { ConnectionSection } from '../components/connection-form/ConnectionSection';
 import { ConnectionSectionFields } from '../components/connection-form/ConnectionSectionFields';
 import { GeneralSection } from '../components/connection-form/GeneralSection';
+import { RemoteAccessSection } from '../components/connection-form/RemoteAccessSection';
 import { TerminalSection } from '../components/connection-form/TerminalSection';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { getDefaultBridgeServer } from '../lib/bridge-settings';
@@ -32,6 +33,11 @@ function buildInitialState(
     bridgePort: host?.bridgePort || draft?.bridgePort || bridgeSettings.targetPort || DEFAULT_BRIDGE_PORT,
     sessionName: host?.sessionName || draft?.sessionName || '',
     authToken: host?.authToken || draft?.authToken || bridgeSettings.targetAuthToken || '',
+    tailscaleHost: host?.tailscaleHost || draft?.tailscaleHost || '',
+    ipv6Host: host?.ipv6Host || draft?.ipv6Host || '',
+    ipv4Host: host?.ipv4Host || draft?.ipv4Host || '',
+    signalUrl: host?.signalUrl || draft?.signalUrl || bridgeSettings.signalUrl || '',
+    transportMode: (host?.transportMode || draft?.transportMode || bridgeSettings.transportMode || 'auto') as 'auto' | 'websocket' | 'webrtc',
     authType: (host?.authType || draft?.authType || 'password') as 'password' | 'key',
     password: host?.password || draft?.password || '',
     privateKey: host?.privateKey || draft?.privateKey || '',
@@ -75,7 +81,10 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   const handleBridgeHostChange = (bridgeHost: string) => {
     setForm((current) => ({
       ...current,
-      bridgeHost,
+      bridgeHost: resolveNormalizedBridgeHost({
+        bridgeHost,
+        bridgePort: current.bridgePort,
+      }),
       bridgePort: resolveEffectiveBridgePort({
         bridgeHost,
         bridgePort: current.bridgePort,
@@ -91,10 +100,21 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
 
     onSave({
       name: form.name.trim(),
-      bridgeHost: form.bridgeHost.trim(),
-      bridgePort: form.bridgePort,
+      bridgeHost: resolveNormalizedBridgeHost({
+        bridgeHost: form.bridgeHost.trim(),
+        bridgePort: form.bridgePort,
+      }),
+      bridgePort: resolveEffectiveBridgePort({
+        bridgeHost: form.bridgeHost.trim(),
+        bridgePort: form.bridgePort,
+      }),
       sessionName: form.sessionName.trim(),
       authToken: form.authToken.trim(),
+      tailscaleHost: form.tailscaleHost.trim(),
+      ipv6Host: form.ipv6Host.trim(),
+      ipv4Host: form.ipv4Host.trim(),
+      signalUrl: form.signalUrl.trim(),
+      transportMode: form.transportMode,
       authType: form.authType,
       password: form.authType === 'password' ? form.password : undefined,
       privateKey: form.authType === 'key' ? form.privateKey : undefined,
@@ -126,7 +146,19 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     setSessionDiscoveryState('loading');
     setSessionDiscoveryError('');
     try {
-      const sessions = await fetchTmuxSessions({ bridgeHost, bridgePort: form.bridgePort, authToken: form.authToken });
+      const sessions = await fetchTmuxSessions(
+        {
+          bridgeHost,
+          bridgePort: form.bridgePort,
+          authToken: form.authToken,
+          tailscaleHost: form.tailscaleHost,
+          ipv6Host: form.ipv6Host,
+          ipv4Host: form.ipv4Host,
+          signalUrl: form.signalUrl,
+          transportMode: form.transportMode,
+        },
+        bridgeSettings,
+      );
       setAvailableSessions(sessions);
       setSessionDiscoveryState('done');
       if (!form.sessionName.trim() && sessions.length === 1) {
@@ -272,6 +304,20 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
           authToken={form.authToken}
           onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
+        />
+
+        <RemoteAccessSection
+          transportMode={form.transportMode}
+          onTransportModeChange={(transportMode) => setForm((current) => ({ ...current, transportMode }))}
+          tailscaleHost={form.tailscaleHost}
+          onTailscaleHostChange={(tailscaleHost) => setForm((current) => ({ ...current, tailscaleHost }))}
+          ipv6Host={form.ipv6Host}
+          onIpv6HostChange={(ipv6Host) => setForm((current) => ({ ...current, ipv6Host }))}
+          ipv4Host={form.ipv4Host}
+          onIpv4HostChange={(ipv4Host) => setForm((current) => ({ ...current, ipv4Host }))}
+          signalUrl={form.signalUrl}
+          onSignalUrlChange={(signalUrl) => setForm((current) => ({ ...current, signalUrl }))}
+          defaults={bridgeSettings}
         />
 
         <ConnectionSection

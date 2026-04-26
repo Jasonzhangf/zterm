@@ -1,8 +1,8 @@
 export {
   createTerminalRuntime,
-  useTerminalRuntimeSnapshot,
+  useTerminalRuntimeState,
   type ActiveBridgeTargetState,
   type TerminalConnectionState,
   type TerminalRuntimeController,
-  type TerminalRuntimeSnapshot as BridgeTerminalState,
+  type TerminalRuntimeState as BridgeTerminalState,
 } from './terminal-runtime';

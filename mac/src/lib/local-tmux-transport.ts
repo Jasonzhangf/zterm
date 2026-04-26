@@ -1,4 +1,10 @@
-import type { BridgeServerMessage, BufferSyncRequestPayload, PasteImagePayload, TerminalBufferPayload, TerminalCell, TerminalSnapshot } from '@zterm/shared';
+import type {
+  BridgeServerMessage,
+  BufferHeadPayload,
+  BufferSyncRequestPayload,
+  PasteImagePayload,
+  TerminalBufferPayload,
+} from '@zterm/shared';
 
 export interface LocalTmuxConnectionState {
   status: 'idle' | 'connecting' | 'connected' | 'error';
@@ -19,6 +25,7 @@ export interface LocalTmuxTransportController {
   ) => void;
   disconnect: () => void;
   setActivityMode: (mode: LocalTmuxActivityMode) => void;
+  requestBufferHead: () => void;
   requestBufferSync: (_payload: BufferSyncRequestPayload) => void;
   sendInput: (data: string) => void;
   pasteImage: (_payload: PasteImagePayload) => boolean;
@@ -34,11 +41,6 @@ const EMPTY_STATE: LocalTmuxConnectionState = {
   activeTarget: null,
 };
 
-interface LocalTmuxSnapshotMessage {
-  type: 'snapshot';
-  payload: TerminalSnapshot;
-}
-
 function createClientId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `local-${crypto.randomUUID()}`;
@@ -46,42 +48,11 @@ function createClientId() {
   return `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function textLineToCells(line: string): TerminalCell[] {
-  return Array.from(line).map((char) => ({
-    char: char.codePointAt(0) || 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  }));
-}
-
-function snapshotToBufferSyncPayload(snapshot: TerminalSnapshot, revision: number): TerminalBufferPayload {
-  const scrollbackStartIndex = Number.isFinite(snapshot.scrollbackStartIndex)
-    ? Math.max(0, Math.floor(snapshot.scrollbackStartIndex || 0))
-    : 0;
-  const indexedLines = [
-    ...(snapshot.scrollbackLines || []).map((line, offset) => ({
-      index: scrollbackStartIndex + offset,
-      cells: textLineToCells(line),
-    })),
-    ...snapshot.viewport.map((cells, offset) => ({
-      index: scrollbackStartIndex + (snapshot.scrollbackLines?.length || 0) + offset,
-      cells,
-    })),
-  ];
-  const endIndex = scrollbackStartIndex + indexedLines.length;
-
-  return {
-    revision,
-    startIndex: scrollbackStartIndex,
-    endIndex,
-    viewportEndIndex: endIndex,
-    cols: snapshot.cols,
-    rows: snapshot.rows,
-    cursorKeysApp: snapshot.cursorKeysApp,
-    lines: indexedLines,
-  };
+function emitServerHead(handler: ((message: BridgeServerMessage) => void) | undefined, payload: BufferHeadPayload | null) {
+  if (!handler || !payload) {
+    return;
+  }
+  handler({ type: 'buffer-head', payload });
 }
 
 export function createLocalTmuxTransportController(): LocalTmuxTransportController {
@@ -91,7 +62,6 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
   let viewport = { cols: 80, rows: 24 };
   let activityMode: LocalTmuxActivityMode = 'active';
   let unsubscribe: (() => void) | null = null;
-  let revision = 0;
   let serverMessageHandler: ((message: BridgeServerMessage) => void) | undefined;
 
   const emit = () => {
@@ -124,6 +94,18 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
     void window.ztermMac.localTmux.setActivityMode(clientId, mode);
   };
 
+  const requestBufferHead = () => {
+    void window.ztermMac.localTmux.requestBufferHead(clientId)
+      .then((payload) => emitServerHead(serverMessageHandler, payload))
+      .catch((error) => {
+        setState((current) => ({
+          ...current,
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      });
+  };
+
   return {
     getState: () => state,
     subscribe: (listener) => {
@@ -132,7 +114,6 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
     },
     connect: (target, handlers) => {
       close();
-      revision = 0;
       serverMessageHandler = handlers?.onServerMessage;
       setState({
         status: 'connecting',
@@ -147,14 +128,8 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
           return;
         }
 
-        const message = payload.message as BridgeServerMessage | LocalTmuxSnapshotMessage;
-        if (message.type === 'snapshot') {
-          revision += 1;
-          serverMessageHandler?.({ type: 'buffer-sync', payload: snapshotToBufferSyncPayload(message.payload, revision) });
-          return;
-        }
-
-        serverMessageHandler?.(message as BridgeServerMessage);
+        const message = payload.message as BridgeServerMessage;
+        serverMessageHandler?.(message);
 
         switch (message.type) {
           case 'connected':
@@ -204,13 +179,14 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
     },
     disconnect,
     setActivityMode,
+    requestBufferHead,
     requestBufferSync: (payload) => {
       void window.ztermMac.localTmux.requestBufferSync(clientId, payload)
         .then((response) => {
           if (!response) {
             return;
           }
-          serverMessageHandler?.({ type: 'buffer-sync', payload: response });
+          serverMessageHandler?.({ type: 'buffer-sync', payload: response as TerminalBufferPayload });
         })
         .catch((error) => {
           setState((current) => ({

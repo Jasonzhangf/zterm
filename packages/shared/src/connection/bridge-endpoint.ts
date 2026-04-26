@@ -5,7 +5,12 @@ export interface BridgeEndpointLike {
   bridgePort: number;
 }
 
-function resolveFallbackPort(port: number) {
+interface ParsedRawHostLiteral {
+  normalizedHost: string;
+  embeddedPort: number | null;
+}
+
+function normalizeBridgePort(port: number) {
   return Number.isFinite(port) && port > 0 ? Math.floor(port) : DEFAULT_BRIDGE_PORT;
 }
 
@@ -14,16 +19,54 @@ function buildUrlDisplay(url: URL) {
   return `${url.protocol}//${url.host}${path}`;
 }
 
+function parseRawHostLiteral(rawHost: string): ParsedRawHostLiteral {
+  if (!rawHost) {
+    return {
+      normalizedHost: rawHost,
+      embeddedPort: null,
+    };
+  }
+
+  if (rawHost.startsWith('[')) {
+    const bracketedMatch = rawHost.match(/^(\[[^\]]+\])(?::(\d+))?$/);
+    if (bracketedMatch) {
+      return {
+        normalizedHost: bracketedMatch[1],
+        embeddedPort: bracketedMatch[2] ? normalizeBridgePort(Number.parseInt(bracketedMatch[2], 10)) : null,
+      };
+    }
+  }
+
+  const colonMatches = rawHost.match(/:/g) || [];
+  if (colonMatches.length === 1) {
+    const separatorIndex = rawHost.lastIndexOf(':');
+    const hostLiteral = rawHost.slice(0, separatorIndex).trim();
+    const portLiteral = rawHost.slice(separatorIndex + 1).trim();
+    if (hostLiteral && /^\d+$/.test(portLiteral)) {
+      return {
+        normalizedHost: hostLiteral,
+        embeddedPort: normalizeBridgePort(Number.parseInt(portLiteral, 10)),
+      };
+    }
+  }
+
+  return {
+    normalizedHost: rawHost,
+    embeddedPort: null,
+  };
+}
+
 export function resolveBridgeEndpoint(target: BridgeEndpointLike) {
   const bridgeHost = target.bridgeHost.trim();
-  const fallbackPort = resolveFallbackPort(target.bridgePort);
+  const normalizedPort = normalizeBridgePort(target.bridgePort);
 
   if (!bridgeHost) {
     return {
       bridgeHost,
-      effectivePort: fallbackPort,
-      displayEndpoint: `:${fallbackPort}`,
-      key: `:${fallbackPort}`.toLowerCase(),
+      normalizedHost: bridgeHost,
+      effectivePort: normalizedPort,
+      displayEndpoint: `:${normalizedPort}`,
+      key: `:${normalizedPort}`.toLowerCase(),
       usesExplicitUrl: false,
     };
   }
@@ -32,32 +75,38 @@ export function resolveBridgeEndpoint(target: BridgeEndpointLike) {
     try {
       const url = new URL(bridgeHost);
       if (!url.port) {
-        url.port = String(fallbackPort);
+        url.port = String(normalizedPort);
       }
-      const effectivePort = resolveFallbackPort(Number.parseInt(url.port, 10));
+      const effectivePort = normalizeBridgePort(Number.parseInt(url.port, 10));
       const displayEndpoint = buildUrlDisplay(url);
       return {
         bridgeHost,
+        normalizedHost: bridgeHost,
         effectivePort,
         displayEndpoint,
         key: displayEndpoint.toLowerCase(),
         usesExplicitUrl: true,
       };
-    } catch {
+    } catch (error) {
       return {
         bridgeHost,
-        effectivePort: fallbackPort,
-        displayEndpoint: `${bridgeHost}:${fallbackPort}`,
-        key: `${bridgeHost}:${fallbackPort}`.toLowerCase(),
-        usesExplicitUrl: false,
+        normalizedHost: bridgeHost,
+        effectivePort: normalizedPort,
+        displayEndpoint: bridgeHost,
+        key: bridgeHost.toLowerCase(),
+        usesExplicitUrl: true,
+        parseError: error instanceof Error ? error.message : String(error),
       };
     }
   }
 
-  const displayEndpoint = `${bridgeHost}:${fallbackPort}`;
+  const parsedRawHost = parseRawHostLiteral(bridgeHost);
+  const effectivePort = parsedRawHost.embeddedPort ?? normalizedPort;
+  const displayEndpoint = `${parsedRawHost.normalizedHost}:${effectivePort}`;
   return {
     bridgeHost,
-    effectivePort: fallbackPort,
+    normalizedHost: parsedRawHost.normalizedHost,
+    effectivePort,
     displayEndpoint,
     key: displayEndpoint.toLowerCase(),
     usesExplicitUrl: false,
@@ -74,4 +123,8 @@ export function buildBridgeEndpointKey(target: BridgeEndpointLike) {
 
 export function resolveEffectiveBridgePort(target: BridgeEndpointLike) {
   return resolveBridgeEndpoint(target).effectivePort;
+}
+
+export function resolveNormalizedBridgeHost(target: BridgeEndpointLike) {
+  return resolveBridgeEndpoint(target).normalizedHost;
 }

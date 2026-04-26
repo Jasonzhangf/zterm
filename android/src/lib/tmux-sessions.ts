@@ -1,15 +1,27 @@
-import { buildBridgeUrlFromTarget } from './bridge-url';
+import type { BridgeSettings } from './bridge-settings';
 import type { ClientMessage } from './types';
+import { TraversalSocket } from './traversal/socket';
+import type { TraversalTargetSource } from './traversal/types';
 
 export interface BridgeTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+  tailscaleHost?: string;
+  ipv6Host?: string;
+  ipv4Host?: string;
+  signalUrl?: string;
+  transportMode?: 'auto' | 'websocket' | 'webrtc';
 }
 
-function sendTmuxRequest(target: BridgeTarget, message: ClientMessage, overrideUrl?: string) {
+function sendTmuxRequest(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  message: ClientMessage,
+  overrideUrl?: string,
+) {
   return new Promise<string[]>((resolve, reject) => {
-    const ws = new WebSocket(buildBridgeUrlFromTarget(target, overrideUrl));
+    const ws = new TraversalSocket(target satisfies TraversalTargetSource, traversalSettings, { overrideUrl });
 
     const cleanup = () => {
       ws.onopen = null;
@@ -49,7 +61,8 @@ function sendTmuxRequest(target: BridgeTarget, message: ClientMessage, overrideU
 
     ws.onerror = () => {
       cleanup();
-      reject(new Error('WebSocket error while managing tmux sessions'));
+      const diagnostics = ws.getDiagnostics();
+      reject(new Error(diagnostics.reason || 'Transport error while managing tmux sessions'));
     };
 
     ws.onclose = () => {
@@ -58,18 +71,43 @@ function sendTmuxRequest(target: BridgeTarget, message: ClientMessage, overrideU
   });
 }
 
-export function fetchTmuxSessions(target: BridgeTarget, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'list-sessions' }, overrideUrl);
+export function fetchTmuxSessions(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  overrideUrl?: string,
+) {
+  return sendTmuxRequest(target, traversalSettings, { type: 'list-sessions' }, overrideUrl);
 }
 
-export function createTmuxSession(target: BridgeTarget, sessionName: string, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'tmux-create-session', payload: { sessionName } }, overrideUrl);
+export function createTmuxSession(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  sessionName: string,
+  overrideUrl?: string,
+) {
+  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-create-session', payload: { sessionName } }, overrideUrl);
 }
 
-export function renameTmuxSession(target: BridgeTarget, sessionName: string, nextSessionName: string, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'tmux-rename-session', payload: { sessionName, nextSessionName } }, overrideUrl);
+export function renameTmuxSession(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  sessionName: string,
+  nextSessionName: string,
+  overrideUrl?: string,
+) {
+  return sendTmuxRequest(
+    target,
+    traversalSettings,
+    { type: 'tmux-rename-session', payload: { sessionName, nextSessionName } },
+    overrideUrl,
+  );
 }
 
-export function killTmuxSession(target: BridgeTarget, sessionName: string, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
+export function killTmuxSession(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  sessionName: string,
+  overrideUrl?: string,
+) {
+  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
 }

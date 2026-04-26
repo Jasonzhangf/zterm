@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const LOCAL_TMUX_EVENT = 'zterm:local-tmux-event';
-const ACTIVE_POLL_INTERVAL_MS = 16;
+const ACTIVE_POLL_INTERVAL_MS = 33;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 
@@ -12,10 +12,8 @@ interface LocalBufferSyncRequestPayload {
   knownRevision: number;
   localStartIndex: number;
   localEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-  mode: 'follow' | 'reading';
-  prefetch?: boolean;
+  requestStartIndex: number;
+  requestEndIndex: number;
   missingRanges?: Array<{ startIndex: number; endIndex: number }>;
 }
 
@@ -23,11 +21,30 @@ interface LocalTerminalBufferPayload {
   revision: number;
   startIndex: number;
   endIndex: number;
-  viewportEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
   lines: Array<{ index: number; cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> }>;
+}
+
+interface LocalBufferHeadPayload {
+  sessionId: string;
+  revision: number;
+  latestEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
+}
+
+interface LocalTmuxCapturePayload {
+  cols: number;
+  rows: number;
+  viewport: Array<Array<{ char: number; fg: number; bg: number; flags: number; width: number }>>;
+  cursor: { row: number; col: number; visible: boolean };
+  cursorKeysApp: boolean;
+  scrollbackLines?: string[];
+  scrollbackStartIndex?: number;
 }
 
 type LocalTmuxMessage =
@@ -35,21 +52,8 @@ type LocalTmuxMessage =
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
   | { type: 'error'; payload: { message: string; code?: string } }
-  | { type: 'buffer-sync'; payload: LocalTerminalBufferPayload }
-  | {
-      type: 'snapshot';
-      payload: {
-        cols: number;
-        rows: number;
-        viewport: Array<Array<{ char: number; fg: number; bg: number; flags: number; width: number }>>;
-        cursor: { row: number; col: number; visible: boolean };
-        cursorKeysApp: boolean;
-        scrollbackLines?: string[];
-        scrollbackStartIndex?: number;
-      };
-    };
-
-type LocalTmuxSnapshotPayload = Extract<LocalTmuxMessage, { type: 'snapshot' }>['payload'];
+  | { type: 'buffer-head'; payload: LocalBufferHeadPayload }
+  | { type: 'buffer-sync'; payload: LocalTerminalBufferPayload };
 
 type LocalTmuxActivityMode = 'active' | 'idle';
 
@@ -64,8 +68,8 @@ interface LocalTmuxClient {
   refreshQueued: boolean;
   disposed: boolean;
   revision: number;
-  lastBufferPayload: LocalTerminalBufferPayload | null;
-  lastSnapshotFingerprint: string;
+  lastCaptureFingerprint: string;
+  lastHeadPayload: LocalBufferHeadPayload | null;
   lastTitle: string;
 }
 
@@ -108,7 +112,7 @@ function rowsEqual(
   return true;
 }
 
-function fingerprintSnapshot(snapshot: LocalTmuxSnapshotPayload) {
+function fingerprintCapture(snapshot: LocalTmuxCapturePayload) {
   let hash = 2166136261;
   hash = updateHash(hash, snapshot.cols);
   hash = updateHash(hash, snapshot.rows);
@@ -287,7 +291,7 @@ async function listSessions() {
   }
 }
 
-async function readSessionSnapshot(sessionName: string, requestedCols: number, requestedRows: number, options?: { visibleOnly?: boolean }) {
+async function readSessionCapture(sessionName: string, requestedCols: number, requestedRows: number, options?: { visibleOnly?: boolean }) {
   const target = sessionName;
   const metricsRaw = await runTmux([
     'display-message',
@@ -394,55 +398,17 @@ function parseTmuxSpecialKey(input: string, index: number) {
   return null;
 }
 
-function buildLiveViewportPayloadFromSnapshot(
-  snapshot: LocalTmuxSnapshotPayload,
-  revision: number,
-  previous: LocalTerminalBufferPayload | null,
-): LocalTerminalBufferPayload {
-  const viewportRows = snapshot.viewport.map((cells) => cells);
-  let startIndex = 0;
-
-  if (previous && previous.lines.length > 0) {
-    const previousRows = previous.lines.map((line) => line.cells);
-    const maxOverlap = Math.min(previousRows.length, viewportRows.length);
-    let overlap = 0;
-
-    for (let size = maxOverlap; size >= 1; size -= 1) {
-      let matched = true;
-      for (let offset = 0; offset < size; offset += 1) {
-        const left = previousRows[previousRows.length - size + offset] || [];
-        const right = viewportRows[offset] || [];
-        if (!rowsEqual(left, right)) {
-          matched = false;
-          break;
-        }
-      }
-      if (matched) {
-        overlap = size;
-        break;
-      }
-    }
-
-    startIndex = overlap > 0 ? previous.endIndex - overlap : previous.startIndex;
-  }
-
-  const endIndex = startIndex + viewportRows.length;
+function buildBufferHeadPayload(sessionName: string, revision: number, payload: LocalTerminalBufferPayload): LocalBufferHeadPayload {
   return {
+    sessionId: `local:${sessionName}`,
     revision,
-    startIndex,
-    endIndex,
-    viewportEndIndex: endIndex,
-    cols: snapshot.cols,
-    rows: snapshot.rows,
-    cursorKeysApp: snapshot.cursorKeysApp,
-    lines: viewportRows.map((cells, offset) => ({
-      index: startIndex + offset,
-      cells,
-    })),
+    latestEndIndex: payload.endIndex,
+    availableStartIndex: payload.availableStartIndex,
+    availableEndIndex: payload.availableEndIndex,
   };
 }
 
-function snapshotToBufferSyncPayload(snapshot: LocalTmuxSnapshotPayload, revision: number): LocalTerminalBufferPayload {
+function captureToBufferPayload(snapshot: LocalTmuxCapturePayload, revision: number): LocalTerminalBufferPayload {
   const scrollbackStartIndex = Number.isFinite(snapshot.scrollbackStartIndex)
     ? Math.max(0, Math.floor(snapshot.scrollbackStartIndex || 0))
     : 0;
@@ -462,7 +428,8 @@ function snapshotToBufferSyncPayload(snapshot: LocalTmuxSnapshotPayload, revisio
     revision,
     startIndex: scrollbackStartIndex,
     endIndex,
-    viewportEndIndex: endIndex,
+    availableStartIndex: scrollbackStartIndex,
+    availableEndIndex: endIndex,
     cols: snapshot.cols,
     rows: snapshot.rows,
     cursorKeysApp: snapshot.cursorKeysApp,
@@ -472,26 +439,6 @@ function snapshotToBufferSyncPayload(snapshot: LocalTmuxSnapshotPayload, revisio
 
 function slicePayloadLines(payload: LocalTerminalBufferPayload, startIndex: number, endIndex: number) {
   return payload.lines.filter((line) => line.index >= startIndex && line.index < endIndex);
-}
-
-function buildViewportTailPayload(payload: LocalTerminalBufferPayload): LocalTerminalBufferPayload {
-  const startIndex = Math.max(payload.startIndex, payload.endIndex - Math.max(1, payload.rows));
-  return {
-    ...payload,
-    startIndex,
-    lines: slicePayloadLines(payload, startIndex, payload.endIndex),
-  };
-}
-
-function buildDiffPayload(previous: LocalTerminalBufferPayload | null, next: LocalTerminalBufferPayload): LocalTerminalBufferPayload {
-  if (!previous) {
-    return next;
-  }
-  const previousRows = new Map(previous.lines.map((line) => [line.index, line.cells]));
-  return {
-    ...next,
-    lines: next.lines.filter((line) => !rowsEqual(previousRows.get(line.index) || [], line.cells)),
-  };
 }
 
 function normalizeMissingRanges(
@@ -511,64 +458,31 @@ function normalizeMissingRanges(
     .filter((range) => range.endIndex > range.startIndex);
 }
 
-function buildReadingRangesFromLocalWindow(
-  request: LocalBufferSyncRequestPayload,
-  desiredStartIndex: number,
-  desiredEndIndex: number,
-) {
-  const ranges: Array<{ startIndex: number; endIndex: number }> = [];
-  const localStartIndex = Math.max(0, Math.floor(request.localStartIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(request.localEndIndex || localStartIndex));
-
-  if (desiredStartIndex < localStartIndex) {
-    ranges.push({
-      startIndex: desiredStartIndex,
-      endIndex: Math.min(desiredEndIndex, localStartIndex),
-    });
-  }
-
-  if (desiredEndIndex > localEndIndex) {
-    ranges.push({
-      startIndex: Math.max(desiredStartIndex, localEndIndex),
-      endIndex: desiredEndIndex,
-    });
-  }
-
-  return ranges.filter((range) => range.endIndex > range.startIndex);
-}
-
 function buildRequestedBufferPayload(
   payload: LocalTerminalBufferPayload,
   request: LocalBufferSyncRequestPayload,
 ): LocalTerminalBufferPayload | null {
-  if (request.mode !== 'reading') {
-    return null;
-  }
-
-  const viewportRows = Math.max(1, Math.floor(request.viewportRows || payload.rows || 1));
-  const requestedViewportEndIndex = Math.max(
+  const requestedStartIndex = Math.max(
     payload.startIndex,
-    Math.min(payload.endIndex, Math.floor(request.viewportEndIndex || payload.endIndex)),
+    Math.min(payload.endIndex, Math.floor(request.requestStartIndex || payload.startIndex)),
   );
-  const viewportStartIndex = Math.max(payload.startIndex, requestedViewportEndIndex - viewportRows);
-  const desiredStartIndex = request.prefetch
-    ? Math.max(payload.startIndex, viewportStartIndex - viewportRows * 2)
-    : viewportStartIndex;
-  const desiredEndIndex = requestedViewportEndIndex;
-  const ranges = request.prefetch
-    ? normalizeMissingRanges(request.missingRanges, desiredStartIndex, desiredEndIndex)
-    : buildReadingRangesFromLocalWindow(request, desiredStartIndex, desiredEndIndex);
-
-  if (ranges.length === 0) {
+  const requestedEndIndex = Math.max(
+    requestedStartIndex,
+    Math.min(payload.endIndex, Math.floor(request.requestEndIndex || requestedStartIndex)),
+  );
+  if (requestedEndIndex <= requestedStartIndex) {
     return null;
   }
+  const ranges = normalizeMissingRanges(request.missingRanges, requestedStartIndex, requestedEndIndex);
+  const responseRanges = ranges.length > 0
+    ? ranges
+    : [{ startIndex: requestedStartIndex, endIndex: requestedEndIndex }];
 
   return {
     ...payload,
-    startIndex: desiredStartIndex,
-    endIndex: desiredEndIndex,
-    viewportEndIndex: requestedViewportEndIndex,
-    lines: ranges.flatMap((range) => slicePayloadLines(payload, range.startIndex, range.endIndex)),
+    startIndex: requestedStartIndex,
+    endIndex: requestedEndIndex,
+    lines: responseRanges.flatMap((range) => slicePayloadLines(payload, range.startIndex, range.endIndex)),
   };
 }
 
@@ -647,26 +561,39 @@ export class LocalTmuxManager {
 
     client.refreshInFlight = true;
     try {
-      const { title, snapshot } = await readSessionSnapshot(client.sessionName, client.cols, client.rows, { visibleOnly: true });
+      const { title, snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: true });
       if (client.disposed) {
         return;
       }
-      const snapshotFingerprint = fingerprintSnapshot(snapshot);
+      const captureFingerprint = fingerprintCapture(snapshot);
 
       if (title !== client.lastTitle) {
         client.lastTitle = title;
         this.emit(client.clientId, { type: 'title', payload: title });
       }
 
-      if (snapshotFingerprint !== client.lastSnapshotFingerprint) {
-        client.lastSnapshotFingerprint = snapshotFingerprint;
+      if (captureFingerprint !== client.lastCaptureFingerprint) {
+        client.lastCaptureFingerprint = captureFingerprint;
         client.revision += 1;
-        const livePayload = buildLiveViewportPayloadFromSnapshot(snapshot, client.revision, client.lastBufferPayload);
-        const diffPayload = buildDiffPayload(client.lastBufferPayload, livePayload);
-        client.lastBufferPayload = livePayload;
+      }
+
+      const headPayload = buildBufferHeadPayload(
+        client.sessionName,
+        client.revision,
+        captureToBufferPayload(snapshot, client.revision),
+      );
+      const previousHead = client.lastHeadPayload;
+      if (
+        !previousHead
+        || previousHead.revision !== headPayload.revision
+        || previousHead.latestEndIndex !== headPayload.latestEndIndex
+        || previousHead.availableStartIndex !== headPayload.availableStartIndex
+        || previousHead.availableEndIndex !== headPayload.availableEndIndex
+      ) {
+        client.lastHeadPayload = headPayload;
         this.emit(client.clientId, {
-          type: 'buffer-sync',
-          payload: diffPayload,
+          type: 'buffer-head',
+          payload: headPayload,
         });
       }
     } catch (error) {
@@ -712,8 +639,8 @@ export class LocalTmuxManager {
       refreshQueued: false,
       disposed: false,
       revision: 0,
-      lastBufferPayload: null,
-      lastSnapshotFingerprint: '',
+      lastCaptureFingerprint: '',
+      lastHeadPayload: null,
       lastTitle: '',
     };
 
@@ -767,14 +694,32 @@ export class LocalTmuxManager {
     await this.refreshClient(client);
   }
 
+  async requestBufferHead(clientId: string) {
+    const client = this.clients.get(clientId);
+    if (!client) {
+      return null;
+    }
+
+    const { snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: true });
+    const captureFingerprint = fingerprintCapture(snapshot);
+    if (captureFingerprint !== client.lastCaptureFingerprint) {
+      client.lastCaptureFingerprint = captureFingerprint;
+      client.revision += 1;
+    }
+    const payload = captureToBufferPayload(snapshot, client.revision);
+    const headPayload = buildBufferHeadPayload(client.sessionName, client.revision, payload);
+    client.lastHeadPayload = headPayload;
+    return headPayload;
+  }
+
   async requestBufferSync(clientId: string, request: LocalBufferSyncRequestPayload) {
     const client = this.clients.get(clientId);
     if (!client) {
       return null;
     }
 
-    const { snapshot } = await readSessionSnapshot(client.sessionName, client.cols, client.rows, { visibleOnly: false });
-    const payload = snapshotToBufferSyncPayload(snapshot, Math.max(client.revision, client.lastBufferPayload?.revision || 0));
+    const { snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: false });
+    const payload = captureToBufferPayload(snapshot, Math.max(client.revision, client.lastHeadPayload?.revision || 0));
     return buildRequestedBufferPayload(payload, request);
   }
 

@@ -26,6 +26,11 @@ export interface Host {
   bridgePort: number;        // Bridge 端口，默认取统一配置
   sessionName: string;       // tmux session 名，留空时回退到 name
   authToken?: string;        // daemon / websocket bridge 鉴权 token
+  tailscaleHost?: string;
+  ipv6Host?: string;
+  ipv4Host?: string;
+  signalUrl?: string;
+  transportMode?: 'auto' | 'websocket' | 'webrtc';
   authType: 'password' | 'key';
   password?: string;         // 暂不加密存储
   privateKey?: string;       // 暂不加密存储
@@ -69,20 +74,22 @@ export interface SessionBufferState {
 export type TerminalViewportMode = 'follow' | 'reading';
 export type TerminalSplitPaneId = 'primary' | 'secondary';
 
+export interface TerminalLayoutState {
+  splitEnabled: boolean;
+  splitSecondarySessionId: string | null;
+  splitPaneAssignments: Partial<Record<string, TerminalSplitPaneId>>;
+}
+
 export interface TerminalViewportState {
   mode: TerminalViewportMode;
   viewportEndIndex: number;
   viewportRows: number;
-  prefetch?: boolean;
-  missingRanges?: TerminalGapRange[];
 }
 
 export interface TerminalViewportSize {
   cols: number;
   rows: number;
 }
-
-export type TerminalFollowResetToken = number;
 
 export type TerminalResizeHandler = (sessionId: string, cols: number, rows: number) => void;
 export type TerminalViewportChangeHandler = (sessionId: string, viewState: TerminalViewportState) => void;
@@ -98,14 +105,28 @@ export interface Session {
   autoCommand?: string;
   title: string;             // 动态标题（来自 tmux / 远端 terminal）
   ws: WebSocket | null;
+  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay';
+  resolvedEndpoint?: string;
+  lastConnectStage?: string;
   state: SessionState;
   hasUnread: boolean;        // 是否有未读输出
   customName?: string;       // 用户重命名的名称
   buffer: SessionBufferState;
-  followResetToken?: TerminalFollowResetToken;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
   reconnectAttempt?: number;
   lastError?: string;
   createdAt: number;         // 创建时间戳
+}
+
+export interface SessionDebugOverlayMetrics {
+  uplinkBps: number;
+  downlinkBps: number;
+  renderHz: number;
+  pullHz: number;
+  bufferPullActive: boolean;
+  status: 'waiting' | 'refreshing' | 'loading' | 'reconnecting' | 'error' | 'closed' | 'connecting';
+  updatedAt: number;
 }
 
 export interface TerminalCell {
@@ -126,7 +147,7 @@ export interface TerminalBufferPayload {
   startIndex: number;               // authoritative available window start on daemon
   endIndex: number;                 // authoritative available window end on daemon (exclusive)
   availableStartIndex?: number;     // authoritative daemon buffer head start (independent from sparse payload window)
-  viewportEndIndex: number;         // authoritative viewport end absolute row
+  availableEndIndex?: number;       // authoritative daemon buffer tail end (independent from sparse payload window)
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
@@ -137,10 +158,8 @@ export interface BufferSyncRequestPayload {
   knownRevision: number;
   localStartIndex: number;
   localEndIndex: number;
-  viewportEndIndex: number;
-  viewportRows: number;
-  mode: 'follow' | 'reading';
-  prefetch?: boolean;
+  requestStartIndex: number;
+  requestEndIndex: number;
   missingRanges?: TerminalGapRange[];
 }
 
@@ -148,6 +167,8 @@ export interface BufferHeadPayload {
   sessionId: string;
   revision: number;
   latestEndIndex: number;
+  availableStartIndex?: number;
+  availableEndIndex?: number;
 }
 
 export interface PasteImagePayload {
@@ -169,11 +190,6 @@ export interface RuntimeDebugLogEntry {
   ts: string;
   scope: string;
   payload?: string;
-}
-
-export interface StreamModePayload {
-  mode: 'active' | 'idle';
-  minCaptureIntervalMs?: number;
 }
 
 // ============================================
@@ -268,7 +284,7 @@ export interface CommandHistory {
 
 export type ClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'stream-mode'; payload: StreamModePayload }
+  | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
   | { type: 'list-sessions' }
@@ -381,6 +397,7 @@ export const STORAGE_KEYS = {
   COMMAND_HISTORY: 'zterm:command-history',
   ACTIVE_SESSION: 'zterm:active-session',
   ACTIVE_PAGE: 'zterm:active-page',
+  TERMINAL_LAYOUT: 'zterm:terminal-layout',
 } as const;
 
 // ============================================
@@ -413,6 +430,11 @@ export const DEFAULT_HOST: Partial<Host> = {
   bridgePort: DEFAULT_BRIDGE_PORT,
   sessionName: '',
   authToken: '',
+  tailscaleHost: '',
+  ipv6Host: '',
+  ipv4Host: '',
+  signalUrl: '',
+  transportMode: 'auto',
   authType: 'password',
   tags: [],
   pinned: false,

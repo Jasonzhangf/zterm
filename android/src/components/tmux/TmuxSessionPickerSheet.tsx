@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { sortBridgeServers, type BridgeServerPreset } from '../../lib/bridge-settings';
+import { sortBridgeServers, type BridgeServerPreset, type BridgeSettings } from '../../lib/bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
@@ -9,6 +9,7 @@ interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
   open: boolean;
   servers: BridgeServerPreset[];
+  bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>;
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
   onClose: () => void;
@@ -25,6 +26,11 @@ function normalizeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
     bridgeHost: target?.bridgeHost?.trim() || '',
     bridgePort: target?.bridgePort || DEFAULT_BRIDGE_PORT,
     authToken: target?.authToken?.trim() || '',
+    tailscaleHost: target?.tailscaleHost?.trim() || '',
+    ipv6Host: target?.ipv6Host?.trim() || '',
+    ipv4Host: target?.ipv4Host?.trim() || '',
+    signalUrl: target?.signalUrl?.trim() || '',
+    transportMode: target?.transportMode || 'auto',
   };
 }
 
@@ -59,6 +65,7 @@ export function TmuxSessionPickerSheet({
   mode,
   open,
   servers,
+  bridgeSettings,
   initialTarget,
   initialSelectedSessions = [],
   onClose,
@@ -141,7 +148,7 @@ export function TmuxSessionPickerSheet({
     setDiscoveryState('loading');
     setErrorMessage('');
     try {
-      const sessions = await fetchTmuxSessions(selectedTarget);
+      const sessions = await fetchTmuxSessions(selectedTarget, bridgeSettings);
       setAvailableSessions(sessions);
       setSelectedSessions((current) => current.filter((item) => sessions.includes(item)));
       setDiscoveryState('done');
@@ -169,7 +176,7 @@ export function TmuxSessionPickerSheet({
 
     setBusyAction(`create:${sessionName}`);
     try {
-      await createTmuxSession(selectedTarget, sessionName);
+      await createTmuxSession(selectedTarget, bridgeSettings, sessionName);
       setNewSessionName('');
       await handleRefreshNow();
     } catch (error) {
@@ -187,7 +194,7 @@ export function TmuxSessionPickerSheet({
 
     setBusyAction(`rename:${sessionName}`);
     try {
-      await renameTmuxSession(selectedTarget, sessionName, nextSessionName);
+      await renameTmuxSession(selectedTarget, bridgeSettings, sessionName, nextSessionName);
       setSelectedSessions((current) => current.map((item) => (item === sessionName ? nextSessionName : item)));
       await handleRefreshNow();
     } catch (error) {
@@ -205,7 +212,7 @@ export function TmuxSessionPickerSheet({
 
     setBusyAction(`kill:${sessionName}`);
     try {
-      await killTmuxSession(selectedTarget, sessionName);
+      await killTmuxSession(selectedTarget, bridgeSettings, sessionName);
       setSelectedSessions((current) => current.filter((item) => item !== sessionName));
       await handleRefreshNow();
     } catch (error) {

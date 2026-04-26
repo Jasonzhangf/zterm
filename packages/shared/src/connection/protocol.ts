@@ -26,14 +26,9 @@ export interface PasteImagePayload {
   pasteSequence?: string;
 }
 
-export interface BridgeStreamModePayload {
-  mode: 'active' | 'idle';
-  minCaptureIntervalMs?: number;
-}
-
 export type BridgeClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'stream-mode'; payload: BridgeStreamModePayload }
+  | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'list-sessions' }
   | { type: 'schedule-list'; payload: { sessionName: string } }

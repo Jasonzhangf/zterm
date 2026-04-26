@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBridgeEndpoint, formatBridgeSessionTarget, getResolvedSessionName, normalizeHost } from './connection-target';
+import { buildStoredHost, formatBridgeEndpoint, formatBridgeSessionTarget, getResolvedSessionName, normalizeHost } from './connection-target';
 
 describe('connection-target helpers', () => {
   it('normalizes legacy host records to bridge/session fields', () => {
@@ -23,6 +23,11 @@ describe('connection-target helpers', () => {
       bridgePort: 37283,
       sessionName: 'main',
       authToken: '',
+      tailscaleHost: undefined,
+      ipv6Host: undefined,
+      ipv4Host: undefined,
+      signalUrl: undefined,
+      transportMode: 'auto',
       authType: 'password',
       password: undefined,
       privateKey: undefined,
@@ -44,7 +49,32 @@ describe('connection-target helpers', () => {
     ).toBe('100.127.23.27:37283 · build');
   });
 
-  it('falls back to connection name when sessionName is empty', () => {
+  it('uses connection name when sessionName is empty', () => {
     expect(getResolvedSessionName({ name: 'Mac', sessionName: '' })).toBe('Mac');
+  });
+
+  it('normalizes raw host:port input before storing the host', () => {
+    const host = buildStoredHost({
+      name: 'Mac',
+      bridgeHost: '100.127.23.27:40807',
+      bridgePort: 3333,
+      sessionName: 'main',
+      authToken: '',
+      tailscaleHost: undefined,
+      ipv6Host: undefined,
+      ipv4Host: undefined,
+      signalUrl: undefined,
+      transportMode: 'auto',
+      authType: 'password',
+      password: undefined,
+      privateKey: undefined,
+      tags: [],
+      pinned: false,
+      lastConnected: undefined,
+      autoCommand: '',
+    });
+
+    expect(host.bridgeHost).toBe('100.127.23.27');
+    expect(host.bridgePort).toBe(40807);
   });
 });
