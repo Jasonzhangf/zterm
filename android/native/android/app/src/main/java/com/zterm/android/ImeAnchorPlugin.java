@@ -98,6 +98,32 @@ public class ImeAnchorPlugin extends Plugin {
         call.resolve(buildState("debugEmitInput"));
     }
 
+    @PluginMethod
+    public void setEditorActive(PluginCall call) {
+        boolean active = call.getBoolean("active", false);
+        getActivity().runOnUiThread(() -> {
+            Log.i(TAG, "setEditorActive(): active=" + active);
+            if (imeEditText != null) {
+                if (active) {
+                    // Editor overlay is active: make ImeAnchor unfocusable so it
+                    // cannot steal focus from WebView <input>/<textarea> elements.
+                    // Do NOT hide keyboard — the HTML editor input needs it.
+                    pendingShowRequest = false;
+                    if (imeEditText.hasFocus()) {
+                        imeEditText.clearFocus();
+                    }
+                    imeEditText.setFocusable(false);
+                    imeEditText.setFocusableInTouchMode(false);
+                } else {
+                    // Terminal mode: re-enable ImeAnchor for terminal input.
+                    imeEditText.setFocusable(true);
+                    imeEditText.setFocusableInTouchMode(true);
+                }
+            }
+            call.resolve(buildState("setEditorActive"));
+        });
+    }
+
     private void ensureImeAnchor() {
         if (imeEditText != null) {
             Log.i(TAG, "ensureImeAnchor(): reuse existing anchor");

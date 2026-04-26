@@ -6,6 +6,7 @@ import {
   createSessionBufferState,
 } from '../src/lib/terminal-buffer';
 import type { TerminalBufferPayload, TerminalCell } from '../src/lib/types';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
 
 interface ProbeHistoryEntry {
   at: string;
@@ -99,14 +100,14 @@ function replayBuffer(
   paneCols: number,
 ) {
   let buffer = createSessionBufferState({
-    cacheLines: 3000,
+    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
     lines: [],
     rows: paneRows,
     cols: paneCols,
   });
 
   for (const item of history) {
-    buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, 3000);
+    buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, DEFAULT_TERMINAL_CACHE_LINES);
   }
 
   const renderWindow = deriveRenderRows({

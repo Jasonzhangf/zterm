@@ -1,7 +1,7 @@
 export const MOBILE_BRIDGE_CONFIG = {
   defaultBridgePort: 3333,
   daemonHost: '0.0.0.0',
-  defaultTerminalCacheLines: 3000,
+  defaultTerminalCacheLines: 1000,
 } as const;
 
 export const DEFAULT_BRIDGE_PORT = MOBILE_BRIDGE_CONFIG.defaultBridgePort;

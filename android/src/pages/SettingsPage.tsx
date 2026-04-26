@@ -9,6 +9,7 @@ import {
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-update';
 import { APP_VERSION_CODE } from '../lib/app-version';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
 import { formatTargetBadge } from '../lib/network-target';
 
@@ -314,11 +315,16 @@ export function SettingsPage({
             <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Terminal Cache Lines</div>
             <input
               type="number"
+              min={200}
+              max={DEFAULT_TERMINAL_CACHE_LINES}
               value={draft.terminalCacheLines}
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
-                  terminalCacheLines: Math.max(200, Number.parseInt(event.target.value, 10) || current.terminalCacheLines),
+                  terminalCacheLines: Math.min(
+                    DEFAULT_TERMINAL_CACHE_LINES,
+                    Math.max(200, Number.parseInt(event.target.value, 10) || current.terminalCacheLines),
+                  ),
                 }))
               }
               style={inputStyle()}

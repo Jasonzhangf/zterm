@@ -360,6 +360,13 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollHeight = 2040;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
 
@@ -598,6 +605,13 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollHeight = 2040;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
 
@@ -682,6 +696,13 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollHeight = 2040;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
 
@@ -945,6 +966,13 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollHeight = 2040;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
 
@@ -1125,6 +1153,86 @@ describe('TerminalView minimal mirror render', () => {
       expect(lastCall?.mode).toBe('follow');
       expect(lastCall?.viewportEndIndex).toBe(100);
     });
+  });
+
+  it('returns to follow when a buffer re-anchor leaves the reading viewport physically at the bottom', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollHeight = 2040;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.viewportEndIndex).toBe(24);
+    });
+
+    const reanchoredTail = makeSession({
+      revision: 2,
+      lines: buildRows(24),
+      startIndex: 56,
+      bufferTailEndIndex: 80,
+    });
+    currentScrollHeight = 408;
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={reanchoredTail.id}
+          initialBufferLines={reanchoredTail.buffer.lines}
+          bufferStartIndex={reanchoredTail.buffer.startIndex}
+          bufferEndIndex={reanchoredTail.buffer.endIndex}
+          bufferTailEndIndex={reanchoredTail.buffer.bufferTailEndIndex}
+          bufferGapRanges={reanchoredTail.buffer.gapRanges}
+          cursorKeysApp={reanchoredTail.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('follow');
+      expect(lastCall?.viewportEndIndex).toBe(80);
+    });
+
+    expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeNull();
   });
 
   it('keeps reading mode pinned when live buffer updates advance the same session head', async () => {

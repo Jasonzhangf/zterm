@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_TERMINAL_CACHE_LINES } from './mobile-config';
 import type { TerminalBufferPayload, TerminalCell } from './types';
 import {
   applyBufferSyncToSessionBuffer,
@@ -50,7 +51,7 @@ describe('terminal-buffer canonical mirror patching', () => {
         viewportEndIndex: 210,
         lines: Array.from({ length: 20 }, (_, offset) => [190 + offset, `line-${190 + offset}`]),
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(190);
@@ -68,7 +69,7 @@ describe('terminal-buffer canonical mirror patching', () => {
       bufferTailEndIndex: 104,
       rows: 4,
       cols: 80,
-      cacheLines: 3000,
+      cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       revision: 1,
     });
 
@@ -88,7 +89,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [106, 'G'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(100);
@@ -162,7 +163,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [1, 'new-b'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -177,7 +178,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [1, 'old-b'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next).toBe(current);
@@ -199,7 +200,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [103, 'd'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -216,7 +217,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [103, 'd'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.revision).toBe(6);
@@ -241,7 +242,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [105, 'f'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -257,7 +258,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [106, 'G'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(100);
@@ -283,7 +284,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [105, 'f'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -298,7 +299,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [103, 'D'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.lines.map(cellsToLine)).toEqual(['a', 'b', 'C', 'D', 'e', 'f']);
@@ -317,7 +318,7 @@ describe('terminal-buffer canonical mirror patching', () => {
         revision: 5,
         lines: Array.from({ length: 12 }, (_, offset) => [100 + offset, `line-${100 + offset}`]),
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -333,7 +334,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [112, 'line-112'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(100);
@@ -356,7 +357,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [106, 'G'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(98);
@@ -382,7 +383,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [105, 'f'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -398,7 +399,7 @@ describe('terminal-buffer canonical mirror patching', () => {
           [106, 'G'],
         ],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.gapRanges).toEqual([]);
@@ -529,7 +530,7 @@ describe('terminal-buffer canonical mirror patching', () => {
       bufferTailEndIndex: 64694,
       rows: 33,
       cols: 56,
-      cacheLines: 3000,
+      cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       revision: 6,
     });
 
@@ -544,7 +545,7 @@ describe('terminal-buffer canonical mirror patching', () => {
         revision: 7,
         lines: Array.from({ length: 99 }, (_, offset) => [51412 + offset, `tail-${51412 + offset}`]),
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.bufferHeadStartIndex).toBe(50511);

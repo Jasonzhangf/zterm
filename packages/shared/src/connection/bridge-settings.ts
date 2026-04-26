@@ -32,6 +32,9 @@ export interface BridgeSettings {
   defaultServerId?: string;
 }
 
+const MIN_TERMINAL_CACHE_LINES = 200;
+const MAX_TERMINAL_CACHE_LINES = DEFAULT_TERMINAL_CACHE_LINES;
+
 export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   targetHost: '',
   targetPort: DEFAULT_BRIDGE_PORT,
@@ -217,7 +220,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       : DEFAULT_BRIDGE_SETTINGS.targetAuthToken;
   const terminalCacheLines =
     typeof candidate.terminalCacheLines === 'number' && Number.isFinite(candidate.terminalCacheLines)
-      ? Math.max(200, Math.floor(candidate.terminalCacheLines))
+      ? Math.min(MAX_TERMINAL_CACHE_LINES, Math.max(MIN_TERMINAL_CACHE_LINES, Math.floor(candidate.terminalCacheLines)))
       : DEFAULT_TERMINAL_CACHE_LINES;
   const signalUrl =
     typeof candidate.signalUrl === 'string'

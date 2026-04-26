@@ -1,7 +1,7 @@
 export const MOBILE_BRIDGE_CONFIG = {
   defaultBridgePort: 3333,
   daemonHost: '0.0.0.0',
-  defaultTerminalCacheLines: 3000,
+  defaultTerminalCacheLines: 1000,
 } as const;
 
 export const DEFAULT_BRIDGE_PORT = MOBILE_BRIDGE_CONFIG.defaultBridgePort;
@@ -83,7 +83,7 @@ export function withDefaultBridgePort(port?: number | null) {
   return port || DEFAULT_BRIDGE_PORT;
 }
 
-export function resolveTerminalCacheLines(rows?: number | null) {
+export function resolveTerminalRequestWindowLines(rows?: number | null) {
   const viewportRows =
     typeof rows === 'number' && Number.isFinite(rows)
       ? Math.max(1, Math.floor(rows))

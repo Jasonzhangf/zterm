@@ -6,6 +6,7 @@ export interface ImeAnchorPlugin {
   blur(): Promise<void>;
   getState(): Promise<Record<string, unknown>>;
   debugEmitInput(options: { text: string }): Promise<Record<string, unknown>>;
+  setEditorActive(options: { active: boolean }): Promise<Record<string, unknown>>;
   addListener(
     eventName: 'input',
     listenerFunc: (event: { text: string }) => void,

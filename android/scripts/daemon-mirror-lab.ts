@@ -3,13 +3,14 @@ import { createWriteStream, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { WebSocket } from 'ws';
 import * as pty from 'node-pty';
-import type { BufferSyncRequestPayload, ClientMessage, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
+import type { BufferSyncRequestPayload, ClientMessage, ScheduleEventPayload, ScheduleStatePayload, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 import {
   applyBufferSyncToSessionBuffer,
   cellsToLine,
   createSessionBufferState,
 } from '../src/lib/terminal-buffer';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
 
 const LAB_SESSION_NAME = 'zterm_mirror_lab';
 const LAB_COLS = 80;
@@ -23,7 +24,8 @@ type CaseName =
   | 'initial-sync'
   | 'local-input-echo'
   | 'external-input-echo'
-  | 'daemon-restart-recover';
+  | 'daemon-restart-recover'
+  | 'schedule-fire';
 
 interface OracleSnapshot {
   sessionName: string;
@@ -51,6 +53,12 @@ interface ProbeEventEntry {
   direction: 'sent' | 'recv';
   type: string;
   payload?: unknown;
+}
+
+interface ScheduleEventWaiter {
+  resolve: (event: ServerMessage & { type: 'schedule-event' }) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface CaseStepResult {
@@ -113,6 +121,41 @@ function currentDateFolder() {
 }
 
 function summarizeProbeMessage(type: string, payload: unknown) {
+  if (type === 'schedule-upsert' && payload && typeof payload === 'object') {
+    const job = (payload as { job?: Record<string, unknown> }).job || {};
+    return {
+      targetSessionName: job.targetSessionName ?? null,
+      label: job.label ?? null,
+      enabled: job.enabled ?? true,
+      ruleKind: (job.rule as Record<string, unknown>)?.kind ?? null,
+      payloadPreview: typeof (job.payload as Record<string, unknown>)?.text === 'string'
+        ? ((job.payload as Record<string, unknown>).text as string).slice(0, 80)
+        : '',
+    };
+  }
+  if (type === 'schedule-delete' && payload && typeof payload === 'object') {
+    return { jobId: (payload as { jobId?: string }).jobId ?? null };
+  }
+  if (type === 'schedule-run-now' && payload && typeof payload === 'object') {
+    return { jobId: (payload as { jobId?: string }).jobId ?? null };
+  }
+  if (type === 'schedule-event' && payload && typeof payload === 'object') {
+    const event = payload as ScheduleEventPayload;
+    return {
+      sessionName: event.sessionName,
+      jobId: event.jobId,
+      eventType: event.type,
+      at: event.at,
+      message: event.message ?? null,
+    };
+  }
+  if (type === 'schedule-state' && payload && typeof payload === 'object') {
+    const state = payload as ScheduleStatePayload;
+    return {
+      sessionName: state.sessionName,
+      jobCount: Array.isArray(state.jobs) ? state.jobs.length : 0,
+    };
+  }
   if (type === 'buffer-sync' && payload && typeof payload === 'object') {
     const bufferPayload = payload as TerminalBufferPayload;
     return {
@@ -474,7 +517,7 @@ function replayClientMirrorCompare(
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
 ): CompareResult {
   let buffer = createSessionBufferState({
-    cacheLines: 3000,
+    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
     lines: [],
     rows: oracle.paneRows,
     cols: oracle.paneCols,
@@ -482,7 +525,7 @@ function replayClientMirrorCompare(
 
   for (const item of history) {
     if (item.type === 'buffer-sync') {
-      buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, 3000);
+      buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, DEFAULT_TERMINAL_CACHE_LINES);
     }
   }
 
@@ -633,6 +676,10 @@ class DaemonProbe {
 
   private readonly eventHistory: ProbeEventEntry[] = [];
 
+  private readonly scheduleEvents: Array<ServerMessage & { type: 'schedule-event' }> = [];
+
+  private readonly scheduleEventWaiters: ScheduleEventWaiter[] = [];
+
   constructor(wsUrl: string, authToken: string) {
     this.wsUrl = authToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : wsUrl;
     this.authToken = authToken;
@@ -730,6 +777,15 @@ class DaemonProbe {
             settled = true;
             reject(error);
           }
+        }
+        if (message.type === 'schedule-event') {
+          this.scheduleEvents.push(message);
+          const waiter = this.scheduleEventWaiters.shift();
+          if (waiter) {
+            clearTimeout(waiter.timer);
+            waiter.resolve(message);
+          }
+          return;
         }
       });
 
@@ -844,6 +900,55 @@ class DaemonProbe {
       const joined = payload.lines.map((line) => cellsToText(line.cells)).join('\n');
       return joined.includes(marker);
     }, timeoutMs);
+  }
+
+  sendMessage(message: ClientMessage) {
+    if (!this.ws || !this.connected) {
+      throw new Error('probe is not connected');
+    }
+    this.eventHistory.push({
+      at: nowStamp(),
+      direction: 'sent',
+      type: message.type,
+      payload: summarizeProbeMessage(message.type, 'payload' in message ? (message as Record<string, unknown>).payload : undefined),
+    });
+    this.ws.send(JSON.stringify(message));
+  }
+
+  waitForScheduleEvent(predicate?: (event: ScheduleEventPayload) => boolean, timeoutMs: number = 5000) {
+    return new Promise<ServerMessage & { type: 'schedule-event' }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const idx = this.scheduleEventWaiters.findIndex((w) => w.timer === timer);
+        if (idx >= 0) {
+          this.scheduleEventWaiters.splice(idx, 1);
+        }
+        reject(new Error('timeout waiting for schedule-event'));
+      }, timeoutMs);
+      this.scheduleEventWaiters.push({
+        resolve: (event) => {
+          if (!predicate || predicate(event.payload)) {
+            resolve(event);
+          } else {
+            // re-queue: doesn't match predicate yet
+            this.waitForScheduleEvent(predicate, timeoutMs).then(resolve, reject);
+          }
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+        timer,
+      });
+      // also check already-received events
+      const existing = this.scheduleEvents.find((e) => !predicate || predicate(e.payload));
+      if (existing) {
+        const w = this.scheduleEventWaiters.pop();
+        if (w) {
+          clearTimeout(w.timer);
+          w.resolve(existing);
+        }
+      }
+    });
   }
 }
 
@@ -1310,6 +1415,112 @@ async function runVimLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
   }
 }
 
+async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
+  const steps: CaseStepResult[] = [];
+  const marker = `__sched_fire_${Date.now()}__`;
+  const jobId = `lab-sched-${Date.now()}`;
+
+  // 1. Create an interval schedule that fires in ~1s
+  probe.sendMessage({
+    type: 'schedule-upsert',
+    payload: {
+      job: {
+        id: jobId,
+        targetSessionName: LAB_SESSION_NAME,
+        label: 'lab-schedule-fire-test',
+        enabled: true,
+        payload: {
+          text: `printf '${marker}\\n'`,
+          appendEnter: true,
+        },
+        rule: {
+          kind: 'interval',
+          intervalMs: 1000,
+          startAt: new Date().toISOString(),
+        },
+      },
+    },
+  });
+
+  // 2. Wait for the marker to appear in tmux via daemon buffer
+  const SCHEDULE_FIRE_TIMEOUT_MS = 10000;
+  let firePayload: TerminalBufferPayload;
+  try {
+    firePayload = await probe.waitForMarker(marker, SCHEDULE_FIRE_TIMEOUT_MS);
+  } catch (error) {
+    // cleanup schedule even on failure
+    probe.sendMessage({ type: 'schedule-delete', payload: { jobId } });
+    throw error;
+  }
+  await sleep(300);
+  const fireOracle = captureOracleSnapshot();
+  const markerInTmux = fireOracle.lines.some((line) => line.includes(marker));
+
+  steps.push({
+    label: 'schedule-fire-marker-in-daemon-buffer',
+    ok: true,
+    oracle: fireOracle,
+    daemonPayload: firePayload,
+    compare: { ok: true, mismatchIndex: null, expected: fireOracle.lines, actual: fireOracle.lines },
+    clientMirrorCompare: replayClientMirrorCompare(fireOracle, probe.history),
+    historyLength: probe.history.length,
+  });
+
+  if (!markerInTmux) {
+    steps[steps.length - 1].ok = false;
+    steps[steps.length - 1].reason = `marker "${marker}" not found in tmux capture-pane after schedule fire`;
+  }
+
+  // 3. Wait for schedule-event from daemon
+  try {
+    await probe.waitForScheduleEvent(
+      (event) => event.jobId === jobId && event.type === 'triggered',
+      SCHEDULE_FIRE_TIMEOUT_MS,
+    );
+    steps.push({
+      label: 'schedule-event-received',
+      ok: true,
+      oracle: captureOracleSnapshot(),
+      daemonPayload: firePayload,
+      compare: { ok: true, mismatchIndex: null, expected: [], actual: [] },
+      clientMirrorCompare: replayClientMirrorCompare(fireOracle, probe.history),
+      historyLength: probe.history.length,
+    });
+  } catch (error) {
+    steps.push({
+      label: 'schedule-event-received',
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+      oracle: captureOracleSnapshot(),
+      daemonPayload: firePayload,
+      compare: { ok: false, mismatchIndex: 0, expected: [], actual: [] },
+      clientMirrorCompare: { ok: false, mismatchIndex: null, expected: [], actual: [] },
+      historyLength: probe.history.length,
+    });
+  }
+
+  // 4. Cleanup: delete the schedule
+  probe.sendMessage({ type: 'schedule-delete', payload: { jobId } });
+  await sleep(200);
+
+  // Build oracle from the fire step for the final result
+  return {
+    caseName: 'schedule-fire',
+    ok: steps.every((s) => s.ok),
+    reason: steps.find((s) => !s.ok)?.reason,
+    oracle: fireOracle,
+    daemonPayload: firePayload,
+    compare: {
+      ok: markerInTmux,
+      mismatchIndex: markerInTmux ? null : 0,
+      expected: [marker],
+      actual: markerInTmux ? [marker] : [],
+    },
+    clientMirrorCompare: replayClientMirrorCompare(fireOracle, probe.history),
+    steps,
+  };
+}
+
 function resolveWsUrl() {
   const config = resolveDaemonRuntimeConfig();
   const base = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
@@ -1351,6 +1562,9 @@ async function runCase(caseName: CaseName, daemonController: LabDaemonController
       case 'daemon-restart-recover':
         result = await runDaemonRestartRecoverCase(probe, daemonController);
         break;
+      case 'schedule-fire':
+        result = await runScheduleFireCase(probe);
+        break;
     }
     result.clientMirrorCompare = replayClientMirrorCompare(result.oracle, probe.history);
     if (!result.clientMirrorCompare.ok) {
@@ -1373,7 +1587,7 @@ async function main() {
   const caseArg = process.argv.find((arg) => arg.startsWith('--case='))?.split('=', 2)[1] || 'all';
   const managedDaemon = process.argv.includes('--managed-daemon');
   const requestedCases: CaseName[] = caseArg === 'all'
-    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover']
+    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire']
     : [caseArg as CaseName];
 
   const daemonController = managedDaemon ? new LabDaemonController() : null;
@@ -1384,7 +1598,7 @@ async function main() {
     }
 
     for (const caseName of requestedCases) {
-      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover'].includes(caseName)) {
+      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire'].includes(caseName)) {
         throw new Error(`unsupported case: ${caseName}`);
       }
       const result = await runCase(caseName, daemonController);

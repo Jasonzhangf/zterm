@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { TerminalView } from '../components/TerminalView';
@@ -380,9 +380,11 @@ export function TerminalPage({
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
+  const previousQuickBarEditorFocusedRef = useRef(quickBarEditorFocused);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const splitOpenWidthRef = useRef(0);
   const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
+  const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
@@ -460,6 +462,9 @@ export function TerminalPage({
       ? [primaryPaneSession!.id, secondarySession!.id]
       : [activeSession.id]
     : [];
+  const renderedPaneSessions = visiblePaneSessionIds
+    .map((sessionId) => sessions.find((session) => session.id === sessionId) || null)
+    .filter((session): session is Session => session !== null);
   const activeDraft = activeSession?.id && sessionDrafts ? sessionDrafts[activeSession.id] || '' : sessionDraft;
   const activeScheduleState = activeSession?.id && scheduleStateBySessionId
     ? scheduleStateBySessionId[activeSession.id] || null
@@ -605,14 +610,29 @@ export function TerminalPage({
     input.setSelectionRange(end, end);
   };
 
-  const requestAndroidImeFocus = () => {
+  const clearPendingAndroidImeFocus = useCallback(() => {
+    if (pendingAndroidImeFocusTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(pendingAndroidImeFocusTimerRef.current);
+    pendingAndroidImeFocusTimerRef.current = null;
+  }, []);
+
+  const requestAndroidImeFocus = useCallback(() => {
     if (!isAndroid || quickBarEditorFocusedRef.current) {
       return;
     }
-    void ImeAnchor.show().catch((error) => {
-      console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
-    });
-  };
+    clearPendingAndroidImeFocus();
+    pendingAndroidImeFocusTimerRef.current = window.setTimeout(() => {
+      pendingAndroidImeFocusTimerRef.current = null;
+      if (quickBarEditorFocusedRef.current) {
+        return;
+      }
+      void ImeAnchor.show().catch((error) => {
+        console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
+      });
+    }, 0);
+  }, [clearPendingAndroidImeFocus, isAndroid]);
 
   const keepTerminalInputFocused = () => {
     if (quickBarEditorFocused) {
@@ -629,7 +649,7 @@ export function TerminalPage({
     window.setTimeout(focusTerminalInput, 120);
   };
 
-  const handleToggleKeyboard = async () => {
+  const handleToggleKeyboard = useCallback(async () => {
     if (quickBarEditorFocused && typeof document !== 'undefined') {
       const activeElement = document.activeElement;
       if (activeElement instanceof HTMLElement) {
@@ -640,6 +660,7 @@ export function TerminalPage({
 
     if (terminalKeyboardRequested || keyboardInset > 0) {
       setTerminalKeyboardRequested(false);
+      clearPendingAndroidImeFocus();
       if (isAndroid) {
         try {
           await ImeAnchor.hide();
@@ -684,7 +705,7 @@ export function TerminalPage({
         logAsyncCleanupFailure('Keyboard.show retry(120ms)', error);
       });
     }, 120);
-  };
+  }, [activeSession?.id, clearPendingAndroidImeFocus, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested]);
 
   useEffect(() => {
     const syncOnlineState = () => {
@@ -734,6 +755,7 @@ export function TerminalPage({
   useEffect(() => {
     setTerminalKeyboardRequested(false);
     setQuickBarEditorFocused(false);
+    clearPendingAndroidImeFocus();
     if (isAndroid) {
       void ImeAnchor.blur().catch((error) => {
         console.warn('[TerminalPage] ImeAnchor.blur() failed:', error);
@@ -743,7 +765,7 @@ export function TerminalPage({
 
     const input = querySessionInput(activeSession?.id || null);
     input?.blur();
-  }, [activeSession?.id, isAndroid]);
+  }, [activeSession?.id, clearPendingAndroidImeFocus, isAndroid]);
 
   useEffect(() => {
     if (!isAndroid) {
@@ -829,14 +851,42 @@ export function TerminalPage({
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {
+      if (!isAndroid) {
+        return;
+      }
+      const wasQuickBarEditorFocused = previousQuickBarEditorFocusedRef.current;
+      previousQuickBarEditorFocusedRef.current = quickBarEditorFocused;
+      void ImeAnchor.setEditorActive({ active: false })
+        .then(() => {
+          if (!wasQuickBarEditorFocused) {
+            return;
+          }
+          requestAndroidImeFocus();
+        })
+        .catch((error) => {
+          console.warn('[TerminalPage] ImeAnchor.setEditorActive(false) failed:', error);
+        });
       return;
     }
 
+    previousQuickBarEditorFocusedRef.current = quickBarEditorFocused;
     setTerminalKeyboardRequested(false);
-    void ImeAnchor.blur().catch((error) => {
-      console.warn('[TerminalPage] ImeAnchor.blur() failed:', error);
+    clearPendingAndroidImeFocus();
+    // ImeAnchor.blur() removed: editor overlay needs keyboard to stay open.
+    // setEditorActive(true) below disables ImeAnchor focus-stealing without hiding keyboard.
+    void ImeAnchor.setEditorActive({ active: true }).catch((error) => {
+      console.warn('[TerminalPage] ImeAnchor.setEditorActive(true) failed:', error);
     });
-  }, [isAndroid, quickBarEditorFocused]);
+  }, [
+    clearPendingAndroidImeFocus,
+    isAndroid,
+    quickBarEditorFocused,
+    requestAndroidImeFocus,
+  ]);
+
+  useEffect(() => () => {
+    clearPendingAndroidImeFocus();
+  }, [clearPendingAndroidImeFocus]);
 
   useEffect(() => {
     let disposed = false;
@@ -1195,17 +1245,14 @@ export function TerminalPage({
             }}
           >
             {activeSession ? (
-              sessions.map((session) => {
-                const sessionVisible = visiblePaneSessionIds.includes(session.id);
+              renderedPaneSessions.map((session) => {
                 const sessionIsActive = session.id === activeSession?.id;
                 return (
                   <div
                     key={session.id}
                     style={{
                       ...terminalPaneStyle(session.id),
-                      opacity: sessionVisible ? 1 : 0,
-                      pointerEvents: sessionVisible && sessionIsActive ? 'auto' : 'none',
-                      visibility: sessionVisible ? 'visible' : 'hidden',
+                      pointerEvents: sessionIsActive ? 'auto' : 'none',
                       borderRadius: splitVisible ? '12px' : undefined,
                       outline: splitVisible && sessionIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
                       outlineOffset: splitVisible && sessionIsActive ? '-2px' : undefined,

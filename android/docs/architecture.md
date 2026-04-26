@@ -168,7 +168,7 @@ daemon server
         ├─ 定时先问 head
         ├─ 比较 local buffer 与 daemon head
         ├─ 决定补 diff / 直接跳到最新三屏 / reading gap repair
-        └─ 维护本地 3000 行 sparse sliding buffer
+        └─ 维护本地 1000 行 sparse sliding buffer
                 ↓
       renderer
         ├─ follow / reading

@@ -81,4 +81,11 @@ describe('bridge-settings helpers', () => {
       terminalThemeId: 'unknown-theme',
     }).terminalThemeId).toBe('classic-dark');
   });
+
+  it('clamps terminal cache lines to the client max 1000', () => {
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalCacheLines: 5000,
+    }).terminalCacheLines).toBe(DEFAULT_TERMINAL_CACHE_LINES);
+  });
 });

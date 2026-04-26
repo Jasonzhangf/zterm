@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import { TerminalPage, resolveKeyboardLiftPx } from './TerminalPage';
@@ -35,6 +35,7 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
     show: vi.fn(async () => ({})),
     hide: vi.fn(async () => undefined),
     blur: vi.fn(async () => undefined),
+    setEditorActive: vi.fn(async () => ({})),
     addListener: vi.fn(async (eventName: string, listener: (event: any) => void) => {
       imeListeners.set(eventName, listener);
       return {
@@ -216,7 +217,13 @@ describe('TerminalPage Android IME bridge', () => {
     imeListeners.get('input')?.({ text: '不该发到 terminal' });
     expect(onTerminalInput).not.toHaveBeenCalled();
 
+    vi.mocked(ImeAnchor.show).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'blur-quick-editor' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+    });
+
     imeListeners.get('input')?.({ text: '恢复路由' });
 
     await waitFor(() => {
@@ -227,37 +234,45 @@ describe('TerminalPage Android IME bridge', () => {
   it('only shows ImeAnchor once when explicitly toggling the Android keyboard', async () => {
     const session = makeSession('s1');
 
-    render(
-      <TerminalPage
-        sessions={[session]}
-        activeSession={session}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
-      />,
-    );
+    try {
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onLoadSavedTabList={vi.fn()}
+        />,
+      );
 
-    await waitFor(() => {
-      expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
-    });
+      await waitFor(() => {
+        expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
+      });
 
-    vi.mocked(ImeAnchor.show).mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
+      vi.useFakeTimers();
+      vi.mocked(ImeAnchor.show).mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
 
-    await waitFor(() => {
-      expect(ImeAnchor.show).toHaveBeenCalled();
-    });
-    expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+      expect(ImeAnchor.show).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not re-show ImeAnchor when Android keyboard actually shows', async () => {

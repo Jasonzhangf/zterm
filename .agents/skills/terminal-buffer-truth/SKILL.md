@@ -69,7 +69,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 5. head 变了或 gap 补齐了，就通知 renderer
 
 ### 2.1 本地 buffer 真相
-- 本地维护一个 sliding buffer，默认保留 **3000 行**
+- 本地维护一个 sliding buffer，客户端默认/最大保留 **1000 行**
 - 按绝对行号存储
 - 可以是 sparse，不要求永远连续
 - 历史超出窗口后滑走，但**不是单次 payload 来了就把本地历史裁掉**
@@ -84,6 +84,9 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
    - **中间缺口不补**
 4. 若离 head 不远：
    - 只补 diff
+
+补充冻结：
+- **三屏请求窗口** 和 **1000 行本地缓存上限** 是两个独立真相，禁止再用同一个 `cacheLines` 语义混写两者
 
 ### 2.3 reading 路径
 - reading 不改变 buffer manager 的 head-first 主循环
@@ -215,6 +218,8 @@ tmux truth
 
 新增门禁精华：
 - cold-start / foreground resume 的 transport gate 必须优先 active tab；若 hidden tabs 跟着一起 eager reconnect，active tab 的首屏会被排队拖慢。除非已有被验证的 hidden low-frequency 设计，否则 hidden tab 默认只保留 runtime shell，等显式激活再 reconnect。
+- hidden / non-visible tab 不得继续挂载 renderer 实例；renderer scope 必须严格等于当前 visible pane。否则 header truth 已切换但 body 仍残留旧 session DOM，Android WebView 容易出现“页头/内容对不上、像花屏”的 stale compositing。
+- foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
 
 ## 8. 现场判断口径
 

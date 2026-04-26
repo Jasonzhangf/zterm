@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 
 const baseSettings: BridgeSettings = {
   targetHost: '',
@@ -14,7 +15,7 @@ const baseSettings: BridgeSettings = {
   turnUsername: '',
   turnCredential: '',
   transportMode: 'auto',
-  terminalCacheLines: 3000,
+  terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
   servers: [],
   defaultServerId: undefined,

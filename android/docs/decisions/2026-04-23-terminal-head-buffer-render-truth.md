@@ -87,7 +87,7 @@ buffer manager 是客户端唯一 buffer worker。
 
 ### 2.2 本地 buffer 结构
 
-- 默认维护 **3000 行** sliding buffer
+- 客户端默认/最大维护 **1000 行** sliding buffer
 - 绝对行号存储
 - 允许 sparse
 - 历史超出窗口后再滑走

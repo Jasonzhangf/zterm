@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_TERMINAL_CACHE_LINES } from './mobile-config';
 import { applyBufferSyncToSessionBuffer, cellsToLine, type TerminalBufferPayload } from '../../../packages/shared/src';
 
 function payload(input: {
@@ -46,7 +47,7 @@ describe('shared terminal-buffer audit', () => {
         revision: 5,
         lines: Array.from({ length: 12 }, (_, offset) => [100 + offset, `line-${100 + offset}`]),
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     const next = applyBufferSyncToSessionBuffer(
@@ -60,7 +61,7 @@ describe('shared terminal-buffer audit', () => {
         revision: 6,
         lines: [[112, 'line-112']],
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     expect(next.startIndex).toBe(100);

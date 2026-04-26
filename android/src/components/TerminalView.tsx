@@ -544,6 +544,7 @@ export function TerminalView({
 
   const applyScrollState = useCallback((nextScrollTop: number, host?: HTMLDivElement | null) => {
     const { nextMode, nextRenderBottomIndex } = resolveRenderDemandFromScroll(nextScrollTop, host);
+    readingModeRef.current = nextMode === 'reading';
     setRenderBottomIndex(nextRenderBottomIndex);
     setReadingMode(nextMode === 'reading');
     emitRenderDemand(nextMode, nextRenderBottomIndex);
@@ -588,6 +589,7 @@ export function TerminalView({
     if (options?.resetReportedViewport) {
       lastReportedViewportRef.current = '';
     }
+    readingModeRef.current = false;
     setReadingMode(false);
     setRenderBottomIndex(nextRenderBottomIndex);
     queueFollowScrollSync(nextRenderBottomIndex);
@@ -596,8 +598,12 @@ export function TerminalView({
   }, [emitRenderDemand, followVisualBottomIndex, queueFollowScrollSync]);
 
   const emitCurrentRenderDemand = useCallback(() => {
-    emitRenderDemand(followMode ? 'follow' : 'reading', effectiveRenderBottomIndex);
-  }, [effectiveRenderBottomIndex, emitRenderDemand, followMode]);
+    const nextMode: 'follow' | 'reading' = readingModeRef.current ? 'reading' : 'follow';
+    emitRenderDemand(
+      nextMode,
+      nextMode === 'follow' ? followVisualBottomIndex : effectiveRenderBottomIndex,
+    );
+  }, [effectiveRenderBottomIndex, emitRenderDemand, followVisualBottomIndex]);
 
   const emitReadingRenderDemand = useCallback((nextRenderBottomIndex?: number) => {
     emitRenderDemand('reading', nextRenderBottomIndex ?? effectiveRenderBottomIndex);
@@ -613,6 +619,10 @@ export function TerminalView({
       minimumRenderBottomIndex,
       Math.min(maximumRenderBottomIndex, Math.floor(effectiveRenderBottomIndex)),
     );
+    if (maxScrollTop <= 1) {
+      alignRenderBottomToFollow();
+      return;
+    }
     if (nextRenderBottomIndex !== effectiveRenderBottomIndex) {
       setRenderBottomIndex(nextRenderBottomIndex);
     }
@@ -621,6 +631,7 @@ export function TerminalView({
     alignRenderBottomToFollow,
     effectiveRenderBottomIndex,
     emitReadingRenderDemand,
+    maxScrollTop,
     maximumRenderBottomIndex,
     minimumRenderBottomIndex,
   ]);

@@ -41,7 +41,7 @@ cd android && npx cap sync android
       "host": "0.0.0.0",
       "port": 3333,
       "authToken": "replace-with-your-token",
-      "terminalCacheLines": 3000
+      "terminalCacheLines": 1000
       }
     }
   }

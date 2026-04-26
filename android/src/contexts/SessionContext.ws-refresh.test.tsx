@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { useEffect } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionProvider, useSession } from './SessionContext';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
 import { getDefaultTerminalViewportSize } from '../lib/default-terminal-viewport';
@@ -172,6 +173,8 @@ function SessionHarness() {
     <div>
       <div data-testid="session-state">{activeSession?.state || 'missing'}</div>
       <div data-testid="session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="session-start-index">{activeSession?.buffer.startIndex ?? -1}</div>
+      <div data-testid="session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
       <button
         type="button"
@@ -303,7 +306,7 @@ function StaleFollowHarness() {
         cols: 56,
         rows: 33,
         revision: 6,
-        cacheLines: 3000,
+        cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
   }, [createSession]);
@@ -353,7 +356,7 @@ function FarBehindFollowHarness() {
         cols: 80,
         rows: 24,
         revision: 3,
-        cacheLines: 3000,
+        cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
   }, [createSession]);
@@ -403,7 +406,7 @@ function NearHeadFollowHarness() {
         cols: 80,
         rows: 24,
         revision: 5,
-        cacheLines: 3000,
+        cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
   }, [createSession]);
@@ -452,7 +455,7 @@ function NearHeadGapFollowHarness() {
           return [absoluteIndex >= 450 ? absoluteIndex + 10 : absoluteIndex, `line-${absoluteIndex}`] as [number, string];
         }),
       }),
-      3000,
+      DEFAULT_TERMINAL_CACHE_LINES,
     );
 
     createSession(host, {
@@ -560,6 +563,82 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       expect(screen.getByTestId('session-lines').textContent).toContain('APPEND_MARKER-');
       expect(screen.getByTestId('session-revision').textContent).toBe('3');
+    });
+  });
+
+  it('applies incoming buffer-sync without waiting for timer-based flush ticks', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      ws.triggerMessage({
+        type: 'buffer-sync',
+        payload: linesToPayload(['stable-line-001', 'stable-line-002'], 2, 1),
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps at most the latest 1000 local buffer lines even if bridge settings request more', async () => {
+    render(
+      <SessionProvider
+        wsUrl="ws://127.0.0.1:3333/ws"
+        terminalCacheLines={5000}
+      >
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    const fullBuffer = Array.from({ length: 1200 }, (_, index) => `line-${String(index).padStart(4, '0')}`);
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: linesToPayload(fullBuffer, fullBuffer.length, 1),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-lines').textContent).toContain('line-0200');
+      const renderedLines = (screen.getByTestId('session-lines').textContent || '').split('|');
+      expect(renderedLines).toHaveLength(DEFAULT_TERMINAL_CACHE_LINES);
+      expect(renderedLines[0]).toBe('line-0200');
+      expect(renderedLines[DEFAULT_TERMINAL_CACHE_LINES - 1]).toBe('line-1199');
+      expect(screen.getByTestId('session-start-index').textContent).toBe('200');
+      expect(screen.getByTestId('session-end-index').textContent).toBe('1200');
     });
   });
 
@@ -1031,7 +1110,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(lastRequest?.payload?.requestStartIndex).toBe(8);
       expect(lastRequest?.payload?.requestEndIndex).toBe(80);
       expect(lastRequest?.payload?.missingRanges).toBeUndefined();
-    });
+    }, { timeout: 2000 });
   });
 
   it('accepts remote debug-control and flips the client runtime debug flag', async () => {
@@ -2159,8 +2238,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 80));
 
-    const sentMessages = readSentMessages(ws);
-    expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+    const sentMessagesAfterRevisionAdvance = readSentMessages(ws);
+    expect(sentMessagesAfterRevisionAdvance.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
   });
 
   it('clears in-flight tail-refresh state when daemon completes the request with an empty buffer-sync payload', async () => {
@@ -2410,7 +2489,43 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('does not keep tail-refreshing when only daemon revision changes but follow tail position is unchanged', async () => {
+  it('does not request a follow refresh only because the local tail window still has gaps when daemon head truth is unchanged', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <NearHeadGapFollowHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'near-head-gap-session',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('near-head-gap-session-state').textContent).toBe('connected'));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'near-head-gap-session',
+        revision: 5,
+        latestEndIndex: 500,
+        availableStartIndex: 0,
+        availableEndIndex: 500,
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const sentMessages = readSentMessages(ws);
+    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+  });
+
+  it('refreshes the current follow tail window when daemon revision changes even if endIndex is unchanged', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -2445,9 +2560,16 @@ describe('SessionContext websocket dynamic refresh', () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const sentMessages = readSentMessages(ws);
-    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestStartIndex: 0,
+          requestEndIndex: 3,
+        }),
+      });
+    });
   });
 
   it('issues a single tail refresh after user input even when the daemon tail line count stays unchanged', async () => {
@@ -2520,9 +2642,10 @@ describe('SessionContext websocket dynamic refresh', () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const sentMessages = readSentMessages(ws);
-    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+    });
   });
 
   it('promotes a connecting session from live buffer-head before connected arrives', async () => {

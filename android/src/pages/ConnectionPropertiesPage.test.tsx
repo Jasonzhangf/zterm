@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { ConnectionPropertiesPage } from './ConnectionPropertiesPage';
 
 const tmuxSessionMocks = vi.hoisted(() => ({
@@ -22,7 +23,7 @@ const bridgeSettings: BridgeSettings = {
   turnUsername: 'turn-user',
   turnCredential: 'turn-pass',
   transportMode: 'auto',
-  terminalCacheLines: 3000,
+  terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
   defaultServerId: 'server-1',
   servers: [

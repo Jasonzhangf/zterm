@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
 
 class MockWebSocket {
@@ -100,7 +101,7 @@ vi.mock('./hooks/useBridgeSettingsStorage', () => ({
       targetHost: '127.0.0.1',
       targetPort: 3333,
       targetAuthToken: '',
-      terminalCacheLines: 3000,
+      terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       terminalThemeId: 'default',
     },
     setSettings: vi.fn(),

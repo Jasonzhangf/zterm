@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
 
 class MockWebSocket {
@@ -107,6 +108,21 @@ function linesToPayload(lines: string[], revision: number, startIndex = 0) {
   };
 }
 
+function fullTailWindowPayload(options: {
+  revision: number;
+  startIndex: number;
+  endIndex: number;
+  tailLines: string[];
+}) {
+  const lines: string[] = [];
+  const fillerCount = Math.max(0, (options.endIndex - options.startIndex) - options.tailLines.length);
+  for (let index = 0; index < fillerCount; index += 1) {
+    lines.push(`line-${String(options.startIndex + index).padStart(3, '0')}`);
+  }
+  lines.push(...options.tailLines);
+  return linesToPayload(lines, options.revision, options.startIndex);
+}
+
 function readSentMessages(ws: MockWebSocket) {
   return ws.sent
     .filter((item): item is string => typeof item === 'string')
@@ -148,7 +164,7 @@ vi.mock('./hooks/useBridgeSettingsStorage', () => ({
       targetHost: '127.0.0.1',
       targetPort: 3333,
       targetAuthToken: '',
-      terminalCacheLines: 3000,
+      terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       terminalThemeId: 'default',
     },
     setSettings: vi.fn(),
@@ -267,6 +283,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
   const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
   const originalResizeObserver = globalThis.ResizeObserver;
+  const originalVisibilityState = Object.getOwnPropertyDescriptor(document, 'visibilityState');
 
   beforeEach(() => {
     cleanup();
@@ -309,6 +326,9 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     vi.unstubAllGlobals();
     globalThis.WebSocket = originalWebSocket;
     globalThis.ResizeObserver = originalResizeObserver;
+    if (originalVisibilityState) {
+      Object.defineProperty(document, 'visibilityState', originalVisibilityState);
+    }
     if (originalClientWidth) {
       Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
     }
@@ -443,6 +463,122 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     await waitFor(() => {
       expect(view.container.textContent).toContain('tab-two-line-001');
       expect(view.container.textContent).toContain('tab-two-line-002');
+    });
+  });
+
+  it('foreground resume on the active tab does head -> sync -> visible body repaint without switching tabs', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+
+    const view = render(<App />);
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 3,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+    });
+
+    const firstSync = readSentMessages(ws).find((item) => item.type === 'buffer-sync-request');
+    expect(firstSync?.payload).toBeTruthy();
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: fullTailWindowPayload({
+        revision: 3,
+        startIndex: firstSync.payload.requestStartIndex,
+        endIndex: firstSync.payload.requestEndIndex,
+        tailLines: ['before-resume-line-001', 'before-resume-line-002'],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('before-resume-line-001');
+      expect(view.container.textContent).toContain('before-resume-line-002');
+    });
+
+    ws.sent.length = 0;
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 4,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = readSentMessages(ws);
+      expect(sent.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 3)).toBe(true);
+    });
+
+    const resumeSyncRequests = readSentMessages(ws)
+      .filter((item) => item.type === 'buffer-sync-request');
+    const resumeSync = resumeSyncRequests[resumeSyncRequests.length - 1];
+    expect(resumeSync?.payload).toBeTruthy();
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: fullTailWindowPayload({
+        revision: 4,
+        startIndex: resumeSync.payload.requestStartIndex,
+        endIndex: resumeSync.payload.requestEndIndex,
+        tailLines: ['after-resume-line-001', 'after-resume-line-002'],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('after-resume-line-001');
+      expect(view.container.textContent).toContain('after-resume-line-002');
+      expect(view.container.textContent).not.toContain('before-resume-line-001');
     });
   });
 });
