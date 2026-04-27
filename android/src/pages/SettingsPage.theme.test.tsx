@@ -17,6 +17,8 @@ const baseSettings: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
+  terminalWidthMode: 'mirror-fixed',
+  shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,
 };
@@ -97,5 +99,41 @@ describe('SettingsPage terminal theme selection', () => {
 
     fireEvent.click(screen.getByText('Cobalt2'));
     expect(onTerminalThemeChange).toHaveBeenCalledWith('tabby-cobalt2');
+  });
+
+  it('persists terminal width mode through settings save', () => {
+    const onSave = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        onSave={onSave}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adaptive Phone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      terminalWidthMode: 'adaptive-phone',
+    }));
   });
 });

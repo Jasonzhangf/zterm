@@ -3,24 +3,32 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 import type {
+  BufferHeadPayload,
   BufferSyncRequestPayload,
   ClientMessage,
+  FileDownloadChunkPayload,
+  FileDownloadCompletePayload,
+  FileDownloadErrorPayload,
   Host,
   HostConfigMessage,
   PasteImageStartPayload,
   AttachFileStartPayload,
+  RemoteScreenshotRequestPayload,
   ScheduleJobDraft,
   ServerMessage,
   Session,
   SessionDebugOverlayMetrics,
   SessionScheduleState,
   SessionBufferState,
+  TerminalCursorState,
   TerminalViewportState,
   SessionState,
   TerminalBufferPayload,
   TerminalCell,
   TerminalGapRange,
+  TerminalWidthMode,
 } from '../lib/types';
 import { buildEmptyScheduleState } from '@zterm/shared';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
@@ -46,7 +54,6 @@ const SESSION_STATUS_EVENT = 'zterm:session-status';
 
 const RECONNECT_BASE_DELAY_MS = 1200;
 const RECONNECT_MAX_DELAY_MS = 30000;
-const POST_SUCCESS_NEXT_RETRY_DELAY_MS = 240;
 const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
 const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
 const CLIENT_PING_INTERVAL_MS = 30000;
@@ -212,7 +219,9 @@ interface SessionContextValue {
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
   sendFileAttach: (sessionId: string, file: File) => Promise<void>;
+  requestRemoteScreenshot: (sessionId: string) => Promise<string>;
   resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
+  setTerminalWidthMode: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
   updateSessionViewport: (sessionId: string, renderDemand: SessionRenderDemandState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
@@ -222,6 +231,8 @@ interface SessionContextValue {
   getSessionScheduleState: (sessionId: string) => SessionScheduleState;
   getActiveSession: () => Session | null;
   getSession: (id: string) => Session | null;
+  onFileTransferMessage: (handler: (msg: any) => void) => () => void;
+  sendMessageRaw: (sessionId: string, msg: unknown) => void;
 }
 
 interface SessionProviderProps {
@@ -240,12 +251,11 @@ interface CreateSessionOptions {
   sessionId?: string;
 }
 
-interface ReconnectBucket {
+interface SessionReconnectRuntime {
   attempt: number;
-  activeSessionId: string | null;
-  pending: string[];
-  timer: ReturnType<typeof setTimeout> | null;
+  timer: number | null;
   nextDelayMs: number | null;
+  connecting: boolean;
 }
 
 interface SessionBufferHeadState {
@@ -275,6 +285,13 @@ interface SessionWireStatsSnapshot {
   pullRequests: number;
 }
 
+interface PendingRemoteScreenshotRequest {
+  fileName: string | null;
+  chunks: Map<number, string>;
+  resolve: (savedPath: string) => void;
+  reject: (error: Error) => void;
+}
+
 type SessionPullPurpose = 'tail-refresh' | 'reading-repair';
 
 interface SessionPullState {
@@ -291,17 +308,12 @@ type SessionRenderDemandState = TerminalViewportState;
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-function toHostKey(target: { bridgeHost: string; bridgePort: number }) {
-  return `${target.bridgeHost.trim()}:${target.bridgePort}`;
-}
-
-function createReconnectBucket(): ReconnectBucket {
+function createSessionReconnectRuntime(): SessionReconnectRuntime {
   return {
     attempt: 0,
-    activeSessionId: null,
-    pending: [],
     timer: null,
     nextDelayMs: null,
+    connecting: false,
   };
 }
 
@@ -357,6 +369,22 @@ function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
     }));
 }
 
+function normalizeTerminalCursorState(
+  input: TerminalBufferPayload['cursor'] | BufferHeadPayload['cursor'],
+): TerminalCursorState | null {
+  return input && typeof input === 'object'
+    ? {
+        rowIndex: typeof input.rowIndex === 'number' && Number.isFinite(input.rowIndex)
+          ? Math.max(0, Math.floor(input.rowIndex))
+          : 0,
+        col: typeof input.col === 'number' && Number.isFinite(input.col)
+          ? Math.max(0, Math.floor(input.col))
+          : 0,
+        visible: Boolean(input.visible),
+      }
+    : null;
+}
+
 function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalBufferPayload {
   const startIndex =
     typeof input.startIndex === 'number' && Number.isFinite(input.startIndex)
@@ -392,18 +420,7 @@ function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalB
         : 80,
     rows,
     cursorKeysApp: Boolean(input.cursorKeysApp),
-    cursor:
-      input.cursor && typeof input.cursor === 'object'
-        ? {
-            rowIndex: typeof input.cursor.rowIndex === 'number' && Number.isFinite(input.cursor.rowIndex)
-              ? Math.max(0, Math.floor(input.cursor.rowIndex))
-              : 0,
-            col: typeof input.cursor.col === 'number' && Number.isFinite(input.cursor.col)
-              ? Math.max(0, Math.floor(input.cursor.col))
-              : 0,
-            visible: Boolean(input.cursor.visible),
-          }
-        : null,
+    cursor: normalizeTerminalCursorState(input.cursor),
     lines: Array.isArray(input.lines)
       ? normalizeWireLines(input.lines, typeof input.cols === 'number' && Number.isFinite(input.cols) ? Math.max(1, Math.floor(input.cols)) : 80)
           .map((line) => ({
@@ -675,6 +692,7 @@ function buildHostConfigMessage(
   host: Host,
   sessionName: string,
   clientSessionId: string,
+  terminalWidthMode: TerminalWidthMode,
 ): HostConfigMessage {
   return {
     clientSessionId,
@@ -682,6 +700,7 @@ function buildHostConfigMessage(
     bridgeHost: host.bridgeHost,
     bridgePort: host.bridgePort,
     sessionName,
+    terminalWidthMode,
     authToken: host.authToken,
     autoCommand: host.autoCommand,
     authType: host.authType,
@@ -792,11 +811,17 @@ function shouldCatchUpFollowTailAfterBufferApply(
   const localHasWindow = localEndIndex > localStartIndex;
   const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
   const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
+  const sameEndRevisionAdvanced = (
+    localHasWindow
+    && distanceToHead === 0
+    && daemonRevision > localRevision
+  );
 
   return (
     !localHasWindow
     || distanceToHead > cacheLines
     || localEndIndex < desiredEndIndex
+    || sameEndRevisionAdvanced
     || (Boolean(options?.forceSameEndRefresh) && daemonRevision > localRevision)
   );
 }
@@ -956,14 +981,13 @@ export function SessionProvider({
   const wsRefs = useRef<Map<string, BridgeTransportSocket>>(new Map());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
-  const deferredReconnectDrainTimersRef = useRef<Set<number>>(new Set());
   // renderer -> worker declarative demand only; never producer/tail truth
   const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
   const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
-  const reconnectBucketsRef = useRef<Map<string, ReconnectBucket>>(new Map());
+  const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
   const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
@@ -976,28 +1000,30 @@ export function SessionProvider({
   const sessionWireStatsRef = useRef<Map<string, SessionWireStatsSnapshot>>(new Map());
   const sessionWireStatsPreviousRef = useRef<Map<string, { sample: SessionWireStatsSnapshot; at: number }>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
+  const fileTransferListeners = useRef<Set<(msg: any) => void>>(new Set());
+  const pendingRemoteScreenshotRequestsRef = useRef<Map<string, PendingRemoteScreenshotRequest>>(new Map());
+  const handleSocketConnectedBaselineRef = useRef<null | ((options: {
+    sessionId: string;
+    sessionName: string;
+    ws: BridgeTransportSocket;
+  }) => void)>(null);
+  const finalizeSocketFailureBaselineRef = useRef<null | ((options: {
+    sessionId: string;
+    message: string;
+    markCompleted: () => boolean;
+  }) => { shouldContinue: boolean; manualClosed: boolean })>(null);
+  const flushPendingInputQueueRef = useRef<null | ((sessionId: string) => void)>(null);
 
   const isSessionTransportActive = useCallback((sessionId: string) => {
     return stateRef.current.activeSessionId === sessionId;
   }, []);
 
   const isReconnectInFlight = useCallback((sessionId: string) => {
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-    const host = sessionHostRef.current.get(sessionId)
-      || (session
-        ? {
-            bridgeHost: session.bridgeHost,
-            bridgePort: session.bridgePort,
-          }
-        : null);
-    if (!host) {
+    const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
+    if (!reconnectRuntime) {
       return false;
     }
-    const bucket = reconnectBucketsRef.current.get(toHostKey(host)) || null;
-    if (!bucket) {
-      return false;
-    }
-    return bucket.activeSessionId === sessionId || bucket.pending.includes(sessionId);
+    return reconnectRuntime.connecting || reconnectRuntime.timer !== null;
   }, []);
 
   const resolveSessionCacheLines = useCallback((rows?: number | null) => {
@@ -1290,13 +1316,6 @@ export function SessionProvider({
     return timerId;
   }, [clearSessionHandshakeTimeout]);
 
-  const clearDeferredReconnectDrainTimers = useCallback(() => {
-    for (const timerId of deferredReconnectDrainTimersRef.current) {
-      window.clearTimeout(timerId);
-    }
-    deferredReconnectDrainTimersRef.current.clear();
-  }, []);
-
   const clearTailRefreshRuntime = useCallback((sessionId: string) => {
     sessionBufferHeadsRef.current.delete(sessionId);
     sessionRevisionResetRef.current.delete(sessionId);
@@ -1356,7 +1375,12 @@ export function SessionProvider({
     options.onBeforeConnectSend?.({ sessionName });
     sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
       type: 'connect',
-      payload: buildHostConfigMessage(options.host, sessionName, options.sessionId),
+      payload: buildHostConfigMessage(
+        options.host,
+        sessionName,
+        options.sessionId,
+        bridgeSettings.terminalWidthMode,
+      ),
     }));
     runtimeDebug(`session.ws.${options.debugScope}.connect-sent`, {
       sessionId: options.sessionId,
@@ -1640,29 +1664,14 @@ export function SessionProvider({
   ]);
 
   const clearReconnectForSession = useCallback((sessionId: string) => {
-    const host = sessionHostRef.current.get(sessionId);
-    if (!host) {
+    const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId);
+    if (!reconnectRuntime) {
       return;
     }
-
-    const hostKey = toHostKey(host);
-    const bucket = reconnectBucketsRef.current.get(hostKey);
-    if (!bucket) {
-      return;
+    if (reconnectRuntime.timer) {
+      clearTimeout(reconnectRuntime.timer);
     }
-
-    bucket.pending = bucket.pending.filter((item) => item !== sessionId);
-    if (bucket.activeSessionId === sessionId) {
-      if (bucket.timer) {
-        clearTimeout(bucket.timer);
-        bucket.timer = null;
-      }
-      bucket.activeSessionId = null;
-    }
-
-    if (!bucket.timer && !bucket.activeSessionId && bucket.pending.length === 0) {
-      reconnectBucketsRef.current.delete(hostKey);
-    }
+    reconnectRuntimesRef.current.delete(sessionId);
   }, []);
 
   const cleanupSocket = useCallback((sessionId: string, shouldClose = false) => {
@@ -1682,64 +1691,59 @@ export function SessionProvider({
     clearSessionHandshakeTimeout(sessionId);
     clearTailRefreshRuntime(sessionId);
     clearSessionPullState(sessionId);
-    sessionRenderDemandRef.current.delete(sessionId);
   }, [clearHeartbeat, clearSessionHandshakeTimeout, clearSessionPullState, clearTailRefreshRuntime]);
 
-  const drainReconnectBucket = useCallback((hostKey: string) => {
-    const bucket = reconnectBucketsRef.current.get(hostKey);
-    if (!bucket || bucket.timer || bucket.activeSessionId || bucket.pending.length === 0) {
+  const startReconnectAttempt = useCallback((sessionId: string) => {
+    const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId);
+    const targetHost = sessionHostRef.current.get(sessionId);
+    if (!reconnectRuntime || !targetHost) {
+      reconnectRuntimesRef.current.delete(sessionId);
+      return;
+    }
+    if (reconnectRuntime.timer || reconnectRuntime.connecting) {
       return;
     }
 
-    const nextSessionId = bucket.pending.shift() || null;
-    if (!nextSessionId) {
-      reconnectBucketsRef.current.delete(hostKey);
-      return;
-    }
+    const delay = reconnectRuntime.nextDelayMs ?? computeReconnectDelay(reconnectRuntime.attempt);
+    reconnectRuntime.nextDelayMs = null;
+    reconnectRuntime.timer = window.setTimeout(() => {
+      const liveRuntime = reconnectRuntimesRef.current.get(sessionId);
+      if (!liveRuntime) {
+        return;
+      }
+      liveRuntime.timer = null;
+      liveRuntime.connecting = true;
 
-    const host = sessionHostRef.current.get(nextSessionId);
-    if (!host) {
-      bucket.activeSessionId = null;
-      drainReconnectBucket(hostKey);
-      return;
-    }
-
-    bucket.activeSessionId = nextSessionId;
-    const delay = bucket.nextDelayMs ?? computeReconnectDelay(bucket.attempt);
-    bucket.nextDelayMs = null;
-    bucket.timer = setTimeout(() => {
-      bucket.timer = null;
-
-      const targetHost = sessionHostRef.current.get(nextSessionId);
-      if (!targetHost) {
-        bucket.activeSessionId = null;
-        drainReconnectBucket(hostKey);
+      const liveHost = sessionHostRef.current.get(sessionId);
+      if (!liveHost) {
+        liveRuntime.connecting = false;
+        reconnectRuntimesRef.current.delete(sessionId);
         return;
       }
 
       dispatch({
         type: 'UPDATE_SESSION',
-        id: nextSessionId,
+        id: sessionId,
         updates: {
           state: 'reconnecting',
-          reconnectAttempt: bucket.attempt + 1,
+          reconnectAttempt: liveRuntime.attempt + 1,
         },
       });
 
-      const ws = buildTraversalSocketForHost(targetHost);
+      const ws = buildTraversalSocketForHost(liveHost);
       runtimeDebug('session.ws.reconnect.opening', {
-        sessionId: nextSessionId,
-        host: targetHost.bridgeHost,
-        port: targetHost.bridgePort,
-        sessionName: getResolvedSessionName(targetHost),
+        sessionId,
+        host: liveHost.bridgeHost,
+        port: liveHost.bridgePort,
+        sessionName: getResolvedSessionName(liveHost),
       });
-      wsRefs.current.set(nextSessionId, ws);
-      dispatch({ type: 'UPDATE_SESSION', id: nextSessionId, updates: { ws: null } });
-      lastPongAtRef.current.set(nextSessionId, Date.now());
+      wsRefs.current.set(sessionId, ws);
+      dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
+      lastPongAtRef.current.set(sessionId, Date.now());
 
       let completed = false;
       const clearHandshakeTimeout = () => {
-        clearSessionHandshakeTimeout(nextSessionId);
+        clearSessionHandshakeTimeout(sessionId);
       };
       const markCompleted = () => {
         if (completed) {
@@ -1750,69 +1754,75 @@ export function SessionProvider({
       };
       const finalizeFailure = (message: string, retryable: boolean) => {
         clearHandshakeTimeout();
-        const baseline = finalizeSocketFailureBaseline({
-          sessionId: nextSessionId,
+        const baseline = finalizeSocketFailureBaselineRef.current?.({
+          sessionId,
           message,
           markCompleted,
         });
+        if (!baseline) {
+          reconnectRuntimesRef.current.delete(sessionId);
+          return;
+        }
+        const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
+        if (currentReconnectRuntime) {
+          currentReconnectRuntime.connecting = false;
+        }
         if (!baseline.shouldContinue) {
-          bucket.activeSessionId = null;
+          reconnectRuntimesRef.current.delete(sessionId);
           return;
         }
 
         if (!retryable) {
-          bucket.activeSessionId = null;
+          reconnectRuntimesRef.current.delete(sessionId);
           dispatch({
             type: 'UPDATE_SESSION',
-            id: nextSessionId,
+            id: sessionId,
             updates: {
               state: 'error',
               lastError: message,
             },
           });
-          emitSessionStatus(nextSessionId, 'error', message);
-          drainReconnectBucket(hostKey);
+          emitSessionStatus(sessionId, 'error', message);
           return;
         }
 
-        bucket.attempt = Math.min(bucket.attempt + 1, 6);
-        bucket.activeSessionId = null;
-        if (!bucket.pending.includes(nextSessionId)) {
-          bucket.pending.push(nextSessionId);
-        }
+        const nextReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || createSessionReconnectRuntime();
+        nextReconnectRuntime.attempt = Math.min(nextReconnectRuntime.attempt + 1, 6);
+        nextReconnectRuntime.connecting = false;
+        reconnectRuntimesRef.current.set(sessionId, nextReconnectRuntime);
 
         dispatch({
           type: 'UPDATE_SESSION',
-          id: nextSessionId,
+          id: sessionId,
           updates: {
             state: 'reconnecting',
             lastError: message,
-            reconnectAttempt: bucket.attempt,
+            reconnectAttempt: nextReconnectRuntime.attempt,
             ws: null,
           },
         });
-        emitSessionStatus(nextSessionId, 'error', message);
-        drainReconnectBucket(hostKey);
+        emitSessionStatus(sessionId, 'error', message);
+        startReconnectAttempt(sessionId);
       };
 
       ws.onopen = () => {
-        applyTransportDiagnostics(nextSessionId, ws);
+        applyTransportDiagnostics(sessionId, ws);
         openSocketConnectHandshake({
-          sessionId: nextSessionId,
-          host: targetHost,
+          sessionId,
+          host: liveHost,
           ws,
           debugScope: 'reconnect',
           finalizeFailure,
           onBeforeConnectSend: ({ sessionName }) => {
             dispatch({
               type: 'UPDATE_SESSION',
-              id: nextSessionId,
+              id: sessionId,
               updates: {
                 state: 'connecting',
                 sessionName,
               },
             });
-            setScheduleStateForSession(nextSessionId, {
+            setScheduleStateForSession(sessionId, {
               sessionName,
               jobs: [],
               loading: true,
@@ -1820,45 +1830,39 @@ export function SessionProvider({
           },
         });
         clearHandshakeTimeout();
-        setSessionHandshakeTimeout(nextSessionId, () => {
+        setSessionHandshakeTimeout(sessionId, () => {
           finalizeFailure('session handshake timeout', true);
         }, SESSION_HANDSHAKE_TIMEOUT_MS);
       };
 
       ws.onmessage = (event) => {
         try {
-          recordSessionRx(nextSessionId, event.data);
+          recordSessionRx(sessionId, event.data);
           if (typeof event.data !== 'string') {
             return;
           }
           const msg: ServerMessage = JSON.parse(event.data);
           handleSocketServerMessage({
-            sessionId: nextSessionId,
-            host: targetHost,
+            sessionId,
+            host: liveHost,
             ws,
             debugScope: 'reconnect',
             onConnected: () => {
               if (completed) return;
               completed = true;
               clearHandshakeTimeout();
-              const connectedSessionName = getResolvedSessionName(targetHost);
+              const connectedSessionName = getResolvedSessionName(liveHost);
               runtimeDebug('session.ws.reconnect.connected', {
-                sessionId: nextSessionId,
+                sessionId,
                 activeSessionId: stateRef.current.activeSessionId,
               });
-              bucket.attempt = 0;
-              bucket.activeSessionId = null;
-              handleSocketConnectedBaseline({
-                sessionId: nextSessionId,
+              reconnectRuntimesRef.current.delete(sessionId);
+              handleSocketConnectedBaselineRef.current?.({
+                sessionId,
                 sessionName: connectedSessionName,
                 ws,
               });
-              flushPendingInputQueue(nextSessionId);
-              const timerId = window.setTimeout(() => {
-                deferredReconnectDrainTimersRef.current.delete(timerId);
-                drainReconnectBucket(hostKey);
-              }, POST_SUCCESS_NEXT_RETRY_DELAY_MS);
-              deferredReconnectDrainTimersRef.current.add(timerId);
+              flushPendingInputQueueRef.current?.(sessionId);
             },
             onFailure: finalizeFailure,
           }, msg);
@@ -1873,13 +1877,9 @@ export function SessionProvider({
   }, [
     applyTransportDiagnostics,
     buildTraversalSocketForHost,
-    cleanupSocket,
     clearSessionHandshakeTimeout,
     recordSessionRx,
-    requestSessionBufferSync,
-    resolveSessionCacheLines,
     setSessionHandshakeTimeout,
-    wsUrl,
   ]);
 
   const scheduleReconnect = useCallback((
@@ -1888,23 +1888,12 @@ export function SessionProvider({
     retryable = true,
     options?: { immediate?: boolean; resetAttempt?: boolean },
   ) => {
-    const host = sessionHostRef.current.get(sessionId);
-    if (!host) {
+    if (!sessionHostRef.current.get(sessionId)) {
       return;
     }
 
-    const hostKey = toHostKey(host);
-    const bucket = reconnectBucketsRef.current.get(hostKey) || createReconnectBucket();
-    reconnectBucketsRef.current.set(hostKey, bucket);
-
-    if (options?.resetAttempt) {
-      bucket.attempt = 0;
-    }
-    if (options?.immediate) {
-      bucket.nextDelayMs = 0;
-    }
-
     if (!retryable) {
+      reconnectRuntimesRef.current.delete(sessionId);
       dispatch({
         type: 'UPDATE_SESSION',
         id: sessionId,
@@ -1918,9 +1907,14 @@ export function SessionProvider({
       return;
     }
 
-    if (bucket.activeSessionId !== sessionId && !bucket.pending.includes(sessionId)) {
-      bucket.pending.push(sessionId);
+    const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || createSessionReconnectRuntime();
+    if (options?.resetAttempt) {
+      reconnectRuntime.attempt = 0;
     }
+    if (options?.immediate) {
+      reconnectRuntime.nextDelayMs = 0;
+    }
+    reconnectRuntimesRef.current.set(sessionId, reconnectRuntime);
 
     dispatch({
       type: 'UPDATE_SESSION',
@@ -1932,8 +1926,8 @@ export function SessionProvider({
       },
     });
     emitSessionStatus(sessionId, 'error', message);
-    drainReconnectBucket(hostKey);
-  }, [drainReconnectBucket]);
+    startReconnectAttempt(sessionId);
+  }, [startReconnectAttempt]);
 
   const connectSession = useCallback((sessionId: string, host: Host, activate: boolean) => {
     clearReconnectForSession(sessionId);
@@ -2119,6 +2113,7 @@ export function SessionProvider({
     pendingInputTailRefreshRef.current.delete(id);
     pendingConnectTailRefreshRef.current.delete(id);
     pendingResumeTailRefreshRef.current.delete(id);
+    sessionRenderDemandRef.current.delete(id);
     sessionWireStatsRef.current.delete(id);
     sessionWireStatsPreviousRef.current.delete(id);
     setSessionDebugMetrics((current) => {
@@ -2301,8 +2296,9 @@ export function SessionProvider({
     latestEndIndex: number,
     availableStartIndex?: number,
     availableEndIndex?: number,
+    cursor?: TerminalCursorState | null,
   ) => {
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+    let session = stateRef.current.sessions.find((item) => item.id === sessionId);
     const ws = wsRefs.current.get(sessionId);
     if (
       !session
@@ -2317,11 +2313,38 @@ export function SessionProvider({
       latestEndIndex,
       availableStartIndex: Number.isFinite(availableStartIndex) ? Math.max(0, Math.floor(availableStartIndex || 0)) : undefined,
       availableEndIndex: Number.isFinite(availableEndIndex) ? Math.max(0, Math.floor(availableEndIndex || 0)) : undefined,
-      seenAt: Date.now(),
-    });
+        seenAt: Date.now(),
+      });
     // Rate-limit: stamp now so the next 33ms tick is skipped,
     // breaking the tight head→sync→head→sync loop.
     lastHeadRequestAtRef.current.set(sessionId, Date.now());
+    const normalizedCursor = normalizeTerminalCursorState(cursor);
+    const cursorChanged = (
+      (session.buffer.cursor?.rowIndex ?? null) !== (normalizedCursor?.rowIndex ?? null)
+      || (session.buffer.cursor?.col ?? null) !== (normalizedCursor?.col ?? null)
+      || (session.buffer.cursor?.visible ?? null) !== (normalizedCursor?.visible ?? null)
+    );
+    if (cursorChanged) {
+      const nextBuffer = {
+        ...session.buffer,
+        cursor: normalizedCursor,
+      };
+      const nextSession = {
+        ...session,
+        buffer: nextBuffer,
+      };
+      stateRef.current = reduceSessionAction(stateRef.current, {
+        type: 'UPDATE_SESSION',
+        id: sessionId,
+        updates: { buffer: nextBuffer },
+      });
+      dispatch({
+        type: 'UPDATE_SESSION',
+        id: sessionId,
+        updates: { buffer: nextBuffer },
+      });
+      session = nextSession;
+    }
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
     if (
       session.daemonHeadRevision !== latestRevision
@@ -2362,16 +2385,17 @@ export function SessionProvider({
       sessionRevisionResetRef.current.delete(sessionId);
     }
 
-    runtimeDebug('session.buffer.head', {
-      sessionId,
-      activeSessionId: stateRef.current.activeSessionId,
-      latestRevision,
-      latestEndIndex,
-      availableStartIndex: liveHead?.availableStartIndex ?? null,
-      availableEndIndex: liveHead?.availableEndIndex ?? null,
-      localRevision,
-      localEndIndex,
-      localWindowInvalid,
+      runtimeDebug('session.buffer.head', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        latestRevision,
+        latestEndIndex,
+        availableStartIndex: liveHead?.availableStartIndex ?? null,
+        availableEndIndex: liveHead?.availableEndIndex ?? null,
+        cursor: normalizedCursor,
+        localRevision,
+        localEndIndex,
+        localWindowInvalid,
       renderDemand: sessionRenderDemandRef.current.get(sessionId) || null,
     });
 
@@ -2426,6 +2450,36 @@ export function SessionProvider({
     });
   }, [clearSessionPullState, isSessionTransportActive, requestSessionBufferSync, resolveSessionCacheLines]);
 
+  async function persistRemoteScreenshotDownload(fileName: string, chunks: Map<number, string>) {
+    const downloadDir = '/storage/emulated/0/Download/zterm';
+    try {
+      await Filesystem.mkdir({
+        path: downloadDir,
+        directory: Directory.ExternalStorage,
+        recursive: true,
+      });
+    } catch {
+      // directory may already exist
+    }
+
+    const ordered: string[] = [];
+    for (let index = 0; index < chunks.size; index += 1) {
+      const chunk = chunks.get(index);
+      if (!chunk) {
+        throw new Error(`Remote screenshot missing chunk ${index}`);
+      }
+      ordered.push(chunk);
+    }
+
+    const savedPath = `${downloadDir}/${fileName}`;
+    await Filesystem.writeFile({
+      path: savedPath,
+      data: ordered.join(''),
+      directory: Directory.ExternalStorage,
+    });
+    return savedPath;
+  }
+
   const handleSocketServerMessage = useCallback((options: {
     sessionId: string;
     host: Host;
@@ -2468,6 +2522,7 @@ export function SessionProvider({
           Math.max(0, Math.floor(msg.payload.latestEndIndex || 0)),
           Number.isFinite(msg.payload.availableStartIndex) ? Math.max(0, Math.floor(msg.payload.availableStartIndex || 0)) : undefined,
           Number.isFinite(msg.payload.availableEndIndex) ? Math.max(0, Math.floor(msg.payload.availableEndIndex || 0)) : undefined,
+          normalizeTerminalCursorState(msg.payload.cursor),
         );
         break;
       case 'schedule-state':
@@ -2501,6 +2556,53 @@ export function SessionProvider({
         break;
       case 'file-attached':
         break;
+      case 'file-list-response':
+      case 'file-list-error':
+      case 'file-download-chunk': {
+        const payload = msg.payload as FileDownloadChunkPayload;
+        const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
+        if (pending) {
+          pending.fileName = payload.fileName || pending.fileName;
+          pending.chunks.set(payload.chunkIndex, payload.dataBase64);
+        }
+        for (const listener of fileTransferListeners.current) {
+          try { listener(msg); } catch { /* listener error */ }
+        }
+        break;
+      }
+      case 'file-download-complete': {
+        const payload = msg.payload as FileDownloadCompletePayload;
+        const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
+        if (pending) {
+          pendingRemoteScreenshotRequestsRef.current.delete(payload.requestId);
+          void persistRemoteScreenshotDownload(payload.fileName || pending.fileName || `remote-screenshot-${Date.now()}.png`, pending.chunks)
+            .then((savedPath) => pending.resolve(savedPath))
+            .catch((error) => pending.reject(error instanceof Error ? error : new Error(String(error))));
+        }
+        for (const listener of fileTransferListeners.current) {
+          try { listener(msg); } catch { /* listener error */ }
+        }
+        break;
+      }
+      case 'file-download-error': {
+        const payload = msg.payload as FileDownloadErrorPayload;
+        const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
+        if (pending) {
+          pendingRemoteScreenshotRequestsRef.current.delete(payload.requestId);
+          pending.reject(new Error(payload.error || 'Remote screenshot download failed'));
+        }
+        for (const listener of fileTransferListeners.current) {
+          try { listener(msg); } catch { /* listener error */ }
+        }
+        break;
+      }
+      case 'file-upload-progress':
+      case 'file-upload-complete':
+      case 'file-upload-error':
+        for (const listener of fileTransferListeners.current) {
+          try { listener(msg); } catch { /* listener error */ }
+        }
+        break;
       case 'error':
         options.onFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
         break;
@@ -2513,7 +2615,7 @@ export function SessionProvider({
         lastPongAtRef.current.set(options.sessionId, Date.now());
         break;
     }
-  }, [applyIncomingBufferSync, handleBufferHead, setScheduleStateForSession, settleSessionPullState]);
+  }, [applyIncomingBufferSync, handleBufferHead, persistRemoteScreenshotDownload, setScheduleStateForSession, settleSessionPullState]);
 
   const handleSocketConnectedBaseline = useCallback((options: {
     sessionId: string;
@@ -2551,6 +2653,7 @@ export function SessionProvider({
     }
     dispatch({ type: 'INCREMENT_CONNECTED' });
   }, [applyTransportDiagnostics, isSessionTransportActive, requestSessionBufferHead, setScheduleStateForSession]);
+  handleSocketConnectedBaselineRef.current = handleSocketConnectedBaseline;
 
   const finalizeSocketFailureBaseline = useCallback((options: {
     sessionId: string;
@@ -2577,6 +2680,7 @@ export function SessionProvider({
       manualClosed,
     };
   }, [cleanupSocket, setScheduleStateForSession]);
+  finalizeSocketFailureBaselineRef.current = finalizeSocketFailureBaseline;
 
   const resumeActiveSessionTransport = useCallback((sessionId: string) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
@@ -2600,21 +2704,13 @@ export function SessionProvider({
       return false;
     }
 
-    if (isSessionTransportActivityStale(sessionId)) {
-      runtimeDebug('session.transport.resume-active.stale', {
-        sessionId,
-        activeSessionId: stateRef.current.activeSessionId,
-        lastServerActivityAt: lastServerActivityAtRef.current.get(sessionId) || 0,
-      });
-      return false;
-    }
-
     runtimeDebug('session.transport.resume-active', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
       localRevision: session.buffer.revision,
       localStartIndex: session.buffer.startIndex,
       localEndIndex: session.buffer.endIndex,
+      transportStale: isSessionTransportActivityStale(sessionId),
     });
     resetSessionTransportPullBookkeeping(sessionId, 'active-resume');
     pendingResumeTailRefreshRef.current.add(sessionId);
@@ -2701,6 +2797,7 @@ export function SessionProvider({
     }
     requestSessionBufferHead(sessionId, ws, { force: true });
   }, [markPendingInputTailRefresh, requestSessionBufferHead, sendSocketPayload]);
+  flushPendingInputQueueRef.current = flushPendingInputQueue;
 
   const enqueuePendingInput = useCallback((sessionId: string, payload: string) => {
     const current = pendingInputQueueRef.current.get(sessionId) || [];
@@ -2715,38 +2812,64 @@ export function SessionProvider({
   }, [flushRuntimeDebugLogs]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      const activeSessionId = stateRef.current.activeSessionId;
-      if (!activeSessionId) {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const scheduleNext = () => {
+      if (cancelled) {
         return;
       }
-      const session = stateRef.current.sessions.find((item) => item.id === activeSessionId) || null;
-      const ws = wsRefs.current.get(activeSessionId) || null;
-      if (
-        !session
-        || !ws
-        || ws.readyState !== WebSocket.OPEN
-      ) {
-        return;
+      timer = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          scheduleNext();
+          return;
+        }
+        const activeSessionId = stateRef.current.activeSessionId;
+        if (!activeSessionId) {
+          scheduleNext();
+          return;
+        }
+        const session = stateRef.current.sessions.find((item) => item.id === activeSessionId) || null;
+        const ws = wsRefs.current.get(activeSessionId) || null;
+        if (
+          !session
+          || !ws
+          || ws.readyState !== WebSocket.OPEN
+        ) {
+          scheduleNext();
+          return;
+        }
+
+        if (
+          isSessionTransportActivityStale(activeSessionId)
+          && !isReconnectInFlight(activeSessionId)
+        ) {
+          runtimeDebug('session.transport.active-tick.stale', {
+            sessionId: activeSessionId,
+            activeSessionId: stateRef.current.activeSessionId,
+            lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
+          });
+          reconnectSession(activeSessionId);
+          scheduleNext();
+          return;
+        }
+
+        requestSessionBufferHead(activeSessionId, ws);
+        scheduleNext();
+      }, ACTIVE_HEAD_REFRESH_TICK_MS);
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
       }
-
-      if (
-        isSessionTransportActivityStale(activeSessionId)
-        && !isReconnectInFlight(activeSessionId)
-      ) {
-        runtimeDebug('session.transport.active-tick.stale', {
-          sessionId: activeSessionId,
-          activeSessionId: stateRef.current.activeSessionId,
-          lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
-        });
-        reconnectSession(activeSessionId);
-        return;
-      }
-
-      requestSessionBufferHead(activeSessionId, ws);
-    }, ACTIVE_HEAD_REFRESH_TICK_MS);
-
-    return () => window.clearInterval(timer);
+    };
   }, [isReconnectInFlight, isSessionTransportActivityStale, reconnectSession, requestSessionBufferHead]);
 
   const sendInput = useCallback((sessionId: string, data: string) => {
@@ -2890,6 +3013,31 @@ export function SessionProvider({
     sendSocketPayload(targetSessionId, ws, fileBuffer);
   }, [ensureSessionReadyForPaste, sendSocketPayload]);
 
+  const requestRemoteScreenshot = useCallback(async (sessionId: string) => {
+    const targetSessionId = sessionId.trim();
+    if (!targetSessionId) {
+      throw new Error('No target session for remote screenshot');
+    }
+
+    const ws = await ensureSessionReadyForPaste(targetSessionId);
+    const requestId = `rs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    return await new Promise<string>((resolve, reject) => {
+      pendingRemoteScreenshotRequestsRef.current.set(requestId, {
+        fileName: null,
+        chunks: new Map(),
+        resolve,
+        reject,
+      });
+
+      const payload: RemoteScreenshotRequestPayload = { requestId };
+      sendSocketPayload(targetSessionId, ws, JSON.stringify({
+        type: 'remote-screenshot-request',
+        payload,
+      } satisfies ClientMessage));
+    });
+  }, [ensureSessionReadyForPaste, sendSocketPayload]);
+
   const resizeTerminal = useCallback((sessionId: string, cols: number, rows: number) => {
     const targetSessionId = sessionId.trim();
     if (!targetSessionId) {
@@ -2902,6 +3050,19 @@ export function SessionProvider({
     }
     viewportSizeRef.current.set(targetSessionId, { cols, rows });
     sendMessage(targetSessionId, { type: 'resize', payload: { cols, rows } });
+  }, [sendMessage]);
+
+  const setTerminalWidthMode = useCallback((sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {
+    const targetSessionId = sessionId.trim();
+    if (!targetSessionId) {
+      return;
+    }
+    const normalizedMode: TerminalWidthMode = mode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+    const payload =
+      normalizedMode === 'adaptive-phone' && typeof cols === 'number' && Number.isFinite(cols) && cols > 0
+        ? { mode: normalizedMode, cols: Math.max(1, Math.floor(cols)) }
+        : { mode: normalizedMode };
+    sendMessage(targetSessionId, { type: 'terminal-width-mode', payload });
   }, [sendMessage]);
 
   const getActiveSession = useCallback(
@@ -2917,23 +3078,26 @@ export function SessionProvider({
   }, []);
 
   useEffect(() => () => {
+    for (const pending of pendingRemoteScreenshotRequestsRef.current.values()) {
+      pending.reject(new Error('Session provider disposed before remote screenshot completed'));
+    }
+    pendingRemoteScreenshotRequestsRef.current.clear();
     for (const timer of pingIntervals.current.values()) {
       clearInterval(timer);
     }
     for (const sessionId of handshakeTimeoutsRef.current.keys()) {
       clearSessionHandshakeTimeout(sessionId);
     }
-    clearDeferredReconnectDrainTimers();
-    for (const bucket of reconnectBucketsRef.current.values()) {
-      if (bucket.timer) {
-        clearTimeout(bucket.timer);
+    for (const reconnectRuntime of reconnectRuntimesRef.current.values()) {
+      if (reconnectRuntime.timer) {
+        clearTimeout(reconnectRuntime.timer);
       }
     }
     for (const session of stateRef.current.sessions) {
       manualCloseRef.current.add(session.id);
       cleanupSocket(session.id, true);
     }
-  }, [cleanupSocket, clearDeferredReconnectDrainTimers, clearSessionHandshakeTimeout]);
+  }, [cleanupSocket, clearSessionHandshakeTimeout]);
 
   const value: SessionContextValue = {
     state,
@@ -2951,7 +3115,9 @@ export function SessionProvider({
     sendInput,
     sendImagePaste,
     sendFileAttach,
+    requestRemoteScreenshot,
     resizeTerminal,
+    setTerminalWidthMode,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -2961,6 +3127,16 @@ export function SessionProvider({
     getSessionScheduleState,
     getActiveSession,
     getSession,
+    onFileTransferMessage: (handler: (msg: any) => void) => {
+      fileTransferListeners.current.add(handler);
+      return () => { fileTransferListeners.current.delete(handler); };
+    },
+    sendMessageRaw: (sessionId: string, msg: unknown) => {
+      const ws = wsRefs.current.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        sendSocketPayload(sessionId, ws, JSON.stringify(msg));
+      }
+    },
   };
 
   return React.createElement(SessionContext.Provider, { value }, children);

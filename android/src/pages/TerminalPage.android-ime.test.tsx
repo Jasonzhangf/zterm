@@ -89,16 +89,19 @@ vi.mock('../components/TerminalView', () => ({
     allowDomFocus,
     onActivateInput,
     onResize,
+    widthMode,
   }: {
     sessionId: string;
     allowDomFocus?: boolean;
     onActivateInput?: () => void;
     onResize?: (...args: any[]) => void;
+    widthMode?: string;
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-allow-dom-focus={allowDomFocus ? 'true' : 'false'}
       data-has-onresize={onResize ? 'true' : 'false'}
+      data-width-mode={widthMode || 'adaptive-phone'}
       onClick={() => onActivateInput?.()}
     />
   ),
@@ -253,7 +256,34 @@ describe('TerminalPage Android IME bridge', () => {
     });
   });
 
-  it('suspends ImeAnchor routing while quick bar DOM editor owns focus', async () => {
+  it('passes settings terminal width mode down to the active renderer', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="mirror-fixed"
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-width-mode')).toBe('mirror-fixed');
+  });
+
+  it('suspends ImeAnchor routing while quick bar DOM editor owns focus but still keeps shell keyboard inset', async () => {
     const session = makeSession('s1');
     const onTerminalInput = vi.fn();
 
@@ -292,7 +322,7 @@ describe('TerminalPage Android IME bridge', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('false');
-      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('0');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('280');
     });
 
     imeListeners.get('input')?.({ text: '不该发到 terminal' });
@@ -589,9 +619,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     const terminalStage = screen.getByTestId('terminal-stage');
     const quickBarShell = screen.getByTestId('terminal-quickbar-shell');
-    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 64px;');
+    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 72px;');
     expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');
-    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 0px;');
+    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 8px;');
 
     await waitFor(() => {
       expect(imeListeners.has('keyboardState')).toBe(true);
@@ -602,9 +632,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute('style') || '';
-      expect(style).toContain('bottom: 384px;');
+      expect(style).toContain('bottom: 392px;');
       expect(style).not.toContain('transform: translateY');
-      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 320px;');
+      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 328px;');
     });
   });
 

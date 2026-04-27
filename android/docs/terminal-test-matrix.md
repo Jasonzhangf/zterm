@@ -25,6 +25,7 @@
 | E | first paint / app loop | 已有基础覆盖 | `src/App.first-paint.test.tsx`, `src/App.first-paint.real-terminal.test.tsx` |
 | F | renderer scope / visible pane | 已覆盖 | `src/pages/TerminalPage.render-scope.test.tsx` |
 | G | local buffer merge/store | 有基础覆盖，但“truth reset 禁止”还缺专项 | `src/lib/terminal-buffer.test.ts`, `src/lib/shared-terminal-buffer.audit.test.ts` |
+| G1 | terminal geometry / width-mode | **需要专项红测** | `src/components/TerminalView.dynamic-refresh.test.tsx`, `src/pages/SettingsPage.theme.test.tsx`, `src/server/mirror-geometry.test.ts` |
 | H | daemon close loop | 已有实验闭环 | `scripts/daemon-mirror-lab.ts` + `pnpm run daemon:mirror:close-loop` |
 | I | APK smoke | 人工 smoke，有 checklist | `docs/terminal-test-loop-checklist.md` |
 
@@ -122,6 +123,7 @@
 
 - [ ] **专项断言：inactive tab 停轮询后 transport 仍保持打开**
 - [ ] **专项断言：foreground resume / tab re-entry 不会先 cleanup session 再 brand-new connect**
+- [ ] **专项断言：foreground resume 遇到 stale-open ws 时，先 probe 复用旧 transport，不直接 reconnect**
 - [ ] **专项断言：reconnect handshake 带同一个 `clientSessionId`**
 - [ ] **专项断言：同 host 多 tab 下，hidden tab 不会抢占 active tab 的 same-session retry**
 - [ ] **daemon 专项：ws close 只 detach transport，不删除 logical client session**
@@ -215,6 +217,8 @@
 - [ ] **中文输入法 composition -> commit 自动刷新**
 - [ ] **语音输入法转文字自动刷新，不需要补一个字符**
 - [ ] **commitText / finishComposingText 到 renderer 刷新闭环**
+- [ ] **same-end / same-window 新 revision** 不会被旧 in-flight range 覆盖，语音/CJK commit 后无需补字符
+- [ ] **buffer-head cursor metadata** 能独立修正光标/高亮，不依赖下一次 buffer-sync
 - [ ] **Android IME 输入后，buffer-sync 前 terminal 可见内容不得先本地变化**
 - [ ] **输入后界面开始刷新，但 terminal 不得失去后续输入能力**
 - [ ] **刷新期间 keyboard/IME 状态变化，不得把 terminal 再次切回不可输入**
@@ -312,6 +316,30 @@
 - [ ] **专项：已有 local absolute-index 内容存在时，window invalid 也不得 reset 成空窗**
 - [ ] **专项：renderer 仍可消费 reset 前已有内容**
 - [ ] **专项：任何“re-anchor”不能通过抹掉已有 truth 来达成**
+
+## G1. terminal geometry / width-mode
+
+### 目标
+
+- Settings 是唯一宽度模式真相
+- `adaptive-phone | mirror-fixed` 可以切换
+- `mirror-fixed` 不向上游写 tmux geometry
+- `adaptive-phone` 只允许写 width / cols
+- keyboard / IME / shell height 变化不再改 tmux rows
+
+### 已覆盖
+
+- `src/components/TerminalView.dynamic-refresh.test.tsx`
+  - `mirror-fixed` 不触发 upstream resize
+  - `mirror-fixed` 自动关闭左右滑切 tab
+
+### 还缺
+
+- [ ] **Settings roundtrip：`terminalWidthMode` 持久化正确**
+- [ ] **TerminalPage -> TerminalView：当前 width mode 能真实透传到 active renderer**
+- [ ] **adaptive-phone 只在首个 width truth / cols 变化时上报，不因纯高度变化重复上报**
+- [ ] **daemon geometry 规则：rows 始终保留 baseline，不因 subscriber / keyboard / container height 变化被改写**
+- [ ] **mode toggle：切到 `mirror-fixed` 后停止上游 width write；切到 `adaptive-phone` 后只恢复 width write**
 
 ---
 

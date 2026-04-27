@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findChangedIndexedRanges,
+  normalizeMirrorCaptureLines,
   normalizeCapturedLineBlock,
   resolveCanonicalAvailableLineCount,
   trimTrailingDefaultCells,
@@ -17,27 +18,53 @@ function row(text: string) {
 }
 
 describe('resolveCanonicalAvailableLineCount', () => {
-  it('does not add paneRows on top of tmux history_size', () => {
+  it('does not add paneRows on top of tmux available-line hint', () => {
     expect(resolveCanonicalAvailableLineCount({
       paneRows: 24,
-      historySize: 381,
+      tmuxAvailableLineCountHint: 381,
       capturedLineCount: 381,
       scratchLineCount: 381,
     })).toBe(381);
   });
 
-  it('keeps at least one viewport for near-empty sessions', () => {
+  it('keeps at least one visible pane for near-empty sessions', () => {
     expect(resolveCanonicalAvailableLineCount({
       paneRows: 24,
-      historySize: 0,
+      tmuxAvailableLineCountHint: 0,
       capturedLineCount: 1,
       scratchLineCount: 24,
     })).toBe(24);
   });
 });
 
+describe('normalizeMirrorCaptureLines', () => {
+  it('keeps alternate-screen blank rows so mirror lines stay pane-height aligned', () => {
+    expect(normalizeMirrorCaptureLines('row-1\nrow-2\n', {
+      paneRows: 4,
+      alternateOn: true,
+    })).toEqual([
+      'row-1',
+      'row-2',
+      '',
+      '',
+    ]);
+  });
+
+  it('does not append a second visible block in normal mode', () => {
+    expect(normalizeMirrorCaptureLines('hist-1\nhist-2\nvis-1\nvis-2\n', {
+      paneRows: 2,
+      alternateOn: false,
+    })).toEqual([
+      'hist-1',
+      'hist-2',
+      'vis-1',
+      'vis-2',
+    ]);
+  });
+});
+
 describe('normalizeCapturedLineBlock', () => {
-  it('preserves trailing blank viewport rows when an expected pane height is provided', () => {
+  it('preserves trailing blank pane rows when an expected pane height is provided', () => {
     expect(normalizeCapturedLineBlock('row-1\nrow-2\n', 3)).toEqual([
       'row-1',
       'row-2',
@@ -45,7 +72,7 @@ describe('normalizeCapturedLineBlock', () => {
     ]);
   });
 
-  it('pads viewport captures up to the requested pane height', () => {
+  it('pads alternate-screen captures up to the requested pane height', () => {
     expect(normalizeCapturedLineBlock('row-1\nrow-2', 4)).toEqual([
       'row-1',
       'row-2',
@@ -54,7 +81,7 @@ describe('normalizeCapturedLineBlock', () => {
     ]);
   });
 
-  it('still trims the trailing separator for history captures', () => {
+  it('still trims the trailing separator for non-alternate captures', () => {
     expect(normalizeCapturedLineBlock('row-1\nrow-2\n')).toEqual([
       'row-1',
       'row-2',

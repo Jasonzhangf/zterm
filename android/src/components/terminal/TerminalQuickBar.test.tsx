@@ -124,6 +124,22 @@ describe('TerminalQuickBar', () => {
     });
   });
 
+  it('still opens the current session schedule list even when local draft is empty', async () => {
+    const onOpenScheduleComposer = vi.fn();
+
+    renderQuickBar({
+      sessionDraft: '',
+      onOpenScheduleComposer,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '定时' }));
+
+    await waitFor(() => {
+      expect(onOpenScheduleComposer).toHaveBeenCalledWith('');
+    });
+  });
+
   it('persists floating bubble position after drag', async () => {
     renderQuickBar();
 
@@ -190,12 +206,12 @@ describe('TerminalQuickBar', () => {
   it('hides shell quick rows while floating menu is open', async () => {
     renderQuickBar();
 
-    expect(screen.getByRole('button', { name: '📎' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '📎' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
     });
   });
 
@@ -204,13 +220,13 @@ describe('TerminalQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '📎' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '关闭快捷输入' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '📎' })).not.toBeNull();
+      expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
     });
   });
 
@@ -234,6 +250,53 @@ describe('TerminalQuickBar', () => {
     const shellRows = screen.getByTestId('terminal-quickbar-shell-rows');
     const style = shellRows.getAttribute('style') || '';
     expect(style).not.toContain('padding-bottom: 240px');
+  });
+
+
+
+  it('renders a dedicated first toolbar row with visible tool actions', async () => {
+    renderQuickBar({
+      onOpenFileTransfer: vi.fn(),
+      onToggleDebugOverlay: vi.fn(),
+      ...( { onOpenSyncSettings: vi.fn(), onRequestRemoteScreenshot: vi.fn() } as any),
+    });
+
+    const shellRows = screen.getByTestId('terminal-quickbar-shell-rows');
+    expect(shellRows.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(3);
+    expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '图片' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '同步' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '截图' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
+  });
+
+  it('routes toolbar actions through explicit callbacks instead of floating menu pills', async () => {
+    const onOpenFileTransfer = vi.fn();
+    const onToggleDebugOverlay = vi.fn();
+    const onOpenSyncSettings = vi.fn();
+    const onRequestRemoteScreenshot = vi.fn().mockResolvedValue(undefined);
+
+    renderQuickBar({
+      onOpenFileTransfer,
+      onToggleDebugOverlay,
+      ...( { onOpenSyncSettings, onRequestRemoteScreenshot } as any),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+    fireEvent.click(screen.getByRole('button', { name: '同步' }));
+    fireEvent.click(screen.getByRole('button', { name: '截图' }));
+
+    await waitFor(() => {
+      expect(onOpenFileTransfer).toHaveBeenCalledTimes(1);
+      expect(onToggleDebugOverlay).toHaveBeenCalledTimes(1);
+      expect(onOpenSyncSettings).toHaveBeenCalledTimes(1);
+      expect(onRequestRemoteScreenshot).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+    expect(screen.queryByText('📁传输')).toBeNull();
+    expect(screen.queryByText(/📊/)).toBeNull();
   });
 
   it('blocks non-interactive shell clicks from bubbling to terminal layer', async () => {
@@ -314,8 +377,8 @@ describe('TerminalQuickBar', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '+' })[0]);
     expect(screen.getByText('快捷按键设置')).not.toBeNull();
     expect(screen.getByText('当前滚动快捷键')).not.toBeNull();
-    expect(screen.getByText('第一行（单按键）')).not.toBeNull();
-    expect(screen.getByText('第二行（组合键）')).not.toBeNull();
+    expect(screen.getByText('第二行（单按键）')).not.toBeNull();
+    expect(screen.getByText('第三行（组合键）')).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '+ 添加组合键' }));
     await waitFor(() => {
@@ -350,7 +413,7 @@ describe('TerminalQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '+ 添加单按键' }));
     await waitFor(() => {
-      expect(screen.getByText('当前编辑：第一行单按键')).not.toBeNull();
+      expect(screen.getByText('当前编辑：第二行单按键')).not.toBeNull();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Return' }));
@@ -377,7 +440,7 @@ describe('TerminalQuickBar', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '加入' }));
 
-    expect(screen.getByText('第一行只支持单个按键。')).not.toBeNull();
+    expect(screen.getByText('第二行只支持单个按键。')).not.toBeNull();
     expect(screen.getByRole('button', { name: '添加快捷键' }).hasAttribute('disabled')).toBe(true);
   });
 
@@ -398,7 +461,7 @@ describe('TerminalQuickBar', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 Enter' }));
 
     await waitFor(() => {
-      expect(screen.getByText('当前编辑：第一行单按键')).not.toBeNull();
+      expect(screen.getByText('当前编辑：第二行单按键')).not.toBeNull();
       expect((screen.getByPlaceholderText('快捷键名称 / 显示名称') as HTMLInputElement).value).toBe('Enter');
       expect((screen.getByPlaceholderText('点击下方按钮选择单个按键') as HTMLTextAreaElement).value).toBe('Enter');
     });
@@ -506,9 +569,9 @@ describe('TerminalQuickBar', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: 'Tab' }).querySelector('[data-shortcut-keycap="Tab"]')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Enter' }).querySelector('[data-shortcut-keycap="Enter"]')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Space' }).querySelector('[data-shortcut-space-visual="true"]')).not.toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Tab' }).some((button) => button.querySelector('[data-shortcut-keycap=\"Tab\"]'))).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Enter' }).some((button) => button.querySelector('[data-shortcut-keycap=\"Enter\"]'))).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Space' }).some((button) => button.querySelector('[data-shortcut-space-visual=\"true\"]'))).toBe(true);
   });
 
   it('renders space shortcut as a long narrow keycap visual in settings list', async () => {
@@ -661,7 +724,7 @@ describe('TerminalQuickBar', () => {
       ],
     });
 
-    const enterButton = screen.getByRole('button', { name: 'Enter' });
+    const enterButton = screen.getAllByRole('button', { name: 'Enter' })[0] as HTMLButtonElement;
 
     fireEvent.pointerDown(enterButton, { pointerId: 1, pointerType: 'touch' });
     act(() => {

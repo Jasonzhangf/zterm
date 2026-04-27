@@ -38,7 +38,6 @@ export interface Host {
   pinned: boolean;           // 是否置顶首页
   lastConnected?: number;    // 最后连接时间戳
   autoCommand?: string;      // 连接后自动执行的命令
-  terminalWidthMode?: TerminalWidthMode;
 }
 
 // ============================================
@@ -102,6 +101,7 @@ export interface TerminalViewportSize {
 }
 
 export type TerminalResizeHandler = (sessionId: string, cols: number, rows: number) => void;
+export type TerminalWidthModeHandler = (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
 export type TerminalViewportChangeHandler = (sessionId: string, viewState: TerminalViewportState) => void;
 
 export interface Session {
@@ -223,6 +223,112 @@ export interface AttachFileStartPayload {
   byteLength: number;
 }
 
+// ============================================
+// File Transfer (Epic-007)
+// ============================================
+
+export interface FileEntry {
+  name: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified: number;
+}
+
+export type TransferDirection = 'upload' | 'download';
+
+export interface TransferProgress {
+  id: string;
+  fileName: string;
+  direction: TransferDirection;
+  totalBytes: number;
+  transferredBytes: number;
+  status: 'pending' | 'transferring' | 'done' | 'error';
+  error?: string;
+}
+
+export interface FileListRequestPayload {
+  requestId: string;
+  path: string;
+  showHidden: boolean;
+}
+
+export interface FileListResponsePayload {
+  requestId: string;
+  path: string;
+  parentPath: string | null;
+  entries: FileEntry[];
+}
+
+export interface FileListErrorPayload {
+  requestId: string;
+  error: string;
+}
+
+export interface FileDownloadRequestPayload {
+  requestId: string;
+  remotePath: string;
+  fileName: string;
+  totalBytes: number;
+}
+
+export interface RemoteScreenshotRequestPayload {
+  requestId: string;
+}
+
+export interface FileDownloadChunkPayload {
+  requestId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  fileName: string;
+  dataBase64: string;
+}
+
+export interface FileDownloadCompletePayload {
+  requestId: string;
+  fileName: string;
+  totalBytes: number;
+}
+
+export interface FileDownloadErrorPayload {
+  requestId: string;
+  error: string;
+}
+
+export interface FileUploadStartPayload {
+  requestId: string;
+  targetDir: string;
+  fileName: string;
+  fileSize: number;
+  chunkCount: number;
+}
+
+export interface FileUploadChunkPayload {
+  requestId: string;
+  chunkIndex: number;
+  dataBase64: string;
+}
+
+export interface FileUploadEndPayload {
+  requestId: string;
+}
+
+export interface FileUploadProgressPayload {
+  requestId: string;
+  chunkIndex: number;
+  totalChunks: number;
+}
+
+export interface FileUploadCompletePayload {
+  requestId: string;
+  filePath: string;
+  bytes: number;
+}
+
+export interface FileUploadErrorPayload {
+  requestId: string;
+  error: string;
+}
+
 export interface RuntimeDebugLogEntry {
   seq: number;
   ts: string;
@@ -339,6 +445,13 @@ export type ClientMessage =
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
+  | { type: 'terminal-width-mode'; payload: { mode: TerminalWidthMode; cols?: number } }
+  | { type: 'file-list-request'; payload: FileListRequestPayload }
+  | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
+  | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
+  | { type: 'file-upload-start'; payload: FileUploadStartPayload }
+  | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
+  | { type: 'file-upload-end'; payload: FileUploadEndPayload }
   | { type: 'ping' }
   | { type: 'close' };
 
@@ -362,6 +475,14 @@ export type ServerMessage =
   | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
+  | { type: 'file-list-response'; payload: FileListResponsePayload }
+  | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
+  | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
+  | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
+  | { type: 'file-upload-progress'; payload: FileUploadProgressPayload }
+  | { type: 'file-upload-complete'; payload: FileUploadCompletePayload }
+  | { type: 'file-upload-error'; payload: FileUploadErrorPayload }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
@@ -376,6 +497,7 @@ export interface HostConfigMessage {
   sessionName: string;
   cols?: number;
   rows?: number;
+  terminalWidthMode?: TerminalWidthMode;
   authToken?: string;
   autoCommand?: string;
   authType: 'password' | 'key';
@@ -439,6 +561,7 @@ export const STORAGE_KEYS = {
   ACTIVE_SESSION: 'zterm:active-session',
   ACTIVE_PAGE: 'zterm:active-page',
   TERMINAL_LAYOUT: 'zterm:terminal-layout',
+  SHORTCUT_FREQUENCY: 'zterm:shortcut-frequency',
 } as const;
 
 // ============================================
@@ -477,7 +600,6 @@ export const DEFAULT_HOST: Partial<Host> = {
   signalUrl: '',
   transportMode: 'auto',
   authType: 'password',
-  terminalWidthMode: 'adaptive-phone',
   tags: [],
   pinned: false,
 };

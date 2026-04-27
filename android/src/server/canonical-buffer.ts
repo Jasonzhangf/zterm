@@ -89,6 +89,18 @@ export function normalizeCapturedLineBlock(raw: string, expectedLineCount?: numb
   return lines;
 }
 
+export function normalizeMirrorCaptureLines(
+  raw: string,
+  options: {
+    paneRows: number;
+    alternateOn: boolean;
+  },
+) {
+  return options.alternateOn
+    ? normalizeCapturedLineBlock(raw, options.paneRows)
+    : normalizeCapturedLineBlock(raw);
+}
+
 export function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {
   return lines.map((cells, offset) => ({
     index: startIndex + offset,
@@ -162,13 +174,13 @@ export function findChangedIndexedRanges(options: {
 
 export function resolveCanonicalAvailableLineCount(options: {
   paneRows: number;
-  historySize: number;
+  tmuxAvailableLineCountHint: number;
   capturedLineCount: number;
   scratchLineCount: number;
 }) {
   return Math.max(
     Math.max(1, Math.floor(options.paneRows)),
-    Math.max(0, Math.floor(options.historySize)),
+    Math.max(0, Math.floor(options.tmuxAvailableLineCountHint)),
     Math.max(0, Math.floor(options.capturedLineCount)),
     Math.max(0, Math.floor(options.scratchLineCount)),
   );

@@ -12,6 +12,7 @@ import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
 import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
+import { useShortcutFrequencyStorage } from './hooks/useShortcutFrequencyStorage';
 import { useSessionDraftStorage } from './hooks/useSessionDraftStorage';
 import { useSessionHistoryStorage } from './hooks/useSessionHistoryStorage';
 import { upsertBridgeServer } from './lib/bridge-settings';
@@ -61,7 +62,8 @@ function readPersistedPageState(): AppPageState {
       return openConnectionsPage();
     }
     if (parsed.kind === 'terminal') {
-      return openTerminalPage(typeof parsed.focusSessionId === 'string' ? parsed.focusSessionId : undefined);
+      const persistedActiveSessionId = readPersistedActiveSessionId();
+      return openTerminalPage(persistedActiveSessionId || undefined);
     }
     if (parsed.kind === 'settings') {
       return openSettingsPage();
@@ -258,7 +260,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     sendInput,
     sendImagePaste,
     sendFileAttach,
+    requestRemoteScreenshot,
+    sendMessageRaw,
+    onFileTransferMessage,
     resizeTerminal,
+    setTerminalWidthMode,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -266,9 +272,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     toggleScheduleJob,
     runScheduleJobNow,
   } = useSession();
+  void sendMessageRaw;
+  void onFileTransferMessage;
   const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
+  const shortcutFrequencyStorage = useShortcutFrequencyStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
   const { sessionGroups, recordSessionOpen, recordSessionGroupOpen, setSessionGroupSelection, deleteSessionGroup } = useSessionHistoryStorage();
   const [pageState, setPageState] = useState<AppPageState>(() => readPersistedPageState());
@@ -430,13 +439,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     restoredRouteHandledRef.current = true;
     const persistedPage = readPersistedPageState();
     if (persistedPage.kind === 'terminal') {
-      const requestedSessionId = persistedPage.focusSessionId;
       const restoredActiveSessionId = state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
         ? state.activeSessionId
         : null;
       const targetSessionId =
         restoredActiveSessionId
-        || (requestedSessionId && sessions.some((session) => session.id === requestedSessionId) ? requestedSessionId : null)
         || activeSession?.id
         || sessions[0].id;
       if (targetSessionId && activeSession?.id !== targetSessionId) {
@@ -1108,6 +1115,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             }}
             onImagePaste={sendImagePaste}
             onFileAttach={sendFileAttach}
+            onOpenSettings={() => setPageState(openSettingsPage())}
+            onRequestRemoteScreenshot={requestRemoteScreenshot}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
             onQuickActionInput={(sequence, sessionId) => {
@@ -1144,6 +1153,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             onToggleScheduleJob={toggleScheduleJob}
             onRunScheduleJobNow={runScheduleJobNow}
             terminalThemeId={bridgeSettings.terminalThemeId}
+            terminalWidthMode={bridgeSettings.terminalWidthMode}
+            onTerminalWidthModeChange={setTerminalWidthMode}
+            onSendMessage={sendMessageRaw}
+            onFileTransferMessage={onFileTransferMessage}
+            shortcutSmartSort={bridgeSettings.shortcutSmartSort}
+            shortcutFrequencyMap={bridgeSettings.shortcutSmartSort ? shortcutFrequencyStorage.getFrequencyMap() : undefined}
+            onShortcutUse={bridgeSettings.shortcutSmartSort ? shortcutFrequencyStorage.recordShortcutUse : undefined}
           />
         )}
       </div>

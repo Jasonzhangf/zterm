@@ -70,6 +70,7 @@
 - `mirror-fixed` 下长行只能裁切，不能换行/重排/回写上游宽度
 - `mirror-fixed` 下横向查看只改 renderer horizontal window
 - `mirror-fixed` 下必须自动关闭左右滑切 tab
+- `adaptive-phone` 若要适配手机，最多只允许写 `cols`；不得因为手机容器高度去写 tmux rows
 
 ### 2.4 UI shell / IME
 
@@ -80,6 +81,7 @@
 - `keyboardInsetPx > 0` 时，QuickBar shell rows 必须整体抬升到键盘上方，不能被 IME 覆盖
 - Android IME 弹起时，header 顶部 inset 必须保持稳定；`visualViewport.offsetTop` 不得把顶部空白再抬一遍
 - Android connect / reconnect 不得把当前容器测得的 `cols/rows` 发给 daemon 改 tmux geometry；键盘/前后台/容器高度变化都只能改 UI shell 容器与 renderer 可见窗口
+- Android runtime 后续 rows 必须冻结：初始化后不得再因为 keyboard / IME / safe-area / 前后台 / 容器高度变化改 tmux rows
 
 ---
 
@@ -144,6 +146,7 @@ tmux oracle
 9. `mirror-fixed` 横向平移只移动 renderer 列窗口，不改 buffer / head
 10. `mirror-fixed` 开启后左右滑切 tab 自动关闭
 11. 混合 `ASCII + CJK double-width` 时，renderer 必须按实测像素列宽稳定对齐，不能因为 `1ch / 2ch` 假设导致整行错位
+12. `adaptive-phone` 只在 width truth / cols 变化时上报；纯高度变化不会重复触发上游 geometry write
 
 ### Group D. Android IME / input loop
 
@@ -155,10 +158,12 @@ tmux oracle
 4. **语音输入法转文字 / 中文 commit** 不需要再补一个字符才刷新
 5. 输入后不会进入“界面刷新但 terminal 再也收不到输入”的死态
 6. 输入发出后、mirror 未返回前，terminal 可见内容不得先本地变化
-7. QuickBar shell 空白区域点击不会弹出 IME
-8. keyboard 弹起时 QuickBar shell rows 始终可见，不被 IME 盖住
-9. keyboard 弹起时 header 顶部 inset 不会突然变大，不会出现顶部空白被多算一遍
-10. keyboard 弹起 / reconnect / 前后台恢复后，tmux rows 不会被 Android UI 容器高度改写
+7. 若 `latestEndIndex` 不变但 `revision` 前进，**同一个 viewport range** 也必须允许再次发 `buffer-sync-request`；旧 in-flight request 不能只按 range 覆盖新 revision
+8. `buffer-head` 若已带 `cursor` metadata，client 必须立刻更新本地 cursor truth；不能丢掉后等下一次 `buffer-sync`
+9. QuickBar shell 空白区域点击不会弹出 IME
+10. keyboard 弹起时 QuickBar shell rows 始终可见，不被 IME 盖住
+11. keyboard 弹起时 header 顶部 inset 不会突然变大，不会出现顶部空白被多算一遍
+12. keyboard 弹起 / reconnect / 前后台恢复后，tmux rows 不会被 Android UI 容器高度改写
 
 ### Group D.1 prompt / input row parity
 

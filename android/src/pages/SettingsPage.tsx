@@ -333,6 +333,68 @@ export function SettingsPage({
         </div>
 
         <div style={sectionStyle()}>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>Terminal Width Mode</div>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 只允许按手机屏宽调整 cols，不再改 rows。
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {([
+              { id: 'mirror-fixed', label: 'Mirror Fixed' },
+              { id: 'adaptive-phone', label: 'Adaptive Phone' },
+            ] as const).map((option) => {
+              const active = draft.terminalWidthMode === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setDraft((current) => ({ ...current, terminalWidthMode: option.id }))}
+                  style={{
+                    flex: 1,
+                    minHeight: '48px',
+                    borderRadius: '16px',
+                    border: 'none',
+                    backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
+                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={sectionStyle()}>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>快捷键智能排序</div>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            开启后，高频使用的快捷键会自动排到前面（历史使用占 80%，最近 10 分钟占 20%），减少滚动查找。
+          </div>
+          <button
+            type="button"
+            onClick={() => setDraft((current) => ({ ...current, shortcutSmartSort: !current.shortcutSmartSort }))}
+            style={{
+              minHeight: '48px',
+              borderRadius: '16px',
+              border: 'none',
+              backgroundColor: draft.shortcutSmartSort ? mobileTheme.colors.shell : '#eef3f8',
+              color: draft.shortcutSmartSort ? '#ffffff' : mobileTheme.colors.lightText,
+              fontWeight: 800,
+              fontSize: '16px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>{draft.shortcutSmartSort ? '✓' : '○'}</span>
+            智能排序 {draft.shortcutSmartSort ? '已开启' : '已关闭'}
+          </button>
+        </div>
+
+        <div style={sectionStyle()}>
           <div style={{ fontSize: '24px', fontWeight: 800 }}>Remote Access</div>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
             连接顺序固定为 Tailscale → IPv6 → IPv4 → TURN relay。这里配置 signaling/TURN 默认值，本地持久化保存。

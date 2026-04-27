@@ -70,6 +70,23 @@ type BufferSyncResponse = {
 
 server 不关心客户端行为；它只是 tmux mirror。
 
+### 1.2.1 daemon mirror 写侧补充冻结
+
+- daemon 从 tmux 写入 mirror 时，只允许：
+
+```text
+single capture
+-> canonicalize
+-> mirror store
+```
+
+- 不允许把 tmux 内容拆成：
+  - `history`
+  - `viewport / visible rows`
+  - 再本地拼接
+- 这类 split 会制造第二语义，也容易在短历史场景下把尾部内容重复拼进 mirror
+- daemon 可以读取 tmux 的 pane rows / cols / alternate-screen 这些**源事实**，但不能基于它们派生“显示策略”
+
 ### 1.3 daemon client-session / transport 生命周期
 
 daemon 侧还要额外冻结一条真源：
@@ -209,6 +226,9 @@ reconnect 语义也固定：
 
 - 若 transport 死了，buffer manager / session runtime 只能做 **same session identity** 的 transport retry
 - 不允许把 reconnect 实现成“先删 session 语义，再创建一个新 session 假装恢复”
+- reconnect bookkeeping 也必须按 **session** 隔离：
+  - 不允许再做 `same host -> reconnect bucket -> activeSessionId` 的跨 session 串行门
+  - 一个 session 的旧 ws / handshake 卡住，**不得**挡住同 host 其他 session 的 retry / resume / active re-entry
 
 ---
 
@@ -313,6 +333,7 @@ UI shell 只负责：
 - IME 不影响 buffer manager 决策
 - IME 不影响 renderer 内容真相
 - keyboard inset 只能消费一次：**terminal stage** 负责用 `quickBarHeight + keyboardLift` 做底部裁切，**QuickBar 容器** 负责用 `bottom = keyboardLift` 整体抬到键盘上方；禁止再通过 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
+- 若 QuickBar 自己的 textarea / sheet / composer 拿到 DOM focus，只允许暂停 terminal ImeAnchor 路由；**不得**把 QuickBar overlay / floating composer 使用的 `keyboardInsetPx` 清零。也就是 terminal body 可以让出 IME，但 UI shell 仍必须继续吃同一份键盘高度真相，避免被输入法盖住
 - Android terminal header 的顶部 inset 必须是 **UI shell 提供的稳定单一像素真相**；IME 弹起导致的 `visualViewport.offsetTop` 不得被二次叠加成 header top inset
 - Android connect / reconnect 不得把 UI 容器当前测得的 `cols/rows` 回写给 daemon 作为 tmux geometry 真相；shell 高度变化只允许影响容器裁切，**不得**改写 tmux 宽高
 - “看不到的区域不渲染”属于 renderer 的窗口绘制职责；正确做法是 renderer 根据容器可见高度只画当前窗口，而不是 UI shell / daemon 去把 tmux 变矮
@@ -320,13 +341,36 @@ UI shell 只负责：
 
 ### 4.2 宽度模式配置入口
 
-- 宽度模式配置真源在连接配置（Connection Properties / Host）
-- 每个 host/session attach 必须显式知道自己当前是：
+- 当前宽度模式配置真源在 **Settings**
+- 它是 app 级全局唯一真相；不再允许 Host / Connection Properties 再保留第二份同语义配置
+- 每个 active session attach / reconnect / mode toggle 都必须显式知道自己当前是：
   - `adaptive-phone`
   - `mirror-fixed`
 - renderer / UI shell 只消费这个配置
 - buffer manager 不关心这个配置
 - daemon 也不关心 renderer 如何裁切；它只需要尊重“是否允许 client width 改写 mirror width”的协议边界
+
+### 4.2.1 tmux geometry 写入边界
+
+- **rows 不是 Android UI shell 的真相**
+- Android runtime 后续运行期间：
+  - keyboard / IME
+  - safe-area
+  - visualViewport
+  - foreground / background
+  - renderer 容器高度变化
+  都**不得**继续改写 tmux rows
+- 当前冻结做法：
+  - tmux rows 要么只允许在首次初始化时确定一次
+  - 要么直接保持上游 tmux / mirror 既有 rows
+  - 之后一律不允许因为手机容器高度变化再写 rows
+- `adaptive-phone` 若需要适配手机，只允许改 **width / cols**
+- `mirror-fixed` 下连 **width / cols** 也不得改写上游 tmux / mirror
+- server 侧 geometry 写点也必须唯一：
+  - `attach` 不得接受 client rows 改写 tmux rows
+  - `resize` 不得再写 rows
+  - `width-mode reconcile` 只允许在 `adaptive-phone` 下改 cols
+  - `mirror-fixed` 下 upstream geometry write 必须是 0
 
 ### 4.3 app lifecycle 规则
 

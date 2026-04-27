@@ -3,6 +3,7 @@ import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { TerminalView } from '../components/TerminalView';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
+import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
@@ -25,6 +26,7 @@ import {
   type TerminalSplitPaneId,
   type TerminalShortcutAction,
   type TerminalViewportChangeHandler,
+  type TerminalWidthMode,
 } from '../lib/types';
 
 type VirtualKeyboardApi = {
@@ -36,6 +38,7 @@ type VirtualKeyboardApi = {
 
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
+const TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX = 8;
 const SPLIT_AUTO_CLOSE_DROP_PX = 96;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
@@ -178,6 +181,8 @@ interface TerminalPageProps {
   onTerminalViewportChange?: TerminalViewportChangeHandler;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
+  onOpenSettings?: () => void;
+  onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -196,6 +201,13 @@ interface TerminalPageProps {
   onToggleScheduleJob?: (sessionId: string, jobId: string, enabled: boolean) => void;
   onRunScheduleJobNow?: (sessionId: string, jobId: string) => void;
   terminalThemeId?: string;
+  terminalWidthMode?: TerminalWidthMode;
+  onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
+  onSendMessage?: (sessionId: string, msg: any) => void;
+  onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
+  shortcutSmartSort?: boolean;
+  shortcutFrequencyMap?: Record<string, number>;
+  onShortcutUse?: (shortcutId: string) => void;
 }
 
 interface ScheduleComposerSeed {
@@ -347,6 +359,8 @@ export function TerminalPage({
   onTerminalViewportChange,
   onImagePaste,
   onFileAttach,
+  onOpenSettings,
+  onRequestRemoteScreenshot,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -365,6 +379,13 @@ export function TerminalPage({
   onToggleScheduleJob,
   onRunScheduleJobNow,
   terminalThemeId,
+  terminalWidthMode = 'mirror-fixed',
+  onTerminalWidthModeChange,
+  onSendMessage,
+  onFileTransferMessage,
+  shortcutSmartSort,
+  shortcutFrequencyMap,
+  onShortcutUse,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   const persistedLayoutRef = useRef<TerminalLayoutState | null>(readPersistedTerminalLayoutState());
@@ -380,6 +401,7 @@ export function TerminalPage({
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [splitEnabled, setSplitEnabled] = useState(() => persistedLayoutRef.current?.splitEnabled || false);
   const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(
     () => persistedLayoutRef.current?.splitSecondarySessionId || null,
@@ -392,6 +414,8 @@ export function TerminalPage({
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(true);
+  const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
+  const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
@@ -403,6 +427,14 @@ export function TerminalPage({
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
   }, [activeSession?.id]);
+
+  const sendFileTransferMessage = useCallback((msg: any) => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId || !onSendMessage) {
+      return;
+    }
+    onSendMessage(sessionId, msg);
+  }, [onSendMessage]);
 
   useEffect(() => {
     terminalInputHandlerRef.current = onTerminalInput;
@@ -933,7 +965,7 @@ export function TerminalPage({
     const showListenerPromise = Keyboard.addListener('keyboardDidShow', (info) => {
       if (!disposed) {
         setKeyboardInset(Math.max(0, Math.round(info.keyboardHeight || 0)));
-        if (isAndroid && !quickBarEditorFocused) {
+        if (isAndroid && !quickBarEditorFocusedRef.current) {
           setTerminalKeyboardRequested(true);
         }
       }
@@ -958,7 +990,7 @@ export function TerminalPage({
           logAsyncCleanupFailure('keyboardDidHide listener remove', error);
         });
     };
-  }, [isAndroid, quickBarEditorFocused]);
+  }, [isAndroid]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined') {
@@ -983,10 +1015,11 @@ export function TerminalPage({
     };
   }, []);
 
-  const terminalChromeBottomPx = Math.max(0, quickBarHeight);
+  const terminalChromeBottomPx = Math.max(0, quickBarHeight + TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
+  const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const activeSessionMetrics = activeSession ? sessionDebugMetrics?.[activeSession.id] : undefined;
   const activeSessionDebugStatus = resolveDebugStatus(activeSession, activeSessionMetrics);
   const networkBanner = !connectionIssueVisible
@@ -1224,6 +1257,7 @@ export function TerminalPage({
           onOpenTabManager={() => setTabManagerOpen(true)}
           onSwitchSession={onSwitchSession}
           onRenameSession={onRenameSession}
+          onCloseSession={onCloseSession}
           splitVisible={splitVisible}
           sessionPaneAssignments={splitPaneAssignments}
           onAssignSessionToPane={assignSessionToPane}
@@ -1316,6 +1350,7 @@ export function TerminalPage({
                       domInputOffscreen={isAndroid}
                       onActivateInput={isAndroid && sessionIsActive ? () => restoreAndroidTerminalImeRoute() : undefined}
                       onResize={!isAndroid && sessionIsActive ? onResize : undefined}
+                      onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
                       onInput={sessionIsActive ? onTerminalInput : undefined}
                       onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
                       onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
@@ -1323,6 +1358,7 @@ export function TerminalPage({
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
                       themeId={terminalThemeId}
+                      widthMode={terminalWidthMode}
                     />
                   </div>
                 );
@@ -1345,94 +1381,127 @@ export function TerminalPage({
             )}
           </div>
         </div>
-        {activeSession && debugOverlayVisible ? (
-          <div
-            style={{
-              position: 'absolute',
-              top: '10px',
-              right: '10px',
-              zIndex: 12,
-              minWidth: '88px',
-              maxWidth: '96px',
-              padding: '5px 6px',
-              borderRadius: '10px',
-              border: `1.5px solid ${activeSessionMetrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.92)' : 'rgba(83, 139, 255, 0.92)'}`,
-              background: 'rgba(10, 16, 26, 0.46)',
-              boxShadow: '0 8px 18px rgba(0, 0, 0, 0.14)',
-              color: '#e7eefc',
-              fontSize: '8px',
-              lineHeight: 1.25,
-              backdropFilter: 'blur(8px)',
-              pointerEvents: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '2px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
-              <span>状态</span>
-              <button
-                type="button"
-                aria-label="关闭调试浮窗"
-                onClick={() => setDebugOverlayVisible(false)}
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  padding: 0,
-                  border: 'none',
-                  borderRadius: '999px',
-                  background: 'rgba(255,255,255,0.14)',
-                  color: '#e7eefc',
-                  fontSize: '9px',
-                  lineHeight: '12px',
-                  cursor: 'pointer',
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
-              <span>模式</span>
-              <span style={{ color: activeSessionMetrics?.bufferPullActive ? '#86efac' : '#93c5fd' }}>{activeSessionDebugStatus}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-              <span>↑</span>
-              <span>{formatDebugRate(activeSessionMetrics?.uplinkBps || 0)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-              <span>↓</span>
-              <span>{formatDebugRate(activeSessionMetrics?.downlinkBps || 0)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-              <span>R</span>
-              <span>{formatDebugHz(activeSessionMetrics?.renderHz || 0)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-              <span>P</span>
-              <span>{formatDebugHz(activeSessionMetrics?.pullHz || 0)}</span>
-            </div>
+        {activeSession && debugOverlayVisible ? (() => {
+          const overlayStyle: React.CSSProperties = {
+            position: 'absolute',
+            top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : '10px',
+            left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
+            right: debugOverlayPos.x >= 0 ? undefined : '10px',
+            zIndex: 12,
+            minWidth: '88px',
+            maxWidth: '96px',
+            padding: '5px 6px',
+            borderRadius: '10px',
+            border: `1.5px solid ${activeSessionMetrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(83, 139, 255, 0.6)'}`,
+            background: 'rgba(10, 16, 26, 0.35)',
+            boxShadow: '0 8px 18px rgba(0, 0, 0, 0.10)',
+            color: 'rgba(231, 238, 252, 0.78)',
+            fontSize: '8px',
+            lineHeight: 1.25,
+            backdropFilter: 'blur(8px)',
+            pointerEvents: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            touchAction: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+          };
+          return (
             <div
-              style={{
-                marginTop: '2px',
-                paddingTop: '2px',
-                borderTop: '1px solid rgba(255,255,255,0.12)',
-                color: 'rgba(231, 238, 252, 0.82)',
-                fontSize: '7px',
-                lineHeight: 1.2,
-                wordBreak: 'break-all',
+              style={overlayStyle}
+              onTouchStart={(e) => {
+                const touch = e.touches[0];
+                debugOverlayDragRef.current = {
+                  startX: touch.clientX,
+                  startY: touch.clientY,
+                  startPosX: debugOverlayPos.x >= 0 ? debugOverlayPos.x : (window.innerWidth - 10 - 96),
+                  startPosY: debugOverlayPos.y >= 0 ? debugOverlayPos.y : 10,
+                  dragging: false,
+                };
+              }}
+              onTouchMove={(e) => {
+                const touch = e.touches[0];
+                const dx = touch.clientX - debugOverlayDragRef.current.startX;
+                const dy = touch.clientY - debugOverlayDragRef.current.startY;
+                if (!debugOverlayDragRef.current.dragging && Math.abs(dx) + Math.abs(dy) < 8) return;
+                debugOverlayDragRef.current.dragging = true;
+                e.preventDefault();
+                const newX = debugOverlayDragRef.current.startPosX + dx;
+                const newY = debugOverlayDragRef.current.startPosY + dy;
+                const clampedX = Math.max(0, Math.min(newX, window.innerWidth - 96));
+                const clampedY = Math.max(0, Math.min(newY, window.innerHeight - 80));
+                setDebugOverlayPos({ x: clampedX, y: clampedY });
+              }}
+              onTouchEnd={() => {
+                debugOverlayDragRef.current.dragging = false;
               }}
             >
-              V {APP_VERSION} / {APP_VERSION_CODE}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
+                <span>状态</span>
+                <button
+                  type="button"
+                  aria-label="关闭调试浮窗"
+                  onClick={() => setDebugOverlayVisible(false)}
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    padding: 0,
+                    border: 'none',
+                    borderRadius: '999px',
+                    background: 'rgba(255,255,255,0.12)',
+                    color: '#e7eefc',
+                    fontSize: '9px',
+                    lineHeight: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
+                <span>模式</span>
+                <span style={{ color: activeSessionMetrics?.bufferPullActive ? '#86efac' : '#93c5fd' }}>{activeSessionDebugStatus}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                <span>↑</span>
+                <span>{formatDebugRate(activeSessionMetrics?.uplinkBps || 0)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                <span>↓</span>
+                <span>{formatDebugRate(activeSessionMetrics?.downlinkBps || 0)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                <span>R</span>
+                <span>{formatDebugHz(activeSessionMetrics?.renderHz || 0)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                <span>P</span>
+                <span>{formatDebugHz(activeSessionMetrics?.pullHz || 0)}</span>
+              </div>
+              <div
+                style={{
+                  marginTop: '2px',
+                  paddingTop: '2px',
+                  borderTop: '1px solid rgba(255,255,255,0.10)',
+                  color: 'rgba(231, 238, 252, 0.65)',
+                  fontSize: '7px',
+                  lineHeight: 1.2,
+                  wordBreak: 'break-all',
+                }}
+              >
+                V {APP_VERSION} / {APP_VERSION_CODE}
+              </div>
             </div>
-          </div>
-        ) : null}
+          );
+        })() : null}
         <div
           data-testid="terminal-quickbar-shell"
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: `${terminalImeLiftPx}px`,
+            bottom: `${terminalImeLiftPx + TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX}px`,
             zIndex: 10,
           }}
         >
@@ -1450,7 +1519,7 @@ export function TerminalPage({
             onImagePaste={onImagePaste}
             onFileAttach={onFileAttach}
             keyboardVisible={terminalImeActive && effectiveKeyboardLiftPx > 0}
-            keyboardInsetPx={terminalImeActive ? effectiveKeyboardLiftPx : 0}
+            keyboardInsetPx={quickBarShellKeyboardLiftPx}
             onToggleKeyboard={handleToggleKeyboard}
             onQuickActionsChange={onQuickActionsChange}
             onShortcutActionsChange={onShortcutActionsChange}
@@ -1479,6 +1548,14 @@ export function TerminalPage({
             onToggleSplitLayout={toggleSplitLayout}
             onCycleSplitPane={cycleSecondaryPane}
             onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
+            onOpenFileTransfer={() => setFileTransferOpen(true)}
+            onToggleDebugOverlay={() => setDebugOverlayVisible((v) => !v)}
+            onOpenSyncSettings={onOpenSettings}
+            onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+            debugOverlayVisible={debugOverlayVisible}
+            shortcutSmartSort={shortcutSmartSort}
+            shortcutFrequencyMap={shortcutFrequencyMap}
+            onShortcutUse={onShortcutUse}
           />
         </div>
       </div>
@@ -1519,6 +1596,15 @@ export function TerminalPage({
           onDelete={(jobId) => onDeleteScheduleJob?.(activeSession.id, jobId)}
           onToggle={(jobId, enabled) => onToggleScheduleJob?.(activeSession.id, jobId, enabled)}
           onRunNow={(jobId) => onRunScheduleJobNow?.(activeSession.id, jobId)}
+        />
+      ) : null}
+      {activeSession && onSendMessage && onFileTransferMessage ? (
+        <FileTransferSheet
+          open={fileTransferOpen}
+          remoteCwd=""
+          onClose={() => setFileTransferOpen(false)}
+          sendJson={sendFileTransferMessage}
+          onFileTransferMessage={onFileTransferMessage}
         />
       ) : null}
     </div>

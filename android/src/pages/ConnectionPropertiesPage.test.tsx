@@ -25,6 +25,8 @@ const bridgeSettings: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
+  terminalWidthMode: 'mirror-fixed',
+  shortcutSmartSort: true,
   defaultServerId: 'server-1',
   servers: [
     {

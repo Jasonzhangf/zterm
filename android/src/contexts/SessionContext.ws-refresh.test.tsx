@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 import {
   SessionProvider,
   shouldReconnectActivatedSession,
@@ -12,6 +13,16 @@ import {
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
+
+vi.mock('@capacitor/filesystem', () => ({
+  Directory: {
+    ExternalStorage: 'ExternalStorage',
+  },
+  Filesystem: {
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -159,11 +170,13 @@ function SessionHarness() {
     createSession,
     sendInput,
     sendImagePaste,
+    requestRemoteScreenshot,
     reconnectSession,
     reconnectAllSessions,
     resumeActiveSessionTransport,
     updateSessionViewport,
   } = useSession();
+  const [remoteScreenshotResult, setRemoteScreenshotResult] = useState('idle');
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -199,9 +212,15 @@ function SessionHarness() {
     <div>
       <div data-testid="session-state">{activeSession?.state || 'missing'}</div>
       <div data-testid="session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="session-cursor">
+        {activeSession?.buffer.cursor
+          ? `${activeSession.buffer.cursor.rowIndex}:${activeSession.buffer.cursor.col}:${activeSession.buffer.cursor.visible ? 'visible' : 'hidden'}`
+          : 'null'}
+      </div>
       <div data-testid="session-start-index">{activeSession?.buffer.startIndex ?? -1}</div>
       <div data-testid="session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
+      <div data-testid="remote-screenshot-result">{remoteScreenshotResult}</div>
       <button
         type="button"
         onClick={() => {
@@ -221,6 +240,16 @@ function SessionHarness() {
         }
       >
         send-image
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void requestRemoteScreenshot('session-1')
+            .then((savedPath) => setRemoteScreenshotResult(savedPath))
+            .catch((error) => setRemoteScreenshotResult(`error:${error instanceof Error ? error.message : String(error)}`));
+        }}
+      >
+        request-screenshot
       </button>
       <button type="button" onClick={() => reconnectSession('session-1')}>
         reconnect-session
@@ -697,6 +726,8 @@ describe('SessionContext websocket dynamic refresh', () => {
     cleanup();
     localStorage.clear();
     MockWebSocket.reset();
+    vi.mocked(Filesystem.mkdir).mockClear();
+    vi.mocked(Filesystem.writeFile).mockClear();
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
   });
 
@@ -1020,9 +1051,11 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       fireEvent.click(screen.getByText('resume-active'));
 
-      const sentMessages = readSentMessages(ws);
-      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
-      expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+      await waitFor(() => {
+        const sentMessages = readSentMessages(ws);
+        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+        expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
+      });
     } finally {
       nowSpy.mockRestore();
     }
@@ -1169,6 +1202,96 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
     } finally {
       nowSpy.mockRestore();
+    }
+  });
+
+  it('reuses the active open websocket on foreground resume before any reconnect decision', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+      ws.sent.length = 0;
+
+      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      fireEvent.click(screen.getByText('resume-active'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('session-state').textContent).toBe('connected');
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not reconnect a stale-open active websocket while the app is hidden', async () => {
+    vi.useFakeTimers();
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+      ws.sent.length = 0;
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80);
+      });
+
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+    } finally {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      nowSpy.mockRestore();
+      vi.useRealTimers();
     }
   });
 
@@ -2306,12 +2429,14 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('reconnect-all'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(3));
-    const reconnectWs1 = MockWebSocket.instances[2]!;
-    reconnectWs1.triggerOpen();
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(4));
+    const reconnectWsActive = MockWebSocket.instances[2]!;
+    const reconnectWsSibling = MockWebSocket.instances[3]!;
+    reconnectWsActive.triggerOpen();
+    reconnectWsSibling.triggerOpen();
 
     await waitFor(() => {
-      const connectMessage = reconnectWs1.sent
+      const connectMessage = reconnectWsActive.sent
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item))
         .find((item) => item.type === 'connect');
@@ -2448,25 +2573,19 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('reconnect-all'));
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(1200);
+        await vi.advanceTimersByTimeAsync(20);
       });
-      expect(MockWebSocket.instances).toHaveLength(3);
+      expect(MockWebSocket.instances).toHaveLength(4);
       const reconnectWsActive = MockWebSocket.instances[2]!;
+      const reconnectWsSibling = MockWebSocket.instances[3]!;
       reconnectWsActive.triggerOpen();
+      reconnectWsSibling.triggerOpen();
       const activeConnectMessage = reconnectWsActive.sent
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item))
         .find((item) => item.type === 'connect');
       expect(activeConnectMessage?.payload?.sessionName).toBe('zterm_mirror_lab_2');
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5200);
-      });
-
-      expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(4);
-      const reconnectWsNext = MockWebSocket.instances[3]!;
-      reconnectWsNext.triggerOpen();
-      const nextConnectMessage = reconnectWsNext.sent
+      const nextConnectMessage = reconnectWsSibling.sent
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item))
         .find((item) => item.type === 'connect');
@@ -2475,6 +2594,46 @@ describe('SessionContext websocket dynamic refresh', () => {
       vi.useRealTimers();
     }
   }, 15000);
+
+  it('does not serialize same-host session reconnect behind a host-global gate', async () => {
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+      vi.useFakeTimers();
+      fireEvent.click(screen.getByText('reconnect-all'));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+
+      expect(MockWebSocket.instances).toHaveLength(4);
+      const reconnectWs1 = MockWebSocket.instances[2]!;
+      const reconnectWs2 = MockWebSocket.instances[3]!;
+      reconnectWs1.triggerOpen();
+      reconnectWs2.triggerOpen();
+
+      const connect1 = readSentMessages(reconnectWs1).find((item) => item.type === 'connect');
+      const connect2 = readSentMessages(reconnectWs2).find((item) => item.type === 'connect');
+      expect(connect1?.payload?.clientSessionId).toBe('session-1');
+      expect(connect2?.payload?.clientSessionId).toBe('session-2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('requests latest head when switching to a connected tab with a continuous local tail', async () => {
     render(
@@ -3280,6 +3439,131 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
+  it('reissues same-window tail refresh immediately after an older same-end in-flight refresh settles against a newer head revision', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 0,
+        endIndex: 120,
+        revision: 5,
+        lines: Array.from({ length: 120 }, (_, index) => [index, `row-${String(index).padStart(3, '0')}`] as const),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('5'));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 6,
+        latestEndIndex: 120,
+        availableStartIndex: 0,
+        availableEndIndex: 120,
+      },
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 7,
+        latestEndIndex: 120,
+        availableStartIndex: 0,
+        availableEndIndex: 120,
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+    });
+
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 96,
+        endIndex: 120,
+        revision: 6,
+        lines: Array.from({ length: 24 }, (_, offset) => [96 + offset, `row-${String(96 + offset).padStart(3, '0')}`] as const),
+      }),
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          knownRevision: 6,
+          requestStartIndex: 96,
+          requestEndIndex: 120,
+        }),
+      });
+    });
+  });
+
+  it('applies cursor metadata from buffer-head immediately even before a follow buffer-sync returns', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: {
+        ...linesToPayload(['prompt-before-head'], 1, 5),
+        cursor: { rowIndex: 0, col: 2, visible: true },
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-cursor').textContent).toBe('0:2:visible'));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 6,
+        latestEndIndex: 1,
+        availableStartIndex: 0,
+        availableEndIndex: 1,
+        cursor: { rowIndex: 0, col: 0, visible: true },
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-cursor').textContent).toBe('0:0:visible');
+    });
+  });
+
   it('supersedes a stale in-flight tail refresh when a re-activated tab comes back with a newer head', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -3744,5 +4028,79 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
     expect(ws.sent.some((item) => item instanceof ArrayBuffer)).toBe(true);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('streams remote screenshot chunks into Download/zterm and resolves the saved path', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('request-screenshot'));
+
+    await waitFor(() => {
+      const messages = readSentMessages(ws);
+      expect(messages.some((item) => item.type === 'remote-screenshot-request')).toBe(true);
+    });
+
+    const requestMessage = readSentMessages(ws).find((item) => item.type === 'remote-screenshot-request');
+    const requestId = requestMessage?.payload?.requestId;
+    expect(typeof requestId).toBe('string');
+
+    ws.triggerMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId,
+        chunkIndex: 1,
+        totalChunks: 2,
+        fileName: 'remote-shot.png',
+        dataBase64: 'YmFy',
+      },
+    });
+    ws.triggerMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId,
+        chunkIndex: 0,
+        totalChunks: 2,
+        fileName: 'remote-shot.png',
+        dataBase64: 'Zm9v',
+      },
+    });
+    ws.triggerMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId,
+        fileName: 'remote-shot.png',
+        totalBytes: 6,
+      },
+    });
+
+    await waitFor(() => {
+      expect(Filesystem.mkdir).toHaveBeenCalledWith({
+        path: '/storage/emulated/0/Download/zterm',
+        directory: Directory.ExternalStorage,
+        recursive: true,
+      });
+      expect(Filesystem.writeFile).toHaveBeenCalledWith({
+        path: '/storage/emulated/0/Download/zterm/remote-shot.png',
+        data: 'Zm9vYmFy',
+        directory: Directory.ExternalStorage,
+      });
+      expect(screen.getByTestId('remote-screenshot-result').textContent).toBe('/storage/emulated/0/Download/zterm/remote-shot.png');
+    });
   });
 });

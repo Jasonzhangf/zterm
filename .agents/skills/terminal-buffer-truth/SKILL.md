@@ -42,11 +42,15 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - daemon 内部也必须 **读写解耦**
   - 写侧：`tmux -> mirror store`
   - 读侧：`mirror store -> head/range reply`
+- mirror 写侧也不得再拆第二语义：
+  - 不允许 `history capture + visible capture + concat`
+  - 只允许 **single-capture -> canonicalize -> mirror store**
 - `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
 - **请求不得触发 tmux capture / canonical rebuild / planner**
 - daemon **不得改写 buffer cells 本身**
   - 包括但不限于：cursor paint、reverse 注入、样式补丁、局部重写
   - 若需要传 cursor truth，必须走**独立元数据**，不能写回 `lines[].cells[].flags`
+- 文件传输这类 session 元数据也一样：远端默认目录必须来自 daemon 读取 tmux 当前 `pane_current_path`；client 不得拿 `process.env.HOME` / 本地 env 冒充远端 cwd
 
 硬规则：
 - server 不做 follow / reading 策略
@@ -127,6 +131,9 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 但**不是**关闭 session
   - 也**不是**关闭 transport
 - reconnect 只能是 **same session identity retry**；不能通过“cleanup old socket -> 当成 brand-new session connect”重建第二份 session 语义
+- reconnect bookkeeping 也必须按 **session** 隔离：
+  - 不允许再做 `same host -> reconnect bucket -> activeSessionId` 的跨 session 串行门
+  - 一个 session 的旧 ws / handshake 卡住，**不得**挡住同 host 其他 session
 
 ## 3. renderer
 
@@ -145,7 +152,9 @@ renderer 只看两件事：
 renderer 还必须显式区分两种宽度模式：
 
 1. `adaptive-phone`
-   - 允许当前手机适配宽度的现有模式
+   - 当前配置真源在 **Settings**
+   - 允许手机适配宽度，但最多只允许改 `cols`
+   - Android runtime 后续不允许因为 keyboard / IME / safe-area / 容器高度变化继续改 tmux rows
 2. `mirror-fixed`
    - daemon mirror / tmux 宽度保持上游真相
    - client viewport、IME、safe-area、容器宽度、字体缩放，**不得**改写 mirror 宽度
@@ -199,10 +208,17 @@ UI 只负责容器位置与裁切：
 - keyboard / IME 不得回灌成 buffer / render 真相
 - Android 顶部 header inset 只允许来自 **UI shell 的单一稳定像素真相**；IME 弹起导致的 `visualViewport.offsetTop` 不得再被当成第二份 top inset 叠到 header 上
 - Android connect / reconnect **不得**把 UI 容器测得的 `cols/rows` 当成 tmux viewport 真相带给 daemon；容器变窄/变矮、IME 弹起、safe-area、前后台恢复，都只能影响 shell 裁切与 renderer 可见窗口
+- tmux rows 也必须单独冻结：
+  - Android runtime 后续运行期间，keyboard / IME / safe-area / 容器高度变化 **不得**继续改 rows
+  - 最多只允许初始化阶段确定一次 rows；更稳妥的实现是直接保持上游 tmux rows，不再由 Android 改写
+  - `adaptive-phone` 若需要适配手机，最多只改 `cols`
+  - server 的 `attach / resize / width-mode reconcile` 也不得再写第二份 rows；rows 真相只能来自上游 tmux / mirror baseline
 - “看不到的地方不画”属于 **renderer 绘制窗口** 真相，不属于 UI shell / buffer manager / daemon；UI shell 只能改容器位置与可见高度，不能借机改 tmux geometry
 - QuickBar / 快捷菜单属于 UI shell；**整块 shell 区域** 都必须吃掉非交互点击，不能让空白点击穿透到底层 terminal/ImeAnchor 把 IME 弹出来
+- QuickBar 固定为三层 shell：工具栏 / 单键 / 复合键；工具入口必须显式可见，不能再塞回浮动菜单隐藏
 - 只有 QuickBar 内显式 editor / input / button 等交互控件允许接管焦点；普通 shell 容器点击必须被阻断在 UI shell 层
 - 若 `keyboardInsetPx > 0`，QuickBar 必须作为**整体容器**抬升到键盘上方；同一份 keyboard inset 只能消费一次：`terminal stage.bottom = quickBarHeight + keyboardLift`，`quickbar shell.bottom = keyboardLift`，禁止再用 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
+- 若 QuickBar 自己的 textarea / sheet 抢到 DOM focus，只允许暂停 terminal ImeAnchor 路由；**不得**把 QuickBar overlay / floating composer 使用的 `keyboardInsetPx` 清零，否则会被输入法盖住
 - Android terminal 原生输入若走 `ImeAnchor`，则 **ImeAnchor editable / composing / selection 必须是单一真相**；组合输入期间不得一边让 IME 持有 composing state，一边又由插件自行清空/改写 editable 造成第二语义
 - `ImeAnchor` 的 `InputConnection` 也必须服从这条真相：`commitText / finishComposingText` 不能跳过 `super` 直接短路返回；否则 framework editable/selection 不更新，真机会出现 **输入法底部预编辑光标错位 / caret 乱飞**
 - `mirror-fixed` 下，UI shell 若启用横向查看：
@@ -315,6 +331,7 @@ tmux truth
 - 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
+- foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
 - 若真机出现**大块灰条/花屏/光标样式乱飞**，优先查 **compact wire 的 default color sentinel** 是否和 `TerminalCell` 真相一致；当前 app/runtime 里的默认前景/背景是 `256/256`，不能在 compact encode/decode 里偷偷改成 ANSI `15/0`。
 - 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
 - 若现场看起来像“正文解析错了”，先把 **terminal body** 与 **IME/editor overlay** 分开审；底部灰条/编辑条不属于 daemon buffer truth，不能直接当成 compact wire 正文错误。
@@ -338,3 +355,6 @@ tmux truth
 - 若真机现场出现 `session.buffer.request` 已发出、daemon direct probe 也能直接拿到非空 range，但 APK 仍首屏空白/`R=0`，优先判定为 **client 侧 `buffer-sync -> local apply -> renderer commit` 断链**；先补本地结构化证据，不要再回头怪 daemon
 - 若现场出现“本地窗口判断错后直接白屏/大包重拉”，优先判定为 **client 侧越权清空已有 absolute-index buffer truth**；这不是 daemon 问题，也不是 buffer 真丢了，而是 client 把“窗口规划错误”实现成了“truth reset”
 - 若 Android 真机出现“未点键盘却前台自动弹 IME”或 IME 在九宫格/QWERTY 间异常切换，优先查 `ImeAnchor` 的 stale show/focus 状态是否跨前后台遗留；**只有显式 keyboard action 才允许 show IME**
+- 若现场表现为“**语音/CJK commit 已经发生，但要再补一个字符才刷新**”，优先查两件事：
+  1. **same-end 新 revision** 是否被旧的 in-flight tail-refresh 误判成“已覆盖”；同窗同 range 但 `targetHeadRevision` 变了，必须允许重发
+  2. `buffer-head.cursor` 是否被 client 丢弃；head 已经带来的 cursor metadata 必须立刻进入本地 truth，不能等下一次 buffer-sync 才纠正高亮/光标

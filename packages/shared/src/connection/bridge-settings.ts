@@ -17,6 +17,8 @@ export interface BridgeServerPreset {
   authToken?: string;
 }
 
+export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
+
 export interface BridgeSettings {
   targetHost: string;
   targetPort: number;
@@ -28,6 +30,8 @@ export interface BridgeSettings {
   transportMode: 'auto' | 'websocket' | 'webrtc';
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
+  terminalWidthMode: TerminalWidthMode;
+  shortcutSmartSort: boolean;
   servers: BridgeServerPreset[];
   defaultServerId?: string;
 }
@@ -46,6 +50,8 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
+  terminalWidthMode: 'mirror-fixed',
+  shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,
 };
@@ -243,6 +249,8 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       ? candidate.transportMode
       : DEFAULT_BRIDGE_SETTINGS.transportMode;
   const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
+  const terminalWidthMode: TerminalWidthMode =
+    candidate.terminalWidthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
   const mergedServers =
     targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
       ? sortBridgeServers([
@@ -268,6 +276,8 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     transportMode,
     terminalCacheLines,
     terminalThemeId,
+    terminalWidthMode,
+    shortcutSmartSort: typeof (candidate as any).shortcutSmartSort === 'boolean' ? (candidate as any).shortcutSmartSort : DEFAULT_BRIDGE_SETTINGS.shortcutSmartSort,
     servers: mergedServers,
     defaultServerId:
       typeof candidate.defaultServerId === 'string'

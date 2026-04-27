@@ -3,7 +3,9 @@ import type { Session, TerminalSplitPaneId } from '../../lib/types';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { getServerColorTone } from '../../lib/server-color';
 
-const LONG_PRESS_MS = 680;
+const TAB_LONG_PRESS_MS = 920;
+const PLUS_LONG_PRESS_MS = 680;
+const HEADER_TOUCH_SAFE_OFFSET_PX = 20;
 const DOUBLE_TAP_MS = 280;
 
 interface TerminalHeaderProps {
@@ -15,6 +17,7 @@ interface TerminalHeaderProps {
   onOpenTabManager: () => void;
   onSwitchSession: (id: string) => void;
   onRenameSession: (id: string, name: string) => void;
+  onCloseSession: (id: string) => void;
   splitVisible?: boolean;
   sessionPaneAssignments?: Partial<Record<string, TerminalSplitPaneId>>;
   onAssignSessionToPane?: (id: string, paneId: TerminalSplitPaneId) => void;
@@ -47,6 +50,7 @@ export function TerminalHeader({
   onOpenTabManager,
   onSwitchSession,
   onRenameSession,
+  onCloseSession,
   splitVisible = false,
   sessionPaneAssignments,
   onAssignSessionToPane,
@@ -95,7 +99,7 @@ export function TerminalHeader({
         return;
       }
       onOpenTabManager();
-    }, LONG_PRESS_MS);
+    }, TAB_LONG_PRESS_MS);
   };
 
   const endTabLongPress = () => {
@@ -108,7 +112,7 @@ export function TerminalHeader({
     plusLongPressTimerRef.current = window.setTimeout(() => {
       plusLongPressTriggeredRef.current = true;
       onOpenTabManager();
-    }, LONG_PRESS_MS);
+    }, PLUS_LONG_PRESS_MS);
   };
 
   const endPlusLongPress = () => {
@@ -164,10 +168,10 @@ export function TerminalHeader({
   return (
     <div
       style={{
-        padding: `${Math.max(0, Math.round(topInsetPx || 0)) + 16}px 6px 6px`,
+        padding: `${Math.max(0, Math.round(topInsetPx || 0)) + HEADER_TOUCH_SAFE_OFFSET_PX}px 6px 6px`,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
         <button
           onClick={onBack}
           tabIndex={-1}
@@ -250,7 +254,7 @@ export function TerminalHeader({
                   }}
                   style={{
                     flexShrink: 0,
-                    minWidth: active ? '112px' : '78px',
+                    minWidth: active ? '120px' : '78px',
                     maxWidth: active ? '160px' : '132px',
                     minHeight: '36px',
                     borderRadius: '12px',
@@ -260,7 +264,9 @@ export function TerminalHeader({
                     color: active ? tone.accent : mobileTheme.colors.textPrimary,
                     fontSize: '11px',
                     fontWeight: 800,
-                    padding: splitVisible ? '0 10px' : '0 12px',
+                    padding: active
+                      ? (splitVisible ? '0 32px 0 10px' : '0 34px 0 12px')
+                      : (splitVisible ? '0 10px' : '0 12px'),
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -321,6 +327,41 @@ export function TerminalHeader({
                     ) : null}
                   </span>
                 </button>
+                {active ? (
+                  <button
+                    type="button"
+                    aria-label="关闭当前 tab"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closePaneMenu();
+                      onCloseSession(session.id);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      right: '8px',
+                      transform: 'translateY(-50%)',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '999px',
+                      border: 'none',
+                      outline: 'none',
+                      padding: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: 'rgba(255,255,255,0.14)',
+                      color: active ? tone.accent : mobileTheme.colors.textPrimary,
+                      fontSize: '13px',
+                      lineHeight: 1,
+                      fontWeight: 900,
+                      zIndex: 2,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}
+                  >
+                    ×
+                  </button>
+                ) : null}
                 {menuOpen ? (
                   <div
                     onPointerDown={(event) => event.stopPropagation()}

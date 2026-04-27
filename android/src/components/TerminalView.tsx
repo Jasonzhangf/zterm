@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getTerminalThemePreset, type TerminalThemePreset } from '@zterm/shared';
 import type {
   TerminalCell,
@@ -6,6 +6,7 @@ import type {
   TerminalGapRange,
   TerminalResizeHandler,
   TerminalViewportChangeHandler,
+  TerminalWidthModeHandler,
   TerminalWidthMode,
 } from '../lib/types';
 
@@ -29,6 +30,7 @@ interface TerminalViewProps {
   onInput?: (sessionId: string, data: string) => void;
   onActivateInput?: (sessionId: string) => void;
   onResize?: TerminalResizeHandler;
+  onWidthModeChange?: TerminalWidthModeHandler;
   onViewportChange?: TerminalViewportChangeHandler;
   onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
   focusNonce?: number;
@@ -373,6 +375,7 @@ export function TerminalView({
   onInput,
   onActivateInput,
   onResize,
+  onWidthModeChange,
   onViewportChange,
   onSwipeTab,
   focusNonce = 0,
@@ -398,6 +401,7 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
+  const lastWidthModeSignalRef = useRef<{ mode: TerminalWidthMode; cols: number | null } | null>(null);
   const resizeCommitTimerRef = useRef<number | null>(null);
   const lastReportedViewportRef = useRef<string>('');
   const followScrollSyncTimerRef = useRef<number | null>(null);
@@ -579,6 +583,27 @@ export function TerminalView({
     setViewportRows((current) => current === nextViewport.rows ? current : nextViewport.rows);
 
     const previous = lastViewportRef.current;
+    const widthSignalCols = widthMode === 'adaptive-phone' ? nextViewport.cols : null;
+    const previousWidthSignal = lastWidthModeSignalRef.current;
+    const shouldEmitWidthModeSignal = Boolean(
+      active
+      && sessionId
+      && onWidthModeChange
+      && (
+        !previousWidthSignal
+        || previousWidthSignal.mode !== widthMode
+        || previousWidthSignal.cols !== widthSignalCols
+      ),
+    );
+
+    if (shouldEmitWidthModeSignal) {
+      lastWidthModeSignalRef.current = {
+        mode: widthMode,
+        cols: widthSignalCols,
+      };
+      onWidthModeChange?.(sessionId, widthMode, widthSignalCols);
+    }
+
     if (previous && previous.cols === nextViewport.cols && previous.rows === nextViewport.rows) {
       return;
     }
@@ -592,12 +617,17 @@ export function TerminalView({
       return;
     }
 
+    if (previous && previous.cols === nextViewport.cols && previous.rows !== nextViewport.rows) {
+      lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
+      return;
+    }
+
     resizeCommitTimerRef.current = window.setTimeout(() => {
       lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
       onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
-  }, [active, fontSize, onResize, rowHeight, sessionId, widthMode]);
+  }, [active, fontSize, onResize, onWidthModeChange, rowHeight, sessionId, widthMode]);
 
   const emitRenderDemand = useCallback((nextMode: 'follow' | 'reading', nextRenderBottomIndex: number, options?: {
     viewportEndIndex?: number;
@@ -838,6 +868,29 @@ export function TerminalView({
     }
     queueFollowScrollSync(followVisualBottomIndex);
   }, [active, followVisualBottomIndex, queueFollowScrollSync]);
+
+  useLayoutEffect(() => {
+    if (!active || readingModeRef.current) {
+      return;
+    }
+    const pendingRenderBottomIndex = pendingFollowRenderBottomIndexRef.current;
+    if (followScrollSyncTimerRef.current !== null) {
+      window.clearTimeout(followScrollSyncTimerRef.current);
+      followScrollSyncTimerRef.current = null;
+    }
+    pendingFollowRenderBottomIndexRef.current = null;
+    syncScrollHostToRenderBottom(pendingRenderBottomIndex ?? followVisualBottomIndex);
+  }, [
+    active,
+    bufferGapRanges,
+    bufferLines,
+    bufferStartIndex,
+    effectiveBufferEndIndex,
+    followVisualBottomIndex,
+    rowHeightPx,
+    syncScrollHostToRenderBottom,
+    viewportRows,
+  ]);
 
   useEffect(() => {
     const previousMetrics = previousFollowViewportMetricsRef.current;

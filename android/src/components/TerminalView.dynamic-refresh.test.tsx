@@ -1885,6 +1885,61 @@ describe('TerminalView minimal mirror render', () => {
     vi.useRealTimers();
   });
 
+  it('only emits adaptive-phone upstream resize when width truth changes, not for pure height changes', async () => {
+    vi.useFakeTimers();
+    const onResize = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={onResize}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="adaptive-phone"
+        />
+      </div>,
+    );
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(onResize).toHaveBeenCalledTimes(1);
+    const firstCall = onResize.mock.calls[0];
+    expect(firstCall?.[1]).toBeGreaterThan(0);
+
+    mockClientHeight = 520;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+      vi.runAllTimers();
+    });
+
+    expect(onResize).toHaveBeenCalledTimes(1);
+
+    mockClientWidth = 320;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+      vi.runAllTimers();
+    });
+
+    expect(onResize).toHaveBeenCalledTimes(2);
+    expect(onResize.mock.calls[1]?.[1]).not.toBe(firstCall?.[1]);
+    vi.useRealTimers();
+  });
+
   it('anchors follow scrolling to the actual DOM bottom instead of the theoretical row math', async () => {
     const session = makeSession({
       revision: 1,
@@ -2678,5 +2733,141 @@ describe('TerminalView minimal mirror render', () => {
       expect(rows.length).toBeGreaterThan(0);
       expect(rows).toContain('row-080');
     });
+  });
+
+
+
+  it('keeps follow rows rendered during shell relayout without waiting for a later input reset', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      mockClientHeight = 340;
+      scrollHeight = 1377;
+      ResizeObserverMock.triggerAll();
+
+      const rowsDuringRelayout = readRenderedRows(view.container);
+      expect(rowsDuringRelayout.length).toBeGreaterThan(0);
+      expect(rowsDuringRelayout).toContain('row-080');
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('realigns follow scroll immediately when input reset and live tail refresh land together', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            inputResetEpoch={0}
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      scrollHeight = 1377;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            inputResetEpoch={1}
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      expect(scroller.scrollTop).toBe(969);
+      expect(readRenderedRows(view.container)).toContain('row-081');
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

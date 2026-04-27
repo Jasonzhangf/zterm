@@ -166,6 +166,7 @@ vi.mock('./hooks/useBridgeSettingsStorage', () => ({
       targetAuthToken: '',
       terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       terminalThemeId: 'default',
+      terminalWidthMode: 'mirror-fixed',
     },
     setSettings: vi.fn(),
   }),

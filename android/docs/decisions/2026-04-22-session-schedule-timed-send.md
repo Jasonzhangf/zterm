@@ -228,6 +228,9 @@ shared 协议真源建议扩展：
 - daemon 是唯一状态真源
 - 任一端修改后，daemon 负责广播新的 `schedule-state`
 - Android / Mac 不得各自本地乐观生成第二份持久状态
+- 只要 client 当前 attach 到某个 `sessionName`，就必须**随时**可以打开该 session 的 schedule 列表并 CRUD
+- “当前是否有本地预输入草稿”只影响新建表单的 seeded text，**不影响**当前 session 任务列表的查看/编辑入口
+- 任意客户端 attach 到同一个 `sessionName` 时，都必须看到 daemon 侧这一份 session 任务列表；禁止按客户端临时 `sessionId` 再切第二份 schedule 真相
 
 ## UI 结构冻结
 

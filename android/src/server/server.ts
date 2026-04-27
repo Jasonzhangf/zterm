@@ -12,7 +12,7 @@ import * as pty from 'node-pty';
 import { v4 as uuidv4 } from 'uuid';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import { spawnSync } from 'child_process';
-import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { basename, extname, join, resolve } from 'path';
 import { homedir } from 'os';
@@ -21,8 +21,22 @@ import type {
   AttachFileStartPayload,
   BufferHeadPayload,
   BufferSyncRequestPayload,
+  FileDownloadChunkPayload,
+  FileDownloadCompletePayload,
+  FileDownloadErrorPayload,
+  FileDownloadRequestPayload,
+  FileListErrorPayload,
+  FileListRequestPayload,
+  FileListResponsePayload,
+  FileUploadChunkPayload,
+  FileUploadCompletePayload,
+  FileUploadEndPayload,
+  FileUploadErrorPayload,
+  FileUploadProgressPayload,
+  FileUploadStartPayload,
   PasteImagePayload,
   PasteImageStartPayload,
+  RemoteScreenshotRequestPayload,
   RuntimeDebugLogEntry,
   ScheduleEventPayload,
   ScheduleJobDraft,
@@ -43,7 +57,7 @@ import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from 
 import { createTraversalRelayHostClient } from './relay-client';
 import {
   findChangedIndexedRanges,
-  normalizeCapturedLineBlock,
+  normalizeMirrorCaptureLines,
   resolveCanonicalAvailableLineCount,
   trimTrailingDefaultCells,
   trimCanonicalBufferWindow,
@@ -55,11 +69,23 @@ import {
   shutdownClientSessions,
 } from './client-session-lifecycle';
 import { closeMirrorSubscribers, detachMirrorSubscriber } from './mirror-lifecycle';
-import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachViewport } from './mirror-geometry';
+import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry, resolveMirrorSubscriberGeometry } from './mirror-geometry';
+import { resolveFileTransferListPath } from './file-transfer-path';
 import { dispatchScheduledJob } from './schedule-dispatch';
 import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug-store';
 import { ScheduleEngine } from './schedule-engine';
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
+
+// 保留正在推进中的文件传输/目录能力真相；当前 server 主链尚未接线完成，
+// 这里只做显式占位，避免把“未接线的新功能定义”误删成不存在。
+void readdirSync;
+void statSync;
+void (0 as unknown as
+  | FileDownloadRequestPayload
+  | FileListRequestPayload
+  | FileUploadChunkPayload
+  | FileUploadEndPayload
+  | FileUploadStartPayload);
 
 interface TmuxConnectPayload {
   clientSessionId: string;
@@ -69,6 +95,7 @@ interface TmuxConnectPayload {
   sessionName: string;
   cols?: number;
   rows?: number;
+  terminalWidthMode?: 'adaptive-phone' | 'mirror-fixed';
   autoCommand?: string;
 }
 
@@ -93,6 +120,8 @@ interface ClientSession {
   mirrorKey: string | null;
   cols: number;
   rows: number;
+  terminalWidthMode: 'adaptive-phone' | 'mirror-fixed';
+  requestedAdaptiveCols: number | null;
   wsAlive: boolean;
   pendingPasteImage: PasteImageStartPayload | null;
   pendingAttachFile: AttachFileStartPayload | null;
@@ -124,7 +153,7 @@ interface SessionMirror {
 
 interface TmuxPaneMetrics {
   paneId: string;
-  historySize: number;
+  tmuxAvailableLineCountHint: number;
   paneRows: number;
   paneCols: number;
   alternateOn: boolean;
@@ -140,19 +169,19 @@ interface TmuxCursorState {
 function normalizeMirrorCursor(options: {
   bufferStartIndex: number;
   availableEndIndex: number;
-  viewportRows: number;
+  paneRows: number;
   cursor: TmuxCursorState;
 }): TerminalCursorState | null {
-  const safeViewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
+  const safePaneRows = Math.max(1, Math.floor(options.paneRows || 1));
   const safeBufferStartIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
   const safeAvailableEndIndex = Math.max(safeBufferStartIndex, Math.floor(options.availableEndIndex || 0));
   if (safeAvailableEndIndex <= safeBufferStartIndex) {
     return null;
   }
-  const viewportTopIndex = Math.max(safeBufferStartIndex, safeAvailableEndIndex - safeViewportRows);
+  const visibleTopIndex = Math.max(safeBufferStartIndex, safeAvailableEndIndex - safePaneRows);
   const rowIndex = Math.max(
-    viewportTopIndex,
-    Math.min(safeAvailableEndIndex - 1, viewportTopIndex + Math.max(0, Math.floor(options.cursor.row || 0))),
+    visibleTopIndex,
+    Math.min(safeAvailableEndIndex - 1, visibleTopIndex + Math.max(0, Math.floor(options.cursor.row || 0))),
   );
   return {
     rowIndex,
@@ -190,6 +219,13 @@ type ClientMessage =
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
+  | { type: 'terminal-width-mode'; payload: { mode: 'adaptive-phone' | 'mirror-fixed'; cols?: number } }
+  | { type: 'file-list-request'; payload: FileListRequestPayload }
+  | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
+  | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
+  | { type: 'file-upload-start'; payload: FileUploadStartPayload }
+  | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
+  | { type: 'file-upload-end'; payload: FileUploadEndPayload }
   | { type: 'ping' }
   | { type: 'close' };
 
@@ -213,6 +249,14 @@ type ServerMessage =
   | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
+  | { type: 'file-list-response'; payload: FileListResponsePayload }
+  | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
+  | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
+  | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
+  | { type: 'file-upload-progress'; payload: FileUploadProgressPayload }
+  | { type: 'file-upload-complete'; payload: FileUploadCompletePayload }
+  | { type: 'file-upload-error'; payload: FileUploadErrorPayload }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
@@ -268,11 +312,11 @@ const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
 
 function resolveMirrorCacheLines(rows: number) {
-  const viewportRows = Math.max(1, Math.floor(rows || 1));
+  const paneRows = Math.max(1, Math.floor(rows || 1));
   if (!Number.isFinite(MAX_CAPTURED_SCROLLBACK_LINES) || MAX_CAPTURED_SCROLLBACK_LINES <= 0) {
-    return viewportRows;
+    return paneRows;
   }
-  return Math.max(viewportRows, Math.floor(MAX_CAPTURED_SCROLLBACK_LINES));
+  return Math.max(paneRows, Math.floor(MAX_CAPTURED_SCROLLBACK_LINES));
 }
 
 function daemonRuntimeDebug(scope: string, payload?: unknown) {
@@ -395,16 +439,16 @@ function normalizeClientSessionId(input?: string) {
   return candidate;
 }
 
-function normalizeViewportCols(cols: number | undefined) {
+function normalizeTerminalCols(cols: number | undefined) {
   if (!Number.isFinite(cols) || cols! <= 0) {
-    throw new Error('viewport cols must be a finite positive number');
+    throw new Error('terminal cols must be a finite positive number');
   }
   return Math.max(1, Math.floor(cols!));
 }
 
-function normalizeViewportRows(rows: number | undefined) {
+function normalizeTerminalRows(rows: number | undefined) {
   if (!Number.isFinite(rows) || rows! <= 0) {
-    throw new Error('viewport rows must be a finite positive number');
+    throw new Error('terminal rows must be a finite positive number');
   }
   return Math.max(1, Math.floor(rows!));
 }
@@ -979,7 +1023,7 @@ function resolveRequestedTmuxRows(contentRows: number) {
 
 function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
   const result = runTmux(['display-message', '-p', '-t', sessionName, '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}']);
-  const [paneIdRaw, historyRaw, rowsRaw, colsRaw, alternateOnRaw] = result.stdout.trim().split('\t');
+  const [paneIdRaw, tmuxAvailableLineCountRaw, rowsRaw, colsRaw, alternateOnRaw] = result.stdout.trim().split('\t');
   const paneRows = Number.parseInt(rowsRaw ?? '', 10);
   const paneCols = Number.parseInt(colsRaw ?? '', 10);
   if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
@@ -987,11 +1031,20 @@ function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
   }
   return {
     paneId: paneIdRaw?.trim() || sessionName,
-    historySize: Math.max(0, Number.parseInt(historyRaw ?? '', 10) || 0),
+    tmuxAvailableLineCountHint: Math.max(0, Number.parseInt(tmuxAvailableLineCountRaw ?? '', 10) || 0),
     paneRows,
     paneCols,
     alternateOn: alternateOnRaw === '1',
   };
+}
+
+function readTmuxPaneCurrentPath(sessionName: string) {
+  const result = runTmux(['display-message', '-p', '-t', sessionName, '#{pane_current_path}']);
+  const currentPath = result.stdout.trim();
+  if (!currentPath) {
+    throw new Error(`tmux returned empty pane_current_path for ${sessionName}`);
+  }
+  return currentPath;
 }
 
 function readTmuxCursorState(target: string): TmuxCursorState {
@@ -1005,7 +1058,7 @@ function readTmuxCursorState(target: string): TmuxCursorState {
   };
 }
 
-function captureTmuxPaneLines(
+function captureTmuxMirrorLines(
   target: string,
   options: {
     paneRows: number;
@@ -1015,59 +1068,52 @@ function captureTmuxPaneLines(
 ) {
   const safePaneRows = Math.max(1, Math.floor(options.paneRows));
   const safeMaxLines = Math.max(1, Math.floor(options.maxLines));
-  const viewportResult = runTmux([
-    'capture-pane',
-    '-M',
-    '-p',
-    '-e',
-    '-N',
-    '-t',
-    target,
-    '-S',
-    '0',
-    '-E',
-    `${Math.max(0, safePaneRows - 1)}`,
-  ]);
+  const captureResult = runTmux(options.alternateOn
+    ? [
+        'capture-pane',
+        '-M',
+        '-p',
+        '-e',
+        '-N',
+        '-t',
+        target,
+        '-S',
+        '0',
+        '-E',
+        `${Math.max(0, safePaneRows - 1)}`,
+      ]
+    : [
+        'capture-pane',
+        '-p',
+        '-e',
+        '-N',
+        '-t',
+        target,
+        '-S',
+        `-${safeMaxLines}`,
+        '-E',
+        `${Math.max(0, safePaneRows - 1)}`,
+      ]);
 
-  const viewportLines = normalizeCapturedLineBlock(viewportResult.stdout, safePaneRows);
-  if (options.alternateOn) {
-    return {
-      historyLines: [] as string[],
-      viewportLines,
-    };
+  const normalizedLines = normalizeMirrorCaptureLines(captureResult.stdout, {
+    paneRows: safePaneRows,
+    alternateOn: options.alternateOn,
+  });
+  if (options.alternateOn || normalizedLines.length <= safeMaxLines) {
+    return normalizedLines;
   }
-
-  const historyResult = runTmux([
-    'capture-pane',
-    '-p',
-    '-e',
-    '-N',
-    '-t',
-    target,
-    '-S',
-    `-${safeMaxLines}`,
-    '-E',
-    '-1',
-  ]);
-  const historyCapturedLines = normalizeCapturedLineBlock(historyResult.stdout);
-  const historyLineCount = Math.max(0, Math.min(historyCapturedLines.length, safeMaxLines - safePaneRows));
-
-  return {
-    historyLines: historyLineCount > 0 ? historyCapturedLines.slice(0, historyLineCount) : [],
-    viewportLines,
-  };
+  return normalizedLines.slice(-safeMaxLines);
 }
 
 async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   const metrics = readTmuxPaneMetrics(mirror.sessionName);
   const cursor = readTmuxCursorState(metrics.paneId);
   const maxLines = resolveMirrorCacheLines(metrics.paneRows);
-  const captured = captureTmuxPaneLines(metrics.paneId, {
+  const capturedLines = captureTmuxMirrorLines(metrics.paneId, {
     paneRows: metrics.paneRows,
     maxLines,
     alternateOn: metrics.alternateOn,
   });
-  const capturedLines = [...captured.historyLines, ...captured.viewportLines];
 
   const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
   mirror.scratchBridge = scratchBridge;
@@ -1076,9 +1122,9 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
     scratchBridge.writeString(capturedLines.join('\r\n'));
   }
 
-  const viewport = buildViewport(scratchBridge).map(trimTrailingDefaultCells);
+  const visibleRows = buildVisibleRows(scratchBridge).map(trimTrailingDefaultCells);
   const scratchScrollbackCount = scratchBridge.getScrollbackCount();
-  const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - viewport.length));
+  const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - visibleRows.length));
   const scrollbackStartOldestIndex = Math.max(0, scratchScrollbackCount - scrollbackKeepCount);
   const scrollbackTail =
     scrollbackKeepCount > 0
@@ -1087,11 +1133,11 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
 
   const totalAvailableLines = resolveCanonicalAvailableLineCount({
     paneRows: metrics.paneRows,
-    historySize: metrics.historySize,
+    tmuxAvailableLineCountHint: metrics.tmuxAvailableLineCountHint,
     capturedLineCount: capturedLines.length,
-    scratchLineCount: scratchScrollbackCount + viewport.length,
+    scratchLineCount: scratchScrollbackCount + visibleRows.length,
   });
-  const nextBufferLines = [...scrollbackTail, ...viewport];
+  const nextBufferLines = [...scrollbackTail, ...visibleRows];
   const nextBufferStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
 
   mirror.rows = metrics.paneRows;
@@ -1109,13 +1155,13 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   mirror.cursor = normalizeMirrorCursor({
     bufferStartIndex: mirror.bufferStartIndex,
     availableEndIndex,
-    viewportRows: mirror.rows,
+    paneRows: mirror.rows,
     cursor,
   });
-  const viewportTopIndex = Math.max(mirror.bufferStartIndex, availableEndIndex - mirror.rows);
+  const visibleTopIndex = Math.max(mirror.bufferStartIndex, availableEndIndex - mirror.rows);
 
   console.log(
-    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync history=${metrics.historySize} captured=${capturedLines.length} viewportCaptured=${captured.viewportLines.length} scratch=${scratchScrollbackCount + viewport.length} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${availableEndIndex} viewport=${viewportTopIndex}-${availableEndIndex}`,
+    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${capturedLines.length} scratch=${scratchScrollbackCount + visibleRows.length} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${availableEndIndex} visible=${visibleTopIndex}-${availableEndIndex}`,
   );
 
   return true;
@@ -1153,6 +1199,8 @@ function createClientSession(transport: ClientSessionTransport, requestOrigin: s
     mirrorKey: null,
     cols: DEFAULT_TERMINAL_SESSION_VIEWPORT.cols,
     rows: DEFAULT_TERMINAL_SESSION_VIEWPORT.rows,
+    terminalWidthMode: 'mirror-fixed',
+    requestedAdaptiveCols: null,
     wsAlive: true,
     pendingPasteImage: null,
     pendingAttachFile: null,
@@ -1252,6 +1300,8 @@ function adoptLogicalClientSession(session: ClientSession, payload: TmuxConnectP
     session.mirrorKey = existing.mirrorKey;
     session.cols = existing.cols;
     session.rows = existing.rows;
+    session.terminalWidthMode = existing.terminalWidthMode;
+    session.requestedAdaptiveCols = existing.requestedAdaptiveCols;
     session.state = existing.state === 'closed' ? 'idle' : existing.state;
     session.pendingPasteImage = existing.pendingPasteImage;
     session.logicalSessionBound = true;
@@ -1391,20 +1441,20 @@ function serializeCell(cell: ReturnType<WasmBridge['getCell']>): TerminalCell {
   };
 }
 
-function buildViewport(bridge: WasmBridge) {
+function buildVisibleRows(bridge: WasmBridge) {
   const rows = bridge.getRows();
   const cols = bridge.getCols();
-  const viewport: TerminalCell[][] = [];
+  const visibleRows: TerminalCell[][] = [];
 
   for (let row = 0; row < rows; row += 1) {
     const cells: TerminalCell[] = [];
     for (let col = 0; col < cols; col += 1) {
       cells.push(serializeCell(bridge.getCell(row, col)));
     }
-    viewport.push(cells);
+    visibleRows.push(cells);
   }
 
-  return viewport;
+  return visibleRows;
 }
 
 function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number, oldestIndex: number) {
@@ -1425,29 +1475,19 @@ function resolveMirrorTargetGeometry(
   mirror: SessionMirror,
   baselineGeometry: { cols: number; rows: number } = { cols: mirror.cols, rows: mirror.rows },
 ) {
-  let minCols = Number.POSITIVE_INFINITY;
-  let minRows = Number.POSITIVE_INFINITY;
-
-  for (const sessionId of mirror.subscribers) {
-    const session = sessions.get(sessionId);
-    if (!session || session.state === 'closed') {
-      continue;
-    }
-    minCols = Math.min(minCols, normalizeViewportCols(session.cols));
-    minRows = Math.min(minRows, normalizeViewportRows(session.rows));
-  }
-
-  if (!Number.isFinite(minCols) || !Number.isFinite(minRows)) {
-    return {
-      cols: normalizeViewportCols(baselineGeometry.cols),
-      rows: normalizeViewportRows(baselineGeometry.rows),
-    };
-  }
-
-  return {
-    cols: normalizeViewportCols(minCols),
-    rows: normalizeViewportRows(minRows),
-  };
+  return resolveMirrorSubscriberGeometry({
+    baselineGeometry: {
+      cols: normalizeTerminalCols(baselineGeometry.cols),
+      rows: normalizeTerminalRows(baselineGeometry.rows),
+    },
+    subscribers: Array.from(mirror.subscribers)
+      .map((sessionId) => sessions.get(sessionId) || null)
+      .filter((session): session is ClientSession => Boolean(session && session.state !== 'closed'))
+      .map((session) => ({
+        widthMode: session.terminalWidthMode,
+        requestedCols: session.requestedAdaptiveCols,
+      })),
+  });
 }
 
 function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: number, endExclusive: number) {
@@ -1586,14 +1626,13 @@ function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = 12) {
   }, Math.max(0, delayMs));
 }
 
-async function resizeConnectedMirror(mirror: SessionMirror, cols: number, rows: number) {
+async function resizeConnectedMirror(mirror: SessionMirror, cols: number) {
   if (mirror.state !== 'connected' || !mirror.ptyProcess) {
     return;
   }
 
-  const tmuxRows = resolveRequestedTmuxRows(rows);
+  const tmuxRows = resolveRequestedTmuxRows(mirror.rows);
   mirror.cols = cols;
-  mirror.rows = rows;
   mirror.ptyProcess.resize(cols, tmuxRows);
   mirror.lastScrollbackCount = -1;
   mirror.bufferLines = [];
@@ -1613,12 +1652,11 @@ async function reconcileMirrorGeometry(mirror: SessionMirror) {
   const target = resolveMirrorTargetGeometry(mirror);
   if (
     target.cols === mirror.cols
-    && target.rows === mirror.rows
   ) {
     return false;
   }
 
-  await resizeConnectedMirror(mirror, target.cols, target.rows);
+  await resizeConnectedMirror(mirror, target.cols);
   return true;
 }
 
@@ -1717,7 +1755,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   const nextSessionName = sanitizeSessionName(payload.sessionName || payload.name);
   const nextMirrorKey = getMirrorKey(nextSessionName);
   const existingMirror = mirrors.get(nextMirrorKey) || null;
-  const existingTmuxViewport = existingMirror
+  const existingTmuxGeometry = existingMirror
     ? null
     : (() => {
       try {
@@ -1730,8 +1768,8 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
         return null;
       }
     })();
-  const requestedViewport = resolveAttachViewport({
-    requestedViewport:
+  const requestedGeometry = resolveAttachGeometry({
+    requestedGeometry:
       typeof payload.cols === 'number'
       && Number.isFinite(payload.cols)
       && typeof payload.rows === 'number'
@@ -1741,20 +1779,20 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
             rows: payload.rows,
           }
         : null,
-    currentMirrorViewport: existingMirror
+    currentMirrorGeometry: existingMirror
       ? {
           cols: existingMirror.cols,
           rows: existingMirror.rows,
         }
       : null,
-    existingTmuxViewport,
-    previousSessionViewport: {
+    existingTmuxGeometry,
+    previousSessionGeometry: {
       cols: session.cols,
       rows: session.rows,
     },
   });
-  const requestedCols = normalizeViewportCols(requestedViewport.cols);
-  const requestedRows = normalizeViewportRows(requestedViewport.rows);
+  const requestedCols = normalizeTerminalCols(requestedGeometry.cols);
+  const requestedRows = normalizeTerminalRows(requestedGeometry.rows);
 
   const previousMirror = getClientMirror(session);
   if (previousMirror) {
@@ -1777,6 +1815,13 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   session.mirrorKey = nextMirrorKey;
   session.cols = requestedCols;
   session.rows = requestedRows;
+  session.terminalWidthMode = payload.terminalWidthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  session.requestedAdaptiveCols =
+    session.terminalWidthMode === 'adaptive-phone'
+    && typeof payload.cols === 'number'
+    && Number.isFinite(payload.cols)
+      ? normalizeTerminalCols(payload.cols)
+      : null;
 
   let mirror = existingMirror;
   if (!mirror) {
@@ -1803,10 +1848,33 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
 }
 
 async function handleResize(session: ClientSession, cols: number, rows: number) {
-  session.cols = normalizeViewportCols(cols);
-  session.rows = normalizeViewportRows(rows);
+  session.cols = normalizeTerminalCols(cols);
+  void rows;
+  if (session.terminalWidthMode !== 'adaptive-phone') {
+    return;
+  }
+  session.requestedAdaptiveCols = session.cols;
   const mirror = getClientMirror(session);
   if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+    return;
+  }
+  await reconcileMirrorGeometry(mirror);
+}
+
+async function handleTerminalWidthMode(session: ClientSession, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number) {
+  session.terminalWidthMode = mode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  session.requestedAdaptiveCols =
+    session.terminalWidthMode === 'adaptive-phone'
+    && typeof cols === 'number'
+    && Number.isFinite(cols)
+    && cols > 0
+      ? normalizeTerminalCols(cols)
+      : null;
+  const mirror = getClientMirror(session);
+  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+    return;
+  }
+  if (session.terminalWidthMode !== 'adaptive-phone') {
     return;
   }
   await reconcileMirrorGeometry(mirror);
@@ -1853,6 +1921,240 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     sendMessage(session, { type: 'error', payload: { message: `Failed to paste image: ${err}`, code: 'paste_image_failed' } });
+  }
+}
+
+// ============================================
+// File Transfer handlers (Epic-007)
+// ============================================
+
+const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk
+
+function handleFileListRequest(session: ClientSession, payload: FileListRequestPayload) {
+  const { requestId, path: requestedPath, showHidden } = payload;
+
+  try {
+    const resolvedPath = resolveFileTransferListPath(
+      requestedPath,
+      () => readTmuxPaneCurrentPath(session.sessionName),
+    );
+    const entries = readdirSync(resolvedPath, { withFileTypes: true });
+    const fileEntries: Array<{ name: string; type: 'file' | 'directory'; size: number; modified: number }> = [];
+
+    for (const entry of entries) {
+      if (!showHidden && entry.name.startsWith('.')) {
+        continue;
+      }
+
+      try {
+        const stats = statSync(join(resolvedPath, entry.name));
+        fileEntries.push({
+          name: entry.name,
+          type: entry.isDirectory() ? 'directory' : 'file',
+          size: entry.isDirectory() ? 0 : stats.size,
+          modified: stats.mtimeMs,
+        });
+      } catch {
+        // Skip entries we can't stat
+      }
+    }
+
+    fileEntries.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const parentPath = resolvedPath === '/' ? null : resolve(resolvedPath, '..');
+
+    sendMessage(session, {
+      type: 'file-list-response',
+      payload: { requestId, path: resolvedPath, parentPath, entries: fileEntries },
+    });
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-list-error',
+      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
+function handleFileDownloadRequest(session: ClientSession, payload: FileDownloadRequestPayload) {
+  const { requestId, remotePath, fileName } = payload;
+
+  try {
+    if (!existsSync(remotePath)) {
+      sendMessage(session, { type: 'file-download-error', payload: { requestId, error: 'File not found' } });
+      return;
+    }
+
+    const fileBuffer = readFileSync(remotePath);
+    sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-download-error',
+      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
+function sendFileDownloadBuffer(session: ClientSession, requestId: string, fileName: string, fileBuffer: Buffer) {
+  const totalChunks = Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * FILE_CHUNK_SIZE;
+    const end = Math.min(start + FILE_CHUNK_SIZE, fileBuffer.length);
+    const chunk = fileBuffer.subarray(start, end);
+
+    sendMessage(session, {
+      type: 'file-download-chunk',
+      payload: {
+        requestId,
+        chunkIndex: i,
+        totalChunks,
+        fileName,
+        dataBase64: chunk.toString('base64'),
+      },
+    });
+  }
+
+  sendMessage(session, {
+    type: 'file-download-complete',
+    payload: { requestId, fileName, totalBytes: fileBuffer.length },
+  });
+}
+
+function buildRemoteScreenshotFileName() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `remote-screenshot-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+}
+
+function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteScreenshotRequestPayload) {
+  const requestId = typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
+  if (!requestId) {
+    sendMessage(session, {
+      type: 'file-download-error',
+      payload: { requestId: '', error: 'remote-screenshot-request missing requestId' },
+    });
+    return;
+  }
+
+  if (process.platform !== 'darwin') {
+    sendMessage(session, {
+      type: 'file-download-error',
+      payload: { requestId, error: `Remote screenshot unsupported on platform: ${process.platform}` },
+    });
+    return;
+  }
+
+  const fileName = buildRemoteScreenshotFileName();
+  const tempPath = join(getWtermHomeDir(), fileName);
+
+  try {
+    mkdirSync(getWtermHomeDir(), { recursive: true });
+    const capture = spawnSync('screencapture', ['-x', tempPath], { encoding: 'utf8' });
+    if (capture.status !== 0) {
+      throw new Error((capture.stderr || capture.stdout || 'screencapture failed').trim());
+    }
+    const fileBuffer = readFileSync(tempPath);
+    sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-download-error',
+      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+    });
+  } finally {
+    try {
+      if (existsSync(tempPath)) {
+        unlinkSync(tempPath);
+      }
+    } catch {
+      // ignore cleanup failure
+    }
+  }
+}
+
+const pendingUploads = new Map<string, {
+  targetDir: string;
+  fileName: string;
+  fileSize: number;
+  chunks: Map<number, Buffer>;
+  totalChunks: number;
+  receivedChunks: number;
+}>();
+
+function handleFileUploadStart(session: ClientSession, payload: FileUploadStartPayload) {
+  const { requestId, targetDir, fileName, fileSize, chunkCount } = payload;
+
+  mkdirSync(targetDir, { recursive: true });
+
+  pendingUploads.set(requestId, {
+    targetDir,
+    fileName,
+    fileSize,
+    chunks: new Map(),
+    totalChunks: chunkCount,
+    receivedChunks: 0,
+  });
+
+  sendMessage(session, {
+    type: 'file-upload-progress',
+    payload: { requestId, chunkIndex: 0, totalChunks: chunkCount },
+  });
+}
+
+function handleFileUploadChunk(session: ClientSession, payload: FileUploadChunkPayload) {
+  const { requestId, chunkIndex, dataBase64 } = payload;
+  const upload = pendingUploads.get(requestId);
+
+  if (!upload) {
+    sendMessage(session, { type: 'file-upload-error', payload: { requestId, error: 'No pending upload' } });
+    return;
+  }
+
+  upload.chunks.set(chunkIndex, Buffer.from(dataBase64, 'base64'));
+  upload.receivedChunks++;
+
+  sendMessage(session, {
+    type: 'file-upload-progress',
+    payload: { requestId, chunkIndex: upload.receivedChunks, totalChunks: upload.totalChunks },
+  });
+}
+
+function handleFileUploadEnd(session: ClientSession, payload: FileUploadEndPayload) {
+  const { requestId } = payload;
+  const upload = pendingUploads.get(requestId);
+
+  if (!upload) {
+    sendMessage(session, { type: 'file-upload-error', payload: { requestId, error: 'No pending upload' } });
+    return;
+  }
+
+  try {
+    const sortedChunks: Buffer[] = [];
+    for (let i = 0; i < upload.totalChunks; i++) {
+      const chunk = upload.chunks.get(i);
+      if (!chunk) {
+        throw new Error('Missing chunk ' + i);
+      }
+      sortedChunks.push(chunk);
+    }
+
+    const filePath = join(upload.targetDir, upload.fileName);
+    const fileBuffer = Buffer.concat(sortedChunks);
+    writeFileSync(filePath, fileBuffer);
+
+    sendMessage(session, {
+      type: 'file-upload-complete',
+      payload: { requestId, filePath, bytes: fileBuffer.length },
+    });
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-upload-error',
+      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+    });
+  } finally {
+    pendingUploads.delete(requestId);
   }
 }
 
@@ -2142,12 +2444,33 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
     case 'resize':
       void handleResize(session, message.payload.cols, message.payload.rows);
       break;
+    case 'terminal-width-mode':
+      void handleTerminalWidthMode(session, message.payload.mode, message.payload.cols);
+      break;
     case 'ping': {
       sendMessage(session, { type: 'pong' });
       break;
     }
     case 'close':
       closeLogicalClientSession(session, 'client requested close', false);
+      break;
+    case 'file-list-request':
+      handleFileListRequest(session, message.payload);
+      break;
+    case 'file-download-request':
+      handleFileDownloadRequest(session, message.payload);
+      break;
+    case 'remote-screenshot-request':
+      handleRemoteScreenshotRequest(session, message.payload);
+      break;
+    case 'file-upload-start':
+      handleFileUploadStart(session, message.payload);
+      break;
+    case 'file-upload-chunk':
+      handleFileUploadChunk(session, message.payload);
+      break;
+    case 'file-upload-end':
+      handleFileUploadEnd(session, message.payload);
       break;
   }
 }

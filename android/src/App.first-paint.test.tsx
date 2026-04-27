@@ -103,6 +103,7 @@ vi.mock('./hooks/useBridgeSettingsStorage', () => ({
       targetAuthToken: '',
       terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       terminalThemeId: 'default',
+      terminalWidthMode: 'mirror-fixed',
     },
     setSettings: vi.fn(),
   }),
@@ -347,6 +348,90 @@ describe('App first paint regression', () => {
       expect(sentMessages.some((item) => item.type === 'connect' && item.payload?.sessionName === 'zterm_mirror_lab_2')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
+  });
+
+  it('ignores ACTIVE_PAGE terminal focus when ACTIVE_SESSION is missing and restores the first persisted tab', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'session-2',
+        hostId: 'host-2',
+        connectionName: 'local-test-2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab_2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-2' }));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.some((item) => item.type === 'connect' && item.payload?.sessionName === 'zterm_mirror_lab')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+  });
+
+  it('restores the last active tab after app relaunch instead of defaulting to the first tab', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'session-2',
+        hostId: 'host-2',
+        connectionName: 'local-test-2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab_2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+
+    const firstMount = render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
+
+    fireEvent.click(screen.getByText('switch-session-2'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
+    await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('session-2'));
+
+    firstMount.unmount();
+    MockWebSocket.reset();
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
   });
 
   it('switching to another tab pulls head then latest range and paints the new active tab without any input', async () => {

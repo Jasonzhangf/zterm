@@ -14,9 +14,6 @@ const FLOATING_BUBBLE_MARGIN = 10;
 const FLOATING_BUBBLE_DRAG_THRESHOLD_PX = 8;
 const QUICK_BAR_SIDE_PADDING = 6;
 const QUICK_BAR_ROW_GAP = 4;
-const QUICK_BAR_FIXED_COLUMNS = 3;
-const FIXED_BUTTON_MIN_WIDTH = 32;
-const FIXED_CLUSTER_PADDING_X = 3;
 const REPEATABLE_ACTION_LONG_PRESS_MS = 420;
 const REPEATABLE_ACTION_REPEAT_MS = 90;
 const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
@@ -38,24 +35,6 @@ const SHORTCUT_PRESETS: ShortcutPreset[] = [
   { label: '→', sequence: '\x1b[C', kind: 'key', row: 'top-scroll' },
 ];
 
-const BASE_ACTIONS = [
-  { id: 'attach', label: '📎', sequence: '' },
-  { id: 'continue', label: '继续', sequence: '继续执行\r' },
-  { id: 'esc', label: 'Esc', sequence: '\x1b' },
-  { id: 'tab', label: 'Tab', sequence: '\t' },
-  { id: 'enter', label: 'Enter', sequence: '\r' },
-  { id: 'left', label: '←', sequence: '\x1b[D' },
-  { id: 'up', label: '↑', sequence: '\x1b[A' },
-  { id: 'down', label: '↓', sequence: '\x1b[B' },
-  { id: 'right', label: '→', sequence: '\x1b[C' },
-  { id: 'space', label: 'Space', sequence: ' ' },
-  { id: 'backspace', label: 'Bksp', sequence: '\x7f' },
-  { id: 'shift-tab', label: 'S-Tab', sequence: '\x1b[Z' },
-  { id: 'shift-enter', label: 'S-Enter', sequence: '\n' },
-  { id: 'paste', label: 'Paste', sequence: '\x16' },
-  { id: 'keyboard', label: '⌨', sequence: '' },
-];
-
 interface TerminalQuickBarProps {
   activeSessionId?: string | null;
   quickActions: QuickAction[];
@@ -63,6 +42,8 @@ interface TerminalQuickBarProps {
   onSendSequence?: (sequence: string) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
+  onOpenSyncSettings?: () => void;
+  onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
   onToggleKeyboard?: () => void;
@@ -78,6 +59,12 @@ interface TerminalQuickBarProps {
   onCycleSplitPane?: () => void;
   onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
+  onOpenFileTransfer?: () => void;
+  onToggleDebugOverlay?: () => void;
+  debugOverlayVisible?: boolean;
+  shortcutSmartSort?: boolean;
+  shortcutFrequencyMap?: Record<string, number>;
+  onShortcutUse?: (shortcutId: string) => void;
 }
 
 interface DraftQuickAction extends QuickAction {
@@ -112,19 +99,19 @@ const SHORTCUT_ROW_META: Record<
   }
 > = {
   'top-scroll': {
-    title: '第一行（单按键）',
+    title: '第二行（单按键）',
     summary: 'Esc / Tab / Enter / Space / 单个字符',
     addLabel: '+ 添加单按键',
-    formTag: '当前编辑：第一行单按键',
+    formTag: '当前编辑：第二行单按键',
     formHint: '这里只放单个按键，不支持 Ctrl / Shift 等组合。',
     inputPlaceholder: '输入单个字母/数字/符号',
   },
   'bottom-scroll': {
-    title: '第二行（组合键）',
+    title: '第三行（组合键）',
     summary: 'Ctrl + C / Shift + Tab / Continue / Paste',
     addLabel: '+ 添加组合键',
-    formTag: '当前编辑：第二行组合键',
-    formHint: '这里放组合键或复合动作，单按键请放到第一行。',
+    formTag: '当前编辑：第三行组合键',
+    formHint: '这里放组合键或复合动作，单按键请放到第二行。',
     inputPlaceholder: '输入组合键里的目标字符，例如 c',
   },
 };
@@ -578,16 +565,16 @@ function validateShortcutTokensForRow(
 
   if (row === 'top-scroll') {
     if (tokens.some((token) => token.kind === 'modifier')) {
-      return '第一行只支持单按键，不支持 Ctrl / Shift 等组合。';
+      return '第二行只支持单按键，不支持 Ctrl / Shift 等组合。';
     }
     if (tokens.length !== 1 || !isSingleShortcutToken(tokens[0])) {
-      return '第一行只支持单个按键。';
+      return '第二行只支持单个按键。';
     }
     return '';
   }
 
   if (tokens.length === 1 && isSingleShortcutToken(tokens[0])) {
-    return '第二行用于组合键或复合动作，单按键请放到第一行。';
+    return '第三行用于组合键或复合动作，单按键请放到第二行。';
   }
 
   return '';
@@ -637,6 +624,8 @@ export function TerminalQuickBar({
   keyboardInsetPx = 0,
   onImagePaste,
   onFileAttach,
+  onOpenSyncSettings,
+  onRequestRemoteScreenshot,
   onToggleKeyboard,
   onQuickActionsChange,
   onShortcutActionsChange,
@@ -651,6 +640,12 @@ export function TerminalQuickBar({
   onCycleSplitPane,
   onEditorDomFocusChange,
   onMeasuredHeightChange,
+  onOpenFileTransfer,
+  onToggleDebugOverlay,
+  debugOverlayVisible,
+  shortcutSmartSort = false,
+  shortcutFrequencyMap,
+  onShortcutUse,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
@@ -701,7 +696,7 @@ export function TerminalQuickBar({
     height: FLOATING_BUBBLE_SIZE,
   });
   const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const imagePasteSessionIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
@@ -709,7 +704,19 @@ export function TerminalQuickBar({
   const domEditorFocusTimerRef = useRef<number | null>(null);
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
-  const sortedShortcutActions = useMemo(() => sortShortcutActions(shortcutActions), [shortcutActions]);
+  const sortedShortcutActions = useMemo(() => {
+    if (!shortcutSmartSort || !shortcutFrequencyMap) return sortShortcutActions(shortcutActions);
+    const freq = shortcutFrequencyMap;
+    return [...shortcutActions].sort((left, right) => {
+      if (left.row !== right.row) {
+        return SHORTCUT_ROW_ORDER.indexOf(left.row) - SHORTCUT_ROW_ORDER.indexOf(right.row);
+      }
+      const lf = freq[left.id] || 0;
+      const rf = freq[right.id] || 0;
+      if (lf !== rf) return rf - lf; // higher frequency first
+      return left.order - right.order; // fallback to manual order
+    });
+  }, [shortcutActions, shortcutSmartSort, shortcutFrequencyMap]);
   const draftShortcutBuild = useMemo(() => buildTerminalShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
   const draftShortcutRowError = useMemo(
     () => validateShortcutTokensForRow(draftShortcutRow, draftShortcutTokens, draftShortcutBuild),
@@ -734,7 +741,6 @@ export function TerminalQuickBar({
     ? `${overlayViewportMetrics.sheetHeightPx}px`
     : 'calc(100dvh - 16px)';
   const overlayBottomInsetStyle = `${overlayViewportMetrics.bottomInsetPx}px`;
-
   const appendToDraft = (value: string) => {
     onSessionDraftChange?.(`${sessionDraft || ''}${value}`);
   };
@@ -777,9 +783,34 @@ export function TerminalQuickBar({
       onToggleKeyboard?.();
       return;
     }
-    if (action.id === 'attach') {
-      imagePasteSessionIdRef.current = activeSessionId || null;
+    if (action.id === 'image-attach') {
       imageInputRef.current?.click();
+      return;
+    }
+    if (action.id === 'file-attach') {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (action.id === 'sync-settings') {
+      onOpenSyncSettings?.();
+      return;
+    }
+    if (action.id === 'debug-overlay') {
+      onToggleDebugOverlay?.();
+      return;
+    }
+    if (action.id === 'remote-screenshot') {
+      if (!activeSessionId) {
+        alert('当前没有可用的目标 session');
+        return;
+      }
+      void Promise.resolve(onRequestRemoteScreenshot?.(activeSessionId)).catch((error) => {
+        alert(error instanceof Error ? error.message : '远程截图失败');
+      });
+      return;
+    }
+    if (action.id === 'file-transfer') {
+      onOpenFileTransfer?.();
       return;
     }
     if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
@@ -791,13 +822,32 @@ export function TerminalQuickBar({
       return;
     }
     onSendSequence?.(action.sequence);
-  }, [activeSessionId, onSendSequence, onToggleKeyboard]);
+    onShortcutUse?.(action.id);
+  }, [
+    activeSessionId,
+    onOpenFileTransfer,
+    onOpenSyncSettings,
+    onRequestRemoteScreenshot,
+    onSendSequence,
+    onShortcutUse,
+    onToggleDebugOverlay,
+    onToggleKeyboard,
+  ]);
 
   const isRepeatableAction = useCallback((action: { id: string; label: string; sequence: string }) => {
     if (!action.sequence) {
       return false;
     }
-    if (action.id === 'keyboard' || action.id === 'attach' || action.id === 'paste') {
+    if (
+      action.id === 'keyboard'
+      || action.id === 'image-attach'
+      || action.id === 'file-attach'
+      || action.id === 'file-transfer'
+      || action.id === 'sync-settings'
+      || action.id === 'remote-screenshot'
+      || action.id === 'debug-overlay'
+      || action.id === 'paste'
+    ) {
       return false;
     }
     if (action.id.startsWith('shortcut-editor')) {
@@ -923,25 +973,36 @@ export function TerminalQuickBar({
     persistDraftActions(nextActions);
   };
 
-  const topFixedActions = useMemo(
-    () => BASE_ACTIONS.filter((action) => ['attach', 'keyboard', 'up'].includes(action.id)),
-    [],
-  );
+  const toolRowActions = useMemo(() => ([
+    { id: 'file-transfer', label: '文件', sequence: '' },
+    { id: 'image-attach', label: '图片', sequence: '' },
+    { id: 'sync-settings', label: '同步', sequence: '' },
+    { id: 'remote-screenshot', label: '截图', sequence: '' },
+    { id: 'debug-overlay', label: '状态', sequence: '' },
+    { id: 'keyboard', label: '键盘', sequence: '' },
+  ]), []);
 
-  const topScrollActions = useMemo(
-    () => sortedShortcutActions.filter((action) => action.row === 'top-scroll'),
-    [sortedShortcutActions],
-  );
+  const topScrollActions = useMemo(() => ([
+    ...SHORTCUT_PRESETS
+      .filter((preset) => preset.row === 'top-scroll')
+      .map((preset) => ({
+        id: `preset-top-${preset.label}-${preset.sequence}`,
+        label: preset.label,
+        sequence: preset.sequence,
+      })),
+    ...sortedShortcutActions.filter((action) => action.row === 'top-scroll'),
+  ]), [sortedShortcutActions]);
 
-  const bottomFixedActions = useMemo(
-    () => BASE_ACTIONS.filter((action) => ['left', 'down', 'right'].includes(action.id)),
-    [],
-  );
-
-  const bottomScrollActions = useMemo(
-    () => sortedShortcutActions.filter((action) => action.row === 'bottom-scroll'),
-    [sortedShortcutActions],
-  );
+  const bottomScrollActions = useMemo(() => ([
+    ...SHORTCUT_PRESETS
+      .filter((preset) => preset.row === 'bottom-scroll')
+      .map((preset) => ({
+        id: `preset-bottom-${preset.label}-${preset.sequence}`,
+        label: preset.label,
+        sequence: preset.sequence,
+      })),
+    ...sortedShortcutActions.filter((action) => action.row === 'bottom-scroll'),
+  ]), [sortedShortcutActions]);
 
   const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
   const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
@@ -986,20 +1047,6 @@ export function TerminalQuickBar({
       window.visualViewport?.removeEventListener('resize', rescueBubblePosition);
     };
   }, [keyboardInsetPx]);
-
-  const fixedClusterStyle = {
-    display: 'grid',
-    gridTemplateColumns: `repeat(${QUICK_BAR_FIXED_COLUMNS}, minmax(${FIXED_BUTTON_MIN_WIDTH}px, 1fr))`,
-    gap: `${QUICK_BAR_ROW_GAP}px`,
-    flexShrink: 0,
-    alignItems: 'center',
-    padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
-    borderRadius: '12px',
-    backgroundColor: 'rgba(59, 74, 108, 0.95)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
-    width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
-  } as const;
 
   const scrollTrackShellStyle = {
     flex: 1,
@@ -1387,15 +1434,13 @@ export function TerminalQuickBar({
         style={{
           minHeight: compact ? '32px' : '34px',
           width: fixed ? '100%' : undefined,
-          minWidth: fixed
-            ? `${FIXED_BUTTON_MIN_WIDTH}px`
-            : actionUsesSpaceBarVisual
+          minWidth: actionUsesSpaceBarVisual
+            ? '58px'
+            : actionDisplayLabel.length > 3
               ? '58px'
-              : actionDisplayLabel.length > 3
-                ? '58px'
-                : actionDisplayLabel.length > 1
-                  ? '48px'
-                  : '34px',
+              : actionDisplayLabel.length > 1
+                ? '48px'
+                : '34px',
           padding: fixed ? '0 6px' : '0 10px',
           border: 'none',
           outline: 'none',
@@ -1405,10 +1450,19 @@ export function TerminalQuickBar({
               ? 'rgba(113, 164, 255, 0.28)'
               : action.id === 'keyboard' && keyboardVisible
               ? 'rgba(31,214,122,0.18)'
+              : action.id === 'debug-overlay' && debugOverlayVisible
+              ? 'rgba(31,214,122,0.18)'
               : fixed
                 ? 'rgba(22, 28, 41, 0.92)'
                 : 'rgba(31, 38, 53, 0.82)',
-          color: repeatActive ? '#bcd3ff' : action.id === 'keyboard' && keyboardVisible ? mobileTheme.colors.accent : '#fff',
+          color:
+            repeatActive
+              ? '#bcd3ff'
+              : action.id === 'keyboard' && keyboardVisible
+              ? mobileTheme.colors.accent
+              : action.id === 'debug-overlay' && debugOverlayVisible
+              ? mobileTheme.colors.accent
+              : '#fff',
           fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : actionDisplayLabel.length > 3 ? '11px' : '14px',
           fontWeight: 700,
           cursor: 'pointer',
@@ -1516,29 +1570,45 @@ export function TerminalQuickBar({
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/*,.txt,.md,.markdown,.text"
+        accept="image/*"
         style={{ display: 'none' }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
           event.currentTarget.value = '';
-          const targetSessionId = imagePasteSessionIdRef.current || activeSessionId || null;
-          imagePasteSessionIdRef.current = null;
           if (!file) {
             return;
           }
+          const targetSessionId = activeSessionId || null;
           if (!targetSessionId) {
             alert('当前没有可用的目标 session');
             return;
           }
           try {
-            const isImage = file.type.startsWith('image/');
-            if (isImage) {
-              await onImagePaste?.(targetSessionId, file);
-            } else {
-              await onFileAttach?.(targetSessionId, file);
-            }
+            await onImagePaste?.(targetSessionId, file);
           } catch (error) {
-            alert(error instanceof Error ? error.message : 'Failed to attach file');
+            alert(error instanceof Error ? error.message : '传图片失败');
+          }
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          event.currentTarget.value = '';
+          if (!file) {
+            return;
+          }
+          const targetSessionId = activeSessionId || null;
+          if (!targetSessionId) {
+            alert('当前没有可用的目标 session');
+            return;
+          }
+          try {
+            await onFileAttach?.(targetSessionId, file);
+          } catch (error) {
+            alert(error instanceof Error ? error.message : '传文件失败');
           }
         }}
       />
@@ -1925,7 +1995,7 @@ export function TerminalQuickBar({
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: 700 }}>当前滚动快捷键</div>
                     <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                      两行分开管理：第一行只放单按键，第二行只放组合键 / 复合动作。
+                      三行分开管理：第一行工具栏，第二行只放单按键，第三行只放组合键 / 复合动作。
                     </div>
                   </div>
 
@@ -2446,13 +2516,10 @@ export function TerminalQuickBar({
                 </button>
                 <button
                   onClick={() => {
-                    if (!sessionDraft.trim()) {
-                      return;
-                    }
                     setFloatingMenuOpen(false);
                     onOpenScheduleComposer?.(sessionDraft);
                   }}
-                  disabled={!sessionDraft.trim() || !activeSessionId}
+                  disabled={!activeSessionId}
                   style={{
                     width: '88px',
                     minHeight: '40px',
@@ -2461,8 +2528,8 @@ export function TerminalQuickBar({
                     backgroundColor: 'rgba(113, 164, 255, 0.12)',
                     color: '#8db7ff',
                     fontWeight: 800,
-                    opacity: !sessionDraft.trim() || !activeSessionId ? 0.45 : 1,
-                    cursor: !sessionDraft.trim() || !activeSessionId ? 'not-allowed' : 'pointer',
+                    opacity: !activeSessionId ? 0.45 : 1,
+                    cursor: !activeSessionId ? 'not-allowed' : 'pointer',
                   }}
                 >
                   定时
@@ -2873,38 +2940,49 @@ export function TerminalQuickBar({
       {!floatingMenuOpen && (
         <div data-testid="terminal-quickbar-shell-rows">
           <div
+            data-quickbar-shell-row="true"
             style={{
               display: 'flex',
               alignItems: 'stretch',
-              gap: `${QUICK_BAR_ROW_GAP}px`,
               padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
               marginBottom: `${QUICK_BAR_ROW_GAP}px`,
             }}
           >
-            <div style={fixedClusterStyle}>
-              {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true }))}
-            </div>
             <div style={scrollTrackShellStyle}>
               <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                {topScrollActions.map((action) => renderBaseActionButton(action))}
-                {renderBaseActionButton(topShortcutEditorEntry)}
+                {toolRowActions.map((action) => renderBaseActionButton(action))}
               </div>
             </div>
           </div>
 
           <div
+            data-quickbar-shell-row="true"
             style={{
               minHeight: '40px',
               display: 'flex',
               alignItems: 'stretch',
-              gap: `${QUICK_BAR_ROW_GAP}px`,
+              padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+              marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+            }}
+          >
+            <div style={scrollTrackShellStyle}>
+              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                {topScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
+              </div>
+            </div>
+          </div>
+
+          <div
+            data-quickbar-shell-row="true"
+            style={{
+              minHeight: '40px',
+              display: 'flex',
+              alignItems: 'stretch',
               padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
               backgroundColor: 'rgba(255,255,255,0.02)',
             }}
           >
-            <div style={fixedClusterStyle}>
-              {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
-            </div>
             <div style={scrollTrackShellStyle}>
               <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
                 {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}

@@ -13,6 +13,8 @@ const baseSettings = {
   transportMode: 'auto' as const,
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark' as const,
+  terminalWidthMode: 'mirror-fixed' as const,
+  shortcutSmartSort: true,
   servers: [],
 };
 
@@ -87,5 +89,17 @@ describe('bridge-settings helpers', () => {
       ...baseSettings,
       terminalCacheLines: 5000,
     }).terminalCacheLines).toBe(DEFAULT_TERMINAL_CACHE_LINES);
+  });
+
+  it('normalizes terminal width mode and defaults to mirror-fixed', () => {
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalWidthMode: 'adaptive-phone',
+    }).terminalWidthMode).toBe('adaptive-phone');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalWidthMode: 'unknown-mode',
+    }).terminalWidthMode).toBe('mirror-fixed');
   });
 });

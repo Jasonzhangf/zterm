@@ -159,12 +159,17 @@
 - [ ] mobile-15.23 tab restore truth closeout：冷启动 / 恢复时最后 active tab 只允许由 `ACTIVE_SESSION` 决定；`ACTIVE_PAGE.focusSessionId` 不得把已恢复的 active tab 覆盖回旧值
 - [ ] mobile-15.24 compact default-color sentinel closeout：compact wire encode/decode 必须和 `TerminalCell` 默认 `fg/bg=256` 对齐；补 roundtrip 回归，解决灰条/花屏/cursor 样式污染
 - [ ] mobile-15.26 mirror width mode truth closeout：冻结 `adaptive-phone | mirror-fixed`；`mirror-fixed` 下 client viewport / IME / container width 变化不得改写 daemon mirror / tmux 宽度
+- [ ] mobile-15.26a Settings width-mode truth closeout：`terminalWidthMode` 真源迁到 Settings，全局唯一；删除 Host / Connection Properties 第二语义
+- [ ] mobile-15.26b tmux rows freeze closeout：Android runtime 后续不再改 tmux rows；`adaptive-phone` 最多只改 width / cols
 - [ ] mobile-15.27 renderer horizontal crop / pan closeout：`mirror-fixed` 下长行默认左裁切，renderer 只维护 horizontal render window，不换行、不重排、不改 buffer truth
 - [ ] mobile-15.28 mirror-fixed gesture closeout：`mirror-fixed` 开启后自动关闭左右滑切 tab；单指横滑只服务于 renderer horizontal pan
 - [ ] mobile-15.29 renderer cursor echo closeout：Android client 不得自行改 cursor 样式；renderer 只能回显 payload。补 renderer theme / follow 场景回归，防止再引入客户端 cursor 第二语义
 - [ ] mobile-15.30 renderer measured-cell-width closeout：renderer 列宽改成客户端实测像素真相，删除 `1ch / 2ch` 作为终端列宽语义；补 mixed ASCII/CJK 对齐回归
 - [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
 - [ ] mobile-15.32 transport/session lifecycle closeout：client session 与 ws/rtc transport 解耦；inactive tab 只停取数，不关闭 session/transport；daemon 侧 reconnect 复用同一 `clientSessionId` logical session，并补 shutdown 统一回收回归
+- [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
+- [ ] mobile-15.34 QuickBar 三行工具栏 closeout：第一行工具（文件/图片/同步/截图/状态/键盘），第二行单键，第三行复合键；工具项移出浮动菜单
+- [ ] mobile-15.35 QuickBar keyboard-lift + session-schedule entry closeout：QuickBar editor 聚焦时 UI shell 仍消费 keyboard inset；定时列表入口不再依赖本地草稿，任何 attach 到同一 session 的客户端都可打开当前任务列表并 CRUD
 
 - 若继续发新 APK，补 `foreground / reading / input` 真机专项证据
 - 单独审 daemon `health.sessions.total` bookkeeping 偏大问题
@@ -189,3 +194,48 @@
   - daemon `health.sessions.total` bookkeeping 仍偏大，需单独审计，但它已不再是 active 首刷慢的主因
   - daemon 仍保留 subscriber 驱动的 mirror 生命周期；`fin` 现场已出现 reconnect 后 `revision 2484 -> 1`、`latestEndIndex 63755 -> 50238` 的 mirror truth reset，和“daemon 只维护 tmux mirror 真相、不受 client 生命周期影响”的冻结设计冲突
   - transport / session 仍未彻底解耦：当前 reconnect 还是 `cleanup old socket -> new ws -> fresh connect`，daemon 侧 ws close 也仍会直接删 `ClientSession`，这和“same-session retry / inactive 不关 session”冲突
+
+## Epic-007 Mac ↔ Phone 双向文件传输
+
+### 对应 Beads Epic
+
+- `mobile-16`: 双面板文件传输（远程 daemon FS ↔ 手机本地 FS）
+
+### T1 协议层
+
+- [ ] types.ts 新增 `FileEntry`、file-transfer 消息类型（client → daemon: file-list-request, file-download-request, file-upload-start/chunk/end; daemon → client: file-list-response, file-download-chunk/complete, file-upload-progress/complete）
+
+### T2 Daemon handler
+
+- [ ] server.ts 新增 `handleFileListRequest` / `handleFileDownloadRequest` / `handleFileUploadChunk`
+- [x] daemon 通过 `tmux display-message -p '#{pane_current_path}'` 获取 session CWD 作为远程默认路径
+
+### T3 客户端依赖
+
+- [ ] 安装 `@capacitor/filesystem` + `npx cap sync`
+
+### T4 客户端 UI
+
+- [ ] 新建 `FileTransferSheet.tsx`：上=远程文件面板，下=本地文件面板，中间方向按钮，底部传输进度
+
+### T5 集成
+
+- [ ] TerminalQuickBar 浮动菜单新增「文件传输」入口
+- [ ] TerminalPage 挂载 FileTransferSheet
+- [ ] SessionContext 新增 file-transfer WS 消息路由
+
+### T6 测试
+
+- [ ] file-transfer-protocol.test.ts（消息序列化、chunk 分块、FileEntry）
+- [ ] FileTransferSheet.test.tsx（UI 渲染、目录导航、文件勾选）
+- [ ] daemon close-loop 集成测试（file-list / download / upload 真实 FS）
+- [ ] type-check + regression gate
+
+### 实施顺序
+
+1. types.ts 协议层
+2. server.ts daemon handler
+3. 安装 @capacitor/filesystem
+4. FileTransferSheet.tsx UI
+5. QuickBar 入口 + TerminalPage 挂载 + SessionContext 路由
+6. 测试 + type-check + build
