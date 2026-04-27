@@ -137,13 +137,11 @@ describe('TerminalView terminal themes', () => {
   });
 
   it('does not invent cursor colors on the client and only echoes the payload styling', () => {
-    const FLAG_REVERSE = 0x20;
-    const FLAG_CURSOR = 0x100;
     const cell = {
       char: 'X'.codePointAt(0) || 88,
       fg: 256,
       bg: 256,
-      flags: FLAG_REVERSE | FLAG_CURSOR,
+      flags: 0,
       width: 1,
     };
 
@@ -155,6 +153,7 @@ describe('TerminalView terminal themes', () => {
           bufferStartIndex={0}
           bufferEndIndex={1}
           bufferTailEndIndex={1}
+          cursor={{ rowIndex: 0, col: 0, visible: true }}
           active
           fontSize={5}
           themeId="catppuccin-mocha"

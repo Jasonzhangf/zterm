@@ -1,6 +1,5 @@
 import type { TerminalCell, TerminalIndexedLine } from '../lib/types';
 
-const FLAG_CURSOR = 0x100;
 const DEFAULT_COLOR = 256;
 
 export function cloneCell(cell: TerminalCell): TerminalCell {
@@ -9,10 +8,6 @@ export function cloneCell(cell: TerminalCell): TerminalCell {
 
 export function cloneRow(row: TerminalCell[]): TerminalCell[] {
   return row.map(cloneCell);
-}
-
-export function cloneRows(rows: TerminalCell[][]): TerminalCell[][] {
-  return rows.map(cloneRow);
 }
 
 export function rowsEqual(left: TerminalCell[] | null | undefined, right: TerminalCell[] | null | undefined) {
@@ -32,58 +27,6 @@ export function rowsEqual(left: TerminalCell[] | null | undefined, right: Termin
   }
 
   return true;
-}
-
-export function resolveCursorPaintColumn(row: TerminalCell[], preferredCol: number) {
-  if (row.length === 0) {
-    return -1;
-  }
-
-  const clamped = Math.max(0, Math.min(row.length - 1, Math.floor(preferredCol)));
-  if (row[clamped]?.width !== 0) {
-    return clamped;
-  }
-
-  for (let col = clamped - 1; col >= 0; col -= 1) {
-    if (row[col]?.width !== 0) {
-      return col;
-    }
-  }
-
-  return clamped;
-}
-
-export function paintCursorOnRow(row: TerminalCell[], cursorCol: number) {
-  if (row.length === 0) {
-    return row;
-  }
-
-  const nextRow = cloneRow(row);
-  const paintCol = resolveCursorPaintColumn(nextRow, cursorCol);
-  if (paintCol < 0 || !nextRow[paintCol]) {
-    return nextRow;
-  }
-
-  nextRow[paintCol] = {
-    ...nextRow[paintCol],
-    flags: nextRow[paintCol].flags | FLAG_CURSOR,
-  };
-  return nextRow;
-}
-
-export function paintCursorIntoViewport(
-  viewport: TerminalCell[][],
-  cursorRowInViewport: number,
-  cursorCol: number,
-  cursorVisible: boolean,
-) {
-  if (!cursorVisible) {
-    return cloneRows(viewport);
-  }
-
-  return viewport.map((row, index) => (
-    index === cursorRowInViewport ? paintCursorOnRow(row, cursorCol) : cloneRow(row)
-  ));
 }
 
 export function trimCanonicalBufferWindow(bufferStartIndex: number, bufferLines: TerminalCell[][], maxLines: number) {

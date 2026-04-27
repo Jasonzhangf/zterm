@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
-import { TerminalPage, resolveKeyboardLiftPx } from './TerminalPage';
+import { TerminalPage, resolveKeyboardLiftPx, resolveTerminalHeaderTopInsetPx } from './TerminalPage';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 
 const imeListeners = new Map<string, (event: any) => void>();
@@ -61,20 +61,24 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     onToggleKeyboard,
     keyboardVisible,
     keyboardInsetPx,
+    sessionDraft,
   }: {
     onEditorDomFocusChange?: (active: boolean) => void;
     onToggleKeyboard?: () => void;
     keyboardVisible?: boolean;
     keyboardInsetPx?: number;
+    sessionDraft?: string;
   }) => (
     <div
       data-testid="terminal-quickbar"
       data-keyboard-visible={keyboardVisible ? 'true' : 'false'}
       data-keyboard-inset={String(keyboardInsetPx || 0)}
+      data-session-draft={sessionDraft || ''}
     >
       <button onClick={() => onEditorDomFocusChange?.(true)}>focus-quick-editor</button>
       <button onClick={() => onEditorDomFocusChange?.(false)}>blur-quick-editor</button>
       <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
+      <div data-testid="terminal-quickbar-draft">{sessionDraft || ''}</div>
     </div>
   ),
 }));
@@ -123,6 +127,7 @@ function makeSession(id: string): Session {
       cols: 80,
       rows: 24,
       cursorKeysApp: false,
+      cursor: null,
       updateKind: 'replace',
       revision: 1,
     },
@@ -178,6 +183,37 @@ describe('TerminalPage Android IME bridge', () => {
 
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '语音输入\r下一行');
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '\x7f\x7f');
+  });
+
+  it('keeps editor overlay draft outside terminal body truth on Android', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft="overlay-draft-中文"
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-session-draft')).toBe('overlay-draft-中文');
+    });
+
+    expect(screen.getByTestId('terminal-quickbar-draft').textContent).toBe('overlay-draft-中文');
+    expect(screen.getByTestId('terminal-view-s1').textContent).not.toContain('overlay-draft-中文');
   });
 
   it('does not pass upstream terminal resize on Android, even when keyboard visibility changes', async () => {
@@ -552,8 +588,10 @@ describe('TerminalPage Android IME bridge', () => {
     );
 
     const terminalStage = screen.getByTestId('terminal-stage');
+    const quickBarShell = screen.getByTestId('terminal-quickbar-shell');
     expect(terminalStage.getAttribute('style') || '').toContain('bottom: 64px;');
     expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');
+    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 0px;');
 
     await waitFor(() => {
       expect(imeListeners.has('keyboardState')).toBe(true);
@@ -566,6 +604,7 @@ describe('TerminalPage Android IME bridge', () => {
       const style = terminalStage.getAttribute('style') || '';
       expect(style).toContain('bottom: 384px;');
       expect(style).not.toContain('transform: translateY');
+      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 320px;');
     });
   });
 
@@ -816,6 +855,26 @@ describe('resolveKeyboardLiftPx', () => {
       configurable: true,
       value: originalInnerHeight,
     });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe('resolveTerminalHeaderTopInsetPx', () => {
+  it('keeps Android header inset stable when visualViewport offsetTop jumps during IME popup', () => {
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        offsetTop: 96,
+      },
+    });
+
+    expect(resolveTerminalHeaderTopInsetPx(true)).toBe(16);
+
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: originalVisualViewport,

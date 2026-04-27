@@ -540,7 +540,7 @@ export function applyBufferSyncToSessionBuffer(
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
-    cursor: payload.cursor,
+    cursor: payload.cursor ?? null,
     revision,
     cacheLines,
     updateKind: detectUpdateKind(current, sparseWindow),

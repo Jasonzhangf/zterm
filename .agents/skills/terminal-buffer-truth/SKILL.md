@@ -59,6 +59,11 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - mirror 生命周期也必须独立：
   - client 断开 / 切 tab / 暂时没有 subscriber，不得销毁 mirror truth 再重建
   - 否则 reconnect 后出现 `revision -> 1` / `latestEndIndex` 回退，不是 tmux 变了，而是 daemon 自己把 absolute truth 丢了
+- daemon client session 和 transport 也必须独立：
+  - logical client session 是稳定对象
+  - ws/rtc transport 是可替换物理连接
+  - transport 断开只允许 detach transport，不允许顺手删 logical client session
+  - reconnect 必须按同一个 `clientSessionId` 重新绑定，不是新建第二份 session 语义
 
 ## 2. client buffer manager
 
@@ -117,6 +122,11 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - buffer manager 不关心 renderer 如何滚动、如何绘制、如何布局
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
+- active / inactive 只影响“是否继续取数”，不影响 logical session / transport 身份：
+  - inactive tab 不主动高频拉 head/range
+  - 但**不是**关闭 session
+  - 也**不是**关闭 transport
+- reconnect 只能是 **same session identity retry**；不能通过“cleanup old socket -> 当成 brand-new session connect”重建第二份 session 语义
 
 ## 3. renderer
 
@@ -187,6 +197,12 @@ UI 只负责容器位置与裁切：
 - IME 只移动容器，不改变内容
 - renderer 只在容器里画，不关心输入法
 - keyboard / IME 不得回灌成 buffer / render 真相
+- Android 顶部 header inset 只允许来自 **UI shell 的单一稳定像素真相**；IME 弹起导致的 `visualViewport.offsetTop` 不得再被当成第二份 top inset 叠到 header 上
+- Android connect / reconnect **不得**把 UI 容器测得的 `cols/rows` 当成 tmux viewport 真相带给 daemon；容器变窄/变矮、IME 弹起、safe-area、前后台恢复，都只能影响 shell 裁切与 renderer 可见窗口
+- “看不到的地方不画”属于 **renderer 绘制窗口** 真相，不属于 UI shell / buffer manager / daemon；UI shell 只能改容器位置与可见高度，不能借机改 tmux geometry
+- QuickBar / 快捷菜单属于 UI shell；**整块 shell 区域** 都必须吃掉非交互点击，不能让空白点击穿透到底层 terminal/ImeAnchor 把 IME 弹出来
+- 只有 QuickBar 内显式 editor / input / button 等交互控件允许接管焦点；普通 shell 容器点击必须被阻断在 UI shell 层
+- 若 `keyboardInsetPx > 0`，QuickBar 必须作为**整体容器**抬升到键盘上方；同一份 keyboard inset 只能消费一次：`terminal stage.bottom = quickBarHeight + keyboardLift`，`quickbar shell.bottom = keyboardLift`，禁止再用 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
 - Android terminal 原生输入若走 `ImeAnchor`，则 **ImeAnchor editable / composing / selection 必须是单一真相**；组合输入期间不得一边让 IME 持有 composing state，一边又由插件自行清空/改写 editable 造成第二语义
 - `ImeAnchor` 的 `InputConnection` 也必须服从这条真相：`commitText / finishComposingText` 不能跳过 `super` 直接短路返回；否则 framework editable/selection 不更新，真机会出现 **输入法底部预编辑光标错位 / caret 乱飞**
 - `mirror-fixed` 下，UI shell 若启用横向查看：
@@ -201,6 +217,9 @@ UI 只负责容器位置与裁切：
 - stream-mode
 - planner
 - viewport prefetch 第二链路
+- `ws close -> daemon delete logical client session`
+- `inactive tab -> close session / close transport`
+- `reconnect -> new client session semantics`
 - daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture
 - daemon 根据 client 状态决定“要不要先刷新一下 mirror 再回复”
 - daemon 因 subscriber 归零就销毁 mirror，导致 reconnect 后 revision / absolute head 重置
@@ -255,6 +274,8 @@ tmux truth
 9. prompt / input row style parity
    - 输入发出后、`buffer-sync` 前，terminal 可见内容不得本地直接变化
    - `buffer-sync` 到达后，renderer 只回显 payload，不得自己再造 prompt/cursor 第二语义
+10. same-session transport retry
+11. inactive tab stops polling but does not close session/transport
    - prompt / input row 必须可比对 `char / fg / bg / flags`
    - daemon 若回 cursor，必须是**独立 cursor metadata**；`lines` 不得因 cursor 改变
 
@@ -285,6 +306,7 @@ tmux truth
 - 若现场 `buffer-sync` 下行长期几百 KB/s 甚至 MB/s，先直接抓 daemon 回包；若仍返回 legacy `lines[].cells[]` 而不是 compact `i/t/w/s`，优先查 **daemon service staged runtime 没更新**，尤其是 `start/restart` 只重启 launchd 但没重建 `~/.wterm/daemon-runtime/server.cjs`。
 - daemon service 管理也必须遵守唯一真源：`start/restart` 必须重建当前 staged runtime；服务异常必须显式失败，**不能 fallback 回 tmux session** 掩盖旧 runtime/旧语义。
 - 本地 `daemon mirror close-loop` 必须使用**隔离测试端口**；禁止复用用户常驻 service 端口（如 3333），否则脚本会误连现场 daemon，出现“自动回归假绿 / 假红”。
+- `daemon mirror close-loop` 的 client replay harness 也必须服从 **revision reset 真相**：daemon 重启后若 revision 回到更小值，回放时必须先 reset local buffer 再 apply；否则会把回环假红误报成 daemon/client 主链故障。
 - hidden / non-visible tab 不得继续挂载 renderer 实例；renderer scope 必须严格等于当前 visible pane。否则 header truth 已切换但 body 仍残留旧 session DOM，Android WebView 容易出现“页头/内容对不上、像花屏”的 stale compositing。
 - renderer scope 回归测试不能只断言 “inactive renderer 还在但 data-active=false”；必须直接断言 **hidden renderer 不在 DOM**，否则会把 DOM 覆盖类问题测成假绿。
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
@@ -295,6 +317,9 @@ tmux truth
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - 若真机出现**大块灰条/花屏/光标样式乱飞**，优先查 **compact wire 的 default color sentinel** 是否和 `TerminalCell` 真相一致；当前 app/runtime 里的默认前景/背景是 `256/256`，不能在 compact encode/decode 里偷偷改成 ANSI `15/0`。
 - 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
+- 若现场看起来像“正文解析错了”，先把 **terminal body** 与 **IME/editor overlay** 分开审；底部灰条/编辑条不属于 daemon buffer truth，不能直接当成 compact wire 正文错误。
+- compact wire 的正文门禁必须覆盖 **ANSI + CJK + reverse + bg span + 中间空格**；只有 body parity 红灯以后，才允许改 contract/renderer，禁止凭截图先回退 codec。
+- 若现场是“点击快捷栏空白区弹出输入法 / 键盘起来后快捷栏被盖住”，先判 **UI shell/QuickBar**，不要误把它当成 renderer 或 buffer 问题；必须先补 shell 区域阻断与 keyboard lift 的红灯测试。
 
 ## 8. 现场判断口径
 

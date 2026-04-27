@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from './TerminalView';
 import { createSessionBufferState } from '../lib/terminal-buffer';
-import type { Session } from '../lib/types';
+import type { Session, TerminalCell } from '../lib/types';
 
 class ResizeObserverMock {
   static instances = new Set<ResizeObserverMock>();
@@ -39,6 +39,17 @@ class ResizeObserverMock {
 
 function buildRows(count: number, prefix = 'row') {
   return Array.from({ length: count }, (_, index) => `${prefix}-${String(index + 1).padStart(3, '0')}`);
+}
+
+function cell(char: string, options?: Partial<TerminalCell>): TerminalCell {
+  return {
+    char: char.codePointAt(0) || 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+    ...options,
+  };
 }
 
 function makeSession(options: {
@@ -1177,8 +1188,6 @@ describe('TerminalView minimal mirror render', () => {
   it('realigns follow scroll when DOM height changes but logical viewport rows stay the same, so the bottom prompt/cursor stays visible', async () => {
     vi.useFakeTimers();
     try {
-      const FLAG_REVERSE = 0x20;
-      const FLAG_CURSOR = 0x100;
       const session = makeSession({
         revision: 1,
         lines: [...buildRows(79), 'prompt-$'],
@@ -1196,10 +1205,11 @@ describe('TerminalView minimal mirror render', () => {
           char: 32,
           fg: 256,
           bg: 256,
-          flags: FLAG_REVERSE | FLAG_CURSOR,
+          flags: 0,
           width: 1,
         },
       ];
+      session.buffer.cursor = { rowIndex: 79, col: 7, visible: true };
 
       const view = render(
         <div style={{ width: '640px', height: '408px' }}>
@@ -1211,6 +1221,7 @@ describe('TerminalView minimal mirror render', () => {
             bufferTailEndIndex={session.buffer.bufferTailEndIndex}
             bufferGapRanges={session.buffer.gapRanges}
             cursorKeysApp={session.buffer.cursorKeysApp}
+            cursor={session.buffer.cursor}
             active
             onResize={vi.fn()}
             onInput={vi.fn()}
@@ -1395,12 +1406,13 @@ describe('TerminalView minimal mirror render', () => {
           sessionId={reanchoredTail.id}
           initialBufferLines={reanchoredTail.buffer.lines}
           bufferStartIndex={reanchoredTail.buffer.startIndex}
-          bufferEndIndex={reanchoredTail.buffer.endIndex}
-          bufferTailEndIndex={reanchoredTail.buffer.bufferTailEndIndex}
-          bufferGapRanges={reanchoredTail.buffer.gapRanges}
-          cursorKeysApp={reanchoredTail.buffer.cursorKeysApp}
-          active
-          bufferPullActive
+            bufferEndIndex={reanchoredTail.buffer.endIndex}
+            bufferTailEndIndex={reanchoredTail.buffer.bufferTailEndIndex}
+            bufferGapRanges={reanchoredTail.buffer.gapRanges}
+            cursorKeysApp={reanchoredTail.buffer.cursorKeysApp}
+            cursor={session.buffer.cursor}
+            active
+            bufferPullActive
           onResize={vi.fn()}
           onInput={vi.fn()}
           onViewportChange={onViewportChange}
@@ -1755,6 +1767,79 @@ describe('TerminalView minimal mirror render', () => {
     fireEvent.touchEnd(scroller, { changedTouches: [{ clientX: 120, clientY: 166 }] });
 
     expect(onSwipeTab).not.toHaveBeenCalled();
+  });
+
+  it('renders body rows from payload truth without letting cursor metadata pollute neighbouring styled CJK cells', async () => {
+    const mixedRow: TerminalCell[] = [
+      cell('A'),
+      cell(' ', { bg: 8 }),
+      cell('你', { fg: 6, width: 2 }),
+      { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+      cell('好', { fg: 6, width: 2 }),
+      { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+      cell('B'),
+    ];
+    const buffer = createSessionBufferState({
+      lines: [mixedRow],
+      startIndex: 100,
+      endIndex: 101,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 101,
+      rows: 24,
+      cols: 80,
+      revision: 1,
+      cursor: {
+        rowIndex: 100,
+        col: 2,
+        visible: true,
+      },
+      cacheLines: 500,
+    });
+    const session: Session = {
+      id: 's1',
+      hostId: 'host-s1',
+      connectionName: 'conn-s1',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      sessionName: 'session-s1',
+      title: 'session-s1',
+      ws: null,
+      state: 'connected',
+      hasUnread: false,
+      buffer,
+      createdAt: 1,
+    };
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          cursor={session.buffer.cursor}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('A 你好B'));
+
+    const activeRow = view.container.querySelector('[data-terminal-index="100"]') as HTMLDivElement;
+    const cells = Array.from(activeRow.querySelectorAll('span'));
+    expect(cells).toHaveLength(7);
+    expect(cells[2]?.getAttribute('data-terminal-cursor')).toBe('true');
+    expect(cells[3]?.getAttribute('data-terminal-cursor')).toBeNull();
+    expect(cells[4]?.getAttribute('data-terminal-cursor')).toBeNull();
+    expect(cells[1]?.style.background).not.toBe('');
+    expect(cells[2]?.style.color).not.toBe('');
+    expect(cells[4]?.style.color).not.toBe('');
   });
 
   it('does not emit upstream resize writes when mirror-fixed width mode is enabled', async () => {
@@ -2418,6 +2503,92 @@ describe('TerminalView minimal mirror render', () => {
 
       expect(scroller.scrollTop).toBe(969);
       expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not auto-enter reading when a live follow refresh temporarily drifts far above bottom before the follow realign runs', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      onViewportChange.mockClear();
+
+      scrollHeight = 1377;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      scroller.scrollTop = 880;
+      fireEvent.scroll(scroller);
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(969);
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
     } finally {
       vi.useRealTimers();
     }

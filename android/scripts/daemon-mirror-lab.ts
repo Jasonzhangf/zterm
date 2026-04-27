@@ -6,12 +6,11 @@ import * as pty from 'node-pty';
 import type { BufferSyncRequestPayload, ClientMessage, ScheduleEventPayload, ScheduleStatePayload, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 import {
-  applyBufferSyncToSessionBuffer,
   cellsToLine,
-  createSessionBufferState,
   normalizeWireLines,
 } from '../src/lib/terminal-buffer';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
+import { replayBufferSyncHistory } from '../src/lib/terminal-buffer-replay';
 
 const LAB_SESSION_NAME = 'zterm_mirror_lab';
 const LAB_COLS = 80;
@@ -528,18 +527,12 @@ function replayClientMirrorCompare(
   oracle: OracleSnapshot,
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
 ): CompareResult {
-  let buffer = createSessionBufferState({
-    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
-    lines: [],
+  const buffer = replayBufferSyncHistory({
+    history,
     rows: oracle.paneRows,
     cols: oracle.paneCols,
+    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   });
-
-  for (const item of history) {
-    if (item.type === 'buffer-sync') {
-      buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, DEFAULT_TERMINAL_CACHE_LINES);
-    }
-  }
 
   const renderWindow = deriveRenderRows({
     lines: buffer.lines,
@@ -674,6 +667,8 @@ class DaemonProbe {
 
   private readonly authToken: string;
 
+  private readonly clientSessionId: string;
+
   private ws: WebSocket | null = null;
 
   private connected = false;
@@ -695,6 +690,7 @@ class DaemonProbe {
   constructor(wsUrl: string, authToken: string) {
     this.wsUrl = authToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : wsUrl;
     this.authToken = authToken;
+    this.clientSessionId = `probe-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   get payload() {
@@ -730,6 +726,7 @@ class DaemonProbe {
         const connectMessage: ClientMessage = {
           type: 'connect',
           payload: {
+            clientSessionId: this.clientSessionId,
             name: LAB_SESSION_NAME,
             bridgeHost: '127.0.0.1',
             bridgePort: 0,

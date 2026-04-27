@@ -224,6 +224,7 @@ export type ServerMessage =
 
 // 用于 WebSocket 传输的 Host 配置（不含敏感信息的长期存储）
 export interface HostConfigMessage {
+  clientSessionId: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;

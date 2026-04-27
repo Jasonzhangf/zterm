@@ -30,6 +30,7 @@
 - terminal 链路必须保持 `server / buffer manager / renderer / UI shell` 独立，禁止越层漂移
 - daemon / buffer manager / renderer 都必须遵守 **读写解耦**：写侧只维护本层真相，读侧只读取当前真相；**请求不得触发上游同步策略**
 - daemon 只关心 `tmux -> mirror store`，**不关心客户端状态**；client buffer manager 只关心 `daemon -> local buffer`，**不关心 renderer**
+- terminal transport/session 也必须解耦：**client session 是稳定业务对象，ws/rtc transport 是可替换物理链路**；inactive tab 只停取数，不得关闭 session / transport 真相
 - terminal 宽度模式必须显式区分：
   - `adaptive-phone`
   - `mirror-fixed`

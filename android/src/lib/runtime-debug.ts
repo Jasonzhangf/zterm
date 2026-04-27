@@ -94,6 +94,10 @@ export function runtimeDebug(scope: string, payload?: unknown) {
     payload: normalizedPayload,
   });
 
+  if (typeof process !== 'undefined' && process.env.VITEST) {
+    return;
+  }
+
   if (payload === undefined) {
     console.debug(`[runtime:${scope}] ${timestamp}`);
     return;

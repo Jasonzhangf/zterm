@@ -168,7 +168,10 @@ export function expandCompactLine(
     };
     if (w === 2 && col + 1 < cols) {
       cells[col + 1] = {
-        char: 0,
+        // Keep continuation cells semantically aligned with daemon rows:
+        // width=0 means "do not render a second glyph", but the stored codepoint
+        // should remain the canonical trailing blank instead of inventing a new sentinel.
+        char: 32,
         fg: style?.fg ?? DEFAULT_FG,
         bg: style?.bg ?? DEFAULT_BG,
         flags: style?.flags ?? DEFAULT_FLAGS,

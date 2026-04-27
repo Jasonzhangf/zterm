@@ -11,6 +11,7 @@ const buildMeta = existsSync(buildMetaPath)
   : { buildNumber: 1000 };
 const appBuildNumber = String(Math.max(1000, Math.floor(buildMeta.buildNumber || 1000))).padStart(4, '0');
 const appDisplayVersion = `${pkg.version}.${appBuildNumber}`;
+const isVitest = process.env.VITEST === 'true';
 
 function computeVersionCode(version: string, buildNumber: number) {
   const semverParts = version.split('.').map((part) => {
@@ -42,6 +43,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 3000,
+    ws: isVitest ? false : undefined,
   },
   build: {
     outDir: 'dist',

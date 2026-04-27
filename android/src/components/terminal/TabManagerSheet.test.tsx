@@ -35,6 +35,7 @@ function buildSession(id: string, sessionName: string): Session {
       lines: [],
       gapRanges: [],
       cursorKeysApp: false,
+      cursor: null,
       updateKind: 'replace',
     },
   };

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   findChangedIndexedRanges,
   normalizeCapturedLineBlock,
-  paintCursorOnRow,
   resolveCanonicalAvailableLineCount,
   trimTrailingDefaultCells,
 } from './canonical-buffer';
@@ -153,21 +152,5 @@ describe('findChangedIndexedRanges', () => {
         endIndex: 106,
       },
     ]);
-  });
-});
-
-describe('cursor projection truth', () => {
-  it('does not inject synthetic reverse styling into a plain prompt cell when marking cursor', () => {
-    const FLAG_CURSOR = 0x100;
-    const prompt = row('prompt-$ ');
-    const painted = paintCursorOnRow(prompt, 7);
-
-    expect(painted[7]).toMatchObject({
-      char: prompt[7]!.char,
-      fg: prompt[7]!.fg,
-      bg: prompt[7]!.bg,
-      width: prompt[7]!.width,
-      flags: prompt[7]!.flags | FLAG_CURSOR,
-    });
   });
 });

@@ -151,6 +151,7 @@
 - [ ] mobile-15.16 active re-entry pull-state closeout：切 tab / resume 后旧 in-flight `buffer-sync` bookkeeping 不得卡死 session；active re-entry 必须回到 head-first 主循环，但不得清空本地 buffer truth
 - [ ] mobile-15.17 reconnect bucket closeout：同 host reconnect 若 socket open 但 handshake 不完成，bucket 不能永远占住 `activeSessionId`；必须显式超时失败并释放后续 session 重连机会
 - [ ] mobile-15.18 UI shell closeout：顶部 terminal header 必须避开 Android 状态栏；键盘弹出时只能做底部裁切/缩高，不允许整页 `translateY` 上抬后再掉回
+  - 2026-04-27 新增冻结：keyboard inset 只能消费一次；`terminal-stage` 用 `quickBarHeight + keyboardLift` 裁切，`TerminalQuickBar` 外层 shell 用 `bottom = keyboardLift` 整体抬升，禁止 QuickBar 内部再用 `paddingBottom = keyboardInsetPx` 形成二次上抬
 - [ ] mobile-15.19 daemon service staging closeout：`zterm-daemon.sh` 的 `start/restart` 必须重建当前 staged runtime，禁止继续启动旧 `~/.wterm/daemon-runtime/server.cjs`；并补门禁保证 `buffer-sync` 返回 compact wire，服务异常不得 fallback 到 tmux session
 - [ ] mobile-15.20 daemon close-loop isolation closeout：`daemon-mirror-lab` 必须使用隔离测试端口，不能复用用户常驻 service 端口；否则 close-loop 会误连现场 daemon，门禁结论失真
 - [ ] mobile-15.21 client buffer-sync apply closeout：补 compact-wire incoming apply 回归；若已收到 `buffer-sync`，本地 buffer truth 必须立刻推进，禁止微任务批处理把 follow 尾窗卡成重复请求同一三屏
@@ -163,6 +164,7 @@
 - [ ] mobile-15.29 renderer cursor echo closeout：Android client 不得自行改 cursor 样式；renderer 只能回显 payload。补 renderer theme / follow 场景回归，防止再引入客户端 cursor 第二语义
 - [ ] mobile-15.30 renderer measured-cell-width closeout：renderer 列宽改成客户端实测像素真相，删除 `1ch / 2ch` 作为终端列宽语义；补 mixed ASCII/CJK 对齐回归
 - [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
+- [ ] mobile-15.32 transport/session lifecycle closeout：client session 与 ws/rtc transport 解耦；inactive tab 只停取数，不关闭 session/transport；daemon 侧 reconnect 复用同一 `clientSessionId` logical session，并补 shutdown 统一回收回归
 
 - 若继续发新 APK，补 `foreground / reading / input` 真机专项证据
 - 单独审 daemon `health.sessions.total` bookkeeping 偏大问题
@@ -186,3 +188,4 @@
 - 当前 blocker：
   - daemon `health.sessions.total` bookkeeping 仍偏大，需单独审计，但它已不再是 active 首刷慢的主因
   - daemon 仍保留 subscriber 驱动的 mirror 生命周期；`fin` 现场已出现 reconnect 后 `revision 2484 -> 1`、`latestEndIndex 63755 -> 50238` 的 mirror truth reset，和“daemon 只维护 tmux mirror 真相、不受 client 生命周期影响”的冻结设计冲突
+  - transport / session 仍未彻底解耦：当前 reconnect 还是 `cleanup old socket -> new ws -> fresh connect`，daemon 侧 ws close 也仍会直接删 `ClientSession`，这和“same-session retry / inactive 不关 session”冲突

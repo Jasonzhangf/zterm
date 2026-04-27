@@ -257,6 +257,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     resumeActiveSessionTransport,
     sendInput,
     sendImagePaste,
+    sendFileAttach,
     resizeTerminal,
     updateSessionViewport,
     requestScheduleList,
@@ -1106,6 +1107,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
               updateSessionViewport(sessionId, viewState);
             }}
             onImagePaste={sendImagePaste}
+            onFileAttach={sendFileAttach}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
             onQuickActionInput={(sequence, sessionId) => {

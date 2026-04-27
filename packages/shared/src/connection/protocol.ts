@@ -6,6 +6,7 @@ import type {
 import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
 
 export interface HostConfigMessage {
+  clientSessionId: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;
@@ -26,6 +27,12 @@ export interface PasteImagePayload {
   pasteSequence?: string;
 }
 
+export interface AttachFileStartPayload {
+  name: string;
+  mimeType: string;
+  byteLength: number;
+}
+
 export type BridgeClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'buffer-head-request' }
@@ -38,6 +45,7 @@ export type BridgeClientMessage =
   | { type: 'schedule-run-now'; payload: { jobId: string } }
   | { type: 'input'; payload: string }
   | { type: 'paste-image'; payload: PasteImagePayload }
+  | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
   | { type: 'close' };
@@ -62,6 +70,7 @@ export type BridgeServerControlMessage =
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
+  | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }

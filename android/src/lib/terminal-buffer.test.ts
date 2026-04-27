@@ -7,6 +7,7 @@ import {
   createSessionBufferState,
   sessionBuffersEqual,
 } from './terminal-buffer';
+import { replayBufferSyncHistory } from './terminal-buffer-replay';
 
 function row(text: string): TerminalCell[] {
   return Array.from(text).map((char) => ({
@@ -27,6 +28,7 @@ function payload(options: {
   rows?: number;
   lines: Array<[number, string]>;
   revision?: number;
+  cursor?: { rowIndex: number; col: number; visible: boolean } | null;
 }): TerminalBufferPayload {
   return {
     revision: options.revision ?? 1,
@@ -37,6 +39,7 @@ function payload(options: {
     cols: 80,
     rows: options.rows ?? 4,
     cursorKeysApp: false,
+    cursor: options.cursor ?? null,
     lines: options.lines.map(([index, text]) => ({ index, cells: row(text) })),
   };
 }
@@ -185,6 +188,47 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.revision).toBe(5);
   });
 
+  it('replay history resets local mirror when daemon revision goes backwards after restart', () => {
+    const replayed = replayBufferSyncHistory({
+      rows: 4,
+      cols: 80,
+      cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+      history: [
+        {
+          type: 'buffer-sync',
+          payload: payload({
+            startIndex: 0,
+            endIndex: 4,
+            revision: 3,
+            lines: [
+              [0, 'old-a'],
+              [1, 'old-b'],
+              [2, 'old-c'],
+              [3, 'old-d'],
+            ],
+          }),
+        },
+        {
+          type: 'buffer-sync',
+          payload: payload({
+            startIndex: 0,
+            endIndex: 4,
+            revision: 2,
+            lines: [
+              [0, 'new-1'],
+              [1, 'new-2'],
+              [2, 'new-3'],
+              [3, 'new-4'],
+            ],
+          }),
+        },
+      ],
+    });
+
+    expect(replayed.revision).toBe(2);
+    expect(replayed.lines.map(cellsToLine)).toEqual(['new-1', 'new-2', 'new-3', 'new-4']);
+  });
+
   it('treats revision-only advances as a real buffer state change', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,
@@ -222,6 +266,47 @@ describe('terminal-buffer canonical mirror patching', () => {
 
     expect(next.revision).toBe(6);
     expect(next.lines.map(cellsToLine)).toEqual(['a', 'b', 'c', 'd']);
+    expect(sessionBuffersEqual(current, next)).toBe(false);
+  });
+
+  it('updates cursor metadata without rewriting buffer lines', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 100,
+        endIndex: 104,
+        revision: 5,
+        cursor: { rowIndex: 103, col: 3, visible: true },
+        lines: [
+          [100, 'a'],
+          [101, 'b'],
+          [102, 'c'],
+          [103, 'd'],
+        ],
+      }),
+      DEFAULT_TERMINAL_CACHE_LINES,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 100,
+        endIndex: 104,
+        revision: 6,
+        cursor: { rowIndex: 103, col: 0, visible: true },
+        lines: [
+          [100, 'a'],
+          [101, 'b'],
+          [102, 'c'],
+          [103, 'd'],
+        ],
+      }),
+      DEFAULT_TERMINAL_CACHE_LINES,
+    );
+
+    expect(next.lines.map(cellsToLine)).toEqual(['a', 'b', 'c', 'd']);
+    expect(next.lines).toEqual(current.lines);
+    expect(next.cursor).toEqual({ rowIndex: 103, col: 0, visible: true });
     expect(sessionBuffersEqual(current, next)).toBe(false);
   });
 
@@ -341,6 +426,64 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.endIndex).toBe(113);
     expect(next.lines.map(cellsToLine).slice(0, 3)).toEqual(['line-100', 'line-101', 'line-102']);
     expect(next.lines.map(cellsToLine).slice(-2)).toEqual(['line-111', 'line-112']);
+  });
+
+  it('slides the follow cache forward across consecutive sparse tail diffs without repeating the newest rows in history', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 100,
+        endIndex: 112,
+        availableStartIndex: 100,
+        availableEndIndex: 112,
+        viewportEndIndex: 112,
+        revision: 1,
+        lines: Array.from({ length: 12 }, (_, offset) => [100 + offset, `line-${100 + offset}`]),
+      }),
+      12,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 109,
+        endIndex: 113,
+        availableStartIndex: 101,
+        availableEndIndex: 113,
+        viewportEndIndex: 113,
+        revision: 2,
+        lines: [
+          [112, 'line-112'],
+        ],
+      }),
+      12,
+    );
+
+    const final = applyBufferSyncToSessionBuffer(
+      next,
+      payload({
+        startIndex: 110,
+        endIndex: 114,
+        availableStartIndex: 102,
+        availableEndIndex: 114,
+        viewportEndIndex: 114,
+        revision: 3,
+        lines: [
+          [113, 'line-113'],
+        ],
+      }),
+      12,
+    );
+
+    expect(final.startIndex).toBe(102);
+    expect(final.endIndex).toBe(114);
+    expect(final.lines.map(cellsToLine)).toEqual([
+      'line-102', 'line-103', 'line-104', 'line-105',
+      'line-106', 'line-107', 'line-108', 'line-109',
+      'line-110', 'line-111', 'line-112', 'line-113',
+    ]);
+    expect(final.lines.map(cellsToLine).filter((line) => line === 'line-112')).toHaveLength(1);
+    expect(final.lines.map(cellsToLine).filter((line) => line === 'line-113')).toHaveLength(1);
   });
 
   it('keeps sparse gaps when the requested window still has unknown rows', () => {

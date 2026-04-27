@@ -16,4 +16,11 @@ describe('daemon mirror lab isolation gate', () => {
     expect(script).toContain("spawn(tsxBin, ['src/server/server.ts']");
     expect(script).not.toContain("spawn(process.execPath, [tsxBin, 'src/server/server.ts']");
   });
+
+  it('replays client mirror history with revision-reset aware helper', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'client-mirror-replay.ts'), 'utf8');
+    expect(script).toContain("import { replayBufferSyncHistory } from '../src/lib/terminal-buffer-replay'");
+    expect(script).toContain('replayBufferSyncHistory({');
+    expect(script).not.toContain('buffer = applyBufferSyncToSessionBuffer(buffer, item.payload');
+  });
 });

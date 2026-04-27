@@ -9,10 +9,9 @@ import {
   shouldReconnectQueuedActiveInput,
   useSession,
 } from './SessionContext';
-import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
-import { getDefaultTerminalViewportSize } from '../lib/default-terminal-viewport';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -951,7 +950,6 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
   it('bootstrap sync starts from head truth and only asks the latest follow window after head arrives', async () => {
-    const initialViewport = getDefaultTerminalViewportSize();
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -990,7 +988,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(followRequest).toMatchObject({
         type: 'buffer-sync-request',
         payload: {
-          requestStartIndex: Math.max(0, 240 - (initialViewport.rows * 3)),
+          requestStartIndex: Math.max(0, 240 - resolveTerminalRequestWindowLines(24)),
           requestEndIndex: 240,
         },
       });
@@ -1357,7 +1355,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       const lastRequest = [...readSentMessages(ws)].reverse().find((item) => item.type === 'buffer-sync-request');
       expect(lastRequest?.payload?.requestStartIndex).toBe(
-        Math.max(8, 80 - getDefaultTerminalViewportSize().rows),
+        56,
       );
       expect(lastRequest?.payload?.requestEndIndex).toBe(80);
       expect(lastRequest?.payload?.missingRanges).toBeUndefined();
@@ -2078,6 +2076,64 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
+  it('stitches back-to-back buffer-sync payloads that arrive in the same task without repeating the newest tail in history', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    act(() => {
+      ws.triggerMessage({
+        type: 'buffer-sync',
+        payload: indexedPayload({
+          startIndex: 100,
+          endIndex: 106,
+          viewportEndIndex: 106,
+          revision: 1,
+          lines: [
+            [100, 'line-a'],
+            [101, 'line-b'],
+            [102, 'line-c'],
+            [103, 'line-d'],
+            [104, 'line-e'],
+            [105, 'line-f'],
+          ],
+        }),
+      });
+      ws.triggerMessage({
+        type: 'buffer-sync',
+        payload: indexedPayload({
+          startIndex: 98,
+          endIndex: 107,
+          viewportEndIndex: 107,
+          revision: 2,
+          lines: [
+            [98, 'line-y'],
+            [99, 'line-z'],
+            [106, 'line-g'],
+          ],
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-lines').textContent).toContain('line-y|line-z|line-a|line-b|line-c|line-d|line-e|line-f|line-g');
+      expect(screen.getByTestId('session-lines').textContent).not.toContain('line-g|line-g');
+      expect(screen.getByTestId('session-revision').textContent).toBe('2');
+    });
+  });
+
   it('keeps latest mirror truth across reconnect and rejects stale post-reconnect buffer-sync payloads', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -2261,6 +2317,110 @@ describe('SessionContext websocket dynamic refresh', () => {
         .find((item) => item.type === 'connect');
       expect(connectMessage?.payload?.sessionName).toBe('zterm_mirror_lab_2');
     });
+  });
+
+  it('sends the same stable clientSessionId in both initial connect and reconnect handshakes', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+
+    await waitFor(() => {
+      const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
+      expect(connectMessage?.payload?.clientSessionId).toBe('session-1');
+    });
+
+    fireEvent.click(screen.getByText('reconnect-session'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const reconnectWs = MockWebSocket.instances[1]!;
+    reconnectWs.triggerOpen();
+
+    await waitFor(() => {
+      const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
+      expect(reconnectMessage?.payload?.clientSessionId).toBe('session-1');
+    });
+  });
+
+  it('does not send Android UI viewport rows/cols in connect or reconnect handshakes', async () => {
+    const originalInnerHeight = window.innerHeight;
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+
+      await waitFor(() => {
+        const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
+        expect(connectMessage?.payload?.clientSessionId).toBe('session-1');
+        expect(connectMessage?.payload?.cols).toBeUndefined();
+        expect(connectMessage?.payload?.rows).toBeUndefined();
+      });
+
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: Math.max(320, originalInnerHeight - 240),
+      });
+
+      fireEvent.click(screen.getByText('reconnect-session'));
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const reconnectWs = MockWebSocket.instances[1]!;
+      reconnectWs.triggerOpen();
+
+      await waitFor(() => {
+        const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
+        expect(reconnectMessage?.payload?.clientSessionId).toBe('session-1');
+        expect(reconnectMessage?.payload?.cols).toBeUndefined();
+        expect(reconnectMessage?.payload?.rows).toBeUndefined();
+      });
+    } finally {
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
+  });
+
+  it('keeps the inactive tab transport open when switching active tabs', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+    expect(ws1.readyState).toBe(MockWebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    fireEvent.click(screen.getByText('switch-first'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    expect(ws1.readyState).toBe(MockWebSocket.OPEN);
+    expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(2);
   });
 
   it('releases the reconnect bucket when an opened reconnect socket never completes the session handshake', async () => {
@@ -2562,6 +2722,10 @@ describe('SessionContext websocket dynamic refresh', () => {
         sessionId: 'session-1',
       },
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('session-state').textContent).toBe('connected');
     ws.triggerMessage({
       type: 'buffer-sync',
       payload: indexedPayload({
@@ -2571,8 +2735,10 @@ describe('SessionContext websocket dynamic refresh', () => {
         lines: Array.from({ length: 240 }, (_, index) => [index, `row-${String(index).padStart(3, '0')}`] as const),
       }),
     });
-
-    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('3'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('session-revision').textContent).toBe('3');
     ws.sent.length = 0;
 
     ws.triggerMessage({
@@ -2585,17 +2751,17 @@ describe('SessionContext websocket dynamic refresh', () => {
         availableEndIndex: 240,
       },
     });
-
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws);
-      const tailRefresh = sentMessages.find((item) => item.type === 'buffer-sync-request');
-      expect(tailRefresh).toMatchObject({
-        type: 'buffer-sync-request',
-        payload: {
-          requestStartIndex: Math.max(0, 240 - getDefaultTerminalViewportSize().rows),
-          requestEndIndex: 240,
-        },
-      });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const sentMessages = readSentMessages(ws);
+    const tailRefresh = sentMessages.find((item) => item.type === 'buffer-sync-request');
+    expect(tailRefresh).toMatchObject({
+      type: 'buffer-sync-request',
+      payload: {
+        requestStartIndex: 216,
+        requestEndIndex: 240,
+      },
     });
   });
 
@@ -2936,6 +3102,51 @@ describe('SessionContext websocket dynamic refresh', () => {
           localEndIndex: 172141,
           requestStartIndex: 172141,
           requestEndIndex: 172150,
+        },
+      });
+    });
+
+    ws.sent.length = 0;
+
+    act(() => {
+      ws.triggerMessage({
+        type: 'buffer-sync',
+        payload: compactPayload({
+          revision: 4257,
+          startIndex: 172141,
+          endIndex: 172150,
+          cols: 56,
+          rows: 33,
+          lines: Array.from({ length: 9 }, (_, offset) => [172141 + offset, `tail-${172141 + offset}`] as const),
+        }),
+      });
+      ws.triggerMessage({
+        type: 'buffer-head',
+        payload: {
+          sessionId: 'compact-follow-session',
+          revision: 4258,
+          latestEndIndex: 172159,
+          availableStartIndex: 171126,
+          availableEndIndex: 172159,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compact-follow-session-revision').textContent).toBe('4257');
+      expect(screen.getByTestId('compact-follow-session-end-index').textContent).toBe('172150');
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      const followUpRequest = sentMessages.find((item) => item.type === 'buffer-sync-request');
+      expect(followUpRequest).toMatchObject({
+        type: 'buffer-sync-request',
+        payload: {
+          knownRevision: 4257,
+          localEndIndex: 172150,
+          requestStartIndex: 172150,
+          requestEndIndex: 172159,
         },
       });
     });

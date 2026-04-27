@@ -690,6 +690,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
         });
 
         const hostConfig: HostConfigMessage = {
+          clientSessionId: nextSessionId,
           name: targetHost.name,
           bridgeHost: targetHost.bridgeHost,
           bridgePort: targetHost.bridgePort,
@@ -866,6 +867,7 @@ export function SessionProvider({ children, wsUrl, terminalCacheLines = DEFAULT_
 
     ws.onopen = () => {
       const hostConfig: HostConfigMessage = {
+        clientSessionId: sessionId,
         name: host.name,
         bridgeHost: host.bridgeHost,
         bridgePort: host.bridgePort,

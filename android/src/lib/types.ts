@@ -217,6 +217,12 @@ export interface PasteImageStartPayload {
   pasteSequence?: string;
 }
 
+export interface AttachFileStartPayload {
+  name: string;
+  mimeType: string;
+  byteLength: number;
+}
+
 export interface RuntimeDebugLogEntry {
   seq: number;
   ts: string;
@@ -331,6 +337,7 @@ export type ClientMessage =
   | { type: 'input'; payload: string }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
+  | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'ping' }
   | { type: 'close' };
@@ -354,6 +361,7 @@ export type ServerMessage =
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
+  | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
@@ -361,6 +369,7 @@ export type ServerMessage =
 
 // 用于 WebSocket 传输的 Host 配置（不含敏感信息的长期存储）
 export interface HostConfigMessage {
+  clientSessionId: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;

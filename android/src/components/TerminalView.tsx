@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTerminalThemePreset, type TerminalThemePreset } from '@zterm/shared';
 import type {
   TerminalCell,
+  TerminalCursorState,
   TerminalGapRange,
   TerminalResizeHandler,
   TerminalViewportChangeHandler,
@@ -19,6 +20,7 @@ interface TerminalViewProps {
   daemonHeadEndIndex?: number;
   bufferGapRanges?: TerminalGapRange[];
   cursorKeysApp?: boolean;
+  cursor?: TerminalCursorState | null;
   active?: boolean;
   bufferPullActive?: boolean;
   inputResetEpoch?: number;
@@ -43,7 +45,6 @@ const FLAG_DIM = 0x02;
 const FLAG_ITALIC = 0x04;
 const FLAG_UNDERLINE = 0x08;
 const FLAG_REVERSE = 0x20;
-const FLAG_CURSOR = 0x100;
 const FLAG_INVISIBLE = 0x40;
 const FLAG_STRIKETHROUGH = 0x80;
 const NORMAL_CURSOR_KEYS = {
@@ -116,11 +117,11 @@ function colorToCSS(index: number, theme: TerminalThemePreset): string | null {
   return `rgb(${level},${level},${level})`;
 }
 
-function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
+function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset, cursorActive = false) {
   const cell = normalizeCell(inputCell);
   let fg = cell.fg;
   let bg = cell.bg;
-  const reverse = Boolean(cell.flags & FLAG_REVERSE);
+  const reverse = Boolean(cell.flags & FLAG_REVERSE) || cursorActive;
 
   if (reverse) {
     [fg, bg] = [bg, fg];
@@ -136,9 +137,15 @@ function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
   };
 }
 
-function cellStyle(inputCell: TerminalCell, rowHeight: string, cellWidthPx: number, theme: TerminalThemePreset) {
+function cellStyle(
+  inputCell: TerminalCell,
+  rowHeight: string,
+  cellWidthPx: number,
+  theme: TerminalThemePreset,
+  cursorActive = false,
+) {
   const cell = normalizeCell(inputCell);
-  const colors = resolveColors(cell, theme);
+  const colors = resolveColors(cell, theme, cursorActive);
   const safeCellWidthPx = Math.max(1, Number.isFinite(cellWidthPx) ? cellWidthPx : 1);
   const style: Record<string, string> = {
     display: 'inline-block',
@@ -222,6 +229,25 @@ function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
 
+function resolveCursorCellColumn(row: TerminalCell[], preferredCol: number) {
+  if (row.length === 0) {
+    return -1;
+  }
+
+  const clamped = Math.max(0, Math.min(row.length - 1, Math.floor(preferredCol)));
+  if (row[clamped]?.width !== 0) {
+    return clamped;
+  }
+
+  for (let col = clamped - 1; col >= 0; col -= 1) {
+    if (row[col]?.width !== 0) {
+      return col;
+    }
+  }
+
+  return clamped;
+}
+
 function resolveDomBottomScrollTop(host: HTMLDivElement, targetScrollTop: number) {
   const safeTargetScrollTop = Math.max(0, targetScrollTop);
   const domBottomScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
@@ -254,6 +280,7 @@ const VisibleRow = memo(function VisibleRow({
   cellWidthPx,
   isGap,
   theme,
+  cursor,
 }: {
   row: TerminalCell[];
   rowIndex: number;
@@ -262,6 +289,7 @@ const VisibleRow = memo(function VisibleRow({
   cellWidthPx: number;
   isGap: boolean;
   theme: TerminalThemePreset;
+  cursor: TerminalCursorState | null;
 }) {
   if (isGap) {
     return (
@@ -285,6 +313,10 @@ const VisibleRow = memo(function VisibleRow({
     );
   }
 
+  const cursorColumn = cursor && cursor.visible && cursor.rowIndex === absoluteIndex
+    ? resolveCursorCellColumn(row, cursor.col)
+    : -1;
+
   return (
     <div
       data-terminal-row="true"
@@ -300,8 +332,8 @@ const VisibleRow = memo(function VisibleRow({
         ? row.map((cell, cellIndex) => (
             <span
               key={`cell-${rowIndex}-${cellIndex}`}
-              data-terminal-cursor={cell.flags & FLAG_CURSOR ? 'true' : undefined}
-              style={cellStyle(cell, rowHeight, cellWidthPx, theme)}
+              data-terminal-cursor={cursorColumn === cellIndex ? 'true' : undefined}
+              style={cellStyle(cell, rowHeight, cellWidthPx, theme, cursorColumn === cellIndex)}
             >
               {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
             </span>
@@ -316,6 +348,9 @@ const VisibleRow = memo(function VisibleRow({
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
   && prev.theme === next.theme
+  && prev.cursor?.rowIndex === next.cursor?.rowIndex
+  && prev.cursor?.col === next.cursor?.col
+  && prev.cursor?.visible === next.cursor?.visible
 ));
 
 export function TerminalView({
@@ -329,6 +364,7 @@ export function TerminalView({
   daemonHeadEndIndex,
   bufferGapRanges = [],
   cursorKeysApp = false,
+  cursor = null,
   active = false,
   bufferPullActive = false,
   inputResetEpoch = 0,
@@ -622,7 +658,8 @@ export function TerminalView({
     guardPendingFollowDrift?: boolean;
   }) => {
     pendingFollowRenderBottomIndexRef.current = nextRenderBottomIndex;
-    pendingFollowScrollSyncRef.current = Boolean(options?.guardPendingFollowDrift);
+    pendingFollowScrollSyncRef.current = pendingFollowScrollSyncRef.current
+      || Boolean(options?.guardPendingFollowDrift);
     if (followScrollSyncTimerRef.current !== null) {
       return;
     }
@@ -1075,6 +1112,16 @@ export function TerminalView({
           return;
         }
         const host = event.currentTarget as HTMLDivElement;
+        if (
+          !readingModeRef.current
+          && pendingFollowScrollSyncRef.current
+          && pendingFollowRenderBottomIndexRef.current !== null
+        ) {
+          queueFollowScrollSync(pendingFollowRenderBottomIndexRef.current, {
+            guardPendingFollowDrift: true,
+          });
+          return;
+        }
         if (!readingModeRef.current && pendingFollowScrollSyncRef.current) {
           const scrollTopUnchanged = Math.abs(host.scrollTop - lastSettledScrollTopRef.current) <= 1;
           if (scrollTopUnchanged) {
@@ -1185,7 +1232,7 @@ export function TerminalView({
         fontSize: `${fontSize}px`,
       }}
     >
-      <div className="term-grid" data-cursor-source="buffer-store" style={{ paddingTop: `${termGridPaddingTopPx}px`, paddingBottom: `${termGridPaddingBottomPx}px` }}>
+      <div className="term-grid" data-cursor-source="cursor-metadata" style={{ paddingTop: `${termGridPaddingTopPx}px`, paddingBottom: `${termGridPaddingBottomPx}px` }}>
         {historyLoading ? (
           <div
             data-terminal-history-loading="true"
@@ -1229,6 +1276,7 @@ export function TerminalView({
             cellWidthPx={resolvedCellWidthPx}
             isGap={isGap}
             theme={theme}
+            cursor={cursor}
           />
         ))}
       </div>

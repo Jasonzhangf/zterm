@@ -17,6 +17,20 @@ function row(text: string): TerminalCell[] {
   }));
 }
 
+function mixedBodyRow(): TerminalCell[] {
+  return [
+    { char: 'A'.codePointAt(0)!, fg: 256, bg: 256, flags: 0, width: 1 },
+    { char: 32, fg: 256, bg: 8, flags: 0, width: 1 },
+    { char: '你'.codePointAt(0)!, fg: 6, bg: 256, flags: 0, width: 2 },
+    { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+    { char: '好'.codePointAt(0)!, fg: 6, bg: 256, flags: 0, width: 2 },
+    { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+    { char: 'B'.codePointAt(0)!, fg: 256, bg: 256, flags: 0, width: 1 },
+    { char: ' '.codePointAt(0)!, fg: 256, bg: 256, flags: 0, width: 1 },
+    { char: 'C'.codePointAt(0)!, fg: 256, bg: 256, flags: 0, width: 1 },
+  ];
+}
+
 function createMirror(lines: string[], overrides?: Partial<BufferSyncMirrorSnapshot>): BufferSyncMirrorSnapshot {
   return {
     revision: 7,
@@ -25,6 +39,7 @@ function createMirror(lines: string[], overrides?: Partial<BufferSyncMirrorSnaps
     cols: 80,
     rows: 24,
     cursorKeysApp: false,
+    cursor: null,
     ...overrides,
   };
 }
@@ -50,6 +65,7 @@ describe('buildRequestedRangeBufferPayload', () => {
       latestEndIndex: 103,
       availableStartIndex: 100,
       availableEndIndex: 103,
+      cursor: null,
     });
   });
 
@@ -67,6 +83,39 @@ describe('buildRequestedRangeBufferPayload', () => {
       availableEndIndex: 103,
     });
     expect(payload.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([100, 101, 102]);
+  });
+
+  it('keeps buffer lines raw and sends cursor separately as metadata', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror(['prompt-$ '], {
+        cursor: {
+          rowIndex: 100,
+          col: 8,
+          visible: true,
+        },
+      }),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 101,
+      }),
+    );
+
+    expect(payload.cursor).toEqual({
+      rowIndex: 100,
+      col: 8,
+      visible: true,
+    });
+    const compact = payload.lines[0] as { i: number; t: string; s?: [number, number, number, number, number][] };
+    expect(compact.t).toBe('prompt-$ ');
+    expect(compact.s).toBeUndefined();
+    const expanded = expandCompactLine(compact, 80);
+    expect(expanded[8]).toMatchObject({
+      char: 32,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    });
   });
 
   it('still returns buffer-sync semantics for zero-width requests instead of forcing head-only semantics', () => {
@@ -158,5 +207,69 @@ describe('buildRequestedRangeBufferPayload', () => {
       flags: 0,
       width: 1,
     });
+  });
+
+  it('keeps visible body-row semantics for ANSI/CJK mixed rows after compact roundtrip', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror([], {
+        bufferStartIndex: 100,
+        bufferLines: [mixedBodyRow()],
+      }),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 101,
+      }),
+    );
+
+    const compact = payload.lines[0] as { i: number; t: string; w?: number[]; s?: [number, number, number, number, number][] };
+    expect(compact.t).toBe('A 你好B C');
+    expect(compact.w).toEqual([1, 1, 2, 2, 1, 1, 1]);
+    expect(compact.s).toEqual([
+      [1, 2, 256, 8, 0],
+      [2, 6, 6, 256, 0],
+    ]);
+
+    const expanded = expandCompactLine(compact, 9);
+    expect(expanded.slice(0, 9).map((cell) => ({
+      char: cell.char,
+      fg: cell.fg,
+      bg: cell.bg,
+      flags: cell.flags,
+      width: cell.width,
+    }))).toEqual([
+      { char: 'A'.codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 32, fg: 256, bg: 8, flags: 0, width: 1 },
+      { char: '你'.codePointAt(0), fg: 6, bg: 256, flags: 0, width: 2 },
+      { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+      { char: '好'.codePointAt(0), fg: 6, bg: 256, flags: 0, width: 2 },
+      { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+      { char: 'B'.codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: ' '.codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 'C'.codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 },
+    ]);
+  });
+
+  it('restores double-width continuation cells with the same buffer truth as daemon rows', () => {
+    const compact = {
+      i: 100,
+      t: '你A',
+      w: [2, 1],
+      s: [[0, 2, 6, 256, 0]] as [number, number, number, number, number][],
+    };
+
+    const expanded = expandCompactLine(compact, 4);
+
+    expect(expanded.slice(0, 4).map((cell) => ({
+      char: cell.char,
+      fg: cell.fg,
+      bg: cell.bg,
+      flags: cell.flags,
+      width: cell.width,
+    }))).toEqual([
+      { char: '你'.codePointAt(0), fg: 6, bg: 256, flags: 0, width: 2 },
+      { char: 32, fg: 6, bg: 256, flags: 0, width: 0 },
+      { char: 'A'.codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 32, fg: 256, bg: 256, flags: 0, width: 1 },
+    ]);
   });
 });

@@ -47,6 +47,17 @@
   - 标 gap
   - 滑动窗口
   - 通知 renderer
+- active / inactive 只影响取数，不影响 logical session / transport 存活
+- reconnect 必须重试同一个 session identity，不得借机重建第二份 session 语义
+
+### 2.2.1 session / transport 生命周期
+
+- client session 是稳定业务对象
+- ws / rtc transport 是可替换物理连接
+- inactive tab 只停取数，不关 session / transport
+- ws close 只说明 transport 死，不说明 session truth 作废
+- daemon 端 reconnect 必须绑定回同一个 `clientSessionId`
+- daemon shutdown 才是统一资源回收点；client 显式 close 是单 session 回收点
 
 ### 2.3 renderer
 
@@ -65,6 +76,10 @@
 - UI shell 只负责容器位置 / 裁切 / keyboard 抬升
 - IME 不得进入 buffer / render 真相链
 - terminal 内容层不要因为 shell transform / 合成层错误而被误判成 buffer 问题
+- QuickBar / 快捷菜单整块 shell 区域都必须阻断非交互点击；空白区域点击不得穿透触发 ImeAnchor / terminal focus
+- `keyboardInsetPx > 0` 时，QuickBar shell rows 必须整体抬升到键盘上方，不能被 IME 覆盖
+- Android IME 弹起时，header 顶部 inset 必须保持稳定；`visualViewport.offsetTop` 不得把顶部空白再抬一遍
+- Android connect / reconnect 不得把当前容器测得的 `cols/rows` 发给 daemon 改 tmux geometry；键盘/前后台/容器高度变化都只能改 UI shell 容器与 renderer 可见窗口
 
 ---
 
@@ -111,6 +126,8 @@ tmux oracle
 6. `buffer-head` 不会卡死 in-flight pull
 7. `buffer-sync` apply 后会通知 renderer
 8. **local window invalid 不得清空已有 absolute-index truth**
+9. inactive tab 只停轮询，不 close transport/session
+10. reconnect 仍使用同一 session identity
 
 ### Group C. renderer orchestration
 
@@ -138,6 +155,10 @@ tmux oracle
 4. **语音输入法转文字 / 中文 commit** 不需要再补一个字符才刷新
 5. 输入后不会进入“界面刷新但 terminal 再也收不到输入”的死态
 6. 输入发出后、mirror 未返回前，terminal 可见内容不得先本地变化
+7. QuickBar shell 空白区域点击不会弹出 IME
+8. keyboard 弹起时 QuickBar shell rows 始终可见，不被 IME 盖住
+9. keyboard 弹起时 header 顶部 inset 不会突然变大，不会出现顶部空白被多算一遍
+10. keyboard 弹起 / reconnect / 前后台恢复后，tmux rows 不会被 Android UI 容器高度改写
 
 ### Group D.1 prompt / input row parity
 
@@ -157,6 +178,15 @@ tmux oracle
 4. `daemon-restart-recover`
 5. `top-live`
 6. `vim-live`
+
+### Group E.1 session / transport lifecycle
+
+必须长期覆盖：
+
+1. same `clientSessionId` reconnect 会复用 daemon logical session
+2. ws close 只 detach transport，不删除 daemon logical session
+3. inactive tab 不会触发 client side close / daemon side close
+4. daemon shutdown 会统一回收 logical session / transport / mirror
 
 ### Group F. APK smoke
 
@@ -219,6 +249,15 @@ tmux oracle
 3. 是否仍有 snapshot / full-tail / second semantics 残留
 4. `buffer-sync-request` 的 `requestStartIndex / requestEndIndex` 实际是多少
 
+### 5.6 看起来像“正文解析错了”
+
+优先查：
+
+1. 这是 **terminal body** 还是 **IME/editor overlay**
+2. daemon compact wire 的正文 mixed row roundtrip 是否真红
+3. renderer 是否把 cursor metadata / overlay 叠进了普通 body row
+4. 若只有底部编辑条错，而 body payload parity 正常，先修 IME/editor，不要回退 daemon codec
+
 ### 5.6 输入后开始刷新，但随后又无法输入
 
 优先查：
@@ -236,6 +275,15 @@ tmux oracle
 2. active re-entry / foreground resume 时，旧 in-flight pull bookkeeping 是否已经清掉
 3. active re-entry 后是否真的出现新的 `buffer-head-request`
 4. 若 head / pong / 任意 server activity 都没有推进，是否立即把旧 transport 判失活并重建
+
+### 5.8 某些 tab 一切回来就重连很慢 / 某些 tab 直接挂住
+
+优先查：
+
+1. inactive tab 是不是被错误 close 了 session / transport
+2. reconnect 是不是又在走 “new ws + new logical session” 而不是 same-session retry
+3. daemon ws close 时是不是把 logical client session 直接删了
+4. 同 host 多 tab 是否被错误串进同一个重连闸门，导致 active tab 被 hidden tab 阻塞
 
 ---
 

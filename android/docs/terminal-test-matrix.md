@@ -19,6 +19,7 @@
 |---|---|---|---|
 | A | server contract | 已有基础覆盖 | `src/server/buffer-sync-contract.test.ts` |
 | B | buffer manager orchestration | 覆盖较强 | `src/contexts/SessionContext.ws-refresh.test.tsx` |
+| B1 | session / transport lifecycle | **需要补专项红测** | `src/contexts/SessionContext.ws-refresh.test.tsx`, `src/server/*lifecycle*.test.ts` |
 | C | renderer orchestration | 覆盖较强 | `src/components/TerminalView.dynamic-refresh.test.tsx` |
 | D | Android IME / input loop | 有基础覆盖，**语音/CJK commit 缺口明显** | `src/pages/TerminalPage.android-ime.test.tsx`, `src/App.android-ime-input-loop.test.tsx` |
 | E | first paint / app loop | 已有基础覆盖 | `src/App.first-paint.test.tsx`, `src/App.first-paint.real-terminal.test.tsx` |
@@ -54,6 +55,7 @@
 - [ ] 明确断言：server 不在 `head/range` 请求路径里触发 planner / rebuild / capture
 - [ ] 明确断言：大请求不会被 server 擅自放大成 full-tail
 - [ ] **专项断言：daemon 不得因 cursor 改写任何 buffer cell；cursor 若存在，必须走独立 metadata**
+- [ ] **专项断言：正文 mixed row（ANSI + CJK + reverse + bg span + 中间空格）compact roundtrip 后 `char/fg/bg/flags/width` 可见语义保持一致**
 
 ---
 
@@ -99,6 +101,32 @@
 - [ ] **专项断言：anchor mismatch / head mismatch 不得把 local buffer 变空**
 - [ ] **专项断言：若已有 local lines，错误窗口判定后仍保留并可被 renderer 消费**
 - [ ] **专项断言：大带宽场景下 request range 仍保持三屏 / diff，不会扩大到异常 full-tail**
+
+## B1. session / transport lifecycle
+
+### 目标
+
+- client session 与 ws transport 解耦
+- inactive 只停取数，不 close session/transport
+- reconnect 重试同一个 session identity
+- same host 多 tab 不得因为 hidden tab 阻塞 active tab 的 same-session retry
+
+### 已覆盖
+
+- `src/contexts/SessionContext.ws-refresh.test.tsx`
+  - active session reconnect 优先
+  - opened reconnect socket never completes handshake 时会释放 bucket
+  - active tab stale-open transport 会立即重连
+
+### 还缺
+
+- [ ] **专项断言：inactive tab 停轮询后 transport 仍保持打开**
+- [ ] **专项断言：foreground resume / tab re-entry 不会先 cleanup session 再 brand-new connect**
+- [ ] **专项断言：reconnect handshake 带同一个 `clientSessionId`**
+- [ ] **专项断言：同 host 多 tab 下，hidden tab 不会抢占 active tab 的 same-session retry**
+- [ ] **daemon 专项：ws close 只 detach transport，不删除 logical client session**
+- [ ] **daemon 专项：same `clientSessionId` reconnect 复用同一 logical client session**
+- [ ] **daemon 专项：shutdown 统一回收 logical session / transport / mirror**
 
 ---
 
@@ -191,6 +219,8 @@
 - [ ] **输入后界面开始刷新，但 terminal 不得失去后续输入能力**
 - [ ] **刷新期间 keyboard/IME 状态变化，不得把 terminal 再次切回不可输入**
 - [ ] **editor overlay 打开/关闭时 ImeAnchor focusable 状态切换正确，不抢 WebView 焦点**
+- [ ] **QuickBar shell 空白区域点击不得弹出 IME；整个 shell 区域都要阻断非交互点击**
+- [ ] **keyboardInset 生效时 QuickBar shell rows 必须抬升到键盘上方，不被 IME 覆盖**
 
 ## D.1 prompt / cursor style parity
 
@@ -210,6 +240,7 @@
 - [ ] **App/IME close loop：输入发出后、buffer-sync 前，terminal 可见内容不变**
 - [ ] **daemon contract：cursor 不得写进 `lines[].cells[].flags`；buffer truth 在有无 cursor 时必须一致**
 - [ ] **renderer parity：收到带样式的 prompt/input row 后，只能回显 payload 的 `fg/bg/flags`**
+- [ ] **IME/editor isolation：底部 editor overlay 样式不得冒充 terminal prompt/input/body**
 
 ---
 

@@ -1,12 +1,11 @@
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import {
-  applyBufferSyncToSessionBuffer,
   cellsToLine,
-  createSessionBufferState,
 } from '../src/lib/terminal-buffer';
 import type { TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
+import { replayBufferSyncHistory } from '../src/lib/terminal-buffer-replay';
 
 interface ProbeHistoryEntry {
   at: string;
@@ -99,16 +98,12 @@ function replayBuffer(
   paneRows: number,
   paneCols: number,
 ) {
-  let buffer = createSessionBufferState({
-    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
-    lines: [],
+  const buffer = replayBufferSyncHistory({
+    history,
     rows: paneRows,
     cols: paneCols,
+    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   });
-
-  for (const item of history) {
-    buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, DEFAULT_TERMINAL_CACHE_LINES);
-  }
 
   const renderWindow = deriveRenderRows({
     lines: buffer.lines,

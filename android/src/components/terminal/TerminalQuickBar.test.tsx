@@ -190,12 +190,12 @@ describe('TerminalQuickBar', () => {
   it('hides shell quick rows while floating menu is open', async () => {
     renderQuickBar();
 
-    expect(screen.getByRole('button', { name: '图' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '📎' })).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '图' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '📎' })).toBeNull();
     });
   });
 
@@ -204,13 +204,13 @@ describe('TerminalQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '图' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '📎' })).toBeNull();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '关闭快捷输入' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '图' })).not.toBeNull();
+      expect(screen.getByRole('button', { name: '📎' })).not.toBeNull();
     });
   });
 
@@ -223,6 +223,42 @@ describe('TerminalQuickBar', () => {
     const bubble = screen.getByRole('button', { name: 'Toggle floating quick menu' });
     const style = bubble.getAttribute('style') || '';
     expect(style).toContain('bottom: calc(312px');
+  });
+
+  it('does not add a second keyboard inset padding inside shell quick rows', async () => {
+    renderQuickBar({
+      keyboardVisible: true,
+      keyboardInsetPx: 240,
+    });
+
+    const shellRows = screen.getByTestId('terminal-quickbar-shell-rows');
+    const style = shellRows.getAttribute('style') || '';
+    expect(style).not.toContain('padding-bottom: 240px');
+  });
+
+  it('blocks non-interactive shell clicks from bubbling to terminal layer', async () => {
+    const onClick = vi.fn();
+    render(
+      <div onClick={onClick}>
+        <TerminalQuickBar
+          activeSessionId="session-1"
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onSendSequence={vi.fn()}
+          onSessionDraftChange={vi.fn()}
+          onSessionDraftSend={vi.fn()}
+          onQuickActionsChange={vi.fn()}
+          onShortcutActionsChange={vi.fn()}
+          onOpenScheduleComposer={vi.fn()}
+          onMeasuredHeightChange={vi.fn()}
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-quickbar-shell-rows'));
+
+    expect(onClick).not.toHaveBeenCalled();
   });
 
   it('reports DOM editor focus transitions for quick input textarea', async () => {

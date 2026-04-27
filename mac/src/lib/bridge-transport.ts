@@ -78,6 +78,7 @@ function normalizeTarget(host: EditableHost | Host): ActiveBridgeTargetState {
 function buildHostConfig(host: EditableHost | Host, cols = 80, rows = 24): HostConfigMessage {
   const target = normalizeTarget(host);
   return {
+    clientSessionId: buildBridgeTargetKey(target),
     name: target.name,
     bridgeHost: target.bridgeHost,
     bridgePort: target.bridgePort,

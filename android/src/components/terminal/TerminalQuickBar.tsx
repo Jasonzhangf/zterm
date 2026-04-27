@@ -39,7 +39,7 @@ const SHORTCUT_PRESETS: ShortcutPreset[] = [
 ];
 
 const BASE_ACTIONS = [
-  { id: 'image', label: '图', sequence: '' },
+  { id: 'attach', label: '📎', sequence: '' },
   { id: 'continue', label: '继续', sequence: '继续执行\r' },
   { id: 'esc', label: 'Esc', sequence: '\x1b' },
   { id: 'tab', label: 'Tab', sequence: '\t' },
@@ -62,6 +62,7 @@ interface TerminalQuickBarProps {
   shortcutActions: TerminalShortcutAction[];
   onSendSequence?: (sequence: string) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
+  onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
   onToggleKeyboard?: () => void;
@@ -635,6 +636,7 @@ export function TerminalQuickBar({
   keyboardVisible = false,
   keyboardInsetPx = 0,
   onImagePaste,
+  onFileAttach,
   onToggleKeyboard,
   onQuickActionsChange,
   onShortcutActionsChange,
@@ -775,7 +777,7 @@ export function TerminalQuickBar({
       onToggleKeyboard?.();
       return;
     }
-    if (action.id === 'image') {
+    if (action.id === 'attach') {
       imagePasteSessionIdRef.current = activeSessionId || null;
       imageInputRef.current?.click();
       return;
@@ -795,7 +797,7 @@ export function TerminalQuickBar({
     if (!action.sequence) {
       return false;
     }
-    if (action.id === 'keyboard' || action.id === 'image' || action.id === 'paste') {
+    if (action.id === 'keyboard' || action.id === 'attach' || action.id === 'paste') {
       return false;
     }
     if (action.id.startsWith('shortcut-editor')) {
@@ -922,7 +924,7 @@ export function TerminalQuickBar({
   };
 
   const topFixedActions = useMemo(
-    () => BASE_ACTIONS.filter((action) => ['image', 'keyboard', 'up'].includes(action.id)),
+    () => BASE_ACTIONS.filter((action) => ['attach', 'keyboard', 'up'].includes(action.id)),
     [],
   );
 
@@ -1450,7 +1452,18 @@ export function TerminalQuickBar({
     };
   }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
 
-  const shellRowsLiftStyle = undefined;
+  const quickBarAllowsTarget = (target: HTMLElement | null) => {
+    return Boolean(target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label'));
+  };
+
+  const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (quickBarAllowsTarget(target)) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+  };
 
   return (
     <div
@@ -1482,24 +1495,16 @@ export function TerminalQuickBar({
         }, 0);
       }}
       onPointerDownCapture={(event) => {
-        const target = event.target as HTMLElement | null;
-        if (target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label')) {
-          return;
-        }
-        event.stopPropagation();
-        if (!target?.closest('input,textarea')) {
-          event.preventDefault();
-        }
+        blockShellEvent(event);
       }}
       onTouchStartCapture={(event) => {
-        const target = event.target as HTMLElement | null;
-        if (target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label')) {
-          return;
-        }
-        event.stopPropagation();
-        if (!target?.closest('input,textarea')) {
-          event.preventDefault();
-        }
+        blockShellEvent(event);
+      }}
+      onMouseDownCapture={(event) => {
+        blockShellEvent(event);
+      }}
+      onClickCapture={(event) => {
+        blockShellEvent(event);
       }}
       style={{
         padding: floatingMenuOpen ? '0' : `6px 0 ${mobileTheme.safeArea.bottom}`,
@@ -1511,7 +1516,7 @@ export function TerminalQuickBar({
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.txt,.md,.markdown,.text"
         style={{ display: 'none' }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
@@ -1526,9 +1531,14 @@ export function TerminalQuickBar({
             return;
           }
           try {
-            await onImagePaste?.(targetSessionId, file);
+            const isImage = file.type.startsWith('image/');
+            if (isImage) {
+              await onImagePaste?.(targetSessionId, file);
+            } else {
+              await onFileAttach?.(targetSessionId, file);
+            }
           } catch (error) {
-            alert(error instanceof Error ? error.message : 'Failed to paste image');
+            alert(error instanceof Error ? error.message : 'Failed to attach file');
           }
         }}
       />
@@ -2861,7 +2871,7 @@ export function TerminalQuickBar({
       )}
 
       {!floatingMenuOpen && (
-        <div style={shellRowsLiftStyle}>
+        <div data-testid="terminal-quickbar-shell-rows">
           <div
             style={{
               display: 'flex',

@@ -70,6 +70,35 @@ type BufferSyncResponse = {
 
 server 不关心客户端行为；它只是 tmux mirror。
 
+### 1.3 daemon client-session / transport 生命周期
+
+daemon 侧还要额外冻结一条真源：
+
+1. **daemon client session** 是稳定逻辑对象
+2. **transport(ws / rtc)** 是可替换物理连接
+3. **mirror** 仍然只代表 tmux truth
+
+关系固定为：
+
+```text
+tmux truth
+  -> mirror
+daemon logical client session
+  -> attached transport (0..1)
+```
+
+硬规则：
+
+- 新 transport 连接上来时，daemon 先按 `clientSessionId` 找已有 logical client session
+- 找到就**重绑 transport**，不是新建第二个 logical session
+- transport 断开时，只允许 **detach transport**，不得顺手删除 logical client session
+- logical client session 只允许由：
+  1. client 显式 `close`
+  2. daemon shutdown
+  3. 显式实现并写进真源的资源回收策略
+    触发销毁
+- 在本轮真源里，**没有**“ws 一断就删 client session”这条语义
+
 ---
 
 ## 2. client buffer manager
@@ -155,6 +184,31 @@ reading 不改变 head-first 主循环。
 - 不允许 snapshot / patch-middle / fallback
 - 不允许因为 `local window invalid` / `anchor mismatch` / `head mismatch` 把已有本地 buffer truth 重置成空窗
 - 不允许把“请求规划错误”实现成“先销毁已有本地内容再重拉”
+
+### 2.6 active / inactive 与 transport 生命周期
+
+buffer manager 自己还必须守住这条边界：
+
+1. **active / inactive 只影响取数频率**
+2. **不影响 session 身份**
+3. **不影响 transport 身份**
+
+固定语义：
+
+- active tab：
+  - 持续 head-first tick
+  - follow 时做 tail diff / 三屏重锚
+  - reading 时额外做 gap repair
+- inactive tab：
+  - 只是不再主动高频拉 `head/range`
+  - **不是**关闭 session
+  - **不是**关闭 transport
+  - **不是**重建 buffer truth
+
+reconnect 语义也固定：
+
+- 若 transport 死了，buffer manager / session runtime 只能做 **same session identity** 的 transport retry
+- 不允许把 reconnect 实现成“先删 session 语义，再创建一个新 session 假装恢复”
 
 ---
 
@@ -258,6 +312,10 @@ UI shell 只负责：
 - IME 只移动容器，不改变内容
 - IME 不影响 buffer manager 决策
 - IME 不影响 renderer 内容真相
+- keyboard inset 只能消费一次：**terminal stage** 负责用 `quickBarHeight + keyboardLift` 做底部裁切，**QuickBar 容器** 负责用 `bottom = keyboardLift` 整体抬到键盘上方；禁止再通过 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
+- Android terminal header 的顶部 inset 必须是 **UI shell 提供的稳定单一像素真相**；IME 弹起导致的 `visualViewport.offsetTop` 不得被二次叠加成 header top inset
+- Android connect / reconnect 不得把 UI 容器当前测得的 `cols/rows` 回写给 daemon 作为 tmux geometry 真相；shell 高度变化只允许影响容器裁切，**不得**改写 tmux 宽高
+- “看不到的区域不渲染”属于 renderer 的窗口绘制职责；正确做法是 renderer 根据容器可见高度只画当前窗口，而不是 UI shell / daemon 去把 tmux 变矮
 - 若 Android terminal 输入走 `ImeAnchor`，则 native `EditText` 的 **editable / composing span / selection** 必须由 framework `InputConnection` 维护为单一真相；`commitText / finishComposingText` 不得跳过 `super` 直接短路，否则会出现输入法预编辑栏 caret 错位，但这仍属于 **IME truth bug**，不是 renderer truth
 
 ### 4.2 宽度模式配置入口
@@ -269,6 +327,23 @@ UI shell 只负责：
 - renderer / UI shell 只消费这个配置
 - buffer manager 不关心这个配置
 - daemon 也不关心 renderer 如何裁切；它只需要尊重“是否允许 client width 改写 mirror width”的协议边界
+
+### 4.3 app lifecycle 规则
+
+前后台、切 tab、恢复可见性，这些都属于 UI shell / app lifecycle。
+
+它们只允许影响：
+
+- 哪个 tab 当前 active
+- 哪些 buffer tick 当前开启 / 关闭
+- 哪个 terminal 容器当前可见
+
+不允许影响：
+
+- daemon mirror truth
+- client local buffer truth
+- logical client session 是否被销毁
+- reconnect 是否变成“新建第二个 session”
 
 ---
 

@@ -72,12 +72,11 @@ export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
     return isAndroid ? 16 : 0;
   }
 
-  const visualViewportTop = Math.max(0, Math.round(window.visualViewport?.offsetTop || 0));
   if (!isAndroid) {
-    return visualViewportTop;
+    return Math.max(0, Math.round(window.visualViewport?.offsetTop || 0));
   }
 
-  return Math.max(16, visualViewportTop);
+  return 16;
 }
 
 function resolveWindowWidth() {
@@ -178,6 +177,7 @@ interface TerminalPageProps {
   onTerminalInput?: (sessionId: string, data: string) => void;
   onTerminalViewportChange?: TerminalViewportChangeHandler;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
+  onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -346,6 +346,7 @@ export function TerminalPage({
   onTerminalInput,
   onTerminalViewportChange,
   onImagePaste,
+  onFileAttach,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -1307,6 +1308,7 @@ export function TerminalPage({
                       daemonHeadEndIndex={session.daemonHeadEndIndex || session.buffer.bufferTailEndIndex}
                       bufferGapRanges={session.buffer.gapRanges}
                       cursorKeysApp={session.buffer.cursorKeysApp}
+                      cursor={session.buffer.cursor}
                       active={sessionIsActive}
                       bufferPullActive={Boolean(sessionDebugMetrics?.[session.id]?.bufferPullActive)}
                       inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
@@ -1425,11 +1427,12 @@ export function TerminalPage({
           </div>
         ) : null}
         <div
+          data-testid="terminal-quickbar-shell"
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: `${terminalImeLiftPx}px`,
             zIndex: 10,
           }}
         >
@@ -1445,6 +1448,7 @@ export function TerminalPage({
               }
             }}
             onImagePaste={onImagePaste}
+            onFileAttach={onFileAttach}
             keyboardVisible={terminalImeActive && effectiveKeyboardLiftPx > 0}
             keyboardInsetPx={terminalImeActive ? effectiveKeyboardLiftPx : 0}
             onToggleKeyboard={handleToggleKeyboard}

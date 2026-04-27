@@ -86,6 +86,7 @@ function makeSession(id: string): Session {
       cols: 80,
       rows: 24,
       cursorKeysApp: false,
+      cursor: null,
       updateKind: 'replace',
       revision: 1,
     },
