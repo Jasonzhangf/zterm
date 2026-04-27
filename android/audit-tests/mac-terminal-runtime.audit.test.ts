@@ -157,9 +157,11 @@ describe('mac terminal-runtime audit', () => {
 
     expect(bridgeTransport.requestBufferSync).toHaveBeenCalledTimes(1);
     expect(bridgeTransport.requestBufferSync.mock.calls[0]?.[0]).toMatchObject({
-      mode: 'follow',
-      viewportEndIndex: 120,
-      viewportRows: 24,
+      knownRevision: 0,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 48,
+      requestEndIndex: 120,
     });
 
     runtime.dispose();

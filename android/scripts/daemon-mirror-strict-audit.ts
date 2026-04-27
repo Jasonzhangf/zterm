@@ -91,6 +91,18 @@ function auditCase(rootDir: string, summary: CaseSummary): AuditCaseResult {
     clientCompare: clientCompare.ok,
     stepsOk: steps.every((step) => step.ok),
   };
+  const firstBufferSyncEvent = events.find((entry) => (
+    entry.direction === 'recv'
+    && entry.type === 'buffer-sync'
+  ));
+  const firstBufferSyncWireKind = (
+    firstBufferSyncEvent?.payload
+    && typeof firstBufferSyncEvent.payload === 'object'
+    && 'wireKind' in firstBufferSyncEvent.payload
+      ? (firstBufferSyncEvent.payload as { wireKind?: string }).wireKind
+      : null
+  );
+  checks.compactWire = firstBufferSyncWireKind === 'compact';
 
   if (summary.caseName === 'initial-sync') {
     checks.startupSequence = findOrderedSequence(events, [

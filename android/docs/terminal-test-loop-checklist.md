@@ -30,6 +30,8 @@
   - `buffer-sync-request`
 - 每次回复都带当前 head
 - `head/range` 请求路径**不得触发** tmux capture / mirror rebuild
+- daemon **不得因为 cursor/selection/transient visual state 改写 buffer cells**
+- cursor 若需要下发，必须是**独立 metadata**，不能写进 `lines[].cells[].flags`
 
 ### 2.2 client buffer manager
 
@@ -54,6 +56,9 @@
   - 已有内容
   - gap / blank marker
 - **不能**把“窗口不连续”解释成“已有内容不存在”
+- `mirror-fixed` 下长行只能裁切，不能换行/重排/回写上游宽度
+- `mirror-fixed` 下横向查看只改 renderer horizontal window
+- `mirror-fixed` 下必须自动关闭左右滑切 tab
 
 ### 2.4 UI shell / IME
 
@@ -92,6 +97,7 @@ tmux oracle
 3. `buffer-sync` 只返回请求区间
 4. 每次 reply 都带 `availableStartIndex / availableEndIndex / latestEndIndex / revision`
 5. 不允许把 `buffer-sync-request` 变成别的 ack 语义
+6. cursor 不得改写任何 buffer cell；有无 cursor 时 `lines` 必须保持同一 tmux truth
 
 ### Group B. buffer manager orchestration
 
@@ -117,6 +123,10 @@ tmux oracle
 5. 输入会退出 reading 回到底部
 6. 底部继续下拉/拖动不会把已有内容画空
 7. 当前窗口有 gap 时继续画已有内容 + gap marker
+8. `mirror-fixed` 长行默认左裁切，不本地重排
+9. `mirror-fixed` 横向平移只移动 renderer 列窗口，不改 buffer / head
+10. `mirror-fixed` 开启后左右滑切 tab 自动关闭
+11. 混合 `ASCII + CJK double-width` 时，renderer 必须按实测像素列宽稳定对齐，不能因为 `1ch / 2ch` 假设导致整行错位
 
 ### Group D. Android IME / input loop
 
@@ -127,6 +137,15 @@ tmux oracle
 3. 输入后 active tab 会进入 `input -> head -> sync -> render`
 4. **语音输入法转文字 / 中文 commit** 不需要再补一个字符才刷新
 5. 输入后不会进入“界面刷新但 terminal 再也收不到输入”的死态
+6. 输入发出后、mirror 未返回前，terminal 可见内容不得先本地变化
+
+### Group D.1 prompt / input row parity
+
+必须长期覆盖：
+
+1. 输入后的 terminal 可见内容只允许由 `buffer-sync` 驱动变化
+2. prompt / input row 的 `char / fg / bg / flags` 必须可回放、可比对
+3. daemon cursor 不得写进 buffer；cursor truth 必须独立于 `lines`
 
 ### Group E. daemon mirror close loop
 
@@ -189,6 +208,7 @@ tmux oracle
 2. terminal shell 是否用了 transform 抬整个 scroll layer
 3. 当前 frame 是否已有内容却被画空
 4. 是合成层错位，还是 buffer 真没 apply
+5. 是否把长行按手机宽度错误重排，导致背景/光标 span 裁切错位
 
 ### 5.5 带宽突然出现 5MB 级高峰
 
@@ -207,6 +227,15 @@ tmux oracle
 2. quick editor / keyboard state / terminal focus 是否互相抢焦点
 3. native input 事件是否还在发
 4. active transport 是否断了却没立刻 reconnect
+
+### 5.7 某个 session 切回来后挂住，杀 app 重进又立刻恢复
+
+优先查：
+
+1. 当前“connected/open”是否只是旧 socket 表象，而不是活的 transport
+2. active re-entry / foreground resume 时，旧 in-flight pull bookkeeping 是否已经清掉
+3. active re-entry 后是否真的出现新的 `buffer-head-request`
+4. 若 head / pong / 任意 server activity 都没有推进，是否立即把旧 transport 判失活并重建
 
 ---
 
@@ -246,6 +275,9 @@ tmux oracle
 - `session.render.follow-reset`
 - `session.render.visible-gap`
 - `session.render.blank-frame`
+- `session.render.width-mode`
+- `session.render.horizontal-window`
+- `session.render.tab-swipe-disabled`
 
 ### 6.4 Android IME
 

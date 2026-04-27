@@ -201,8 +201,48 @@ renderWindow = [renderTopIndex, renderBottomIndex)
 - 不决定 buffer pull
 - 不修改 buffer 内容
 - 不因为 buffer 变化自动滚动
+- 不修改 cursor 真相；cursor 颜色 / 样式 / 位置语义都不能由 Android client 自己二次生成
 - 不允许把“窗口不连续”解释成“已有内容不存在”
 - 当前窗口缺行时，应继续消费已有 absolute-index 内容，并把缺口显式视为 gap / blank marker，而不是把整屏当空
+
+### 3.6 宽度模式真源
+
+terminal 宽度语义固定为两种模式：
+
+1. `adaptive-phone`
+   - 当前手机适配模式
+2. `mirror-fixed`
+   - **上游宽度真相固定在 daemon mirror / tmux**
+   - client viewport / safe-area / IME / renderer 容器宽度变化，**不得改写上游 mirror buffer 宽度**
+   - renderer 只能消费已有绝对列 truth，并维护自己的横向渲染窗口
+
+`mirror-fixed` 的显示规则：
+
+- 行宽大于 viewport 时，默认只显示左侧裁切窗口
+- 用户若要看右侧，只能移动 renderer 的横向窗口
+- 可以通过字体缩放让同一 viewport 容纳更多列
+- renderer 的**列宽真相**必须来自客户端实测的像素宽度；不能再把浏览器 `1ch / 2ch` 当终端列宽真相
+- 双宽 cell 只能按 `2 * measuredCellWidthPx` 渲染；如果浏览器 fallback 字体导致 CJK glyph 宽度偏移，也必须由 renderer 的像素度量吸收，不能回写 daemon / buffer truth
+- **不允许**因为手机变窄而重排旧行、重新 wrap mirror、或回写 daemon/tmux 宽度
+
+### 3.6.1 renderer 列宽度量规则
+
+- renderer 必须显式测量当前字体栈的：
+  - 单宽 cell 像素宽度
+  - 双宽 glyph 的像素占用
+- 用于布局和 viewport cols 计算的统一真相为 `measuredCellWidthPx`
+- 若双宽 glyph 的浏览器像素宽度大于 `2 * latinProbeWidth`，renderer 必须提升 `measuredCellWidthPx`，而不是继续信任 `ch`
+- 该规则只影响 renderer 布局，不影响 daemon mirror / client buffer 的绝对列 truth
+
+### 3.7 横向平移与 tab 手势边界
+
+`mirror-fixed` 下固定规则：
+
+1. 自动关闭左右滑切 tab
+2. 单指横滑只用于 renderer horizontal pan
+3. 一次手势只能命中“横向平移”这一条语义
+
+这条属于 UI shell / renderer 的边界，不属于 buffer manager，更不属于 daemon
 
 ---
 
@@ -218,6 +258,17 @@ UI shell 只负责：
 - IME 只移动容器，不改变内容
 - IME 不影响 buffer manager 决策
 - IME 不影响 renderer 内容真相
+- 若 Android terminal 输入走 `ImeAnchor`，则 native `EditText` 的 **editable / composing span / selection** 必须由 framework `InputConnection` 维护为单一真相；`commitText / finishComposingText` 不得跳过 `super` 直接短路，否则会出现输入法预编辑栏 caret 错位，但这仍属于 **IME truth bug**，不是 renderer truth
+
+### 4.2 宽度模式配置入口
+
+- 宽度模式配置真源在连接配置（Connection Properties / Host）
+- 每个 host/session attach 必须显式知道自己当前是：
+  - `adaptive-phone`
+  - `mirror-fixed`
+- renderer / UI shell 只消费这个配置
+- buffer manager 不关心这个配置
+- daemon 也不关心 renderer 如何裁切；它只需要尊重“是否允许 client width 改写 mirror width”的协议边界
 
 ---
 
@@ -232,6 +283,8 @@ UI shell 只负责：
 5. buffer manager 直接改 renderer 状态
 6. follow 下修本地历史 gap
 7. 靠 fallback / 第二语义兜底
+8. client width 变化直接把 daemon mirror / tmux 改成手机宽度
+9. `mirror-fixed` 下左右滑切 tab 继续开启，和横向平移共享同一手势链
 
 ---
 

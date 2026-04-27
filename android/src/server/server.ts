@@ -1507,7 +1507,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.state = 'connected';
 
   ptyProcess.onData((_data: string) => {
-    scheduleMirrorLiveSync(mirror, 12);
+    scheduleMirrorLiveSync(mirror, 33);
   });
 
   ptyProcess.onExit(({ exitCode, signal }) => {
@@ -1623,7 +1623,7 @@ function handleInput(session: ClientSession, data: string) {
   const mirror = getClientMirror(session);
   if (mirror?.state === 'connected' && mirror.ptyProcess) {
     mirror.ptyProcess.write(data);
-    scheduleMirrorLiveSync(mirror, 12);
+    scheduleMirrorLiveSync(mirror, 33);
   }
 }
 
@@ -1638,7 +1638,7 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
     const { sourcePath, pngPath, bytes } = persistClipboardImage(payload);
     const pasteSequence = payload.pasteSequence || '\x16';
     mirror.ptyProcess.write(pasteSequence);
-    scheduleMirrorLiveSync(mirror, 12);
+    scheduleMirrorLiveSync(mirror, 33);
     sendMessage(session, {
       type: 'image-pasted',
       payload: {

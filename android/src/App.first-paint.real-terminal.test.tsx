@@ -305,6 +305,36 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
       },
     });
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.textContent === 'W') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 6,
+          bottom: 17,
+          width: 6,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      if (this.textContent === '你') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 14,
+          bottom: 17,
+          width: 14,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
       return {
         x: 0,
         y: 0,

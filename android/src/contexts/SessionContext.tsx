@@ -51,6 +51,7 @@ const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
 const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
+const ACTIVE_TRANSPORT_STALE_ACTIVITY_MS = CLIENT_PING_INTERVAL_MS + 5000;
 const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 
 function resolveInitialViewportSize(
@@ -948,6 +949,7 @@ export function SessionProvider({
   // renderer -> worker declarative demand only; never producer/tail truth
   const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
+  const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
   const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
   const reconnectBucketsRef = useRef<Map<string, ReconnectBucket>>(new Map());
@@ -1051,6 +1053,7 @@ export function SessionProvider({
   const recordSessionRx = useCallback((sessionId: string, data: string | ArrayBuffer) => {
     const current = ensureSessionWireStats(sessionId);
     current.rxBytes += estimateWireBytes(data);
+    lastServerActivityAtRef.current.set(sessionId, Date.now());
   }, [ensureSessionWireStats, estimateWireBytes]);
 
   const recordSessionRenderCommit = useCallback((sessionId: string) => {
@@ -1106,6 +1109,14 @@ export function SessionProvider({
     });
     clearSessionPullState(sessionId);
   }, [clearSessionPullState]);
+
+  const isSessionTransportActivityStale = useCallback((sessionId: string) => {
+    const lastServerActivityAt = lastServerActivityAtRef.current.get(sessionId) || 0;
+    if (lastServerActivityAt <= 0) {
+      return false;
+    }
+    return Date.now() - lastServerActivityAt > ACTIVE_TRANSPORT_STALE_ACTIVITY_MS;
+  }, []);
 
   const sendSocketPayload = useCallback((sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, options?: {
     pullPurpose?: SessionPullPurpose;
@@ -1247,6 +1258,7 @@ export function SessionProvider({
       pingIntervals.current.delete(sessionId);
     }
     lastPongAtRef.current.delete(sessionId);
+    lastServerActivityAtRef.current.delete(sessionId);
   }, []);
 
   const clearTailRefreshRuntime = useCallback((sessionId: string) => {
@@ -2518,6 +2530,15 @@ export function SessionProvider({
       return false;
     }
 
+    if (isSessionTransportActivityStale(sessionId)) {
+      runtimeDebug('session.transport.resume-active.stale', {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        lastServerActivityAt: lastServerActivityAtRef.current.get(sessionId) || 0,
+      });
+      return false;
+    }
+
     runtimeDebug('session.transport.resume-active', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
@@ -2529,7 +2550,7 @@ export function SessionProvider({
     pendingResumeTailRefreshRef.current.add(sessionId);
     requestSessionBufferHead(sessionId, ws, { force: true });
     return true;
-  }, [requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
+  }, [isSessionTransportActivityStale, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
   const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
     const normalized = normalizeSessionRenderDemandState(renderDemand);
@@ -2565,6 +2586,21 @@ export function SessionProvider({
     const activeSessionId = state.activeSessionId;
     const activeSession = state.sessions.find((item) => item.id === activeSessionId) || null;
     const ws = wsRefs.current.get(activeSessionId) || null;
+    if (
+      activeSession
+      && ws
+      && ws.readyState === WebSocket.OPEN
+      && isSessionTransportActivityStale(activeSessionId)
+      && !isReconnectInFlight(activeSessionId)
+    ) {
+      runtimeDebug('session.transport.active-reentry.stale', {
+        sessionId: activeSessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
+      });
+      reconnectSession(activeSessionId);
+      return;
+    }
     resetSessionTransportPullBookkeeping(activeSessionId, 'active-reentry');
     if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
       return;
@@ -2576,7 +2612,7 @@ export function SessionProvider({
     })) {
       reconnectSession(activeSessionId);
     }
-  }, [isReconnectInFlight, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
+  }, [isReconnectInFlight, isSessionTransportActivityStale, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2624,11 +2660,24 @@ export function SessionProvider({
         return;
       }
 
+      if (
+        isSessionTransportActivityStale(activeSessionId)
+        && !isReconnectInFlight(activeSessionId)
+      ) {
+        runtimeDebug('session.transport.active-tick.stale', {
+          sessionId: activeSessionId,
+          activeSessionId: stateRef.current.activeSessionId,
+          lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
+        });
+        reconnectSession(activeSessionId);
+        return;
+      }
+
       requestSessionBufferHead(activeSessionId, ws);
     }, ACTIVE_HEAD_REFRESH_TICK_MS);
 
     return () => window.clearInterval(timer);
-  }, [requestSessionBufferHead]);
+  }, [isReconnectInFlight, isSessionTransportActivityStale, reconnectSession, requestSessionBufferHead]);
 
   const sendInput = useCallback((sessionId: string, data: string) => {
     const targetSessionId = sessionId.trim();
@@ -2651,7 +2700,8 @@ export function SessionProvider({
     }
 
     const ws = wsRefs.current.get(targetSessionId);
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    const transportStale = isSessionTransportActivityStale(targetSessionId);
+    if (ws && ws.readyState === WebSocket.OPEN && !transportStale) {
       runtimeDebug('session.input.send', {
         sessionId: targetSessionId,
         size: data.length,
@@ -2665,20 +2715,24 @@ export function SessionProvider({
 
     runtimeDebug('session.input.queue', {
       sessionId: targetSessionId,
+      why: transportStale ? 'stale-open-transport' : 'transport-unavailable',
       size: data.length,
       preview: data.slice(0, 32),
     });
     enqueuePendingInput(targetSessionId, data);
     const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
-    const shouldForceReconnect = shouldReconnectQueuedActiveInput({
-      isActiveTarget,
-      wsReadyState: ws?.readyState ?? null,
-      reconnectInFlight: isReconnectInFlight(targetSessionId),
-    });
+    const reconnectInFlight = isReconnectInFlight(targetSessionId);
+    const shouldForceReconnect = transportStale
+      ? isActiveTarget && !reconnectInFlight
+      : shouldReconnectQueuedActiveInput({
+          isActiveTarget,
+          wsReadyState: ws?.readyState ?? null,
+          reconnectInFlight,
+        });
     if (shouldForceReconnect) {
       reconnectSession(targetSessionId);
     }
-  }, [enqueuePendingInput, isReconnectInFlight, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
+  }, [enqueuePendingInput, isReconnectInFlight, isSessionTransportActivityStale, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {

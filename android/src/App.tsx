@@ -430,8 +430,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     const persistedPage = readPersistedPageState();
     if (persistedPage.kind === 'terminal') {
       const requestedSessionId = persistedPage.focusSessionId;
+      const restoredActiveSessionId = state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
+        ? state.activeSessionId
+        : null;
       const targetSessionId =
-        (requestedSessionId && sessions.some((session) => session.id === requestedSessionId) ? requestedSessionId : null)
+        restoredActiveSessionId
+        || (requestedSessionId && sessions.some((session) => session.id === requestedSessionId) ? requestedSessionId : null)
         || activeSession?.id
         || sessions[0].id;
       if (targetSessionId && activeSession?.id !== targetSessionId) {

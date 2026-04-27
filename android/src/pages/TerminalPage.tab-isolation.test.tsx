@@ -150,7 +150,7 @@ describe('TerminalPage tab isolation', () => {
     localStorage.clear();
   });
 
-  it('keeps every tab view mounted and only flips active visibility on switch', () => {
+  it('renders only the active tab view when split is disabled and switches body with active session', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const view = render(
       <TerminalPage
@@ -173,7 +173,7 @@ describe('TerminalPage tab isolation', () => {
     );
 
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
 
     view.rerender(
       <TerminalPage
@@ -195,8 +195,8 @@ describe('TerminalPage tab isolation', () => {
       />,
     );
 
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('false');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('true');
+    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
   it('routes input/resize/viewport callbacks with explicit sessionId', async () => {
@@ -271,9 +271,8 @@ describe('TerminalPage tab isolation', () => {
     );
 
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-oninput')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-oninput')).toBe('false');
 
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-available')).toBe('true');
 

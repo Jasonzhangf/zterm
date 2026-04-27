@@ -309,6 +309,46 @@ describe('App first paint regression', () => {
     });
   });
 
+  it('prefers the persisted latest active tab over a stale terminal page focus id during cold restore', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'session-2',
+        hostId: 'host-2',
+        connectionName: 'local-test-2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab_2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-2');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.some((item) => item.type === 'connect' && item.payload?.sessionName === 'zterm_mirror_lab_2')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+  });
+
   it('switching to another tab pulls head then latest range and paints the new active tab without any input', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {

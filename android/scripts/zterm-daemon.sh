@@ -418,6 +418,7 @@ start_service() {
 
   stop_tmux >/dev/null 2>&1 || true
   remove_legacy_service
+  write_launch_agent
 
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
@@ -429,9 +430,9 @@ start_service() {
     return 0
   fi
 
-  echo "zterm autostart service unhealthy after start; falling back to tmux session"
+  echo "zterm autostart service unhealthy after start"
   launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
-  start_tmux
+  return 1
 }
 
 stop_service() {
@@ -456,6 +457,7 @@ restart_service() {
 
   stop_tmux >/dev/null 2>&1 || true
   remove_legacy_service
+  write_launch_agent
 
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
@@ -466,9 +468,9 @@ restart_service() {
     return 0
   fi
 
-  echo "zterm autostart service unhealthy after restart; falling back to tmux session"
+  echo "zterm autostart service unhealthy after restart"
   launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
-  start_tmux
+  return 1
 }
 
 install_service() {

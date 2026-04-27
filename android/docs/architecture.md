@@ -24,6 +24,11 @@
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
 - Client Mirror Buffer 不变量：窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相；client 不得先清空已有本地 buffer 再重拉
 - Client Render Window：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
+- Client Render Width Mode：`adaptive-phone | mirror-fixed`
+- Client Render Width 不变量：
+  - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
+  - `mirror-fixed` 下 viewport / IME / safe-area / shell 宽度变化不得回写 daemon mirror / tmux 宽度
+  - `mirror-fixed` 下自动关闭左右滑切 tab，避免与 horizontal pan 冲突
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
@@ -146,12 +151,22 @@ mobile file picker -> websocket paste-image -> daemon temp file
 - client 连接初始化时只上报真实 geometry `cols / rows`
 - keyboard / IME 只允许改变 UI shell 的位置与裁切，不属于 tmux geometry change
 - pinch zoom / orientation / real container resize 才属于 geometry 变化候选
+- terminal width mode 必须显式区分：
+  - `adaptive-phone`：允许当前手机适配宽度路径
+  - `mirror-fixed`：只读上游宽度真相；renderer 只做 horizontal crop / pan
 - viewport / geometry 变化时不允许：
   - clear terminal
   - replay `outputHistory`
   - 重建 session
   - 本地重排旧 buffer 作为真相
   - 因 IME 动画持续修改 tmux 高度
+  - 在 `mirror-fixed` 下因手机 viewport 变窄而把 daemon mirror / tmux 改成更窄宽度
+
+## Terminal horizontal pan 边界
+
+- `mirror-fixed` 横向查看属于 renderer window horizontal pan
+- `mirror-fixed` 下自动关闭左右滑切 tab
+- 一次手势只能命中 horizontal pan，不允许共享给 tab swipe
 
 ## Terminal canonical buffer ownership
 

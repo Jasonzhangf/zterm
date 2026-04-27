@@ -48,7 +48,7 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: () => <div data-testid="terminal-header" />,
+  TerminalHeader: ({ topInsetPx }: { topInsetPx?: number }) => <div data-testid="terminal-header" data-top-inset={String(topInsetPx || 0)} />,
 }));
 
 vi.mock('../components/terminal/TabManagerSheet', () => ({
@@ -84,14 +84,17 @@ vi.mock('../components/TerminalView', () => ({
     sessionId,
     allowDomFocus,
     onActivateInput,
+    onResize,
   }: {
     sessionId: string;
     allowDomFocus?: boolean;
     onActivateInput?: () => void;
+    onResize?: (...args: any[]) => void;
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-allow-dom-focus={allowDomFocus ? 'true' : 'false'}
+      data-has-onresize={onResize ? 'true' : 'false'}
       onClick={() => onActivateInput?.()}
     />
   ),
@@ -168,12 +171,50 @@ describe('TerminalPage Android IME bridge', () => {
     });
 
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-allow-dom-focus')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onresize')).toBe('false');
 
     imeListeners.get('input')?.({ text: '语音输入\n下一行' });
     imeListeners.get('backspace')?.({ count: 2 });
 
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '语音输入\r下一行');
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '\x7f\x7f');
+  });
+
+  it('does not pass upstream terminal resize on Android, even when keyboard visibility changes', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
+    });
+
+    const terminalView = screen.getByTestId('terminal-view-s1');
+    expect(terminalView.getAttribute('data-has-onresize')).toBe('false');
+
+    keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 320 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onresize')).toBe('false');
+    });
   });
 
   it('suspends ImeAnchor routing while quick bar DOM editor owns focus', async () => {
@@ -485,6 +526,73 @@ describe('TerminalPage Android IME bridge', () => {
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
     });
+  });
+
+  it('shrinks the terminal stage from the bottom instead of translating the whole page when keyboard is visible', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const terminalStage = screen.getByTestId('terminal-stage');
+    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 64px;');
+    expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');
+
+    await waitFor(() => {
+      expect(imeListeners.has('keyboardState')).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
+    imeListeners.get('keyboardState')?.({ visible: true, height: 320 });
+
+    await waitFor(() => {
+      const style = terminalStage.getAttribute('style') || '';
+      expect(style).toContain('bottom: 384px;');
+      expect(style).not.toContain('transform: translateY');
+    });
+  });
+
+  it('keeps a non-zero terminal header top inset on Android even when CSS safe-area env is unavailable', () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(Number(screen.getByTestId('terminal-header').getAttribute('data-top-inset') || '0')).toBeGreaterThan(0);
   });
 
   it('does not reattach native IME listeners on buffer rerenders and still routes to latest active session', async () => {

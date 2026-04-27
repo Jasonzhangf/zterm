@@ -3,6 +3,7 @@ import {
   BufferSyncRequestPayload,
   TerminalBufferPayload,
   TerminalCell,
+  TerminalCursorState,
   type CompactIndexedLine,
   type TerminalIndexedLine,
   type WireIndexedLine,
@@ -16,12 +17,14 @@ export interface BufferSyncMirrorSnapshot {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor: TerminalCursorState | null;
 }
 
 export interface BufferHeadMirrorSnapshot {
   revision: number;
   bufferStartIndex: number;
   bufferLines: TerminalCell[][];
+  cursor: TerminalCursorState | null;
 }
 
 /** Default terminal cell values — must match TerminalCell sentinel truth across app/runtime. */
@@ -196,6 +199,7 @@ export function buildBufferHeadPayload(
     latestEndIndex: availableEndIndex,
     availableStartIndex,
     availableEndIndex,
+    cursor: mirror.cursor,
   };
 }
 
@@ -232,6 +236,7 @@ function buildBufferSyncPayload(
     cols: Math.max(1, Math.floor(mirror.cols || 80)),
     rows: Math.max(1, Math.floor(mirror.rows || 24)),
     cursorKeysApp: Boolean(mirror.cursorKeysApp),
+    cursor: mirror.cursor,
     lines: lines.map((line) => compactLine(line.index, line.cells)),
   };
 }

@@ -83,6 +83,13 @@ function readRenderedRows(container: HTMLElement) {
     .map((node) => (node.textContent || '').replace(/\s+$/u, ''));
 }
 
+function scrollFromBottomIntoReading(scroller: HTMLDivElement, bottomScrollTop = 952) {
+  scroller.scrollTop = bottomScrollTop;
+  fireEvent.scroll(scroller);
+  scroller.scrollTop = 0;
+  fireEvent.scroll(scroller);
+}
+
 describe('TerminalView minimal mirror render', () => {
   const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
@@ -108,6 +115,36 @@ describe('TerminalView minimal mirror render', () => {
       },
     });
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.textContent === 'W') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 6,
+          bottom: 17,
+          width: 6,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      if (this.textContent === '你') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 14,
+          bottom: 17,
+          width: 14,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
       return {
         x: 0,
         y: 0,
@@ -288,8 +325,7 @@ describe('TerminalView minimal mirror render', () => {
       expect(scroller.scrollTop).toBe(952);
     });
 
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
@@ -366,8 +402,7 @@ describe('TerminalView minimal mirror render', () => {
         return currentScrollHeight;
       },
     });
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -424,8 +459,7 @@ describe('TerminalView minimal mirror render', () => {
     });
     scroller.scrollTop = 272;
     fireEvent.scroll(scroller);
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
@@ -618,8 +652,7 @@ describe('TerminalView minimal mirror render', () => {
         return currentScrollHeight;
       },
     });
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -709,8 +742,7 @@ describe('TerminalView minimal mirror render', () => {
         return currentScrollHeight;
       },
     });
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -979,8 +1011,7 @@ describe('TerminalView minimal mirror render', () => {
         return currentScrollHeight;
       },
     });
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1062,8 +1093,13 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 1360;
+      },
+    });
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1079,6 +1115,148 @@ describe('TerminalView minimal mirror render', () => {
       expect(lastCall?.mode).toBe('reading');
       expect(lastCall?.viewportRows).toBe(18);
     });
+  });
+
+  it('realigns follow scroll to the new DOM bottom when viewport rows change, instead of leaving a blank overscrolled frame', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      mockClientHeight = 510;
+      scrollHeight = 1360;
+      act(() => {
+        ResizeObserverMock.triggerAll();
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(850);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('realigns follow scroll when DOM height changes but logical viewport rows stay the same, so the bottom prompt/cursor stays visible', async () => {
+    vi.useFakeTimers();
+    try {
+      const FLAG_REVERSE = 0x20;
+      const FLAG_CURSOR = 0x100;
+      const session = makeSession({
+        revision: 1,
+        lines: [...buildRows(79), 'prompt-$'],
+        bufferTailEndIndex: 80,
+      });
+      session.buffer.lines[79] = [
+        ...Array.from('prompt-$').map((char) => ({
+          char: char.codePointAt(0) || 32,
+          fg: 256,
+          bg: 256,
+          flags: 0,
+          width: 1 as const,
+        })),
+        {
+          char: 32,
+          fg: 256,
+          bg: 256,
+          flags: FLAG_REVERSE | FLAG_CURSOR,
+          width: 1,
+        },
+      ];
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let currentScrollTop = 0;
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        },
+      });
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return 1360;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('prompt-$');
+      expect(view.container.querySelector('[data-terminal-cursor="true"]')).toBeTruthy();
+
+      mockClientHeight = 415;
+      act(() => {
+        ResizeObserverMock.triggerAll();
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(945);
+      expect(readRenderedRows(view.container)).toContain('prompt-$');
+      expect(view.container.querySelector('[data-terminal-cursor="true"]')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 
@@ -1110,8 +1288,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1196,8 +1373,7 @@ describe('TerminalView minimal mirror render', () => {
         return currentScrollHeight;
       },
     });
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1270,8 +1446,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1383,8 +1558,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
@@ -1536,6 +1710,94 @@ describe('TerminalView minimal mirror render', () => {
     fireEvent.touchEnd(scroller, { changedTouches: [{ clientX: 170, clientY: 120 }] });
 
     expect(onSwipeTab).not.toHaveBeenCalled();
+  });
+
+  it('disables tab swipe gestures when mirror-fixed width mode is enabled', async () => {
+    const onSwipeTab = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const fixedWidthProps = {
+      widthMode: 'mirror-fixed',
+    } as any;
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onSwipeTab={onSwipeTab}
+          fontSize={5}
+          {...fixedWidthProps}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    expect(scroller.dataset.hasOnswipetab).toBe('false');
+
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 220, clientY: 160 }] });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 120, clientY: 166 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(scroller, { changedTouches: [{ clientX: 120, clientY: 166 }] });
+
+    expect(onSwipeTab).not.toHaveBeenCalled();
+  });
+
+  it('does not emit upstream resize writes when mirror-fixed width mode is enabled', async () => {
+    vi.useFakeTimers();
+    const onResize = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const fixedWidthProps = {
+      widthMode: 'mirror-fixed',
+    } as any;
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={onResize}
+          onInput={vi.fn()}
+          fontSize={5}
+          {...fixedWidthProps}
+        />
+      </div>,
+    );
+
+    mockClientWidth = 320;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+      vi.runAllTimers();
+    });
+
+    expect(onResize).not.toHaveBeenCalled();
+    view.unmount();
+    vi.useRealTimers();
   });
 
   it('anchors follow scrolling to the actual DOM bottom instead of the theoretical row math', async () => {
@@ -1694,8 +1956,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const readingCalls = onViewportChange.mock.calls
@@ -1742,8 +2003,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
@@ -1807,8 +2067,7 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
+    scrollFromBottomIntoReading(scroller);
 
     await waitFor(() => {
       const readingCalls = onViewportChange.mock.calls.filter(([, payload]) => payload?.mode === 'reading');
@@ -2073,6 +2332,92 @@ describe('TerminalView minimal mirror render', () => {
 
       expect(scroller.scrollTop).toBe(969);
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not auto-enter reading when follow only drifts one pixel above bottom during a live refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      onViewportChange.mockClear();
+
+      scrollHeight = 1377;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      scroller.scrollTop = 951;
+      fireEvent.scroll(scroller);
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(969);
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
     } finally {
       vi.useRealTimers();
     }

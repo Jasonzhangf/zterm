@@ -395,6 +395,9 @@ describe('App Android IME input closed loop', () => {
       expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
 
+    expect(view.container.textContent).toContain('prompt-before-input');
+    expect(view.container.textContent).not.toContain('prompt-before-inputls');
+
     ws.triggerMessage({
       type: 'buffer-head',
       payload: {

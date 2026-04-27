@@ -1,6 +1,6 @@
 import type { TerminalCell, TerminalIndexedLine } from '../lib/types';
 
-const FLAG_REVERSE = 0x20;
+const FLAG_CURSOR = 0x100;
 const DEFAULT_COLOR = 256;
 
 export function cloneCell(cell: TerminalCell): TerminalCell {
@@ -66,7 +66,7 @@ export function paintCursorOnRow(row: TerminalCell[], cursorCol: number) {
 
   nextRow[paintCol] = {
     ...nextRow[paintCol],
-    flags: nextRow[paintCol].flags | FLAG_REVERSE,
+    flags: nextRow[paintCol].flags | FLAG_CURSOR,
   };
   return nextRow;
 }

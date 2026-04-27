@@ -18,6 +18,7 @@ const LAB_COLS = 80;
 const LAB_ROWS = 24;
 const WAIT_TIMEOUT_MS = 8000;
 const DAEMON_READY_TIMEOUT_MS = 10000;
+const MANAGED_DAEMON_TEST_PORT = process.env.ZTERM_TEST_DAEMON_PORT || '46333';
 type CaseName =
   | 'codex-live'
   | 'top-live'
@@ -210,6 +211,16 @@ function summarizeProbeMessage(type: string, payload: unknown) {
   return payload;
 }
 
+function detectBufferSyncWireKind(rawText: string) {
+  if (/"lines":\[\{"i":/u.test(rawText)) {
+    return 'compact';
+  }
+  if (/"lines":\[\{"index":/u.test(rawText)) {
+    return 'legacy';
+  }
+  return 'unknown';
+}
+
 async function waitForDaemonHealth(healthUrl: string, timeoutMs: number = DAEMON_READY_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   let lastError = 'unknown';
@@ -242,7 +253,7 @@ class LabDaemonController {
   constructor() {
     const config = resolveDaemonRuntimeConfig();
     this.host = process.env.ZTERM_HOST || (config.host === '0.0.0.0' ? '127.0.0.1' : config.host);
-    this.port = String(process.env.ZTERM_PORT || config.port || 45761);
+    this.port = String(MANAGED_DAEMON_TEST_PORT);
     this.healthUrl = `http://${this.host}:${this.port}/health`;
     this.logPath = join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), 'current-daemon.log');
   }
@@ -254,7 +265,7 @@ class LabDaemonController {
     mkdirSync(join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder()), { recursive: true });
     const logStream = createWriteStream(this.logPath, { flags: 'a' });
     const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
-    const proc = spawn(process.execPath, [tsxBin, 'src/server/server.ts'], {
+    const proc = spawn(tsxBin, ['src/server/server.ts'], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -745,7 +756,14 @@ class DaemonProbe {
           at: nowStamp(),
           direction: 'recv',
           type: message.type,
-          payload: summarizeProbeMessage(message.type, 'payload' in message ? message.payload : undefined),
+          payload: (
+            message.type === 'buffer-sync'
+              ? {
+                  ...summarizeProbeMessage(message.type, 'payload' in message ? message.payload : undefined) as Record<string, unknown>,
+                  wireKind: detectBufferSyncWireKind(text),
+                }
+              : summarizeProbeMessage(message.type, 'payload' in message ? message.payload : undefined)
+          ),
         });
         if (message.type === 'connected') {
           this.connected = true;
@@ -1122,7 +1140,7 @@ async function runDaemonRestartRecoverCase(
 
   await controller.restart();
 
-  const { wsUrl, authToken } = resolveWsUrl();
+  const { wsUrl, authToken } = resolveWsUrl(Boolean(controller));
   const reconnectProbe = new DaemonProbe(wsUrl, authToken);
   try {
     await reconnectProbe.connect();
@@ -1524,11 +1542,12 @@ async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
   };
 }
 
-function resolveWsUrl() {
+function resolveWsUrl(useManagedDaemon: boolean) {
   const config = resolveDaemonRuntimeConfig();
   const base = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
+  const port = useManagedDaemon ? MANAGED_DAEMON_TEST_PORT : String(config.port);
   return {
-    wsUrl: `ws://${base}:${config.port}/ws`,
+    wsUrl: `ws://${base}:${port}/ws`,
     authToken: config.authToken,
   };
 }
@@ -1536,7 +1555,7 @@ function resolveWsUrl() {
 async function runCase(caseName: CaseName, daemonController: LabDaemonController | null) {
   resetLabSession();
   await sleep(150);
-  const { wsUrl, authToken } = resolveWsUrl();
+  const { wsUrl, authToken } = resolveWsUrl(Boolean(daemonController));
   const probe = new DaemonProbe(wsUrl, authToken);
   const operator = new AttachedTmuxOperator();
 

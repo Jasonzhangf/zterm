@@ -5,6 +5,7 @@ import type {
   TerminalGapRange,
   TerminalResizeHandler,
   TerminalViewportChangeHandler,
+  TerminalWidthMode,
 } from '../lib/types';
 
 interface TerminalViewProps {
@@ -32,6 +33,7 @@ interface TerminalViewProps {
   fontSize?: number;
   rowHeight?: string;
   themeId?: string;
+  widthMode?: TerminalWidthMode;
 }
 
 const DEFAULT_ROWS = 24;
@@ -41,6 +43,7 @@ const FLAG_DIM = 0x02;
 const FLAG_ITALIC = 0x04;
 const FLAG_UNDERLINE = 0x08;
 const FLAG_REVERSE = 0x20;
+const FLAG_CURSOR = 0x100;
 const FLAG_INVISIBLE = 0x40;
 const FLAG_STRIKETHROUGH = 0x80;
 const NORMAL_CURSOR_KEYS = {
@@ -133,9 +136,10 @@ function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
   };
 }
 
-function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalThemePreset) {
+function cellStyle(inputCell: TerminalCell, rowHeight: string, cellWidthPx: number, theme: TerminalThemePreset) {
   const cell = normalizeCell(inputCell);
   const colors = resolveColors(cell, theme);
+  const safeCellWidthPx = Math.max(1, Number.isFinite(cellWidthPx) ? cellWidthPx : 1);
   const style: Record<string, string> = {
     display: 'inline-block',
     height: rowHeight,
@@ -143,12 +147,13 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalTh
     verticalAlign: 'top',
     overflow: 'hidden',
     whiteSpace: 'pre',
-    width: cell.width === 2 ? '2ch' : cell.width === 0 ? '0px' : '1ch',
+    width: cell.width === 2 ? `${safeCellWidthPx * 2}px` : cell.width === 0 ? '0px' : `${safeCellWidthPx}px`,
     letterSpacing: '0',
     fontKerning: 'none',
     fontVariantLigatures: 'none',
     fontFeatureSettings: '"liga" 0, "calt" 0',
     textRendering: 'optimizeSpeed',
+    boxSizing: 'border-box',
   };
 
   if (cell.width === 0) {
@@ -178,28 +183,38 @@ function measureViewport(host: HTMLDivElement, fontSize: number, rowHeight: stri
       cols: 80,
       rows: DEFAULT_ROWS,
       resolvedRowHeight: rowHeight,
+      resolvedCellWidthPx: Math.max(1, fontSize * 0.62),
     };
   }
 
-  const probe = document.createElement('span');
-  probe.textContent = 'W';
-  probe.style.position = 'absolute';
-  probe.style.visibility = 'hidden';
-  probe.style.whiteSpace = 'pre';
-  probe.style.fontFamily = TERMINAL_FONT_STACK;
-  probe.style.fontSize = `${fontSize}px`;
-  probe.style.lineHeight = rowHeight;
-  host.appendChild(probe);
-  const rect = probe.getBoundingClientRect();
-  probe.remove();
+  const measureProbeRect = (text: string) => {
+    const probe = document.createElement('span');
+    probe.textContent = text;
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'pre';
+    probe.style.fontFamily = TERMINAL_FONT_STACK;
+    probe.style.fontSize = `${fontSize}px`;
+    probe.style.lineHeight = rowHeight;
+    host.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    return rect;
+  };
 
-  const cellWidth = Math.max(1, rect.width || fontSize * 0.62);
-  const measuredRowHeight = Math.max(1, Math.ceil(rect.height || parseInt(rowHeight, 10) || 17));
+  const latinRect = measureProbeRect('W');
+  const cjkRect = measureProbeRect('你');
+
+  const latinWidthPx = Math.max(1, latinRect.width || fontSize * 0.62);
+  const cjkHalfWidthPx = Math.max(1, (cjkRect.width || latinWidthPx * 2) / 2);
+  const cellWidthPx = Math.max(latinWidthPx, cjkHalfWidthPx);
+  const measuredRowHeight = Math.max(1, Math.ceil(latinRect.height || parseInt(rowHeight, 10) || 17));
 
   return {
-    cols: Math.max(1, Math.floor(host.clientWidth / cellWidth)),
+    cols: Math.max(1, Math.floor(host.clientWidth / cellWidthPx)),
     rows: Math.max(1, Math.floor(host.clientHeight / measuredRowHeight)),
     resolvedRowHeight: `${measuredRowHeight}px`,
+    resolvedCellWidthPx: cellWidthPx,
   };
 }
 
@@ -236,6 +251,7 @@ const VisibleRow = memo(function VisibleRow({
   rowIndex,
   absoluteIndex,
   rowHeight,
+  cellWidthPx,
   isGap,
   theme,
 }: {
@@ -243,6 +259,7 @@ const VisibleRow = memo(function VisibleRow({
   rowIndex: number;
   absoluteIndex: number;
   rowHeight: string;
+  cellWidthPx: number;
   isGap: boolean;
   theme: TerminalThemePreset;
 }) {
@@ -283,7 +300,8 @@ const VisibleRow = memo(function VisibleRow({
         ? row.map((cell, cellIndex) => (
             <span
               key={`cell-${rowIndex}-${cellIndex}`}
-              style={cellStyle(cell, rowHeight, theme)}
+              data-terminal-cursor={cell.flags & FLAG_CURSOR ? 'true' : undefined}
+              style={cellStyle(cell, rowHeight, cellWidthPx, theme)}
             >
               {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
             </span>
@@ -294,6 +312,7 @@ const VisibleRow = memo(function VisibleRow({
 }, (prev, next) => (
   prev.row === next.row
   && prev.rowHeight === next.rowHeight
+  && prev.cellWidthPx === next.cellWidthPx
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
   && prev.theme === next.theme
@@ -324,8 +343,10 @@ export function TerminalView({
   fontSize = 14,
   rowHeight = '17px',
   themeId,
+  widthMode = 'adaptive-phone',
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
+  const swipeTabEnabled = widthMode !== 'mirror-fixed' && Boolean(onSwipeTab);
   const bufferLines = initialBufferLines || [];
   const effectiveBufferEndIndex = typeof bufferEndIndex === 'number' && Number.isFinite(bufferEndIndex)
     ? Math.max(bufferStartIndex, Math.floor(bufferEndIndex))
@@ -357,6 +378,11 @@ export function TerminalView({
   const previousRefreshSessionIdRef = useRef<string | null>(sessionId);
   const previousSessionIdRef = useRef<string | null>(sessionId);
   const previousInputResetEpochRef = useRef(inputResetEpoch);
+  const previousFollowViewportMetricsRef = useRef<{
+    viewportRows: number;
+    rowHeightPx: number;
+    clientHeightPx: number;
+  } | null>(null);
   const touchGestureRef = useRef({
     active: false,
     pointerCaptured: false,
@@ -369,6 +395,8 @@ export function TerminalView({
 
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
+  const [resolvedCellWidthPx, setResolvedCellWidthPx] = useState(Math.max(1, fontSize * 0.62));
+  const [viewportClientHeightPx, setViewportClientHeightPx] = useState(0);
   const [renderBottomIndex, setRenderBottomIndex] = useState(effectiveBufferEndIndex);
   const [readingMode, setReadingMode] = useState(false);
 
@@ -506,7 +534,12 @@ export function TerminalView({
     }
 
     const nextViewport = measureViewport(host, fontSize, rowHeight);
+    setViewportClientHeightPx((current) => {
+      const nextHeight = Math.max(0, Math.round(host.clientHeight || 0));
+      return current === nextHeight ? current : nextHeight;
+    });
     setResolvedRowHeight((current) => current === nextViewport.resolvedRowHeight ? current : nextViewport.resolvedRowHeight);
+    setResolvedCellWidthPx((current) => current === nextViewport.resolvedCellWidthPx ? current : nextViewport.resolvedCellWidthPx);
     setViewportRows((current) => current === nextViewport.rows ? current : nextViewport.rows);
 
     const previous = lastViewportRef.current;
@@ -518,12 +551,17 @@ export function TerminalView({
       window.clearTimeout(resizeCommitTimerRef.current);
     }
 
+    if (widthMode === 'mirror-fixed') {
+      lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
+      return;
+    }
+
     resizeCommitTimerRef.current = window.setTimeout(() => {
       lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
       onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
-  }, [active, fontSize, onResize, rowHeight, sessionId]);
+  }, [active, fontSize, onResize, rowHeight, sessionId, widthMode]);
 
   const emitRenderDemand = useCallback((nextMode: 'follow' | 'reading', nextRenderBottomIndex: number, options?: {
     viewportEndIndex?: number;
@@ -765,10 +803,33 @@ export function TerminalView({
   }, [active, followVisualBottomIndex, queueFollowScrollSync]);
 
   useEffect(() => {
+    const previousMetrics = previousFollowViewportMetricsRef.current;
+    previousFollowViewportMetricsRef.current = { viewportRows, rowHeightPx, clientHeightPx: viewportClientHeightPx };
+
+    if (!active || readingModeRef.current) {
+      return;
+    }
+
+    if (
+      !previousMetrics
+      || (
+        previousMetrics.viewportRows === viewportRows
+        && previousMetrics.rowHeightPx === rowHeightPx
+        && previousMetrics.clientHeightPx === viewportClientHeightPx
+      )
+    ) {
+      return;
+    }
+
+    syncScrollHostToRenderBottom(followVisualBottomIndex);
+  }, [active, followVisualBottomIndex, rowHeightPx, syncScrollHostToRenderBottom, viewportClientHeightPx, viewportRows]);
+
+  useEffect(() => {
     const host = containerRef.current;
     if (!host) {
       return;
     }
+    runViewportRefresh();
     const observer = new ResizeObserver(() => runViewportRefresh());
     observer.observe(host);
     return () => observer.disconnect();
@@ -993,6 +1054,12 @@ export function TerminalView({
       ref={containerRef}
       className="wterm"
       data-terminal-session-id={sessionId || undefined}
+      data-testid={sessionId ? `terminal-view-${sessionId}` : undefined}
+      data-active={active ? 'true' : 'false'}
+      data-has-oninput={onInput ? 'true' : 'false'}
+      data-has-onresize={onResize ? 'true' : 'false'}
+      data-has-onswipetab={swipeTabEnabled ? 'true' : 'false'}
+      data-width-mode={widthMode}
       onClick={() => {
         if (!sessionId) {
           return;
@@ -1026,11 +1093,22 @@ export function TerminalView({
           }
           ignoredProgrammaticScrollTopRef.current = null;
         }
+        if (!readingModeRef.current) {
+          const observedScrollTop = Math.max(0, host.scrollTop);
+          const upwardAwayFromSettledBottom = observedScrollTop < lastSettledScrollTopRef.current - 1;
+          const stillAtBottom = isScrollAtBottom(host, observedScrollTop, maxScrollTop);
+          if (!upwardAwayFromSettledBottom && !stillAtBottom) {
+            queueFollowScrollSync(followVisualBottomIndex, {
+              guardPendingFollowDrift: true,
+            });
+            return;
+          }
+        }
         applyScrollState(host.scrollTop, host);
         lastSettledScrollTopRef.current = host.scrollTop;
       }}
       onTouchStart={(event) => {
-        if (!active || !sessionId || event.touches.length !== 1) {
+        if (!active || !sessionId || !swipeTabEnabled || event.touches.length !== 1) {
           resetTouchGesture();
           return;
         }
@@ -1080,7 +1158,7 @@ export function TerminalView({
             : 'previous'
           : null;
         resetTouchGesture();
-        if (!active || !sessionId || !direction) {
+        if (!active || !sessionId || !swipeTabEnabled || !direction) {
           return;
         }
         onSwipeTab?.(sessionId, direction);
@@ -1096,7 +1174,7 @@ export function TerminalView({
         overflowY: 'auto',
         overflowX: 'hidden',
         overscrollBehavior: 'contain',
-        touchAction: 'pan-y',
+        touchAction: swipeTabEnabled ? 'pan-y' : 'pan-x pan-y',
         padding: '0',
         borderRadius: '0',
         boxShadow: 'none',
@@ -1148,6 +1226,7 @@ export function TerminalView({
             row={row}
             rowIndex={rowIndex}
             rowHeight={resolvedRowHeight || rowHeight}
+            cellWidthPx={resolvedCellWidthPx}
             isGap={isGap}
             theme={theme}
           />

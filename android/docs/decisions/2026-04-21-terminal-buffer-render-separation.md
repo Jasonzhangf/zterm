@@ -1,5 +1,16 @@
 # 2026-04-22 Terminal daemon truth / client mirror reset
 
+> **已废止 / superseded**：本页中关于 “zterm clients min geometry -> tmux resize” 的旧宽度策略，已被
+> `2026-04-23-terminal-head-buffer-render-truth.md` 覆盖。
+>
+> 当前唯一真源补充为：
+> - `adaptive-phone`
+> - `mirror-fixed`
+>
+> 尤其是：
+> - `mirror-fixed` 下，client viewport / IME / container width 不得改写 daemon mirror / tmux 宽度
+> - 横向查看属于 renderer crop/pan，不属于 daemon geometry policy
+
 ## 决策
 
 Android 终端链路收敛到一个更硬的模型：

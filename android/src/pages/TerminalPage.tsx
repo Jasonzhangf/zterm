@@ -67,6 +67,19 @@ export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
   return Math.min(safeReportedInset, occludedBottom);
 }
 
+export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
+  if (typeof window === 'undefined') {
+    return isAndroid ? 16 : 0;
+  }
+
+  const visualViewportTop = Math.max(0, Math.round(window.visualViewport?.offsetTop || 0));
+  if (!isAndroid) {
+    return visualViewportTop;
+  }
+
+  return Math.max(16, visualViewportTop);
+}
+
 function resolveWindowWidth() {
   if (typeof window === 'undefined') {
     return 0;
@@ -374,6 +387,7 @@ export function TerminalPage({
     () => persistedLayoutRef.current?.splitPaneAssignments || {},
   );
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
+  const [headerTopInsetPx, setHeaderTopInsetPx] = useState(() => resolveTerminalHeaderTopInsetPx(isAndroid));
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(true);
@@ -463,7 +477,7 @@ export function TerminalPage({
     : [];
   const renderedPaneSessions = visiblePaneSessionIds
     .map((sessionId) => sessions.find((session) => session.id === sessionId) || null)
-    .filter((session): session is Session => session !== null);
+    .filter((session): session is Session => Boolean(session));
   const activeDraft = activeSession?.id && sessionDrafts ? sessionDrafts[activeSession.id] || '' : sessionDraft;
   const activeScheduleState = activeSession?.id && scheduleStateBySessionId
     ? scheduleStateBySessionId[activeSession.id] || null
@@ -567,18 +581,21 @@ export function TerminalPage({
       return;
     }
 
-    const syncViewportWidth = () => {
+    const syncViewportMetrics = () => {
       setViewportWidth(resolveWindowWidth());
+      setHeaderTopInsetPx(resolveTerminalHeaderTopInsetPx(isAndroid));
     };
 
-    syncViewportWidth();
-    window.addEventListener('resize', syncViewportWidth);
-    window.visualViewport?.addEventListener('resize', syncViewportWidth);
+    syncViewportMetrics();
+    window.addEventListener('resize', syncViewportMetrics);
+    window.visualViewport?.addEventListener('resize', syncViewportMetrics);
+    window.visualViewport?.addEventListener('scroll', syncViewportMetrics);
     return () => {
-      window.removeEventListener('resize', syncViewportWidth);
-      window.visualViewport?.removeEventListener('resize', syncViewportWidth);
+      window.removeEventListener('resize', syncViewportMetrics);
+      window.visualViewport?.removeEventListener('resize', syncViewportMetrics);
+      window.visualViewport?.removeEventListener('scroll', syncViewportMetrics);
     };
-  }, []);
+  }, [isAndroid]);
 
   useEffect(() => {
     if (!splitVisible) {
@@ -1200,6 +1217,7 @@ export function TerminalPage({
         <TerminalHeader
           sessions={sessions}
           activeSession={activeSession}
+          topInsetPx={headerTopInsetPx}
           onBack={onOpenConnections}
           onOpenQuickTabPicker={onOpenQuickTabPicker}
           onOpenTabManager={() => setTabManagerOpen(true)}
@@ -1240,16 +1258,14 @@ export function TerminalPage({
         }}
       >
         <div
+          data-testid="terminal-stage"
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
-            bottom: `${terminalChromeBottomPx}px`,
+            bottom: `${terminalChromeBottomPx + terminalImeLiftPx}px`,
             display: 'flex',
-            transform: terminalImeLiftPx > 0 ? `translateY(-${terminalImeLiftPx}px)` : undefined,
-            transition: 'transform 180ms ease',
-            willChange: terminalImeLiftPx > 0 ? 'transform' : undefined,
           }}
         >
           <div
@@ -1297,7 +1313,7 @@ export function TerminalPage({
                       allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
                       domInputOffscreen={isAndroid}
                       onActivateInput={isAndroid && sessionIsActive ? () => restoreAndroidTerminalImeRoute() : undefined}
-                      onResize={sessionIsActive ? onResize : undefined}
+                      onResize={!isAndroid && sessionIsActive ? onResize : undefined}
                       onInput={sessionIsActive ? onTerminalInput : undefined}
                       onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
                       onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}

@@ -131,12 +131,38 @@
 ### Epic-006 后续加固项（不阻塞 mobile-15 主链收口）
 
 - [ ] mobile-15.9 真机 closeout：收敛 `head -> buffer-sync -> local apply -> renderer commit` 断链（当前 1258 现场表现为 `session.buffer.request` 后无 `buffer-sync/render` 证据，首屏空白但 daemon direct probe 正常）
+- [x] mobile-15.9a renderer scope closeout：`TerminalPage` 只挂 visible pane renderer，禁止 hidden session DOM 覆盖 active body（1277）
 - [ ] mobile-15.10 Android IME closeout：修正 `ImeAnchor` 的 stale show / 前台自动弹键盘 / 异常九宫格态，保证只有显式点键盘按钮才 show，且输入后必须进入 `input -> head -> buffer-sync -> render` 闭环
+- [ ] mobile-15.25 Android ImeAnchor composing truth closeout：`ImeAnchorEditText` 的 editable/composing/selection 必须单一真相；中文/九键输入期间不得提前 emit delta 或主动 clear editable，避免 caret 错位导致终端不可用
+  - 2026-04-27 已完成第一轮收口：
+    - 新增 `ImeAnchorInputLogic` + `ImeAnchorInputLogicTest`
+    - `ImeAnchorPlugin` 已切到 commit-only composing 路径
+    - 1276 APK 已构建并安装
+  - 2026-04-27 现场新增根因：
+    - `InputConnection.commitText / finishComposingText` 直接短路返回、没让 framework 更新 editable/selection，会导致输入法底部预编辑栏 cursor/caret 错位
+  - 待真机继续专项确认：
+    - 九键中文 caret 是否回正
+    - 语音转文字后是否仍能立即继续输入
 - [ ] mobile-15.11 buffer store closeout：把 client 本地 buffer trim 真相从“3 屏”改回“1000 行 sliding window”，请求窗口仍保持三屏，不再混用
 - [ ] mobile-15.12 daemon mirror lifecycle closeout：daemon mirror 不能再跟 subscriber 生命周期绑定；当前 `orphan destroy -> mirror recreate` 会把 `revision/latestEndIndex` 重置，破坏 daemon 绝对行号真相并触发 client revision-reset 链路
 - [ ] mobile-15.13 daemon client-session bookkeeping closeout：`destroyMirror()` 当前会把 subscriber 标成 `closed` 但不 `sessions.delete()`，现场 `/health` 已出现 `170 total / 1 connected`
 - [ ] mobile-15.14 terminal 测试矩阵 closeout：把 checklist 映射到现有自动测试与缺口，固定补测顺序（voice/CJK commit、follow overdrag blank-frame、buffer truth reset violation、payload inflation）
 - [ ] mobile-15.15 renderer follow-state closeout：live tail refresh / pending follow realign 不得把底部 follow 自动打进 reading；先补本地回归，再修 renderer 状态机
+- [ ] mobile-15.16 active re-entry pull-state closeout：切 tab / resume 后旧 in-flight `buffer-sync` bookkeeping 不得卡死 session；active re-entry 必须回到 head-first 主循环，但不得清空本地 buffer truth
+- [ ] mobile-15.17 reconnect bucket closeout：同 host reconnect 若 socket open 但 handshake 不完成，bucket 不能永远占住 `activeSessionId`；必须显式超时失败并释放后续 session 重连机会
+- [ ] mobile-15.18 UI shell closeout：顶部 terminal header 必须避开 Android 状态栏；键盘弹出时只能做底部裁切/缩高，不允许整页 `translateY` 上抬后再掉回
+- [ ] mobile-15.19 daemon service staging closeout：`zterm-daemon.sh` 的 `start/restart` 必须重建当前 staged runtime，禁止继续启动旧 `~/.wterm/daemon-runtime/server.cjs`；并补门禁保证 `buffer-sync` 返回 compact wire，服务异常不得 fallback 到 tmux session
+- [ ] mobile-15.20 daemon close-loop isolation closeout：`daemon-mirror-lab` 必须使用隔离测试端口，不能复用用户常驻 service 端口；否则 close-loop 会误连现场 daemon，门禁结论失真
+- [ ] mobile-15.21 client buffer-sync apply closeout：补 compact-wire incoming apply 回归；若已收到 `buffer-sync`，本地 buffer truth 必须立刻推进，禁止微任务批处理把 follow 尾窗卡成重复请求同一三屏
+- [ ] mobile-15.22 terminal header inset closeout：Header 顶部 inset 改成 UI shell 单一真相，删除 Header 内部二次 safe-area 叠加，补 Android 顶部点击区回归
+- [ ] mobile-15.23 tab restore truth closeout：冷启动 / 恢复时最后 active tab 只允许由 `ACTIVE_SESSION` 决定；`ACTIVE_PAGE.focusSessionId` 不得把已恢复的 active tab 覆盖回旧值
+- [ ] mobile-15.24 compact default-color sentinel closeout：compact wire encode/decode 必须和 `TerminalCell` 默认 `fg/bg=256` 对齐；补 roundtrip 回归，解决灰条/花屏/cursor 样式污染
+- [ ] mobile-15.26 mirror width mode truth closeout：冻结 `adaptive-phone | mirror-fixed`；`mirror-fixed` 下 client viewport / IME / container width 变化不得改写 daemon mirror / tmux 宽度
+- [ ] mobile-15.27 renderer horizontal crop / pan closeout：`mirror-fixed` 下长行默认左裁切，renderer 只维护 horizontal render window，不换行、不重排、不改 buffer truth
+- [ ] mobile-15.28 mirror-fixed gesture closeout：`mirror-fixed` 开启后自动关闭左右滑切 tab；单指横滑只服务于 renderer horizontal pan
+- [ ] mobile-15.29 renderer cursor echo closeout：Android client 不得自行改 cursor 样式；renderer 只能回显 payload。补 renderer theme / follow 场景回归，防止再引入客户端 cursor 第二语义
+- [ ] mobile-15.30 renderer measured-cell-width closeout：renderer 列宽改成客户端实测像素真相，删除 `1ch / 2ch` 作为终端列宽语义；补 mixed ASCII/CJK 对齐回归
+- [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
 
 - 若继续发新 APK，补 `foreground / reading / input` 真机专项证据
 - 单独审 daemon `health.sessions.total` bookkeeping 偏大问题
@@ -151,6 +177,9 @@
   - renderer 只维护 `follow / reading + renderBottomIndex`
   - UI shell 只负责容器位置与裁切
 - 当前下一步：先把 cold-start / tab-switch 首屏不刷新收敛成自动复现 case，再继续修实现
+- 当前新增冻结：terminal width mode 分成 `adaptive-phone | mirror-fixed`
+- 当前新增冻结：`mirror-fixed` 下只允许 renderer crop/pan，不允许 client width 回写 daemon mirror / tmux
+- 当前新增冻结：`mirror-fixed` 开启后自动关闭左右滑切 tab
 - 当前已解决的一层根因：
   - 旧实现会在 restore / foreground resume 时把 hidden tabs 一起抢连，拖慢 active tab 首刷
   - 当前已改成 active-only eager connect / active-only foreground resume

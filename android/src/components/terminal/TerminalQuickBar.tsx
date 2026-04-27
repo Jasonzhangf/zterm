@@ -1450,13 +1450,7 @@ export function TerminalQuickBar({
     };
   }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
 
-  const shellRowsLiftStyle = !floatingMenuOpen && keyboardVisible
-    ? {
-        transform: `translateY(-${keyboardInsetPx}px)`,
-        transition: 'transform 180ms ease',
-        willChange: 'transform',
-      }
-    : undefined;
+  const shellRowsLiftStyle = undefined;
 
   return (
     <div

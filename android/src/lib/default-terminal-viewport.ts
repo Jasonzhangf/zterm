@@ -21,36 +21,44 @@ function measureTerminalCell() {
     };
   }
 
-  const probe = document.createElement('span');
-  probe.textContent = 'W';
-  probe.style.position = 'fixed';
-  probe.style.left = '-9999px';
-  probe.style.top = '-9999px';
-  probe.style.visibility = 'hidden';
-  probe.style.whiteSpace = 'pre';
-  probe.style.fontFamily = [
-    '"Sarasa Mono SC"',
-    '"Sarasa Term SC"',
-    '"Noto Sans Mono CJK SC"',
-    '"Noto Sans CJK SC"',
-    '"Source Han Sans SC"',
-    '"Droid Sans Fallback"',
-    '"PingFang SC"',
-    '"Microsoft YaHei UI"',
-    '"Roboto Mono"',
-    '"Menlo"',
-    '"Consolas"',
-    'monospace',
-  ].join(', ');
-  probe.style.fontSize = `${DEFAULT_TERMINAL_FONT_SIZE_PX}px`;
-  probe.style.lineHeight = String(DEFAULT_TERMINAL_LINE_HEIGHT);
-  document.body.appendChild(probe);
-  const rect = probe.getBoundingClientRect();
-  probe.remove();
+  const measureProbeRect = (text: string) => {
+    const probe = document.createElement('span');
+    probe.textContent = text;
+    probe.style.position = 'fixed';
+    probe.style.left = '-9999px';
+    probe.style.top = '-9999px';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'pre';
+    probe.style.fontFamily = [
+      '"Sarasa Mono SC"',
+      '"Sarasa Term SC"',
+      '"Noto Sans Mono CJK SC"',
+      '"Noto Sans CJK SC"',
+      '"Source Han Sans SC"',
+      '"Droid Sans Fallback"',
+      '"PingFang SC"',
+      '"Microsoft YaHei UI"',
+      '"Roboto Mono"',
+      '"Menlo"',
+      '"Consolas"',
+      'monospace',
+    ].join(', ');
+    probe.style.fontSize = `${DEFAULT_TERMINAL_FONT_SIZE_PX}px`;
+    probe.style.lineHeight = String(DEFAULT_TERMINAL_LINE_HEIGHT);
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    return rect;
+  };
+
+  const latinRect = measureProbeRect('W');
+  const cjkRect = measureProbeRect('你');
+  const latinWidth = Math.max(1, latinRect.width || DEFAULT_TERMINAL_FONT_SIZE_PX * 0.62);
+  const cellWidth = Math.max(latinWidth, (cjkRect.width || latinWidth * 2) / 2);
 
   return {
-    cellWidth: Math.max(1, rect.width || DEFAULT_TERMINAL_FONT_SIZE_PX * 0.62),
-    rowHeight: Math.max(1, Math.ceil(rect.height || DEFAULT_TERMINAL_ROW_HEIGHT_PX), DEFAULT_TERMINAL_ROW_HEIGHT_PX),
+    cellWidth,
+    rowHeight: Math.max(1, Math.ceil(latinRect.height || DEFAULT_TERMINAL_ROW_HEIGHT_PX), DEFAULT_TERMINAL_ROW_HEIGHT_PX),
   };
 }
 

@@ -53,6 +53,7 @@
 - [ ] 明确断言：**每次回复都带 head bounds**
 - [ ] 明确断言：server 不在 `head/range` 请求路径里触发 planner / rebuild / capture
 - [ ] 明确断言：大请求不会被 server 擅自放大成 full-tail
+- [ ] **专项断言：daemon 不得因 cursor 改写任何 buffer cell；cursor 若存在，必须走独立 metadata**
 
 ---
 
@@ -111,6 +112,8 @@
 - 输入退出 reading
 - follow overdrag 不白屏/不花屏
 - 有 gap 时继续显示已有内容
+- `mirror-fixed` 长行只裁切不重排
+- `mirror-fixed` 开启后左右滑切 tab 自动关闭
 
 ### 已覆盖
 
@@ -149,6 +152,9 @@
 - [ ] **专项：follow 模式到底后继续下拖 / overdrag，不得出现白屏 / 贴图错位 / 重复灰块**
 - [ ] **专项：shell 抬升/布局变化时 renderer 仍持续显示已有内容，不产生 blank frame**
 - [ ] **专项：窗口不连续时，renderer 不能把已有 absolute-index 内容整屏画空**
+- [ ] **专项：`mirror-fixed` 长行默认左裁切，不换行、不重排、不改 buffer truth**
+- [ ] **专项：`mirror-fixed` 横向平移只改 renderer 列窗口，不触发 `onResize` / buffer pull / mode change**
+- [ ] **专项：`mirror-fixed` 开启后左右滑切 tab 自动关闭**
 
 ---
 
@@ -181,9 +187,29 @@
 - [ ] **中文输入法 composition -> commit 自动刷新**
 - [ ] **语音输入法转文字自动刷新，不需要补一个字符**
 - [ ] **commitText / finishComposingText 到 renderer 刷新闭环**
+- [ ] **Android IME 输入后，buffer-sync 前 terminal 可见内容不得先本地变化**
 - [ ] **输入后界面开始刷新，但 terminal 不得失去后续输入能力**
 - [ ] **刷新期间 keyboard/IME 状态变化，不得把 terminal 再次切回不可输入**
 - [ ] **editor overlay 打开/关闭时 ImeAnchor focusable 状态切换正确，不抢 WebView 焦点**
+
+## D.1 prompt / cursor style parity
+
+### 目标
+
+- prompt / input row 样式真相必须来自 mirror payload
+- client 不得 local-echo 输入行样式
+- daemon 不得在 cursor 路径里改写 prompt/input 行任何 cell truth
+
+### 已覆盖
+
+- `src/contexts/SessionContext.ws-refresh.test.tsx`
+  - input 发出后、mirror 未回来前，不会本地把 `typed-from-client` 画到 terminal
+
+### 还缺
+
+- [ ] **App/IME close loop：输入发出后、buffer-sync 前，terminal 可见内容不变**
+- [ ] **daemon contract：cursor 不得写进 `lines[].cells[].flags`；buffer truth 在有无 cursor 时必须一致**
+- [ ] **renderer parity：收到带样式的 prompt/input row 后，只能回显 payload 的 `fg/bg/flags`**
 
 ---
 

@@ -44,6 +44,9 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - 读侧：`mirror store -> head/range reply`
 - `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
 - **请求不得触发 tmux capture / canonical rebuild / planner**
+- daemon **不得改写 buffer cells 本身**
+  - 包括但不限于：cursor paint、reverse 注入、样式补丁、局部重写
+  - 若需要传 cursor truth，必须走**独立元数据**，不能写回 `lines[].cells[].flags`
 
 硬规则：
 - server 不做 follow / reading 策略
@@ -112,6 +115,8 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 写侧：同步 daemon -> 更新本地 sparse buffer
   - 读侧：renderer 只消费当前本地 buffer
 - buffer manager 不关心 renderer 如何滚动、如何绘制、如何布局
+- `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
+- session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
 
 ## 3. renderer
 
@@ -124,6 +129,31 @@ renderer 只看两件事：
 - daemon 策略
 - buffer 拉取策略
 - 输入法
+
+### 3.0 宽度模式真源
+
+renderer 还必须显式区分两种宽度模式：
+
+1. `adaptive-phone`
+   - 允许当前手机适配宽度的现有模式
+2. `mirror-fixed`
+   - daemon mirror / tmux 宽度保持上游真相
+   - client viewport、IME、safe-area、容器宽度、字体缩放，**不得**改写 mirror 宽度
+   - renderer 只能：
+     - 读取原始列 truth
+     - 对当前 viewport 做横向裁切
+     - 维护自己的 horizontal render window
+   - **cell 宽度真相必须来自客户端实测的像素宽度**，不能再把 `1ch / 2ch` 当终端列宽真相
+   - 双宽 cell 只能按 `2 * measuredCellWidthPx` 渲染；浏览器 fallback 字体的 `ch` 不是 tmux 列宽真相
+   - 若 buffer 行宽大于 viewport：
+     - 默认显示左侧窗口
+     - 用户横向平移 renderer window 看右侧
+     - **不允许**本地重排、换行、回写上游宽度
+  - **cursor 也是上游 truth**
+    - Android client / renderer **不得自行改 cursor 样式、颜色、位置语义**
+    - 但 cursor truth 也**不得通过改写 buffer cell** 来传递
+    - 正确做法只能是：daemon 单独回 cursor metadata；renderer 按 metadata 做 overlay / highlight
+    - buffer lines 只承载 tmux 原始 cell truth
 
 ### 3.1 follow
 - follow 只是在收到 head / buffer 更新后
@@ -157,6 +187,12 @@ UI 只负责容器位置与裁切：
 - IME 只移动容器，不改变内容
 - renderer 只在容器里画，不关心输入法
 - keyboard / IME 不得回灌成 buffer / render 真相
+- Android terminal 原生输入若走 `ImeAnchor`，则 **ImeAnchor editable / composing / selection 必须是单一真相**；组合输入期间不得一边让 IME 持有 composing state，一边又由插件自行清空/改写 editable 造成第二语义
+- `ImeAnchor` 的 `InputConnection` 也必须服从这条真相：`commitText / finishComposingText` 不能跳过 `super` 直接短路返回；否则 framework editable/selection 不更新，真机会出现 **输入法底部预编辑光标错位 / caret 乱飞**
+- `mirror-fixed` 下，UI shell 若启用横向查看：
+  - 自动关闭左右滑切 tab
+  - 单指横滑只服务于 renderer horizontal pan
+  - 不允许一次手势里同时尝试切 tab 与横向平移
 
 ## 5. 反模式清单
 
@@ -168,6 +204,10 @@ UI 只负责容器位置与裁切：
 - daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture
 - daemon 根据 client 状态决定“要不要先刷新一下 mirror 再回复”
 - daemon 因 subscriber 归零就销毁 mirror，导致 reconnect 后 revision / absolute head 重置
+- daemon 把 cursor / selection / transient visual state 直接写进 buffer cells
+- client viewport 变窄就改写 daemon mirror / tmux 宽度
+- `mirror-fixed` 下把长行本地重排成手机宽度
+- `mirror-fixed` 下还保留左右滑切 tab，和横向平移发生手势冲突
 - renderer 直接 request buffer
 - buffer manager 直接改 renderer follow/reading
 - follow 下因为历史 gap 去回补整段旧历史
@@ -212,6 +252,11 @@ tmux truth
 6. reading 连续上滚
 7. 输入退出 reading
 8. daemon 重启恢复
+9. prompt / input row style parity
+   - 输入发出后、`buffer-sync` 前，terminal 可见内容不得本地直接变化
+   - `buffer-sync` 到达后，renderer 只回显 payload，不得自己再造 prompt/cursor 第二语义
+   - prompt / input row 必须可比对 `char / fg / bg / flags`
+   - daemon 若回 cursor，必须是**独立 cursor metadata**；`lines` 不得因 cursor 改变
 
 ## 7.1 必须沉淀成自动回归
 
@@ -237,8 +282,19 @@ tmux truth
 
 新增门禁精华：
 - cold-start / foreground resume 的 transport gate 必须优先 active tab；若 hidden tabs 跟着一起 eager reconnect，active tab 的首屏会被排队拖慢。除非已有被验证的 hidden low-frequency 设计，否则 hidden tab 默认只保留 runtime shell，等显式激活再 reconnect。
+- 若现场 `buffer-sync` 下行长期几百 KB/s 甚至 MB/s，先直接抓 daemon 回包；若仍返回 legacy `lines[].cells[]` 而不是 compact `i/t/w/s`，优先查 **daemon service staged runtime 没更新**，尤其是 `start/restart` 只重启 launchd 但没重建 `~/.wterm/daemon-runtime/server.cjs`。
+- daemon service 管理也必须遵守唯一真源：`start/restart` 必须重建当前 staged runtime；服务异常必须显式失败，**不能 fallback 回 tmux session** 掩盖旧 runtime/旧语义。
+- 本地 `daemon mirror close-loop` 必须使用**隔离测试端口**；禁止复用用户常驻 service 端口（如 3333），否则脚本会误连现场 daemon，出现“自动回归假绿 / 假红”。
 - hidden / non-visible tab 不得继续挂载 renderer 实例；renderer scope 必须严格等于当前 visible pane。否则 header truth 已切换但 body 仍残留旧 session DOM，Android WebView 容易出现“页头/内容对不上、像花屏”的 stale compositing。
+- renderer scope 回归测试不能只断言 “inactive renderer 还在但 data-active=false”；必须直接断言 **hidden renderer 不在 DOM**，否则会把 DOM 覆盖类问题测成假绿。
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
+- 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
+- “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。
+- 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
+- Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
+- terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
+- 若真机出现**大块灰条/花屏/光标样式乱飞**，优先查 **compact wire 的 default color sentinel** 是否和 `TerminalCell` 真相一致；当前 app/runtime 里的默认前景/背景是 `256/256`，不能在 compact encode/decode 里偷偷改成 ANSI `15/0`。
+- 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
 
 ## 8. 现场判断口径
 

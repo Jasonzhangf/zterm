@@ -2,6 +2,7 @@ import {
   SessionBufferState,
   TerminalBufferPayload,
   TerminalCell,
+  TerminalCursorState,
   TerminalGapRange,
   type TerminalIndexedLine,
   type WireIndexedLine,
@@ -13,6 +14,17 @@ const EMPTY_ROW: TerminalCell[] = [];
 
 function cloneGapRanges(gapRanges: TerminalGapRange[]) {
   return gapRanges.map((range) => ({ ...range }));
+}
+
+function cloneCursor(cursor: TerminalCursorState | null | undefined) {
+  if (!cursor) {
+    return null;
+  }
+  return {
+    rowIndex: Math.max(0, Math.floor(cursor.rowIndex || 0)),
+    col: Math.max(0, Math.floor(cursor.col || 0)),
+    visible: Boolean(cursor.visible),
+  } satisfies TerminalCursorState;
 }
 
 function textLineToCells(line: string): TerminalCell[] {
@@ -201,6 +213,7 @@ function buildSessionBufferState(options: {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor: TerminalCursorState | null;
   revision: number;
   cacheLines: number;
   updateKind: SessionBufferState['updateKind'];
@@ -233,6 +246,7 @@ function buildSessionBufferState(options: {
     cols: Math.max(1, Math.floor(options.cols)),
     rows: Math.max(1, Math.floor(options.rows)),
     cursorKeysApp: Boolean(options.cursorKeysApp),
+    cursor: cloneCursor(options.cursor),
     updateKind: options.updateKind,
     revision: Math.max(0, Math.floor(options.revision || 0)),
   };
@@ -247,6 +261,7 @@ export function createSessionBufferState(options: {
   cols?: number;
   rows?: number;
   cursorKeysApp?: boolean;
+  cursor?: TerminalCursorState | null;
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
@@ -278,6 +293,7 @@ export function createSessionBufferState(options: {
     cols,
     rows,
     cursorKeysApp: Boolean(options.cursorKeysApp),
+    cursor: cloneCursor(options.cursor),
     revision: options.revision ?? 0,
     cacheLines: options.cacheLines,
     updateKind: 'replace',
@@ -498,6 +514,7 @@ export function applyBufferSyncToSessionBuffer(
       cols: payload.cols,
       rows: payload.rows,
       cursorKeysApp: payload.cursorKeysApp,
+      cursor: payload.cursor,
       revision,
       cacheLines,
     });
@@ -523,6 +540,7 @@ export function applyBufferSyncToSessionBuffer(
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
+    cursor: payload.cursor,
     revision,
     cacheLines,
     updateKind: detectUpdateKind(current, sparseWindow),
@@ -551,6 +569,9 @@ export function sessionBuffersEqual(left: SessionBufferState, right: SessionBuff
     || left.cols !== right.cols
     || left.rows !== right.rows
     || left.cursorKeysApp !== right.cursorKeysApp
+    || (left.cursor?.rowIndex ?? null) !== (right.cursor?.rowIndex ?? null)
+    || (left.cursor?.col ?? null) !== (right.cursor?.col ?? null)
+    || (left.cursor?.visible ?? null) !== (right.cursor?.visible ?? null)
     || left.lines.length !== right.lines.length
     || left.gapRanges.length !== right.gapRanges.length
   ) {

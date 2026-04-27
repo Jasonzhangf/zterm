@@ -9,6 +9,7 @@ const DOUBLE_TAP_MS = 280;
 interface TerminalHeaderProps {
   sessions: Session[];
   activeSession: Session | null;
+  topInsetPx?: number;
   onBack: () => void;
   onOpenQuickTabPicker: () => void;
   onOpenTabManager: () => void;
@@ -40,6 +41,7 @@ function formatResolvedPath(path?: Session['resolvedPath']) {
 export function TerminalHeader({
   sessions,
   activeSession,
+  topInsetPx = 0,
   onBack,
   onOpenQuickTabPicker,
   onOpenTabManager,
@@ -162,7 +164,7 @@ export function TerminalHeader({
   return (
     <div
       style={{
-        padding: `${mobileTheme.safeArea.top} 6px 6px`,
+        padding: `${Math.max(0, Math.round(topInsetPx || 0)) + 16}px 6px 6px`,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

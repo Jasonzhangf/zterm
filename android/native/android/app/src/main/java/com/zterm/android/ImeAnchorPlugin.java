@@ -25,6 +25,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.List;
 
 @CapacitorPlugin(name = "ImeAnchor")
 public class ImeAnchorPlugin extends Plugin {
@@ -35,12 +36,11 @@ public class ImeAnchorPlugin extends Plugin {
     private ViewTreeObserver.OnGlobalLayoutListener keyboardLayoutListener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean suppressTextChange = false;
+    private boolean suppressFrameworkEditableDispatch = false;
     private boolean pendingShowRequest = false;
-    private boolean suppressCommittedTextEcho = false;
-    private String lastObservedEditableText = "";
-    private boolean lastObservedEditableWasImmediate = false;
     private boolean lastKeyboardVisible = false;
     private int lastKeyboardHeight = 0;
+    private final ImeAnchorInputLogic inputLogic = new ImeAnchorInputLogic();
 
     @Override
     public void load() {
@@ -229,56 +229,46 @@ public class ImeAnchorPlugin extends Plugin {
     }
 
     private void handleEditableChanged(Editable editable) {
-        if (suppressTextChange || imeEditText == null) {
+        if (suppressTextChange || suppressFrameworkEditableDispatch || imeEditText == null) {
             return;
         }
 
         String currentText = editable.toString();
-        if (currentText.isEmpty()) {
-            lastObservedEditableText = "";
-            lastObservedEditableWasImmediate = false;
-            return;
-        }
-
         boolean composing = hasComposingText(editable);
-        if (composing) {
-            boolean immediate = isImmediateTerminalComposition(currentText);
-            Log.i(TAG, "handleEditableChanged(): composing length=" + editable.length() + " immediate=" + immediate);
-            if (immediate) {
-                emitImmediateTextDelta(lastObservedEditableText, currentText, "editableComposing");
-            }
-            lastObservedEditableText = currentText;
-            lastObservedEditableWasImmediate = immediate;
+        Log.i(TAG, "handleEditableChanged(): composing=" + composing + " length=" + editable.length());
+        dispatchInputLogicEvents(
+            inputLogic.onEditableChanged(currentText, composing),
+            "editableChanged"
+        );
+    }
+
+    private void dispatchEditableSnapshot(String source) {
+        if (imeEditText == null) {
             return;
         }
 
-        if (suppressCommittedTextEcho) {
-            Log.i(TAG, "handleEditableChanged(): skip committed echo=" + currentText);
+        Editable editable = imeEditText.getText();
+        if (editable == null) {
             return;
         }
 
-        if (lastObservedEditableWasImmediate) {
-            emitImmediateTextDelta(lastObservedEditableText, currentText, "editableCommit");
-            clearImeEditText();
-            return;
-        }
-
-        emitInputText(currentText, "editableCommitBuffer");
+        String currentText = editable.toString();
+        boolean composing = hasComposingText(editable);
+        Log.i(TAG, "dispatchEditableSnapshot(): source=" + source + " composing=" + composing + " length=" + editable.length());
+        dispatchInputLogicEvents(
+            inputLogic.onEditableChanged(currentText, composing),
+            source
+        );
     }
 
     private void clearImeEditText() {
+        inputLogic.reset();
         if (imeEditText == null || imeEditText.getText() == null) {
-            lastObservedEditableText = "";
-            lastObservedEditableWasImmediate = false;
             return;
         }
-        lastObservedEditableText = "";
-        lastObservedEditableWasImmediate = false;
-        suppressCommittedTextEcho = true;
         suppressTextChange = true;
         imeEditText.getText().clear();
         suppressTextChange = false;
-        suppressCommittedTextEcho = false;
     }
 
     void emitBackspace(int count) {
@@ -301,58 +291,27 @@ public class ImeAnchorPlugin extends Plugin {
         clearImeEditText();
     }
 
-    private void emitImmediateTextDelta(String previousText, String nextText, String source) {
-        String previous = previousText == null ? "" : previousText;
-        String next = nextText == null ? "" : nextText;
-        if (previous.equals(next)) {
-            return;
-        }
-
-        if (next.startsWith(previous)) {
-            String delta = next.substring(previous.length());
-            if (!delta.isEmpty()) {
+    private void dispatchInputLogicEvents(List<ImeAnchorInputLogic.Event> events, String source) {
+        for (ImeAnchorInputLogic.Event event : events) {
+            if (event.type == ImeAnchorInputLogic.EventType.EMIT_INPUT && event.text != null && !event.text.isEmpty()) {
+                Log.i(TAG, "dispatchInputLogicEvents(): source=" + source + " emitInput=" + event.text);
                 JSObject payload = new JSObject();
-                payload.put("text", delta);
-                Log.i(TAG, "emitImmediateTextDelta(): source=" + source + " delta=" + delta);
+                payload.put("text", event.text);
                 notifyListeners("input", payload);
-            }
-            return;
-        }
-
-        if (previous.startsWith(next)) {
-            int deleteCount = previous.length() - next.length();
-            if (deleteCount > 0) {
-                emitBackspace(deleteCount);
-            }
-            return;
-        }
-
-        if (!previous.isEmpty()) {
-            emitBackspace(previous.length());
-        }
-        if (!next.isEmpty()) {
-            JSObject payload = new JSObject();
-            payload.put("text", next);
-            Log.i(TAG, "emitImmediateTextDelta(): source=" + source + " reset=" + next);
-            notifyListeners("input", payload);
-        }
-    }
-
-    private boolean isImmediateTerminalComposition(String text) {
-        if (text == null || text.isEmpty()) {
-            return false;
-        }
-        for (int i = 0; i < text.length(); ) {
-            int codePoint = text.codePointAt(i);
-            i += Character.charCount(codePoint);
-            if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t') {
                 continue;
             }
-            if (codePoint < 0x20 || codePoint > 0x7e) {
-                return false;
+            if (event.type == ImeAnchorInputLogic.EventType.EMIT_BACKSPACE && event.count > 0) {
+                Log.i(TAG, "dispatchInputLogicEvents(): source=" + source + " emitBackspace=" + event.count);
+                JSObject payload = new JSObject();
+                payload.put("count", event.count);
+                notifyListeners("backspace", payload);
+                continue;
+            }
+            if (event.type == ImeAnchorInputLogic.EventType.CLEAR_EDITABLE) {
+                Log.i(TAG, "dispatchInputLogicEvents(): source=" + source + " clearEditable");
+                clearImeEditText();
             }
         }
-        return true;
     }
 
     private boolean hasComposingText(Editable editable) {
@@ -522,31 +481,32 @@ public class ImeAnchorPlugin extends Plugin {
 
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
-                    if (plugin != null && text != null && text.length() > 0) {
-                        String committed = text.toString();
-                        if (plugin.lastObservedEditableWasImmediate) {
-                            plugin.emitImmediateTextDelta(plugin.lastObservedEditableText, committed, "commitText");
-                            plugin.clearImeEditText();
-                            return true;
+                    if (plugin != null) {
+                        plugin.suppressFrameworkEditableDispatch = true;
+                        boolean handled;
+                        try {
+                            handled = super.commitText(text, newCursorPosition);
+                        } finally {
+                            plugin.suppressFrameworkEditableDispatch = false;
                         }
-                        plugin.emitInputText(committed, "commitText");
-                        return true;
+                        plugin.dispatchEditableSnapshot("commitText");
+                        return handled;
                     }
                     return super.commitText(text, newCursorPosition);
                 }
 
                 @Override
                 public boolean finishComposingText() {
-                    Editable editable = getText();
-                    if (plugin != null && editable != null && editable.length() > 0) {
-                        String committed = editable.toString();
-                        if (plugin.lastObservedEditableWasImmediate) {
-                            plugin.emitImmediateTextDelta(plugin.lastObservedEditableText, committed, "finishComposingText");
-                            plugin.clearImeEditText();
-                            return true;
+                    if (plugin != null) {
+                        plugin.suppressFrameworkEditableDispatch = true;
+                        boolean handled;
+                        try {
+                            handled = super.finishComposingText();
+                        } finally {
+                            plugin.suppressFrameworkEditableDispatch = false;
                         }
-                        plugin.emitInputText(committed, "finishComposingText");
-                        return true;
+                        plugin.dispatchEditableSnapshot("finishComposingText");
+                        return handled;
                     }
                     return super.finishComposingText();
                 }

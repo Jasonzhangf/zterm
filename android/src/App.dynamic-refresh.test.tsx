@@ -676,6 +676,73 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
 
+  it('does not let a stale terminal page focus id override the restored latest active tab truth', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      {
+        id: 'host-b',
+        createdAt: 2,
+        name: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'tab-b',
+        hostId: 'host-b',
+        connectionName: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-b');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'tab-a' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b'));
+    expect(sessionHarness.switchSession).not.toHaveBeenCalledWith('tab-a');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('tab-b');
+  });
+
   it('reconnects the active tab when the restored active session is closed', async () => {
     sessionHarness.update(
       {

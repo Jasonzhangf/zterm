@@ -58,6 +58,12 @@ export interface TerminalGapRange {
   endIndex: number;
 }
 
+export interface TerminalCursorState {
+  rowIndex: number;   // absolute buffer row index
+  col: number;        // grid column inside the row
+  visible: boolean;
+}
+
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
 export interface SessionBufferState {
@@ -70,6 +76,7 @@ export interface SessionBufferState {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor: TerminalCursorState | null;
   updateKind: 'replace' | 'append' | 'prepend' | 'patch';
   revision: number;
 }
@@ -174,6 +181,7 @@ export interface TerminalBufferPayload {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor?: TerminalCursorState | null;
   lines: WireIndexedLine[];         // concrete rows carried by this message; compact preferred, legacy accepted
 }
 
@@ -192,6 +200,7 @@ export interface BufferHeadPayload {
   latestEndIndex: number;
   availableStartIndex?: number;
   availableEndIndex?: number;
+  cursor?: TerminalCursorState | null;
 }
 
 export interface PasteImagePayload {
