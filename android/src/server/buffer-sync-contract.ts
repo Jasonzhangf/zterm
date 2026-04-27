@@ -48,15 +48,13 @@ function compactLine(index: number, cells: TerminalCell[]): CompactIndexedLine {
   let hasNonUnitWidth = false;
   let col = 0;                // output column (advances only for width > 0)
   let firstTextCell = true;
-  let lastGridCol = 0;        // grid column of last cell with width > 0
+  let outputCol = 0;           // actual output grid column (advances by cell.width)
 
   for (let c = 0; c < cells.length; c++) {
     const cell = cells[c];
 
     // Continuation / padding cells (width <= 0): skip entirely
     if (cell.width <= 0) continue;
-
-    lastGridCol = c;
 
     // --- text + width tracking ---
     text += String.fromCodePoint(cell.char);
@@ -69,7 +67,7 @@ function compactLine(index: number, cells: TerminalCell[]): CompactIndexedLine {
     if (cell.width !== 1) hasNonUnitWidth = true;
 
     // --- style run tracking ---
-    // Span boundaries use grid column 'c', matching expandCompactLine lookup.
+    // Span boundaries use output column (advances by cell.width, not grid index).
     const isDefault =
       cell.fg === DEFAULT_FG &&
       cell.bg === DEFAULT_BG &&
@@ -80,24 +78,25 @@ function compactLine(index: number, cells: TerminalCell[]): CompactIndexedLine {
       runFg = cell.fg;
       runBg = cell.bg;
       runFlags = cell.flags;
-      runStart = c;
+      runStart = outputCol;
       firstTextCell = false;
     } else if (cell.fg !== runFg || cell.bg !== runBg || cell.flags !== runFlags) {
       if (spans === undefined) spans = [];
-      spans.push([runStart, c, runFg, runBg, runFlags]);
-      runStart = c;
+      spans.push([runStart, outputCol, runFg, runBg, runFlags]);
+      runStart = outputCol;
       runFg = cell.fg;
       runBg = cell.bg;
       runFlags = cell.flags;
     }
 
+    outputCol += cell.width;
     col++;
   }
 
-  // Flush final run — end is one past the last text cell's grid column
+  // Flush final run — end is actual output column after last text cell's grid column
   if (col > 0) {
     if (spans === undefined) spans = [];
-    spans.push([runStart, lastGridCol + 1, runFg, runBg, runFlags]);
+    spans.push([runStart, outputCol, runFg, runBg, runFlags]);
   }
 
   const result: CompactIndexedLine = { i: index, t: text };
