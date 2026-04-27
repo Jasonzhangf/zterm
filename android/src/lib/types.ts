@@ -38,6 +38,7 @@ export interface Host {
   pinned: boolean;           // 是否置顶首页
   lastConnected?: number;    // 最后连接时间戳
   autoCommand?: string;      // 连接后自动执行的命令
+  terminalWidthMode?: TerminalWidthMode;
 }
 
 // ============================================
@@ -56,6 +57,8 @@ export interface TerminalGapRange {
   startIndex: number;
   endIndex: number;
 }
+
+export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
 export interface SessionBufferState {
   lines: TerminalCell[][];          // sparse cached window rows; gap rows are [] and described by gapRanges
@@ -147,14 +150,16 @@ export interface TerminalIndexedLine {
  * Replaces TerminalIndexedLine on the wire to cut payload size ~95%.
  *
  *   i = absolute line index
- *   t = text content (codePoints, width-0 continuation cells skipped)
- *   s = optional sparse style spans [startCol, endCol, fg, bg]
- *       absent or empty = all default (fg=15, bg=0, flags=0, width=1)
+ *   t = text content (codePoints, width-0 continuation cells skipped, padding stripped)
+ *   w = optional width per codepoint in t (omitted = all 1; needed for CJK double-width)
+ *   s = optional sparse style spans [startCol, endCol, fg, bg, flags]
+ *       absent or empty = all default (fg=256, bg=256, flags=0, width=1)
  */
 export interface CompactIndexedLine {
   i: number;
   t: string;
-  s?: [number, number, number, number][];
+  w?: number[];
+  s?: [number, number, number, number, number][];
 }
 
 /** Wire format: either compact (new) or legacy full-cell (old). */
@@ -454,6 +459,7 @@ export const DEFAULT_HOST: Partial<Host> = {
   signalUrl: '',
   transportMode: 'auto',
   authType: 'password',
+  terminalWidthMode: 'adaptive-phone',
   tags: [],
   pinned: false,
 };

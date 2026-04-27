@@ -3,6 +3,7 @@ import type { BufferSyncRequestPayload, TerminalCell } from '../lib/types';
 import {
   buildBufferHeadPayload,
   buildRequestedRangeBufferPayload,
+  expandCompactLine,
   type BufferSyncMirrorSnapshot,
 } from './buffer-sync-contract';
 
@@ -106,5 +107,56 @@ describe('buildRequestedRangeBufferPayload', () => {
       availableEndIndex: 0,
     });
     expect(payload.lines).toEqual([]);
+  });
+
+  it('does not emit non-default style spans for rows that only use the terminal default 256/256 colors', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror(['plain-default-row']),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 101,
+      }),
+    );
+
+    expect(payload.lines).toHaveLength(1);
+    const compactLine = payload.lines[0] as { i: number; t: string; s?: unknown };
+    expect(compactLine.i).toBe(100);
+    expect(compactLine.t).toBe('plain-default-row');
+    expect(compactLine.s).toBeUndefined();
+  });
+
+  it('roundtrips compact rows without corrupting trailing blank cells away from the default 256/256 sentinel', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror(['A']),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 101,
+      }),
+    );
+
+    const compactLine = payload.lines[0] as { i: number; t: string; w?: number[]; s?: [number, number, number, number, number][] };
+    const expanded = expandCompactLine(compactLine, 80);
+
+    expect(expanded[0]).toMatchObject({
+      char: 'A'.codePointAt(0),
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    });
+    expect(expanded[1]).toMatchObject({
+      char: 32,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    });
+    expect(expanded[20]).toMatchObject({
+      char: 32,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    });
   });
 });

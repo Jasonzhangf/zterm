@@ -47,6 +47,7 @@ const SESSION_STATUS_EVENT = 'zterm:session-status';
 const RECONNECT_BASE_DELAY_MS = 1200;
 const RECONNECT_MAX_DELAY_MS = 30000;
 const POST_SUCCESS_NEXT_RETRY_DELAY_MS = 240;
+const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
 const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
@@ -597,17 +598,13 @@ function buildTailRefreshBufferSyncRequestPayload(
       requestEndIndex: viewportEndIndex,
     };
   } else if (sameEndRevisionAdvanced) {
-    window = options?.forceSameEndRefresh
-      ? resolveRequestedBufferWindow(
-          viewportEndIndex,
-          viewportRows,
-          authoritativeHeadStartIndex,
-        )
-      : resolveVisibleViewportWindow(
-          viewportEndIndex,
-          viewportRows,
-          authoritativeHeadStartIndex,
-        );
+    // sameEnd: revision advanced, end unchanged (style/cursor update).
+    // Only request visible viewport — never full 3-screen cache.
+    window = resolveVisibleViewportWindow(
+      viewportEndIndex,
+      viewportRows,
+      authoritativeHeadStartIndex,
+    );
   } else {
     window = {
       requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
@@ -956,8 +953,6 @@ export function SessionProvider({
   const reconnectBucketsRef = useRef<Map<string, ReconnectBucket>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
   const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
-  const pendingIncomingBufferPayloadsRef = useRef<Map<string, TerminalBufferPayload[]>>(new Map());
-  const pendingIncomingBufferFlushScheduledRef = useRef<Set<string>>(new Set());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
@@ -1097,6 +1092,20 @@ export function SessionProvider({
     }
     sessionPullStateRef.current.set(sessionId, nextPullStates);
   }, []);
+
+  const resetSessionTransportPullBookkeeping = useCallback((sessionId: string, reason: string) => {
+    const pullStates = sessionPullStateRef.current.get(sessionId) || null;
+    if (!pullStates || !hasActiveSessionPullState(pullStates)) {
+      return;
+    }
+    runtimeDebug('session.buffer.pull.reset', {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      reason,
+      pullStates,
+    });
+    clearSessionPullState(sessionId);
+  }, [clearSessionPullState]);
 
   const sendSocketPayload = useCallback((sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, options?: {
     pullPurpose?: SessionPullPurpose;
@@ -1238,11 +1247,6 @@ export function SessionProvider({
       pingIntervals.current.delete(sessionId);
     }
     lastPongAtRef.current.delete(sessionId);
-  }, []);
-
-  const clearPendingIncomingBuffer = useCallback((sessionId: string) => {
-    pendingIncomingBufferFlushScheduledRef.current.delete(sessionId);
-    pendingIncomingBufferPayloadsRef.current.delete(sessionId);
   }, []);
 
   const clearTailRefreshRuntime = useCallback((sessionId: string) => {
@@ -1423,15 +1427,7 @@ export function SessionProvider({
     return true;
   }, [sendSocketPayload]);
 
-  const flushPendingIncomingBuffer = useCallback((sessionId: string) => {
-    pendingIncomingBufferFlushScheduledRef.current.delete(sessionId);
-    const pendingPayloads = pendingIncomingBufferPayloadsRef.current.get(sessionId);
-    if (!pendingPayloads || pendingPayloads.length === 0) {
-      pendingIncomingBufferPayloadsRef.current.delete(sessionId);
-      return;
-    }
-    pendingIncomingBufferPayloadsRef.current.delete(sessionId);
-
+  const applyIncomingBufferSync = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId);
     if (!session) {
       return;
@@ -1439,7 +1435,8 @@ export function SessionProvider({
 
     const revisionResetExpectation = sessionRevisionResetRef.current.get(sessionId) || null;
     const lowerRevisionPayload = revisionResetExpectation
-      ? pendingPayloads.find((payload) => Math.max(0, Math.floor(payload.revision || 0)) <= Math.max(0, Math.floor(session.buffer.revision || 0)))
+      && Math.max(0, Math.floor(payload.revision || 0)) <= Math.max(0, Math.floor(session.buffer.revision || 0))
+      ? payload
       : null;
 
     let nextBuffer = (
@@ -1469,13 +1466,11 @@ export function SessionProvider({
       });
     }
 
-    for (const payload of pendingPayloads) {
-      nextBuffer = applyBufferSyncToSessionBuffer(
-        nextBuffer,
-        payload,
-        resolveSessionCacheLines(payload.rows || nextBuffer.rows),
-      );
-    }
+    nextBuffer = applyBufferSyncToSessionBuffer(
+      nextBuffer,
+      payload,
+      resolveSessionCacheLines(payload.rows || nextBuffer.rows),
+    );
 
     if (
       revisionResetExpectation
@@ -1520,6 +1515,11 @@ export function SessionProvider({
       return;
     }
 
+    stateRef.current = reduceSessionAction(stateRef.current, {
+      type: 'UPDATE_SESSION',
+      id: sessionId,
+      updates: { buffer: nextBuffer },
+    });
     dispatch({
       type: 'UPDATE_SESSION',
       id: sessionId,
@@ -1569,21 +1569,6 @@ export function SessionProvider({
     resolveSessionCacheLines,
   ]);
 
-  const queueIncomingBufferSync = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
-    const pending = pendingIncomingBufferPayloadsRef.current.get(sessionId) || [];
-    pending.push(payload);
-    pendingIncomingBufferPayloadsRef.current.set(sessionId, pending);
-
-    if (pendingIncomingBufferFlushScheduledRef.current.has(sessionId)) {
-      return;
-    }
-
-    pendingIncomingBufferFlushScheduledRef.current.add(sessionId);
-    void Promise.resolve().then(() => {
-      flushPendingIncomingBuffer(sessionId);
-    });
-  }, [flushPendingIncomingBuffer]);
-
   const clearReconnectForSession = useCallback((sessionId: string) => {
     const host = sessionHostRef.current.get(sessionId);
     if (!host) {
@@ -1624,11 +1609,10 @@ export function SessionProvider({
     }
 
     clearHeartbeat(sessionId);
-    clearPendingIncomingBuffer(sessionId);
     clearTailRefreshRuntime(sessionId);
     clearSessionPullState(sessionId);
     sessionRenderDemandRef.current.delete(sessionId);
-  }, [clearHeartbeat, clearPendingIncomingBuffer, clearSessionPullState, clearTailRefreshRuntime]);
+  }, [clearHeartbeat, clearSessionPullState, clearTailRefreshRuntime]);
 
   const drainReconnectBucket = useCallback((hostKey: string) => {
     const bucket = reconnectBucketsRef.current.get(hostKey);
@@ -1683,6 +1667,14 @@ export function SessionProvider({
       lastPongAtRef.current.set(nextSessionId, Date.now());
 
       let completed = false;
+      let handshakeTimeoutId: number | null = null;
+      const clearHandshakeTimeout = () => {
+        if (handshakeTimeoutId === null) {
+          return;
+        }
+        window.clearTimeout(handshakeTimeoutId);
+        handshakeTimeoutId = null;
+      };
       const markCompleted = () => {
         if (completed) {
           return false;
@@ -1691,6 +1683,7 @@ export function SessionProvider({
         return true;
       };
       const finalizeFailure = (message: string, retryable: boolean) => {
+        clearHandshakeTimeout();
         const baseline = finalizeSocketFailureBaseline({
           sessionId: nextSessionId,
           message,
@@ -1760,6 +1753,10 @@ export function SessionProvider({
             });
           },
         });
+        clearHandshakeTimeout();
+        handshakeTimeoutId = window.setTimeout(() => {
+          finalizeFailure('session handshake timeout', true);
+        }, SESSION_HANDSHAKE_TIMEOUT_MS);
       };
 
       ws.onmessage = (event) => {
@@ -1777,6 +1774,7 @@ export function SessionProvider({
             onConnected: () => {
               if (completed) return;
               completed = true;
+              clearHandshakeTimeout();
               const connectedSessionName = getResolvedSessionName(targetHost);
               runtimeDebug('session.ws.reconnect.connected', {
                 sessionId: nextSessionId,
@@ -1900,6 +1898,14 @@ export function SessionProvider({
     lastPongAtRef.current.set(sessionId, Date.now());
 
     let completed = false;
+    let handshakeTimeoutId: number | null = null;
+    const clearHandshakeTimeout = () => {
+      if (handshakeTimeoutId === null) {
+        return;
+      }
+      window.clearTimeout(handshakeTimeoutId);
+      handshakeTimeoutId = null;
+    };
     const markCompleted = () => {
       if (completed) {
         return false;
@@ -1908,6 +1914,7 @@ export function SessionProvider({
       return true;
     };
     const finalizeFailure = (message: string, retryable: boolean) => {
+      clearHandshakeTimeout();
       const baseline = finalizeSocketFailureBaseline({
         sessionId,
         message,
@@ -1929,6 +1936,10 @@ export function SessionProvider({
         activate,
         finalizeFailure,
       });
+      clearHandshakeTimeout();
+      handshakeTimeoutId = window.setTimeout(() => {
+        finalizeFailure('session handshake timeout', true);
+      }, SESSION_HANDSHAKE_TIMEOUT_MS);
     };
 
     ws.onmessage = (event) => {
@@ -1946,6 +1957,7 @@ export function SessionProvider({
           onConnected: () => {
             if (completed) return;
             completed = true;
+            clearHandshakeTimeout();
             const connectedSessionName = getResolvedSessionName(host);
             runtimeDebug('session.ws.connected', {
               sessionId,
@@ -2227,7 +2239,9 @@ export function SessionProvider({
       availableEndIndex: Number.isFinite(availableEndIndex) ? Math.max(0, Math.floor(availableEndIndex || 0)) : undefined,
       seenAt: Date.now(),
     });
-    lastHeadRequestAtRef.current.delete(sessionId);
+    // Rate-limit: stamp now so the next 33ms tick is skipped,
+    // breaking the tight head→sync→head→sync loop.
+    lastHeadRequestAtRef.current.set(sessionId, Date.now());
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
     if (
       session.daemonHeadRevision !== latestRevision
@@ -2354,14 +2368,15 @@ export function SessionProvider({
         if (shouldPromoteConnectedFromLiveBuffer) {
           options.onConnected();
         }
-        lastHeadRequestAtRef.current.delete(options.sessionId);
+        // Rate-limit: stamp now so the next 33ms tick is skipped.
+        lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
         settleSessionPullState(options.sessionId, msg.payload);
         runtimeDebug(`session.ws.${options.debugScope}.buffer-sync`, {
           sessionId: options.sessionId,
           payload: summarizeBufferPayload(msg.payload),
           activeSessionId: stateRef.current.activeSessionId,
         });
-        queueIncomingBufferSync(options.sessionId, normalizeIncomingBufferPayload(msg.payload));
+        applyIncomingBufferSync(options.sessionId, normalizeIncomingBufferPayload(msg.payload));
         break;
       case 'buffer-head':
         if (shouldPromoteConnectedFromLiveBuffer) {
@@ -2416,7 +2431,7 @@ export function SessionProvider({
         lastPongAtRef.current.set(options.sessionId, Date.now());
         break;
     }
-  }, [handleBufferHead, queueIncomingBufferSync, setScheduleStateForSession, settleSessionPullState]);
+  }, [applyIncomingBufferSync, handleBufferHead, setScheduleStateForSession, settleSessionPullState]);
 
   const handleSocketConnectedBaseline = useCallback((options: {
     sessionId: string;
@@ -2510,10 +2525,11 @@ export function SessionProvider({
       localStartIndex: session.buffer.startIndex,
       localEndIndex: session.buffer.endIndex,
     });
+    resetSessionTransportPullBookkeeping(sessionId, 'active-resume');
     pendingResumeTailRefreshRef.current.add(sessionId);
     requestSessionBufferHead(sessionId, ws, { force: true });
     return true;
-  }, [requestSessionBufferHead]);
+  }, [requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
   const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
     const normalized = normalizeSessionRenderDemandState(renderDemand);
@@ -2549,6 +2565,7 @@ export function SessionProvider({
     const activeSessionId = state.activeSessionId;
     const activeSession = state.sessions.find((item) => item.id === activeSessionId) || null;
     const ws = wsRefs.current.get(activeSessionId) || null;
+    resetSessionTransportPullBookkeeping(activeSessionId, 'active-reentry');
     if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
       return;
     }
@@ -2559,7 +2576,7 @@ export function SessionProvider({
     })) {
       reconnectSession(activeSessionId);
     }
-  }, [isReconnectInFlight, reconnectSession, requestSessionBufferHead, state.activeSessionId, state.sessions]);
+  }, [isReconnectInFlight, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2758,7 +2775,6 @@ export function SessionProvider({
     for (const timer of pingIntervals.current.values()) {
       clearInterval(timer);
     }
-    pendingIncomingBufferFlushScheduledRef.current.clear();
     for (const bucket of reconnectBucketsRef.current.values()) {
       if (bucket.timer) {
         clearTimeout(bucket.timer);
