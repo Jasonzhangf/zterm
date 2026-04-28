@@ -1,17 +1,26 @@
 package com.zterm.android;
 
 import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * MainActivity - Capacitor 主 Activity
- * 包含后台服务启动/停止逻辑
+ * MainActivity - Capacitor main Activity
+ * Includes storage permission requests for file transfer
  */
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ZTermMainActivity";
+    private static final int STORAGE_PERMISSION_REQUEST_CODE = 1001;
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -25,13 +34,38 @@ public class MainActivity extends BridgeActivity {
             getBridge().getWebView().setVerticalScrollBarEnabled(false);
             getBridge().getWebView().setHorizontalScrollBarEnabled(false);
         }
+        requestStoragePermissions();
+    }
+
+    private void requestStoragePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Log.i(TAG, "Requesting MANAGE_EXTERNAL_STORAGE permission");
+                try {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    startActivity(intent);
+                }
+            } else {
+                Log.i(TAG, "MANAGE_EXTERNAL_STORAGE already granted");
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                Log.i(TAG, "Requesting READ/WRITE_EXTERNAL_STORAGE permissions");
+                ActivityCompat.requestPermissions(this,
+                    new String[]{
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    },
+                    STORAGE_PERMISSION_REQUEST_CODE);
+            }
+        }
     }
     
-    /**
-     * 当 Activity 进入后台时，不再启动“占位”前台服务。
-     * 当前 socket 真源在 WebView/JS；ForegroundService 并不持有真实连接，
-     * 继续启动只会制造额外生命周期与 WakeLock 问题。
-     */
     @Override
     public void onStop() {
         super.onStop();
@@ -39,9 +73,6 @@ public class MainActivity extends BridgeActivity {
         stopBackgroundService();
     }
     
-    /**
-     * 当 Activity 回到前台时
-     */
     @Override
     public void onStart() {
         super.onStart();
@@ -76,18 +107,12 @@ public class MainActivity extends BridgeActivity {
         super.onDestroy();
     }
     
-    /**
-     * 启动后台服务
-     */
     public void startBackgroundService(int sessionCount) {
         Intent serviceIntent = new Intent(this, BackgroundService.class);
         serviceIntent.putExtra("sessionCount", sessionCount);
         startForegroundService(serviceIntent);
     }
     
-    /**
-     * 停止后台服务
-     */
     public void stopBackgroundService() {
         Intent serviceIntent = new Intent(this, BackgroundService.class);
         stopService(serviceIntent);

@@ -376,6 +376,7 @@ export function FileTransferSheet({
 
   // Start transfer
   const startTransfer = useCallback(async () => {
+    console.log('[FileTransferSheet] startTransfer called', { direction, selectedRemote: [...selectedRemote], selectedLocal: [...selectedLocal], remotePath, localPath });
     if (direction === 'download') {
       // Download selected remote files
       for (const name of selectedRemote) {

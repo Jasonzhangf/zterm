@@ -292,7 +292,7 @@ function isScrollAtBottom(host: HTMLDivElement | null, scrollTop: number, localB
 
 const VisibleRow = memo(function VisibleRow({
   row,
-  rowIndex,
+  rowIndex: _rowIndex,
   absoluteIndex,
   rowHeight,
   cellWidthPx,
@@ -388,7 +388,7 @@ const VisibleRow = memo(function VisibleRow({
         {row.length > 0
           ? row.map((cell, cellIndex) => (
               <span
-                key={`cell-${rowIndex}-${cellIndex}`}
+                key={`cell-${absoluteIndex}-${cellIndex}`}
                 data-terminal-cursor={cursorColumn === cellIndex ? 'true' : undefined}
                 style={cellStyle(cell, rowHeight, cellWidthPx, theme, cursorColumn === cellIndex)}
               >

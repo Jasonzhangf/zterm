@@ -814,7 +814,7 @@ export function TerminalQuickBar({
       return;
     }
     if (action.id === 'file-transfer') {
-      onOpenFileTransfer?.();
+      fileInputRef.current?.click();
       return;
     }
     if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
