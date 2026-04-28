@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 import { TerminalView } from '../components/TerminalView';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
+import { RemoteScreenshotSheet, type RemoteScreenshotPreviewState } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
@@ -15,6 +17,8 @@ import {
   STORAGE_KEYS,
   type PersistedOpenTab,
   type QuickAction,
+  type RemoteScreenshotCapture,
+  type RemoteScreenshotStatusPayload,
   type SavedTabList,
   type Session,
   type SessionDebugOverlayMetrics,
@@ -25,6 +29,7 @@ import {
   type TerminalResizeHandler,
   type TerminalSplitPaneId,
   type TerminalShortcutAction,
+  type TerminalViewportMode,
   type TerminalViewportChangeHandler,
   type TerminalWidthMode,
 } from '../lib/types';
@@ -38,7 +43,7 @@ type VirtualKeyboardApi = {
 
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
-const TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX = 8;
+const TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX = 14;
 const SPLIT_AUTO_CLOSE_DROP_PX = 96;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
@@ -182,7 +187,10 @@ interface TerminalPageProps {
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   onOpenSettings?: () => void;
-  onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
+  onRequestRemoteScreenshot?: (
+    sessionId: string,
+    onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+  ) => Promise<RemoteScreenshotCapture>;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -228,6 +236,27 @@ function toPersistedOpenTab(session: Session): PersistedOpenTab {
     customName: session.customName,
     createdAt: session.createdAt,
   };
+}
+
+async function persistRemoteScreenshotCapture(fileName: string, dataBase64: string) {
+  const downloadDir = '/storage/emulated/0/Download/zterm';
+  try {
+    await Filesystem.mkdir({
+      path: downloadDir,
+      directory: Directory.ExternalStorage,
+      recursive: true,
+    });
+  } catch {
+    // directory may already exist
+  }
+
+  const savedPath = `${downloadDir}/${fileName}`;
+  await Filesystem.writeFile({
+    path: savedPath,
+    data: dataBase64,
+    directory: Directory.ExternalStorage,
+  });
+  return savedPath;
 }
 
 function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
@@ -359,7 +388,7 @@ export function TerminalPage({
   onTerminalViewportChange,
   onImagePaste,
   onFileAttach,
-  onOpenSettings,
+  onOpenSettings: _onOpenSettings,
   onRequestRemoteScreenshot,
   quickActions,
   shortcutActions,
@@ -402,6 +431,7 @@ export function TerminalPage({
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [splitEnabled, setSplitEnabled] = useState(() => persistedLayoutRef.current?.splitEnabled || false);
   const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(
     () => persistedLayoutRef.current?.splitSecondarySessionId || null,
@@ -414,7 +444,9 @@ export function TerminalPage({
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(true);
+  const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(true);
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
+  const [sessionViewportModes, setSessionViewportModes] = useState<Record<string, TerminalViewportMode>>({});
   const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
@@ -423,6 +455,7 @@ export function TerminalPage({
   const splitOpenWidthRef = useRef(0);
   const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
+  const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
@@ -717,6 +750,100 @@ export function TerminalPage({
     window.setTimeout(focusTerminalInput, 32);
     window.setTimeout(focusTerminalInput, 120);
   };
+
+  const revokeRemoteScreenshotPreviewUrl = useCallback(() => {
+    if (!remoteScreenshotPreviewUrlRef.current) {
+      return;
+    }
+    URL.revokeObjectURL(remoteScreenshotPreviewUrlRef.current);
+    remoteScreenshotPreviewUrlRef.current = null;
+  }, []);
+
+  const closeRemoteScreenshotPreview = useCallback(() => {
+    revokeRemoteScreenshotPreviewUrl();
+    setRemoteScreenshotPreview(null);
+  }, [revokeRemoteScreenshotPreviewUrl]);
+
+  useEffect(() => () => {
+    revokeRemoteScreenshotPreviewUrl();
+  }, [revokeRemoteScreenshotPreviewUrl]);
+
+  const handleRequestRemoteScreenshot = useCallback(async () => {
+    const targetSessionId = activeSession?.id;
+    if (!targetSessionId || !onRequestRemoteScreenshot) {
+      alert('当前没有可用的目标 session');
+      return;
+    }
+
+    revokeRemoteScreenshotPreviewUrl();
+    setRemoteScreenshotPreview({
+      phase: 'request-sent',
+      fileName: `remote-screenshot-${Date.now()}.png`,
+      previewDataUrl: null,
+      rawDataBase64: null,
+    });
+
+    try {
+      const capture = await onRequestRemoteScreenshot(targetSessionId, (progress) => {
+        setRemoteScreenshotPreview((current) => ({
+          phase: progress.phase,
+          fileName: progress.fileName || current?.fileName || `remote-screenshot-${Date.now()}.png`,
+          previewDataUrl: current?.previewDataUrl || null,
+          rawDataBase64: current?.rawDataBase64 || null,
+          receivedChunks: Math.max(0, Math.floor(progress.receivedChunks || current?.receivedChunks || 0)),
+          totalChunks: Math.max(0, Math.floor(progress.totalChunks || current?.totalChunks || 0)),
+          totalBytes: Math.max(0, Math.floor(progress.totalBytes || current?.totalBytes || 0)),
+        }));
+      });
+
+      setRemoteScreenshotPreview((current) => current ? {
+        ...current,
+        phase: 'transfer-complete',
+        fileName: capture.fileName,
+        totalBytes: capture.totalBytes,
+      } : current);
+
+      const binary = Uint8Array.from(atob(capture.dataBase64), (char) => char.charCodeAt(0));
+      const blob = new Blob([binary], { type: capture.mimeType || 'image/png' });
+      const previewUrl = URL.createObjectURL(blob);
+      remoteScreenshotPreviewUrlRef.current = previewUrl;
+      setRemoteScreenshotPreview({
+        phase: 'preview-ready',
+        fileName: capture.fileName,
+        previewDataUrl: previewUrl,
+        rawDataBase64: capture.dataBase64,
+        receivedChunks: undefined,
+        totalChunks: undefined,
+        totalBytes: capture.totalBytes,
+      });
+    } catch (error) {
+      closeRemoteScreenshotPreview();
+      alert(error instanceof Error ? error.message : '远程截图失败');
+    }
+  }, [activeSession?.id, closeRemoteScreenshotPreview, onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl]);
+
+  const handleSaveRemoteScreenshot = useCallback(async () => {
+    if (
+      !remoteScreenshotPreview?.previewDataUrl
+      || !remoteScreenshotPreview.rawDataBase64
+      || remoteScreenshotPreview.phase !== 'preview-ready'
+    ) {
+      return;
+    }
+
+    setRemoteScreenshotPreview((current) => current ? { ...current, phase: 'saving' } : current);
+    try {
+      const savedPath = await persistRemoteScreenshotCapture(
+        remoteScreenshotPreview.fileName,
+        remoteScreenshotPreview.rawDataBase64,
+      );
+      closeRemoteScreenshotPreview();
+      alert(`截图已保存到 ${savedPath}`);
+    } catch (error) {
+      setRemoteScreenshotPreview((current) => current ? { ...current, phase: 'preview-ready' } : current);
+      alert(error instanceof Error ? error.message : '保存远程截图失败');
+    }
+  }, [closeRemoteScreenshotPreview, remoteScreenshotPreview]);
 
   const handleToggleKeyboard = useCallback(async () => {
     if (quickBarEditorFocused && typeof document !== 'undefined') {
@@ -1022,6 +1149,7 @@ export function TerminalPage({
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const activeSessionMetrics = activeSession ? sessionDebugMetrics?.[activeSession.id] : undefined;
   const activeSessionDebugStatus = resolveDebugStatus(activeSession, activeSessionMetrics);
+  const activeSessionViewportMode = activeSession ? (sessionViewportModes[activeSession.id] || 'follow') : 'follow';
   const networkBanner = !connectionIssueVisible
     ? null
     : !networkOnline
@@ -1236,6 +1364,18 @@ export function TerminalPage({
     };
   };
 
+  const handleTerminalViewportChange = useCallback<TerminalViewportChangeHandler>((sessionId, viewState) => {
+    setSessionViewportModes((current) => (
+      current[sessionId] === viewState.mode
+        ? current
+        : {
+            ...current,
+            [sessionId]: viewState.mode,
+          }
+    ));
+    onTerminalViewportChange?.(sessionId, viewState);
+  }, [onTerminalViewportChange]);
+
   return (
     <div
       style={{
@@ -1352,13 +1492,14 @@ export function TerminalPage({
                       onResize={!isAndroid && sessionIsActive ? onResize : undefined}
                       onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
                       onInput={sessionIsActive ? onTerminalInput : undefined}
-                      onViewportChange={sessionIsActive ? onTerminalViewportChange : undefined}
+                      onViewportChange={sessionIsActive ? handleTerminalViewportChange : undefined}
                       onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
                       focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
                       fontSize={terminalFontSize}
                       rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
                       themeId={terminalThemeId}
                       widthMode={terminalWidthMode}
+                      showAbsoluteLineNumbers={absoluteLineNumbersVisible}
                     />
                   </div>
                 );
@@ -1460,7 +1601,11 @@ export function TerminalPage({
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
-                <span>模式</span>
+                <span>渲染</span>
+                <span style={{ color: activeSessionViewportMode === 'reading' ? '#fbbf24' : '#93c5fd' }}>{activeSessionViewportMode}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
+                <span>状态</span>
                 <span style={{ color: activeSessionMetrics?.bufferPullActive ? '#86efac' : '#93c5fd' }}>{activeSessionDebugStatus}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
@@ -1550,9 +1695,25 @@ export function TerminalPage({
             onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
             onOpenFileTransfer={() => setFileTransferOpen(true)}
             onToggleDebugOverlay={() => setDebugOverlayVisible((v) => !v)}
-            onOpenSyncSettings={onOpenSettings}
-            onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+            onToggleAbsoluteLineNumbers={() => setAbsoluteLineNumbersVisible((v) => !v)}
+            onRequestRemoteScreenshot={() => void handleRequestRemoteScreenshot()}
             debugOverlayVisible={debugOverlayVisible}
+            absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+            remoteScreenshotStatus={
+              remoteScreenshotPreview?.phase === 'request-sent'
+                ? 'capturing'
+                : remoteScreenshotPreview?.phase === 'transfer-complete'
+                  ? 'transferring'
+                  : remoteScreenshotPreview?.phase === 'preview-ready'
+                    ? 'preview-ready'
+                    : remoteScreenshotPreview?.phase === 'saving'
+                      ? 'saving'
+                      : remoteScreenshotPreview?.phase === 'capturing'
+                        ? 'capturing'
+                        : remoteScreenshotPreview?.phase === 'transferring'
+                          ? 'transferring'
+                          : 'idle'
+            }
             shortcutSmartSort={shortcutSmartSort}
             shortcutFrequencyMap={shortcutFrequencyMap}
             onShortcutUse={onShortcutUse}
@@ -1587,6 +1748,7 @@ export function TerminalPage({
           scheduleState={activeScheduleState || { sessionName: activeSession.sessionName, jobs: [], loading: false }}
           composerSeedText={scheduleComposerSeed.text}
           composerSeedNonce={scheduleComposerSeed.nonce}
+          keyboardInset={keyboardInset}
           onClose={() => {
             setScheduleOpen(false);
             setScheduleComposerSeed((current) => (current.text ? { ...current, text: '' } : current));
@@ -1607,6 +1769,13 @@ export function TerminalPage({
           onFileTransferMessage={onFileTransferMessage}
         />
       ) : null}
+      <RemoteScreenshotSheet
+        state={remoteScreenshotPreview}
+        onSave={() => {
+          void handleSaveRemoteScreenshot();
+        }}
+        onDiscard={closeRemoteScreenshotPreview}
+      />
     </div>
   );
 }

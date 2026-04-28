@@ -23,6 +23,12 @@ export interface SchedulePayload {
   appendEnter: boolean;
 }
 
+export interface ScheduleExecutionPolicy {
+  maxRuns: number; // 0 = unlimited
+  firedCount: number;
+  endAt?: string;
+}
+
 export interface ScheduleJob {
   id: string;
   targetSessionName: string;
@@ -30,6 +36,7 @@ export interface ScheduleJob {
   enabled: boolean;
   payload: SchedulePayload;
   rule: ScheduleRule;
+  execution: ScheduleExecutionPolicy;
   nextFireAt?: string;
   lastFiredAt?: string;
   lastResult?: 'ok' | 'error';
@@ -45,6 +52,7 @@ export interface ScheduleJobDraft {
   enabled?: boolean;
   payload: SchedulePayload;
   rule: ScheduleRule;
+  execution?: Partial<Pick<ScheduleExecutionPolicy, 'maxRuns' | 'endAt'>>;
 }
 
 export interface ScheduleStatePayload {
@@ -67,4 +75,3 @@ export interface SessionScheduleState {
   lastEvent?: ScheduleEventPayload;
   error?: string;
 }
-

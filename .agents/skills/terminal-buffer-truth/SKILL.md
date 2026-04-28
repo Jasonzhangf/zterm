@@ -86,6 +86,9 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - 可以是 sparse，不要求永远连续
 - 历史超出窗口后滑走，但**不是单次 payload 来了就把本地历史裁掉**
 - **已有 absolute-index 内容不能因为窗口判断错误而被逻辑清空**
+- **同 revision 的迟到旧 payload 不得把本地窗口重新锚回更老的位置**
+  - 它只允许 patch 当前 1000 行窗口内的 absolute-index truth
+  - 不允许因为晚到的 prepend / reading repair 响应，把 follow 中已经稳定的 tail window 拖回去
 
 ### 2.1.1 本地 buffer 不变量
 
@@ -124,6 +127,9 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 写侧：同步 daemon -> 更新本地 sparse buffer
   - 读侧：renderer 只消费当前本地 buffer
 - buffer manager 不关心 renderer 如何滚动、如何绘制、如何布局
+- same-revision merge 也必须遵守“tail 优先稳定”：
+  - 若当前本地窗口已经贴着 authoritative tail，且迟到 payload 只覆盖更老的历史、不推进 tail
+  - 那么它只能补当前窗口内已有 absolute-index 行，**不得**回拖 `startIndex/endIndex`
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
 - active / inactive 只影响“是否继续取数”，不影响 logical session / transport 身份：
@@ -185,7 +191,14 @@ renderer 还必须显式区分两种宽度模式：
 - 申请的是“reading head 往回 3 屏”的渲染窗口
 - buffer 更新只会让 renderer 重绘当前窗口，**不会自动滚动**
 - 即使当前窗口不连续，renderer 也只能把缺口画成 gap / blank marker；不能把已有 absolute-index 内容当成不存在
+- gap 行的显示规则也冻结为：
+  - **先显示空背景占位，不等待补齐**
+  - 补齐后只替换对应 absolute-index 行
+  - 相邻 absolute line number 若不连续，当前行号必须显式高亮（debug 下优先红标）
 - follow 态若只是因为 live tail refresh / pending follow realign / programmatic scroll 导致 DOM 暂时没贴底，**不得自动进入 reading**；进入 reading 只能由用户滚动手势触发
+- follow 态若只是因为 **IME 弹起 / viewport 高度变化 / UI shell relayout** 触发 DOM scroll，**也不得自动进入 reading**
+  - viewport relayout 只允许触发 follow realign
+  - 不允许把“布局导致的 scrollTop 变化”误判成“用户回滚”
 
 ### 3.3 reading 退出条件
 只允许三种：
@@ -206,6 +219,9 @@ UI 只负责容器位置与裁切：
 - IME 只移动容器，不改变内容
 - renderer 只在容器里画，不关心输入法
 - keyboard / IME 不得回灌成 buffer / render 真相
+- `状态浮窗` 与 `绝对行号` 都属于 UI shell observability，但必须 **解耦**
+  - `状态浮窗` 只负责连接/刷新/模式观测
+  - `绝对行号` 必须由独立显式开关控制，不能再隐式绑定到状态浮窗
 - Android 顶部 header inset 只允许来自 **UI shell 的单一稳定像素真相**；IME 弹起导致的 `visualViewport.offsetTop` 不得再被当成第二份 top inset 叠到 header 上
 - Android connect / reconnect **不得**把 UI 容器测得的 `cols/rows` 当成 tmux viewport 真相带给 daemon；容器变窄/变矮、IME 弹起、safe-area、前后台恢复，都只能影响 shell 裁切与 renderer 可见窗口
 - tmux rows 也必须单独冻结：
@@ -215,9 +231,35 @@ UI 只负责容器位置与裁切：
   - server 的 `attach / resize / width-mode reconcile` 也不得再写第二份 rows；rows 真相只能来自上游 tmux / mirror baseline
 - “看不到的地方不画”属于 **renderer 绘制窗口** 真相，不属于 UI shell / buffer manager / daemon；UI shell 只能改容器位置与可见高度，不能借机改 tmux geometry
 - QuickBar / 快捷菜单属于 UI shell；**整块 shell 区域** 都必须吃掉非交互点击，不能让空白点击穿透到底层 terminal/ImeAnchor 把 IME 弹出来
-- QuickBar 固定为三层 shell：工具栏 / 单键 / 复合键；工具入口必须显式可见，不能再塞回浮动菜单隐藏
+- QuickBar 壳布局必须是 **三栏**：前两栏保持老样式（左侧固定六键区两行 + 右侧两行滚动快捷区），第三栏恢复工具栏
+- QuickBar 固定布局还要守住：
+  - 左侧固定六键区必须是：`状态 / ↑ / 键盘` 与 `← / ↓ / →`
+  - `状态` 只替换老附件位；`↑` 与 `键盘` 保持老位置
+  - 文件/图片/同步/截图 这四个工具入口要作为 **第三栏工具栏** 显式可见
+  - 工具栏只能有这一份；悬浮菜单里不得再重复渲染 文件/图片/同步/截图
+  - 固定六键区宽度必须能完整容纳 `状态 / 键盘` 文案，不能裁切、顶出或超界
 - 只有 QuickBar 内显式 editor / input / button 等交互控件允许接管焦点；普通 shell 容器点击必须被阻断在 UI shell 层
 - 若 `keyboardInsetPx > 0`，QuickBar 必须作为**整体容器**抬升到键盘上方；同一份 keyboard inset 只能消费一次：`terminal stage.bottom = quickBarHeight + keyboardLift`，`quickbar shell.bottom = keyboardLift`，禁止再用 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
+- remote screenshot 也属于 UI shell / session control 闭环：
+  - UI 必须能区分 `capturing -> transferring -> preview-ready`
+  - `capturing` / `transferring` 都必须有**显式失败边界**；不允许无限 spinner
+  - 客户端**不得**在收到远程截图后直接自动落盘并宣称成功
+  - 正确动作是：先预览，再由用户显式 `save` / `discard`
+  - QuickBar 工具语义也必须固定：
+    - `文件` = 本地文件选择并上传到当前 session
+    - `图片` = 本地图片选择并上传到当前 session
+    - `同步` = 打开远程文件同步页 / FileTransferSheet
+    - `截图` = 远端截图预览流
+- session schedule 也必须保持 daemon 单真源：
+  - `maxRuns=0` 表示无限次，默认 `3`
+  - `firedCount / endAt / stop condition` 只能由 daemon 维护；client 只编辑和展示
+- 若为了审计 buffer/render 真相新增 debug UI：
+  - 只能做 **观测**：如绝对行号、当前 `follow / reading` 模式、拉取/刷新状态
+  - debug UI 不得反向驱动 buffer manager / renderer / daemon 行为
+- active tab 持久化也属于 app-shell truth：
+  - `ACTIVE_SESSION` 是最后激活 tab 的唯一持久化真相
+  - **每次 tab 激活都必须立即写回 `ACTIVE_SESSION`**
+  - 冷启动 / 恢复只允许按 `ACTIVE_SESSION` 恢复 active tab，`ACTIVE_PAGE` 只决定页面种类，不得反向覆盖
 - 若 QuickBar 自己的 textarea / sheet 抢到 DOM focus，只允许暂停 terminal ImeAnchor 路由；**不得**把 QuickBar overlay / floating composer 使用的 `keyboardInsetPx` 清零，否则会被输入法盖住
 - Android terminal 原生输入若走 `ImeAnchor`，则 **ImeAnchor editable / composing / selection 必须是单一真相**；组合输入期间不得一边让 IME 持有 composing state，一边又由插件自行清空/改写 editable 造成第二语义
 - `ImeAnchor` 的 `InputConnection` 也必须服从这条真相：`commitText / finishComposingText` 不能跳过 `super` 直接短路返回；否则 framework editable/selection 不更新，真机会出现 **输入法底部预编辑光标错位 / caret 乱飞**

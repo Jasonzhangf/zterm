@@ -38,6 +38,7 @@ interface TerminalViewProps {
   rowHeight?: string;
   themeId?: string;
   widthMode?: TerminalWidthMode;
+  showAbsoluteLineNumbers?: boolean;
 }
 
 const DEFAULT_ROWS = 24;
@@ -231,6 +232,21 @@ function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
 
+function hasDiscontinuousNeighbor(
+  rows: Array<{ absoluteIndex: number }>,
+  rowIndex: number,
+) {
+  const current = rows[rowIndex];
+  if (!current) {
+    return false;
+  }
+  const previous = rows[rowIndex - 1];
+  const next = rows[rowIndex + 1];
+  const brokenBefore = Boolean(previous) && previous.absoluteIndex + 1 !== current.absoluteIndex;
+  const brokenAfter = Boolean(next) && current.absoluteIndex + 1 !== next.absoluteIndex;
+  return brokenBefore || brokenAfter;
+}
+
 function resolveCursorCellColumn(row: TerminalCell[], preferredCol: number) {
   if (row.length === 0) {
     return -1;
@@ -283,6 +299,8 @@ const VisibleRow = memo(function VisibleRow({
   isGap,
   theme,
   cursor,
+  showAbsoluteLineNumbers = false,
+  discontinuousLineNumber = false,
 }: {
   row: TerminalCell[];
   rowIndex: number;
@@ -292,7 +310,29 @@ const VisibleRow = memo(function VisibleRow({
   isGap: boolean;
   theme: TerminalThemePreset;
   cursor: TerminalCursorState | null;
+  showAbsoluteLineNumbers?: boolean;
+  discontinuousLineNumber?: boolean;
 }) {
+  const lineNumberCell = showAbsoluteLineNumbers ? (
+    <span
+      data-terminal-line-number="true"
+      data-terminal-line-discontinuous={discontinuousLineNumber ? 'true' : undefined}
+      style={{
+        display: 'inline-flex',
+        width: '48px',
+        minWidth: '48px',
+        justifyContent: 'flex-end',
+        paddingRight: '8px',
+        boxSizing: 'border-box',
+        color: discontinuousLineNumber ? '#ef4444' : theme.colors[8],
+        opacity: 0.92,
+        fontWeight: discontinuousLineNumber ? 700 : 500,
+      }}
+    >
+      {absoluteIndex}
+    </span>
+  ) : null;
+
   if (isGap) {
     return (
       <div
@@ -300,17 +340,29 @@ const VisibleRow = memo(function VisibleRow({
         data-terminal-gap="true"
         data-terminal-index={absoluteIndex}
         style={{
-          display: 'block',
+          display: 'flex',
+          alignItems: 'center',
           height: rowHeight,
           lineHeight: rowHeight,
           whiteSpace: 'pre',
           color: theme.foreground,
-          opacity: 0.48,
-          background: `repeating-linear-gradient(90deg, ${theme.selection || 'rgba(255,255,255,0.08)'} 0 8px, transparent 8px 16px)`,
-          borderTop: `1px dashed ${theme.colors[8]}`,
+          opacity: 0.88,
+          background: 'rgba(239, 68, 68, 0.12)',
+          borderTop: `1px dashed rgba(239, 68, 68, 0.42)`,
+          borderBottom: `1px dashed rgba(239, 68, 68, 0.42)`,
         }}
       >
-        ⋯
+        {lineNumberCell}
+        <span
+          data-terminal-gap-fill="true"
+          style={{
+            display: 'block',
+            minWidth: 0,
+            flex: 1,
+            height: '100%',
+            background: 'rgba(239, 68, 68, 0.08)',
+          }}
+        />
       </div>
     );
   }
@@ -324,23 +376,27 @@ const VisibleRow = memo(function VisibleRow({
       data-terminal-row="true"
       data-terminal-index={absoluteIndex}
       style={{
-        display: 'block',
+        display: 'flex',
+        alignItems: 'center',
         height: rowHeight,
         lineHeight: rowHeight,
         whiteSpace: 'pre',
       }}
     >
-      {row.length > 0
-        ? row.map((cell, cellIndex) => (
-            <span
-              key={`cell-${rowIndex}-${cellIndex}`}
-              data-terminal-cursor={cursorColumn === cellIndex ? 'true' : undefined}
-              style={cellStyle(cell, rowHeight, cellWidthPx, theme, cursorColumn === cellIndex)}
-            >
-              {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
-            </span>
-          ))
-        : ' '}
+      {lineNumberCell}
+      <span style={{ display: 'inline-block', minWidth: 0, flex: 1 }}>
+        {row.length > 0
+          ? row.map((cell, cellIndex) => (
+              <span
+                key={`cell-${rowIndex}-${cellIndex}`}
+                data-terminal-cursor={cursorColumn === cellIndex ? 'true' : undefined}
+                style={cellStyle(cell, rowHeight, cellWidthPx, theme, cursorColumn === cellIndex)}
+              >
+                {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
+              </span>
+            ))
+          : ' '}
+      </span>
     </div>
   );
 }, (prev, next) => (
@@ -353,6 +409,8 @@ const VisibleRow = memo(function VisibleRow({
   && prev.cursor?.rowIndex === next.cursor?.rowIndex
   && prev.cursor?.col === next.cursor?.col
   && prev.cursor?.visible === next.cursor?.visible
+  && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
+  && prev.discontinuousLineNumber === next.discontinuousLineNumber
 ));
 
 export function TerminalView({
@@ -368,7 +426,7 @@ export function TerminalView({
   cursorKeysApp = false,
   cursor = null,
   active = false,
-  bufferPullActive = false,
+  bufferPullActive: _bufferPullActive = false,
   inputResetEpoch = 0,
   allowDomFocus = true,
   domInputOffscreen = false,
@@ -383,6 +441,7 @@ export function TerminalView({
   rowHeight = '17px',
   themeId,
   widthMode = 'adaptive-phone',
+  showAbsoluteLineNumbers = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const swipeTabEnabled = widthMode !== 'mirror-fixed' && Boolean(onSwipeTab);
@@ -405,8 +464,11 @@ export function TerminalView({
   const resizeCommitTimerRef = useRef<number | null>(null);
   const lastReportedViewportRef = useRef<string>('');
   const followScrollSyncTimerRef = useRef<number | null>(null);
+  const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
   const pendingFollowRenderBottomIndexRef = useRef<number | null>(null);
   const pendingFollowScrollSyncRef = useRef(false);
+  const pendingFollowViewportRealignRef = useRef(false);
+  const recentViewportLayoutChangeRef = useRef(false);
   const ignoredProgrammaticScrollTopRef = useRef<number | null>(null);
   const lastSettledScrollTopRef = useRef(0);
   const hasSettledFollowFrameRef = useRef(false);
@@ -473,11 +535,6 @@ export function TerminalView({
   const visibleStartOffset = Math.max(0, visibleWindowStartIndex - bufferStartIndex);
   const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
   const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
-  const historyLoading = active
-    && !followMode
-    && bufferPullActive
-    && effectiveRenderBottomIndex < followVisualBottomIndex;
-
   const visibleRows = useMemo(() => {
     const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean; viewportOffset: number }> = [];
     for (let dataOffset = 0; dataOffset < bufferLines.length; dataOffset += 1) {
@@ -574,9 +631,23 @@ export function TerminalView({
     }
 
     const nextViewport = measureViewport(host, fontSize, rowHeight);
+    const nextClientHeight = Math.max(0, Math.round(host.clientHeight || 0));
+    const viewportLayoutChanged = nextViewport.rows !== viewportRows || nextClientHeight !== viewportClientHeightPx;
+    if (!readingModeRef.current && viewportLayoutChanged) {
+      pendingFollowViewportRealignRef.current = true;
+      if (viewportClientHeightPx > 0) {
+        recentViewportLayoutChangeRef.current = true;
+        if (recentViewportLayoutChangeTimerRef.current !== null) {
+          window.clearTimeout(recentViewportLayoutChangeTimerRef.current);
+        }
+        recentViewportLayoutChangeTimerRef.current = window.setTimeout(() => {
+          recentViewportLayoutChangeTimerRef.current = null;
+          recentViewportLayoutChangeRef.current = false;
+        }, 0);
+      }
+    }
     setViewportClientHeightPx((current) => {
-      const nextHeight = Math.max(0, Math.round(host.clientHeight || 0));
-      return current === nextHeight ? current : nextHeight;
+      return current === nextClientHeight ? current : nextClientHeight;
     });
     setResolvedRowHeight((current) => current === nextViewport.resolvedRowHeight ? current : nextViewport.resolvedRowHeight);
     setResolvedCellWidthPx((current) => current === nextViewport.resolvedCellWidthPx ? current : nextViewport.resolvedCellWidthPx);
@@ -627,7 +698,7 @@ export function TerminalView({
       onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
-  }, [active, fontSize, onResize, onWidthModeChange, rowHeight, sessionId, widthMode]);
+  }, [active, fontSize, onResize, onWidthModeChange, rowHeight, sessionId, viewportClientHeightPx, viewportRows, widthMode]);
 
   const emitRenderDemand = useCallback((nextMode: 'follow' | 'reading', nextRenderBottomIndex: number, options?: {
     viewportEndIndex?: number;
@@ -673,6 +744,7 @@ export function TerminalView({
       Math.max(0, resolveScrollTopForRenderBottomIndex(nextRenderBottomIndex)),
     );
     pendingFollowScrollSyncRef.current = false;
+    pendingFollowViewportRealignRef.current = false;
     ignoredProgrammaticScrollTopRef.current = nextTarget;
     suppressProgrammaticScrollRef.current = true;
     if (Math.abs(host.scrollTop - nextTarget) > 1) {
@@ -709,8 +781,14 @@ export function TerminalView({
       window.clearTimeout(followScrollSyncTimerRef.current);
       followScrollSyncTimerRef.current = null;
     }
+    if (recentViewportLayoutChangeTimerRef.current !== null) {
+      window.clearTimeout(recentViewportLayoutChangeTimerRef.current);
+      recentViewportLayoutChangeTimerRef.current = null;
+    }
     pendingFollowRenderBottomIndexRef.current = null;
     pendingFollowScrollSyncRef.current = false;
+    pendingFollowViewportRealignRef.current = false;
+    recentViewportLayoutChangeRef.current = false;
     ignoredProgrammaticScrollTopRef.current = null;
   }, []);
 
@@ -1165,12 +1243,29 @@ export function TerminalView({
           return;
         }
         const host = event.currentTarget as HTMLDivElement;
+        if (!readingModeRef.current && recentViewportLayoutChangeRef.current) {
+          recentViewportLayoutChangeRef.current = false;
+          if (recentViewportLayoutChangeTimerRef.current !== null) {
+            window.clearTimeout(recentViewportLayoutChangeTimerRef.current);
+            recentViewportLayoutChangeTimerRef.current = null;
+          }
+          queueFollowScrollSync(followVisualBottomIndex, {
+            guardPendingFollowDrift: true,
+          });
+          return;
+        }
         if (
           !readingModeRef.current
           && pendingFollowScrollSyncRef.current
           && pendingFollowRenderBottomIndexRef.current !== null
         ) {
           queueFollowScrollSync(pendingFollowRenderBottomIndexRef.current, {
+            guardPendingFollowDrift: true,
+          });
+          return;
+        }
+        if (!readingModeRef.current && pendingFollowViewportRealignRef.current) {
+          queueFollowScrollSync(followVisualBottomIndex, {
             guardPendingFollowDrift: true,
           });
           return;
@@ -1286,39 +1381,6 @@ export function TerminalView({
       }}
     >
       <div className="term-grid" data-cursor-source="cursor-metadata" style={{ paddingTop: `${termGridPaddingTopPx}px`, paddingBottom: `${termGridPaddingBottomPx}px` }}>
-        {historyLoading ? (
-          <div
-            data-terminal-history-loading="true"
-            style={{
-              position: 'sticky',
-              top: 0,
-              zIndex: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              height: rowHeightPx * 2,
-              color: theme.foreground,
-              background: `linear-gradient(180deg, ${theme.background} 0%, rgba(0,0,0,0) 100%)`,
-              fontSize: `${Math.max(11, fontSize - 1)}px`,
-              opacity: 0.88,
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: '999px',
-                border: `2px solid ${theme.colors[8]}`,
-                borderTopColor: theme.foreground,
-                animation: 'zterm-history-spin 0.8s linear infinite',
-                boxSizing: 'border-box',
-              }}
-            />
-            <span>加载历史…</span>
-          </div>
-        ) : null}
         {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) => (
           <VisibleRow
             key={`row-${absoluteIndex}`}
@@ -1330,6 +1392,8 @@ export function TerminalView({
             isGap={isGap}
             theme={theme}
             cursor={cursor}
+            showAbsoluteLineNumbers={showAbsoluteLineNumbers}
+            discontinuousLineNumber={isGap || hasDiscontinuousNeighbor(renderRows, rowIndex)}
           />
         ))}
       </div>

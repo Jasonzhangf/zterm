@@ -14,6 +14,9 @@ const FLOATING_BUBBLE_MARGIN = 10;
 const FLOATING_BUBBLE_DRAG_THRESHOLD_PX = 8;
 const QUICK_BAR_SIDE_PADDING = 6;
 const QUICK_BAR_ROW_GAP = 4;
+const QUICK_BAR_FIXED_COLUMNS = 3;
+const FIXED_BUTTON_MIN_WIDTH = 48;
+const FIXED_CLUSTER_PADDING_X = 3;
 const REPEATABLE_ACTION_LONG_PRESS_MS = 420;
 const REPEATABLE_ACTION_REPEAT_MS = 90;
 const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
@@ -30,9 +33,6 @@ const SHORTCUT_PRESETS: ShortcutPreset[] = [
   { label: 'Paste', sequence: '\x16', kind: 'text', row: 'bottom-scroll' },
   { label: 'S-Tab', sequence: '\x1b[Z', kind: 'text', row: 'bottom-scroll' },
   { label: 'S-Enter', sequence: '\n', kind: 'text', row: 'bottom-scroll' },
-  { label: '↓', sequence: '\x1b[B', kind: 'key', row: 'top-scroll' },
-  { label: '←', sequence: '\x1b[D', kind: 'key', row: 'top-scroll' },
-  { label: '→', sequence: '\x1b[C', kind: 'key', row: 'top-scroll' },
 ];
 
 interface TerminalQuickBarProps {
@@ -42,7 +42,6 @@ interface TerminalQuickBarProps {
   onSendSequence?: (sequence: string) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
-  onOpenSyncSettings?: () => void;
   onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
@@ -62,6 +61,9 @@ interface TerminalQuickBarProps {
   onOpenFileTransfer?: () => void;
   onToggleDebugOverlay?: () => void;
   debugOverlayVisible?: boolean;
+  onToggleAbsoluteLineNumbers?: () => void;
+  absoluteLineNumbersVisible?: boolean;
+  remoteScreenshotStatus?: 'idle' | 'capturing' | 'transferring' | 'preview-ready' | 'saving';
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
@@ -624,7 +626,6 @@ export function TerminalQuickBar({
   keyboardInsetPx = 0,
   onImagePaste,
   onFileAttach,
-  onOpenSyncSettings,
   onRequestRemoteScreenshot,
   onToggleKeyboard,
   onQuickActionsChange,
@@ -643,6 +644,9 @@ export function TerminalQuickBar({
   onOpenFileTransfer,
   onToggleDebugOverlay,
   debugOverlayVisible,
+  onToggleAbsoluteLineNumbers,
+  absoluteLineNumbersVisible,
+  remoteScreenshotStatus = 'idle',
   shortcutSmartSort = false,
   shortcutFrequencyMap,
   onShortcutUse,
@@ -787,16 +791,16 @@ export function TerminalQuickBar({
       imageInputRef.current?.click();
       return;
     }
-    if (action.id === 'file-attach') {
-      fileInputRef.current?.click();
-      return;
-    }
     if (action.id === 'sync-settings') {
-      onOpenSyncSettings?.();
+      onOpenFileTransfer?.();
       return;
     }
     if (action.id === 'debug-overlay') {
       onToggleDebugOverlay?.();
+      return;
+    }
+    if (action.id === 'line-numbers') {
+      onToggleAbsoluteLineNumbers?.();
       return;
     }
     if (action.id === 'remote-screenshot') {
@@ -810,7 +814,7 @@ export function TerminalQuickBar({
       return;
     }
     if (action.id === 'file-transfer') {
-      onOpenFileTransfer?.();
+      fileInputRef.current?.click();
       return;
     }
     if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
@@ -826,10 +830,10 @@ export function TerminalQuickBar({
   }, [
     activeSessionId,
     onOpenFileTransfer,
-    onOpenSyncSettings,
     onRequestRemoteScreenshot,
     onSendSequence,
     onShortcutUse,
+    onToggleAbsoluteLineNumbers,
     onToggleDebugOverlay,
     onToggleKeyboard,
   ]);
@@ -973,36 +977,50 @@ export function TerminalQuickBar({
     persistDraftActions(nextActions);
   };
 
+  const screenshotToolLabel = useMemo(() => {
+    switch (remoteScreenshotStatus) {
+      case 'capturing':
+        return '截图中';
+      case 'transferring':
+        return '传图中';
+      case 'preview-ready':
+        return '预览中';
+      case 'saving':
+        return '保存中';
+      default:
+        return '截图';
+    }
+  }, [remoteScreenshotStatus]);
+
   const toolRowActions = useMemo(() => ([
     { id: 'file-transfer', label: '文件', sequence: '' },
     { id: 'image-attach', label: '图片', sequence: '' },
     { id: 'sync-settings', label: '同步', sequence: '' },
-    { id: 'remote-screenshot', label: '截图', sequence: '' },
+    { id: 'remote-screenshot', label: screenshotToolLabel, sequence: '' },
+    { id: 'line-numbers', label: '行号', sequence: '' },
+  ]), [screenshotToolLabel]);
+
+  const topFixedActions = useMemo(() => ([
     { id: 'debug-overlay', label: '状态', sequence: '' },
+    { id: 'arrow-up', label: '↑', sequence: '\x1b[A' },
     { id: 'keyboard', label: '键盘', sequence: '' },
   ]), []);
 
-  const topScrollActions = useMemo(() => ([
-    ...SHORTCUT_PRESETS
-      .filter((preset) => preset.row === 'top-scroll')
-      .map((preset) => ({
-        id: `preset-top-${preset.label}-${preset.sequence}`,
-        label: preset.label,
-        sequence: preset.sequence,
-      })),
-    ...sortedShortcutActions.filter((action) => action.row === 'top-scroll'),
-  ]), [sortedShortcutActions]);
+  const bottomFixedActions = useMemo(() => ([
+    { id: 'arrow-left', label: '←', sequence: '\x1b[D' },
+    { id: 'arrow-down', label: '↓', sequence: '\x1b[B' },
+    { id: 'arrow-right', label: '→', sequence: '\x1b[C' },
+  ]), []);
 
-  const bottomScrollActions = useMemo(() => ([
-    ...SHORTCUT_PRESETS
-      .filter((preset) => preset.row === 'bottom-scroll')
-      .map((preset) => ({
-        id: `preset-bottom-${preset.label}-${preset.sequence}`,
-        label: preset.label,
-        sequence: preset.sequence,
-      })),
-    ...sortedShortcutActions.filter((action) => action.row === 'bottom-scroll'),
-  ]), [sortedShortcutActions]);
+  const topScrollActions = useMemo(
+    () => buildVisibleShortcutRowActions('top-scroll', sortedShortcutActions),
+    [sortedShortcutActions],
+  );
+
+  const bottomScrollActions = useMemo(
+    () => buildVisibleShortcutRowActions('bottom-scroll', sortedShortcutActions),
+    [sortedShortcutActions],
+  );
 
   const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
   const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
@@ -1057,6 +1075,20 @@ export function TerminalQuickBar({
     borderRadius: '12px',
     backgroundColor: 'rgba(255,255,255,0.04)',
     border: '1px solid rgba(255,255,255,0.08)',
+  } as const;
+
+  const fixedClusterStyle = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${QUICK_BAR_FIXED_COLUMNS}, minmax(${FIXED_BUTTON_MIN_WIDTH}px, 1fr))`,
+    gap: `${QUICK_BAR_ROW_GAP}px`,
+    flexShrink: 0,
+    alignItems: 'center',
+    padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
+    borderRadius: '12px',
+    backgroundColor: 'rgba(59, 74, 108, 0.95)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+    width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
   } as const;
 
   const scrollTrackStyle = {
@@ -1452,6 +1484,10 @@ export function TerminalQuickBar({
               ? 'rgba(31,214,122,0.18)'
               : action.id === 'debug-overlay' && debugOverlayVisible
               ? 'rgba(31,214,122,0.18)'
+              : action.id === 'line-numbers' && absoluteLineNumbersVisible
+              ? 'rgba(31,214,122,0.18)'
+              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
+              ? 'rgba(113, 164, 255, 0.18)'
               : fixed
                 ? 'rgba(22, 28, 41, 0.92)'
                 : 'rgba(31, 38, 53, 0.82)',
@@ -1462,6 +1498,10 @@ export function TerminalQuickBar({
               ? mobileTheme.colors.accent
               : action.id === 'debug-overlay' && debugOverlayVisible
               ? mobileTheme.colors.accent
+              : action.id === 'line-numbers' && absoluteLineNumbersVisible
+              ? mobileTheme.colors.accent
+              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
+              ? '#8db7ff'
               : '#fff',
           fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : actionDisplayLabel.length > 3 ? '11px' : '14px',
           fontWeight: 700,
@@ -1473,7 +1513,12 @@ export function TerminalQuickBar({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          boxShadow: repeatActive ? 'inset 0 0 0 1px rgba(141,183,255,0.55)' : 'none',
+          boxShadow:
+            repeatActive
+              ? 'inset 0 0 0 1px rgba(141,183,255,0.55)'
+              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
+              ? 'inset 0 0 0 1px rgba(141,183,255,0.42)'
+              : 'none',
         }}
       >
         {renderShortcutVisualNode(action.label, 'button')}
@@ -1561,7 +1606,7 @@ export function TerminalQuickBar({
         blockShellEvent(event);
       }}
       style={{
-        padding: floatingMenuOpen ? '0' : `6px 0 ${mobileTheme.safeArea.bottom}`,
+        padding: floatingMenuOpen ? '0' : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
         position: 'relative',
         backgroundColor: floatingMenuOpen ? 'transparent' : 'rgba(11, 15, 24, 0.88)',
         borderTop: floatingMenuOpen ? 'none' : '1px solid rgba(255,255,255,0.08)',
@@ -2547,9 +2592,9 @@ export function TerminalQuickBar({
                     color: mobileTheme.colors.accent,
                     fontWeight: 800,
                   }}
-                >
-                  发送
-                </button>
+                  >
+                    发送
+                  </button>
               </div>
 
               {splitAvailable && (
@@ -2942,29 +2987,17 @@ export function TerminalQuickBar({
           <div
             data-quickbar-shell-row="true"
             style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
-              marginBottom: `${QUICK_BAR_ROW_GAP}px`,
-            }}
-          >
-            <div style={scrollTrackShellStyle}>
-              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                {toolRowActions.map((action) => renderBaseActionButton(action))}
-              </div>
-            </div>
-          </div>
-
-          <div
-            data-quickbar-shell-row="true"
-            style={{
               minHeight: '40px',
               display: 'flex',
               alignItems: 'stretch',
+              gap: `${QUICK_BAR_ROW_GAP}px`,
               padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
               marginBottom: `${QUICK_BAR_ROW_GAP}px`,
             }}
           >
+            <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
+              {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+            </div>
             <div style={scrollTrackShellStyle}>
               <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
                 {topScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
@@ -2979,14 +3012,33 @@ export function TerminalQuickBar({
               minHeight: '40px',
               display: 'flex',
               alignItems: 'stretch',
+              gap: `${QUICK_BAR_ROW_GAP}px`,
               padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
               backgroundColor: 'rgba(255,255,255,0.02)',
             }}
           >
+            <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
+              {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+            </div>
             <div style={scrollTrackShellStyle}>
               <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
                 {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
                 {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+              </div>
+            </div>
+          </div>
+
+          <div
+            data-quickbar-shell-row="true"
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+            }}
+          >
+            <div style={scrollTrackShellStyle}>
+              <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                {toolRowActions.map((action) => renderBaseActionButton(action))}
               </div>
             </div>
           </div>
@@ -3007,6 +3059,57 @@ function lightEditorInputStyle() {
     border: '1px solid rgba(23, 27, 45, 0.1)',
     color: mobileTheme.colors.lightText,
   } as const;
+}
+
+function buildVisibleShortcutRowActions(
+  row: ShortcutRow,
+  shortcutActions: TerminalShortcutAction[],
+) {
+  const customRowActions = shortcutActions.filter((action) => action.row === row);
+  const customBySequence = new Map<string, { id: string; label: string; sequence: string }>();
+  customRowActions.forEach((action) => {
+    if (!customBySequence.has(action.sequence)) {
+      customBySequence.set(action.sequence, action);
+    }
+  });
+
+  const visibleActions: Array<{ id: string; label: string; sequence: string }> = [];
+  const consumedSequences = new Set<string>();
+
+  SHORTCUT_PRESETS
+    .filter((preset) => preset.row === row)
+    .forEach((preset) => {
+      const customAction = customBySequence.get(preset.sequence);
+      if (customAction) {
+        visibleActions.push({
+          id: customAction.id,
+          label: customAction.label,
+          sequence: customAction.sequence,
+        });
+        consumedSequences.add(customAction.sequence);
+        return;
+      }
+      visibleActions.push({
+        id: `preset-${row}-${preset.label}-${preset.sequence}`,
+        label: preset.label,
+        sequence: preset.sequence,
+      });
+      consumedSequences.add(preset.sequence);
+    });
+
+  customRowActions.forEach((action) => {
+    if (consumedSequences.has(action.sequence)) {
+      return;
+    }
+    visibleActions.push({
+      id: action.id,
+      label: action.label,
+      sequence: action.sequence,
+    });
+    consumedSequences.add(action.sequence);
+  });
+
+  return visibleActions;
 }
 
 function overlayIconButton(disabled: boolean) {

@@ -3,7 +3,6 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
-import { Directory, Filesystem } from '@capacitor/filesystem';
 import type {
   BufferHeadPayload,
   BufferSyncRequestPayload,
@@ -15,7 +14,9 @@ import type {
   HostConfigMessage,
   PasteImageStartPayload,
   AttachFileStartPayload,
+  RemoteScreenshotCapture,
   RemoteScreenshotRequestPayload,
+  RemoteScreenshotStatusPayload,
   ScheduleJobDraft,
   ServerMessage,
   Session,
@@ -219,7 +220,10 @@ interface SessionContextValue {
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
   sendFileAttach: (sessionId: string, file: File) => Promise<void>;
-  requestRemoteScreenshot: (sessionId: string) => Promise<string>;
+  requestRemoteScreenshot: (
+    sessionId: string,
+    onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+  ) => Promise<RemoteScreenshotCapture>;
   resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
   setTerminalWidthMode: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
   updateSessionViewport: (sessionId: string, renderDemand: SessionRenderDemandState) => void;
@@ -288,7 +292,11 @@ interface SessionWireStatsSnapshot {
 interface PendingRemoteScreenshotRequest {
   fileName: string | null;
   chunks: Map<number, string>;
-  resolve: (savedPath: string) => void;
+  totalBytes: number;
+  phase: 'request-sent' | 'capturing' | 'transferring';
+  timeoutId: number | null;
+  onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
+  resolve: (capture: RemoteScreenshotCapture) => void;
   reject: (error: Error) => void;
 }
 
@@ -307,6 +315,8 @@ type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullState>>;
 type SessionRenderDemandState = TerminalViewportState;
 
 const SessionContext = createContext<SessionContextValue | null>(null);
+
+const REMOTE_SCREENSHOT_REQUEST_TIMEOUT_MS = 15000;
 
 function createSessionReconnectRuntime(): SessionReconnectRuntime {
   return {
@@ -1016,6 +1026,32 @@ export function SessionProvider({
 
   const isSessionTransportActive = useCallback((sessionId: string) => {
     return stateRef.current.activeSessionId === sessionId;
+  }, []);
+
+  const clearRemoteScreenshotTimeout = useCallback((pending: PendingRemoteScreenshotRequest) => {
+    if (pending.timeoutId !== null) {
+      window.clearTimeout(pending.timeoutId);
+      pending.timeoutId = null;
+    }
+  }, []);
+
+  const armRemoteScreenshotTimeout = useCallback((requestId: string) => {
+    const pending = pendingRemoteScreenshotRequestsRef.current.get(requestId);
+    if (!pending) {
+      return;
+    }
+    if (pending.timeoutId !== null) {
+      window.clearTimeout(pending.timeoutId);
+    }
+    pending.timeoutId = window.setTimeout(() => {
+      const activePending = pendingRemoteScreenshotRequestsRef.current.get(requestId);
+      if (!activePending) {
+        return;
+      }
+      pendingRemoteScreenshotRequestsRef.current.delete(requestId);
+      activePending.timeoutId = null;
+      activePending.reject(new Error(`Remote screenshot timed out during ${activePending.phase}`));
+    }, REMOTE_SCREENSHOT_REQUEST_TIMEOUT_MS);
   }, []);
 
   const isReconnectInFlight = useCallback((sessionId: string) => {
@@ -2450,18 +2486,11 @@ export function SessionProvider({
     });
   }, [clearSessionPullState, isSessionTransportActive, requestSessionBufferSync, resolveSessionCacheLines]);
 
-  async function persistRemoteScreenshotDownload(fileName: string, chunks: Map<number, string>) {
-    const downloadDir = '/storage/emulated/0/Download/zterm';
-    try {
-      await Filesystem.mkdir({
-        path: downloadDir,
-        directory: Directory.ExternalStorage,
-        recursive: true,
-      });
-    } catch {
-      // directory may already exist
-    }
-
+  function buildRemoteScreenshotCapture(
+    fileName: string,
+    chunks: Map<number, string>,
+    totalBytes: number,
+  ): RemoteScreenshotCapture {
     const ordered: string[] = [];
     for (let index = 0; index < chunks.size; index += 1) {
       const chunk = chunks.get(index);
@@ -2471,13 +2500,12 @@ export function SessionProvider({
       ordered.push(chunk);
     }
 
-    const savedPath = `${downloadDir}/${fileName}`;
-    await Filesystem.writeFile({
-      path: savedPath,
-      data: ordered.join(''),
-      directory: Directory.ExternalStorage,
-    });
-    return savedPath;
+    return {
+      fileName,
+      mimeType: 'image/png',
+      dataBase64: ordered.join(''),
+      totalBytes,
+    };
   }
 
   const handleSocketServerMessage = useCallback((options: {
@@ -2558,12 +2586,42 @@ export function SessionProvider({
         break;
       case 'file-list-response':
       case 'file-list-error':
+      case 'remote-screenshot-status':
+        if (msg.type === 'remote-screenshot-status') {
+          const payload = msg.payload as RemoteScreenshotStatusPayload;
+          const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
+          if (pending) {
+            pending.phase = payload.phase;
+            pending.fileName = payload.fileName || pending.fileName;
+            pending.totalBytes = Math.max(0, Math.floor(payload.totalBytes || pending.totalBytes || 0));
+            armRemoteScreenshotTimeout(payload.requestId);
+            pending.onProgress?.({
+              ...payload,
+              fileName: payload.fileName || pending.fileName || undefined,
+              totalBytes: Math.max(0, Math.floor(payload.totalBytes || pending.totalBytes || 0)),
+            });
+          }
+        }
+        for (const listener of fileTransferListeners.current) {
+          try { listener(msg); } catch { /* listener error */ }
+        }
+        break;
       case 'file-download-chunk': {
         const payload = msg.payload as FileDownloadChunkPayload;
         const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
         if (pending) {
+          pending.phase = 'transferring';
           pending.fileName = payload.fileName || pending.fileName;
           pending.chunks.set(payload.chunkIndex, payload.dataBase64);
+          armRemoteScreenshotTimeout(payload.requestId);
+          pending.onProgress?.({
+            requestId: payload.requestId,
+            phase: 'transferring',
+            fileName: payload.fileName || pending.fileName || undefined,
+            receivedChunks: pending.chunks.size,
+            totalChunks: Math.max(0, Math.floor(payload.totalChunks || 0)),
+            totalBytes: pending.totalBytes,
+          });
         }
         for (const listener of fileTransferListeners.current) {
           try { listener(msg); } catch { /* listener error */ }
@@ -2575,9 +2633,16 @@ export function SessionProvider({
         const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
         if (pending) {
           pendingRemoteScreenshotRequestsRef.current.delete(payload.requestId);
-          void persistRemoteScreenshotDownload(payload.fileName || pending.fileName || `remote-screenshot-${Date.now()}.png`, pending.chunks)
-            .then((savedPath) => pending.resolve(savedPath))
-            .catch((error) => pending.reject(error instanceof Error ? error : new Error(String(error))));
+          clearRemoteScreenshotTimeout(pending);
+          try {
+            pending.resolve(buildRemoteScreenshotCapture(
+              payload.fileName || pending.fileName || `remote-screenshot-${Date.now()}.png`,
+              pending.chunks,
+              Math.max(0, Math.floor(payload.totalBytes || pending.totalBytes || 0)),
+            ));
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)));
+          }
         }
         for (const listener of fileTransferListeners.current) {
           try { listener(msg); } catch { /* listener error */ }
@@ -2589,6 +2654,7 @@ export function SessionProvider({
         const pending = pendingRemoteScreenshotRequestsRef.current.get(payload.requestId);
         if (pending) {
           pendingRemoteScreenshotRequestsRef.current.delete(payload.requestId);
+          clearRemoteScreenshotTimeout(pending);
           pending.reject(new Error(payload.error || 'Remote screenshot download failed'));
         }
         for (const listener of fileTransferListeners.current) {
@@ -2615,7 +2681,7 @@ export function SessionProvider({
         lastPongAtRef.current.set(options.sessionId, Date.now());
         break;
     }
-  }, [applyIncomingBufferSync, handleBufferHead, persistRemoteScreenshotDownload, setScheduleStateForSession, settleSessionPullState]);
+  }, [applyIncomingBufferSync, buildRemoteScreenshotCapture, handleBufferHead, setScheduleStateForSession, settleSessionPullState]);
 
   const handleSocketConnectedBaseline = useCallback((options: {
     sessionId: string;
@@ -2990,7 +3056,7 @@ export function SessionProvider({
       payload,
     } satisfies ClientMessage));
     sendSocketPayload(targetSessionId, ws, fileBuffer);
-  }, [ensureSessionReadyForPaste, sendSocketPayload]);
+  }, [armRemoteScreenshotTimeout, ensureSessionReadyForPaste, sendSocketPayload]);
 
   const sendFileAttach = useCallback(async (sessionId: string, file: File) => {
     const targetSessionId = sessionId.trim();
@@ -3013,7 +3079,10 @@ export function SessionProvider({
     sendSocketPayload(targetSessionId, ws, fileBuffer);
   }, [ensureSessionReadyForPaste, sendSocketPayload]);
 
-  const requestRemoteScreenshot = useCallback(async (sessionId: string) => {
+  const requestRemoteScreenshot = useCallback(async (
+    sessionId: string,
+    onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+  ) => {
     const targetSessionId = sessionId.trim();
     if (!targetSessionId) {
       throw new Error('No target session for remote screenshot');
@@ -3022,13 +3091,18 @@ export function SessionProvider({
     const ws = await ensureSessionReadyForPaste(targetSessionId);
     const requestId = `rs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    return await new Promise<string>((resolve, reject) => {
+    return await new Promise<RemoteScreenshotCapture>((resolve, reject) => {
       pendingRemoteScreenshotRequestsRef.current.set(requestId, {
         fileName: null,
         chunks: new Map(),
+        totalBytes: 0,
+        phase: 'request-sent',
+        timeoutId: null,
+        onProgress,
         resolve,
         reject,
       });
+      armRemoteScreenshotTimeout(requestId);
 
       const payload: RemoteScreenshotRequestPayload = { requestId };
       sendSocketPayload(targetSessionId, ws, JSON.stringify({
@@ -3079,6 +3153,7 @@ export function SessionProvider({
 
   useEffect(() => () => {
     for (const pending of pendingRemoteScreenshotRequestsRef.current.values()) {
+      clearRemoteScreenshotTimeout(pending);
       pending.reject(new Error('Session provider disposed before remote screenshot completed'));
     }
     pendingRemoteScreenshotRequestsRef.current.clear();
@@ -3097,7 +3172,7 @@ export function SessionProvider({
       manualCloseRef.current.add(session.id);
       cleanupSocket(session.id, true);
     }
-  }, [cleanupSocket, clearSessionHandshakeTimeout]);
+  }, [cleanupSocket, clearRemoteScreenshotTimeout, clearSessionHandshakeTimeout]);
 
   const value: SessionContextValue = {
     state,

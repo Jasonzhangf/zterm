@@ -27,6 +27,7 @@ function makeJob(id: string): ScheduleJob {
       time: '09:30',
       repeat: 'once',
     },
+    execution: { maxRuns: 3, firedCount: 0 },
     createdAt: '2026-04-26T01:00:00.000Z',
     updatedAt: '2026-04-26T01:00:00.000Z',
   };

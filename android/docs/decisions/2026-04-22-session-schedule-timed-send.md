@@ -110,7 +110,14 @@ type ScheduleJob = {
         time: string;     // HH:mm
         repeat: 'once' | 'daily' | 'weekdays' | 'weekly' | 'custom';
         weekdays?: number[]; // 0-6
-      };
+  };
+
+  execution: {
+    startAt?: string; // ISO，允许 job 在此之前存在但不可触发
+    endAt?: string;   // ISO，超过该时间后停止触发
+    maxRuns: number;  // 0 = 无限次；默认 3
+    firedCount: number;
+  };
 
   nextFireAt?: string;
   lastFiredAt?: string;
@@ -136,6 +143,22 @@ type ScheduleJob = {
 - `text` 是原始语义真源，不允许为“提速/兼容”擅自裁剪文本
 - `appendEnter=true` 等价于 daemon 在发送文本后再补一个 Enter
 - 不允许在 daemon 侧偷偷把文本拆成多条 shell 命令做语义改写
+
+### 次数 / 时间窗真源规则
+
+- `execution.maxRuns` 是 daemon 真源：
+  - `0` = 无限次
+  - 默认 `3`
+- `execution.firedCount` 由 daemon 在**真实触发一次发送 attempt** 后递增；client 只展示，不维护第二份计数
+- `execution.endAt` 到达后 job 必须停止触发，并清空后续 `nextFireAt`
+- job 的停用条件只有三类：
+  1. `enabled=false`
+  2. `execution.endAt` 已过
+  3. `execution.maxRuns > 0 && execution.firedCount >= execution.maxRuns`
+- client 编辑器必须同时暴露：
+  - 起始时间
+  - 终止时间
+  - 次数上限（`0` 表示无限）
 
 ## daemon 调度引擎
 
@@ -163,6 +186,13 @@ type ScheduleJob = {
 4. 启动单一 master timer
 5. 到点后执行全部到期 job
 6. 写回新的 `lastFiredAt / lastResult / nextFireAt`
+
+补充冻结：
+
+7. 每次成功进入实际 dispatch 前，先校验：
+   - 当前时间是否已超过 `execution.endAt`
+   - `firedCount` 是否已达到 `maxRuns`
+8. 若达到终止条件，daemon 直接把 job 收口到“已停止”状态，不再继续重排下一次触发
 
 ### 执行策略
 
@@ -250,6 +280,9 @@ shared 协议真源建议扩展：
    - 文本内容
    - `发送后回车`
    - 规则类型：`周期 / 闹钟`
+   - 起始时间
+   - 终止时间
+   - 次数上限（默认 `3`，`0` 表示无限）
    - 周期模式：N 秒 / 分 / 小时，是否立即执行一次
    - 闹钟模式：日期、时间、重复规则
    - 启用/停用

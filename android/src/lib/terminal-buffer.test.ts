@@ -627,6 +627,45 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(cellsToLine(next.lines[next.lines.length - 1]!)).toBe('line-199');
   });
 
+  it('does not let a same-revision stale prepend drag a settled tail window backward', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 188,
+        endIndex: 200,
+        availableEndIndex: 200,
+        viewportEndIndex: 200,
+        rows: 4,
+        revision: 3,
+        lines: Array.from({ length: 12 }, (_, offset) => [188 + offset, `line-${188 + offset}`]),
+      }),
+      12,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 180,
+        endIndex: 192,
+        availableEndIndex: 200,
+        viewportEndIndex: 188,
+        rows: 4,
+        revision: 3,
+        lines: Array.from({ length: 12 }, (_, offset) => [180 + offset, `line-${180 + offset}`]),
+      }),
+      12,
+    );
+
+    expect(next.startIndex).toBe(188);
+    expect(next.endIndex).toBe(200);
+    expect(next.bufferTailEndIndex).toBe(200);
+    expect(next.lines.map(cellsToLine)).toEqual([
+      'line-188', 'line-189', 'line-190', 'line-191',
+      'line-192', 'line-193', 'line-194', 'line-195',
+      'line-196', 'line-197', 'line-198', 'line-199',
+    ]);
+  });
+
   it('keeps prepended reading history rows instead of immediately trimming them back out', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,

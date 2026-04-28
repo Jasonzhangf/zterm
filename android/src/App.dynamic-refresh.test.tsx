@@ -241,6 +241,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onMoveSession,
     onCloseSession,
     onTerminalInput,
+    onSessionDraftSend,
   }: {
     activeSession: { id: string; buffer: { revision: number } } | null;
     sessions: Array<{ id: string }>;
@@ -249,6 +250,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onMoveSession: (sessionId: string, toIndex: number) => void;
     onCloseSession: (sessionId: string) => void;
     onTerminalInput?: (sessionId: string, data: string) => void;
+    onSessionDraftSend?: (value: string, sessionId?: string) => void;
   }) => (
     <div>
       <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
@@ -298,6 +300,18 @@ vi.mock('./pages/TerminalPage', () => ({
         }}
       >
         send-active-input
+      </button>
+      <button
+        type="button"
+        data-testid="send-draft-to-second-tab"
+        onClick={() => {
+          const target = sessions[1];
+          if (target) {
+            onSessionDraftSend?.('draft-to-second-tab', target.id);
+          }
+        }}
+      >
+        send-draft-to-second-tab
       </button>
     </div>
   ),
@@ -801,7 +815,7 @@ describe('App dynamic refresh matrix', () => {
       makeSession('s1', 1),
     );
 
-    render(
+    const view = render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
@@ -809,7 +823,60 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('switch-second-tab'));
 
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+
+    // Simulate the state change that switchSession causes in real SessionContext
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    });
+  });
+
+  it('persists programmatic tab activation immediately when sending draft to another tab', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('send-draft-to-second-tab'));
+
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
+
+    // Simulate state change
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    });
   });
 
   it('persists manual tab reorder immediately from terminal UI intent', async () => {
@@ -822,7 +889,7 @@ describe('App dynamic refresh matrix', () => {
       makeSession('s1', 1),
     );
 
-    render(
+    const view = render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
@@ -830,10 +897,26 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('move-second-tab-first'));
 
     expect(sessionHarness.moveSession).toHaveBeenCalledWith('s2', 0);
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-      expect.objectContaining({ sessionId: 's2' }),
-      expect.objectContaining({ sessionId: 's1' }),
-    ]);
+
+    // Simulate reordered state
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s2', 2), makeSession('s1', 1)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+        expect.objectContaining({ sessionId: 's2' }),
+        expect.objectContaining({ sessionId: 's1' }),
+      ]);
+    });
   });
 
   it('persists closed tabs immediately and does not restore them on next launch', async () => {
@@ -854,10 +937,30 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('close-active-tab'));
 
     expect(sessionHarness.closeSession).toHaveBeenCalledWith('s1');
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-      expect.objectContaining({ sessionId: 's2' }),
-    ]);
+
+    // Simulate what SessionContext DELETE_SESSION does: remove s1, set active to s2
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+
+    // Re-render to trigger state change and auto-persist useEffect
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    });
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+        expect.objectContaining({ sessionId: 's2' }),
+      ]);
+    });
 
     view.unmount();
     sessionHarness.reset();

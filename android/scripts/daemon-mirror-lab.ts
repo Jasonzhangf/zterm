@@ -5,6 +5,7 @@ import { WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import type { BufferSyncRequestPayload, ClientMessage, ScheduleEventPayload, ScheduleStatePayload, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
+import { loadScheduleStore, saveScheduleStore } from '../src/server/schedule-store';
 import {
   cellsToLine,
   normalizeWireLines,
@@ -378,6 +379,12 @@ function ensureCaseDir(caseName: CaseName) {
 }
 
 function resetLabSession() {
+  const store = loadScheduleStore();
+  const nextJobs = store.jobs.filter((job) => job.targetSessionName !== LAB_SESSION_NAME);
+  if (nextJobs.length !== store.jobs.length) {
+    saveScheduleStore(nextJobs);
+  }
+
   if (sessionExists(LAB_SESSION_NAME)) {
     runTmux(['kill-session', '-t', LAB_SESSION_NAME], { allowFailure: true });
   }

@@ -157,6 +157,7 @@
 - [ ] mobile-15.21 client buffer-sync apply closeout：补 compact-wire incoming apply 回归；若已收到 `buffer-sync`，本地 buffer truth 必须立刻推进，禁止微任务批处理把 follow 尾窗卡成重复请求同一三屏
 - [ ] mobile-15.22 terminal header inset closeout：Header 顶部 inset 改成 UI shell 单一真相，删除 Header 内部二次 safe-area 叠加，补 Android 顶部点击区回归
 - [ ] mobile-15.23 tab restore truth closeout：冷启动 / 恢复时最后 active tab 只允许由 `ACTIVE_SESSION` 决定；`ACTIVE_PAGE.focusSessionId` 不得把已恢复的 active tab 覆盖回旧值
+  - 新冻结：**任何 tab 激活事件都必须立即持久化 `ACTIVE_SESSION`**；下次启动只能按这份真相恢复最后激活 tab，不允许再从别的 UI 状态反推。
 - [ ] mobile-15.24 compact default-color sentinel closeout：compact wire encode/decode 必须和 `TerminalCell` 默认 `fg/bg=256` 对齐；补 roundtrip 回归，解决灰条/花屏/cursor 样式污染
 - [ ] mobile-15.26 mirror width mode truth closeout：冻结 `adaptive-phone | mirror-fixed`；`mirror-fixed` 下 client viewport / IME / container width 变化不得改写 daemon mirror / tmux 宽度
 - [ ] mobile-15.26a Settings width-mode truth closeout：`terminalWidthMode` 真源迁到 Settings，全局唯一；删除 Host / Connection Properties 第二语义
@@ -168,8 +169,20 @@
 - [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
 - [ ] mobile-15.32 transport/session lifecycle closeout：client session 与 ws/rtc transport 解耦；inactive tab 只停取数，不关闭 session/transport；daemon 侧 reconnect 复用同一 `clientSessionId` logical session，并补 shutdown 统一回收回归
 - [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
-- [ ] mobile-15.34 QuickBar 三行工具栏 closeout：第一行工具（文件/图片/同步/截图/状态/键盘），第二行单键，第三行复合键；工具项移出浮动菜单
+- [ ] mobile-15.34 QuickBar 老布局回归 closeout：壳体改成三栏，前两栏保持老布局（左侧固定六键 `状态/↑/键盘 + ←/↓/→` + 右侧两行快捷滚动区），第三栏恢复文件/图片/同步/截图工具栏；工具栏不得重复；固定按钮不得超界
 - [ ] mobile-15.35 QuickBar keyboard-lift + session-schedule entry closeout：QuickBar editor 聚焦时 UI shell 仍消费 keyboard inset；定时列表入口不再依赖本地草稿，任何 attach 到同一 session 的客户端都可打开当前任务列表并 CRUD
+- [ ] mobile-15.36 remote screenshot preview closeout：截图必须显式暴露 `capturing -> transferring -> preview-ready -> save/discard` 单一路径；客户端不得再自动落盘后假装成功。
+- [ ] mobile-15.37 remote screenshot fail-fast closeout：`capturing / transferring` 必须有显式失败边界，daemon 和 client 任一端卡住都必须回错误，不允许无限等待。
+- [ ] mobile-15.38 QuickBar tool semantic closeout：`文件=文件上传`、`图片=图片上传`、`同步=远程文件同步页`、`截图=远端截图`，不得再错绑到 settings/file-transfer
+- [ ] mobile-15.39 session schedule count/window closeout：定时任务新增 `次数上限 + 终止时间`；`maxRuns=0` 表示无限次，默认 `3` 次；daemon 维护 `firedCount / nextFireAt / stop condition`，client 只编辑和展示
+- [ ] mobile-15.40 terminal debug truth overlay closeout：沿用 QuickBar `状态` 按钮开关 debug；开启后 renderer 左侧显示每行绝对行号，状态悬浮窗显示当前 `follow / reading` 模式；只做观测，不改 buffer / daemon / renderer 真相
+- [ ] mobile-15.41 renderer gap-visible debug closeout：reading/follow 窗口内若 absolute rows 不连续，直接把 gap 画成空背景占位，不等待补齐；debug 绝对行号在相邻不连续时红标
+- [ ] mobile-15.42 same-revision stale-prepend closeout：同 revision 的迟到旧 `buffer-sync` 不得把本地 1000 行窗口从 tail follow 态拖回更老历史；只能 patch 当前窗口内 absolute-index truth，先补红测再修 `terminal-buffer`
+- [ ] mobile-15.43 follow-ime-relayout closeout：IME 弹起 / viewport 高度变化 / UI shell relayout 触发的 DOM scroll 不得把 follow 误判成 reading；先补“keyboard + live update + bottom input line”红测，再修 renderer
+  - 2026-04-28 已验证根因：`pendingFollowViewportRealignRef` 在真实 scroll 到达前被 `syncScrollHostToRenderBottom()` 提前清掉，导致 relayout/live-refresh scroll 被错当成用户回滚
+  - 下一步固定顺序：补“快速吐字 / 绝对行号剧烈变化仍保持 follow”红测 -> 收 follow realign 单一路径 -> 全量 renderer 回归
+  - 2026-04-28 第一轮收口已落地：`TerminalView` 对**非首屏** viewport relayout 新增 `recentViewportLayoutChange` guard；相关 2 条 renderer 红测已转绿
+- [ ] mobile-15.44 debug-line-number-toggle closeout：绝对行号开关从 `状态浮窗` 解耦，放到第三行工具栏显式入口；`状态` 只管浮窗，`行号` 只管 line-number gutter
 
 - 若继续发新 APK，补 `foreground / reading / input` 真机专项证据
 - 单独审 daemon `health.sessions.total` bookkeeping 偏大问题

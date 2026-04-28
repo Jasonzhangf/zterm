@@ -16,6 +16,7 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
       time: '09:30',
       repeat: 'once',
     },
+    execution: overrides.execution || { maxRuns: 3, firedCount: 0 },
     createdAt: overrides.createdAt || '2026-04-26T01:00:00.000Z',
     updatedAt: overrides.updatedAt || '2026-04-26T01:00:00.000Z',
   };

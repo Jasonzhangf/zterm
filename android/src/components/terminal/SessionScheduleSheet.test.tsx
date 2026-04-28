@@ -18,6 +18,7 @@ function createJob(overrides?: Partial<ScheduleJob>): ScheduleJob {
     enabled: true,
     payload: { text: 'echo hello', appendEnter: true },
     rule: { kind: 'interval', intervalMs: 60000, startAt: now },
+    execution: { maxRuns: 3, firedCount: 0 },
     nextFireAt: now,
     createdAt: now,
     updatedAt: now,
@@ -89,6 +90,32 @@ describe('SessionScheduleSheet', () => {
     expect(savedJob.rule.kind).toBe('interval');
     expect(savedJob.rule.intervalMs).toBe(5 * 60 * 1000);
     expect(savedJob.targetSessionName).toBe('demo-session');
+    expect(savedJob.execution.maxRuns).toBe(3);
+  });
+
+  it('creates a new schedule job with unlimited runs and end time when configured', () => {
+    const onSave = vi.fn();
+    renderSheet({ onSave });
+
+    fireEvent.change(screen.getByPlaceholderText('输入要定时发送到 tmux session 的文本'), {
+      target: { value: 'echo forever' },
+    });
+    const maxRunsInput = screen.getAllByText('次数上限（0 = 无限次）')[0]?.parentElement?.querySelector('input');
+    const endAtInput = screen.getAllByText('终止时间')[0]?.parentElement?.querySelector('input');
+    expect(maxRunsInput).toBeTruthy();
+    expect(endAtInput).toBeTruthy();
+    fireEvent.change(maxRunsInput as HTMLInputElement, {
+      target: { value: '0' },
+    });
+    fireEvent.change(endAtInput as HTMLInputElement, {
+      target: { value: '2026-04-28T08:30' },
+    });
+
+    fireEvent.click(screen.getByText('Create'));
+
+    const savedJob = onSave.mock.calls[0][0];
+    expect(savedJob.execution.maxRuns).toBe(0);
+    expect(savedJob.execution.endAt).toBe('2026-04-28T00:30:00.000Z');
   });
 
   it('does not submit when text is empty', () => {
@@ -190,6 +217,20 @@ describe('SessionScheduleSheet', () => {
     const job = createJob({ lastResult: 'error', lastError: 'tmux session not found' });
     renderSheet({ scheduleState: createState([job]) });
     expect(screen.getByText('最近错误：tmux session not found')).toBeTruthy();
+  });
+
+  it('renders execution summary with run count and end time', () => {
+    const job = createJob({
+      execution: {
+        maxRuns: 0,
+        firedCount: 4,
+        endAt: '2026-04-28T08:30:00.000Z',
+      },
+    });
+    renderSheet({ scheduleState: createState([job]) });
+    expect(
+      screen.getByText((_, element) => element?.textContent === '已执行 4 次 / 无限次 · 截止：04/28 16:30'),
+    ).toBeTruthy();
   });
 
   it('renders disabled job without checked checkbox', () => {

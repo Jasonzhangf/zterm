@@ -390,6 +390,7 @@ function resolveDesiredLocalWindow(options: {
   authoritativeHeadStartIndex: number;
   authoritativeTailEndIndex: number;
   cacheLines: number;
+  preserveCurrentWindow?: boolean;
 }) {
   const safeHead = Math.max(0, Math.floor(options.authoritativeHeadStartIndex));
   const safeTail = Math.max(safeHead, Math.floor(options.authoritativeTailEndIndex));
@@ -407,6 +408,16 @@ function resolveDesiredLocalWindow(options: {
   }
 
   const current = options.current!;
+  if (options.preserveCurrentWindow) {
+    return clampWindowToBounds({
+      desiredStartIndex: current.startIndex,
+      desiredEndIndex: current.endIndex,
+      authoritativeHeadStartIndex: safeHead,
+      authoritativeTailEndIndex: safeTail,
+      cacheLines: safeCacheLines,
+    });
+  }
+
   let desiredStartIndex = current.startIndex;
   let desiredEndIndex = current.endIndex;
 
@@ -522,12 +533,20 @@ export function applyBufferSyncToSessionBuffer(
 
   const authoritativeHeadStartIndex = resolveAuthoritativeHeadStartIndex(current, sparseWindow, payload);
   const authoritativeTailEndIndex = resolveAuthoritativeTailEndIndex(current, sparseWindow, payload);
+  const preserveCurrentWindow = Boolean(
+    current
+    && revision === current.revision
+    && current.endIndex >= authoritativeTailEndIndex
+    && sparseWindow.startIndex < current.startIndex
+    && sparseWindow.endIndex <= current.endIndex
+  );
   const desiredWindow = resolveDesiredLocalWindow({
     current,
     sparseWindow,
     authoritativeHeadStartIndex,
     authoritativeTailEndIndex,
     cacheLines,
+    preserveCurrentWindow,
   });
   const patched = buildPatchedWindowFromCurrent(current, sparseWindow, desiredWindow);
 

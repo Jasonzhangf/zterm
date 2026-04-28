@@ -275,6 +275,22 @@ export interface RemoteScreenshotRequestPayload {
   requestId: string;
 }
 
+export interface RemoteScreenshotStatusPayload {
+  requestId: string;
+  phase: 'capturing' | 'transferring';
+  fileName?: string;
+  receivedChunks?: number;
+  totalChunks?: number;
+  totalBytes?: number;
+}
+
+export interface RemoteScreenshotCapture {
+  fileName: string;
+  mimeType: 'image/png';
+  dataBase64: string;
+  totalBytes: number;
+}
+
 export interface FileDownloadChunkPayload {
   requestId: string;
   chunkIndex: number;
@@ -477,6 +493,7 @@ export type ServerMessage =
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
   | { type: 'file-list-response'; payload: FileListResponsePayload }
   | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
   | { type: 'file-download-error'; payload: FileDownloadErrorPayload }

@@ -189,6 +189,7 @@ export function FileTransferSheet({
   const activeListRequestRef = useRef<string | null>(null);
   const activeDownloadRequestRef = useRef<string | null>(null);
   const downloadChunksRef = useRef<Map<number, string>>(new Map());
+  const transferDoneCallbacksRef = useRef<Map<string, () => void>>(new Map());
 
   // Request remote file list
   const requestRemoteList = useCallback((path: string, showHidden: boolean) => {
@@ -278,10 +279,14 @@ export function FileTransferSheet({
         const payload = msg.payload as FileDownloadCompletePayload;
         if (activeDownloadRequestRef.current !== payload.requestId) return;
         activeDownloadRequestRef.current = null;
+        transferDoneCallbacksRef.current.get(payload.requestId)?.();
+        transferDoneCallbacksRef.current.delete(payload.requestId);
         // Reassemble and write to local
         void reassembleDownload(payload);
       } else if (msg.type === 'file-download-error') {
         activeDownloadRequestRef.current = null;
+        transferDoneCallbacksRef.current.get(msg.payload.requestId)?.();
+        transferDoneCallbacksRef.current.delete(msg.payload.requestId);
         setTransfers(prev => prev.map(t =>
           t.id === msg.payload.requestId ? { ...t, status: 'error' as const, error: msg.payload.error } : t
         ));
@@ -297,10 +302,14 @@ export function FileTransferSheet({
         setTransfers(prev => prev.map(t =>
           t.id === payload.requestId ? { ...t, status: 'done' as const, transferredBytes: t.totalBytes } : t
         ));
+        transferDoneCallbacksRef.current.get(payload.requestId)?.();
+        transferDoneCallbacksRef.current.delete(payload.requestId);
       } else if (msg.type === 'file-upload-error') {
         setTransfers(prev => prev.map(t =>
           t.id === msg.payload.requestId ? { ...t, status: 'error' as const, error: msg.payload.error } : t
         ));
+        transferDoneCallbacksRef.current.get(msg.payload.requestId)?.();
+        transferDoneCallbacksRef.current.delete(msg.payload.requestId);
       }
     });
   }, [open, onFileTransferMessage]);
@@ -391,17 +400,13 @@ export function FileTransferSheet({
           totalBytes: entry.size,
         };
         sendJson({ type: 'file-download-request', payload });
-        // Wait for download to complete before starting next
-        await new Promise<void>(resolve => {
-          const check = setInterval(() => {
-            const t = transfers.find(x => x.id === requestId);
-            if (t && (t.status === 'done' || t.status === 'error')) {
-              clearInterval(check);
-              resolve();
-            }
-          }, 200);
-          // Timeout after 60s
-          setTimeout(() => { clearInterval(check); resolve(); }, 60000);
+        // Wait for this download to finish before starting next
+        await new Promise<void>((resolve) => {
+          transferDoneCallbacksRef.current.set(requestId, resolve);
+          setTimeout(() => {
+            transferDoneCallbacksRef.current.delete(requestId);
+            resolve();
+          }, 60000);
         });
       }
       setSelectedRemote(new Set());

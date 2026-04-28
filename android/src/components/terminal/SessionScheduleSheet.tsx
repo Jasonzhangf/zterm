@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   describeScheduleRule,
+  formatScheduleExecution,
   formatScheduleDateTime,
   resolveScheduleTimeZone,
 } from '../../../../packages/shared/src/schedule/next-fire';
@@ -23,6 +24,7 @@ interface SessionScheduleSheetProps {
   onDelete: (jobId: string) => void;
   onToggle: (jobId: string, enabled: boolean) => void;
   onRunNow: (jobId: string) => void;
+  keyboardInset?: number;
 }
 
 type IntervalUnit = 'seconds' | 'minutes' | 'hours';
@@ -77,6 +79,10 @@ function createDefaultDraft(sessionName: string, seededText = ''): ScheduleJobDr
       startAt: now.toISOString(),
       fireImmediately: false,
     },
+    execution: {
+      maxRuns: 3,
+      endAt: '',
+    },
   };
 }
 
@@ -88,6 +94,10 @@ function createDraftFromJob(job: ScheduleJob): ScheduleJobDraft {
     label: job.label,
     payload: {
       ...job.payload,
+    },
+    execution: {
+      maxRuns: job.execution.maxRuns,
+      endAt: job.execution.endAt || '',
     },
     rule: {
       ...job.rule,
@@ -110,6 +120,7 @@ export function SessionScheduleSheet({
   onDelete,
   onToggle,
   onRunNow,
+  keyboardInset = 0,
 }: SessionScheduleSheetProps) {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ScheduleJobDraft>(() => createDefaultDraft(sessionName, composerSeedText));
@@ -163,6 +174,13 @@ export function SessionScheduleSheet({
             startAt: draft.rule.startAt || new Date().toISOString(),
           }
         : draft.rule,
+      execution: {
+        maxRuns:
+          typeof draft.execution?.maxRuns === 'number' && Number.isFinite(draft.execution.maxRuns)
+            ? Math.max(0, Math.floor(draft.execution.maxRuns))
+            : 3,
+        endAt: typeof draft.execution?.endAt === 'string' ? draft.execution.endAt : '',
+      },
     };
     onSave(nextDraft);
     setEditingJobId(null);
@@ -183,13 +201,14 @@ export function SessionScheduleSheet({
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'stretch',
+        paddingBottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
       }}
       onClick={onClose}
     >
       <div
         style={{
           width: '100%',
-          maxHeight: '88vh',
+          maxHeight: keyboardInset > 0 ? `calc(88vh - ${keyboardInset}px)` : '88vh',
           overflow: 'auto',
           borderTopLeftRadius: '20px',
           borderTopRightRadius: '20px',
@@ -235,6 +254,11 @@ export function SessionScheduleSheet({
                       下次：{formatScheduleDateTime(job.nextFireAt)}
                       {' · '}
                       上次：{formatScheduleDateTime(job.lastFiredAt)}
+                    </div>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: mobileTheme.colors.textMuted }}>
+                      {formatScheduleExecution(job)}
+                      {' · '}
+                      截止：{job.execution.endAt ? formatScheduleDateTime(job.execution.endAt) : '无'}
                     </div>
                     <div style={{ marginTop: '6px', fontSize: '12px', color: job.lastResult === 'error' ? '#ff8f8f' : mobileTheme.colors.textMuted }}>
                       {job.lastResult === 'error'
@@ -401,6 +425,42 @@ export function SessionScheduleSheet({
                 />
                 创建后立即触发一次
               </label>
+              <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
+                <span>终止时间</span>
+                <input
+                  type="datetime-local"
+                  value={draft.execution?.endAt ? toDateTimeLocalValue(draft.execution.endAt) : ''}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    execution: {
+                      ...current.execution,
+                      endAt: event.target.value
+                        ? (() => {
+                            const nextDate = new Date(event.target.value);
+                            return Number.isNaN(nextDate.getTime()) ? '' : nextDate.toISOString();
+                          })()
+                        : '',
+                    },
+                  }))}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
+                <span>次数上限（0 = 无限次）</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.execution?.maxRuns ?? 3}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    execution: {
+                      ...current.execution,
+                      maxRuns: Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0),
+                    },
+                  }))}
+                  style={inputStyle}
+                />
+              </label>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
@@ -505,6 +565,42 @@ export function SessionScheduleSheet({
                   })}
                 </div>
               ) : null}
+              <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
+                <span>终止时间</span>
+                <input
+                  type="datetime-local"
+                  value={draft.execution?.endAt ? toDateTimeLocalValue(draft.execution.endAt) : ''}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    execution: {
+                      ...current.execution,
+                      endAt: event.target.value
+                        ? (() => {
+                            const nextDate = new Date(event.target.value);
+                            return Number.isNaN(nextDate.getTime()) ? '' : nextDate.toISOString();
+                          })()
+                        : '',
+                    },
+                  }))}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
+                <span>次数上限（0 = 无限次）</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.execution?.maxRuns ?? 3}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    execution: {
+                      ...current.execution,
+                      maxRuns: Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0),
+                    },
+                  }))}
+                  style={inputStyle}
+                />
+              </label>
             </div>
           )}
 

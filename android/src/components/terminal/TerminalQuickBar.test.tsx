@@ -206,11 +206,13 @@ describe('TerminalQuickBar', () => {
   it('hides shell quick rows while floating menu is open', async () => {
     renderQuickBar();
 
+    expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
 
     await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '状态' })).toBeNull();
       expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
     });
   });
@@ -220,12 +222,13 @@ describe('TerminalQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '状态' })).toBeNull();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '关闭快捷输入' }));
 
     await waitFor(() => {
+      expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
       expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
     });
   });
@@ -254,49 +257,100 @@ describe('TerminalQuickBar', () => {
 
 
 
-  it('renders a dedicated first toolbar row with visible tool actions', async () => {
+  it('renders three shell rows with the third row as the visible tool bar', async () => {
     renderQuickBar({
       onOpenFileTransfer: vi.fn(),
       onToggleDebugOverlay: vi.fn(),
-      ...( { onOpenSyncSettings: vi.fn(), onRequestRemoteScreenshot: vi.fn() } as any),
+      onToggleAbsoluteLineNumbers: vi.fn(),
+      onRequestRemoteScreenshot: vi.fn(),
     });
 
     const shellRows = screen.getByTestId('terminal-quickbar-shell-rows');
     expect(shellRows.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(3);
+    expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '键盘' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '↑' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '←' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '↓' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '→' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '文件' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '图片' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '同步' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '截图' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '行号' })).not.toBeNull();
+
+    const topFixedClusterButtons = screen
+      .getByTestId('quickbar-fixed-cluster-top')
+      .querySelectorAll('button');
+    expect(Array.from(topFixedClusterButtons).map((node) => node.getAttribute('aria-label'))).toEqual(['状态', '↑', '键盘']);
+    const topClusterStyle = screen.getByTestId('quickbar-fixed-cluster-top').getAttribute('style') || '';
+    expect(topClusterStyle).toContain('width: 158px');
   });
 
-  it('routes toolbar actions through explicit callbacks instead of floating menu pills', async () => {
+  it('routes visible tool bar actions through explicit callbacks and keeps file/sync semantics correct', async () => {
     const onOpenFileTransfer = vi.fn();
     const onToggleDebugOverlay = vi.fn();
-    const onOpenSyncSettings = vi.fn();
+    const onToggleAbsoluteLineNumbers = vi.fn();
     const onRequestRemoteScreenshot = vi.fn().mockResolvedValue(undefined);
+    const onFileAttach = vi.fn();
 
     renderQuickBar({
       onOpenFileTransfer,
+      onFileAttach,
       onToggleDebugOverlay,
-      ...( { onOpenSyncSettings, onRequestRemoteScreenshot } as any),
+      onToggleAbsoluteLineNumbers,
+      onRequestRemoteScreenshot,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '文件' }));
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
+    fireEvent.click(screen.getByRole('button', { name: '文件' }));
     fireEvent.click(screen.getByRole('button', { name: '同步' }));
     fireEvent.click(screen.getByRole('button', { name: '截图' }));
+    fireEvent.click(screen.getByRole('button', { name: '行号' }));
 
     await waitFor(() => {
       expect(onOpenFileTransfer).toHaveBeenCalledTimes(1);
       expect(onToggleDebugOverlay).toHaveBeenCalledTimes(1);
-      expect(onOpenSyncSettings).toHaveBeenCalledTimes(1);
+      expect(onToggleAbsoluteLineNumbers).toHaveBeenCalledTimes(1);
       expect(onRequestRemoteScreenshot).toHaveBeenCalledTimes(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
-    expect(screen.queryByText('📁传输')).toBeNull();
-    expect(screen.queryByText(/📊/)).toBeNull();
+    expect(screen.queryByText('文件')).toBeNull();
+    expect(screen.queryByText('图片')).toBeNull();
+    expect(screen.queryByText('同步')).toBeNull();
+    expect(screen.queryByText('截图')).toBeNull();
+    expect(screen.queryByText('行号')).toBeNull();
+  });
+
+  it('shows screenshot transfer state on the visible third-row toolbar while keeping keyboard in the old fixed spot', async () => {
+    renderQuickBar({
+      remoteScreenshotStatus: 'transferring',
+    });
+
+    expect(screen.getByRole('button', { name: '键盘' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '传图中' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '截图' })).toBeNull();
+  });
+
+  it('deduplicates visible shortcut rows when saved shortcuts overlap built-in presets', async () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: 'custom-tab', label: '我的 Tab', sequence: '\t', order: 0, row: 'top-scroll' },
+        { id: 'custom-enter', label: '我的回车', sequence: '\r', order: 1, row: 'top-scroll' },
+        { id: 'custom-paste', label: '我的粘贴', sequence: '\x16', order: 0, row: 'bottom-scroll' },
+        { id: 'custom-senter', label: '我的换行', sequence: '\n', order: 1, row: 'bottom-scroll' },
+      ],
+    });
+
+    expect(screen.getAllByRole('button', { name: '我的 Tab' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '我的回车' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '我的粘贴' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '我的换行' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Tab' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Enter' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Paste' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'S-Enter' })).toBeNull();
   });
 
   it('blocks non-interactive shell clicks from bubbling to terminal layer', async () => {

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Filesystem } from '@capacitor/filesystem';
 import {
   SessionProvider,
   shouldReconnectActivatedSession,
@@ -177,6 +177,7 @@ function SessionHarness() {
     updateSessionViewport,
   } = useSession();
   const [remoteScreenshotResult, setRemoteScreenshotResult] = useState('idle');
+  const [remoteScreenshotPhase, setRemoteScreenshotPhase] = useState('idle');
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -221,6 +222,7 @@ function SessionHarness() {
       <div data-testid="session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
       <div data-testid="remote-screenshot-result">{remoteScreenshotResult}</div>
+      <div data-testid="remote-screenshot-phase">{remoteScreenshotPhase}</div>
       <button
         type="button"
         onClick={() => {
@@ -244,8 +246,10 @@ function SessionHarness() {
       <button
         type="button"
         onClick={() => {
-          void requestRemoteScreenshot('session-1')
-            .then((savedPath) => setRemoteScreenshotResult(savedPath))
+          void requestRemoteScreenshot('session-1', (progress) => {
+            setRemoteScreenshotPhase(`${progress.phase}:${progress.receivedChunks || 0}/${progress.totalChunks || 0}`);
+          })
+            .then((capture) => setRemoteScreenshotResult(`${capture.fileName}:${capture.dataBase64}`))
             .catch((error) => setRemoteScreenshotResult(`error:${error instanceof Error ? error.message : String(error)}`));
         }}
       >
@@ -4030,7 +4034,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 
-  it('streams remote screenshot chunks into Download/zterm and resolves the saved path', async () => {
+  it('streams remote screenshot chunks into preview payload and reports progress phases', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -4061,6 +4065,25 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(typeof requestId).toBe('string');
 
     ws.triggerMessage({
+      type: 'remote-screenshot-status',
+      payload: {
+        requestId,
+        phase: 'capturing',
+        fileName: 'remote-shot.png',
+      },
+    });
+    ws.triggerMessage({
+      type: 'remote-screenshot-status',
+      payload: {
+        requestId,
+        phase: 'transferring',
+        fileName: 'remote-shot.png',
+        receivedChunks: 0,
+        totalChunks: 2,
+        totalBytes: 6,
+      },
+    });
+    ws.triggerMessage({
       type: 'file-download-chunk',
       payload: {
         requestId,
@@ -4090,17 +4113,59 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      expect(Filesystem.mkdir).toHaveBeenCalledWith({
-        path: '/storage/emulated/0/Download/zterm',
-        directory: Directory.ExternalStorage,
-        recursive: true,
-      });
-      expect(Filesystem.writeFile).toHaveBeenCalledWith({
-        path: '/storage/emulated/0/Download/zterm/remote-shot.png',
-        data: 'Zm9vYmFy',
-        directory: Directory.ExternalStorage,
-      });
-      expect(screen.getByTestId('remote-screenshot-result').textContent).toBe('/storage/emulated/0/Download/zterm/remote-shot.png');
+      expect(screen.getByTestId('remote-screenshot-phase').textContent).toBe('transferring:2/2');
+      expect(screen.getByTestId('remote-screenshot-result').textContent).toBe('remote-shot.png:Zm9vYmFy');
     });
+    expect(Filesystem.mkdir).not.toHaveBeenCalled();
+    expect(Filesystem.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('fails remote screenshot request explicitly when no progress arrives before timeout', async () => {
+    let screenshotTimeout: (() => void) | null = null;
+    const realSetTimeout = window.setTimeout.bind(window);
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, timeout?: number, ...args: any[]) => {
+      if (timeout === 15000 && typeof handler === 'function' && screenshotTimeout === null) {
+        screenshotTimeout = () => (handler as (...invokeArgs: any[]) => void)(...args);
+        return 9001 as unknown as number;
+      }
+      return realSetTimeout(handler, timeout, ...args);
+    }) as typeof window.setTimeout);
+
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('request-screenshot'));
+
+    await waitFor(() => {
+      const messages = readSentMessages(ws);
+      expect(messages.some((item) => item.type === 'remote-screenshot-request')).toBe(true);
+    });
+
+    await act(async () => {
+      expect(screenshotTimeout).not.toBeNull();
+      screenshotTimeout?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-screenshot-result').textContent).toBe('error:Remote screenshot timed out during request-sent');
+    });
+
+    setTimeoutSpy.mockRestore();
   });
 });

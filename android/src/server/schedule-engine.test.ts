@@ -17,6 +17,7 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
       startAt: '2026-04-26T00:00:00.000Z',
       fireImmediately: false,
     },
+    execution: overrides.execution || { maxRuns: 3, firedCount: 0 },
     nextFireAt: overrides.nextFireAt,
     lastFiredAt: overrides.lastFiredAt,
     lastResult: overrides.lastResult,
@@ -39,6 +40,7 @@ function makeDraft(overrides: Partial<ScheduleJobDraft> = {}): ScheduleJobDraft 
       startAt: '2026-04-26T00:00:00.000Z',
       fireImmediately: false,
     },
+    execution: overrides.execution,
   };
 }
 
@@ -68,6 +70,27 @@ describe('ScheduleEngine', () => {
     const jobs = engine.listBySession('main');
     expect(jobs).toHaveLength(1);
     expect(jobs[0].id).toBe('job-1');
+    expect(jobs[0].nextFireAt).toBe('2026-04-26T00:01:00.000Z');
+
+    engine.dispose();
+  });
+
+  it('normalizes legacy jobs that do not carry execution policy yet', () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    vi.setSystemTime(now);
+
+    const engine = new ScheduleEngine({
+      initialJobs: [{
+        ...makeJob({ id: 'legacy-job' }),
+        execution: undefined,
+      } as unknown as ScheduleJob],
+      saveJobs: () => {},
+      executeJob: () => ({ ok: true }),
+    });
+
+    const jobs = engine.listBySession('main');
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].execution).toEqual({ maxRuns: 3, firedCount: 0 });
     expect(jobs[0].nextFireAt).toBe('2026-04-26T00:01:00.000Z');
 
     engine.dispose();
@@ -183,6 +206,56 @@ describe('ScheduleEngine', () => {
     expect(executed).toEqual(['job-1']);
     expect(result!.lastFiredAt).toBe(now.toISOString());
     expect(result!.lastResult).toBe('ok');
+    expect(result!.execution.firedCount).toBe(1);
+
+    engine.dispose();
+  });
+
+  it('stops a job after it reaches maxRuns', async () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    vi.setSystemTime(now);
+
+    const engine = new ScheduleEngine({
+      initialJobs: [makeJob({ id: 'job-1', execution: { maxRuns: 1, firedCount: 0 } })],
+      saveJobs: () => {},
+      executeJob: () => ({ ok: true }),
+    });
+
+    const result = await engine.runNow('job-1');
+    expect(result).not.toBeNull();
+    expect(result!.execution.firedCount).toBe(1);
+    expect(result!.enabled).toBe(false);
+    expect(result!.nextFireAt).toBeUndefined();
+
+    engine.dispose();
+  });
+
+  it('does not execute jobs whose endAt has already passed', async () => {
+    const now = new Date('2026-04-26T00:10:00.000Z');
+    vi.setSystemTime(now);
+
+    const executed = vi.fn();
+    const engine = new ScheduleEngine({
+      initialJobs: [makeJob({
+        id: 'job-1',
+        execution: {
+          maxRuns: 0,
+          firedCount: 0,
+          endAt: '2026-04-26T00:05:00.000Z',
+        },
+      })],
+      saveJobs: () => {},
+      executeJob: () => {
+        executed();
+        return { ok: true };
+      },
+    });
+
+    const result = await engine.runNow('job-1');
+    expect(executed).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.enabled).toBe(false);
+    expect(result!.nextFireAt).toBeUndefined();
 
     engine.dispose();
   });

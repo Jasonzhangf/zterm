@@ -1,6 +1,7 @@
 import type {
   ScheduleAlarmRule,
   ScheduleEventPayload,
+  ScheduleExecutionPolicy,
   ScheduleJob,
   ScheduleJobDraft,
   ScheduleRule,
@@ -9,6 +10,7 @@ import type {
 const DEFAULT_TIMEZONE = 'UTC';
 const WEEKDAY_SET = new Set([1, 2, 3, 4, 5]);
 const MIN_INTERVAL_MS = 1000;
+const DEFAULT_MAX_RUNS = 3;
 
 function parseIsoDateParts(input: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(input.trim());
@@ -235,6 +237,7 @@ export function computeNextFireAtForRule(
     enabled: true,
     payload: { text: '', appendEnter: true },
     rule,
+    execution: { maxRuns: DEFAULT_MAX_RUNS, firedCount: 0 },
     lastFiredAt,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -242,14 +245,66 @@ export function computeNextFireAtForRule(
   return computeNextFireAtForJob(pseudoJob, now);
 }
 
+export function normalizeScheduleExecutionPolicy(
+  execution?: Partial<ScheduleExecutionPolicy> | null,
+  existing?: ScheduleJob | null,
+): ScheduleExecutionPolicy {
+  const rawMaxRuns = execution?.maxRuns ?? existing?.execution?.maxRuns ?? DEFAULT_MAX_RUNS;
+  const safeMaxRuns =
+    Number.isFinite(rawMaxRuns) && typeof rawMaxRuns === 'number'
+      ? Math.max(0, Math.floor(rawMaxRuns))
+      : DEFAULT_MAX_RUNS;
+  const rawFiredCount = execution?.firedCount ?? existing?.execution?.firedCount ?? 0;
+  const safeFiredCount =
+    Number.isFinite(rawFiredCount) && typeof rawFiredCount === 'number'
+      ? Math.max(0, Math.floor(rawFiredCount))
+      : 0;
+  const endAt =
+    typeof execution?.endAt === 'string' && execution.endAt.trim()
+      ? execution.endAt
+      : typeof existing?.execution?.endAt === 'string' && existing.execution.endAt.trim()
+        ? existing.execution.endAt
+        : undefined;
+  return {
+    maxRuns: safeMaxRuns,
+    firedCount: safeFiredCount,
+    ...(endAt ? { endAt } : {}),
+  };
+}
+
+function hasReachedExecutionLimit(job: ScheduleJob) {
+  const execution = normalizeScheduleExecutionPolicy(job.execution, job);
+  return execution.maxRuns > 0 && execution.firedCount >= execution.maxRuns;
+}
+
 export function computeNextFireAtForJob(job: ScheduleJob, now = new Date()) {
+  const execution = normalizeScheduleExecutionPolicy(job.execution, job);
   if (!job.enabled) {
     return undefined;
   }
-  if (job.rule.kind === 'interval') {
-    return resolveNextIntervalFireAt(job, now);
+  if (hasReachedExecutionLimit(job)) {
+    return undefined;
   }
-  return resolveNextAlarmFireAt(job.rule, now);
+  if (execution.endAt) {
+    const endAtMs = Date.parse(execution.endAt);
+    if (!Number.isFinite(endAtMs) || endAtMs <= now.getTime()) {
+      return undefined;
+    }
+  }
+  const nextCandidate = job.rule.kind === 'interval'
+    ? resolveNextIntervalFireAt(job, now)
+    : resolveNextAlarmFireAt(job.rule, now);
+  if (!nextCandidate) {
+    return undefined;
+  }
+  if (execution.endAt) {
+    const endAtMs = Date.parse(execution.endAt);
+    const nextCandidateMs = Date.parse(nextCandidate);
+    if (!Number.isFinite(endAtMs) || !Number.isFinite(nextCandidateMs) || nextCandidateMs > endAtMs) {
+      return undefined;
+    }
+  }
+  return nextCandidate;
 }
 
 export function resolveScheduleTimeZone() {
@@ -281,6 +336,7 @@ export function normalizeScheduleDraft(
     enabled,
     payload,
     rule: draft.rule,
+    execution: normalizeScheduleExecutionPolicy(draft.execution, existing),
     nextFireAt: existing?.nextFireAt,
     lastFiredAt: existing?.lastFiredAt,
     lastResult: existing?.lastResult,
@@ -350,6 +406,15 @@ export function buildEmptyScheduleState(sessionName: string) {
     jobs: [],
     loading: false,
   };
+}
+
+export function formatScheduleExecution(job: Pick<ScheduleJob, 'execution'>) {
+  const execution = normalizeScheduleExecutionPolicy(job.execution);
+  const maxRuns = execution.maxRuns;
+  const firedCount = execution.firedCount;
+  return maxRuns === 0
+    ? `已执行 ${firedCount} 次 / 无限次`
+    : `已执行 ${firedCount}/${maxRuns} 次`;
 }
 
 export function mergeScheduleEventState(

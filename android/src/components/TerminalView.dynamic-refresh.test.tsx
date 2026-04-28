@@ -94,6 +94,12 @@ function readRenderedRows(container: HTMLElement) {
     .map((node) => (node.textContent || '').replace(/\s+$/u, ''));
 }
 
+function readRenderedLineNumbers(container: HTMLElement) {
+  return Array.from(container.querySelectorAll('[data-terminal-line-number="true"]'))
+    .map((node) => Number.parseInt(node.textContent?.trim() || '', 10))
+    .filter((value) => Number.isFinite(value));
+}
+
 function scrollFromBottomIntoReading(scroller: HTMLDivElement, bottomScrollTop = 952) {
   scroller.scrollTop = bottomScrollTop;
   fireEvent.scroll(scroller);
@@ -1832,7 +1838,8 @@ describe('TerminalView minimal mirror render', () => {
     await waitFor(() => expect(readRenderedRows(view.container)).toContain('A 你好B'));
 
     const activeRow = view.container.querySelector('[data-terminal-index="100"]') as HTMLDivElement;
-    const cells = Array.from(activeRow.querySelectorAll('span'));
+    const cellContainer = activeRow.querySelector('span:last-child') as HTMLSpanElement;
+    const cells = Array.from(cellContainer.querySelectorAll('span'));
     expect(cells).toHaveLength(7);
     expect(cells[2]?.getAttribute('data-terminal-cursor')).toBe('true');
     expect(cells[3]?.getAttribute('data-terminal-cursor')).toBeNull();
@@ -2112,7 +2119,7 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
-  it('shows loading only when buffer manager marks the pull as active', async () => {
+  it('keeps gap rows visible instead of replacing them with a loading strip while gap repair is in flight', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 1,
@@ -2121,6 +2128,8 @@ describe('TerminalView minimal mirror render', () => {
       bufferHeadStartIndex: 0,
       bufferTailEndIndex: 100,
     });
+    session.buffer.lines[8] = [];
+    session.buffer.gapRanges = [{ startIndex: 28, endIndex: 29 }];
 
     const view = render(
       <div style={{ width: '640px', height: '408px' }}>
@@ -2147,6 +2156,7 @@ describe('TerminalView minimal mirror render', () => {
 
     await waitFor(() => {
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
+      expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
       expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
     });
 
@@ -2172,7 +2182,8 @@ describe('TerminalView minimal mirror render', () => {
     );
 
     await waitFor(() => {
-      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeTruthy();
+      expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
+      expect(view.container.querySelector('[data-terminal-history-loading="true"]')).toBeFalsy();
     });
   });
 
@@ -2649,6 +2660,216 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('does not auto-enter reading when IME-style viewport shrink and live follow refresh fire a scroll before follow realign', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      onViewportChange.mockClear();
+
+      mockClientHeight = 272;
+      scrollHeight = 1377;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '272px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      await act(async () => {
+        ResizeObserverMock.triggerAll();
+        scroller.scrollTop = 760;
+        fireEvent.scroll(scroller);
+      });
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps follow line numbers anchored to the latest tail during IME-style relayout and rapid tail refreshes', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+            showAbsoluteLineNumbers
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      onViewportChange.mockClear();
+      mockClientHeight = 272;
+      scrollHeight = 1377;
+
+      const nextSession81 = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '272px' }}>
+          <TerminalView
+            sessionId={nextSession81.id}
+            initialBufferLines={nextSession81.buffer.lines}
+            bufferStartIndex={nextSession81.buffer.startIndex}
+            bufferEndIndex={nextSession81.buffer.endIndex}
+            bufferTailEndIndex={nextSession81.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession81.buffer.gapRanges}
+            cursorKeysApp={nextSession81.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+            showAbsoluteLineNumbers
+          />
+        </div>,
+      );
+
+      const nextSession82 = makeSession({
+        revision: 3,
+        lines: buildRows(82),
+        bufferTailEndIndex: 82,
+      });
+      view.rerender(
+        <div style={{ width: '640px', height: '272px' }}>
+          <TerminalView
+            sessionId={nextSession82.id}
+            initialBufferLines={nextSession82.buffer.lines}
+            bufferStartIndex={nextSession82.buffer.startIndex}
+            bufferEndIndex={nextSession82.buffer.endIndex}
+            bufferTailEndIndex={nextSession82.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession82.buffer.gapRanges}
+            cursorKeysApp={nextSession82.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+            showAbsoluteLineNumbers
+          />
+        </div>,
+      );
+
+      await act(async () => {
+        ResizeObserverMock.triggerAll();
+        scroller.scrollTop = 760;
+        fireEvent.scroll(scroller);
+      });
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+
+      const renderedLineNumbers = readRenderedLineNumbers(view.container);
+      expect(renderedLineNumbers.length).toBeGreaterThan(0);
+      expect(renderedLineNumbers[renderedLineNumbers.length - 1]).toBe(81);
+      expect(view.container.querySelector('[data-terminal-line-discontinuous="true"]')).toBeNull();
+      expect(readRenderedRows(view.container).some((row) => row.endsWith('row-082'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps rendering current rows instead of going full black when the first visible frame contains a gap', async () => {
     const session = makeSession({
       revision: 1,
@@ -2869,5 +3090,103 @@ describe('TerminalView minimal mirror render', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows absolute line number gutter only when debug overlay requests it', async () => {
+    const session = makeSession({
+      revision: 1,
+      lines: ['alpha', 'beta', 'gamma'],
+      bufferTailEndIndex: 3,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          showAbsoluteLineNumbers
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const gutters = Array.from(view.container.querySelectorAll('[data-terminal-line-number="true"]'));
+      expect(gutters.length).toBeGreaterThan(0);
+      expect(gutters.some((node) => node.textContent?.trim() === '0')).toBe(true);
+      expect(gutters.some((node) => node.textContent?.trim() === '2')).toBe(true);
+    });
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          showAbsoluteLineNumbers={false}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-terminal-line-number="true"]')).toBeNull();
+    });
+  });
+
+  it('marks discontinuous absolute line numbers in red and renders gap rows as blank placeholders', async () => {
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+    session.buffer.lines[70] = [];
+    session.buffer.gapRanges = [{ startIndex: 70, endIndex: 71 }];
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          showAbsoluteLineNumbers
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
+    });
+
+    const gapRow = view.container.querySelector('[data-terminal-gap="true"]') as HTMLDivElement;
+    expect(gapRow).toBeTruthy();
+    expect(gapRow.textContent?.replace(/\s+/gu, '')).toBe('70');
+
+    const gapLineNumber = gapRow.querySelector('[data-terminal-line-number="true"]') as HTMLSpanElement;
+    expect(gapLineNumber).toBeTruthy();
+    expect(gapLineNumber.getAttribute('data-terminal-line-discontinuous')).toBe('true');
   });
 });

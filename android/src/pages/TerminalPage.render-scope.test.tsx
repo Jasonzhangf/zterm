@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { useEffect } from 'react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
@@ -42,25 +43,58 @@ vi.mock('../components/terminal/SessionScheduleSheet', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: () => <div data-testid="terminal-quickbar" />,
+  TerminalQuickBar: ({
+    onToggleDebugOverlay,
+    onToggleAbsoluteLineNumbers,
+  }: {
+    onToggleDebugOverlay?: () => void;
+    onToggleAbsoluteLineNumbers?: () => void;
+  }) => (
+    <div data-testid="terminal-quickbar">
+      <button type="button" onClick={() => onToggleDebugOverlay?.()}>
+        状态
+      </button>
+      <button type="button" onClick={() => onToggleAbsoluteLineNumbers?.()}>
+        行号
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({
     sessionId,
     active,
+    onViewportChange,
+    showAbsoluteLineNumbers,
   }: {
     sessionId: string;
     active?: boolean;
-  }) => (
-    <div
-      data-testid={`terminal-view-${sessionId}`}
-      data-session-id={sessionId}
-      data-active={active ? 'true' : 'false'}
-    >
-      renderer:{sessionId}
-    </div>
-  ),
+    onViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
+    showAbsoluteLineNumbers?: boolean;
+  }) => {
+    useEffect(() => {
+      if (!active || !onViewportChange) {
+        return;
+      }
+      onViewportChange(sessionId, {
+        mode: sessionId === 's2' ? 'reading' : 'follow',
+        viewportEndIndex: 24,
+        viewportRows: 24,
+      });
+    }, [active, onViewportChange, sessionId]);
+
+    return (
+      <div
+        data-testid={`terminal-view-${sessionId}`}
+        data-session-id={sessionId}
+        data-active={active ? 'true' : 'false'}
+        data-show-line-numbers={showAbsoluteLineNumbers ? 'true' : 'false'}
+      >
+        renderer:{sessionId}
+      </div>
+    );
+  },
 }));
 
 function makeSession(id: string): Session {
@@ -177,5 +211,71 @@ describe('TerminalPage renderer scope', () => {
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
     expect(screen.queryByTestId('terminal-view-s3')).toBeNull();
+  });
+
+  it('uses debug overlay only for overlay observability while line numbers stay independently controlled', () => {
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const view = renderTerminalPage([session1, session2], session1);
+
+    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByText('follow')).not.toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session2}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('reading')).not.toBeNull();
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-show-line-numbers')).toBe('true');
+  });
+
+  it('toggles debug overlay off and on from the 状态 quickbar button without changing line numbers', () => {
+    const session1 = makeSession('s1');
+    renderTerminalPage([session1], session1);
+
+    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+
+    expect(screen.queryByText('渲染')).toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+
+    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+  });
+
+  it('toggles absolute line numbers independently from the 行号 quickbar button', () => {
+    const session1 = makeSession('s1');
+    renderTerminalPage([session1], session1);
+
+    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: '行号' }));
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
+    expect(screen.getByText('渲染')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '行号' }));
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
   });
 });

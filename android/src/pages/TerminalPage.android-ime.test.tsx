@@ -619,9 +619,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     const terminalStage = screen.getByTestId('terminal-stage');
     const quickBarShell = screen.getByTestId('terminal-quickbar-shell');
-    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 72px;');
+    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 78px;');
     expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');
-    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 8px;');
+    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 14px;');
 
     await waitFor(() => {
       expect(imeListeners.has('keyboardState')).toBe(true);
@@ -632,9 +632,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute('style') || '';
-      expect(style).toContain('bottom: 392px;');
+      expect(style).toContain('bottom: 398px;');
       expect(style).not.toContain('transform: translateY');
-      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 328px;');
+      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 334px;');
     });
   });
 

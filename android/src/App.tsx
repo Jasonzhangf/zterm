@@ -203,17 +203,30 @@ function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string 
 
   try {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
-    if (activeSessionId) {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, activeSessionId);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
-    }
+    persistActiveSessionId(activeSessionId);
   } catch (error) {
     console.error('[App] Failed to persist open tabs:', error);
   }
 }
 
-function reorderSessionList(sessions: Session[], sessionId: string, toIndex: number) {
+function persistActiveSessionId(activeSessionId: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const normalized = typeof activeSessionId === 'string' ? activeSessionId.trim() : '';
+    if (normalized) {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, normalized);
+      return;
+    }
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+  } catch (error) {
+    console.error('[App] Failed to persist active session:', error);
+  }
+}
+
+function _reorderSessionList(sessions: Session[], sessionId: string, toIndex: number) {
   const currentIndex = sessions.findIndex((session) => session.id === sessionId);
   if (currentIndex < 0) {
     return sessions;
@@ -307,42 +320,17 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     reconnectSessionRef.current = reconnectSession;
   }, [reconnectSession, resumeActiveSessionTransport, state.activeSessionId, state.sessions]);
 
-  const persistSessionState = useCallback((
-    nextSessions: Session[],
-    nextActiveSessionId: string | null,
-    options?: { hydrate?: boolean },
-  ) => {
-    if (!restoredTabsHandledRef.current) {
-      if (!options?.hydrate) {
-        return;
-      }
-      restoredTabsHandledRef.current = true;
-    }
-
-    persistOpenTabsState(nextSessions.map((session) => buildPersistedOpenTabFromSession(session)), nextActiveSessionId);
-  }, []);
-
-  const persistTabState = useCallback((
-    nextTabs: PersistedOpenTab[],
-    nextActiveSessionId: string | null,
-    options?: { hydrate?: boolean },
-  ) => {
-    if (!restoredTabsHandledRef.current) {
-      if (!options?.hydrate) {
-        return;
-      }
-      restoredTabsHandledRef.current = true;
-    }
-
-    persistOpenTabsState(nextTabs, nextActiveSessionId);
-  }, []);
-
+  // Single auto-persist: the ONLY writer to localStorage for open-tabs & active-session.
+  // Fires whenever sessions[] or activeSessionId changes AFTER restore is complete.
   useEffect(() => {
     if (!restoredTabsHandledRef.current) {
       return;
     }
-    persistSessionState(sessions, state.activeSessionId);
-  }, [persistSessionState, sessions, state.activeSessionId]);
+    persistOpenTabsState(
+      sessions.map((session) => buildPersistedOpenTabFromSession(session)),
+      state.activeSessionId,
+    );
+  }, [sessions, state.activeSessionId]);
 
   useEffect(() => {
     if (restoredTabsHandledRef.current || !hostsLoaded) {
@@ -351,7 +339,18 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
 
     if (sessions.length > 0) {
       restoredTabsHandledRef.current = true;
-      persistSessionState(sessions, state.activeSessionId);
+      const persistedActiveSessionId = readPersistedActiveSessionId();
+      const effectiveActiveSessionId =
+        (persistedActiveSessionId && sessions.some((session) => session.id === persistedActiveSessionId))
+          ? persistedActiveSessionId
+          : state.activeSessionId;
+      persistOpenTabsState(
+        sessions.map((session) => buildPersistedOpenTabFromSession(session)),
+        effectiveActiveSessionId,
+      );
+      if (effectiveActiveSessionId !== state.activeSessionId) {
+        switchSession(effectiveActiveSessionId);
+      }
       return;
     }
 
@@ -406,7 +405,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     if (nextActiveSessionId) {
       switchSession(nextActiveSessionId);
     }
-  }, [createSession, hosts, hostsLoaded, persistSessionState, sessions, state.activeSessionId, switchSession]);
+  }, [createSession, hosts, hostsLoaded, sessions, state.activeSessionId, switchSession]);
 
   useEffect(() => {
     if (!state.activeSessionId) {
@@ -637,23 +636,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     const shouldActivate = options?.activate !== false;
 
     if (existingSession) {
-      const nextActiveSessionId = shouldActivate ? existingSession.id : state.activeSessionId;
-      const nextTabs = sessions.map((session) =>
-        session.id === existingSession.id
-          ? buildPersistedOpenTabFromHost(persistedHost, {
-              sessionId: existingSession.id,
-              customName: existingSession.customName,
-              createdAt: existingSession.createdAt,
-            })
-          : buildPersistedOpenTabFromSession(session),
-      );
       if (shouldActivate) {
         switchSession(existingSession.id);
       }
       if (existingSession.state === 'error' || existingSession.state === 'closed') {
         reconnectSession(existingSession.id);
       }
-      persistTabState(nextTabs, nextActiveSessionId, { hydrate: true });
       recordSessionOpen({
         connectionName: persistedHost.name,
         bridgeHost: persistedHost.bridgeHost,
@@ -668,10 +656,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     }
 
     const sessionId = createSession(persistedHost, { activate: shouldActivate });
-    persistTabState([
-      ...sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-      buildPersistedOpenTabFromHost(persistedHost, { sessionId }),
-    ], shouldActivate ? sessionId : state.activeSessionId, { hydrate: true });
     recordSessionOpen({
       connectionName: persistedHost.name,
       bridgeHost: persistedHost.bridgeHost,
@@ -683,7 +667,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       setPageState(openTerminalPage(sessionId));
     }
     return { sessionId, host: persistedHost };
-  }, [createSession, findReusableSession, persistTabState, reconnectSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
+  }, [createSession, findReusableSession, reconnectSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
 
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, options?: {
     target?: BridgeTarget | null;
@@ -743,43 +727,23 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
 
   const handleSwitchSession = useCallback((sessionId: string) => {
     switchSession(sessionId);
-    persistSessionState(sessions, sessionId, { hydrate: true });
-  }, [persistSessionState, sessions, switchSession]);
+  }, [switchSession]);
 
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
-    const nextSessions = reorderSessionList(sessions, sessionId, toIndex);
     moveSession(sessionId, toIndex);
-    persistSessionState(nextSessions, state.activeSessionId, { hydrate: true });
-  }, [moveSession, persistSessionState, sessions, state.activeSessionId]);
+  }, [moveSession]);
 
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
     renameSession(sessionId, name);
-    const trimmed = name.trim();
-    persistSessionState(
-      sessions.map((session) => (session.id === sessionId
-        ? {
-            ...session,
-            customName: trimmed || undefined,
-            title: trimmed || session.sessionName,
-          }
-        : session)),
-      state.activeSessionId,
-      { hydrate: true },
-    );
-  }, [persistSessionState, renameSession, sessions, state.activeSessionId]);
+  }, [renameSession]);
 
   const handleCloseSession = useCallback((sessionId: string) => {
     clearSessionDraft(sessionId);
-    const nextSessions = sessions.filter((session) => session.id !== sessionId);
-    const nextActiveSessionId = state.activeSessionId === sessionId
-      ? (nextSessions[0]?.id || null)
-      : state.activeSessionId;
     closeSession(sessionId);
-    persistSessionState(nextSessions, nextActiveSessionId, { hydrate: true });
     if (sessions.length === 1) {
       setPageState(openConnectionsPage());
     }
-  }, [clearSessionDraft, closeSession, persistSessionState, sessions, state.activeSessionId]);
+  }, [clearSessionDraft, closeSession, sessions]);
 
   const handleResumeSession = useCallback((sessionId: string) => {
     handleSwitchSession(sessionId);

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   computeNextFireAtForJob,
   normalizeScheduleDraft,
+  normalizeScheduleExecutionPolicy,
 } from '../../../packages/shared/src/schedule/next-fire.ts';
 import type {
   ScheduleEventPayload,
@@ -52,6 +53,7 @@ export class ScheduleEngine {
     for (const job of options.initialJobs || []) {
       const normalized = {
         ...job,
+        execution: normalizeScheduleExecutionPolicy(job.execution),
         nextFireAt: computeNextFireAtForJob(job, now),
       };
       this.jobs.set(normalized.id, normalized);
@@ -265,6 +267,52 @@ export class ScheduleEngine {
   }
 
   private async execute(job: ScheduleJob, now: Date) {
+    const currentBeforeExecute = this.jobs.get(job.id);
+    if (!currentBeforeExecute) {
+      return;
+    }
+    const currentMaxRuns = Math.max(0, Math.floor(currentBeforeExecute.execution.maxRuns || 0));
+    const currentFiredCount = Math.max(0, Math.floor(currentBeforeExecute.execution.firedCount || 0));
+    if (currentMaxRuns > 0 && currentFiredCount >= currentMaxRuns) {
+      const stoppedJob: ScheduleJob = {
+        ...currentBeforeExecute,
+        enabled: false,
+        updatedAt: now.toISOString(),
+        nextFireAt: undefined,
+      };
+      this.jobs.set(job.id, stoppedJob);
+      this.emitState(stoppedJob.targetSessionName);
+      this.emitEvent({
+        sessionName: stoppedJob.targetSessionName,
+        jobId: stoppedJob.id,
+        type: 'updated',
+        at: now.toISOString(),
+        message: 'schedule stopped after reaching max runs',
+      });
+      return;
+    }
+    if (currentBeforeExecute.execution.endAt) {
+      const endAtMs = Date.parse(currentBeforeExecute.execution.endAt);
+      if (!Number.isFinite(endAtMs) || endAtMs <= now.getTime()) {
+        const stoppedJob: ScheduleJob = {
+          ...currentBeforeExecute,
+          enabled: false,
+          updatedAt: now.toISOString(),
+          nextFireAt: undefined,
+        };
+        this.jobs.set(job.id, stoppedJob);
+        this.emitState(stoppedJob.targetSessionName);
+        this.emitEvent({
+          sessionName: stoppedJob.targetSessionName,
+          jobId: stoppedJob.id,
+          type: 'updated',
+          at: now.toISOString(),
+          message: 'schedule stopped after end time',
+        });
+        return;
+      }
+    }
+
     const result = await this.executeJob(job);
     const current = this.jobs.get(job.id);
     if (!current) {
@@ -272,13 +320,20 @@ export class ScheduleEngine {
     }
 
     const lastResult = result.ok ? 'ok' : 'error';
+    const nextFiredCount = Math.max(0, Math.floor(current.execution.firedCount || 0)) + 1;
+    const nextMaxRuns = Math.max(0, Math.floor(current.execution.maxRuns || 0));
+    const reachedRunLimit = nextMaxRuns > 0 && nextFiredCount >= nextMaxRuns;
     const nextBase: ScheduleJob = {
       ...current,
       updatedAt: now.toISOString(),
       lastFiredAt: now.toISOString(),
       lastResult,
       lastError: result.ok ? undefined : result.message,
-      enabled: result.disable ? false : current.enabled,
+      enabled: result.disable || reachedRunLimit ? false : current.enabled,
+      execution: {
+        ...current.execution,
+        firedCount: nextFiredCount,
+      },
     };
     const nextJob: ScheduleJob = {
       ...nextBase,
@@ -291,7 +346,10 @@ export class ScheduleEngine {
       jobId: nextJob.id,
       type: result.ok ? 'triggered' : 'error',
       at: now.toISOString(),
-      message: result.message,
+      message:
+        reachedRunLimit
+          ? 'schedule reached max runs'
+          : result.message,
     });
   }
 }

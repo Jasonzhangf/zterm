@@ -24,6 +24,7 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
       startAt: '2026-04-26T00:00:00.000Z',
       fireImmediately: false,
     },
+    execution: overrides.execution || { maxRuns: 3, firedCount: 0 },
     lastFiredAt: overrides.lastFiredAt,
     createdAt: overrides.createdAt || '2026-04-26T00:00:00.000Z',
     updatedAt: overrides.updatedAt || '2026-04-26T00:00:00.000Z',
@@ -227,6 +228,53 @@ describe('computeNextFireAtForJob / disabled', () => {
     const now = new Date('2026-04-26T00:00:00.000Z');
     const result = computeNextFireAtForJob(
       makeJob({ enabled: false }),
+      now,
+    );
+    expect(result).toBeUndefined();
+  });
+});
+
+describe('computeNextFireAtForJob / execution policy', () => {
+  it('returns undefined when maxRuns has been reached', () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    const result = computeNextFireAtForJob(
+      makeJob({
+        execution: {
+          maxRuns: 3,
+          firedCount: 3,
+        },
+      }),
+      now,
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined when endAt has already passed', () => {
+    const now = new Date('2026-04-26T00:10:00.000Z');
+    const result = computeNextFireAtForJob(
+      makeJob({
+        execution: {
+          maxRuns: 0,
+          firedCount: 1,
+          endAt: '2026-04-26T00:05:00.000Z',
+        },
+      }),
+      now,
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined when the next candidate would exceed endAt', () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    const result = computeNextFireAtForJob(
+      makeJob({
+        rule: { kind: 'interval', intervalMs: 60_000, startAt: '2026-04-26T00:00:00.000Z', fireImmediately: false },
+        execution: {
+          maxRuns: 0,
+          firedCount: 0,
+          endAt: '2026-04-26T00:00:30.000Z',
+        },
+      }),
       now,
     );
     expect(result).toBeUndefined();

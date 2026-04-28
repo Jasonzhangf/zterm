@@ -11,7 +11,7 @@ import { WebSocketServer, WebSocket, RawData } from 'ws';
 import * as pty from 'node-pty';
 import { v4 as uuidv4 } from 'uuid';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
-import { spawnSync } from 'child_process';
+import { execFile, spawnSync } from 'child_process';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { basename, extname, join, resolve } from 'path';
@@ -37,6 +37,7 @@ import type {
   PasteImagePayload,
   PasteImageStartPayload,
   RemoteScreenshotRequestPayload,
+  RemoteScreenshotStatusPayload,
   RuntimeDebugLogEntry,
   ScheduleEventPayload,
   ScheduleJobDraft,
@@ -251,6 +252,7 @@ type ServerMessage =
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
   | { type: 'file-list-response'; payload: FileListResponsePayload }
   | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
   | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
@@ -1929,6 +1931,7 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
 // ============================================
 
 const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk
+const REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000;
 
 function handleFileListRequest(session: ClientSession, payload: FileListRequestPayload) {
   const { requestId, path: requestedPath, showHidden } = payload;
@@ -1999,28 +2002,34 @@ function handleFileDownloadRequest(session: ClientSession, payload: FileDownload
 
 function sendFileDownloadBuffer(session: ClientSession, requestId: string, fileName: string, fileBuffer: Buffer) {
   const totalChunks = Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE);
+  let index = 0;
 
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * FILE_CHUNK_SIZE;
+  function sendNextChunk() {
+    if (index >= totalChunks) {
+      sendMessage(session, {
+        type: 'file-download-complete',
+        payload: { requestId, fileName, totalBytes: fileBuffer.length },
+      });
+      return;
+    }
+    const start = index * FILE_CHUNK_SIZE;
     const end = Math.min(start + FILE_CHUNK_SIZE, fileBuffer.length);
     const chunk = fileBuffer.subarray(start, end);
-
     sendMessage(session, {
       type: 'file-download-chunk',
       payload: {
         requestId,
-        chunkIndex: i,
+        chunkIndex: index,
         totalChunks,
         fileName,
         dataBase64: chunk.toString('base64'),
       },
     });
+    index += 1;
+    setImmediate(sendNextChunk);
   }
 
-  sendMessage(session, {
-    type: 'file-download-complete',
-    payload: { requestId, fileName, totalBytes: fileBuffer.length },
-  });
+  sendNextChunk();
 }
 
 function buildRemoteScreenshotFileName() {
@@ -2050,20 +2059,53 @@ function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteSc
   const fileName = buildRemoteScreenshotFileName();
   const tempPath = join(getWtermHomeDir(), fileName);
 
-  try {
-    mkdirSync(getWtermHomeDir(), { recursive: true });
-    const capture = spawnSync('screencapture', ['-x', tempPath], { encoding: 'utf8' });
-    if (capture.status !== 0) {
-      throw new Error((capture.stderr || capture.stdout || 'screencapture failed').trim());
+  sendMessage(session, {
+    type: 'remote-screenshot-status',
+    payload: { requestId, phase: 'capturing', fileName },
+  });
+
+  mkdirSync(getWtermHomeDir(), { recursive: true });
+
+  execFile('screencapture', ['-x', tempPath], { timeout: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS }, (captureError) => {
+    if (captureError) {
+      sendMessage(session, {
+        type: 'file-download-error',
+        payload: {
+          requestId,
+          error: captureError.killed
+            ? `screencapture timed out after ${REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS}ms`
+            : captureError.message || 'screencapture failed',
+        },
+      });
+      cleanup();
+      return;
     }
-    const fileBuffer = readFileSync(tempPath);
-    sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
-  } catch (error) {
-    sendMessage(session, {
-      type: 'file-download-error',
-      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
-    });
-  } finally {
+
+    try {
+      const fileBuffer = readFileSync(tempPath);
+      sendMessage(session, {
+        type: 'remote-screenshot-status',
+        payload: {
+          requestId,
+          phase: 'transferring',
+          fileName,
+          receivedChunks: 0,
+          totalChunks: Math.max(1, Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE)),
+          totalBytes: fileBuffer.length,
+        },
+      });
+      sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
+    } catch (readError) {
+      sendMessage(session, {
+        type: 'file-download-error',
+        payload: { requestId, error: readError instanceof Error ? readError.message : String(readError) },
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  function cleanup() {
     try {
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
