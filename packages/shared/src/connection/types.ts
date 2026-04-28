@@ -43,6 +43,34 @@ export interface TerminalIndexedLine {
   cells: TerminalCell[];
 }
 
+/**
+ * Terminal cursor state — matches daemon/Android wire truth.
+ */
+export interface TerminalCursorState {
+  rowIndex: number;
+  col: number;
+  visible: boolean;
+}
+
+/**
+ * Compact wire format for a single line.
+ * Replaces TerminalIndexedLine on the wire to cut payload size ~95%.
+ *
+ *   i = absolute line index
+ *   t = text content (codePoints, width-0 continuation cells skipped)
+ *   w = optional width per codepoint (omitted = all 1; needed for CJK double-width)
+ *   s = optional sparse style spans [startCol, endCol, fg, bg, flags]
+ */
+export interface CompactIndexedLine {
+  i: number;
+  t: string;
+  w?: number[];
+  s?: [number, number, number, number, number][];
+}
+
+/** Wire format: either compact (new) or legacy full-cell (old). */
+export type WireIndexedLine = CompactIndexedLine | TerminalIndexedLine;
+
 export interface TerminalGapRange {
   startIndex: number;
   endIndex: number;

@@ -1961,10 +1961,10 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
   sendMessage(session, { type: 'title', payload: mirror.title });
 
   if (mirror.state === 'connected') {
-    const resized = await reconcileMirrorGeometry(mirror);
-    if (resized) {
-      return;
-    }
+    // reconcileMirrorGeometry may resize the mirror if new subscriber
+    // geometry differs; regardless of resize outcome, we must still
+    // call ensureSessionConnected so the session receives 'connected'.
+    await reconcileMirrorGeometry(mirror);
     ensureSessionConnected(session, mirror);
     return;
   }

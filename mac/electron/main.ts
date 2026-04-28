@@ -18,6 +18,13 @@ const localTmuxManager = new LocalTmuxManager();
 const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
 let screenshotHelperServer: ScreenshotHelperServerController | null = null;
 
+process.on('uncaughtException', (err) => {
+  console.error('[MAIN UNCAUGHT]', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[MAIN UNHANDLED REJECTION]', err);
+});
+
 function getDevServerUrl() {
   const value = process.env.VITE_DEV_SERVER_URL;
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -39,6 +46,17 @@ function createWindow() {
     },
   });
 
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levels = ['verbose','info','warning','error'];
+    console.error('[RENDERER ' + (levels[level]||level) + '] ' + message + ' (at ' + sourceId + ':' + line + ')');
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[RENDERER CRASHED]', JSON.stringify(details));
+  });
+  win.webContents.on('unresponsive', () => {
+    console.error('[RENDERER UNRESPONSIVE]');
+  });
+
   const devServerUrl = getDevServerUrl();
   if (devServerUrl) {
     void win.loadURL(devServerUrl);
@@ -46,6 +64,7 @@ function createWindow() {
     return;
   }
 
+  win.webContents.openDevTools({ mode: 'detach' });
   void win.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 

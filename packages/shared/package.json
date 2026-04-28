@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./terminal-buffer": "./src/connection/terminal-buffer.ts",
+    "./types": "./src/connection/types.ts",
+    "./protocol": "./src/connection/protocol.ts",
+    "./mobile-config": "./src/connection/mobile-config.ts",
+    "./schedule-types": "./src/schedule/types.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

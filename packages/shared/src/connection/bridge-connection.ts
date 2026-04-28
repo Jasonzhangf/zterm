@@ -14,6 +14,14 @@ export interface BridgeConnectionHandlers {
 export interface BridgeConnectionOptions {
 }
 
+/**
+ * Open a bridge connection to the daemon.
+ *
+ * Uses two-phase handshake (matching daemon session-transport-ticket protocol):
+ *   1. On WebSocket open → send `session-open` with hostConfig
+ *   2. On receiving `session-ticket` → send `connect` with sessionTransportToken
+ *   3. On receiving `connected` → connection is fully established
+ */
 export function openBridgeConnection(
   target: BridgeTarget,
   hostConfig: HostConfigMessage,
@@ -26,7 +34,8 @@ export function openBridgeConnection(
 
   ws.onopen = () => {
     handlers.onOpen?.();
-    ws.send(JSON.stringify({ type: 'connect', payload: hostConfig }));
+    // Phase 1: request a session transport ticket
+    ws.send(JSON.stringify({ type: 'session-open', payload: hostConfig }));
   };
 
   ws.onmessage = (event) => {
@@ -34,17 +43,32 @@ export function openBridgeConnection(
       const message = JSON.parse(String(event.data)) as BridgeServerMessage;
       handlers.onMessage?.(message);
       switch (message.type) {
+        case 'session-ticket': {
+          // Phase 2: got the ticket, now send connect with the token
+          const ticket = (message as { type: 'session-ticket'; payload: { clientSessionId: string; sessionTransportToken: string; sessionName: string } }).payload;
+          const connectPayload: HostConfigMessage = {
+            ...hostConfig,
+            sessionTransportToken: ticket.sessionTransportToken,
+          };
+          ws.send(JSON.stringify({ type: 'connect', payload: connectPayload }));
+          break;
+        }
+        case 'session-open-failed': {
+          const payload = (message as { type: 'session-open-failed'; payload: { clientSessionId: string; message: string; code?: string } }).payload;
+          handlers.onError?.(payload.message, payload.code);
+          break;
+        }
         case 'connected':
-          handlers.onConnected?.(message.payload);
+          handlers.onConnected?.((message as { type: 'connected'; payload: { sessionId: string } }).payload);
           break;
         case 'error':
-          handlers.onError?.(message.payload.message, message.payload.code);
+          handlers.onError?.((message as { type: 'error'; payload: { message: string; code?: string } }).payload.message, (message as { type: 'error'; payload: { message: string; code?: string } }).payload.code);
           break;
         case 'title':
-          handlers.onTitle?.(message.payload);
+          handlers.onTitle?.((message as { type: 'title'; payload: string }).payload);
           break;
         case 'closed':
-          handlers.onClosed?.(message.payload.reason);
+          handlers.onClosed?.((message as { type: 'closed'; payload: { reason: string } }).payload.reason);
           break;
         default:
           break;

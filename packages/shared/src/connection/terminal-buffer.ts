@@ -4,9 +4,96 @@ import type {
   TerminalCell,
   TerminalGapRange,
   TerminalIndexedLine,
+  CompactIndexedLine,
+  WireIndexedLine,
 } from './types';
 
 const EMPTY_ROW: TerminalCell[] = [];
+
+const COMPACT_DEFAULT_FG = 256;
+const COMPACT_DEFAULT_BG = 256;
+const COMPACT_DEFAULT_FLAGS = 0;
+
+export function isCompactLine(line: WireIndexedLine): line is CompactIndexedLine {
+  return typeof (line as CompactIndexedLine).t === 'string';
+}
+
+/**
+ * Expand a CompactIndexedLine back to TerminalCell[] for client consumption.
+ */
+export function expandCompactLine(
+  line: CompactIndexedLine,
+  cols: number,
+): TerminalCell[] {
+  const spanLookup = new Map<number, { fg: number; bg: number; flags: number }>();
+
+  if (line.s) {
+    for (const [start, end, fg, bg, flags] of line.s) {
+      for (let c = start; c < end; c++) {
+        spanLookup.set(c, { fg, bg, flags: flags ?? 0 });
+      }
+    }
+  }
+
+  const cells: TerminalCell[] = Array.from({ length: cols }, (_, c) => {
+    const style = spanLookup.get(c);
+    return {
+      char: 32,
+      fg: style?.fg ?? COMPACT_DEFAULT_FG,
+      bg: style?.bg ?? COMPACT_DEFAULT_BG,
+      flags: style?.flags ?? COMPACT_DEFAULT_FLAGS,
+      width: 1,
+    };
+  });
+
+  const codePoints = [...line.t];
+  const widths = Array.isArray(line.w) ? line.w : [];
+  let col = 0;
+  for (let i = 0; i < codePoints.length && col < cols; i++) {
+    const cp = codePoints[i]!.codePointAt(0)!;
+    const w = widths[i] === 2 ? 2 : 1;
+    const style = spanLookup.get(col);
+    cells[col] = {
+      char: cp,
+      fg: style?.fg ?? COMPACT_DEFAULT_FG,
+      bg: style?.bg ?? COMPACT_DEFAULT_BG,
+      flags: style?.flags ?? COMPACT_DEFAULT_FLAGS,
+      width: w,
+    };
+    if (w === 2 && col + 1 < cols) {
+      cells[col + 1] = {
+        char: 32,
+        fg: style?.fg ?? COMPACT_DEFAULT_FG,
+        bg: style?.bg ?? COMPACT_DEFAULT_BG,
+        flags: style?.flags ?? COMPACT_DEFAULT_FLAGS,
+        width: 0,
+      };
+    }
+    col += w;
+  }
+
+  return cells;
+}
+
+export function normalizeWireLines(lines: WireIndexedLine[], cols: number): TerminalIndexedLine[] {
+  const result: TerminalIndexedLine[] = [];
+  for (const line of lines) {
+    if (isCompactLine(line)) {
+      const index = Math.max(0, Math.floor(line.i));
+      const cells = expandCompactLine(line, cols);
+      result.push({ index, cells });
+    } else {
+      const legacy = line as TerminalIndexedLine;
+      if (legacy && Number.isFinite(legacy.index)) {
+        result.push({
+          index: Math.max(0, Math.floor(legacy.index)),
+          cells: legacy.cells || EMPTY_ROW,
+        });
+      }
+    }
+  }
+  return result.sort((left, right) => left.index - right.index);
+}
 
 function cloneGapRanges(gapRanges: TerminalGapRange[]) {
   return gapRanges.map((range) => ({ ...range }));
@@ -75,6 +162,40 @@ function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
   }
 
   return true;
+}
+
+export function replayBufferSyncHistory(options: {
+  history: Array<{ type: string; payload: TerminalBufferPayload }>;
+  rows: number;
+  cols: number;
+  cacheLines: number;
+}): SessionBufferState {
+  let buffer = createSessionBufferState({
+    cacheLines: options.cacheLines,
+    lines: [],
+    rows: options.rows,
+    cols: options.cols,
+  });
+
+  for (const item of options.history) {
+    if (item.type !== 'buffer-sync') {
+      continue;
+    }
+    const nextRevision = Math.max(0, Math.floor(item.payload.revision || 0));
+    if (nextRevision < Math.max(0, Math.floor(buffer.revision || 0))) {
+      buffer = createSessionBufferState({
+        cacheLines: options.cacheLines,
+        lines: [],
+        rows: item.payload.rows || buffer.rows || options.rows,
+        cols: item.payload.cols || buffer.cols || options.cols,
+        cursorKeysApp: item.payload.cursorKeysApp,
+        revision: 0,
+      });
+    }
+    buffer = applyBufferSyncToSessionBuffer(buffer, item.payload, options.cacheLines);
+  }
+
+  return buffer;
 }
 
 function isGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
@@ -254,7 +375,7 @@ export function createSessionBufferState(options: {
 }
 
 function payloadToSparseWindow(payload: TerminalBufferPayload) {
-  const normalizedLines = normalizeIndexedLines(payload.lines || []);
+  const normalizedLines = normalizeWireLines(payload.lines || [], payload.cols || 80);
   const expectedStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
   const expectedEndIndex = Math.max(expectedStartIndex, Math.floor(payload.endIndex || expectedStartIndex));
 
@@ -343,6 +464,7 @@ function resolveDesiredLocalWindow(options: {
   authoritativeHeadStartIndex: number;
   authoritativeTailEndIndex: number;
   cacheLines: number;
+  preserveCurrentWindow?: boolean;
 }) {
   const safeHead = Math.max(0, Math.floor(options.authoritativeHeadStartIndex));
   const safeTail = Math.max(safeHead, Math.floor(options.authoritativeTailEndIndex));
@@ -360,6 +482,16 @@ function resolveDesiredLocalWindow(options: {
   }
 
   const current = options.current!;
+  if (options.preserveCurrentWindow) {
+    return clampWindowToBounds({
+      desiredStartIndex: current.startIndex,
+      desiredEndIndex: current.endIndex,
+      authoritativeHeadStartIndex: safeHead,
+      authoritativeTailEndIndex: safeTail,
+      cacheLines: safeCacheLines,
+    });
+  }
+
   let desiredStartIndex = current.startIndex;
   let desiredEndIndex = current.endIndex;
 
@@ -474,12 +606,20 @@ export function applyBufferSyncToSessionBuffer(
 
   const authoritativeHeadStartIndex = resolveAuthoritativeHeadStartIndex(current, sparseWindow, payload);
   const authoritativeTailEndIndex = resolveAuthoritativeTailEndIndex(current, sparseWindow, payload);
+  const preserveCurrentWindow = Boolean(
+    current
+    && revision === current.revision
+    && current.endIndex >= authoritativeTailEndIndex
+    && sparseWindow.startIndex < current.startIndex
+    && sparseWindow.endIndex <= current.endIndex
+  );
   const desiredWindow = resolveDesiredLocalWindow({
     current,
     sparseWindow,
     authoritativeHeadStartIndex,
     authoritativeTailEndIndex,
     cacheLines,
+    preserveCurrentWindow,
   });
   const patched = buildPatchedWindowFromCurrent(current, sparseWindow, desiredWindow);
 
