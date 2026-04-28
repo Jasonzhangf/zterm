@@ -472,6 +472,19 @@ export function ShellWorkspace({
     return [...requestMap.values()];
   }, [hosts, workspace]);
 
+  // Only eager-connect active visible tab per pane; hidden tabs connect on-demand when activated.
+  const eagerConnectionRequests = useMemo<ConnectionRequest[]>(() => {
+    const activeTabResourceKeys = new Set<string>();
+    workspace.panes.forEach((pane) => {
+      const tab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+      if (tab && tab.kind !== 'empty') {
+        const key = resolveRuntimeResourceKey(tab, hosts);
+        if (key) activeTabResourceKeys.add(key);
+      }
+    });
+    return connectionRequests.filter((r) => activeTabResourceKeys.has(r.resourceKey));
+  }, [connectionRequests, hosts, workspace]);
+
   useEffect(() => {
     const activeResourceKeys = new Set(
       workspace.panes
@@ -503,9 +516,11 @@ export function ShellWorkspace({
   }, [hosts, workspace]);
 
   useEffect(() => {
-    const activeRequestKeys = new Set<string>();
+    const allRequestKeys = new Set<string>();
     connectionRequests.forEach((request) => {
-      activeRequestKeys.add(request.resourceKey);
+      allRequestKeys.add(request.resourceKey);
+    });
+    eagerConnectionRequests.forEach((request) => {
       const previousSignature = connectedResourceSignaturesRef.current.get(request.resourceKey);
       if (previousSignature === request.connectSignature) {
         return;
@@ -519,11 +534,11 @@ export function ShellWorkspace({
       connectedResourceSignaturesRef.current.set(request.resourceKey, request.connectSignature);
     });
     connectedResourceSignaturesRef.current.forEach((_signature, resourceKey) => {
-      if (!activeRequestKeys.has(resourceKey)) {
+      if (!allRequestKeys.has(resourceKey)) {
         connectedResourceSignaturesRef.current.delete(resourceKey);
       }
     });
-  }, [connectionRequests, getRuntimeForResource]);
+  }, [eagerConnectionRequests, connectionRequests, getRuntimeForResource]);
 
   useEffect(() => () => {
     runtimeRegistryRef.current.forEach((runtime) => runtime.dispose());

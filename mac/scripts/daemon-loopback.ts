@@ -323,8 +323,9 @@ class DaemonProbe {
       this.ws = ws;
 
       ws.on('open', () => {
-        const connectMessage = {
-          type: 'connect' as const,
+        // Phase 1: session-open (no sessionTransportToken)
+        const sessionOpenMessage = {
+          type: 'session-open' as const,
           payload: {
             clientSessionId: this.clientSessionId,
             name: LAB_SESSION_NAME,
@@ -333,18 +334,37 @@ class DaemonProbe {
             sessionName: LAB_SESSION_NAME,
             cols: LAB_COLS,
             rows: LAB_ROWS,
-            authToken: this.authToken,
-            authType: 'password' as const,
           },
         };
-        this.eventHistory.push({ at: nowStamp(), direction: 'sent', type: connectMessage.type, payload: connectMessage.payload });
-        ws.send(JSON.stringify(connectMessage));
+        this.eventHistory.push({ at: nowStamp(), direction: 'sent', type: sessionOpenMessage.type, payload: sessionOpenMessage.payload });
+        ws.send(JSON.stringify(sessionOpenMessage));
       });
 
       ws.on('message', (raw) => {
         const text = typeof raw === 'string' ? raw : raw.toString('utf-8');
         const message = JSON.parse(text) as BridgeServerMessage;
         this.eventHistory.push({ at: nowStamp(), direction: 'recv', type: message.type, payload: 'payload' in message ? (message as any).payload : undefined });
+
+        if (message.type === 'session-ticket') {
+          // Phase 2: got the ticket, send connect with sessionTransportToken
+          const ticket = (message as { type: 'session-ticket'; payload: { clientSessionId: string; sessionTransportToken: string; sessionName: string } }).payload;
+          const connectMessage = {
+            type: 'connect' as const,
+            payload: {
+              clientSessionId: this.clientSessionId,
+              name: LAB_SESSION_NAME,
+              bridgeHost: '127.0.0.1',
+              bridgePort: 0,
+              sessionName: LAB_SESSION_NAME,
+              cols: LAB_COLS,
+              rows: LAB_ROWS,
+              sessionTransportToken: ticket.sessionTransportToken,
+            },
+          };
+          this.eventHistory.push({ at: nowStamp(), direction: 'sent', type: connectMessage.type, payload: connectMessage.payload });
+          ws.send(JSON.stringify(connectMessage));
+          return;
+        }
 
         if (message.type === 'connected') {
           this.connected = true;
