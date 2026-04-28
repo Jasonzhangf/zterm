@@ -7,6 +7,7 @@ import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } fro
 
 export interface HostConfigMessage {
   clientSessionId: string;
+  sessionTransportToken?: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;
@@ -34,6 +35,7 @@ export interface AttachFileStartPayload {
 }
 
 export type BridgeClientMessage =
+  | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
@@ -54,6 +56,22 @@ export type BridgeBufferMessage =
   | { type: 'buffer-sync'; payload: TerminalBufferPayload };
 
 export type BridgeServerControlMessage =
+  | {
+      type: 'session-ticket';
+      payload: {
+        clientSessionId: string;
+        sessionTransportToken: string;
+        sessionName: string;
+      };
+    }
+  | {
+      type: 'session-open-failed';
+      payload: {
+        clientSessionId: string;
+        message: string;
+        code?: string;
+      };
+    }
   | {
       type: 'connected';
       payload: {

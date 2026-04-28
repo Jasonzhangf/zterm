@@ -444,6 +444,7 @@ export interface CommandHistory {
 // ============================================
 
 export type ClientMessage =
+  | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
@@ -473,6 +474,22 @@ export type ClientMessage =
   | { type: 'close' };
 
 export type ServerMessage =
+  | {
+      type: 'session-ticket';
+      payload: {
+        clientSessionId: string;
+        sessionTransportToken: string;
+        sessionName: string;
+      };
+    }
+  | {
+      type: 'session-open-failed';
+      payload: {
+        clientSessionId: string;
+        message: string;
+        code?: string;
+      };
+    }
   | {
       type: 'connected';
       payload: {
@@ -509,6 +526,7 @@ export type ServerMessage =
 // 用于 WebSocket 传输的 Host 配置（不含敏感信息的长期存储）
 export interface HostConfigMessage {
   clientSessionId: string;
+  sessionTransportToken?: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;

@@ -47,6 +47,23 @@ import {
   normalizeWireLines,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
+import {
+  clearSessionSupersededSockets,
+  createSessionTransportRuntimeStore,
+  getSessionTargetControlTransport,
+  getSessionTargetTransportRuntime,
+  getSessionTransportHost,
+  getSessionTransportRuntime,
+  getSessionTransportSocket,
+  getSessionTransportToken,
+  getSessionTransportTargetKey,
+  moveSessionTransportSocketToSuperseded,
+  removeSessionTransportRuntime,
+  setSessionTargetControlTransport,
+  setSessionTransportToken,
+  setSessionTransportSocket,
+  upsertSessionTransportRuntime,
+} from '../lib/session-transport-runtime';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -299,6 +316,16 @@ interface PendingRemoteScreenshotRequest {
   onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
   resolve: (capture: RemoteScreenshotCapture) => void;
   reject: (error: Error) => void;
+}
+
+interface PendingSessionTransportOpenIntent {
+  sessionId: string;
+  host: Host;
+  debugScope: 'connect' | 'reconnect';
+  activate?: boolean;
+  onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
+  finalizeFailure: (message: string, retryable: boolean) => void;
+  onConnected: (ws: BridgeTransportSocket) => void;
 }
 
 type SessionPullPurpose = 'tail-refresh' | 'reading-repair';
@@ -706,9 +733,11 @@ function buildHostConfigMessage(
   sessionName: string,
   clientSessionId: string,
   terminalWidthMode: TerminalWidthMode,
+  sessionTransportToken?: string | null,
 ): HostConfigMessage {
   return {
     clientSessionId,
+    sessionTransportToken: sessionTransportToken?.trim() || undefined,
     name: host.name,
     bridgeHost: host.bridgeHost,
     bridgePort: host.bridgePort,
@@ -991,8 +1020,7 @@ export function SessionProvider({
   const [sessionDebugMetrics, setSessionDebugMetrics] = useState<Record<string, SessionDebugOverlayMetrics | undefined>>({});
   const stateRef = useRef(state);
   const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
-  const wsRefs = useRef<Map<string, BridgeTransportSocket>>(new Map());
-  const supersededWsRefs = useRef<Map<string, BridgeTransportSocket[]>>(new Map());
+  const transportRuntimeStoreRef = useRef(createSessionTransportRuntimeStore());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
   // renderer -> worker declarative demand only; never producer/tail truth
@@ -1000,7 +1028,6 @@ export function SessionProvider({
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
   const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
-  const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
   const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
@@ -1015,6 +1042,7 @@ export function SessionProvider({
   const sessionWireStatsRef = useRef<Map<string, SessionWireStatsSnapshot>>(new Map());
   const sessionWireStatsPreviousRef = useRef<Map<string, { sample: SessionWireStatsSnapshot; at: number }>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
+  const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const fileTransferListeners = useRef<Set<(msg: any) => void>>(new Set());
   const pendingRemoteScreenshotRequestsRef = useRef<Map<string, PendingRemoteScreenshotRequest>>(new Map());
   const handleSocketConnectedBaselineRef = useRef<null | ((options: {
@@ -1029,8 +1057,68 @@ export function SessionProvider({
   }) => { shouldContinue: boolean; manualClosed: boolean })>(null);
   const flushPendingInputQueueRef = useRef<null | ((sessionId: string) => void)>(null);
 
+  const readSessionTransportSocket = useCallback((sessionId: string) => {
+    return getSessionTransportSocket(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTransportHost = useCallback((sessionId: string) => {
+    return getSessionTransportHost(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTransportRuntime = useCallback((sessionId: string) => {
+    return getSessionTransportRuntime(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTargetRuntime = useCallback((sessionId: string) => {
+    return getSessionTargetTransportRuntime(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTargetKey = useCallback((sessionId: string) => {
+    return getSessionTransportTargetKey(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTransportToken = useCallback((sessionId: string) => {
+    return getSessionTransportToken(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const readSessionTargetControlSocket = useCallback((sessionId: string) => {
+    return getSessionTargetControlTransport(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const writeSessionTransportHost = useCallback((sessionId: string, host: Host) => {
+    return upsertSessionTransportRuntime(transportRuntimeStoreRef.current, sessionId, host);
+  }, []);
+
+  const writeSessionTransportSocket = useCallback((sessionId: string, socket: BridgeTransportSocket | null) => {
+    return setSessionTransportSocket(transportRuntimeStoreRef.current, sessionId, socket);
+  }, []);
+
+  const writeSessionTransportToken = useCallback((sessionId: string, token: string | null) => {
+    return setSessionTransportToken(transportRuntimeStoreRef.current, sessionId, token);
+  }, []);
+
+  const writeSessionTargetControlSocket = useCallback((sessionId: string, socket: BridgeTransportSocket | null) => {
+    return setSessionTargetControlTransport(transportRuntimeStoreRef.current, sessionId, socket);
+  }, []);
+
+  const moveSessionTransportSocketAside = useCallback((sessionId: string) => {
+    return moveSessionTransportSocketToSuperseded(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const clearSessionTransportRuntime = useCallback((sessionId: string) => {
+    return removeSessionTransportRuntime(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
+  const drainSessionSupersededSockets = useCallback((sessionId: string) => {
+    return clearSessionSupersededSockets(transportRuntimeStoreRef.current, sessionId);
+  }, []);
+
   const isSessionTransportActive = useCallback((sessionId: string) => {
     return stateRef.current.activeSessionId === sessionId;
+  }, []);
+
+  const hasPendingSessionTransportOpen = useCallback((sessionId: string) => {
+    return pendingSessionTransportOpenIntentsRef.current.has(sessionId);
   }, []);
 
   const clearRemoteScreenshotTimeout = useCallback((pending: PendingRemoteScreenshotRequest) => {
@@ -1207,9 +1295,21 @@ export function SessionProvider({
     ws.send(data);
   }, [recordSessionTx]);
 
-  const buildTraversalSocketForHost = useCallback((host: Host) => {
+  const buildTraversalSocketForHost = useCallback((host: Host, transportRole: 'control' | 'session' = 'session') => {
     const traversal = resolveTraversalConfigFromHost(host, bridgeSettings);
-    return new TraversalSocket(traversal.target, traversal.settings, { overrideUrl: wsUrl });
+    const overrideUrl = (() => {
+      if (!wsUrl) {
+        return undefined;
+      }
+      try {
+        const parsed = new URL(wsUrl);
+        parsed.searchParams.set('ztermTransport', transportRole);
+        return parsed.toString();
+      } catch {
+        return wsUrl;
+      }
+    })();
+    return new TraversalSocket(traversal.target, traversal.settings, { overrideUrl });
   }, [bridgeSettings, wsUrl]);
 
   const applyTransportDiagnostics = useCallback((sessionId: string, socket: BridgeTransportSocket) => {
@@ -1232,7 +1332,7 @@ export function SessionProvider({
     }
 
     const activeWs = stateRef.current.activeSessionId
-      ? wsRefs.current.get(stateRef.current.activeSessionId) || null
+      ? readSessionTransportSocket(stateRef.current.activeSessionId) || null
       : null;
     const targetWs = activeWs && activeWs.readyState === WebSocket.OPEN ? activeWs : null;
     if (!targetWs || targetWs.readyState !== WebSocket.OPEN) {
@@ -1397,6 +1497,187 @@ export function SessionProvider({
     };
   }
 
+  const cleanupControlSocket = useCallback((sessionId: string, shouldClose = false) => {
+    const controlSocket = readSessionTargetControlSocket(sessionId);
+    if (!controlSocket) {
+      return;
+    }
+    controlSocket.onopen = null;
+    controlSocket.onmessage = null;
+    controlSocket.onerror = null;
+    controlSocket.onclose = null;
+    if (shouldClose && controlSocket.readyState < WebSocket.CLOSING) {
+      controlSocket.close();
+    }
+    writeSessionTargetControlSocket(sessionId, null);
+  }, [readSessionTargetControlSocket, writeSessionTargetControlSocket]);
+
+  const openSessionTransportByIntentRef = useRef<null | ((intent: PendingSessionTransportOpenIntent) => void)>(null);
+
+  const handleControlTransportMessage = useCallback((options: {
+    sessionId: string;
+    host: Host;
+    ws: BridgeTransportSocket;
+  }, msg: ServerMessage) => {
+    switch (msg.type) {
+      case 'session-ticket': {
+        const payload = msg.payload;
+        const intent = pendingSessionTransportOpenIntentsRef.current.get(payload.clientSessionId) || null;
+        if (!intent) {
+          return;
+        }
+        if (payload.clientSessionId !== intent.sessionId) {
+          return;
+        }
+        clearSessionHandshakeTimeout(payload.clientSessionId);
+        writeSessionTransportToken(payload.clientSessionId, payload.sessionTransportToken);
+        pendingSessionTransportOpenIntentsRef.current.delete(payload.clientSessionId);
+        openSessionTransportByIntentRef.current?.(intent);
+        return;
+      }
+      case 'session-open-failed': {
+        const payload = msg.payload;
+        const intent = pendingSessionTransportOpenIntentsRef.current.get(payload.clientSessionId) || null;
+        if (!intent) {
+          return;
+        }
+        clearSessionHandshakeTimeout(payload.clientSessionId);
+        pendingSessionTransportOpenIntentsRef.current.delete(payload.clientSessionId);
+        writeSessionTransportToken(payload.clientSessionId, null);
+        intent.finalizeFailure(payload.message, false);
+        return;
+      }
+      case 'error': {
+        const intent = pendingSessionTransportOpenIntentsRef.current.get(options.sessionId) || null;
+        if (intent) {
+          clearSessionHandshakeTimeout(options.sessionId);
+          pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+          writeSessionTransportToken(options.sessionId, null);
+          intent.finalizeFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
+        }
+        return;
+      }
+      case 'pong':
+        return;
+      default:
+        return;
+    }
+  }, [clearSessionHandshakeTimeout, writeSessionTransportToken]);
+
+  const failPendingControlTargetIntents = useCallback((sessionId: string, message: string, retryable: boolean) => {
+    const targetRuntime = readSessionTargetRuntime(sessionId);
+    const targetSessionIds = targetRuntime?.sessionIds || [sessionId];
+    for (const targetSessionId of targetSessionIds) {
+      const pending = pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) || null;
+      if (!pending) {
+        continue;
+      }
+      clearSessionHandshakeTimeout(targetSessionId);
+      pendingSessionTransportOpenIntentsRef.current.delete(targetSessionId);
+      writeSessionTransportToken(targetSessionId, null);
+      pending.finalizeFailure(message, retryable);
+    }
+  }, [clearSessionHandshakeTimeout, readSessionTargetRuntime, writeSessionTransportToken]);
+
+  const ensureControlTransportForSessionOpen = useCallback((intent: PendingSessionTransportOpenIntent) => {
+    const { sessionId, host } = intent;
+    const existingControlSocket = readSessionTargetControlSocket(sessionId);
+    const flushPendingSessionOpens = (anchorSessionId: string, socket: BridgeTransportSocket) => {
+      const targetRuntime = readSessionTargetRuntime(anchorSessionId);
+      const targetSessionIds = targetRuntime?.sessionIds || [anchorSessionId];
+      for (const targetSessionId of targetSessionIds) {
+        const pendingIntent = pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) || null;
+        if (!pendingIntent) {
+          continue;
+        }
+        const pendingSessionName = getResolvedSessionName(pendingIntent.host);
+        sendSocketPayload(targetSessionId, socket, JSON.stringify({
+          type: 'session-open',
+          payload: buildHostConfigMessage(
+            pendingIntent.host,
+            pendingSessionName,
+            targetSessionId,
+            bridgeSettings.terminalWidthMode,
+          ),
+        } satisfies ClientMessage));
+        runtimeDebug('session.control.session-open-sent', {
+          sessionId: targetSessionId,
+          targetKey: readSessionTargetKey(targetSessionId),
+          sessionName: pendingSessionName,
+        });
+        clearSessionHandshakeTimeout(targetSessionId);
+        setSessionHandshakeTimeout(targetSessionId, () => {
+          failPendingControlTargetIntents(targetSessionId, 'session open timeout', true);
+        }, SESSION_HANDSHAKE_TIMEOUT_MS);
+      }
+    };
+
+    if (existingControlSocket && existingControlSocket.readyState === WebSocket.OPEN) {
+      flushPendingSessionOpens(sessionId, existingControlSocket);
+      return;
+    }
+
+    if (existingControlSocket && existingControlSocket.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    const controlSocket = buildTraversalSocketForHost(host, 'control');
+    writeSessionTargetControlSocket(sessionId, controlSocket);
+    runtimeDebug('session.control.opening', {
+      sessionId,
+      targetKey: readSessionTargetKey(sessionId),
+      host: host.bridgeHost,
+      port: host.bridgePort,
+      sessionName: getResolvedSessionName(host),
+    });
+    controlSocket.onopen = () => {
+      applyTransportDiagnostics(sessionId, controlSocket);
+      runtimeDebug('session.control.open', {
+        sessionId,
+        targetKey: readSessionTargetKey(sessionId),
+      });
+      flushPendingSessionOpens(sessionId, controlSocket);
+    };
+    controlSocket.onmessage = (event) => {
+      try {
+        recordSessionRx(sessionId, event.data);
+        if (typeof event.data !== 'string') {
+          return;
+        }
+        const msg = JSON.parse(event.data) as ServerMessage;
+        handleControlTransportMessage({
+          sessionId,
+          host,
+          ws: controlSocket,
+        }, msg);
+      } catch (error) {
+        failPendingControlTargetIntents(sessionId, error instanceof Error ? error.message : 'control transport parse error', true);
+      }
+    };
+    controlSocket.onerror = () => {
+      cleanupControlSocket(sessionId);
+      failPendingControlTargetIntents(sessionId, controlSocket.getDiagnostics().reason || 'control transport error', true);
+    };
+    controlSocket.onclose = () => {
+      cleanupControlSocket(sessionId);
+      failPendingControlTargetIntents(sessionId, controlSocket.getDiagnostics().reason || 'control transport closed', true);
+    };
+  }, [
+    applyTransportDiagnostics,
+    bridgeSettings.terminalWidthMode,
+    buildTraversalSocketForHost,
+    clearSessionHandshakeTimeout,
+    cleanupControlSocket,
+    failPendingControlTargetIntents,
+    handleControlTransportMessage,
+    readSessionTargetControlSocket,
+    readSessionTargetRuntime,
+    readSessionTargetKey,
+    sendSocketPayload,
+    setSessionHandshakeTimeout,
+    writeSessionTargetControlSocket,
+  ]);
+
   function openSocketConnectHandshake(options: {
     sessionId: string;
     host: Host;
@@ -1415,6 +1696,7 @@ export function SessionProvider({
         : { targetSessionName: sessionName }),
     });
     options.onBeforeConnectSend?.({ sessionName });
+    const sessionTransportToken = readSessionTransportToken(options.sessionId);
     sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
       type: 'connect',
       payload: buildHostConfigMessage(
@@ -1422,6 +1704,7 @@ export function SessionProvider({
         sessionName,
         options.sessionId,
         bridgeSettings.terminalWidthMode,
+        sessionTransportToken,
       ),
     }));
     runtimeDebug(`session.ws.${options.debugScope}.connect-sent`, {
@@ -1432,6 +1715,70 @@ export function SessionProvider({
     startSocketHeartbeat(options.sessionId, options.ws, options.finalizeFailure);
   }
 
+  const primeSessionTransportSocket = useCallback((sessionId: string, ws: BridgeTransportSocket) => {
+    writeSessionTransportSocket(sessionId, ws);
+    dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
+    lastPongAtRef.current.set(sessionId, Date.now());
+  }, [writeSessionTransportSocket]);
+
+  const bindSessionTransportSocketLifecycle = useCallback((options: {
+    sessionId: string;
+    host: Host;
+    ws: BridgeTransportSocket;
+    debugScope: 'connect' | 'reconnect';
+    activate?: boolean;
+    finalizeFailure: (message: string, retryable: boolean) => void;
+    onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
+    onConnected: () => void;
+  }) => {
+    const { sessionId, host, ws, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected } = options;
+
+    ws.onopen = () => {
+      applyTransportDiagnostics(sessionId, ws);
+      openSocketConnectHandshake({
+        sessionId,
+        host,
+        ws,
+        debugScope,
+        activate,
+        finalizeFailure,
+        onBeforeConnectSend,
+      });
+      clearSessionHandshakeTimeout(sessionId);
+      setSessionHandshakeTimeout(sessionId, () => {
+        finalizeFailure('session handshake timeout', true);
+      }, SESSION_HANDSHAKE_TIMEOUT_MS);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        recordSessionRx(sessionId, event.data);
+        if (typeof event.data !== 'string') {
+          return;
+        }
+        const msg: ServerMessage = JSON.parse(event.data);
+        handleSocketServerMessage({
+          sessionId,
+          host,
+          ws,
+          debugScope,
+          onConnected,
+          onFailure: finalizeFailure,
+        }, msg);
+      } catch (error) {
+        finalizeFailure(error instanceof Error ? error.message : 'parse error', true);
+      }
+    };
+
+    ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
+    ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+  }, [
+    applyTransportDiagnostics,
+    clearSessionHandshakeTimeout,
+    recordSessionRx,
+    setSessionHandshakeTimeout,
+  ]);
+
   const requestSessionBufferSync = useCallback((sessionId: string, options?: {
     ws?: BridgeTransportSocket | null;
     reason?: string;
@@ -1441,7 +1788,7 @@ export function SessionProvider({
     invalidLocalWindow?: boolean;
   }) => {
     const session = options?.sessionOverride || stateRef.current.sessions.find((item) => item.id === sessionId);
-    const targetWs = options?.ws || wsRefs.current.get(sessionId);
+    const targetWs = options?.ws || readSessionTransportSocket(sessionId);
     if (!session || !targetWs || targetWs.readyState !== WebSocket.OPEN) {
       return false;
     }
@@ -1518,7 +1865,7 @@ export function SessionProvider({
   const requestSessionBufferHead = useCallback((sessionId: string, ws?: BridgeTransportSocket | null, options?: {
     force?: boolean;
   }) => {
-    const targetWs = ws || wsRefs.current.get(sessionId) || null;
+    const targetWs = ws || readSessionTransportSocket(sessionId) || null;
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
     if (
       !session
@@ -1717,9 +2064,8 @@ export function SessionProvider({
   }, []);
 
   const clearSupersededSockets = useCallback((sessionId: string, shouldClose = true) => {
-    const superseded = supersededWsRefs.current.get(sessionId) || null;
-    if (!superseded || superseded.length === 0) {
-      supersededWsRefs.current.delete(sessionId);
+    const superseded = drainSessionSupersededSockets(sessionId);
+    if (superseded.length === 0) {
       return;
     }
     if (shouldClose) {
@@ -1733,11 +2079,10 @@ export function SessionProvider({
         }
       }
     }
-    supersededWsRefs.current.delete(sessionId);
   }, []);
 
   const cleanupSocket = useCallback((sessionId: string, shouldClose = false) => {
-    const ws = wsRefs.current.get(sessionId);
+    const ws = readSessionTransportSocket(sessionId);
     if (ws) {
       ws.onopen = null;
       ws.onmessage = null;
@@ -1746,10 +2091,9 @@ export function SessionProvider({
       if (shouldClose && ws.readyState < WebSocket.CLOSING) {
         ws.close();
       } else if (!shouldClose) {
-        const superseded = supersededWsRefs.current.get(sessionId) || [];
-        supersededWsRefs.current.set(sessionId, [...superseded, ws]);
+        moveSessionTransportSocketAside(sessionId);
       }
-      wsRefs.current.delete(sessionId);
+      writeSessionTransportSocket(sessionId, null);
     }
 
     if (shouldClose) {
@@ -1761,11 +2105,53 @@ export function SessionProvider({
     clearTailRefreshRuntime(sessionId);
     clearSessionPullState(sessionId);
     staleTransportProbeAtRef.current.delete(sessionId);
-  }, [clearHeartbeat, clearSessionHandshakeTimeout, clearSessionPullState, clearSupersededSockets, clearTailRefreshRuntime]);
+  }, [clearHeartbeat, clearSessionHandshakeTimeout, clearSessionPullState, clearSupersededSockets, clearTailRefreshRuntime, moveSessionTransportSocketAside, readSessionTransportSocket, writeSessionTransportSocket]);
+
+  const openSessionTransportByIntent = useCallback((intent: PendingSessionTransportOpenIntent) => {
+    const { sessionId, host, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected } = intent;
+    const sessionTransportToken = readSessionTransportToken(sessionId);
+    if (!sessionTransportToken) {
+      finalizeFailure('missing session transport token', true);
+      return;
+    }
+
+    cleanupSocket(sessionId, false);
+    const ws = buildTraversalSocketForHost(host, 'session');
+    runtimeDebug(`session.ws.${debugScope}.opening`, {
+      sessionId,
+      host: host.bridgeHost,
+      port: host.bridgePort,
+      sessionName: getResolvedSessionName(host),
+      activate: Boolean(activate),
+    });
+    primeSessionTransportSocket(sessionId, ws);
+
+    bindSessionTransportSocketLifecycle({
+      sessionId,
+      host,
+      ws,
+      debugScope,
+      activate,
+      finalizeFailure,
+      onBeforeConnectSend,
+      onConnected: () => {
+        writeSessionTransportToken(sessionId, null);
+        onConnected(ws);
+      },
+    });
+  }, [
+    bindSessionTransportSocketLifecycle,
+    buildTraversalSocketForHost,
+    cleanupSocket,
+    primeSessionTransportSocket,
+    readSessionTransportToken,
+    writeSessionTransportToken,
+  ]);
+  openSessionTransportByIntentRef.current = openSessionTransportByIntent;
 
   const startReconnectAttempt = useCallback((sessionId: string) => {
     const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId);
-    const targetHost = sessionHostRef.current.get(sessionId);
+    const targetHost = readSessionTransportHost(sessionId);
     if (!reconnectRuntime || !targetHost) {
       reconnectRuntimesRef.current.delete(sessionId);
       return;
@@ -1784,7 +2170,7 @@ export function SessionProvider({
       liveRuntime.timer = null;
       liveRuntime.connecting = true;
 
-      const liveHost = sessionHostRef.current.get(sessionId);
+      const liveHost = readSessionTransportHost(sessionId);
       if (!liveHost) {
         liveRuntime.connecting = false;
         reconnectRuntimesRef.current.delete(sessionId);
@@ -1799,22 +2185,9 @@ export function SessionProvider({
           reconnectAttempt: liveRuntime.attempt + 1,
         },
       });
-
-      const ws = buildTraversalSocketForHost(liveHost);
-      runtimeDebug('session.ws.reconnect.opening', {
-        sessionId,
-        host: liveHost.bridgeHost,
-        port: liveHost.bridgePort,
-        sessionName: getResolvedSessionName(liveHost),
-      });
-      wsRefs.current.set(sessionId, ws);
-      dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
-      lastPongAtRef.current.set(sessionId, Date.now());
+      writeSessionTransportToken(sessionId, null);
 
       let completed = false;
-      const clearHandshakeTimeout = () => {
-        clearSessionHandshakeTimeout(sessionId);
-      };
       const markCompleted = () => {
         if (completed) {
           return false;
@@ -1823,7 +2196,7 @@ export function SessionProvider({
         return true;
       };
       const finalizeFailure = (message: string, retryable: boolean) => {
-        clearHandshakeTimeout();
+        clearSessionHandshakeTimeout(sessionId);
         const baseline = finalizeSocketFailureBaselineRef.current?.({
           sessionId,
           message,
@@ -1876,83 +2249,52 @@ export function SessionProvider({
         startReconnectAttempt(sessionId);
       };
 
-      ws.onopen = () => {
-        applyTransportDiagnostics(sessionId, ws);
-        openSocketConnectHandshake({
-          sessionId,
-          host: liveHost,
-          ws,
-          debugScope: 'reconnect',
-          finalizeFailure,
-          onBeforeConnectSend: ({ sessionName }) => {
-            dispatch({
-              type: 'UPDATE_SESSION',
-              id: sessionId,
-              updates: {
-                state: 'connecting',
-                sessionName,
-              },
-            });
-            setScheduleStateForSession(sessionId, {
+      pendingSessionTransportOpenIntentsRef.current.set(sessionId, {
+        sessionId,
+        host: liveHost,
+        debugScope: 'reconnect',
+        onBeforeConnectSend: ({ sessionName }) => {
+          dispatch({
+            type: 'UPDATE_SESSION',
+            id: sessionId,
+            updates: {
+              state: 'connecting',
               sessionName,
-              jobs: [],
-              loading: true,
-            });
-          },
-        });
-        clearHandshakeTimeout();
-        setSessionHandshakeTimeout(sessionId, () => {
-          finalizeFailure('session handshake timeout', true);
-        }, SESSION_HANDSHAKE_TIMEOUT_MS);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          recordSessionRx(sessionId, event.data);
-          if (typeof event.data !== 'string') {
-            return;
-          }
-          const msg: ServerMessage = JSON.parse(event.data);
-          handleSocketServerMessage({
-            sessionId,
-            host: liveHost,
-            ws,
-            debugScope: 'reconnect',
-            onConnected: () => {
-              if (completed) return;
-              completed = true;
-              clearHandshakeTimeout();
-              const connectedSessionName = getResolvedSessionName(liveHost);
-              runtimeDebug('session.ws.reconnect.connected', {
-                sessionId,
-                activeSessionId: stateRef.current.activeSessionId,
-              });
-              reconnectRuntimesRef.current.delete(sessionId);
-              clearSupersededSockets(sessionId, true);
-              handleSocketConnectedBaselineRef.current?.({
-                sessionId,
-                sessionName: connectedSessionName,
-                ws,
-              });
-              flushPendingInputQueueRef.current?.(sessionId);
             },
-            onFailure: finalizeFailure,
-          }, msg);
-        } catch (error) {
-          finalizeFailure(error instanceof Error ? error.message : 'parse error', true);
-        }
-      };
-
-      ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
-      ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+          });
+          setScheduleStateForSession(sessionId, {
+            sessionName,
+            jobs: [],
+            loading: true,
+          });
+        },
+        finalizeFailure,
+        onConnected: (ws) => {
+          if (completed) return;
+          completed = true;
+          clearSessionHandshakeTimeout(sessionId);
+          const connectedSessionName = getResolvedSessionName(liveHost);
+          runtimeDebug('session.ws.reconnect.connected', {
+            sessionId,
+            activeSessionId: stateRef.current.activeSessionId,
+          });
+          reconnectRuntimesRef.current.delete(sessionId);
+          clearSupersededSockets(sessionId, true);
+          handleSocketConnectedBaselineRef.current?.({
+            sessionId,
+            sessionName: connectedSessionName,
+            ws,
+          });
+          flushPendingInputQueueRef.current?.(sessionId);
+        },
+      });
+      ensureControlTransportForSessionOpen(pendingSessionTransportOpenIntentsRef.current.get(sessionId)!);
     }, delay);
   }, [
-    applyTransportDiagnostics,
-    buildTraversalSocketForHost,
     clearSupersededSockets,
     clearSessionHandshakeTimeout,
-    recordSessionRx,
-    setSessionHandshakeTimeout,
+    ensureControlTransportForSessionOpen,
+    writeSessionTransportToken,
   ]);
 
   const scheduleReconnect = useCallback((
@@ -1961,7 +2303,7 @@ export function SessionProvider({
     retryable = true,
     options?: { immediate?: boolean; resetAttempt?: boolean },
   ) => {
-    if (!sessionHostRef.current.get(sessionId)) {
+    if (!readSessionTransportHost(sessionId)) {
       return;
     }
 
@@ -2000,13 +2342,17 @@ export function SessionProvider({
     });
     emitSessionStatus(sessionId, 'error', message);
     startReconnectAttempt(sessionId);
-  }, [startReconnectAttempt]);
+  }, [readSessionTransportHost, startReconnectAttempt]);
 
   const connectSession = useCallback((sessionId: string, host: Host, activate: boolean) => {
     clearReconnectForSession(sessionId);
-    cleanupSocket(sessionId, true);
+    cleanupSocket(sessionId, false);
     manualCloseRef.current.delete(sessionId);
-    sessionHostRef.current.set(sessionId, { ...host, sessionName: getResolvedSessionName(host) });
+    writeSessionTransportHost(sessionId, {
+      ...host,
+      sessionName: getResolvedSessionName(host),
+    });
+    writeSessionTransportToken(sessionId, null);
     dispatch({
       type: 'UPDATE_SESSION',
       id: sessionId,
@@ -2032,22 +2378,7 @@ export function SessionProvider({
       dispatch({ type: 'SET_ACTIVE_SESSION', id: sessionId });
     }
 
-    const ws = buildTraversalSocketForHost(host);
-    runtimeDebug('session.ws.connect.opening', {
-      sessionId,
-      host: host.bridgeHost,
-      port: host.bridgePort,
-      sessionName: getResolvedSessionName(host),
-      activate,
-    });
-    wsRefs.current.set(sessionId, ws);
-    dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
-    lastPongAtRef.current.set(sessionId, Date.now());
-
     let completed = false;
-    const clearHandshakeTimeout = () => {
-      clearSessionHandshakeTimeout(sessionId);
-    };
     const markCompleted = () => {
       if (completed) {
         return false;
@@ -2056,7 +2387,7 @@ export function SessionProvider({
       return true;
     };
     const finalizeFailure = (message: string, retryable: boolean) => {
-      clearHandshakeTimeout();
+      clearSessionHandshakeTimeout(sessionId);
       const baseline = finalizeSocketFailureBaseline({
         sessionId,
         message,
@@ -2068,70 +2399,36 @@ export function SessionProvider({
       scheduleReconnect(sessionId, message, retryable);
     };
 
-    ws.onopen = () => {
-      applyTransportDiagnostics(sessionId, ws);
-      openSocketConnectHandshake({
-        sessionId,
-        host,
-        ws,
-        debugScope: 'connect',
-        activate,
-        finalizeFailure,
-      });
-      clearHandshakeTimeout();
-      setSessionHandshakeTimeout(sessionId, () => {
-        finalizeFailure('session handshake timeout', true);
-      }, SESSION_HANDSHAKE_TIMEOUT_MS);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        recordSessionRx(sessionId, event.data);
-        if (typeof event.data !== 'string') {
-          return;
-        }
-        const msg: ServerMessage = JSON.parse(event.data);
-        handleSocketServerMessage({
+    pendingSessionTransportOpenIntentsRef.current.set(sessionId, {
+      sessionId,
+      host,
+      debugScope: 'connect',
+      activate,
+      finalizeFailure,
+      onConnected: (ws) => {
+        if (completed) return;
+        completed = true;
+        clearSessionHandshakeTimeout(sessionId);
+        const connectedSessionName = getResolvedSessionName(host);
+        runtimeDebug('session.ws.connected', {
           sessionId,
-          host,
+          activeSessionId: stateRef.current.activeSessionId,
+        });
+        handleSocketConnectedBaseline({
+          sessionId,
+          sessionName: connectedSessionName,
           ws,
-          debugScope: 'connect',
-          onConnected: () => {
-            if (completed) return;
-            completed = true;
-            clearHandshakeTimeout();
-            const connectedSessionName = getResolvedSessionName(host);
-            runtimeDebug('session.ws.connected', {
-              sessionId,
-              activeSessionId: stateRef.current.activeSessionId,
-            });
-            handleSocketConnectedBaseline({
-              sessionId,
-              sessionName: connectedSessionName,
-              ws,
-            });
-          },
-          onFailure: finalizeFailure,
-        }, msg);
-      } catch (error) {
-        finalizeFailure(error instanceof Error ? error.message : 'parse error', true);
-      }
-    };
-
-    ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
-    ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+        });
+      },
+    });
+    ensureControlTransportForSessionOpen(pendingSessionTransportOpenIntentsRef.current.get(sessionId)!);
   }, [
-    applyTransportDiagnostics,
-    buildTraversalSocketForHost,
     cleanupSocket,
     clearReconnectForSession,
     clearSessionHandshakeTimeout,
-    recordSessionRx,
-    requestSessionBufferSync,
-    resolveSessionCacheLines,
     scheduleReconnect,
-    setSessionHandshakeTimeout,
-    wsUrl,
+    ensureControlTransportForSessionOpen,
+    writeSessionTransportToken,
   ]);
 
   const createSession = useCallback((host: Host, options?: CreateSessionOptions): string => {
@@ -2174,14 +2471,23 @@ export function SessionProvider({
   const closeSession = useCallback((id: string) => {
     manualCloseRef.current.add(id);
     pendingInputQueueRef.current.delete(id);
+    pendingSessionTransportOpenIntentsRef.current.delete(id);
     clearReconnectForSession(id);
+    const transportRuntime = readSessionTransportRuntime(id);
+    const targetRuntime = readSessionTargetRuntime(id);
 
-    const ws = wsRefs.current.get(id);
+    const ws = readSessionTransportSocket(id);
     if (ws && ws.readyState === WebSocket.OPEN) {
       sendSocketPayload(id, ws, JSON.stringify({ type: 'close' }));
     }
+    runtimeDebug('session.close', {
+      sessionId: id,
+      targetKey: transportRuntime?.targetKey || null,
+      targetSessionCount: targetRuntime?.sessionIds.length || 0,
+    });
     cleanupSocket(id, false);
-    sessionHostRef.current.delete(id);
+    writeSessionTransportToken(id, null);
+    clearSessionTransportRuntime(id);
     viewportSizeRef.current.delete(id);
     pendingInputTailRefreshRef.current.delete(id);
     pendingConnectTailRefreshRef.current.delete(id);
@@ -2206,7 +2512,7 @@ export function SessionProvider({
       return next;
     });
     dispatch({ type: 'DELETE_SESSION', id });
-  }, [cleanupSocket, clearReconnectForSession, sendSocketPayload]);
+  }, [cleanupSocket, clearReconnectForSession, clearSessionTransportRuntime, readSessionTargetRuntime, readSessionTransportRuntime, readSessionTransportSocket, sendSocketPayload, writeSessionTransportToken]);
 
   const switchSession = useCallback((id: string) => dispatch({ type: 'SET_ACTIVE_SESSION', id }), []);
 
@@ -2234,7 +2540,9 @@ export function SessionProvider({
   const reconnectSession = useCallback((id: string) => {
     clearReconnectForSession(id);
     const current = stateRef.current.sessions.find((session) => session.id === id);
-    const knownHost = sessionHostRef.current.get(id);
+    const knownHost = readSessionTransportHost(id);
+    const targetKey = readSessionTargetKey(id);
+    const targetRuntime = readSessionTargetRuntime(id);
     if (!current && !knownHost) {
       return;
     }
@@ -2259,11 +2567,16 @@ export function SessionProvider({
       bridgePort: host.bridgePort,
       sessionName: host.sessionName,
       activeSessionId: stateRef.current.activeSessionId,
+      targetKey,
+      targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
 
     cleanupSocket(id, false);
     manualCloseRef.current.delete(id);
-    sessionHostRef.current.set(id, { ...host, sessionName: getResolvedSessionName(host) });
+    writeSessionTransportHost(id, {
+      ...host,
+      sessionName: getResolvedSessionName(host),
+    });
     dispatch({
       type: 'UPDATE_SESSION',
       id,
@@ -2287,7 +2600,7 @@ export function SessionProvider({
     }
 
     scheduleReconnect(id, 'manual reconnect', true, { immediate: true, resetAttempt: true });
-  }, [cleanupSocket, clearReconnectForSession, scheduleReconnect]);
+  }, [cleanupSocket, clearReconnectForSession, readSessionTargetKey, readSessionTargetRuntime, readSessionTransportHost, scheduleReconnect, writeSessionTransportHost]);
 
   const reconnectAllSessions = useCallback(() => {
     runtimeDebug('session.reconnect.all', {
@@ -2342,7 +2655,7 @@ export function SessionProvider({
   }, [reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
   const sendMessage = useCallback((sessionId: string, msg: ClientMessage) => {
-    const ws = wsRefs.current.get(sessionId);
+    const ws = readSessionTransportSocket(sessionId);
     if (ws && ws.readyState === WebSocket.OPEN) {
       sendSocketPayload(sessionId, ws, JSON.stringify(msg));
     }
@@ -2410,7 +2723,7 @@ export function SessionProvider({
     cursor?: TerminalCursorState | null,
   ) => {
     let session = stateRef.current.sessions.find((item) => item.id === sessionId);
-    const ws = wsRefs.current.get(sessionId);
+    const ws = readSessionTransportSocket(sessionId);
     if (
       !session
       || (session.state !== 'connected' && session.state !== 'connecting' && session.state !== 'reconnecting')
@@ -2834,6 +3147,8 @@ export function SessionProvider({
     }
 
     cleanupSocket(options.sessionId);
+    pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+    writeSessionTransportToken(options.sessionId, null);
     setScheduleStateForSession(options.sessionId, (current) => ({
       ...current,
       loading: false,
@@ -2845,12 +3160,14 @@ export function SessionProvider({
       shouldContinue: !manualClosed,
       manualClosed,
     };
-  }, [cleanupSocket, setScheduleStateForSession]);
+  }, [cleanupSocket, setScheduleStateForSession, writeSessionTransportToken]);
   finalizeSocketFailureBaselineRef.current = finalizeSocketFailureBaseline;
 
   const resumeActiveSessionTransport = useCallback((sessionId: string) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-    const ws = wsRefs.current.get(sessionId) || null;
+    const transportRuntime = readSessionTransportRuntime(sessionId);
+    const targetRuntime = readSessionTargetRuntime(sessionId);
+    const ws = readSessionTransportSocket(sessionId) || null;
     const isActive = stateRef.current.activeSessionId === sessionId;
     const sessionState = session?.state ?? null;
     const canResumeByTransportTruth = (
@@ -2871,6 +3188,8 @@ export function SessionProvider({
         sessionState,
         wsReadyState: ws?.readyState ?? null,
         isActive,
+        targetKey: transportRuntime?.targetKey || null,
+        targetSessionCount: targetRuntime?.sessionIds.length || 0,
       });
       return false;
     }
@@ -2884,12 +3203,14 @@ export function SessionProvider({
       localStartIndex: activeSession.buffer.startIndex,
       localEndIndex: activeSession.buffer.endIndex,
       transportStale: isSessionTransportActivityStale(sessionId),
+      targetKey: transportRuntime?.targetKey || null,
+      targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
     resetSessionTransportPullBookkeeping(sessionId, 'active-resume');
     pendingResumeTailRefreshRef.current.add(sessionId);
     requestSessionBufferHead(sessionId, activeWs, { force: true });
     return true;
-  }, [isSessionTransportActivityStale, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
+  }, [isSessionTransportActivityStale, readSessionTargetRuntime, readSessionTransportRuntime, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
   const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
     const normalized = normalizeSessionRenderDemandState(renderDemand);
@@ -2924,7 +3245,7 @@ export function SessionProvider({
     lastActivatedSessionIdRef.current = state.activeSessionId;
     const activeSessionId = state.activeSessionId;
     const activeSession = state.sessions.find((item) => item.id === activeSessionId) || null;
-    const ws = wsRefs.current.get(activeSessionId) || null;
+    const ws = readSessionTransportSocket(activeSessionId) || null;
     if (
       activeSession
       && ws
@@ -2939,6 +3260,9 @@ export function SessionProvider({
     if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
       return;
     }
+    if (hasPendingSessionTransportOpen(activeSessionId)) {
+      return;
+    }
     if (shouldReconnectActivatedSession({
       hasSession: Boolean(activeSession),
       wsReadyState: ws?.readyState ?? null,
@@ -2946,10 +3270,10 @@ export function SessionProvider({
     })) {
       reconnectSession(activeSessionId);
     }
-  }, [isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
+  }, [hasPendingSessionTransportOpen, isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
-    const ws = wsRefs.current.get(sessionId);
+    const ws = readSessionTransportSocket(sessionId);
     const queued = pendingInputQueueRef.current.get(sessionId);
     if (!ws || ws.readyState !== WebSocket.OPEN || !queued || queued.length === 0) {
       return;
@@ -3001,7 +3325,7 @@ export function SessionProvider({
           return;
         }
         const session = stateRef.current.sessions.find((item) => item.id === activeSessionId) || null;
-        const ws = wsRefs.current.get(activeSessionId) || null;
+        const ws = readSessionTransportSocket(activeSessionId) || null;
         if (
           !session
           || !ws
@@ -3055,7 +3379,7 @@ export function SessionProvider({
       return;
     }
 
-    const ws = wsRefs.current.get(targetSessionId);
+    const ws = readSessionTransportSocket(targetSessionId);
     const transportStale = isSessionTransportActivityStale(targetSessionId);
     if (ws && ws.readyState === WebSocket.OPEN) {
       runtimeDebug('session.input.send', {
@@ -3077,6 +3401,9 @@ export function SessionProvider({
       preview: data.slice(0, 32),
     });
     enqueuePendingInput(targetSessionId, data);
+    if (hasPendingSessionTransportOpen(targetSessionId)) {
+      return;
+    }
     const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
     const reconnectInFlight = isReconnectInFlight(targetSessionId);
     const shouldForceReconnect = transportStale
@@ -3089,12 +3416,12 @@ export function SessionProvider({
     if (shouldForceReconnect) {
       reconnectSession(targetSessionId);
     }
-  }, [enqueuePendingInput, isReconnectInFlight, isSessionTransportActivityStale, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
+  }, [enqueuePendingInput, hasPendingSessionTransportOpen, isReconnectInFlight, isSessionTransportActivityStale, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {
       const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-      const ws = wsRefs.current.get(sessionId) || null;
+      const ws = readSessionTransportSocket(sessionId) || null;
       const ready =
         Boolean(session) &&
         session?.state === 'connected' &&
@@ -3269,8 +3596,9 @@ export function SessionProvider({
     for (const session of stateRef.current.sessions) {
       manualCloseRef.current.add(session.id);
       cleanupSocket(session.id, true);
+      cleanupControlSocket(session.id, true);
     }
-  }, [cleanupSocket, clearRemoteScreenshotTimeout, clearSessionHandshakeTimeout]);
+  }, [cleanupControlSocket, cleanupSocket, clearRemoteScreenshotTimeout, clearSessionHandshakeTimeout]);
 
   const value: SessionContextValue = {
     state,
@@ -3305,7 +3633,7 @@ export function SessionProvider({
       return () => { fileTransferListeners.current.delete(handler); };
     },
     sendMessageRaw: (sessionId: string, msg: unknown) => {
-      const ws = wsRefs.current.get(sessionId);
+      const ws = readSessionTransportSocket(sessionId);
       if (ws && ws.readyState === WebSocket.OPEN) {
         sendSocketPayload(sessionId, ws, JSON.stringify(msg));
       }

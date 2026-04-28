@@ -676,6 +676,8 @@ class DaemonProbe {
 
   private readonly clientSessionId: string;
 
+  private controlWs: WebSocket | null = null;
+
   private ws: WebSocket | null = null;
 
   private connected = false;
@@ -712,6 +714,12 @@ class DaemonProbe {
     return this.eventHistory;
   }
 
+  private buildTransportUrl(role: 'control' | 'session') {
+    const url = new URL(this.wsUrl);
+    url.searchParams.set('ztermTransport', role);
+    return url.toString();
+  }
+
   absorb(other: DaemonProbe, fromHistoryIndex = 0) {
     if (other.payload) {
       this.lastPayload = other.payload;
@@ -725,13 +733,19 @@ class DaemonProbe {
 
   async connect() {
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(this.wsUrl);
+      const controlWs = new WebSocket(this.buildTransportUrl('control'));
       let settled = false;
-      this.ws = ws;
+      const fail = (error: Error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
+      this.controlWs = controlWs;
 
-      ws.on('open', () => {
-        const connectMessage: ClientMessage = {
-          type: 'connect',
+      controlWs.on('open', () => {
+        const sessionOpenMessage: ClientMessage = {
+          type: 'session-open',
           payload: {
             clientSessionId: this.clientSessionId,
             name: LAB_SESSION_NAME,
@@ -747,13 +761,13 @@ class DaemonProbe {
         this.eventHistory.push({
           at: nowStamp(),
           direction: 'sent',
-          type: connectMessage.type,
-          payload: summarizeProbeMessage(connectMessage.type, connectMessage.payload),
+          type: sessionOpenMessage.type,
+          payload: summarizeProbeMessage(sessionOpenMessage.type, sessionOpenMessage.payload),
         });
-        ws.send(JSON.stringify(connectMessage));
+        controlWs.send(JSON.stringify(sessionOpenMessage));
       });
 
-      ws.on('message', (raw) => {
+      controlWs.on('message', (raw) => {
         const text = typeof raw === 'string' ? raw : raw.toString('utf-8');
         const message = JSON.parse(text) as ServerMessage;
         this.eventHistory.push({
@@ -769,60 +783,108 @@ class DaemonProbe {
               : summarizeProbeMessage(message.type, 'payload' in message ? message.payload : undefined)
           ),
         });
-        if (message.type === 'connected') {
-          this.connected = true;
-          this.requestHead(true);
-          if (!settled) {
-            settled = true;
-            resolve();
-          }
-          return;
-        }
-        if (message.type === 'buffer-head') {
-          this.lastHead = {
-            revision: Math.max(0, Math.floor(message.payload.revision || 0)),
-            latestEndIndex: Math.max(0, Math.floor(message.payload.latestEndIndex || 0)),
-          };
-          this.requestFollowWindow(this.lastHead.latestEndIndex);
-          return;
-        }
-        if (message.type === 'buffer-sync') {
-          this.lastPayload = message.payload;
-          this.payloadHistory.push({
-            at: nowStamp(),
-            type: message.type,
-            payload: message.payload,
+        if (message.type === 'session-ticket') {
+          const sessionWs = new WebSocket(this.buildTransportUrl('session'));
+          this.ws = sessionWs;
+          sessionWs.on('open', () => {
+            const connectMessage: ClientMessage = {
+              type: 'connect',
+              payload: {
+                clientSessionId: this.clientSessionId,
+                sessionTransportToken: message.payload.sessionTransportToken,
+                name: LAB_SESSION_NAME,
+                bridgeHost: '127.0.0.1',
+                bridgePort: 0,
+                sessionName: LAB_SESSION_NAME,
+                cols: LAB_COLS,
+                rows: LAB_ROWS,
+                authToken: this.authToken,
+                authType: 'password',
+              },
+            };
+            this.eventHistory.push({
+              at: nowStamp(),
+              direction: 'sent',
+              type: connectMessage.type,
+              payload: summarizeProbeMessage(connectMessage.type, connectMessage.payload),
+            });
+            sessionWs.send(JSON.stringify(connectMessage));
           });
+          sessionWs.on('message', (sessionRaw) => {
+            const sessionText = typeof sessionRaw === 'string' ? sessionRaw : sessionRaw.toString('utf-8');
+            const sessionMessage = JSON.parse(sessionText) as ServerMessage;
+            this.eventHistory.push({
+              at: nowStamp(),
+              direction: 'recv',
+              type: sessionMessage.type,
+              payload: (
+                sessionMessage.type === 'buffer-sync'
+                  ? {
+                      ...summarizeProbeMessage(sessionMessage.type, 'payload' in sessionMessage ? sessionMessage.payload : undefined) as Record<string, unknown>,
+                      wireKind: detectBufferSyncWireKind(sessionText),
+                    }
+                  : summarizeProbeMessage(sessionMessage.type, 'payload' in sessionMessage ? sessionMessage.payload : undefined)
+              ),
+            });
+            if (sessionMessage.type === 'connected') {
+              this.connected = true;
+              this.requestHead(true);
+              if (!settled) {
+                settled = true;
+                resolve();
+              }
+              return;
+            }
+            if (sessionMessage.type === 'buffer-head') {
+              this.lastHead = {
+                revision: Math.max(0, Math.floor(sessionMessage.payload.revision || 0)),
+                latestEndIndex: Math.max(0, Math.floor(sessionMessage.payload.latestEndIndex || 0)),
+              };
+              this.requestFollowWindow(this.lastHead.latestEndIndex);
+              return;
+            }
+            if (sessionMessage.type === 'buffer-sync') {
+              this.lastPayload = sessionMessage.payload;
+              this.payloadHistory.push({
+                at: nowStamp(),
+                type: sessionMessage.type,
+                payload: sessionMessage.payload,
+              });
+            }
+            if (sessionMessage.type === 'error') {
+              fail(new Error(sessionMessage.payload.message));
+              return;
+            }
+            if (sessionMessage.type === 'schedule-event') {
+              this.scheduleEvents.push(sessionMessage);
+              const waiter = this.scheduleEventWaiters.shift();
+              if (waiter) {
+                clearTimeout(waiter.timer);
+                waiter.resolve(sessionMessage);
+              }
+            }
+          });
+          sessionWs.on('error', (error) => fail(error instanceof Error ? error : new Error(String(error))));
+          sessionWs.on('close', () => {
+            if (!settled) {
+              fail(new Error('daemon session websocket closed before connect'));
+            }
+          });
+          return;
         }
-        if (message.type === 'error') {
-          const error = new Error(message.payload.message);
-          if (!settled) {
-            settled = true;
-            reject(error);
-          }
-        }
-        if (message.type === 'schedule-event') {
-          this.scheduleEvents.push(message);
-          const waiter = this.scheduleEventWaiters.shift();
-          if (waiter) {
-            clearTimeout(waiter.timer);
-            waiter.resolve(message);
-          }
+        if (message.type === 'session-open-failed' || message.type === 'error') {
+          fail(new Error('payload' in message && message.payload && typeof message.payload === 'object' && 'message' in message.payload
+            ? String((message.payload as { message?: string }).message || 'daemon control error')
+            : 'daemon control error'));
           return;
         }
       });
 
-      ws.on('error', (error) => {
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      });
+      controlWs.on('error', (error) => fail(error instanceof Error ? error : new Error(String(error))));
 
-      ws.on('close', () => {
+      controlWs.on('close', () => {
         if (!settled) {
-          settled = true;
-          reject(new Error('daemon websocket closed before connect'));
+          fail(new Error('daemon control websocket closed before ticket'));
         }
       });
     });
@@ -831,6 +893,8 @@ class DaemonProbe {
   }
 
   close() {
+    this.controlWs?.close();
+    this.controlWs = null;
     this.ws?.close();
     this.ws = null;
   }

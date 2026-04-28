@@ -1,3 +1,4 @@
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 
 export interface RemoteScreenshotPreviewState {
@@ -108,6 +109,75 @@ export function RemoteScreenshotSheet({
   onSave,
   onDiscard,
 }: RemoteScreenshotSheetProps) {
+  const [zoomed, setZoomed] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const lastTouchRef = useRef<{ dist: number; x: number; y: number; scale: number; tx: number; ty: number } | null>(null);
+  const imgContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Reset zoom when preview changes
+  useEffect(() => {
+    setZoomed(false);
+    setScale(1);
+    setTranslate({ x: 0, y: 0 });
+  }, [state?.previewDataUrl]);
+
+  const handlePinchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      lastTouchRef.current = {
+        dist,
+        x: (t0.clientX + t1.clientX) / 2,
+        y: (t0.clientY + t1.clientY) / 2,
+        scale,
+        tx: translate.x,
+        ty: translate.y,
+      };
+    } else if (e.touches.length === 1 && scale > 1) {
+      lastTouchRef.current = {
+        dist: 0,
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        scale,
+        tx: translate.x,
+        ty: translate.y,
+      };
+    }
+  }, [scale, translate]);
+
+  const handlePinchMove = useCallback((e: React.TouchEvent) => {
+    const last = lastTouchRef.current;
+    if (!last) return;
+
+    if (e.touches.length === 2 && last.dist > 0) {
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      const newScale = Math.max(1, Math.min(5, last.scale * (dist / last.dist)));
+      setScale(newScale);
+      if (newScale <= 1) {
+        setTranslate({ x: 0, y: 0 });
+      }
+    } else if (e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - last.x;
+      const dy = e.touches[0].clientY - last.y;
+      setTranslate({
+        x: last.tx + dx,
+        y: last.ty + dy,
+      });
+    }
+  }, [scale]);
+
+  const handlePinchEnd = useCallback(() => {
+    lastTouchRef.current = null;
+    if (scale <= 1.05) {
+      setScale(1);
+      setTranslate({ x: 0, y: 0 });
+    }
+  }, [scale]);
+
   if (!state) {
     return null;
   }
@@ -115,6 +185,76 @@ export function RemoteScreenshotSheet({
   const copy = resolveStatusCopy(state);
   const busy = state.phase !== 'preview-ready' && state.phase !== 'failed';
   const steps = resolveStepStates(state.phase);
+  const hasPreview = Boolean(state.previewDataUrl);
+
+  if (zoomed && hasPreview) {
+    return (
+      <div
+        data-testid="remote-screenshot-zoomed"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 200,
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          touchAction: 'none',
+        }}
+        onTouchStart={handlePinchStart}
+        onTouchMove={handlePinchMove}
+        onTouchEnd={handlePinchEnd}
+        onDoubleClick={() => {
+          if (scale > 1) {
+            setScale(1);
+            setTranslate({ x: 0, y: 0 });
+          } else {
+            setScale(2.5);
+          }
+        }}
+      >
+        <img
+          data-testid="remote-screenshot-zoomed-image"
+          src={state.previewDataUrl!}
+          alt={state.fileName}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '100%',
+            objectFit: 'contain',
+            transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
+            transition: lastTouchRef.current ? 'none' : 'transform 0.2s ease-out',
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setZoomed(false);
+            setScale(1);
+            setTranslate({ x: 0, y: 0 });
+          }}
+          style={{
+            position: 'absolute',
+            top: 'env(safe-area-inset-top, 12px)',
+            right: '12px',
+            width: '36px',
+            height: '36px',
+            borderRadius: '999px',
+            background: 'rgba(0,0,0,0.6)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            color: '#fff',
+            fontSize: '18px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -200,11 +340,13 @@ export function RemoteScreenshotSheet({
         </div>
 
         <div
+          ref={imgContainerRef}
           style={{
             padding: '0 12px 12px',
           }}
         >
           <div
+            data-testid="remote-screenshot-preview-area"
             style={{
               minHeight: '220px',
               maxHeight: '56vh',
@@ -215,7 +357,9 @@ export function RemoteScreenshotSheet({
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'hidden',
+              cursor: hasPreview ? 'zoom-in' : 'default',
             }}
+            onClick={() => { if (hasPreview) setZoomed(true); }}
           >
             {state.previewDataUrl ? (
               <img

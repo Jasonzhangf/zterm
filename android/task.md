@@ -180,6 +180,11 @@
     - App 恢复链保持 `resume-first` 真相，并把对应 App regression expectation 收口
     - App 首帧已有 session 时立即持久化 `OPEN_TABS / ACTIVE_SESSION`，补“现存 tab 自动恢复真相”红测
     - 继续收 `SessionContext` 内 transport truth：`wsRefs / supersededWsRefs / sessionHostRef -> runtime store`
+    - 继续补 `target runtime.controlTransport` helper + 单测，先完成 target 级真相冻结
+    - target runtime cleanup 已补门禁：最后一个 session 离开但 control transport 仍存活时，target truth 不得删除；只有 `0 session + no control transport` 才允许回收
+    - client `connect/reconnect` websocket lifecycle 已共享单一路径，避免两份 handshake/timeout/socket-failure 编排继续分叉
+    - daemon `transport close/error -> detach-only` source gate 已纳入 `test:terminal:contracts`
+    - daemon `session transport ticket` 与 client `sessionTransportToken` 真相已落地基础模块/单测；下一刀直接把 control transport -> issue ticket -> session transport attach 串起来
 - [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
 - [ ] mobile-15.34 QuickBar 老布局回归 closeout：壳体改成三栏，前两栏保持老布局（左侧固定六键 `状态/↑/键盘 + ←/↓/→` + 右侧两行快捷滚动区），第三栏恢复文件/图片/同步/截图工具栏；工具栏不得重复；固定按钮不得超界
 - [ ] mobile-15.35 QuickBar keyboard-lift + session-schedule entry closeout：QuickBar editor 聚焦时 UI shell 仍消费 keyboard inset；定时列表入口不再依赖本地草稿，任何 attach 到同一 session 的客户端都可打开当前任务列表并 CRUD

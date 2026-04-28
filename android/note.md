@@ -86,6 +86,13 @@
   - App 若首帧已持有现存 sessions，也必须立即把 `OPEN_TABS / ACTIVE_SESSION` 回写到 localStorage；否则冷启动恢复真相会滞后一个渲染周期，测试与现场都会丢 active tab
   - 下一步结构收口：把 `SessionContext` 里的 `wsRefs / supersededWsRefs / sessionHostRef` 合并成单一 transport runtime store
   - 目标不是补新语义，而是把“session -> target -> active/superseded transport” 的真实 ownership 从散乱 Map 收到一处，给后续 control transport / per-session transport 分层打底
+  - 继续要求：`controlTransport` 先只作为 target runtime 显式真相，不提前承接 head/range/input；避免角色越层漂移
+  - 2026-04-28 当前新增收口：`target runtime` 只允许在 `0 session + no control transport` 时删除；最后一个 session 离开但 control transport 还活着时，target truth 不能被顺手清空
+  - 2026-04-28 当前继续收口：`SessionContext` 里 connect / reconnect 的 websocket onopen/onmessage/onerror/onclose 已共用同一条 lifecycle helper，避免两份 transport 编排继续漂移
+  - daemon transport lifecycle gate 已补进 contracts：ws/rtc close/error 对 logical-bound session 只能 detach transport，不能回退成隐式 close logical session
+  - 2026-04-28 当前再向前一刀：`session transport token` 已明确冻结成 per-session truth
+    - daemon: `session-transport-ticket.ts` 保证同一 `clientSessionId` 只有一个当前有效 ticket
+    - client runtime: `sessionTransportToken` 不属于 target，也不属于 socket，而属于 session runtime；retarget 时必须清空
 - Jason 2026-04-28 P0 silent failure audit & remote screenshot fix:
   - 全局审计完成，13 处 silent catch 定位，7 处 P0 已修复为 console.error/warn 暴露
   - 远程截图卡死根因：daemon 侧正常（ws probe 全链路验证通过），问题在 Android 客户端

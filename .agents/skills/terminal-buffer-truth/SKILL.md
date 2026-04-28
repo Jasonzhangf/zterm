@@ -140,6 +140,8 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - head / range / input 等高频流量只走 per-session transport，不得全部塞进 control transport
   - session attach / resume 必须复用 control transport，但 session data 仍各自独立
   - auth 也只属于 control transport；只要 control transport 没断，就不应重复 auth
+  - target runtime 生命周期也必须独立：最后一个 session 离开后，若 control transport 还活着，target runtime 仍保留；只有 `0 session + no control transport` 才允许删除
+  - session transport token 也必须是**每个 clientSessionId 独立真相**：同一 session 只允许一个当前有效 ticket；retarget/close 后旧 ticket 必须失效
 - active / inactive 只影响“是否继续取数”，不影响 logical session / transport 身份：
   - inactive tab 不主动高频拉 head/range
   - 但**不是**关闭 session

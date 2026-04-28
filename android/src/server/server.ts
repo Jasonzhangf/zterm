@@ -65,6 +65,7 @@ import {
 } from './canonical-buffer';
 import { buildBufferHeadPayload, buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import {
+  attachClientSessionTransport,
   closeClientSession as removeLogicalClientSession,
   detachClientSessionTransport as markLogicalClientSessionTransportDetached,
   shutdownClientSessions,
@@ -78,6 +79,12 @@ import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
 import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug-store';
 import { ScheduleEngine } from './schedule-engine';
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
+import {
+  createSessionTransportTicketStore,
+  issueSessionTransportTicket,
+  revokeSessionTransportTicket,
+  takeSessionTransportTicket,
+} from './session-transport-ticket';
 
 // 保留正在推进中的文件传输/目录能力真相；当前 server 主链尚未接线完成，
 // 这里只做显式占位，避免把“未接线的新功能定义”误删成不存在。
@@ -92,6 +99,7 @@ void (0 as unknown as
 
 interface TmuxConnectPayload {
   clientSessionId: string;
+  sessionTransportToken?: string;
   name: string;
   bridgeHost: string;
   bridgePort: number;
@@ -108,6 +116,17 @@ interface ClientSessionTransport {
   sendText: (text: string) => void;
   close: (reason?: string) => void;
   ping?: () => void;
+}
+
+interface TransportConnection {
+  id: string;
+  transportId: string;
+  transport: ClientSessionTransport;
+  closeTransport: (reason: string) => void;
+  requestOrigin: string;
+  wsAlive: boolean;
+  role: 'pending' | 'control' | 'session';
+  boundSessionId: string | null;
 }
 
 interface ClientSession {
@@ -204,6 +223,7 @@ function mirrorCursorEqual(left: TerminalCursorState | null | undefined, right: 
 }
 
 type ClientMessage =
+  | { type: 'session-open'; payload: TmuxConnectPayload }
   | { type: 'connect'; payload: TmuxConnectPayload }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
@@ -233,6 +253,22 @@ type ClientMessage =
   | { type: 'close' };
 
 type ServerMessage =
+  | {
+      type: 'session-ticket';
+      payload: {
+        clientSessionId: string;
+        sessionTransportToken: string;
+        sessionName: string;
+      };
+    }
+  | {
+      type: 'session-open-failed';
+      payload: {
+        clientSessionId: string;
+        message: string;
+        code?: string;
+      };
+    }
   | {
       type: 'connected';
       payload: {
@@ -311,7 +347,9 @@ const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
 const sessions = new Map<string, ClientSession>();
+const connections = new Map<string, TransportConnection>();
 const mirrors = new Map<string, SessionMirror>();
+const sessionTransportTicketStore = createSessionTransportTicketStore();
 const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
 
@@ -490,6 +528,13 @@ function createRtcSessionTransport(transport: RtcServerTransport): ClientSession
   };
 }
 
+function sendTransportMessage(transport: ClientSessionTransport | null | undefined, message: ServerMessage) {
+  if (!transport || transport.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  transport.sendText(JSON.stringify(message));
+}
+
 function sendMessage(session: ClientSession, message: ServerMessage) {
   if (session.transport && session.transport.readyState === WebSocket.OPEN) {
     if (message.type === 'buffer-sync' || message.type === 'connected') {
@@ -500,7 +545,7 @@ function sendMessage(session: ClientSession, message: ServerMessage) {
         payload: summarizePayload(message),
       });
     }
-    session.transport.sendText(JSON.stringify(message));
+    sendTransportMessage(session.transport, message);
   }
 }
 
@@ -1184,11 +1229,10 @@ function renameTmuxSession(currentName?: string, nextName?: string) {
   return nextSessionName;
 }
 
-function createClientSession(transport: ClientSessionTransport, requestOrigin: string): ClientSession {
+function createTransportConnection(transport: ClientSessionTransport, requestOrigin: string): TransportConnection {
   const transportId = uuidv4();
-  const session: ClientSession = {
+  const connection: TransportConnection = {
     id: uuidv4(),
-    clientSessionId: '',
     transportId,
     transport,
     closeTransport: (reason: string) => {
@@ -1196,6 +1240,22 @@ function createClientSession(transport: ClientSessionTransport, requestOrigin: s
         transport.close(reason);
       }
     },
+    requestOrigin,
+    wsAlive: true,
+    role: 'pending',
+    boundSessionId: null,
+  };
+  connections.set(connection.id, connection);
+  return connection;
+}
+
+function createLogicalClientSession(clientSessionId: string, requestOrigin: string): ClientSession {
+  const session: ClientSession = {
+    id: clientSessionId,
+    clientSessionId,
+    transportId: null,
+    transport: null,
+    closeTransport: undefined,
     requestOrigin,
     state: 'idle',
     title: 'Terminal',
@@ -1205,12 +1265,11 @@ function createClientSession(transport: ClientSessionTransport, requestOrigin: s
     rows: DEFAULT_TERMINAL_SESSION_VIEWPORT.rows,
     terminalWidthMode: 'mirror-fixed',
     requestedAdaptiveCols: null,
-    wsAlive: true,
+    wsAlive: false,
     pendingPasteImage: null,
     pendingAttachFile: null,
-    logicalSessionBound: false,
+    logicalSessionBound: true,
   };
-  session.clientSessionId = session.id;
   sessions.set(session.id, session);
   return session;
 }
@@ -1240,6 +1299,62 @@ function normalizeBufferSyncRequestPayload(
     requestEndIndex: Math.max(requestStartIndex, requestEndIndex),
     missingRanges: request.missingRanges,
   };
+}
+
+function normalizeSessionTransportToken(input?: string) {
+  const token = (input || '').trim();
+  if (!token) {
+    throw new Error('connect payload missing sessionTransportToken');
+  }
+  return token;
+}
+
+function handleSessionOpen(connection: TransportConnection, payload: TmuxConnectPayload) {
+  const clientSessionId = normalizeClientSessionId(payload.clientSessionId);
+  const logicalSession = getOrCreateLogicalClientSession(clientSessionId, connection.requestOrigin);
+  connection.role = 'control';
+  connection.boundSessionId = null;
+  const sessionName = sanitizeSessionName(payload.sessionName || payload.name);
+  const issued = issueSessionTransportTicket(sessionTransportTicketStore, clientSessionId);
+  sendTransportMessage(connection.transport, {
+    type: 'session-ticket',
+    payload: {
+      clientSessionId,
+      sessionTransportToken: issued.token,
+      sessionName,
+    },
+  });
+  return logicalSession;
+}
+
+function handleSessionTransportConnect(connection: TransportConnection, payload: TmuxConnectPayload) {
+  const clientSessionId = normalizeClientSessionId(payload.clientSessionId);
+  const token = normalizeSessionTransportToken(payload.sessionTransportToken);
+  const ticket = takeSessionTransportTicket(sessionTransportTicketStore, token);
+  if (!ticket || ticket.clientSessionId !== clientSessionId) {
+    sendTransportMessage(connection.transport, {
+      type: 'error',
+      payload: {
+        message: 'Invalid session transport ticket',
+        code: 'session_transport_ticket_invalid',
+      },
+    });
+    connection.closeTransport('session transport ticket invalid');
+    return null;
+  }
+  const logicalSession = sessions.get(clientSessionId) || null;
+  if (!logicalSession) {
+    sendTransportMessage(connection.transport, {
+      type: 'error',
+      payload: {
+        message: `Logical client session ${clientSessionId} not found`,
+        code: 'logical_session_missing',
+      },
+    });
+    connection.closeTransport('logical client session missing');
+    return null;
+  }
+  return bindTransportConnectionToLogicalSession(connection, logicalSession);
 }
 
 function createMirror(sessionName: string): SessionMirror {
@@ -1277,46 +1392,50 @@ function getClientMirror(session: ClientSession) {
   return mirrors.get(session.mirrorKey) || null;
 }
 
-function adoptLogicalClientSession(session: ClientSession, payload: TmuxConnectPayload) {
-  const clientSessionId = normalizeClientSessionId(payload.clientSessionId);
-  if (session.id === clientSessionId) {
-    session.clientSessionId = clientSessionId;
-    session.logicalSessionBound = true;
-    return session;
-  }
-
+function getOrCreateLogicalClientSession(clientSessionId: string, requestOrigin: string) {
   const existing = sessions.get(clientSessionId) || null;
-  const previousId = session.id;
-  if (existing && existing !== session) {
-    if (existing.transport && existing.transport !== session.transport && existing.transport.readyState < WebSocket.CLOSING) {
-      try {
-        existing.transport.close('transport replaced by reconnect');
-      } catch (error) {
-        console.warn(
-          `[${new Date().toISOString()}] failed to close replaced transport for ${existing.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+  if (existing) {
+    existing.requestOrigin = requestOrigin;
+    if (existing.state === 'closed') {
+      existing.state = 'idle';
     }
-    session.title = existing.title;
-    session.sessionName = existing.sessionName;
-    session.mirrorKey = existing.mirrorKey;
-    session.cols = existing.cols;
-    session.rows = existing.rows;
-    session.terminalWidthMode = existing.terminalWidthMode;
-    session.requestedAdaptiveCols = existing.requestedAdaptiveCols;
-    session.state = existing.state === 'closed' ? 'idle' : existing.state;
-    session.pendingPasteImage = existing.pendingPasteImage;
-    session.logicalSessionBound = true;
-    sessions.delete(existing.id);
+    existing.logicalSessionBound = true;
+    return existing;
   }
+  return createLogicalClientSession(clientSessionId, requestOrigin);
+}
 
-  sessions.delete(previousId);
-  session.id = clientSessionId;
-  session.clientSessionId = clientSessionId;
+function bindTransportConnectionToLogicalSession(
+  connection: TransportConnection,
+  session: ClientSession,
+) {
+  const replacedTransportId = attachClientSessionTransport(
+    session,
+    connection.transportId,
+    connection.closeTransport,
+  ).replacedTransportId;
+  if (
+    replacedTransportId
+    && session.transport
+    && session.transport !== connection.transport
+    && session.transport.readyState < WebSocket.CLOSING
+  ) {
+    try {
+      session.transport.close('transport replaced by reconnect');
+    } catch (error) {
+      console.warn(
+        `[${new Date().toISOString()}] failed to close replaced transport for ${session.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  session.transport = connection.transport;
+  session.requestOrigin = connection.requestOrigin;
+  session.wsAlive = true;
   session.logicalSessionBound = true;
-  sessions.set(session.id, session);
+  connection.role = 'session';
+  connection.boundSessionId = session.id;
   return session;
 }
 
@@ -1386,6 +1505,7 @@ function closeLogicalClientSession(session: ClientSession, reason: string, notif
   session.pendingAttachFile = null;
   session.mirrorKey = null;
   session.state = 'closed';
+  revokeSessionTransportTicket(sessionTransportTicketStore, session.id);
   removeLogicalClientSession(sessions, session.id);
 }
 
@@ -2282,8 +2402,16 @@ function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
   }
 }
 
-async function handleMessage(session: ClientSession, rawData: RawData, isBinary = false) {
+async function handleMessage(connection: TransportConnection, rawData: RawData, isBinary = false) {
+  const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
   if (isBinary) {
+    if (!session) {
+      sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: { message: 'Binary payload requires an attached session transport', code: 'binary_requires_session' },
+      });
+      return;
+    }
     const binaryBuffer = Buffer.isBuffer(rawData)
       ? rawData
       : Array.isArray(rawData)
@@ -2309,12 +2437,40 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
   try {
     message = JSON.parse(text) as ClientMessage;
   } catch (_parseError) {
+    if (!session) {
+      sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: { message: 'Plain text input requires an attached session transport', code: 'input_requires_session' },
+      });
+      return;
+    }
     handleInput(session, text);
     return;
   }
 
   switch (message.type) {
+    case 'session-open':
+      try {
+        handleSessionOpen(connection, message.payload);
+      } catch (error) {
+        sendTransportMessage(connection.transport, {
+          type: 'session-open-failed',
+          payload: {
+            clientSessionId: message.payload?.clientSessionId || '',
+            message: error instanceof Error ? error.message : 'Invalid session-open payload',
+            code: 'session_open_invalid',
+          },
+        });
+      }
+      break;
     case 'list-sessions':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'list-sessions requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       try {
         sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
       } catch (error) {
@@ -2323,9 +2479,23 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'schedule-list':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'schedule-list requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       sendScheduleStateToSession(session, sanitizeSessionName(message.payload.sessionName || session.sessionName));
       break;
     case 'schedule-upsert':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'schedule-upsert requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       try {
         const normalized = normalizeScheduleDraft(
           {
@@ -2353,20 +2523,43 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'schedule-delete':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'schedule-delete requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       scheduleEngine.delete(message.payload.jobId);
       break;
     case 'schedule-toggle':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'schedule-toggle requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled));
       break;
     case 'schedule-run-now':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'schedule-run-now requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       void scheduleEngine.runNow(message.payload.jobId);
       break;
     case 'connect':
       try {
-        const logicalSession = adoptLogicalClientSession(session, message.payload);
-        void attachTmux(logicalSession, message.payload);
+        const logicalSession = handleSessionTransportConnect(connection, message.payload);
+        if (logicalSession) {
+          void attachTmux(logicalSession, message.payload);
+        }
       } catch (error) {
-        sendMessage(session, {
+        sendTransportMessage(connection.transport, {
           type: 'error',
           payload: {
             message: error instanceof Error ? error.message : 'Invalid connect payload',
@@ -2376,6 +2569,13 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'buffer-head-request': {
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'buffer-head-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       const mirror = getClientMirror(session);
       if (!mirror || mirror.state !== 'connected') {
         break;
@@ -2384,12 +2584,33 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       break;
     }
     case 'paste-image-start':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'paste-image-start requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       session.pendingPasteImage = message.payload;
       break;
     case 'attach-file-start':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'attach-file-start requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       session.pendingAttachFile = message.payload;
       break;
     case 'buffer-sync-request': {
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'buffer-sync-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       const mirror = getClientMirror(session);
       if (!mirror || mirror.state !== 'connected') {
         break;
@@ -2412,9 +2633,23 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       break;
     }
     case 'debug-log':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'debug-log requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleClientDebugLog(session, message.payload);
       break;
     case 'tmux-create-session':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'tmux-create-session requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       try {
         createDetachedTmuxSession(message.payload.sessionName);
         sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
@@ -2424,6 +2659,13 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'tmux-rename-session':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'tmux-rename-session requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       try {
         const currentName = sanitizeSessionName(message.payload.sessionName);
         const nextName = renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName);
@@ -2455,6 +2697,13 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'tmux-kill-session':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'tmux-kill-session requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       try {
         // Hard rule: user tmux session kill is explicit-only.
         // Close tab / split / pane recycle / runtime cleanup must never flow into this path.
@@ -2472,40 +2721,114 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       }
       break;
     case 'input':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'input requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleInput(session, message.payload);
       break;
     case 'paste-image':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'paste-image requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handlePasteImage(session, message.payload);
       break;
     case 'resize':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'resize requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       void handleResize(session, message.payload.cols, message.payload.rows);
       break;
     case 'terminal-width-mode':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'terminal-width-mode requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       void handleTerminalWidthMode(session, message.payload.mode, message.payload.cols);
       break;
     case 'ping': {
-      sendMessage(session, { type: 'pong' });
+      sendTransportMessage(connection.transport, { type: 'pong' });
       break;
     }
     case 'close':
+      if (!session) {
+        connection.closeTransport('client requested close');
+        break;
+      }
       closeLogicalClientSession(session, 'client requested close', false);
       break;
     case 'file-list-request':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-list-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleFileListRequest(session, message.payload);
       break;
     case 'file-download-request':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-download-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleFileDownloadRequest(session, message.payload);
       break;
     case 'remote-screenshot-request':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'remote-screenshot-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       void handleRemoteScreenshotRequest(session, message.payload);
       break;
     case 'file-upload-start':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-upload-start requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleFileUploadStart(session, message.payload);
       break;
     case 'file-upload-chunk':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-upload-chunk requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleFileUploadChunk(session, message.payload);
       break;
     case 'file-upload-end':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-upload-end requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
       handleFileUploadEnd(session, message.payload);
       break;
   }
@@ -2524,28 +2847,32 @@ const wss = new WebSocketServer({
 
 const rtcBridgeServer = createRtcBridgeServer({
   onTransportOpen: (transport) => {
-    const session = createClientSession(createRtcSessionTransport(transport), transport.requestOrigin);
-    console.log(`[${new Date().toISOString()}] rtc client session ${session.id} created`);
+    const connection = createTransportConnection(createRtcSessionTransport(transport), transport.requestOrigin);
+    console.log(`[${new Date().toISOString()}] rtc transport ${connection.id} created`);
     return {
       onMessage: (_transportId, data, isBinary) => {
-        session.wsAlive = true;
-        void handleMessage(session, data, isBinary);
+        connection.wsAlive = true;
+        const boundSession = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+        if (boundSession) {
+          boundSession.wsAlive = true;
+        }
+        void handleMessage(connection, data, isBinary);
       },
       onClose: (_transportId, reason) => {
-        console.log(`[${new Date().toISOString()}] rtc client session ${session.id} closed: ${reason}`);
-        if (session.logicalSessionBound) {
-          detachClientSessionTransportOnly(session, reason, session.transportId || undefined);
-        } else {
-          closeLogicalClientSession(session, reason, false);
+        console.log(`[${new Date().toISOString()}] rtc transport ${connection.id} closed: ${reason}`);
+        const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+        if (session?.logicalSessionBound) {
+          detachClientSessionTransportOnly(session, reason, connection.transportId);
         }
+        connections.delete(connection.id);
       },
       onError: (_transportId, message) => {
-        console.error(`[${new Date().toISOString()}] rtc client session ${session.id} error: ${message}`);
-        if (session.logicalSessionBound) {
-          detachClientSessionTransportOnly(session, `rtc error: ${message}`, session.transportId || undefined);
-        } else {
-          closeLogicalClientSession(session, `rtc error: ${message}`, false);
+        console.error(`[${new Date().toISOString()}] rtc transport ${connection.id} error: ${message}`);
+        const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+        if (session?.logicalSessionBound) {
+          detachClientSessionTransportOnly(session, `rtc error: ${message}`, connection.transportId);
         }
+        connections.delete(connection.id);
       },
     };
   },
@@ -2584,60 +2911,71 @@ wss.on('connection', (ws: WebSocket, request) => {
     return;
   }
 
-  const session = createClientSession(createWebSocketSessionTransport(ws), resolveRequestOrigin(request));
-  console.log(`[${new Date().toISOString()}] client session ${session.id} created`);
+  const connection = createTransportConnection(createWebSocketSessionTransport(ws), resolveRequestOrigin(request));
+  console.log(`[${new Date().toISOString()}] websocket transport ${connection.id} created`);
 
   ws.on('pong', () => {
-    session.wsAlive = true;
+    connection.wsAlive = true;
+    const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+    if (session) {
+      session.wsAlive = true;
+    }
   });
 
   ws.on('message', (rawData, isBinary) => {
-    session.wsAlive = true;
-    void handleMessage(session, rawData, isBinary);
+    connection.wsAlive = true;
+    const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+    if (session) {
+      session.wsAlive = true;
+    }
+    void handleMessage(connection, rawData, isBinary);
   });
 
   ws.on('close', () => {
-    console.log(`[${new Date().toISOString()}] client session ${session.id} websocket closed`);
-    if (session.logicalSessionBound) {
-      detachClientSessionTransportOnly(session, 'websocket closed', session.transportId || undefined);
-    } else {
-      closeLogicalClientSession(session, 'websocket closed', false);
+    console.log(`[${new Date().toISOString()}] websocket transport ${connection.id} closed`);
+    const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+    if (session?.logicalSessionBound) {
+      detachClientSessionTransportOnly(session, 'websocket closed', connection.transportId);
     }
+    connections.delete(connection.id);
   });
 
   ws.on('error', (error) => {
-    console.error(`[${new Date().toISOString()}] client session ${session.id} websocket error: ${error.message}`);
-    if (session.logicalSessionBound) {
-      detachClientSessionTransportOnly(session, `websocket error: ${error.message}`, session.transportId || undefined);
-    } else {
-      closeLogicalClientSession(session, `websocket error: ${error.message}`, false);
+    console.error(`[${new Date().toISOString()}] websocket transport ${connection.id} error: ${error.message}`);
+    const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+    if (session?.logicalSessionBound) {
+      detachClientSessionTransportOnly(session, `websocket error: ${error.message}`, connection.transportId);
     }
+    connections.delete(connection.id);
   });
 });
 
 const heartbeatTimer = setInterval(() => {
-  for (const session of sessions.values()) {
-    if (!session.transport || session.transport.kind !== 'ws' || session.transport.readyState !== WebSocket.OPEN) {
-      // Detached sessions have no transport; only explicit close / daemon shutdown may reclaim them.
+  for (const connection of connections.values()) {
+    if (connection.transport.kind !== 'ws' || connection.transport.readyState !== WebSocket.OPEN) {
       continue;
     }
 
-    if (!session.wsAlive) {
-      console.warn(`[${new Date().toISOString()}] client session ${session.id} heartbeat timeout`);
-      session.transport.close('heartbeat timeout');
+    if (!connection.wsAlive) {
+      console.warn(`[${new Date().toISOString()}] transport ${connection.id} heartbeat timeout`);
+      connection.transport.close('heartbeat timeout');
       continue;
     }
 
-    session.wsAlive = false;
+    connection.wsAlive = false;
+    const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
+    if (session) {
+      session.wsAlive = false;
+    }
     try {
-      session.transport.ping?.();
+      connection.transport.ping?.();
     } catch (error) {
       console.warn(
-        `[${new Date().toISOString()}] client session ${session.id} heartbeat ping failed: ${
+        `[${new Date().toISOString()}] transport ${connection.id} heartbeat ping failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      session.transport.close('heartbeat ping failed');
+      connection.transport.close('heartbeat ping failed');
     }
   }
 }, WS_HEARTBEAT_INTERVAL_MS);
@@ -2657,6 +2995,18 @@ function shutdownDaemon(reason: string, exitCode = 0) {
   clearInterval(memoryGuardTimer);
   scheduleEngine.dispose();
   relayHostClient.dispose();
+  for (const connection of connections.values()) {
+    try {
+      connection.closeTransport(reason);
+    } catch (error) {
+      console.warn(
+        `[${new Date().toISOString()}] failed to close transport ${connection.id} during daemon shutdown: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  connections.clear();
   shutdownClientSessions(sessions, reason);
 
   for (const mirror of [...mirrors.values()]) {

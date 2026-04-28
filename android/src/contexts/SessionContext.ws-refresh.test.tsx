@@ -30,8 +30,10 @@ class MockWebSocket {
   static CLOSING = 2;
   static CLOSED = 3;
   static instances: MockWebSocket[] = [];
+  static controlInstances: MockWebSocket[] = [];
 
   readonly url: string;
+  readonly transportRole: 'control' | 'session';
   readyState = MockWebSocket.CONNECTING;
   sent: Array<string | ArrayBuffer> = [];
   onopen: ((event?: Event) => void) | null = null;
@@ -41,11 +43,45 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url;
-    MockWebSocket.instances.push(this);
+    const role = (() => {
+      try {
+        const parsed = new URL(url);
+        return parsed.searchParams.get('ztermTransport') === 'control' ? 'control' : 'session';
+      } catch {
+        return 'session';
+      }
+    })();
+    this.transportRole = role;
+    if (role === 'control') {
+      MockWebSocket.controlInstances.push(this);
+      queueMicrotask(() => {
+        if (this.readyState === MockWebSocket.CONNECTING) {
+          this.triggerOpen();
+        }
+      });
+    } else {
+      MockWebSocket.instances.push(this);
+    }
   }
 
   send(data: string | ArrayBuffer) {
     this.sent.push(data);
+    if (this.transportRole !== 'control' || typeof data !== 'string') {
+      return;
+    }
+    const message = JSON.parse(data);
+    if (message?.type !== 'session-open') {
+      return;
+    }
+    const payload = message.payload || {};
+    this.triggerMessage({
+      type: 'session-ticket',
+      payload: {
+        clientSessionId: payload.clientSessionId,
+        sessionTransportToken: `ticket-${payload.clientSessionId}`,
+        sessionName: payload.sessionName,
+      },
+    } as ServerMessage);
   }
 
   close() {
@@ -64,6 +100,7 @@ class MockWebSocket {
 
   static reset() {
     MockWebSocket.instances = [];
+    MockWebSocket.controlInstances = [];
   }
 }
 
@@ -1755,75 +1792,71 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
   it('immediately catches up to a newer head after an older tail pull finishes instead of waiting for the next head tick', async () => {
-    vi.useFakeTimers();
-    try {
-      render(
-        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
-          <SessionHarness />
-        </SessionProvider>,
-      );
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
 
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(MockWebSocket.instances).toHaveLength(1);
-      const ws = MockWebSocket.instances[0]!;
-      ws.triggerOpen();
-      ws.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
 
-      await Promise.resolve();
-      let sentMessages = readSentMessages(ws);
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
 
-      ws.sent.length = 0;
-      ws.triggerMessage({
-        type: 'buffer-head',
-        payload: {
-          sessionId: 'session-1',
-          revision: 1,
-          latestEndIndex: 240,
-          availableStartIndex: 0,
-          availableEndIndex: 240,
-        },
-      });
+    ws.sent.length = 0;
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 1,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
 
-      await Promise.resolve();
-      sentMessages = readSentMessages(ws);
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+    });
 
-      fireEvent.click(screen.getByText('send-input'));
-      ws.triggerMessage({
-        type: 'buffer-head',
-        payload: {
-          sessionId: 'session-1',
-          revision: 2,
-          latestEndIndex: 240,
-          availableStartIndex: 0,
-          availableEndIndex: 240,
-        },
-      });
-      ws.triggerMessage({
-        type: 'buffer-sync',
-        payload: indexedPayload({
-          startIndex: 45,
-          endIndex: 240,
-          revision: 1,
-          lines: [[239, 'prompt-before-input']],
-        }),
-      });
-      await vi.advanceTimersByTimeAsync(17);
+    fireEvent.click(screen.getByText('send-input'));
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 2,
+        latestEndIndex: 240,
+        availableStartIndex: 0,
+        availableEndIndex: 240,
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 45,
+        endIndex: 240,
+        revision: 1,
+        lines: [[239, 'prompt-before-input']],
+      }),
+    });
 
-      sentMessages = readSentMessages(ws);
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(2);
       expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 1)).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    }, { timeout: 220 });
   });
 
   it('flushes queued input with a forced head request as soon as the session reconnects', async () => {
@@ -4357,5 +4390,49 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     setTimeoutSpy.mockRestore();
+  });
+
+  it('shares one control socket across same-target sessions while keeping per-session data sockets', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+
+    const controlWs = MockWebSocket.controlInstances[0]!;
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+
+    expect(readSentMessages(controlWs).filter((item) => item.type === 'session-open')).toHaveLength(2);
+    expect(readSentMessages(ws1).some((item) => item.type === 'connect')).toBe(true);
+    expect(readSentMessages(ws2).some((item) => item.type === 'connect')).toBe(true);
+  });
+
+  it('reuses the same control socket when reconnecting one session on a shared target', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+
+    const controlWs = MockWebSocket.controlInstances[0]!;
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+
+    fireEvent.click(screen.getByText('reconnect-all'));
+
+    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(4));
+    expect(readSentMessages(controlWs).filter((item) => item.type === 'session-open').length).toBeGreaterThanOrEqual(4);
   });
 });

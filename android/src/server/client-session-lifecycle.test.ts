@@ -42,6 +42,20 @@ describe('client session lifecycle truth', () => {
     expect(rebound.replacedTransportId).toBe('transport-1');
   });
 
+  it('reopening a closed logical session through a new transport returns it to idle instead of creating a new truth', () => {
+    const session = {
+      ...createSession(),
+      state: 'closed' as const,
+      transportId: null,
+    };
+
+    const rebound = attachClientSessionTransport(session, 'transport-2');
+
+    expect(rebound.clientSessionId).toBe('client-1');
+    expect(session.state).toBe('idle');
+    expect(session.transportId).toBe('transport-2');
+  });
+
   it('only explicit close removes the logical client session from daemon truth', () => {
     const sessions = new Map<string, ClientSessionLifecycleState>([
       ['client-1', createSession()],
