@@ -38,7 +38,7 @@ function loadFromStorage(): StoredFrequency {
       };
     }
   } catch {
-    // ignore
+    console.warn('[ShortcutFrequency] failed to parse persisted frequency data');
   }
   return empty;
 }

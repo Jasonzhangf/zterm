@@ -921,6 +921,31 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(sentTypes).not.toContain('buffer-sync-request');
   });
 
+  it('does not create a third transport when switching between two same-target sessions that already have their own transports', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('session-1-state').textContent).toBe('connected'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
   it('advances local revision even when a newer buffer-sync keeps the same visible lines', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -1157,7 +1182,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2));
   });
 
-  it('queues input and reconnects instead of sending into a stale-open websocket', async () => {
+  it('sends input immediately on an open session transport even when activity audit is stale', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1185,25 +1210,12 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('send-input'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
-      });
-      expect(readSentMessages(ws1).some((item) => item.type === 'input')).toBe(false);
-
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
-      const ws2 = MockWebSocket.instances[1]!;
-      ws2.triggerOpen();
-      ws2.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
-
-      await waitFor(() => {
-        const sentMessages = readSentMessages(ws2);
+        const sentMessages = readSentMessages(ws1);
         expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
         expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       });
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+      expect(MockWebSocket.instances).toHaveLength(1);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1244,6 +1256,27 @@ describe('SessionContext websocket dynamic refresh', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('reuses an active open transport on explicit resume even while the session label is still connecting', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.sent.length = 0;
+
+    fireEvent.click(screen.getByText('resume-active'));
+
+    await waitFor(() => {
+      expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(screen.getByTestId('session-state').textContent).toBe('connecting');
   });
 
   it('does not reconnect a stale-open active websocket while the app is hidden', async () => {
@@ -2474,6 +2507,70 @@ describe('SessionContext websocket dynamic refresh', () => {
       const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
       expect(reconnectMessage?.payload?.clientSessionId).toBe('session-1');
     });
+  });
+
+  it('does not eagerly close the current open transport before the replacement reconnect transport starts', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('reconnect-session'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+    expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
+  });
+
+  it('closes the superseded open transport after the replacement reconnect transport has connected', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    fireEvent.click(screen.getByText('reconnect-session'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const reconnectWs = MockWebSocket.instances[1]!;
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+
+    reconnectWs.triggerOpen();
+    reconnectWs.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+    expect(reconnectWs.readyState).toBe(MockWebSocket.OPEN);
   });
 
   it('does not send Android UI viewport rows/cols in connect or reconnect handshakes', async () => {
@@ -3730,7 +3827,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('reconnects an active tab immediately when its open transport has gone stale instead of trusting readyState OPEN', async () => {
+  it('probes an active tab over its existing open transport before any reconnect when activity is stale', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -3748,17 +3845,110 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+      ws2.sent.length = 0;
 
       now = new Date('2026-04-27T00:00:40.000Z').getTime();
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => {
         expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      });
+      expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('reconnects only after a stale-open active transport stays silent after an explicit probe', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+      ws2.sent.length = 0;
+      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      fireEvent.click(screen.getByText('switch-second'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+
+      fireEvent.click(screen.getByText('switch-first'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+      now = new Date('2026-04-27T00:00:45.000Z').getTime();
+      fireEvent.click(screen.getByText('switch-second'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-session').textContent).toBe('session-2');
         expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting');
       });
-      expect(ws2.readyState).toBe(MockWebSocket.CLOSED);
-
+      expect(ws2.readyState).toBe(MockWebSocket.OPEN);
       await waitFor(() => expect(MockWebSocket.instances).toHaveLength(3));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not reconnect on the very next active tick while a stale transport probe is still within its wait window', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+      fireEvent.click(screen.getByText('switch-second'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      ws2.sent.length = 0;
+
+      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(2);
+
+      now = new Date('2026-04-27T00:00:40.200Z').getTime();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();
     }

@@ -229,7 +229,7 @@ export function FileTransferSheet({
           try {
             const stat = await Filesystem.stat({ path: `${path}/${entry.name}`, directory: Directory.ExternalStorage });
             size = stat.size;
-          } catch { /* skip */ }
+          } catch (statError) { console.warn('[FileTransferSheet] stat failed for', entry.name, statError); }
         }
         entries.push({ name: entry.name, type, size, modified: 0, uri: entry.uri });
       }
@@ -330,7 +330,7 @@ export function FileTransferSheet({
       // Ensure directory exists
       try {
         await Filesystem.mkdir({ path: downloadDir, directory: Directory.ExternalStorage, recursive: true });
-      } catch { /* may already exist */ }
+      } catch (mkdirError) { console.warn('[FileTransferSheet] mkdir failed (may already exist):', mkdirError); }
 
       await Filesystem.writeFile({
         path: `${downloadDir}/${payload.fileName}`,

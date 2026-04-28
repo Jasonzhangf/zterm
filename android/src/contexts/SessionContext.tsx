@@ -60,6 +60,7 @@ const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
 const CLIENT_PING_INTERVAL_MS = 30000;
 const CLIENT_PONG_TIMEOUT_MS = 70000;
 const ACTIVE_TRANSPORT_STALE_ACTIVITY_MS = CLIENT_PING_INTERVAL_MS + 5000;
+const ACTIVE_TRANSPORT_PROBE_WAIT_MS = 1500;
 const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   cols: 80,
@@ -328,7 +329,9 @@ function createSessionReconnectRuntime(): SessionReconnectRuntime {
 }
 
 function computeReconnectDelay(attempt: number) {
-  return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
+  // First reconnect is immediate (0ms); subsequent attempts use exponential backoff.
+  if (attempt <= 0) return 0;
+  return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1));
 }
 
 export function shouldReconnectActivatedSession(options: SessionReconnectDecisionOptions) {
@@ -989,12 +992,14 @@ export function SessionProvider({
   const stateRef = useRef(state);
   const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
   const wsRefs = useRef<Map<string, BridgeTransportSocket>>(new Map());
+  const supersededWsRefs = useRef<Map<string, BridgeTransportSocket[]>>(new Map());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
   // renderer -> worker declarative demand only; never producer/tail truth
   const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
+  const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
   const sessionHostRef = useRef<Map<string, Host>>(new Map());
   const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
   const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
@@ -1127,6 +1132,7 @@ export function SessionProvider({
     const current = ensureSessionWireStats(sessionId);
     current.rxBytes += estimateWireBytes(data);
     lastServerActivityAtRef.current.set(sessionId, Date.now());
+    staleTransportProbeAtRef.current.delete(sessionId);
   }, [ensureSessionWireStats, estimateWireBytes]);
 
   const recordSessionRenderCommit = useCallback((sessionId: string) => {
@@ -1710,6 +1716,26 @@ export function SessionProvider({
     reconnectRuntimesRef.current.delete(sessionId);
   }, []);
 
+  const clearSupersededSockets = useCallback((sessionId: string, shouldClose = true) => {
+    const superseded = supersededWsRefs.current.get(sessionId) || null;
+    if (!superseded || superseded.length === 0) {
+      supersededWsRefs.current.delete(sessionId);
+      return;
+    }
+    if (shouldClose) {
+      for (const ws of superseded) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState < WebSocket.CLOSING) {
+          ws.close();
+        }
+      }
+    }
+    supersededWsRefs.current.delete(sessionId);
+  }, []);
+
   const cleanupSocket = useCallback((sessionId: string, shouldClose = false) => {
     const ws = wsRefs.current.get(sessionId);
     if (ws) {
@@ -1719,15 +1745,23 @@ export function SessionProvider({
       ws.onclose = null;
       if (shouldClose && ws.readyState < WebSocket.CLOSING) {
         ws.close();
+      } else if (!shouldClose) {
+        const superseded = supersededWsRefs.current.get(sessionId) || [];
+        supersededWsRefs.current.set(sessionId, [...superseded, ws]);
       }
       wsRefs.current.delete(sessionId);
+    }
+
+    if (shouldClose) {
+      clearSupersededSockets(sessionId, true);
     }
 
     clearHeartbeat(sessionId);
     clearSessionHandshakeTimeout(sessionId);
     clearTailRefreshRuntime(sessionId);
     clearSessionPullState(sessionId);
-  }, [clearHeartbeat, clearSessionHandshakeTimeout, clearSessionPullState, clearTailRefreshRuntime]);
+    staleTransportProbeAtRef.current.delete(sessionId);
+  }, [clearHeartbeat, clearSessionHandshakeTimeout, clearSessionPullState, clearSupersededSockets, clearTailRefreshRuntime]);
 
   const startReconnectAttempt = useCallback((sessionId: string) => {
     const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId);
@@ -1803,6 +1837,7 @@ export function SessionProvider({
         if (currentReconnectRuntime) {
           currentReconnectRuntime.connecting = false;
         }
+        clearSupersededSockets(sessionId, true);
         if (!baseline.shouldContinue) {
           reconnectRuntimesRef.current.delete(sessionId);
           return;
@@ -1893,6 +1928,7 @@ export function SessionProvider({
                 activeSessionId: stateRef.current.activeSessionId,
               });
               reconnectRuntimesRef.current.delete(sessionId);
+              clearSupersededSockets(sessionId, true);
               handleSocketConnectedBaselineRef.current?.({
                 sessionId,
                 sessionName: connectedSessionName,
@@ -1913,6 +1949,7 @@ export function SessionProvider({
   }, [
     applyTransportDiagnostics,
     buildTraversalSocketForHost,
+    clearSupersededSockets,
     clearSessionHandshakeTimeout,
     recordSessionRx,
     setSessionHandshakeTimeout,
@@ -2143,7 +2180,7 @@ export function SessionProvider({
     if (ws && ws.readyState === WebSocket.OPEN) {
       sendSocketPayload(id, ws, JSON.stringify({ type: 'close' }));
     }
-    cleanupSocket(id, true);
+    cleanupSocket(id, false);
     sessionHostRef.current.delete(id);
     viewportSizeRef.current.delete(id);
     pendingInputTailRefreshRef.current.delete(id);
@@ -2224,7 +2261,7 @@ export function SessionProvider({
       activeSessionId: stateRef.current.activeSessionId,
     });
 
-    cleanupSocket(id, true);
+    cleanupSocket(id, false);
     manualCloseRef.current.delete(id);
     sessionHostRef.current.set(id, { ...host, sessionName: getResolvedSessionName(host) });
     dispatch({
@@ -2265,6 +2302,44 @@ export function SessionProvider({
       reconnectSession(session.id);
     }
   }, [reconnectSession]);
+
+  const probeOrReconnectStaleSessionTransport = useCallback((sessionId: string, ws: BridgeTransportSocket, reason: 'active-reentry' | 'active-tick') => {
+    const lastActivityAt = lastServerActivityAtRef.current.get(sessionId) || 0;
+    const lastProbeAt = staleTransportProbeAtRef.current.get(sessionId) || 0;
+    if (lastProbeAt <= 0 || lastProbeAt <= lastActivityAt) {
+      runtimeDebug(`session.transport.${reason}.probe`, {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        lastServerActivityAt: lastActivityAt,
+      });
+      resetSessionTransportPullBookkeeping(sessionId, `${reason}-probe`);
+      staleTransportProbeAtRef.current.set(sessionId, Date.now());
+      requestSessionBufferHead(sessionId, ws, { force: true });
+      return 'probed' as const;
+    }
+
+    const probeAgeMs = Math.max(0, Date.now() - lastProbeAt);
+    if (probeAgeMs < ACTIVE_TRANSPORT_PROBE_WAIT_MS) {
+      runtimeDebug(`session.transport.${reason}.probe-wait`, {
+        sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        lastServerActivityAt: lastActivityAt,
+        lastProbeAt,
+        probeAgeMs,
+      });
+      return 'waiting' as const;
+    }
+
+    runtimeDebug(`session.transport.${reason}.reconnect-after-probe`, {
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      lastServerActivityAt: lastActivityAt,
+      lastProbeAt,
+      probeAgeMs,
+    });
+    reconnectSession(sessionId);
+    return 'reconnecting' as const;
+  }, [reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
   const sendMessage = useCallback((sessionId: string, msg: ClientMessage) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2492,20 +2567,45 @@ export function SessionProvider({
     totalBytes: number,
   ): RemoteScreenshotCapture {
     const ordered: string[] = [];
+    const binaryParts: Uint8Array[] = [];
+    let totalBinaryLength = 0;
     for (let index = 0; index < chunks.size; index += 1) {
       const chunk = chunks.get(index);
       if (!chunk) {
         throw new Error(`Remote screenshot missing chunk ${index}`);
       }
       ordered.push(chunk);
+      try {
+        const decoded = atob(chunk);
+        const bytes = new Uint8Array(decoded.length);
+        for (let i = 0; i < decoded.length; i += 1) {
+          bytes[i] = decoded.charCodeAt(i);
+        }
+        binaryParts.push(bytes);
+        totalBinaryLength += bytes.length;
+      } catch {
+        // chunk decode failed — will fall back to full-string decode in caller
+      }
     }
 
-    return {
+    const result: RemoteScreenshotCapture = {
       fileName,
       mimeType: 'image/png',
       dataBase64: ordered.join(''),
       totalBytes,
     };
+
+    if (binaryParts.length === chunks.size && totalBinaryLength > 0) {
+      const combined = new Uint8Array(totalBinaryLength);
+      let offset = 0;
+      for (const part of binaryParts) {
+        combined.set(part, offset);
+        offset += part.length;
+      }
+      result.dataBytes = combined;
+    }
+
+    return result;
   }
 
   const handleSocketServerMessage = useCallback((options: {
@@ -2603,7 +2703,7 @@ export function SessionProvider({
           }
         }
         for (const listener of fileTransferListeners.current) {
-          try { listener(msg); } catch { /* listener error */ }
+          try { listener(msg); } catch (listenerError) { console.error('[SessionContext] fileTransfer listener error (status):', listenerError); }
         }
         break;
       case 'file-download-chunk': {
@@ -2624,7 +2724,7 @@ export function SessionProvider({
           });
         }
         for (const listener of fileTransferListeners.current) {
-          try { listener(msg); } catch { /* listener error */ }
+          try { listener(msg); } catch (listenerError) { console.error('[SessionContext] fileTransfer listener error (chunk):', listenerError); }
         }
         break;
       }
@@ -2645,7 +2745,7 @@ export function SessionProvider({
           }
         }
         for (const listener of fileTransferListeners.current) {
-          try { listener(msg); } catch { /* listener error */ }
+          try { listener(msg); } catch (listenerError) { console.error('[SessionContext] fileTransfer listener error (complete):', listenerError); }
         }
         break;
       }
@@ -2658,7 +2758,7 @@ export function SessionProvider({
           pending.reject(new Error(payload.error || 'Remote screenshot download failed'));
         }
         for (const listener of fileTransferListeners.current) {
-          try { listener(msg); } catch { /* listener error */ }
+          try { listener(msg); } catch (listenerError) { console.error('[SessionContext] fileTransfer listener error (error):', listenerError); }
         }
         break;
       }
@@ -2666,7 +2766,7 @@ export function SessionProvider({
       case 'file-upload-complete':
       case 'file-upload-error':
         for (const listener of fileTransferListeners.current) {
-          try { listener(msg); } catch { /* listener error */ }
+          try { listener(msg); } catch (listenerError) { console.error('[SessionContext] fileTransfer listener error (upload):', listenerError); }
         }
         break;
       case 'error':
@@ -2752,35 +2852,42 @@ export function SessionProvider({
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
     const ws = wsRefs.current.get(sessionId) || null;
     const isActive = stateRef.current.activeSessionId === sessionId;
+    const sessionState = session?.state ?? null;
+    const canResumeByTransportTruth = (
+      Boolean(session)
+      && sessionState !== 'closed'
+      && sessionState !== 'error'
+      && Boolean(ws)
+      && ws!.readyState === WebSocket.OPEN
+      && isActive
+    );
     if (
-      !session
-      || session.state !== 'connected'
-      || !ws
-      || ws.readyState !== WebSocket.OPEN
-      || !isActive
+      !canResumeByTransportTruth
     ) {
       runtimeDebug('session.transport.resume-active.skip', {
         sessionId,
         activeSessionId: stateRef.current.activeSessionId,
         hasSession: Boolean(session),
-        sessionState: session?.state ?? null,
+        sessionState,
         wsReadyState: ws?.readyState ?? null,
         isActive,
       });
       return false;
     }
+    const activeSession = session as Session;
+    const activeWs = ws as BridgeTransportSocket;
 
     runtimeDebug('session.transport.resume-active', {
       sessionId,
       activeSessionId: stateRef.current.activeSessionId,
-      localRevision: session.buffer.revision,
-      localStartIndex: session.buffer.startIndex,
-      localEndIndex: session.buffer.endIndex,
+      localRevision: activeSession.buffer.revision,
+      localStartIndex: activeSession.buffer.startIndex,
+      localEndIndex: activeSession.buffer.endIndex,
       transportStale: isSessionTransportActivityStale(sessionId),
     });
     resetSessionTransportPullBookkeeping(sessionId, 'active-resume');
     pendingResumeTailRefreshRef.current.add(sessionId);
-    requestSessionBufferHead(sessionId, ws, { force: true });
+    requestSessionBufferHead(sessionId, activeWs, { force: true });
     return true;
   }, [isSessionTransportActivityStale, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
 
@@ -2825,12 +2932,7 @@ export function SessionProvider({
       && isSessionTransportActivityStale(activeSessionId)
       && !isReconnectInFlight(activeSessionId)
     ) {
-      runtimeDebug('session.transport.active-reentry.stale', {
-        sessionId: activeSessionId,
-        activeSessionId: stateRef.current.activeSessionId,
-        lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
-      });
-      reconnectSession(activeSessionId);
+      probeOrReconnectStaleSessionTransport(activeSessionId, ws, 'active-reentry');
       return;
     }
     resetSessionTransportPullBookkeeping(activeSessionId, 'active-reentry');
@@ -2844,7 +2946,7 @@ export function SessionProvider({
     })) {
       reconnectSession(activeSessionId);
     }
-  }, [isReconnectInFlight, isSessionTransportActivityStale, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
+  }, [isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = wsRefs.current.get(sessionId);
@@ -2913,12 +3015,7 @@ export function SessionProvider({
           isSessionTransportActivityStale(activeSessionId)
           && !isReconnectInFlight(activeSessionId)
         ) {
-          runtimeDebug('session.transport.active-tick.stale', {
-            sessionId: activeSessionId,
-            activeSessionId: stateRef.current.activeSessionId,
-            lastServerActivityAt: lastServerActivityAtRef.current.get(activeSessionId) || 0,
-          });
-          reconnectSession(activeSessionId);
+          probeOrReconnectStaleSessionTransport(activeSessionId, ws, 'active-tick');
           scheduleNext();
           return;
         }
@@ -2936,7 +3033,7 @@ export function SessionProvider({
         window.clearTimeout(timer);
       }
     };
-  }, [isReconnectInFlight, isSessionTransportActivityStale, reconnectSession, requestSessionBufferHead]);
+  }, [isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, requestSessionBufferHead]);
 
   const sendInput = useCallback((sessionId: string, data: string) => {
     const targetSessionId = sessionId.trim();
@@ -2960,11 +3057,12 @@ export function SessionProvider({
 
     const ws = wsRefs.current.get(targetSessionId);
     const transportStale = isSessionTransportActivityStale(targetSessionId);
-    if (ws && ws.readyState === WebSocket.OPEN && !transportStale) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       runtimeDebug('session.input.send', {
         sessionId: targetSessionId,
         size: data.length,
         preview: data.slice(0, 32),
+        transportStale,
       });
       markPendingInputTailRefresh(targetSessionId, session.buffer.revision);
       sendSocketPayload(targetSessionId, ws, JSON.stringify({ type: 'input', payload: data }));

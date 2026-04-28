@@ -18,6 +18,8 @@ describe('zterm daemon service script truth gates', () => {
     const body = extractFunctionBody(script, 'start_service');
     expect(body).toContain('write_launch_agent');
     expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
+    expect(body).toContain('wait_for_service_unloaded');
+    expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
   });
 
   it('restages the current daemon runtime before bootstrapping launchd on service restart', () => {
@@ -25,6 +27,8 @@ describe('zterm daemon service script truth gates', () => {
     const body = extractFunctionBody(script, 'restart_service');
     expect(body).toContain('write_launch_agent');
     expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
+    expect(body).toContain('wait_for_service_unloaded');
+    expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
   });
 
   it('does not fallback to tmux session when launchd service start or restart is unhealthy', () => {
@@ -35,5 +39,11 @@ describe('zterm daemon service script truth gates', () => {
     expect(startBody).not.toContain('start_tmux');
     expect(restartBody).not.toContain('falling back to tmux session');
     expect(restartBody).not.toContain('start_tmux');
+  });
+
+  it('does not emit premature package-resolve errors before filesystem fallback succeeds', () => {
+    const script = readDaemonScript();
+    const body = extractFunctionBody(script, 'resolve_node_package_dir');
+    expect(body).not.toContain('[zterm-daemon] unable to resolve');
   });
 });

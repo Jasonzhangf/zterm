@@ -132,6 +132,14 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 那么它只能补当前窗口内已有 absolute-index 行，**不得**回拖 `startIndex/endIndex`
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
+- transport topology 也必须冻结：
+  - `bridge target = bridgeHost + bridgePort + authToken`
+  - 每个 bridge target 只允许一个长期存活的 **control transport**
+  - 每个 `clientSessionId` 只允许一个稳定的 **per-session transport**
+  - control transport 只做 auth / create / attach / resume / close 等低频控制
+  - head / range / input 等高频流量只走 per-session transport，不得全部塞进 control transport
+  - session attach / resume 必须复用 control transport，但 session data 仍各自独立
+  - auth 也只属于 control transport；只要 control transport 没断，就不应重复 auth
 - active / inactive 只影响“是否继续取数”，不影响 logical session / transport 身份：
   - inactive tab 不主动高频拉 head/range
   - 但**不是**关闭 session
@@ -334,6 +342,8 @@ tmux truth
    - `buffer-sync` 到达后，renderer 只回显 payload，不得自己再造 prompt/cursor 第二语义
 10. same-session transport retry
 11. inactive tab stops polling but does not close session/transport
+12. same target multi-session stays isolated without shared reconnect fate
+13. foreground resume reuses the original session transport before any fresh reconnect
    - prompt / input row 必须可比对 `char / fg / bg / flags`
    - daemon 若回 cursor，必须是**独立 cursor metadata**；`lines` 不得因 cursor 改变
 
@@ -368,12 +378,19 @@ tmux truth
 - hidden / non-visible tab 不得继续挂载 renderer 实例；renderer scope 必须严格等于当前 visible pane。否则 header truth 已切换但 body 仍残留旧 session DOM，Android WebView 容易出现“页头/内容对不上、像花屏”的 stale compositing。
 - renderer scope 回归测试不能只断言 “inactive renderer 还在但 data-active=false”；必须直接断言 **hidden renderer 不在 DOM**，否则会把 DOM 覆盖类问题测成假绿。
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
+- App foreground resume 的真相只能是：**先 probe/resume 当前 active transport，再决定是否 reconnect**；App 不得再按 UI `session.state` 先分叉，否则会把“label stale but transport alive”误杀成重连。
+- 若 App 首帧就已经持有现存 `sessions[]`，也必须立刻持久化 `OPEN_TABS / ACTIVE_SESSION`；不能因为“这次不是 restore 分支”就跳过首次回写，否则下次冷启动恢复会拿到陈旧 tab 真相。
 - 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。
 - 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
+- transport/session 生命周期若要改，先问自己有没有违反这四条：
+  1. 是否又把 per-session ws 当成 transport 真相
+  2. 是否又让 reconnect 走 `cleanup old socket -> fresh connect`
+  3. 是否又让 inactive tab 关闭 session / transport
+  4. 是否又让 daemon 因 ws close / grace timeout 回收 logical session
 - 若真机出现**大块灰条/花屏/光标样式乱飞**，优先查 **compact wire 的 default color sentinel** 是否和 `TerminalCell` 真相一致；当前 app/runtime 里的默认前景/背景是 `256/256`，不能在 compact encode/decode 里偷偷改成 ANSI `15/0`。
 - 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
 - 若现场看起来像“正文解析错了”，先把 **terminal body** 与 **IME/editor overlay** 分开审；底部灰条/编辑条不属于 daemon buffer truth，不能直接当成 compact wire 正文错误。

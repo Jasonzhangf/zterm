@@ -2,6 +2,10 @@
 
 > 本文档是 terminal 链路唯一真源。若旧文档、旧实现、旧测试与本文冲突，以本文为准。
 
+> 补充：transport / logical session 生命周期已单独冻结在  
+> `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`。  
+> 本文档只负责 `daemon mirror / buffer manager / renderer / UI shell` 四层内容真相。
+
 ## 决策
 
 terminal 链路固定为四层独立模型：

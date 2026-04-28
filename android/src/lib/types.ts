@@ -288,6 +288,7 @@ export interface RemoteScreenshotCapture {
   fileName: string;
   mimeType: 'image/png';
   dataBase64: string;
+  dataBytes?: Uint8Array;
   totalBytes: number;
 }
 

@@ -173,6 +173,7 @@ tmux truth
    - head-only / empty sync 不得卡死 in-flight pull
    - cold start active tab 时必须主动发出 first head request
    - tab switch 到新 active tab 时必须主动发出 first head request
+   - same target 多 session 时，一个 session reconnect 不得阻塞兄弟 session 的 first head request
 
 3. **renderer orchestration**
    - follow 收到 head/buffer 更新后 commit
@@ -194,9 +195,17 @@ tmux truth
    - 安装态输入与刷新
    - 安装态恢复连接
 
+6. **session / transport lifecycle**
+   - same `clientSessionId` reconnect 复用 daemon logical session
+   - inactive tab 只停取数，不 close session / transport
+   - foreground resume 优先复用原 session transport，不 fresh recreate session
+   - daemon transport close 只 detach transport；daemon shutdown 才统一回收
+
 ### 编译前门禁
 
 每次准备出 APK 前，至少自动执行前 1-4 组。
+
+若本轮改动涉及 transport/session 生命周期，再额外强制执行第 6 组。
 
 只有：
 

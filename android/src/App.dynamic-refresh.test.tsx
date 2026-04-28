@@ -556,7 +556,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).toHaveBeenCalled();
     expect(sessionHarness.reconnectSession.mock.calls.every(([sessionId]) => sessionId === 's1')).toBe(true);
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();

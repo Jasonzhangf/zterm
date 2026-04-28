@@ -1,13 +1,14 @@
 import { mobileTheme } from '../../lib/mobile-ui';
 
 export interface RemoteScreenshotPreviewState {
-  phase: 'request-sent' | 'capturing' | 'transferring' | 'transfer-complete' | 'preview-ready' | 'saving';
+  phase: 'request-sent' | 'capturing' | 'transferring' | 'transfer-complete' | 'preview-ready' | 'saving' | 'failed';
   fileName: string;
   previewDataUrl?: string | null;
   rawDataBase64?: string | null;
   receivedChunks?: number;
   totalChunks?: number;
   totalBytes?: number;
+  errorMessage?: string | null;
 }
 
 interface RemoteScreenshotSheetProps {
@@ -56,6 +57,11 @@ function resolveStatusCopy(state: RemoteScreenshotPreviewState) {
         title: '正在保存截图',
         detail: `写入 Download/zterm/${state.fileName}`,
       };
+    case 'failed':
+      return {
+        title: '截图失败',
+        detail: state.errorMessage || '远端截图失败',
+      };
     case 'preview-ready':
     default:
       return {
@@ -72,12 +78,22 @@ function resolveStepStates(phase: RemoteScreenshotPreviewState['phase']) {
       case 'capturing': return 2;
       case 'transferring': return 3;
       case 'transfer-complete': return 3.5;
+      case 'failed': return -1;
       case 'preview-ready':
       case 'saving':
       default:
         return 4;
     }
   })();
+
+  if (phase === 'failed') {
+    return [
+      { key: 'sent', label: '发送成功', status: 'done' },
+      { key: 'captured', label: '截图成功', status: 'error' },
+      { key: 'transferred', label: '传送成功', status: 'pending' },
+      { key: 'displayed', label: '显示', status: 'pending' },
+    ] as const;
+  }
 
   return [
     { key: 'sent', label: '发送成功', status: currentRank > 1 ? 'done' : currentRank === 1 ? 'active' : 'pending' },
@@ -97,7 +113,7 @@ export function RemoteScreenshotSheet({
   }
 
   const copy = resolveStatusCopy(state);
-  const busy = state.phase !== 'preview-ready';
+  const busy = state.phase !== 'preview-ready' && state.phase !== 'failed';
   const steps = resolveStepStates(state.phase);
 
   return (
@@ -147,11 +163,15 @@ export function RemoteScreenshotSheet({
                   borderRadius: '12px',
                   border: step.status === 'done'
                     ? '1px solid rgba(31,214,122,0.28)'
+                    : step.status === 'error'
+                      ? '1px solid rgba(255,107,107,0.30)'
                     : step.status === 'active'
                       ? '1px solid rgba(141,183,255,0.36)'
                       : '1px solid rgba(255,255,255,0.08)',
                   background: step.status === 'done'
                     ? 'rgba(31,214,122,0.10)'
+                    : step.status === 'error'
+                      ? 'rgba(255,107,107,0.12)'
                     : step.status === 'active'
                       ? 'rgba(141,183,255,0.10)'
                       : 'rgba(255,255,255,0.03)',
@@ -162,6 +182,8 @@ export function RemoteScreenshotSheet({
                   style={{
                     color: step.status === 'done'
                       ? mobileTheme.colors.accent
+                      : step.status === 'error'
+                        ? '#ff9b9b'
                       : step.status === 'active'
                         ? '#8db7ff'
                         : mobileTheme.colors.textSecondary,
@@ -207,6 +229,37 @@ export function RemoteScreenshotSheet({
                   display: 'block',
                 }}
               />
+            ) : state.phase === 'failed' ? (
+              <div
+                data-testid="remote-screenshot-error"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '10px',
+                  color: '#ffd4d4',
+                  fontSize: '14px',
+                  padding: '0 20px',
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '999px',
+                    background: 'rgba(255,107,107,0.18)',
+                    color: '#ff9b9b',
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontSize: '18px',
+                    fontWeight: 800,
+                  }}
+                >
+                  !
+                </div>
+                <div>{copy.detail}</div>
+              </div>
             ) : (
               <div
                 data-testid="remote-screenshot-progress"
@@ -258,7 +311,7 @@ export function RemoteScreenshotSheet({
               cursor: busy ? 'not-allowed' : 'pointer',
             }}
           >
-            丢弃
+            {state.phase === 'failed' ? '关闭' : '丢弃'}
           </button>
           <button
             type="button"

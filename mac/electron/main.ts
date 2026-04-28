@@ -1,13 +1,22 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { LocalTmuxManager } from './local-tmux.js';
+import {
+  DEFAULT_REMOTE_SCREENSHOT_HELPER_SOCKET_PATH,
+  cleanupScreenshotHelperRuntimeState,
+  persistScreenshotHelperRuntimeState,
+  startScreenshotHelperServer,
+  type ScreenshotHelperServerController,
+} from './screenshot-helper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 
 const localTmuxManager = new LocalTmuxManager();
+const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
+let screenshotHelperServer: ScreenshotHelperServerController | null = null;
 
 function getDevServerUrl() {
   const value = process.env.VITE_DEV_SERVER_URL;
@@ -40,7 +49,38 @@ function createWindow() {
   void win.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 
-app.whenReady().then(() => {
+function installHelperOnlyAppMenu() {
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'ZTerm Screenshot Helper',
+      submenu: [
+        { label: '状态：运行中', enabled: false },
+        { label: `Socket：${DEFAULT_REMOTE_SCREENSHOT_HELPER_SOCKET_PATH}`, enabled: false },
+        { type: 'separator' },
+        {
+          label: '退出 Helper',
+          click: () => {
+            app.quit();
+          },
+        },
+      ],
+    },
+  ]);
+  Menu.setApplicationMenu(menu);
+  if (process.platform === 'darwin') {
+    app.dock?.setMenu(menu);
+  }
+}
+
+app.whenReady().then(async () => {
+  if (screenshotHelperOnlyMode) {
+    app.setName('ZTerm Screenshot Helper');
+  }
+  screenshotHelperServer = await startScreenshotHelperServer();
+  if (screenshotHelperOnlyMode) {
+    persistScreenshotHelperRuntimeState(DEFAULT_REMOTE_SCREENSHOT_HELPER_SOCKET_PATH);
+    installHelperOnlyAppMenu();
+  }
   ipcMain.handle('zterm:local-tmux:list-sessions', () => localTmuxManager.listSessions());
   ipcMain.handle('zterm:local-tmux:connect', (_event, payload: { clientId: string; sessionName: string; cols: number; rows: number; mode?: 'active' | 'idle' }) =>
     localTmuxManager.connect(payload.clientId, payload.sessionName, payload.cols, payload.rows, payload.mode || 'active'));
@@ -57,9 +97,14 @@ app.whenReady().then(() => {
   ipcMain.handle('zterm:local-tmux:buffer-sync-request', (_event, payload: { clientId: string; request: LocalBufferSyncRequestPayload }) =>
     localTmuxManager.requestBufferSync(payload.clientId, payload.request));
 
-  createWindow();
+  if (!screenshotHelperOnlyMode) {
+    createWindow();
+  }
 
   app.on('activate', () => {
+    if (screenshotHelperOnlyMode) {
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
@@ -68,11 +113,18 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   void localTmuxManager.dispose();
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && !screenshotHelperOnlyMode) {
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
   void localTmuxManager.dispose();
+  if (screenshotHelperOnlyMode) {
+    cleanupScreenshotHelperRuntimeState();
+  }
+  if (screenshotHelperServer) {
+    void screenshotHelperServer.close();
+    screenshotHelperServer = null;
+  }
 });

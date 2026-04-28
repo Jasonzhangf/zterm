@@ -174,28 +174,6 @@ function buildPersistedOpenTabFromSession(session: Pick<
   };
 }
 
-function buildPersistedOpenTabFromHost(
-  host: Pick<Host, 'id' | 'name' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand'>,
-  options: {
-    sessionId: string;
-    customName?: string;
-    createdAt?: number;
-  },
-): PersistedOpenTab {
-  return {
-    sessionId: options.sessionId,
-    hostId: host.id,
-    connectionName: host.name,
-    bridgeHost: host.bridgeHost,
-    bridgePort: host.bridgePort,
-    sessionName: host.sessionName,
-    authToken: host.authToken,
-    autoCommand: host.autoCommand,
-    customName: options.customName?.trim() || undefined,
-    createdAt: options.createdAt || Date.now(),
-  };
-}
-
 function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null) {
   if (typeof window === 'undefined') {
     return;
@@ -224,23 +202,6 @@ function persistActiveSessionId(activeSessionId: string | null) {
   } catch (error) {
     console.error('[App] Failed to persist active session:', error);
   }
-}
-
-function _reorderSessionList(sessions: Session[], sessionId: string, toIndex: number) {
-  const currentIndex = sessions.findIndex((session) => session.id === sessionId);
-  if (currentIndex < 0) {
-    return sessions;
-  }
-
-  const nextIndex = Math.max(0, Math.min(toIndex, sessions.length - 1));
-  if (currentIndex === nextIndex) {
-    return sessions;
-  }
-
-  const nextSessions = [...sessions];
-  const [targetSession] = nextSessions.splice(currentIndex, 1);
-  nextSessions.splice(nextIndex, 0, targetSession);
-  return nextSessions;
 }
 
 export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
@@ -320,36 +281,36 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     reconnectSessionRef.current = reconnectSession;
   }, [reconnectSession, resumeActiveSessionTransport, state.activeSessionId, state.sessions]);
 
-  // Single auto-persist: the ONLY writer to localStorage for open-tabs & active-session.
-  // Fires whenever sessions[] or activeSessionId changes AFTER restore is complete.
   useEffect(() => {
-    if (!restoredTabsHandledRef.current) {
+    if (!hostsLoaded) {
       return;
     }
-    persistOpenTabsState(
-      sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-      state.activeSessionId,
-    );
-  }, [sessions, state.activeSessionId]);
 
-  useEffect(() => {
-    if (restoredTabsHandledRef.current || !hostsLoaded) {
+    if (restoredTabsHandledRef.current) {
+      persistOpenTabsState(
+        sessions.map((session) => buildPersistedOpenTabFromSession(session)),
+        state.activeSessionId,
+      );
       return;
     }
 
     if (sessions.length > 0) {
       restoredTabsHandledRef.current = true;
       const persistedActiveSessionId = readPersistedActiveSessionId();
-      const effectiveActiveSessionId =
-        (persistedActiveSessionId && sessions.some((session) => session.id === persistedActiveSessionId))
+      const nextActiveSessionId =
+        persistedActiveSessionId
+        && sessions.some((session) => session.id === persistedActiveSessionId)
           ? persistedActiveSessionId
           : state.activeSessionId;
       persistOpenTabsState(
         sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-        effectiveActiveSessionId,
+        nextActiveSessionId,
       );
-      if (effectiveActiveSessionId !== state.activeSessionId) {
-        switchSession(effectiveActiveSessionId);
+      if (
+        nextActiveSessionId
+        && state.activeSessionId !== nextActiveSessionId
+      ) {
+        switchSession(nextActiveSessionId);
       }
       return;
     }
@@ -357,6 +318,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     restoredTabsHandledRef.current = true;
     const persistedTabs = readPersistedOpenTabs();
     if (persistedTabs.length === 0) {
+      persistOpenTabsState([], null);
       return;
     }
 
@@ -513,25 +475,16 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       }
 
       const currentActiveSession = currentSessions.find((session) => session.id === activeSessionId) || null;
-      if (currentActiveSession?.state === 'connected') {
-        const resumed = resumeActiveSessionTransportRef.current(activeSessionId);
-        console.debug('[App] foreground resume actions ->', {
-          reason,
-          activeSessionId,
-          action: resumed ? 'resume-active-transport' : 'resume-active-transport-noop',
-        });
-        if (!resumed) {
-          reconnectSessionRef.current(activeSessionId);
-        }
-        return;
-      }
-
+      const resumed = resumeActiveSessionTransportRef.current(activeSessionId);
       console.debug('[App] foreground resume actions ->', {
         reason,
         activeSessionId,
-        action: 'reconnect-active-session',
+        sessionState: currentActiveSession?.state || 'missing',
+        action: resumed ? 'resume-active-transport' : 'reconnect-active-session',
       });
-      reconnectSessionRef.current(activeSessionId);
+      if (!resumed) {
+        reconnectSessionRef.current(activeSessionId);
+      }
     };
 
     const markHidden = () => {

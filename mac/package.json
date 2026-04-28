@@ -9,6 +9,13 @@
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
     "build": "pnpm run build:renderer && pnpm run build:main",
+    "helper:dev": "pnpm run build:main && electron . --screenshot-helper",
+    "helper:start": "./scripts/zterm-screenshot-helper.sh start",
+    "helper:stop": "./scripts/zterm-screenshot-helper.sh stop",
+    "helper:restart": "./scripts/zterm-screenshot-helper.sh restart",
+    "helper:status": "./scripts/zterm-screenshot-helper.sh status",
+    "helper:install-service": "./scripts/zterm-screenshot-helper.sh install-service",
+    "helper:uninstall-service": "./scripts/zterm-screenshot-helper.sh uninstall-service",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "package": "pnpm run build && electron-builder --mac dir"
   },

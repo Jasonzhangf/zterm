@@ -228,4 +228,51 @@ describe('TerminalPage remote screenshot preview', () => {
       expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
     });
   });
+
+  it('keeps an explicit failed state when remote screenshot capture errors', async () => {
+    const session = makeSession('s1');
+    const onRequestRemoteScreenshot = vi.fn(async (_sessionId: string, onProgress?: (progress: any) => void): Promise<RemoteScreenshotCapture> => {
+      onProgress?.({ requestId: 'rs-1', phase: 'capturing', fileName: 'remote-shot.png' });
+      throw new Error('daemon 当前 launchd 运行上下文无法直接截图');
+    });
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('request-remote-screenshot'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-screenshot-status')).toBe('failed');
+      expect(screen.getByTestId('remote-screenshot-sheet')).toBeTruthy();
+      expect(screen.getByText('截图失败')).toBeTruthy();
+      expect(screen.getByTestId('remote-screenshot-error').textContent).toContain('daemon 当前 launchd 运行上下文无法直接截图');
+      expect(screen.getByTestId('remote-screenshot-step-captured').getAttribute('data-step-status')).toBe('error');
+      expect(screen.queryByTestId('remote-screenshot-preview-image')).toBeNull();
+    });
+
+    expect(alert).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('关闭'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
+    });
+  });
 });

@@ -168,11 +168,47 @@
 - [ ] mobile-15.30 renderer measured-cell-width closeout：renderer 列宽改成客户端实测像素真相，删除 `1ch / 2ch` 作为终端列宽语义；补 mixed ASCII/CJK 对齐回归
 - [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
 - [ ] mobile-15.32 transport/session lifecycle closeout：client session 与 ws/rtc transport 解耦；inactive tab 只停取数，不关闭 session/transport；daemon 侧 reconnect 复用同一 `clientSessionId` logical session，并补 shutdown 统一回收回归
+  - 冻结真源：`docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`
+  - 第一轮关闭顺序：
+    1. client 引入 `bridge target -> control transport` 单一真相
+    2. 每个 `clientSessionId` 保持自己独立的 stable session transport；高频 head/range/input 不复用到 control transport
+    3. session attach / resume 通过 control transport 协调，但仍绑定同一个 `clientSessionId`
+    4. inactive tab 只停 head/range pull，不关 session / transport
+    5. daemon transport close 只 detach transport；logical session 只允许 explicit close / daemon shutdown 回收
+    6. 自动回归覆盖 same target multi-session / foreground resume / active re-entry / daemon transport re-attach
+  - 2026-04-28 当前补口：
+    - App 恢复链保持 `resume-first` 真相，并把对应 App regression expectation 收口
+    - App 首帧已有 session 时立即持久化 `OPEN_TABS / ACTIVE_SESSION`，补“现存 tab 自动恢复真相”红测
+    - 继续收 `SessionContext` 内 transport truth：`wsRefs / supersededWsRefs / sessionHostRef -> runtime store`
 - [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
 - [ ] mobile-15.34 QuickBar 老布局回归 closeout：壳体改成三栏，前两栏保持老布局（左侧固定六键 `状态/↑/键盘 + ←/↓/→` + 右侧两行快捷滚动区），第三栏恢复文件/图片/同步/截图工具栏；工具栏不得重复；固定按钮不得超界
 - [ ] mobile-15.35 QuickBar keyboard-lift + session-schedule entry closeout：QuickBar editor 聚焦时 UI shell 仍消费 keyboard inset；定时列表入口不再依赖本地草稿，任何 attach 到同一 session 的客户端都可打开当前任务列表并 CRUD
 - [ ] mobile-15.36 remote screenshot preview closeout：截图必须显式暴露 `capturing -> transferring -> preview-ready -> save/discard` 单一路径；客户端不得再自动落盘后假装成功。
 - [ ] mobile-15.37 remote screenshot fail-fast closeout：`capturing / transferring` 必须有显式失败边界，daemon 和 client 任一端卡住都必须回错误，不允许无限等待。
+  - 2026-04-28 新证据：本机 daemon probe 已稳定复现 `capturing -> file-download-error(could not create image from display)`；交互 shell 直接 `screencapture` 正常
+  - 2026-04-28 新增上下文对照：daemon bootstrap / `launchctl bsexec` 都失败；shell 直接跑、shell 里 `launchctl asuser` 成功
+  - 当前收口顺序冻结：
+    1. 先补 UI 红测：失败后必须停在显式 failed，不得继续 spinner / 假 loading
+    2. daemon 错误文案改成 launchd 上下文真相，不再误报 GUI/Aqua
+    3. 下一轮补“可截图 helper / 非 launchd 负责进程”执行链
+- [ ] mobile-15.45 remote screenshot helper closeout：截图能力拆成独立 GUI helper，daemon 只转发请求/回传文件
+  - 冻结真源：`docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`
+  - 第一版闭环：
+    1. daemon 走 Unix socket helper client，不再直接 `screencapture`
+    2. mac GUI helper 常驻监听并执行截图
+    3. 本机 ws probe 必须真拿到 `file-download-complete`
+    4. 自动回归覆盖 helper success / helper unavailable / helper failed
+  - 2026-04-28 当前进度：1/2/3/4 已在开发态 + service 安装态跑通
+    - helper/client/UI 自动回归：10 tests passed
+    - service script 回归：`src/server/daemon-service-script.test.ts` 4 tests passed
+    - 本机证据：launchd service restart 后继续拿到 `capturing -> transferring -> file-download-complete`
+    - 剩余只是不做 fallback 的产品化启动方式（例如 helper 安装/显式启动入口），不是主链正确性问题
+- [ ] mobile-15.45a remote screenshot helper productized startup closeout：helper 需要独立安装/自启动/状态入口
+  - 第一版冻结：
+    1. `mac/scripts/zterm-screenshot-helper.sh` 提供 `install-service/start/stop/restart/status/uninstall-service`
+    2. helper LaunchAgent 拉起 Electron `--screenshot-helper`
+    3. helper-only 模式保留明确 app 身份与退出入口，不做黑盒后台进程
+    4. helper 未运行时仍只回显式错误，不加 fallback
 - [ ] mobile-15.38 QuickBar tool semantic closeout：`文件=文件上传`、`图片=图片上传`、`同步=远程文件同步页`、`截图=远端截图`，不得再错绑到 settings/file-transfer
 - [ ] mobile-15.39 session schedule count/window closeout：定时任务新增 `次数上限 + 终止时间`；`maxRuns=0` 表示无限次，默认 `3` 次；daemon 维护 `firedCount / nextFireAt / stop condition`，client 只编辑和展示
 - [ ] mobile-15.40 terminal debug truth overlay closeout：沿用 QuickBar `状态` 按钮开关 debug；开启后 renderer 左侧显示每行绝对行号，状态悬浮窗显示当前 `follow / reading` 模式；只做观测，不改 buffer / daemon / renderer 真相
@@ -206,7 +242,11 @@
 - 当前 blocker：
   - daemon `health.sessions.total` bookkeeping 仍偏大，需单独审计，但它已不再是 active 首刷慢的主因
   - daemon 仍保留 subscriber 驱动的 mirror 生命周期；`fin` 现场已出现 reconnect 后 `revision 2484 -> 1`、`latestEndIndex 63755 -> 50238` 的 mirror truth reset，和“daemon 只维护 tmux mirror 真相、不受 client 生命周期影响”的冻结设计冲突
-  - transport / session 仍未彻底解耦：当前 reconnect 还是 `cleanup old socket -> new ws -> fresh connect`，daemon 侧 ws close 也仍会直接删 `ClientSession`，这和“same-session retry / inactive 不关 session”冲突
+  - transport / session 仍未彻底解耦：
+    - client 仍是 `sessionId -> wsRefs` 单层真相，没有 `control transport + per-session transport` 分层
+    - client reconnect 仍是 `cleanup old socket -> new ws -> fresh connect`
+    - transport open 后仍重新发 `connect`
+    - daemon 侧虽然已有 `logical session != transport` 雏形，但 ws close 后仍保留 grace close 语义，不符合“只 detach transport”的冻结设计
 
 ## Epic-007 Mac ↔ Phone 双向文件传输
 

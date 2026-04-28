@@ -52,8 +52,14 @@
 
 ### 2.2.1 session / transport 生命周期
 
+- `bridge target = bridgeHost + bridgePort + authToken`
+- 每个 bridge target 只允许一个长期存活的 **control transport**
+- 每个 `clientSessionId` 只允许一个稳定的 **per-session transport**
 - client session 是稳定业务对象
 - ws / rtc transport 是可替换物理连接
+- control transport 只做 auth / create / attach / resume / close
+- head / range / input 只走 per-session transport，不复用到 control transport
+- session attach / resume 必须复用 control transport，但不能把每个 session 的高频流量都塞回 control transport
 - inactive tab 只停取数，不关 session / transport
 - ws close 只说明 transport 死，不说明 session truth 作废
 - daemon 端 reconnect 必须绑定回同一个 `clientSessionId`
@@ -130,6 +136,8 @@ tmux oracle
 8. **local window invalid 不得清空已有 absolute-index truth**
 9. inactive tab 只停轮询，不 close transport/session
 10. reconnect 仍使用同一 session identity
+11. same target 下多个 session 不共享 reconnect fate
+12. foreground resume 优先复用原 session transport，不 fresh recreate session
 
 ### Group C. renderer orchestration
 
@@ -192,6 +200,8 @@ tmux oracle
 2. ws close 只 detach transport，不删除 daemon logical session
 3. inactive tab 不会触发 client side close / daemon side close
 4. daemon shutdown 会统一回收 logical session / transport / mirror
+5. same target multi-session 时，一个 session 的旧 transport 卡住不会挡住兄弟 session
+6. foreground / active re-entry 会先 probe / reuse 原 session transport，只有失败后才 reconnect
 
 ### Group F. APK smoke
 

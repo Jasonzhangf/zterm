@@ -63,7 +63,7 @@ interface TerminalQuickBarProps {
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
   absoluteLineNumbersVisible?: boolean;
-  remoteScreenshotStatus?: 'idle' | 'capturing' | 'transferring' | 'preview-ready' | 'saving';
+  remoteScreenshotStatus?: 'idle' | 'capturing' | 'transferring' | 'preview-ready' | 'saving' | 'failed';
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
@@ -814,7 +814,7 @@ export function TerminalQuickBar({
       return;
     }
     if (action.id === 'file-transfer') {
-      fileInputRef.current?.click();
+      onOpenFileTransfer?.();
       return;
     }
     if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
@@ -987,6 +987,8 @@ export function TerminalQuickBar({
         return '预览中';
       case 'saving':
         return '保存中';
+      case 'failed':
+        return '截图失败';
       default:
         return '截图';
     }

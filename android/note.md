@@ -38,7 +38,65 @@
 - Jason 2026-04-24 新冻结: daemon 不再使用 `tmux -CC attach-session ... read-only` control observer；tmux 外部变化统一靠 mirror 自身的 active/idle cadence capture 检测，避免新增第二个 tmux client 崩溃面
 - Jason 2026-04-24 新冻结: active/idle cadence 由 client 显式上报；daemon 只按 session subscriber 聚合后的 cadence 调度 capture，不再保留全局 33ms head 广播 / 补偿式 reconcile 定时器
 - Jason 2026-04-24 新冻结: remote daemon / client 活跃刷新链禁止 snapshot/整窗初始化请求；client 只做 head 查询与显式区间请求，daemon 只回答 head 与 ranges，不允许整窗快照语义
+- Jason 2026-04-28 remote screenshot 新复现:
+  - 直接用本机 ws probe 打 daemon：`connected -> remote-screenshot-status(capturing) -> file-download-error(could not create image from display)`
+  - 同一台机器交互 shell 里 `screencapture -x /tmp/...png` 成功
+  - 新对照：
+    - shell 里 `launchctl asuser $(id -u) screencapture` 成功
+    - daemon bootstrap 里 `launchctl bsexec <daemon-pid> screencapture` 失败
+  - 推断：不是 `screencapture` 二进制缺失，也不是机器无屏；而是 **launchd job 的负责进程/运行上下文** 不能直接截图，单纯改 `Aqua/Interactive` 还不够
+  - 还缺：client 失败态现在只会 close preview + alert，用户体感像“还在 loading”；要改成显式 failed sheet
+- Jason 2026-04-28 remote screenshot 新冻结:
+  - 不能再让 daemon 直接截图
+  - 必须增加一个运行在 GUI session 的 screenshot helper app/process
+  - daemon 只做 request/response bridge + file stream
 - Jason 2026-04-24 traversal close-loop 新目标: 本地先完成“独立 traversal relay 模块”闭环，再做一键部署到 Claw，随后验证 register/login 与 rtc relay
 - 新根因确认: 当前已落地的 `/signal` 仍挂在目标 daemon 本身，只适用于“已能直达 daemon”的场景；对真正 NAT/内网目标无效，因为 signaling 本身先被直连阻断
 - 修复方向: 新增独立 relay service（账户 + signaling broker + TURN 配置下发），daemon 改为主动出站注册到 relay service；client 通过 relay service 转发 SDP/ICE，WebRTC 仍只做链路层
 - 部署约束: Claw 当前 `3478/udp` 已被 `derper` 占用，coturn 不能复用该端口；需选非冲突 TURN 监听端口并避免影响现有 sing-box/nginx 栈
+
+- Jason 2026-04-28 remote screenshot helper 实证:
+  - `pnpm --dir mac helper:dev` 已能起本机 GUI helper，socket=`~/.wterm/run/remote-screenshot-helper.sock`
+  - 直连 socket probe 收到 `capture-started -> capture-completed`，并产出 `~/.wterm/tmp-helper-proof.png`
+  - 前台 daemon + ws probe 收到 `capturing -> transferring -> file-download-complete(totalBytes=7056377)`
+  - 新发现独立安装态问题：`./android/scripts/zterm-daemon.sh restart` 仍会在 `launchctl bootstrap` 失败，说明 helper 主链闭环已通，但 service 安装/重启链还没闭
+
+- Jason 2026-04-28 launchd restart 根因收敛:
+  - `./android/scripts/zterm-daemon.sh restart` 里的 `Bootstrap failed: 5: Input/output error` 不是 helper 不工作
+  - 实际是 `launchctl bootout` 后旧 service 还没从 gui domain 移除，脚本就立刻 `bootstrap`，触发 launchd 时序竞争
+  - 证据：`log show` 只看到 `service inactive -> removing service`；手工稍后 bootstrap 成功；补等待后 restart/remote-screenshot 闭环转绿
+- Jason 2026-04-28 helper 产品化启动冻结:
+  - screenshot helper 现在功能链已通，但仍靠 `pnpm --dir mac helper:dev`
+  - 下一步要补 helper 自己的 LaunchAgent/service 脚本与显式状态入口
+  - daemon 不得代为拉起 helper；helper 未运行仍然必须显式失败
+- Jason 2026-04-28 transport/session 审计结论:
+  - 用户要求的唯一模型是：**bridge target 一个 base ws 长连，client session 稳定，inactive 只停取数，不关 session/transport**
+  - 当前 client 活代码并不是这样：
+    - `SessionContext` 仍是 `sessionId -> wsRefs`
+    - `connectSession()` / `reconnectSession()` 都会先 `cleanupSocket(..., true)`
+    - transport open 后仍重新发 `connect`
+  - `TraversalSocket` 本身没有 host 级 singleton / reconnect bucket；“同 host 多 session 串挂”主因不在 traversal layer
+  - daemon 活代码已具备 `logical session != transport` 雏形：
+    - `adoptLogicalClientSession()` 会按 `clientSessionId` 重绑 transport
+    - `ws.on('close')` 对 logical-bound session 走 `detachClientSessionTransportOnly()`
+  - 但 daemon 仍保留 `60s grace -> closeLogicalClientSession()`，这和“只允许 explicit close / daemon shutdown 回收 logical session”的冻结设计冲突
+- Jason 2026-04-28 transport/session 本轮 closeout 约束:
+  - App foreground resume 必须统一走：`resumeActiveSessionTransport(active) -> failed 才 reconnect(active)`
+  - 这里不能再按 UI `session.state` 先分叉，否则会把“label stale but transport alive”的情况误杀成 reconnect
+  - App 若首帧已持有现存 sessions，也必须立即把 `OPEN_TABS / ACTIVE_SESSION` 回写到 localStorage；否则冷启动恢复真相会滞后一个渲染周期，测试与现场都会丢 active tab
+  - 下一步结构收口：把 `SessionContext` 里的 `wsRefs / supersededWsRefs / sessionHostRef` 合并成单一 transport runtime store
+  - 目标不是补新语义，而是把“session -> target -> active/superseded transport” 的真实 ownership 从散乱 Map 收到一处，给后续 control transport / per-session transport 分层打底
+- Jason 2026-04-28 P0 silent failure audit & remote screenshot fix:
+  - 全局审计完成，13 处 silent catch 定位，7 处 P0 已修复为 console.error/warn 暴露
+  - 远程截图卡死根因：daemon 侧正常（ws probe 全链路验证通过），问题在 Android 客户端
+    - `buildRemoteScreenshotCapture()` 将 27 个 base64 chunk 拼成 ~6.9MB 巨串
+    - `TerminalPage` 做 `atob(6.9MB)` → Android WebView 上此操作挂住（内存/性能限制）
+    - 修复：逐 chunk atob 解码为 Uint8Array 后合并，TerminalPage 优先用 `capture.dataBytes`
+  - Fallback 代码逻辑已全部清除（只剩一处排序注释 `// fallback to manual order`，不是代码逻辑）
+  - 架构风险确认待后续处理：
+    - SessionContext.tsx 3230行需拆分（buffer-sync / transport / render-demand）
+    - 5路 reconnectSession 并行触发需收敛为单一入口
+    - cleanupSocket 先杀再建与 stable transport 设计冲突
+    - 60s grace timer 与 explicit-only close 设计冲突
+- Jason 2026-04-28 文件传输功能依然无反应：
+  - 需要端到端排查：客户端发送是否到 daemon、daemon 处理逻辑、文件实际传输

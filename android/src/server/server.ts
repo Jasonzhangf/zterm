@@ -11,7 +11,7 @@ import { WebSocketServer, WebSocket, RawData } from 'ws';
 import * as pty from 'node-pty';
 import { v4 as uuidv4 } from 'uuid';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
-import { execFile, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { basename, extname, join, resolve } from 'path';
@@ -73,6 +73,8 @@ import { closeMirrorSubscribers, detachMirrorSubscriber } from './mirror-lifecyc
 import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry, resolveMirrorSubscriberGeometry } from './mirror-geometry';
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { dispatchScheduledJob } from './schedule-dispatch';
+import { requestRemoteScreenshotViaHelper } from './remote-screenshot-helper-client';
+import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
 import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug-store';
 import { ScheduleEngine } from './schedule-engine';
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
@@ -1766,7 +1768,8 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
           cols: metrics.paneCols,
           rows: metrics.paneRows,
         };
-      } catch {
+      } catch (metricsError) {
+        console.warn('[server] readTmuxPaneMetrics failed:', metricsError instanceof Error ? metricsError.message : metricsError);
         return null;
       }
     })();
@@ -2038,7 +2041,7 @@ function buildRemoteScreenshotFileName() {
   return `remote-screenshot-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
 }
 
-function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteScreenshotRequestPayload) {
+async function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteScreenshotRequestPayload) {
   const requestId = typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
   if (!requestId) {
     sendMessage(session, {
@@ -2066,44 +2069,35 @@ function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteSc
 
   mkdirSync(getWtermHomeDir(), { recursive: true });
 
-  execFile('screencapture', ['-x', tempPath], { timeout: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS }, (captureError) => {
-    if (captureError) {
-      sendMessage(session, {
-        type: 'file-download-error',
-        payload: {
-          requestId,
-          error: captureError.killed
-            ? `screencapture timed out after ${REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS}ms`
-            : captureError.message || 'screencapture failed',
-        },
-      });
-      cleanup();
-      return;
-    }
-
-    try {
-      const fileBuffer = readFileSync(tempPath);
-      sendMessage(session, {
-        type: 'remote-screenshot-status',
-        payload: {
-          requestId,
-          phase: 'transferring',
-          fileName,
-          receivedChunks: 0,
-          totalChunks: Math.max(1, Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE)),
-          totalBytes: fileBuffer.length,
-        },
-      });
-      sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
-    } catch (readError) {
-      sendMessage(session, {
-        type: 'file-download-error',
-        payload: { requestId, error: readError instanceof Error ? readError.message : String(readError) },
-      });
-    } finally {
-      cleanup();
-    }
-  });
+  try {
+    const captureResult = await requestRemoteScreenshotViaHelper({
+      outputPath: tempPath,
+      timeoutMs: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS,
+    });
+    const fileBuffer = readFileSync(captureResult.outputPath);
+    sendMessage(session, {
+      type: 'remote-screenshot-status',
+      payload: {
+        requestId,
+        phase: 'transferring',
+        fileName,
+        receivedChunks: 0,
+        totalChunks: Math.max(1, Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE)),
+        totalBytes: fileBuffer.length,
+      },
+    });
+    sendFileDownloadBuffer(session, requestId, fileName, fileBuffer);
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-download-error',
+      payload: {
+        requestId,
+        error: resolveRemoteScreenshotErrorMessage(error, REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS),
+      },
+    });
+  } finally {
+    cleanup();
+  }
 
   function cleanup() {
     try {
@@ -2503,7 +2497,7 @@ async function handleMessage(session: ClientSession, rawData: RawData, isBinary 
       handleFileDownloadRequest(session, message.payload);
       break;
     case 'remote-screenshot-request':
-      handleRemoteScreenshotRequest(session, message.payload);
+      void handleRemoteScreenshotRequest(session, message.payload);
       break;
     case 'file-upload-start':
       handleFileUploadStart(session, message.payload);
@@ -2624,6 +2618,7 @@ wss.on('connection', (ws: WebSocket, request) => {
 const heartbeatTimer = setInterval(() => {
   for (const session of sessions.values()) {
     if (!session.transport || session.transport.kind !== 'ws' || session.transport.readyState !== WebSocket.OPEN) {
+      // Detached sessions have no transport; only explicit close / daemon shutdown may reclaim them.
       continue;
     }
 

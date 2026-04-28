@@ -104,6 +104,21 @@ wait_for_service_ready() {
   return 1
 }
 
+wait_for_service_unloaded() {
+  local attempts=0
+  local max_attempts=30
+
+  while (( attempts < max_attempts )); do
+    if ! service_loaded; then
+      return 0
+    fi
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+
+  return 1
+}
+
 port_listening() {
   nc -z 127.0.0.1 "${PORT}" >/dev/null 2>&1
 }
@@ -134,18 +149,12 @@ resolve_node_package_dir() {
 const path = require('path');
 
 const [rootDir, workspaceRoot, packageName] = process.argv.slice(2);
-let lastError = null;
 for (const base of [rootDir, workspaceRoot]) {
   try {
     const resolved = require.resolve(`${packageName}/package.json`, { paths: [base] });
     console.log(path.dirname(resolved));
     process.exit(0);
-  } catch (error) {
-    lastError = error;
-  }
-}
-if (lastError) {
-  console.error(`[zterm-daemon] unable to resolve ${packageName}: ${lastError.message || String(lastError)}`);
+  } catch {}
 }
 process.exit(1);
 EOF
@@ -167,6 +176,7 @@ EOF
     return 0
   fi
 
+  echo "[zterm-daemon] unable to resolve ${package_name} in ${ROOT_DIR} or ${WORKSPACE_ROOT}" >&2
   return 1
 }
 
@@ -360,33 +370,28 @@ chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$LAUNCH_RUNNER"
-  cat > "$LAUNCH_AGENT_PATH" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${LAUNCH_AGENT_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${LAUNCH_RUNNER}</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-  <key>ThrottleInterval</key>
-  <integer>60</integer>
-  <key>StandardOutPath</key>
-  <string>${LOG_DIR}/launchd-stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/launchd-stderr.log</string>
-</dict>
-</plist>
+  (
+    cd "$ROOT_DIR"
+    export ZTERM_LAUNCH_AGENT_PATH="$LAUNCH_AGENT_PATH"
+    export ZTERM_LAUNCH_AGENT_LABEL="$LAUNCH_AGENT_LABEL"
+    export ZTERM_LAUNCH_RUNNER="$LAUNCH_RUNNER"
+    export ZTERM_LAUNCH_STDOUT_PATH="${LOG_DIR}/launchd-stdout.log"
+    export ZTERM_LAUNCH_STDERR_PATH="${LOG_DIR}/launchd-stderr.log"
+    "$NODE_BIN" --import tsx <<EOF
+import { writeFileSync } from 'node:fs';
+import { buildLaunchAgentPlistXml } from './src/server/launch-agent-plist.ts';
+
+writeFileSync(
+  process.env.ZTERM_LAUNCH_AGENT_PATH!,
+  buildLaunchAgentPlistXml({
+    label: process.env.ZTERM_LAUNCH_AGENT_LABEL!,
+    launchRunner: process.env.ZTERM_LAUNCH_RUNNER!,
+    stdoutPath: process.env.ZTERM_LAUNCH_STDOUT_PATH!,
+    stderrPath: process.env.ZTERM_LAUNCH_STDERR_PATH!,
+  }),
+);
 EOF
+  )
 }
 
 stop_legacy_service() {
@@ -422,6 +427,10 @@ start_service() {
 
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before start"
+      return 1
+    }
   fi
   bootstrap_service
 
@@ -461,6 +470,10 @@ restart_service() {
 
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before restart"
+      return 1
+    }
   fi
   bootstrap_service
   if wait_for_service_ready; then
@@ -479,6 +492,10 @@ install_service() {
   write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before install"
+      return 1
+    }
   fi
   bootstrap_service
   echo "zterm autostart service installed"

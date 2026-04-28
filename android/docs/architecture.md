@@ -6,13 +6,15 @@
 2. `architecture.md`：模块边界
 3. `docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局 / Mac 共享壳决策
 4. `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 唯一真源
-5. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
-6. `dev-workflow.md`：执行门禁
-7. `task.md`：当前任务
-8. `CACHE.md`：短期上下文
-9. `MEMORY.md`：长期经验
-10. `evidence/`：运行证据
-11. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport / daemon logical session 生命周期真源
+6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
+7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot helper 唯一真源
+8. `dev-workflow.md`：执行门禁
+9. `task.md`：当前任务
+10. `CACHE.md`：短期上下文
+11. `MEMORY.md`：长期经验
+12. `evidence/`：运行证据
+13. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
 
 ## 模块边界
 
@@ -20,6 +22,16 @@
 - Layout/Presentation Shell：layout profile、pane 编排、safe-area / density token
 - Storage：主机配置与运行态持久化
 - Session/Transport：WebSocket、tmux bridge 会话状态
+- Session/Transport 不变量：
+  - `bridge target = bridgeHost + bridgePort + authToken`
+  - 每个 bridge target 只允许一个长期存活的 **control transport**
+  - 每个 `clientSessionId` 只允许一个稳定的 **per-session transport**
+  - `client session` 是稳定业务对象，不是 transport
+  - `daemon logical client session` 也是稳定对象，不是 transport
+  - control transport 只承载 auth / create / attach / resume / close 等低频控制
+  - head / range / input 等高频流量只走 per-session transport，不复用到 control transport
+  - active / inactive 只影响取数频率，不影响 session / transport 身份
+  - foreground / background / tab switch 不得成为 fresh recreate session 的理由
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
 - Client Mirror Buffer 不变量：窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相；client 不得先清空已有本地 buffer 再重拉
@@ -32,6 +44,7 @@
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
+- Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
 
 ## 跨尺寸布局真源
 
@@ -122,6 +135,21 @@ mobile file picker -> websocket paste-image -> daemon temp file
 - server 负责解码/格式统一（当前统一转成 PNG）
 - 剪贴板真源在本地 Mac/PC daemon，不在 mobile client
 - `Ctrl+V` 发送给当前 active tmux 会话，不广播给其他 tabs
+
+## Remote screenshot 链路
+
+```text
+Android client -> daemon -> GUI screenshot helper -> macOS screenshot truth
+               -> daemon file-download stream -> Android preview/save
+```
+
+规则：
+
+- daemon 不得再直接执行 `screencapture`
+- GUI screenshot helper 是截图能力的唯一执行主体
+- helper 与 daemon 只通过本机 IPC 通信
+- helper 不关心 tmux / terminal / renderer
+- client 只消费 `capturing / transferring / preview-ready / failed`
 
 ## Session schedule / timed send 真源
 

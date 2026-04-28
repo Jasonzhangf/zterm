@@ -803,8 +803,9 @@ export function TerminalPage({
         totalBytes: capture.totalBytes,
       } : current);
 
-      const binary = Uint8Array.from(atob(capture.dataBase64), (char) => char.charCodeAt(0));
-      const blob = new Blob([binary], { type: capture.mimeType || 'image/png' });
+      const binary = capture.dataBytes
+        ?? Uint8Array.from(atob(capture.dataBase64), (char) => char.charCodeAt(0));
+      const blob = new Blob([binary.buffer as ArrayBuffer], { type: capture.mimeType || 'image/png' });
       const previewUrl = URL.createObjectURL(blob);
       remoteScreenshotPreviewUrlRef.current = previewUrl;
       setRemoteScreenshotPreview({
@@ -817,10 +818,18 @@ export function TerminalPage({
         totalBytes: capture.totalBytes,
       });
     } catch (error) {
-      closeRemoteScreenshotPreview();
-      alert(error instanceof Error ? error.message : '远程截图失败');
+      setRemoteScreenshotPreview((current) => ({
+        phase: 'failed',
+        fileName: current?.fileName || `remote-screenshot-${Date.now()}.png`,
+        previewDataUrl: null,
+        rawDataBase64: null,
+        receivedChunks: current?.receivedChunks,
+        totalChunks: current?.totalChunks,
+        totalBytes: current?.totalBytes,
+        errorMessage: error instanceof Error ? error.message : '远程截图失败',
+      }));
     }
-  }, [activeSession?.id, closeRemoteScreenshotPreview, onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl]);
+  }, [activeSession?.id, onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl]);
 
   const handleSaveRemoteScreenshot = useCallback(async () => {
     if (
@@ -1489,7 +1498,7 @@ export function TerminalPage({
                       allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
                       domInputOffscreen={isAndroid}
                       onActivateInput={isAndroid && sessionIsActive ? () => restoreAndroidTerminalImeRoute() : undefined}
-                      onResize={!isAndroid && sessionIsActive ? onResize : undefined}
+                      onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
                       onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
                       onInput={sessionIsActive ? onTerminalInput : undefined}
                       onViewportChange={sessionIsActive ? handleTerminalViewportChange : undefined}
@@ -1708,6 +1717,8 @@ export function TerminalPage({
                     ? 'preview-ready'
                     : remoteScreenshotPreview?.phase === 'saving'
                       ? 'saving'
+                      : remoteScreenshotPreview?.phase === 'failed'
+                        ? 'failed'
                       : remoteScreenshotPreview?.phase === 'capturing'
                         ? 'capturing'
                         : remoteScreenshotPreview?.phase === 'transferring'
