@@ -116,6 +116,69 @@ app.whenReady().then(async () => {
   ipcMain.handle('zterm:local-tmux:buffer-sync-request', (_event, payload: { clientId: string; request: LocalBufferSyncRequestPayload }) =>
     localTmuxManager.requestBufferSync(payload.clientId, payload.request));
 
+  // ─── File Transfer (local filesystem) ───
+  const DEFAULT_DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads', 'zterm');
+
+  ipcMain.handle('zterm:fs:readdir', async (_event, payload: { dirPath: string }) => {
+    try {
+      const resolvedPath = payload.dirPath || DEFAULT_DOWNLOAD_DIR;
+      await fs.promises.mkdir(resolvedPath, { recursive: true });
+      const entries = await fs.promises.readdir(resolvedPath, { withFileTypes: true });
+      const result: Array<{ name: string; type: string; size: number; modified: number }> = [];
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        const fullPath = path.join(resolvedPath, entry.name);
+        try {
+          const stat = await fs.promises.stat(fullPath);
+          result.push({
+            name: entry.name,
+            type: entry.isDirectory() ? 'directory' : 'file',
+            size: stat.size,
+            modified: Math.floor(stat.mtimeMs / 1000),
+          });
+        } catch {
+          result.push({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file', size: 0, modified: 0 });
+        }
+      }
+      return { ok: true, entries: result };
+    } catch (err) {
+      return { ok: false, error: String(err), entries: [] as Array<{ name: string; type: string; size: number; modified: number }> };
+    }
+  });
+
+  ipcMain.handle('zterm:fs:save-file', async (_event, payload: { dirPath: string; fileName: string; dataBase64: string }) => {
+    try {
+      const dirPath = payload.dirPath || DEFAULT_DOWNLOAD_DIR;
+      await fs.promises.mkdir(dirPath, { recursive: true });
+      const filePath = path.join(dirPath, payload.fileName);
+      const buffer = Buffer.from(payload.dataBase64, 'base64');
+      await fs.promises.writeFile(filePath, buffer);
+      return { ok: true, path: filePath };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('zterm:fs:read-file', async (_event, payload: { filePath: string }) => {
+    try {
+      const buffer = await fs.promises.readFile(payload.filePath);
+      return { ok: true, dataBase64: buffer.toString('base64'), size: buffer.length };
+    } catch (err) {
+      return { ok: false, error: String(err), dataBase64: '', size: 0 };
+    }
+  });
+
+  ipcMain.handle('zterm:fs:mkdir', async (_event, payload: { dirPath: string }) => {
+    try {
+      await fs.promises.mkdir(payload.dirPath, { recursive: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('zterm:fs:get-download-dir', () => DEFAULT_DOWNLOAD_DIR);
+
   if (!screenshotHelperOnlyMode) {
     createWindow();
   }
@@ -147,3 +210,7 @@ app.on('before-quit', () => {
     screenshotHelperServer = null;
   }
 });
+import fs from 'node:fs';
+import os from 'node:os';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';

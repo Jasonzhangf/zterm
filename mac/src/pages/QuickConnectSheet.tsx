@@ -91,6 +91,20 @@ export function QuickConnectSheet({
     setDiscoveryError('');
   }, [bridgeSettings]);
 
+  // T-A1: auto-discover remote sessions when entering remote mode with valid credentials
+  useEffect(() => {
+    if (mode !== 'remote') {
+      return;
+    }
+    if (!draft.bridgeHost.trim() || !draft.authToken.trim()) {
+      return;
+    }
+    if (discoveryState !== 'idle') {
+      return;
+    }
+    void discoverSessions(draft);
+  }, [mode]);
+
   const refreshLocalSessions = () => {
     setLocalState('loading');
     setLocalError('');

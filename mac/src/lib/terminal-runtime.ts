@@ -11,6 +11,7 @@ import type {
   TerminalRenderBufferProjection,
   SessionBufferState,
 } from '@zterm/shared';
+import type { RemoteScreenshotStatusPayload } from '@zterm/shared';
 import { buildEmptyScheduleState } from '@zterm/shared';
 import {
   createBridgeTransportController,
@@ -18,6 +19,7 @@ import {
   type ActiveBridgeTargetState,
   type BridgeTransportController,
   type TerminalConnectionState,
+  type RemoteScreenshotRequestOptions,
 } from './bridge-transport';
 import {
   createLocalTmuxTransportController,
@@ -72,6 +74,9 @@ export interface TerminalRuntimeController {
   sendInput: (data: string) => void;
   pasteImage: (payload: PasteImagePayload) => boolean;
   resizeTerminal: (cols: number, rows: number) => void;
+  requestRemoteScreenshot: (opts: RemoteScreenshotRequestOptions) => boolean;
+  sendRawJson: (message: unknown) => boolean;
+  onFileTransferMessage: (handler: (msg: unknown) => void) => () => void;
   dispose: () => void;
 }
 
@@ -528,6 +533,19 @@ export function createTerminalRuntime(): TerminalRuntimeController {
       lastBufferSyncKey = '';
       requestCurrentHead({ force: true });
       applyViewportDemand();
+    },
+    requestRemoteScreenshot: (opts) => {
+      if (activeTransport !== bridgeTransport) {
+        opts.onError(new Error('Remote screenshot only available for bridge connections'));
+        return false;
+      }
+      return bridgeTransport.requestRemoteScreenshot(opts);
+    },
+    sendRawJson: (message) => {
+      return bridgeTransport.sendRawJson(message);
+    },
+    onFileTransferMessage: (handler) => {
+      return bridgeTransport.onFileTransferMessage(handler);
     },
     dispose: () => {
       clearQueuedReadingSync();

@@ -20,6 +20,8 @@ import { createIdleConnectionState, type TerminalConnectionState } from '../lib/
 import { DetailsSlot } from './DetailsSlot';
 import { QuickConnectSheet } from './QuickConnectSheet';
 import { SessionScheduleModal } from '../components/SessionScheduleModal';
+import { RemoteScreenshotSheet, type RemoteScreenshotPreviewState } from '../components/RemoteScreenshotSheet';
+import { FileTransferSheet } from '../components/FileTransferSheet';
 import {
   cloneWorkspaceState,
   createConnectionWorkspaceTab,
@@ -431,6 +433,127 @@ export function ShellWorkspace({
   const activeRuntimeResourceKey = useMemo(() => resolveRuntimeResourceKey(activeTab, hosts), [activeTab, hosts]);
   const activeRuntime = activeRuntimeResourceKey ? getRuntimeForResource(activeRuntimeResourceKey) : null;
   const activeRuntimeState = useTerminalRuntimeState(activeRuntime);
+
+  const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
+  const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
+
+  const revokeRemoteScreenshotPreviewUrl = useCallback(() => {
+    if (remoteScreenshotPreviewUrlRef.current) {
+      URL.revokeObjectURL(remoteScreenshotPreviewUrlRef.current);
+      remoteScreenshotPreviewUrlRef.current = null;
+    }
+  }, []);
+
+  const handleRequestRemoteScreenshot = useCallback(async () => {
+    if (!activeRuntime || activeRuntimeState.connection.status !== 'connected') {
+      return;
+    }
+    revokeRemoteScreenshotPreviewUrl();
+    setRemoteScreenshotPreview({
+      phase: 'request-sent',
+      fileName: 'remote-screenshot-' + Date.now() + '.png',
+      previewDataUrl: null,
+      rawDataBase64: null,
+    });
+    const requestId = 'rs-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    activeRuntime.requestRemoteScreenshot({
+      requestId,
+      onStatus: (status) => {
+        setRemoteScreenshotPreview((current) => ({
+          phase: status.phase === 'failed' ? 'failed' : (status.phase as RemoteScreenshotPreviewState['phase']),
+          fileName: status.fileName || (current && current.fileName) || 'remote-screenshot-' + Date.now() + '.png',
+          previewDataUrl: (current && current.previewDataUrl) || null,
+          rawDataBase64: (current && current.rawDataBase64) || null,
+          totalBytes: status.totalBytes || (current && current.totalBytes) || 0,
+          errorMessage: status.errorMessage || (current && current.errorMessage) || null,
+        }));
+      },
+      onChunk: (chunk) => {
+        setRemoteScreenshotPreview((current) => {
+          if (!current) return null;
+          return {
+            ...current,
+            phase: 'transferring',
+            fileName: chunk.fileName || current.fileName,
+            receivedChunks: (current.receivedChunks || 0) + 1,
+            totalChunks: chunk.totalChunks,
+          };
+        });
+      },
+      onComplete: (result) => {
+        setRemoteScreenshotPreview((current) => {
+          if (!current) return null;
+          return {
+            ...current,
+            phase: 'transfer-complete',
+            fileName: result.fileName,
+            totalBytes: result.totalBytes,
+          };
+        });
+        const dataBase64 = result.dataBase64Parts.join('');
+        try {
+          const binary = Uint8Array.from(atob(dataBase64), function(char) { return char.charCodeAt(0); });
+          const blob = new Blob([binary.buffer], { type: 'image/png' });
+          const previewUrl = URL.createObjectURL(blob);
+          remoteScreenshotPreviewUrlRef.current = previewUrl;
+          setRemoteScreenshotPreview({
+            phase: 'preview-ready',
+            fileName: result.fileName,
+            previewDataUrl: previewUrl,
+            rawDataBase64: dataBase64,
+            totalBytes: result.totalBytes,
+          });
+        } catch (_e) {
+          setRemoteScreenshotPreview((current) => {
+            if (!current) return null;
+            return {
+              ...current,
+              phase: 'failed',
+              errorMessage: 'Failed to decode screenshot data',
+            };
+          });
+        }
+      },
+      onError: (error) => {
+        setRemoteScreenshotPreview((current) => ({
+          phase: 'failed',
+          fileName: (current && current.fileName) || 'remote-screenshot-' + Date.now() + '.png',
+          previewDataUrl: null,
+          rawDataBase64: null,
+          totalBytes: (current && current.totalBytes) || 0,
+          errorMessage: error.message || 'Remote screenshot failed',
+        }));
+      },
+    });
+  }, [activeRuntime, activeRuntimeState.connection.status, revokeRemoteScreenshotPreviewUrl]);
+
+  const handleSaveRemoteScreenshot = useCallback(() => {
+    if (!remoteScreenshotPreview || !remoteScreenshotPreview.rawDataBase64 || remoteScreenshotPreview.phase !== 'preview-ready') {
+      return;
+    }
+    setRemoteScreenshotPreview((current) => {
+      if (!current) return null;
+      return { ...current, phase: 'saving' };
+    });
+    try {
+      const binary = Uint8Array.from(atob(remoteScreenshotPreview.rawDataBase64), function(char) { return char.charCodeAt(0); });
+      const blob = new Blob([binary.buffer], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = remoteScreenshotPreview.fileName || 'remote-screenshot.png';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      revokeRemoteScreenshotPreviewUrl();
+      setRemoteScreenshotPreview(null);
+    } catch (_e) {
+      setRemoteScreenshotPreview((current) => {
+        if (!current) return null;
+        return { ...current, phase: 'preview-ready', errorMessage: 'save failed' };
+      });
+    }
+  }, [remoteScreenshotPreview, revokeRemoteScreenshotPreviewUrl]);
+
   const activeBridgeRuntime = useMemo<TerminalConnectionState>(() => {
     if (activeTab?.kind === 'connection') {
       return activeRuntimeState.connection as TerminalConnectionState;
@@ -963,6 +1086,22 @@ export function ShellWorkspace({
           >
             Schedule
           </button>
+          <button
+            className="shell-action-button"
+            type="button"
+            disabled={activeTab?.kind !== 'connection' || !activeTarget || !activeRuntime || activeRuntimeState.connection.status !== 'connected'}
+            onClick={() => void handleRequestRemoteScreenshot()}
+          >
+            Screenshot
+          </button>
+          <button
+            className="shell-action-button"
+            type="button"
+            disabled={activeTab?.kind !== 'connection' || !activeTarget || !activeRuntime || activeRuntimeState.connection.status !== 'connected'}
+            onClick={() => setFileTransferOpen(true)}
+          >
+            Sync
+          </button>
           <div className="shell-menu-anchor">
             <button className="shell-action-button" type="button" onClick={() => setProfileMenuOpen((current) => !current)}>
               Profiles
@@ -1212,6 +1351,22 @@ export function ShellWorkspace({
           onRunNow={(jobId) => activeRuntime.runScheduleJobNow(jobId)}
         />
       ) : null}
+      <RemoteScreenshotSheet
+        state={remoteScreenshotPreview}
+        onSave={handleSaveRemoteScreenshot}
+        onDiscard={() => {
+          revokeRemoteScreenshotPreviewUrl();
+          setRemoteScreenshotPreview(null);
+        }}
+      />
+      <FileTransferSheet
+        open={fileTransferOpen}
+        remoteCwd={activeTarget ? activeTarget.sessionName || '' : ''}
+        onClose={() => setFileTransferOpen(false)}
+        sendJson={(msg) => { if (activeRuntime) activeRuntime.sendRawJson(msg); }}
+        onFileTransferMessage={activeRuntime?.onFileTransferMessage}
+      />
     </div>
   );
 }
+  const [fileTransferOpen, setFileTransferOpen] = useState(false);

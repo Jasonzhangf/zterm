@@ -5,6 +5,125 @@ import type {
 } from './types';
 import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
 
+// ─── Remote screenshot / file transfer types ───
+
+export interface FileEntry {
+  name: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified: number;
+}
+
+export type TransferDirection = 'upload' | 'download';
+
+export interface TransferProgress {
+  id: string;
+  fileName: string;
+  direction: TransferDirection;
+  totalBytes: number;
+  transferredBytes: number;
+  status: 'pending' | 'transferring' | 'done' | 'error';
+  error?: string;
+}
+
+export interface FileListRequestPayload {
+  requestId: string;
+  path: string;
+  showHidden: boolean;
+}
+
+export interface FileListResponsePayload {
+  requestId: string;
+  path: string;
+  parentPath: string | null;
+  entries: FileEntry[];
+}
+
+export interface FileListErrorPayload {
+  requestId: string;
+  error: string;
+}
+
+export interface FileDownloadRequestPayload {
+  requestId: string;
+  remotePath: string;
+  fileName: string;
+  totalBytes: number;
+}
+
+export interface FileUploadStartPayload {
+  requestId: string;
+  targetDir: string;
+  fileName: string;
+  fileSize: number;
+  chunkCount: number;
+}
+
+export interface FileUploadChunkPayload {
+  requestId: string;
+  chunkIndex: number;
+  dataBase64: string;
+}
+
+export interface FileUploadEndPayload {
+  requestId: string;
+}
+
+export interface FileUploadProgressPayload {
+  requestId: string;
+  chunkIndex: number;
+}
+
+export interface FileUploadCompletePayload {
+  requestId: string;
+}
+
+export interface FileUploadErrorPayload {
+  requestId: string;
+  error: string;
+}
+
+export interface RemoteScreenshotRequestPayload {
+  requestId: string;
+}
+
+export interface RemoteScreenshotStatusPayload {
+  requestId: string;
+  phase: 'capturing' | 'transferring' | 'failed';
+  fileName?: string;
+  receivedChunks?: number;
+  totalChunks?: number;
+  totalBytes?: number;
+  errorMessage?: string;
+}
+
+export interface FileDownloadChunkPayload {
+  requestId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  fileName: string;
+  dataBase64: string;
+}
+
+export interface FileDownloadCompletePayload {
+  requestId: string;
+  fileName: string;
+  totalBytes: number;
+}
+
+export interface FileDownloadErrorPayload {
+  requestId: string;
+  error: string;
+}
+
+export interface RemoteScreenshotCapture {
+  fileName: string;
+  mimeType: 'image/png';
+  dataBase64: string;
+  dataBytes?: Uint8Array;
+  totalBytes: number;
+}
+
 export interface HostConfigMessage {
   clientSessionId: string;
   sessionTransportToken?: string;
@@ -49,6 +168,12 @@ export type BridgeClientMessage =
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
+  | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
+  | { type: 'file-list-request'; payload: FileListRequestPayload }
+  | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
+  | { type: 'file-upload-start'; payload: FileUploadStartPayload }
+  | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
+  | { type: 'file-upload-end'; payload: FileUploadEndPayload }
   | { type: 'ping' }
   | { type: 'close' };
 
@@ -89,6 +214,15 @@ export type BridgeServerControlMessage =
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
+  | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
+  | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
+  | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
+  | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
+  | { type: 'file-list-response'; payload: FileListResponsePayload }
+  | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'file-upload-progress'; payload: FileUploadProgressPayload }
+  | { type: 'file-upload-complete'; payload: FileUploadCompletePayload }
+  | { type: 'file-upload-error'; payload: FileUploadErrorPayload }
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
