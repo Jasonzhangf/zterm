@@ -294,6 +294,7 @@ function PaneSurface({
   isInputFocused,
   onOpenConnection,
   terminalThemeId,
+  showAbsoluteLineNumbers,
 }: {
   tab: ShellWorkspaceTab;
   target: EditableHost | null;
@@ -303,6 +304,7 @@ function PaneSurface({
   isInputFocused: boolean;
   onOpenConnection: () => void;
   terminalThemeId?: string;
+  showAbsoluteLineNumbers?: boolean;
 }) {
   const runtimeState = useTerminalRuntimeState(runtime);
 
@@ -350,6 +352,7 @@ function PaneSurface({
           onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
           onViewportChange={(viewState) => runtime?.updateViewport(viewState)}
           themeId={terminalThemeId}
+          showAbsoluteLineNumbers={showAbsoluteLineNumbers}
         />
       </div>
     </div>
@@ -374,6 +377,9 @@ export function ShellWorkspace({
   const [connectionEditor, setConnectionEditor] = useState<ConnectionEditorState | null>(null);
   const [quickPaletteOpen, setQuickPaletteOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
+  const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
   const [quickPaletteTab, setQuickPaletteTab] = useState<QuickPaletteTab>('shortcuts');
   const [quickPaletteQuery, setQuickPaletteQuery] = useState('');
   const [clipboardText, setClipboardText] = useState('');
@@ -1102,6 +1108,20 @@ export function ShellWorkspace({
           >
             Sync
           </button>
+          <button
+            className={"shell-action-button" + (debugOverlayVisible ? " active" : "")}
+            type="button"
+            onClick={() => setDebugOverlayVisible((v) => !v)}
+          >
+            Debug
+          </button>
+          <button
+            className={"shell-action-button" + (absoluteLineNumbersVisible ? " active" : "")}
+            type="button"
+            onClick={() => setAbsoluteLineNumbersVisible((v) => !v)}
+          >
+            Line#
+          </button>
           <div className="shell-menu-anchor">
             <button className="shell-action-button" type="button" onClick={() => setProfileMenuOpen((current) => !current)}>
               Profiles
@@ -1238,6 +1258,7 @@ export function ShellWorkspace({
                     isInputFocused={pane.id === workspace.activePaneId}
                     onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
                     terminalThemeId={bridgeSettings.terminalThemeId}
+                    showAbsoluteLineNumbers={absoluteLineNumbersVisible}
                   />
                 </div>
               </div>
@@ -1369,4 +1390,3 @@ export function ShellWorkspace({
     </div>
   );
 }
-  const [fileTransferOpen, setFileTransferOpen] = useState(false);

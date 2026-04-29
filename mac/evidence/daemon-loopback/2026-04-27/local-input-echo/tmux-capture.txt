@@ -1,0 +1,24 @@
+fanzhang@MacBook-Air mac % printf 'hello-mac-a\n__mac_loopback_a__\n'
+hello-mac-a
+__mac_loopback_a__
+fanzhang@MacBook-Air mac % printf 'hello-mac-b\n__mac_loopback_b__\n'
+hello-mac-b
+__mac_loopback_b__
+fanzhang@MacBook-Air mac %
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

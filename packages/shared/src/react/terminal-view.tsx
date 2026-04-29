@@ -23,6 +23,7 @@ interface TerminalViewProps {
   fontSize?: number;
   rowHeight?: string;
   themeId?: string;
+  showAbsoluteLineNumbers?: boolean;
 }
 
 const DEFAULT_ROWS = 24;
@@ -221,6 +222,7 @@ const VisibleRow = memo(function VisibleRow({
   rowHeight,
   isGap,
   theme,
+  showAbsoluteLineNumbers = false,
 }: {
   row: TerminalCell[];
   rowIndex: number;
@@ -228,7 +230,27 @@ const VisibleRow = memo(function VisibleRow({
   rowHeight: string;
   isGap: boolean;
   theme: TerminalThemePreset;
+  showAbsoluteLineNumbers?: boolean;
 }) {
+  const lineNumberCell = showAbsoluteLineNumbers ? (
+    <span
+      data-terminal-line-number="true"
+      style={{
+        display: 'inline-flex',
+        width: '48px',
+        minWidth: '48px',
+        justifyContent: 'flex-end',
+        paddingRight: '8px',
+        boxSizing: 'border-box',
+        color: theme.colors[8],
+        opacity: 0.92,
+        fontWeight: 500,
+      }}
+    >
+      {absoluteIndex}
+    </span>
+  ) : null;
+
   if (isGap) {
     return (
       <div
@@ -236,7 +258,8 @@ const VisibleRow = memo(function VisibleRow({
         data-terminal-gap="true"
         data-terminal-index={absoluteIndex}
         style={{
-          display: 'block',
+          display: 'flex',
+          alignItems: 'center',
           height: rowHeight,
           lineHeight: rowHeight,
           whiteSpace: 'pre',
@@ -246,6 +269,7 @@ const VisibleRow = memo(function VisibleRow({
           borderTop: `1px dashed ${theme.colors[8]}`,
         }}
       >
+        {lineNumberCell}
         ⋯
       </div>
     );
@@ -256,18 +280,20 @@ const VisibleRow = memo(function VisibleRow({
       data-terminal-row="true"
       data-terminal-index={absoluteIndex}
       style={{
-        display: 'block',
+        display: 'flex',
+        alignItems: 'center',
         height: rowHeight,
         lineHeight: rowHeight,
         whiteSpace: 'pre',
       }}
     >
+      {lineNumberCell}
       {row.length > 0
-        ? row.map((cell, cellIndex) => (
+        ? <span style={{ display: 'inline-block', minWidth: 0, flex: 1 }}>{row.map((cell, cellIndex) => (
             <span key={`cell-${rowIndex}-${cellIndex}`} style={cellStyle(cell, rowHeight, theme)}>
               {cell.width === 0 ? '' : safeCodePointToString(cell.char)}
             </span>
-          ))
+          ))}</span>
         : ' '}
     </div>
   );
@@ -277,6 +303,7 @@ const VisibleRow = memo(function VisibleRow({
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
   && prev.theme === next.theme
+  && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
 ));
 
 export function TerminalView({
@@ -292,6 +319,7 @@ export function TerminalView({
   fontSize = 13,
   rowHeight = '16px',
   themeId,
+  showAbsoluteLineNumbers = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const resolvedProjection = projection || emptyProjection();
@@ -802,6 +830,7 @@ export function TerminalView({
             rowHeight={resolvedRowHeight || rowHeight}
             isGap={isGap}
             theme={theme}
+            showAbsoluteLineNumbers={showAbsoluteLineNumbers}
           />
         ))}
       </div>

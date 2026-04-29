@@ -1,0 +1,348 @@
+[
+  {
+    "at": "2026-04-28T10:32:52.050Z",
+    "direction": "sent",
+    "type": "session-open",
+    "payload": {
+      "clientSessionId": "mac-probe-gglved1d",
+      "name": "zterm_mac_loopback",
+      "bridgeHost": "127.0.0.1",
+      "bridgePort": 0,
+      "sessionName": "zterm_mac_loopback",
+      "cols": 80,
+      "rows": 24
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.051Z",
+    "direction": "recv",
+    "type": "session-ticket",
+    "payload": {
+      "clientSessionId": "mac-probe-gglved1d",
+      "sessionTransportToken": "fdfd0130-d106-4e11-b57d-154a4a706e9b",
+      "sessionName": "zterm_mac_loopback"
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.051Z",
+    "direction": "sent",
+    "type": "connect",
+    "payload": {
+      "clientSessionId": "mac-probe-gglved1d",
+      "name": "zterm_mac_loopback",
+      "bridgeHost": "127.0.0.1",
+      "bridgePort": 0,
+      "sessionName": "zterm_mac_loopback",
+      "cols": 80,
+      "rows": 24,
+      "sessionTransportToken": "fdfd0130-d106-4e11-b57d-154a4a706e9b"
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.055Z",
+    "direction": "recv",
+    "type": "title",
+    "payload": "zterm_mac_loopback"
+  },
+  {
+    "at": "2026-04-28T10:32:52.149Z",
+    "direction": "recv",
+    "type": "connected",
+    "payload": {
+      "sessionId": "mac-probe-gglved1d"
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.149Z",
+    "direction": "recv",
+    "type": "schedule-state",
+    "payload": {
+      "sessionName": "zterm_mac_loopback",
+      "jobs": []
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.149Z",
+    "direction": "recv",
+    "type": "title",
+    "payload": "zterm_mac_loopback"
+  },
+  {
+    "at": "2026-04-28T10:32:52.149Z",
+    "direction": "recv",
+    "type": "buffer-head",
+    "payload": {
+      "sessionId": "mac-probe-gglved1d",
+      "revision": 2,
+      "latestEndIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 27,
+        "visible": true
+      }
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.150Z",
+    "direction": "recv",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 2,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 27,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@MacBook-Air mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.230Z",
+    "direction": "recv",
+    "type": "buffer-head",
+    "payload": {
+      "sessionId": "mac-probe-gglved1d",
+      "revision": 2,
+      "latestEndIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 27,
+        "visible": true
+      }
+    }
+  },
+  {
+    "at": "2026-04-28T10:32:52.231Z",
+    "direction": "recv",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 2,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 27,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@MacBook-Air mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  }
+]
