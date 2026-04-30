@@ -69,6 +69,7 @@ WTERM_HOME="${HOME}/.wterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 RUNTIME_STATE_DIR="${WTERM_HOME}/run"
 RUNTIME_DIR="${PACKAGE_ROOT}/runtime"
+DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
 LAUNCH_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-launchd-run"
 LAUNCH_AGENT_LABEL="com.zterm.android.zterm-daemon"
@@ -175,8 +176,35 @@ port_listening() {
   nc -z 127.0.0.1 "${PORT}" >/dev/null 2>&1
 }
 
+wait_for_port_closed() {
+  local attempts=0
+  local max_attempts=30
+  while (( attempts < max_attempts )); do
+    if ! port_listening; then
+      return 0
+    fi
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 reset_launch_crash_guard() {
   rm -f "${RUNTIME_STATE_DIR}/zterm-daemon-launch-crashes.log"
+}
+
+read_daemon_pid() {
+  [[ -f "${DAEMON_PID_FILE}" ]] || return 1
+  local pid
+  pid="$(tr -d '[:space:]' < "${DAEMON_PID_FILE}")"
+  [[ -n "${pid}" ]] || return 1
+  printf '%s\n' "${pid}"
+}
+
+is_process_running() {
+  local pid="${1:-}"
+  [[ -n "${pid}" ]] || return 1
+  kill -0 "${pid}" >/dev/null 2>&1
 }
 
 run_foreground() {
@@ -186,10 +214,19 @@ run_foreground() {
   exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
-status_tmux() {
-  if tmux has-session -t "$SESSION_NAME" 2>/dev/null && port_listening; then
-    echo "zterm daemon running: session=${SESSION_NAME} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
+status_direct() {
+  local pid=""
+  if pid="$(read_daemon_pid 2>/dev/null)" && is_process_running "${pid}" && port_listening; then
+    echo "zterm daemon running: pid=${pid} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
     return 0
+  fi
+  if [[ -n "${pid}" ]] && ! is_process_running "${pid}"; then
+    rm -f "${DAEMON_PID_FILE}"
+  fi
+  if port_listening; then
+    echo "zterm daemon listener is up on port ${PORT}, but managed pid truth is missing"
+    echo "pidFile=${DAEMON_PID_FILE} host=${HOST} auth=${AUTH_SOURCE}"
+    return 1
   fi
   echo "zterm daemon not running (${PORT})"
   echo "config=${CONFIG_DISPLAY_PATH} found=${CONFIG_FOUND} auth=${AUTH_SOURCE}"
@@ -224,41 +261,87 @@ status() {
     if status_service; then
       return 0
     fi
-    status_tmux
+    status_direct
     return $?
   fi
-  status_tmux
+  status_direct
 }
 
-start_tmux() {
-  mkdir -p "$LOG_DIR"
+start_direct() {
+  mkdir -p "$LOG_DIR" "$RUNTIME_STATE_DIR"
   local timestamp log_file
   timestamp="$(date +%Y%m%d-%H%M%S)"
-  log_file="${LOG_DIR}/tmux-bridge-${PORT}-${timestamp}.log"
-  if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    echo "zterm daemon already running: session=${SESSION_NAME} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
-    echo "log dir: ${LOG_DIR}"
+  log_file="${LOG_DIR}/daemon-${PORT}-${timestamp}.log"
+  local existing_pid=""
+  if existing_pid="$(read_daemon_pid 2>/dev/null)" && is_process_running "${existing_pid}" && port_listening; then
+    echo "zterm daemon already running: pid=${existing_pid} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
+    echo "pidFile=${DAEMON_PID_FILE}"
     return 0
   fi
+  if [[ -n "${existing_pid}" ]] && ! is_process_running "${existing_pid}"; then
+    rm -f "${DAEMON_PID_FILE}"
+  fi
+  if port_listening; then
+    echo "zterm daemon listener already exists on port ${PORT}, but managed pid truth is missing"
+    echo "pidFile=${DAEMON_PID_FILE}"
+    return 1
+  fi
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-  tmux new-session -d -s "$SESSION_NAME" \
-    "cd '${HOME}' && env -u TMUX -u TMUX_PANE HOST='$HOST' PORT='$PORT' ZTERM_HOST='$HOST' ZTERM_PORT='$PORT' ZTERM_AUTH_TOKEN='${ZTERM_AUTH_TOKEN:-}' '$NODE_BIN' '$STAGED_DAEMON_ENTRY' >>'$log_file' 2>&1"
+  (
+    cd "${HOME}"
+    env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" \
+      "$NODE_BIN" "$STAGED_DAEMON_ENTRY" >>"$log_file" 2>&1
+  ) &
+  local daemon_pid=$!
+  printf '%s\n' "${daemon_pid}" > "${DAEMON_PID_FILE}"
+  if ! wait_for_service_ready; then
+    if is_process_running "${daemon_pid}"; then
+      kill "${daemon_pid}" >/dev/null 2>&1 || true
+      wait "${daemon_pid}" 2>/dev/null || true
+    fi
+    rm -f "${DAEMON_PID_FILE}"
+    echo "zterm daemon failed to become ready on port ${PORT}"
+    echo "log=${log_file}"
+    return 1
+  fi
   echo "zterm daemon started"
-  echo "session=${SESSION_NAME}"
+  echo "pid=${daemon_pid}"
   echo "host=${HOST}"
   echo "port=${PORT}"
   echo "auth=${AUTH_SOURCE}"
   echo "config=${CONFIG_DISPLAY_PATH}"
+  echo "pidFile=${DAEMON_PID_FILE}"
   echo "log=${log_file}"
 }
 
-stop_tmux() {
-  if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+stop_direct() {
+  local pid=""
+  if ! pid="$(read_daemon_pid 2>/dev/null)"; then
+    if port_listening; then
+      echo "zterm daemon listener is up on port ${PORT}, but managed pid truth is missing"
+      echo "pidFile=${DAEMON_PID_FILE}"
+      return 1
+    fi
     echo "zterm daemon not running (${PORT})"
     return 0
   fi
-  tmux kill-session -t "$SESSION_NAME"
-  echo "zterm daemon stopped: session=${SESSION_NAME}"
+  if ! is_process_running "${pid}"; then
+    rm -f "${DAEMON_PID_FILE}"
+    if port_listening; then
+      echo "zterm daemon listener is up on port ${PORT}, but pid ${pid} is stale"
+      return 1
+    fi
+    echo "zterm daemon not running (${PORT})"
+    return 0
+  fi
+  kill "${pid}"
+  if ! wait_for_port_closed; then
+    echo "zterm daemon did not stop listening on port ${PORT} after pid ${pid} was terminated"
+    return 1
+  fi
+  wait "${pid}" 2>/dev/null || true
+  rm -f "${DAEMON_PID_FILE}"
+  echo "zterm daemon stopped: pid=${pid}"
 }
 
 write_launch_agent() {
@@ -372,19 +455,24 @@ start_service() {
     echo "run: zterm-daemon install-service"
     return 1
   fi
-  stop_tmux >/dev/null 2>&1 || true
+  stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
+  write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before start"
+      return 1
+    }
   fi
   bootstrap_service
   if wait_for_service_ready; then
     status_service
     return 0
   fi
-  echo "zterm autostart service unhealthy after start; falling back to tmux session"
+  echo "zterm autostart service unhealthy after start"
   launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
-  start_tmux
+  return 1
 }
 
 stop_service() {
@@ -404,27 +492,36 @@ restart_service() {
     echo "run: zterm-daemon install-service"
     return 1
   fi
-  stop_tmux >/dev/null 2>&1 || true
+  stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
+  write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before restart"
+      return 1
+    }
   fi
   bootstrap_service
   if wait_for_service_ready; then
     status_service
     return 0
   fi
-  echo "zterm autostart service unhealthy after restart; falling back to tmux session"
+  echo "zterm autostart service unhealthy after restart"
   launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
-  start_tmux
+  return 1
 }
 
 install_service() {
-  stop_tmux >/dev/null 2>&1 || true
+  stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
+    wait_for_service_unloaded || {
+      echo "zterm autostart service failed to unload before install"
+      return 1
+    }
   fi
   bootstrap_service
   echo "zterm autostart service installed"

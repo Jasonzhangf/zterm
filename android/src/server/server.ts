@@ -8,7 +8,6 @@
  */
 
 import { WebSocketServer, WebSocket, RawData } from 'ws';
-import * as pty from 'node-pty';
 import { v4 as uuidv4 } from 'uuid';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import { spawnSync } from 'child_process';
@@ -21,6 +20,9 @@ import type {
   AttachFileStartPayload,
   BufferHeadPayload,
   BufferSyncRequestPayload,
+  FileCreateDirectoryCompletePayload,
+  FileCreateDirectoryErrorPayload,
+  FileCreateDirectoryRequestPayload,
   FileDownloadChunkPayload,
   FileDownloadCompletePayload,
   FileDownloadErrorPayload,
@@ -60,10 +62,10 @@ import {
   findChangedIndexedRanges,
   normalizeMirrorCaptureLines,
   resolveCanonicalAvailableLineCount,
-  trimTrailingDefaultCells,
   trimCanonicalBufferWindow,
 } from './canonical-buffer';
 import { buildBufferHeadPayload, buildRequestedRangeBufferPayload } from './buffer-sync-contract';
+import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 import {
   attachClientSessionTransport,
   closeClientSession as removeLogicalClientSession,
@@ -91,6 +93,7 @@ import {
 void readdirSync;
 void statSync;
 void (0 as unknown as
+  | FileCreateDirectoryRequestPayload
   | FileDownloadRequestPayload
   | FileListRequestPayload
   | FileUploadChunkPayload
@@ -145,15 +148,20 @@ interface ClientSession {
   terminalWidthMode: 'adaptive-phone' | 'mirror-fixed';
   requestedAdaptiveCols: number | null;
   wsAlive: boolean;
-  pendingPasteImage: PasteImageStartPayload | null;
-  pendingAttachFile: AttachFileStartPayload | null;
+  pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
+  pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
   logicalSessionBound: boolean;
+}
+
+interface PendingBinaryTransfer<TPayload extends { byteLength: number }> {
+  payload: TPayload;
+  receivedBytes: number;
+  chunks: Buffer[];
 }
 
 interface SessionMirror {
   key: string;
   sessionName: string;
-  ptyProcess: pty.IPty | null;
   scratchBridge: WasmBridge | null;
   state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   title: string;
@@ -222,6 +230,25 @@ function mirrorCursorEqual(left: TerminalCursorState | null | undefined, right: 
   return left.rowIndex === right.rowIndex && left.col === right.col && left.visible === right.visible;
 }
 
+function formatLocalLogTimestamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const millis = String(date.getMilliseconds()).padStart(3, '0');
+  const timezoneOffsetMinutes = -date.getTimezoneOffset();
+  const sign = timezoneOffsetMinutes >= 0 ? '+' : '-';
+  const timezoneHours = String(Math.floor(Math.abs(timezoneOffsetMinutes) / 60)).padStart(2, '0');
+  const timezoneMinutes = String(Math.abs(timezoneOffsetMinutes) % 60).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${millis} ${sign}${timezoneHours}:${timezoneMinutes}`;
+}
+
+function logTimePrefix(date = new Date()) {
+  return formatLocalLogTimestamp(date);
+}
+
 type ClientMessage =
   | { type: 'session-open'; payload: TmuxConnectPayload }
   | { type: 'connect'; payload: TmuxConnectPayload }
@@ -244,6 +271,7 @@ type ClientMessage =
   | { type: 'resize'; payload: { cols: number; rows: number } }
   | { type: 'terminal-width-mode'; payload: { mode: 'adaptive-phone' | 'mirror-fixed'; cols?: number } }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
+  | { type: 'file-create-directory-request'; payload: FileCreateDirectoryRequestPayload }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'file-upload-start'; payload: FileUploadStartPayload }
@@ -290,6 +318,8 @@ type ServerMessage =
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
   | { type: 'file-list-response'; payload: FileListResponsePayload }
   | { type: 'file-list-error'; payload: FileListErrorPayload }
+  | { type: 'file-create-directory-complete'; payload: FileCreateDirectoryCompletePayload }
+  | { type: 'file-create-directory-error'; payload: FileCreateDirectoryErrorPayload }
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
@@ -366,7 +396,7 @@ function daemonRuntimeDebug(scope: string, payload?: unknown) {
     return;
   }
 
-  const timestamp = new Date().toISOString();
+  const timestamp = logTimePrefix();
   if (payload === undefined) {
     console.debug(`[daemon-runtime:${scope}] ${timestamp}`);
     return;
@@ -388,7 +418,7 @@ function normalizeClientDebugEntries(entries: RuntimeDebugLogEntry[]) {
     .slice(0, MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES)
     .map((entry) => ({
       seq: typeof entry.seq === 'number' && Number.isFinite(entry.seq) ? entry.seq : 0,
-      ts: typeof entry.ts === 'string' ? entry.ts : new Date().toISOString(),
+      ts: typeof entry.ts === 'string' ? entry.ts : logTimePrefix(),
       scope: truncateDaemonLogPayload(entry.scope, 120),
       payload:
         typeof entry.payload === 'string' && entry.payload.length > 0
@@ -413,11 +443,11 @@ function handleClientDebugLog(session: ClientSession, payload: { entries: Runtim
   );
 
   console.log(
-    `[${new Date().toISOString()}] [client-debug] session=${session.id} tmux=${session.sessionName || 'unknown'} entries=${entries.length}`,
+    `[${logTimePrefix()}] [client-debug] session=${session.id} tmux=${session.sessionName || 'unknown'} entries=${entries.length}`,
   );
   for (const entry of entries) {
     console.log(
-      `[${new Date().toISOString()}] [client-debug:${entry.scope}] seq=${entry.seq} ts=${entry.ts} session=${session.id} ${entry.payload}`,
+      `[${logTimePrefix()}] [client-debug:${entry.scope}] seq=${entry.seq} ts=${entry.ts} session=${session.id} ${entry.payload}`,
     );
   }
 }
@@ -615,12 +645,15 @@ function writeToTmuxSession(sessionName: string, payload: string, appendEnter: b
   }
 }
 
-function writeToLiveMirror(sessionName: string, payload: string) {
+function writeToLiveMirror(sessionName: string, payload: string, appendEnter: boolean) {
   const mirror = mirrors.get(getMirrorKey(sessionName));
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     return false;
   }
-  mirror.ptyProcess.write(payload);
+  runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
+  if (appendEnter) {
+    runTmux(['send-keys', '-t', sessionName, 'Enter']);
+  }
   return true;
 }
 
@@ -657,7 +690,7 @@ function readLatestUpdateManifest() {
       versionName?: string;
     };
   } catch (error) {
-    console.warn(`[${new Date().toISOString()}] failed to parse update manifest: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[${logTimePrefix()}] failed to parse update manifest: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -786,7 +819,7 @@ function buildDebugRuntimeSnapshot(request: IncomingMessage) {
 
   return {
     ok: true,
-    generatedAt: new Date().toISOString(),
+    generatedAt: logTimePrefix(),
     authEnabled: Boolean(REQUIRED_AUTH_TOKEN),
     health: buildRuntimeHealthSnapshot(request),
     clientDebug: clientRuntimeDebugStore.getSummary(),
@@ -862,7 +895,7 @@ function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
     });
     serveJson(response, {
       ok: true,
-      generatedAt: new Date().toISOString(),
+      generatedAt: logTimePrefix(),
       limit,
       returned: entries.length,
       filters: {
@@ -1036,7 +1069,7 @@ function persistClipboardImage(payload: PasteImagePayload) {
 
 function logCleanupFailure(scope: string, filePath: string, error: unknown) {
   console.warn(
-    `[${new Date().toISOString()}] ${scope} cleanup failed for ${filePath}: ${
+    `[${logTimePrefix()}] ${scope} cleanup failed for ${filePath}: ${
       error instanceof Error ? error.message : String(error)
     }`,
   );
@@ -1057,7 +1090,7 @@ function readTmuxStatusLineCount() {
     return result.stdout.trim() === '1' ? 1 : 0;
   } catch (error) {
     console.warn(
-      `[${new Date().toISOString()}] failed to read tmux status line count; defaulting to 0: ${
+      `[${logTimePrefix()}] failed to read tmux status line count; defaulting to 0: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1166,33 +1199,20 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
 
   const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
   mirror.scratchBridge = scratchBridge;
-  scratchBridge.init(metrics.paneCols, metrics.paneRows);
-  if (capturedLines.length > 0) {
-    scratchBridge.writeString(capturedLines.join('\r\n'));
-  }
-
-  const visibleRows = buildVisibleRows(scratchBridge).map(trimTrailingDefaultCells);
-  const scratchScrollbackCount = scratchBridge.getScrollbackCount();
-  const scrollbackKeepCount = Math.max(0, Math.min(scratchScrollbackCount, maxLines - visibleRows.length));
-  const scrollbackStartOldestIndex = Math.max(0, scratchScrollbackCount - scrollbackKeepCount);
-  const scrollbackTail =
-    scrollbackKeepCount > 0
-      ? readScrollbackRangeByOldestIndex(scratchBridge, scrollbackStartOldestIndex, scratchScrollbackCount)
-      : [];
+  const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);
 
   const totalAvailableLines = resolveCanonicalAvailableLineCount({
     paneRows: metrics.paneRows,
     tmuxAvailableLineCountHint: metrics.tmuxAvailableLineCountHint,
     capturedLineCount: capturedLines.length,
-    scratchLineCount: scratchScrollbackCount + visibleRows.length,
+    canonicalLineCount: nextBufferLines.length,
   });
-  const nextBufferLines = [...scrollbackTail, ...visibleRows];
   const nextBufferStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
 
   mirror.rows = metrics.paneRows;
   mirror.cols = metrics.paneCols;
   mirror.cursorKeysApp = cursor.cursorKeysApp;
-  mirror.lastScrollbackCount = scratchScrollbackCount;
+  mirror.lastScrollbackCount = Math.max(0, nextBufferLines.length - metrics.paneRows);
   const trimmed = trimCanonicalBufferWindow(
     nextBufferStartIndex,
     nextBufferLines,
@@ -1210,7 +1230,7 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
   const visibleTopIndex = Math.max(mirror.bufferStartIndex, availableEndIndex - mirror.rows);
 
   console.log(
-    `[${new Date().toISOString()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${capturedLines.length} scratch=${scratchScrollbackCount + visibleRows.length} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${availableEndIndex} visible=${visibleTopIndex}-${availableEndIndex}`,
+    `[${logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${capturedLines.length} canonical=${nextBufferLines.length} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${availableEndIndex} visible=${visibleTopIndex}-${availableEndIndex}`,
   );
 
   return true;
@@ -1362,7 +1382,6 @@ function createMirror(sessionName: string): SessionMirror {
   const mirror: SessionMirror = {
     key,
     sessionName: key,
-    ptyProcess: null,
     scratchBridge: null,
     state: 'idle',
     title: key,
@@ -1424,7 +1443,7 @@ function bindTransportConnectionToLogicalSession(
       session.transport.close('transport replaced by reconnect');
     } catch (error) {
       console.warn(
-        `[${new Date().toISOString()}] failed to close replaced transport for ${session.id}: ${
+        `[${logTimePrefix()}] failed to close replaced transport for ${session.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -1473,7 +1492,7 @@ function closeLogicalClientSession(session: ClientSession, reason: string, notif
     if (detachResult.shouldReconcileGeometry) {
       void reconcileMirrorGeometry(mirror).catch((error) => {
         console.error(
-          `[${new Date().toISOString()}] failed to reconcile mirror geometry after detach for ${mirror.sessionName}: ${
+          `[${logTimePrefix()}] failed to reconcile mirror geometry after detach for ${mirror.sessionName}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1490,7 +1509,7 @@ function closeLogicalClientSession(session: ClientSession, reason: string, notif
       session.transport.close(reason);
     } catch (error) {
       console.warn(
-        `[${new Date().toISOString()}] failed to close client transport for ${session.id}: ${
+        `[${logTimePrefix()}] failed to close client transport for ${session.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -1515,15 +1534,6 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
   }
 
   mirror.state = 'closed';
-
-  if (mirror.ptyProcess) {
-    try {
-      mirror.ptyProcess.kill();
-    } catch (error) {
-      console.warn(`[${new Date().toISOString()}] Failed to kill pty for mirror ${mirror.key}:`, error);
-    }
-    mirror.ptyProcess = null;
-  }
 
   if (notifyClients) {
     for (const sessionId of mirror.subscribers) {
@@ -1555,42 +1565,6 @@ function destroyMirror(mirror: SessionMirror, reason: string, notifyClients = tr
   mirrors.delete(mirror.key);
 }
 
-function serializeCell(cell: ReturnType<WasmBridge['getCell']>): TerminalCell {
-  return {
-    char: cell.char,
-    fg: cell.fg,
-    bg: cell.bg,
-    flags: cell.flags,
-    width: cell.width,
-  };
-}
-
-function buildVisibleRows(bridge: WasmBridge) {
-  const rows = bridge.getRows();
-  const cols = bridge.getCols();
-  const visibleRows: TerminalCell[][] = [];
-
-  for (let row = 0; row < rows; row += 1) {
-    const cells: TerminalCell[] = [];
-    for (let col = 0; col < cols; col += 1) {
-      cells.push(serializeCell(bridge.getCell(row, col)));
-    }
-    visibleRows.push(cells);
-  }
-
-  return visibleRows;
-}
-
-function readScrollbackLineByOldestIndex(bridge: WasmBridge, totalCount: number, oldestIndex: number) {
-  const offset = totalCount - 1 - oldestIndex;
-  const lineLen = bridge.getScrollbackLineLen(offset);
-  const cells: TerminalCell[] = [];
-  for (let col = 0; col < lineLen; col += 1) {
-    cells.push(serializeCell(bridge.getScrollbackCell(offset, col)));
-  }
-  return trimTrailingDefaultCells(cells);
-}
-
 function getMirrorAvailableEndIndex(mirror: SessionMirror) {
   return mirror.bufferStartIndex + mirror.bufferLines.length;
 }
@@ -1612,21 +1586,6 @@ function resolveMirrorTargetGeometry(
         requestedCols: session.requestedAdaptiveCols,
       })),
   });
-}
-
-function readScrollbackRangeByOldestIndex(bridge: WasmBridge, startInclusive: number, endExclusive: number) {
-  const totalCount = bridge.getScrollbackCount();
-  if (totalCount <= 0 || endExclusive <= startInclusive) {
-    return [];
-  }
-
-  const start = Math.max(0, Math.min(startInclusive, totalCount));
-  const end = Math.max(start, Math.min(endExclusive, totalCount));
-  const lines: TerminalCell[][] = [];
-  for (let oldestIndex = start; oldestIndex < end; oldestIndex += 1) {
-    lines.push(readScrollbackLineByOldestIndex(bridge, totalCount, oldestIndex));
-  }
-  return lines;
 }
 
 function mirrorBufferChanged(
@@ -1719,7 +1678,7 @@ async function syncMirrorCanonicalBuffer(
     })
     .catch((error) => {
       console.error(
-        `[${new Date().toISOString()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
+        `[${logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -1751,13 +1710,13 @@ function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = 12) {
 }
 
 async function resizeConnectedMirror(mirror: SessionMirror, cols: number) {
-  if (mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (mirror.state !== 'connected') {
     return;
   }
 
   const tmuxRows = resolveRequestedTmuxRows(mirror.rows);
   mirror.cols = cols;
-  mirror.ptyProcess.resize(cols, tmuxRows);
+  runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(cols), '-y', String(tmuxRows)]);
   mirror.lastScrollbackCount = -1;
   mirror.bufferLines = [];
   mirror.bufferStartIndex = 0;
@@ -1769,7 +1728,7 @@ async function resizeConnectedMirror(mirror: SessionMirror, cols: number) {
 }
 
 async function reconcileMirrorGeometry(mirror: SessionMirror) {
-  if (mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (mirror.state !== 'connected') {
     return false;
   }
 
@@ -1799,16 +1758,16 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   mirror.cols = targetGeometry.cols;
   mirror.rows = targetGeometry.rows;
   const requestedTmuxRows = resolveRequestedTmuxRows(targetGeometry.rows);
-
-  let ptyProcess: pty.IPty;
   try {
-    ptyProcess = pty.spawn(TMUX_BINARY, ['new-session', '-A', '-s', mirror.sessionName], {
-      name: 'xterm-256color',
-      cols: targetGeometry.cols,
-      rows: requestedTmuxRows,
-      cwd: process.env.HOME || '/',
-      env: cleanEnv(),
-    });
+    let sessionExists = true;
+    try {
+      runTmux(['has-session', '-t', mirror.sessionName]);
+    } catch {
+      sessionExists = false;
+    }
+    if (!sessionExists) {
+      runTmux(['new-session', '-d', '-s', mirror.sessionName, '-x', String(targetGeometry.cols), '-y', String(requestedTmuxRows)]);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     mirror.state = 'error';
@@ -1818,22 +1777,12 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
         continue;
       }
       session.state = 'error';
-      sendMessage(session, { type: 'error', payload: { message: `Failed to spawn tmux: ${message}`, code: 'spawn_failed' } });
+      sendMessage(session, { type: 'error', payload: { message: `Failed to start tmux session: ${message}`, code: 'tmux_start_failed' } });
     }
     return;
   }
 
-  mirror.ptyProcess = ptyProcess;
   mirror.state = 'connected';
-
-  ptyProcess.onData((_data: string) => {
-    scheduleMirrorLiveSync(mirror, 33);
-  });
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    const reason = `pty exited (code=${exitCode}, signal=${signal ?? 'none'})`;
-    destroyMirror(mirror, reason);
-  });
 
   try {
     await new Promise((resolve) => setTimeout(resolve, 80));
@@ -1845,7 +1794,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   } catch (error) {
     mirror.state = 'error';
     console.error(
-      `[${new Date().toISOString()}] initial buffer sync failed for ${mirror.sessionName}: ${
+      `[${logTimePrefix()}] initial buffer sync failed for ${mirror.sessionName}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1866,10 +1815,11 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
   }
 
   if (autoCommand?.trim()) {
-    const command = autoCommand.endsWith('\r') ? autoCommand : `${autoCommand}\r`;
+    const command = autoCommand.endsWith('\r') ? autoCommand.slice(0, -1) : autoCommand;
     setTimeout(() => {
-      if (mirror.state === 'connected' && mirror.ptyProcess) {
-        mirror.ptyProcess.write(command);
+      if (mirror.state === 'connected') {
+        writeToTmuxSession(mirror.sessionName, command, true);
+        scheduleMirrorLiveSync(mirror, 33);
       }
     }, AUTO_COMMAND_DELAY_MS);
   }
@@ -1926,7 +1876,7 @@ async function attachTmux(session: ClientSession, payload: TmuxConnectPayload) {
     if (detachResult.shouldReconcileGeometry) {
       void reconcileMirrorGeometry(previousMirror).catch((error) => {
         console.error(
-          `[${new Date().toISOString()}] failed to reconcile mirror geometry after session switch for ${previousMirror.sessionName}: ${
+          `[${logTimePrefix()}] failed to reconcile mirror geometry after session switch for ${previousMirror.sessionName}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1980,7 +1930,7 @@ async function handleResize(session: ClientSession, cols: number, rows: number) 
   }
   session.requestedAdaptiveCols = session.cols;
   const mirror = getClientMirror(session);
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     return;
   }
   await reconcileMirrorGeometry(mirror);
@@ -1996,7 +1946,7 @@ async function handleTerminalWidthMode(session: ClientSession, mode: 'adaptive-p
       ? normalizeTerminalCols(cols)
       : null;
   const mirror = getClientMirror(session);
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     return;
   }
   if (session.terminalWidthMode !== 'adaptive-phone') {
@@ -2007,15 +1957,15 @@ async function handleTerminalWidthMode(session: ClientSession, mode: 'adaptive-p
 
 function handleInput(session: ClientSession, data: string) {
   const mirror = getClientMirror(session);
-  if (mirror?.state === 'connected' && mirror.ptyProcess) {
-    mirror.ptyProcess.write(data);
+  if (mirror?.state === 'connected') {
+    writeToLiveMirror(mirror.sessionName, data, false);
     scheduleMirrorLiveSync(mirror, 33);
   }
 }
 
 function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
   const mirror = getClientMirror(session);
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' } });
     return;
   }
@@ -2023,7 +1973,7 @@ function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
   try {
     const { sourcePath, pngPath, bytes } = persistClipboardImage(payload);
     const pasteSequence = payload.pasteSequence || '\x16';
-    mirror.ptyProcess.write(pasteSequence);
+    writeToLiveMirror(mirror.sessionName, pasteSequence, false);
     scheduleMirrorLiveSync(mirror, 33);
     sendMessage(session, {
       type: 'image-pasted',
@@ -2099,6 +2049,34 @@ function handleFileListRequest(session: ClientSession, payload: FileListRequestP
   } catch (error) {
     sendMessage(session, {
       type: 'file-list-error',
+      payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
+function handleFileCreateDirectoryRequest(session: ClientSession, payload: FileCreateDirectoryRequestPayload) {
+  const { requestId, path: requestedPath, name: requestedName } = payload;
+
+  try {
+    const resolvedPath = resolveFileTransferListPath(
+      requestedPath,
+      () => readTmuxPaneCurrentPath(session.sessionName),
+    );
+    const directoryName = requestedName.trim();
+    if (!directoryName) {
+      throw new Error('directory name required');
+    }
+    if (directoryName === '.' || directoryName === '..' || directoryName.includes('/') || directoryName.includes('\\')) {
+      throw new Error('invalid directory name');
+    }
+    mkdirSync(join(resolvedPath, directoryName), { recursive: false });
+    sendMessage(session, {
+      type: 'file-create-directory-complete',
+      payload: { requestId, path: resolvedPath, name: directoryName },
+    });
+  } catch (error) {
+    sendMessage(session, {
+      type: 'file-create-directory-error',
       payload: { requestId, error: error instanceof Error ? error.message : String(error) },
     });
   }
@@ -2314,37 +2292,77 @@ function handleFileUploadEnd(session: ClientSession, payload: FileUploadEndPaylo
   }
 }
 
-function handleAttachFileBinary(session: ClientSession, buffer: Buffer) {
-  const pending = session.pendingAttachFile;
-  session.pendingAttachFile = null;
-
+function consumePendingBinaryTransfer<TPayload extends { byteLength: number }>(
+  pending: PendingBinaryTransfer<TPayload> | null,
+  buffer: Buffer,
+) {
   if (!pending) {
+    return { pending: null, complete: null as Buffer | null, error: null as string | null };
+  }
+
+  pending.chunks.push(buffer);
+  pending.receivedBytes += buffer.length;
+  if (pending.receivedBytes > pending.payload.byteLength) {
+    return {
+      pending: null,
+      complete: null as Buffer | null,
+      error: `Binary payload exceeded expected size (${pending.receivedBytes} > ${pending.payload.byteLength})`,
+    };
+  }
+
+  if (pending.receivedBytes < pending.payload.byteLength) {
+    return { pending, complete: null as Buffer | null, error: null as string | null };
+  }
+
+  return {
+    pending: null,
+    complete: Buffer.concat(pending.chunks, pending.payload.byteLength),
+    error: null as string | null,
+  };
+}
+
+function handleAttachFileBinary(session: ClientSession, buffer: Buffer) {
+  const pendingTransfer = session.pendingAttachFile;
+  const consume = consumePendingBinaryTransfer(pendingTransfer, buffer);
+  session.pendingAttachFile = consume.pending;
+
+  if (!pendingTransfer) {
     sendMessage(session, { type: 'error', payload: { message: 'No pending attach-file when binary arrived', code: 'attach_file_no_pending' } });
     return;
   }
+  if (consume.error) {
+    sendMessage(session, { type: 'error', payload: { message: consume.error, code: 'attach_file_size_mismatch' } });
+    return;
+  }
+  if (!consume.complete) {
+    return;
+  }
+
+  const binaryBuffer = consume.complete;
 
   const mirror = getClientMirror(session);
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for file attach', code: 'session_not_ready' } });
     return;
   }
 
   try {
+    const payload = pendingTransfer.payload;
     const downloadDir = join(homedir(), 'Downloads', 'zterm');
     mkdirSync(downloadDir, { recursive: true });
 
-    const targetPath = join(downloadDir, pending.name);
-    writeFileSync(targetPath, buffer);
+    const targetPath = join(downloadDir, payload.name);
+    writeFileSync(targetPath, binaryBuffer);
 
-    mirror.ptyProcess.write(targetPath);
-    mirror.ptyProcess.write('\r');
+    writeToTmuxSession(mirror.sessionName, targetPath, true);
+    scheduleMirrorLiveSync(mirror, 33);
 
     sendMessage(session, {
       type: 'file-attached',
       payload: {
-        name: pending.name,
+        name: payload.name,
         path: targetPath,
-        bytes: buffer.length,
+        bytes: binaryBuffer.length,
       },
     });
   } catch (error) {
@@ -2354,30 +2372,40 @@ function handleAttachFileBinary(session: ClientSession, buffer: Buffer) {
 }
 
 function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
-  const pending = session.pendingPasteImage;
-  session.pendingPasteImage = null;
+  const pendingTransfer = session.pendingPasteImage;
+  const consume = consumePendingBinaryTransfer(pendingTransfer, buffer);
+  session.pendingPasteImage = consume.pending;
 
-  if (!pending) {
-    handleInput(session, buffer.toString('utf-8'));
+  if (!pendingTransfer) {
+    sendMessage(session, { type: 'error', payload: { message: 'No pending paste-image when binary arrived', code: 'paste_image_no_pending' } });
+    return;
+  }
+  if (consume.error) {
+    sendMessage(session, { type: 'error', payload: { message: consume.error, code: 'paste_image_size_mismatch' } });
+    return;
+  }
+  if (!consume.complete) {
     return;
   }
 
   const mirror = getClientMirror(session);
-  if (!mirror || mirror.state !== 'connected' || !mirror.ptyProcess) {
+  if (!mirror || mirror.state !== 'connected') {
     sendMessage(session, { type: 'error', payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' } });
     return;
   }
 
   try {
+    const pending = pendingTransfer.payload;
     const { sourcePath, pngPath, bytes } = persistClipboardImageBuffer(
       {
         name: pending.name,
         mimeType: pending.mimeType,
       },
-      buffer,
+      consume.complete,
     );
     const pasteSequence = pending.pasteSequence || '\x16';
-    mirror.ptyProcess.write(pasteSequence);
+    writeToLiveMirror(mirror.sessionName, pasteSequence, false);
+    scheduleMirrorLiveSync(mirror, 33);
     sendMessage(session, {
       type: 'image-pasted',
       payload: {
@@ -2464,18 +2492,14 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
       }
       break;
     case 'list-sessions':
-      if (!session) {
-        sendTransportMessage(connection.transport, {
-          type: 'error',
-          payload: { message: 'list-sessions requires an attached session transport', code: 'session_required' },
-        });
-        break;
-      }
       try {
-        sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
+        sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
-        sendMessage(session, { type: 'error', payload: { message: `Failed to list tmux sessions: ${err}`, code: 'list_sessions_failed' } });
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: `Failed to list tmux sessions: ${err}`, code: 'list_sessions_failed' },
+        });
       }
       break;
     case 'schedule-list':
@@ -2591,7 +2615,11 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
         });
         break;
       }
-      session.pendingPasteImage = message.payload;
+      session.pendingPasteImage = {
+        payload: message.payload,
+        receivedBytes: 0,
+        chunks: [],
+      };
       break;
     case 'attach-file-start':
       if (!session) {
@@ -2601,7 +2629,11 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
         });
         break;
       }
-      session.pendingAttachFile = message.payload;
+      session.pendingAttachFile = {
+        payload: message.payload,
+        receivedBytes: 0,
+        chunks: [],
+      };
       break;
     case 'buffer-sync-request': {
       if (!session) {
@@ -2643,29 +2675,18 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
       handleClientDebugLog(session, message.payload);
       break;
     case 'tmux-create-session':
-      if (!session) {
-        sendTransportMessage(connection.transport, {
-          type: 'error',
-          payload: { message: 'tmux-create-session requires an attached session transport', code: 'session_required' },
-        });
-        break;
-      }
       try {
         createDetachedTmuxSession(message.payload.sessionName);
-        sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
+        sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
-        sendMessage(session, { type: 'error', payload: { message: `Failed to create tmux session: ${err}`, code: 'tmux_create_failed' } });
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: `Failed to create tmux session: ${err}`, code: 'tmux_create_failed' },
+        });
       }
       break;
     case 'tmux-rename-session':
-      if (!session) {
-        sendTransportMessage(connection.transport, {
-          type: 'error',
-          payload: { message: 'tmux-rename-session requires an attached session transport', code: 'session_required' },
-        });
-        break;
-      }
       try {
         const currentName = sanitizeSessionName(message.payload.sessionName);
         const nextName = renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName);
@@ -2690,20 +2711,16 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
             sendMessage(client, { type: 'title', payload: nextKey });
           }
         }
-        sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
+        sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
-        sendMessage(session, { type: 'error', payload: { message: `Failed to rename tmux session: ${err}`, code: 'tmux_rename_failed' } });
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: `Failed to rename tmux session: ${err}`, code: 'tmux_rename_failed' },
+        });
       }
       break;
     case 'tmux-kill-session':
-      if (!session) {
-        sendTransportMessage(connection.transport, {
-          type: 'error',
-          payload: { message: 'tmux-kill-session requires an attached session transport', code: 'session_required' },
-        });
-        break;
-      }
       try {
         // Hard rule: user tmux session kill is explicit-only.
         // Close tab / split / pane recycle / runtime cleanup must never flow into this path.
@@ -2714,10 +2731,13 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
         if (mirror) {
           destroyMirror(mirror, 'tmux session killed');
         }
-        sendMessage(session, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
+        sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
-        sendMessage(session, { type: 'error', payload: { message: `Failed to kill tmux session: ${err}`, code: 'tmux_kill_failed' } });
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: `Failed to kill tmux session: ${err}`, code: 'tmux_kill_failed' },
+        });
       }
       break;
     case 'input':
@@ -2780,6 +2800,16 @@ async function handleMessage(connection: TransportConnection, rawData: RawData, 
         break;
       }
       handleFileListRequest(session, message.payload);
+      break;
+    case 'file-create-directory-request':
+      if (!session) {
+        sendTransportMessage(connection.transport, {
+          type: 'error',
+          payload: { message: 'file-create-directory-request requires an attached session transport', code: 'session_required' },
+        });
+        break;
+      }
+      handleFileCreateDirectoryRequest(session, message.payload);
       break;
     case 'file-download-request':
       if (!session) {
@@ -2848,7 +2878,7 @@ const wss = new WebSocketServer({
 const rtcBridgeServer = createRtcBridgeServer({
   onTransportOpen: (transport) => {
     const connection = createTransportConnection(createRtcSessionTransport(transport), transport.requestOrigin);
-    console.log(`[${new Date().toISOString()}] rtc transport ${connection.id} created`);
+    console.log(`[${logTimePrefix()}] rtc transport ${connection.id} created`);
     return {
       onMessage: (_transportId, data, isBinary) => {
         connection.wsAlive = true;
@@ -2859,7 +2889,7 @@ const rtcBridgeServer = createRtcBridgeServer({
         void handleMessage(connection, data, isBinary);
       },
       onClose: (_transportId, reason) => {
-        console.log(`[${new Date().toISOString()}] rtc transport ${connection.id} closed: ${reason}`);
+        console.log(`[${logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
         const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
         if (session?.logicalSessionBound) {
           detachClientSessionTransportOnly(session, reason, connection.transportId);
@@ -2867,7 +2897,7 @@ const rtcBridgeServer = createRtcBridgeServer({
         connections.delete(connection.id);
       },
       onError: (_transportId, message) => {
-        console.error(`[${new Date().toISOString()}] rtc transport ${connection.id} error: ${message}`);
+        console.error(`[${logTimePrefix()}] rtc transport ${connection.id} error: ${message}`);
         const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
         if (session?.logicalSessionBound) {
           detachClientSessionTransportOnly(session, `rtc error: ${message}`, connection.transportId);
@@ -2894,7 +2924,7 @@ function extractAuthToken(rawUrl?: string) {
     return url.searchParams.get('token')?.trim() || '';
   } catch (error) {
     console.warn(
-      `[${new Date().toISOString()}] failed to parse websocket auth token from "${rawUrl || ''}": ${
+      `[${logTimePrefix()}] failed to parse websocket auth token from "${rawUrl || ''}": ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -2907,12 +2937,12 @@ wss.on('connection', (ws: WebSocket, request) => {
   if (REQUIRED_AUTH_TOKEN && providedToken !== REQUIRED_AUTH_TOKEN) {
     ws.send(JSON.stringify({ type: 'error', payload: { message: 'Unauthorized bridge token', code: 'unauthorized' } }));
     ws.close(4001, 'unauthorized');
-    console.warn(`[${new Date().toISOString()}] unauthorized websocket from ${request.socket.remoteAddress || 'unknown'}`);
+    console.warn(`[${logTimePrefix()}] unauthorized websocket from ${request.socket.remoteAddress || 'unknown'}`);
     return;
   }
 
   const connection = createTransportConnection(createWebSocketSessionTransport(ws), resolveRequestOrigin(request));
-  console.log(`[${new Date().toISOString()}] websocket transport ${connection.id} created`);
+  console.log(`[${logTimePrefix()}] websocket transport ${connection.id} created`);
 
   ws.on('pong', () => {
     connection.wsAlive = true;
@@ -2932,7 +2962,7 @@ wss.on('connection', (ws: WebSocket, request) => {
   });
 
   ws.on('close', () => {
-    console.log(`[${new Date().toISOString()}] websocket transport ${connection.id} closed`);
+    console.log(`[${logTimePrefix()}] websocket transport ${connection.id} closed`);
     const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
     if (session?.logicalSessionBound) {
       detachClientSessionTransportOnly(session, 'websocket closed', connection.transportId);
@@ -2941,7 +2971,7 @@ wss.on('connection', (ws: WebSocket, request) => {
   });
 
   ws.on('error', (error) => {
-    console.error(`[${new Date().toISOString()}] websocket transport ${connection.id} error: ${error.message}`);
+    console.error(`[${logTimePrefix()}] websocket transport ${connection.id} error: ${error.message}`);
     const session = connection.boundSessionId ? sessions.get(connection.boundSessionId) || null : null;
     if (session?.logicalSessionBound) {
       detachClientSessionTransportOnly(session, `websocket error: ${error.message}`, connection.transportId);
@@ -2957,7 +2987,7 @@ const heartbeatTimer = setInterval(() => {
     }
 
     if (!connection.wsAlive) {
-      console.warn(`[${new Date().toISOString()}] transport ${connection.id} heartbeat timeout`);
+      console.warn(`[${logTimePrefix()}] transport ${connection.id} heartbeat timeout`);
       connection.transport.close('heartbeat timeout');
       continue;
     }
@@ -2971,7 +3001,7 @@ const heartbeatTimer = setInterval(() => {
       connection.transport.ping?.();
     } catch (error) {
       console.warn(
-        `[${new Date().toISOString()}] transport ${connection.id} heartbeat ping failed: ${
+        `[${logTimePrefix()}] transport ${connection.id} heartbeat ping failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -2990,7 +3020,7 @@ function shutdownDaemon(reason: string, exitCode = 0) {
   }
   shutdownInFlight = true;
 
-  console.log(`[${new Date().toISOString()}] daemon shutdown start: ${reason}`);
+  console.log(`[${logTimePrefix()}] daemon shutdown start: ${reason}`);
   clearInterval(heartbeatTimer);
   clearInterval(memoryGuardTimer);
   scheduleEngine.dispose();
@@ -3000,7 +3030,7 @@ function shutdownDaemon(reason: string, exitCode = 0) {
       connection.closeTransport(reason);
     } catch (error) {
       console.warn(
-        `[${new Date().toISOString()}] failed to close transport ${connection.id} during daemon shutdown: ${
+        `[${logTimePrefix()}] failed to close transport ${connection.id} during daemon shutdown: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -3020,12 +3050,12 @@ function shutdownDaemon(reason: string, exitCode = 0) {
   try {
     wss.close();
   } catch (error) {
-    console.warn(`[${new Date().toISOString()}] websocket server close failed:`, error);
+    console.warn(`[${logTimePrefix()}] websocket server close failed:`, error);
   }
 
   server.close((error) => {
     if (error) {
-      console.warn(`[${new Date().toISOString()}] http server close failed: ${error.message}`);
+      console.warn(`[${logTimePrefix()}] http server close failed: ${error.message}`);
     }
     finalize();
   });
@@ -3040,7 +3070,7 @@ const memoryGuardTimer = setInterval(() => {
   }
 
   console.error(
-    `[${new Date().toISOString()}] daemon memory guard tripped: rss=${usage.rss} heapUsed=${usage.heapUsed} sessions=${sessions.size} mirrors=${mirrors.size}`,
+    `[${logTimePrefix()}] daemon memory guard tripped: rss=${usage.rss} heapUsed=${usage.heapUsed} sessions=${sessions.size} mirrors=${mirrors.size}`,
   );
   shutdownDaemon('memory guard', 70);
 }, MEMORY_GUARD_INTERVAL_MS);
@@ -3058,14 +3088,14 @@ wss.on('close', () => {
 server.on('error', (error) => {
   if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
     console.error(
-      `[${new Date().toISOString()}] daemon listen conflict on ${HOST}:${PORT}; another process is already bound to this port`,
+      `[${logTimePrefix()}] daemon listen conflict on ${HOST}:${PORT}; another process is already bound to this port`,
     );
     shutdownDaemon('listen conflict', STARTUP_PORT_CONFLICT_EXIT_CODE);
     return;
   }
 
   console.error(
-    `[${new Date().toISOString()}] daemon server error: ${error instanceof Error ? error.message : String(error)}`,
+    `[${logTimePrefix()}] daemon server error: ${error instanceof Error ? error.message : String(error)}`,
   );
   shutdownDaemon('server error', 1);
 });
@@ -3100,7 +3130,7 @@ server.on('upgrade', (request, socket, head) => {
 
 server.listen(PORT, HOST, () => {
   relayHostClient.start();
-  console.log(`[${new Date().toISOString()}] zterm tmux bridge listening on ws://${HOST}:${PORT}`);
+  console.log(`[${logTimePrefix()}] zterm tmux bridge listening on ws://${HOST}:${PORT}`);
   console.log(`  - health: http://${HOST}:${PORT}/health`);
   console.log(`  - rtc signal: ws://${HOST}:${PORT}/signal${REQUIRED_AUTH_TOKEN ? '?token=<auth>' : ''}`);
   console.log(`  - runtime debug snapshot: http://${HOST}:${PORT}/debug/runtime${REQUIRED_AUTH_TOKEN ? '?token=<auth>' : ''}`);
