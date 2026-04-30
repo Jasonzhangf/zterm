@@ -380,6 +380,7 @@ export function ShellWorkspace({
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
+  const [tabContextMenu, setTabContextMenu] = useState<{ paneId: string; tabId: string; x: number; y: number } | null>(null);
   const fileTransferSendJsonRef = useRef<(msg: unknown) => void>(() => {});
   const fileTransferOnMessageRef = useRef<((handler: (msg: unknown) => void) => () => void) | undefined>(undefined);
   const [clipboardText, setClipboardText] = useState('');
@@ -965,6 +966,31 @@ export function ShellWorkspace({
     });
   }, []);
 
+  const moveTabToPane = useCallback((sourcePaneId: string, tabId: string, targetPaneId: string) => {
+    if (sourcePaneId === targetPaneId) return;
+    setWorkspace((current) => {
+      const next = cloneWorkspaceState(current);
+      const sourcePane = next.panes.find((p) => p.id === sourcePaneId);
+      const targetPane = next.panes.find((p) => p.id === targetPaneId);
+      if (!sourcePane || !targetPane) return current;
+      const tabIndex = sourcePane.tabs.findIndex((t) => t.id === tabId);
+      if (tabIndex === -1) return current;
+      const [movedTab] = sourcePane.tabs.splice(tabIndex, 1);
+      targetPane.tabs.push(movedTab);
+      targetPane.activeTabId = movedTab.id;
+      next.activePaneId = targetPaneId;
+      // If source pane is now empty, add an empty tab
+      if (sourcePane.tabs.length === 0) {
+        const empty = createEmptyWorkspaceTab();
+        sourcePane.tabs.push(empty);
+        sourcePane.activeTabId = empty.id;
+      } else if (sourcePane.activeTabId === tabId) {
+        sourcePane.activeTabId = sourcePane.tabs[Math.max(0, sourcePane.tabs.length - 1)].id;
+      }
+      return next;
+    });
+  }, []);
+
   const handleDividerPointerDown = useCallback((index: number, clientX: number) => {
     dragStateRef.current = {
       index,
@@ -1219,6 +1245,10 @@ export function ShellWorkspace({
                         <div
                           className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}
                           key={tab.id}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setTabContextMenu({ paneId: pane.id, tabId: tab.id, x: e.clientX, y: e.clientY });
+                          }}
                         >
                           <button type="button" onClick={() => setActivePaneTab(pane.id, tab.id)}>
                             <PaneTabStatus tab={tab} runtime={tabRuntime} />
@@ -1393,6 +1423,35 @@ export function ShellWorkspace({
         sendJson={(msg) => fileTransferSendJsonRef.current(msg)}
         onFileTransferMessage={fileTransferOnMessageRef.current}
       />
+      {tabContextMenu ? (
+        <div
+          className="shell-context-backdrop"
+          onClick={() => setTabContextMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setTabContextMenu(null); }}
+        >
+          <div
+            className="shell-context-menu"
+            style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shell-context-label">Move to pane</div>
+            {workspace.panes.map((targetPane, index) => (
+              <button
+                key={targetPane.id}
+                className="shell-context-item"
+                type="button"
+                disabled={targetPane.id === tabContextMenu.paneId}
+                onClick={() => {
+                  moveTabToPane(tabContextMenu.paneId, tabContextMenu.tabId, targetPane.id);
+                  setTabContextMenu(null);
+                }}
+              >
+                Pane {index + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
