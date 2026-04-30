@@ -380,8 +380,8 @@ export function ShellWorkspace({
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
-  const [quickPaletteTab, setQuickPaletteTab] = useState<QuickPaletteTab>('shortcuts');
-  const [quickPaletteQuery, setQuickPaletteQuery] = useState('');
+  const fileTransferSendJsonRef = useRef<(msg: unknown) => void>(() => {});
+  const fileTransferOnMessageRef = useRef<((handler: (msg: unknown) => void) => () => void) | undefined>(undefined);
   const [clipboardText, setClipboardText] = useState('');
   const [clipboardError, setClipboardError] = useState('');
   const dragStateRef = useRef<{ index: number; startX: number; sizes: number[] } | null>(null);
@@ -440,6 +440,12 @@ export function ShellWorkspace({
   const activeRuntime = activeRuntimeResourceKey ? getRuntimeForResource(activeRuntimeResourceKey) : null;
   const activeRuntimeState = useTerminalRuntimeState(activeRuntime);
 
+  useEffect(() => {
+    fileTransferSendJsonRef.current = (msg: unknown) => { if (activeRuntime) activeRuntime.sendRawJson(msg); };
+    fileTransferOnMessageRef.current = activeRuntime?.onFileTransferMessage;
+  }, [activeRuntime]);
+  const [quickPaletteTab, setQuickPaletteTab] = useState<QuickPaletteTab>('shortcuts');
+  const [quickPaletteQuery, setQuickPaletteQuery] = useState('');
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
 
@@ -1382,10 +1388,10 @@ export function ShellWorkspace({
       />
       <FileTransferSheet
         open={fileTransferOpen}
-        remoteCwd={activeTarget ? activeTarget.sessionName || '' : ''}
+        remoteCwd={activeTarget?.sessionName || ''}
         onClose={() => setFileTransferOpen(false)}
-        sendJson={(msg) => { if (activeRuntime) activeRuntime.sendRawJson(msg); }}
-        onFileTransferMessage={activeRuntime?.onFileTransferMessage}
+        sendJson={(msg) => fileTransferSendJsonRef.current(msg)}
+        onFileTransferMessage={fileTransferOnMessageRef.current}
       />
     </div>
   );
