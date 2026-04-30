@@ -1705,7 +1705,11 @@ function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = 12) {
 
   mirror.liveSyncTimer = setTimeout(() => {
     mirror.liveSyncTimer = null;
-    void syncMirrorCanonicalBuffer(mirror);
+    void syncMirrorCanonicalBuffer(mirror).finally(() => {
+      if (mirror.state === 'connected') {
+        scheduleMirrorLiveSync(mirror, 33);
+      }
+    });
   }, Math.max(0, delayMs));
 }
 
@@ -1791,6 +1795,7 @@ async function startMirror(mirror: SessionMirror, autoCommand?: string) {
       throw new Error('Failed to capture canonical tmux buffer during initial sync');
     }
     announceMirrorSubscribersReady(mirror);
+    scheduleMirrorLiveSync(mirror, 33);
   } catch (error) {
     mirror.state = 'error';
     console.error(
