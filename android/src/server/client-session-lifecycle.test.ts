@@ -10,9 +10,9 @@ import {
 function createSession(id = 'client-1'): ClientSessionLifecycleState {
   return {
     clientSessionId: id,
-    state: 'connected',
     mirrorKey: 'mirror-1',
     transportId: 'transport-1',
+    readyTransportId: 'transport-1',
   };
 }
 
@@ -28,6 +28,7 @@ describe('client session lifecycle truth', () => {
     expect(sessions.get('client-1')).toMatchObject({
       clientSessionId: 'client-1',
       transportId: null,
+      readyTransportId: null,
       mirrorKey: 'mirror-1',
     });
   });
@@ -40,20 +41,21 @@ describe('client session lifecycle truth', () => {
     expect(rebound.clientSessionId).toBe('client-1');
     expect(rebound.transportId).toBe('transport-2');
     expect(rebound.replacedTransportId).toBe('transport-1');
+    expect(session.readyTransportId).toBeNull();
   });
 
-  it('reopening a closed logical session through a new transport returns it to idle instead of creating a new truth', () => {
+  it('binding a new transport clears previous ready-handshake truth', () => {
     const session = {
       ...createSession(),
-      state: 'closed' as const,
       transportId: null,
+      readyTransportId: 'transport-1',
     };
 
     const rebound = attachClientSessionTransport(session, 'transport-2');
 
     expect(rebound.clientSessionId).toBe('client-1');
-    expect(session.state).toBe('idle');
     expect(session.transportId).toBe('transport-2');
+    expect(session.readyTransportId).toBeNull();
   });
 
   it('only explicit close removes the logical client session from daemon truth', () => {

@@ -29,7 +29,7 @@ server 是独立层，只做：
 1. mirror tmux truth
 2. 回 `buffer-head-request`
 3. 回 `buffer-sync-request`
-4. 处理 connect / input / resize 这类基础控制
+4. 处理 session attach / input / file / schedule / tmux 基础控制
 
 ### 1.0 daemon 唯一心智
 
@@ -68,6 +68,16 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - ws/rtc transport 是可替换物理连接
   - transport 断开只允许 detach transport，不允许顺手删 logical client session
   - reconnect 必须按同一个 `clientSessionId` 重新绑定，不是新建第二份 session 语义
+- daemon 不允许保留 client 风格状态机：
+  - 不允许 `session.state`
+  - 不允许 `mirror.state`
+  - 不允许 `terminalWidthMode / requestedAdaptiveCols`
+  - 不允许把 `resize / terminal-width-mode` 做成 daemon 内部状态推进入口
+- daemon terminal core 的**代码组织**也必须收口：
+  - `server.ts` 只保留 transport/http glue
+  - session lifecycle / mirror lifecycle / live sync / attach / input orchestration 必须下沉到独立 terminal core 模块
+  - file list / mkdir / download / upload / remote screenshot / attach-file binary / paste-image binary 也必须下沉到独立 runtime
+  - 禁止一边说“daemon 不关心客户端”，一边把 terminal core 业务散落回 `server.ts`
 
 ## 2. client buffer manager
 

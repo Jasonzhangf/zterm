@@ -386,6 +386,17 @@ export function shouldReconnectQueuedActiveInput(options: {
   return options.isActiveTarget && transportClosed && !options.reconnectInFlight;
 }
 
+function shouldAutoReconnectSession(options: {
+  sessionId: string;
+  activeSessionId: string | null;
+  force?: boolean;
+}) {
+  if (options.force) {
+    return true;
+  }
+  return options.sessionId === options.activeSessionId;
+}
+
 function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
   if (typeof input === 'string') {
     return Array.from(input).map((char) => ({
@@ -2181,6 +2192,10 @@ export function SessionProvider({
   openSessionTransportByIntentRef.current = openSessionTransportByIntent;
 
   const startReconnectAttempt = useCallback((sessionId: string) => {
+    if (manualCloseRef.current.has(sessionId)) {
+      reconnectRuntimesRef.current.delete(sessionId);
+      return;
+    }
     const reconnectRuntime = reconnectRuntimesRef.current.get(sessionId);
     const targetHost = readSessionTransportHost(sessionId);
     if (!reconnectRuntime || !targetHost) {
@@ -2194,6 +2209,10 @@ export function SessionProvider({
     const delay = reconnectRuntime.nextDelayMs ?? computeReconnectDelay(reconnectRuntime.attempt);
     reconnectRuntime.nextDelayMs = null;
     reconnectRuntime.timer = window.setTimeout(() => {
+      if (manualCloseRef.current.has(sessionId)) {
+        reconnectRuntimesRef.current.delete(sessionId);
+        return;
+      }
       const liveRuntime = reconnectRuntimesRef.current.get(sessionId);
       if (!liveRuntime) {
         return;
@@ -2218,66 +2237,89 @@ export function SessionProvider({
       });
       writeSessionTransportToken(sessionId, null);
 
-      let completed = false;
-      const markCompleted = () => {
-        if (completed) {
+      let handshakeSettled = false;
+      let liveFailureHandled = false;
+      const markHandshakeSettled = () => {
+        if (handshakeSettled) {
           return false;
         }
-        completed = true;
+        handshakeSettled = true;
         return true;
       };
       const finalizeFailure = (message: string, retryable: boolean) => {
-        clearSessionHandshakeTimeout(sessionId);
-        const baseline = finalizeSocketFailureBaselineRef.current?.({
-          sessionId,
-          message,
-          markCompleted,
-        });
-        if (!baseline) {
-          reconnectRuntimesRef.current.delete(sessionId);
-          return;
-        }
-        const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
-        if (currentReconnectRuntime) {
-          currentReconnectRuntime.connecting = false;
-        }
-        clearSupersededSockets(sessionId, true);
-        if (!baseline.shouldContinue) {
-          reconnectRuntimesRef.current.delete(sessionId);
-          return;
-        }
+        if (!handshakeSettled) {
+          clearSessionHandshakeTimeout(sessionId);
+          const baseline = finalizeSocketFailureBaselineRef.current?.({
+            sessionId,
+            message,
+            markCompleted: markHandshakeSettled,
+          });
+          if (!baseline) {
+            reconnectRuntimesRef.current.delete(sessionId);
+            return;
+          }
+          const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
+          if (currentReconnectRuntime) {
+            currentReconnectRuntime.connecting = false;
+          }
+          clearSupersededSockets(sessionId, true);
+          if (!baseline.shouldContinue) {
+            reconnectRuntimesRef.current.delete(sessionId);
+            return;
+          }
 
-        if (!retryable) {
-          reconnectRuntimesRef.current.delete(sessionId);
+          if (!retryable) {
+            reconnectRuntimesRef.current.delete(sessionId);
+            dispatch({
+              type: 'UPDATE_SESSION',
+              id: sessionId,
+              updates: {
+                state: 'error',
+                lastError: message,
+              },
+            });
+            emitSessionStatus(sessionId, 'error', message);
+            return;
+          }
+
+          const nextReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || createSessionReconnectRuntime();
+          nextReconnectRuntime.attempt = Math.min(nextReconnectRuntime.attempt + 1, 6);
+          nextReconnectRuntime.connecting = false;
+          reconnectRuntimesRef.current.set(sessionId, nextReconnectRuntime);
+
           dispatch({
             type: 'UPDATE_SESSION',
             id: sessionId,
             updates: {
-              state: 'error',
+              state: 'reconnecting',
               lastError: message,
+              reconnectAttempt: nextReconnectRuntime.attempt,
+              ws: null,
             },
           });
           emitSessionStatus(sessionId, 'error', message);
+          startReconnectAttempt(sessionId);
           return;
         }
 
-        const nextReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || createSessionReconnectRuntime();
-        nextReconnectRuntime.attempt = Math.min(nextReconnectRuntime.attempt + 1, 6);
-        nextReconnectRuntime.connecting = false;
-        reconnectRuntimesRef.current.set(sessionId, nextReconnectRuntime);
-
-        dispatch({
-          type: 'UPDATE_SESSION',
-          id: sessionId,
-          updates: {
-            state: 'reconnecting',
-            lastError: message,
-            reconnectAttempt: nextReconnectRuntime.attempt,
-            ws: null,
-          },
-        });
-        emitSessionStatus(sessionId, 'error', message);
-        startReconnectAttempt(sessionId);
+        if (liveFailureHandled) {
+          return;
+        }
+        liveFailureHandled = true;
+        const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
+        if (currentReconnectRuntime) {
+          currentReconnectRuntime.connecting = false;
+        }
+        cleanupSocket(sessionId);
+        pendingSessionTransportOpenIntentsRef.current.delete(sessionId);
+        writeSessionTransportToken(sessionId, null);
+        clearSupersededSockets(sessionId, true);
+        setScheduleStateForSession(sessionId, (current) => ({
+          ...current,
+          loading: false,
+          error: message,
+        }));
+        scheduleReconnect(sessionId, message, retryable);
       };
 
       pendingSessionTransportOpenIntentsRef.current.set(sessionId, {
@@ -2301,8 +2343,7 @@ export function SessionProvider({
         },
         finalizeFailure,
         onConnected: (ws) => {
-          if (completed) return;
-          completed = true;
+          if (!markHandshakeSettled()) return;
           clearSessionHandshakeTimeout(sessionId);
           const connectedSessionName = getResolvedSessionName(liveHost);
           runtimeDebug('session.ws.reconnect.connected', {
@@ -2332,8 +2373,12 @@ export function SessionProvider({
     sessionId: string,
     message: string,
     retryable = true,
-    options?: { immediate?: boolean; resetAttempt?: boolean },
+    options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
   ) => {
+    if (manualCloseRef.current.has(sessionId)) {
+      reconnectRuntimesRef.current.delete(sessionId);
+      return;
+    }
     if (!readSessionTransportHost(sessionId)) {
       return;
     }
@@ -2346,6 +2391,26 @@ export function SessionProvider({
         updates: {
           state: 'error',
           lastError: message,
+          ws: null,
+        },
+        });
+      emitSessionStatus(sessionId, 'error', message);
+      return;
+    }
+
+    if (!shouldAutoReconnectSession({
+      sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      force: options?.force,
+    })) {
+      reconnectRuntimesRef.current.delete(sessionId);
+      dispatch({
+        type: 'UPDATE_SESSION',
+        id: sessionId,
+        updates: {
+          state: 'idle',
+          lastError: message,
+          reconnectAttempt: 0,
           ws: null,
         },
       });
@@ -2409,24 +2474,41 @@ export function SessionProvider({
       dispatch({ type: 'SET_ACTIVE_SESSION', id: sessionId });
     }
 
-    let completed = false;
-    const markCompleted = () => {
-      if (completed) {
+    let handshakeSettled = false;
+    let liveFailureHandled = false;
+    const markHandshakeSettled = () => {
+      if (handshakeSettled) {
         return false;
       }
-      completed = true;
+      handshakeSettled = true;
       return true;
     };
     const finalizeFailure = (message: string, retryable: boolean) => {
-      clearSessionHandshakeTimeout(sessionId);
-      const baseline = finalizeSocketFailureBaseline({
-        sessionId,
-        message,
-        markCompleted,
-      });
-      if (!baseline.shouldContinue) {
+      if (!handshakeSettled) {
+        clearSessionHandshakeTimeout(sessionId);
+        const baseline = finalizeSocketFailureBaseline({
+          sessionId,
+          message,
+          markCompleted: markHandshakeSettled,
+        });
+        if (!baseline.shouldContinue) {
+          return;
+        }
+        scheduleReconnect(sessionId, message, retryable);
         return;
       }
+      if (liveFailureHandled) {
+        return;
+      }
+      liveFailureHandled = true;
+      cleanupSocket(sessionId);
+      pendingSessionTransportOpenIntentsRef.current.delete(sessionId);
+      writeSessionTransportToken(sessionId, null);
+      setScheduleStateForSession(sessionId, (current) => ({
+        ...current,
+        loading: false,
+        error: message,
+      }));
       scheduleReconnect(sessionId, message, retryable);
     };
 
@@ -2437,8 +2519,7 @@ export function SessionProvider({
       activate,
       finalizeFailure,
       onConnected: (ws) => {
-        if (completed) return;
-        completed = true;
+        if (!markHandshakeSettled()) return;
         clearSessionHandshakeTimeout(sessionId);
         const connectedSessionName = getResolvedSessionName(host);
         runtimeDebug('session.ws.connected', {
@@ -2630,7 +2711,7 @@ export function SessionProvider({
       dispatch({ type: 'SET_ACTIVE_SESSION', id });
     }
 
-    scheduleReconnect(id, 'manual reconnect', true, { immediate: true, resetAttempt: true });
+    scheduleReconnect(id, 'manual reconnect', true, { immediate: true, resetAttempt: true, force: true });
   }, [cleanupSocket, clearReconnectForSession, readSessionTargetKey, readSessionTargetRuntime, readSessionTransportHost, scheduleReconnect, writeSessionTransportHost]);
 
   const reconnectAllSessions = useCallback(() => {

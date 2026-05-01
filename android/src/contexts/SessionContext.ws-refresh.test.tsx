@@ -4090,6 +4090,34 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
+  it('does not auto reconnect an inactive session after its transport closes', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+    ws2.close();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-2-state').textContent).toBe('idle');
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
   it('lets the second tab continue scrolling deeper while an older reading repair is still in flight', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">

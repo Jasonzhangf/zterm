@@ -72,10 +72,13 @@ export interface FileUploadEndPayload {
 export interface FileUploadProgressPayload {
   requestId: string;
   chunkIndex: number;
+  totalChunks?: number;
 }
 
 export interface FileUploadCompletePayload {
   requestId: string;
+  filePath?: string;
+  bytes?: number;
 }
 
 export interface FileUploadErrorPayload {
@@ -133,11 +136,19 @@ export interface HostConfigMessage {
   sessionName: string;
   cols?: number;
   rows?: number;
+  terminalWidthMode?: 'adaptive-phone' | 'mirror-fixed';
   authToken?: string;
   autoCommand?: string;
   authType: 'password' | 'key';
   password?: string;
   privateKey?: string;
+}
+
+export interface PasteImageStartPayload {
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  pasteSequence?: string;
 }
 
 export interface PasteImagePayload {
@@ -158,18 +169,25 @@ export type BridgeClientMessage =
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
+  | { type: 'debug-log'; payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> } }
   | { type: 'list-sessions' }
   | { type: 'schedule-list'; payload: { sessionName: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
   | { type: 'schedule-delete'; payload: { jobId: string } }
   | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
   | { type: 'schedule-run-now'; payload: { jobId: string } }
+  | { type: 'tmux-create-session'; payload: { sessionName: string } }
+  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
+  | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string }
+  | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'resize'; payload: { cols: number; rows: number } }
+  | { type: 'terminal-width-mode'; payload: { mode: 'adaptive-phone' | 'mirror-fixed'; cols?: number } }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
+  | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
   | { type: 'file-upload-start'; payload: FileUploadStartPayload }
   | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
@@ -212,8 +230,11 @@ export type BridgeServerControlMessage =
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
+  | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
+  | { type: 'file-create-directory-complete'; payload: { requestId: string; path: string; name: string } }
+  | { type: 'file-create-directory-error'; payload: { requestId: string; error: string } }
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }

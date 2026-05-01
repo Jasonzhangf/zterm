@@ -145,7 +145,7 @@
     - 语音转文字后是否仍能立即继续输入
 - [ ] mobile-15.11 buffer store closeout：把 client 本地 buffer trim 真相从“3 屏”改回“1000 行 sliding window”，请求窗口仍保持三屏，不再混用
 - [ ] mobile-15.12 daemon mirror lifecycle closeout：daemon mirror 不能再跟 subscriber 生命周期绑定；当前 `orphan destroy -> mirror recreate` 会把 `revision/latestEndIndex` 重置，破坏 daemon 绝对行号真相并触发 client revision-reset 链路
-- [ ] mobile-15.13 daemon client-session bookkeeping closeout：`destroyMirror()` 当前会把 subscriber 标成 `closed` 但不 `sessions.delete()`，现场 `/health` 已出现 `170 total / 1 connected`
+- [x] mobile-15.13 daemon client-session bookkeeping closeout：`destroyMirror()` 不再越权删除 subscriber logical session；tmux kill 改为 `error(code=tmux_session_killed)`，logical session 保留到显式 close / daemon shutdown
 - [ ] mobile-15.14 terminal 测试矩阵 closeout：把 checklist 映射到现有自动测试与缺口，固定补测顺序（voice/CJK commit、follow overdrag blank-frame、buffer truth reset violation、payload inflation）
 - [ ] mobile-15.15 renderer follow-state closeout：live tail refresh / pending follow realign 不得把底部 follow 自动打进 reading；先补本地回归，再修 renderer 状态机
 - [ ] mobile-15.16 active re-entry pull-state closeout：切 tab / resume 后旧 in-flight `buffer-sync` bookkeeping 不得卡死 session；active re-entry 必须回到 head-first 主循环，但不得清空本地 buffer truth
@@ -185,6 +185,27 @@
     - client `connect/reconnect` websocket lifecycle 已共享单一路径，避免两份 handshake/timeout/socket-failure 编排继续分叉
     - daemon `transport close/error -> detach-only` source gate 已纳入 `test:terminal:contracts`
     - daemon `session transport ticket` 与 client `sessionTransportToken` 真相已落地基础模块/单测；下一刀直接把 control transport -> issue ticket -> session transport attach 串起来
+- [ ] mobile-15.32a daemon terminal core de-client closeout：daemon terminal core 删除客户端状态机与 viewport/UI 语义
+  - 冻结：
+    1. daemon 只保留 `logical session / transport attach-detach / readyTransportId / mirror lifecycle`
+    2. 删除 `session.state / mirror.state / session.title / terminalWidthMode / requestedAdaptiveCols`
+    3. `resize / terminal-width-mode` 若协议仍存在，daemon 只能忽略，不得成为状态推进入口
+  - 2026-05-01 当前进度：
+    - 第一刀已完成：删除 daemon client-like state，`resize / terminal-width-mode` 改为 ignore
+    - 第二刀已完成：`sendBufferHead / live-sync / startMirror / attachTmux / handleInput` 已从 `server.ts` 抽到 `terminal-runtime.ts`
+    - 第三刀已完成第一半：`terminal-runtime.ts` 已拆为 `terminal-runtime-types.ts + terminal-mirror-runtime.ts + terminal-runtime.ts`
+    - 第三刀已完成第二半：tmux mirror capture/helper 已从 `server.ts` 收到独立模块，source gate 已升级为模块级门禁
+    - 第四刀已完成：file / screenshot / binary-transfer handler 已从 `server.ts` 下沉到独立 runtime
+    - 第五刀已完成：message parse / dispatch 从 `server.ts` 下沉到独立 protocol runtime；协议消息类型回归 `lib/types.ts` 单一真源
+    - 第五刀补口已完成：HTTP debug/update route runtime 已抽到 `terminal-http-runtime.ts`，source gate 已升级为模块级门禁
+    - 第六刀当前小步已完成：schedule state/event bridge + schedule engine wiring 已从 `server.ts` 下沉到 `terminal-schedule-runtime.ts`
+    - 第六刀第二小步已完成：tmux/shell control (`runTmux / runCommand / send-keys / list/create/rename session`) 已从 `server.ts` 下沉到 `terminal-control-runtime.ts`
+    - 第六刀第三小步已完成：transport wrapper / delivery / connection helper (`ws/rtc transport wrapper + sendMessage + connection create`) 已从 `server.ts` 下沉到 `terminal-transport-runtime.ts`
+    - 第六刀第四小步已完成：debug/log helper (`local-time log helper / daemon runtime debug / payload summary / client-debug normalize+append`) 已从 `server.ts` 下沉到 `terminal-debug-runtime.ts`
+    - 第六刀第五小步已完成：terminal core normalize/sanitize/helper 已从 `server.ts` 下沉到 `terminal-core-support.ts`
+    - 第六刀第六小步已完成：daemon service helper (`resolveTmuxBinary / auth token parse / heartbeat / memory guard / shutdown / listen logs`) 已从 `server.ts` 下沉到 `terminal-daemon-runtime.ts`
+    - 第六刀第七小步已完成：bridge glue (`ws connect / rtc transport lifecycle / upgrade route / relay-signal bridge`) 已从 `server.ts` 下沉到 `terminal-bridge-runtime.ts`
+    - 当前验证：`pnpm --dir android exec tsc -p tsconfig.json --noEmit` 通过；13 个 daemon truth/lifecycle gate = `51 passed`；`pnpm --dir android run test:terminal:contracts` = `24 files passed / 266 tests passed`
 - [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
 - [ ] mobile-15.34 QuickBar 老布局回归 closeout：壳体改成三栏，前两栏保持老布局（左侧固定六键 `状态/↑/键盘 + ←/↓/→` + 右侧两行快捷滚动区），第三栏恢复文件/图片/同步/截图工具栏；工具栏不得重复；固定按钮不得超界
 - [ ] mobile-15.35 QuickBar keyboard-lift + session-schedule entry closeout：QuickBar editor 聚焦时 UI shell 仍消费 keyboard inset；定时列表入口不再依赖本地草稿，任何 attach 到同一 session 的客户端都可打开当前任务列表并 CRUD
@@ -297,3 +318,11 @@
 4. FileTransferSheet.tsx UI
 5. QuickBar 入口 + TerminalPage 挂载 + SessionContext 路由
 6. 测试 + type-check + build
+
+- [x] mobile-15.32b protocol truth unification closeout：daemon / client / shared 只允许一份 wire protocol 真源
+  - 真源：`packages/shared/src/connection/types.ts` + `packages/shared/src/connection/protocol.ts`
+  - Android `src/lib/types.ts` 只允许 re-export / alias，不得再本地重定义 `ClientMessage / ServerMessage / HostConfigMessage / Buffer*`
+  - 2026-05-01 已完成：contracts/type-check 通过；新增 `src/lib/protocol-truth.test.ts`
+- [x] mobile-15.32c daemon restore closeout：先恢复本地 daemon 可运行，再继续拆分
+  - 2026-05-01 已验证：`daemon:status` running；`/health` ok；`initial-sync/probe-events.json` 看到 `session-open -> session-ticket -> connect -> connected -> buffer-head -> buffer-sync`
+- [ ] 下一步：继续分拆前，先把 protocol 真源更新到 docs/decision，并检查所有直接从 `../lib/types` 读协议的调用点是否还能进一步下沉到 shared/helper

@@ -1,6 +1,5 @@
 export interface MirrorLifecycleSessionLike {
   id: string;
-  state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   mirrorKey: string | null;
 }
 
@@ -25,20 +24,18 @@ export function detachMirrorSubscriber(
   };
 }
 
-export function closeMirrorSubscribers<T extends MirrorLifecycleSessionLike>(
+export function releaseMirrorSubscribers<T extends MirrorLifecycleSessionLike>(
   sessions: Map<string, T>,
   subscriberIds: Iterable<string>,
 ) {
-  const closedSessionIds: string[] = [];
+  const releasedSessionIds: string[] = [];
   for (const sessionId of subscriberIds) {
     const session = sessions.get(sessionId);
     if (!session) {
       continue;
     }
     session.mirrorKey = null;
-    session.state = 'closed';
-    sessions.delete(sessionId);
-    closedSessionIds.push(sessionId);
+    releasedSessionIds.push(sessionId);
   }
-  return closedSessionIds;
+  return releasedSessionIds;
 }

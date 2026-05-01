@@ -72,6 +72,86 @@ daemon **不负责**：
 - active / inactive UI 状态
 - renderer 行为
 - 代替 client 决定何时销毁 session
+- client 风格状态机标签
+- viewport / width-mode / adaptive-cols / pane 语义
+
+### 1.1.1 daemon 最小状态要求
+
+daemon terminal core 只允许保留这些最小事实：
+
+- logical session registry
+- `transportId`
+- `readyTransportId`
+- `sessionName`
+- `mirrorKey`
+- transport attach / detach
+- mirror lifecycle:
+  - `booting`
+  - `ready`
+  - `failed`
+  - `destroyed`
+
+不允许再保留：
+
+- `session.state = idle/connecting/connected/error/closed`
+- `mirror.state = idle/connecting/connected/error/closed`
+- `session.title`
+- `session.terminalWidthMode`
+- `session.requestedAdaptiveCols`
+- 任何 active/inactive / tab / pane / renderer 语义
+
+### 1.1.2 代码组织约束
+
+在实现层，`server.ts` 只允许承担：
+
+1. websocket / rtc transport 接入
+2. http/debug routes
+3. 协议 message dispatch glue
+
+不允许继续把 daemon terminal core 业务编排长期内联在 `server.ts`。  
+以下逻辑必须收敛到独立 terminal core 模块：
+
+- logical session lifecycle
+- mirror lifecycle
+- mirror live sync
+- tmux attach / start / input orchestration
+- `buffer-head` reply 组装入口
+
+允许 `server.ts` 保留最底层 tmux / os / fs helper，但不允许再成为第二份 terminal core 真相。
+
+### 1.1.3 file / screenshot / binary-transfer 边界
+
+daemon 的文件能力也必须保持同样的去客户端化原则：
+
+1. `server.ts` 只负责协议分发与 transport/session required 校验
+2. file list / mkdir / download / upload / remote screenshot / attach-file binary / paste-image binary
+   必须收敛到独立 runtime
+3. file runtime 只关心：
+   - 远端 tmux cwd 真相
+   - 文件系统读写
+   - 传输分块协议
+   - screenshot helper 调用
+   - mirror 输入注入后的显式 `scheduleMirrorLiveSync`
+
+file runtime **不允许**承担：
+
+- client sheet / preview / toast / active tab 语义
+- fallback 到“没 pending binary 就当普通 input 发给 tmux”
+- transport lifecycle / reconnect / session active 状态机
+- renderer / UI shell 任何策略
+
+换句话说：
+
+```text
+client ui/sheet
+  -> protocol message
+  -> server.ts glue
+  -> file-transfer runtime
+  -> fs / screenshot-helper / tmux input
+```
+
+其中唯一远端目录真相必须继续来自 daemon 读取 `tmux #{pane_current_path}`；
+client 不得自带远端 cwd 语义。
 
 ### 1.2 client transport split
 
@@ -292,7 +372,29 @@ mirror truth 与 transport / logical session 也必须解耦：
 
 - logical session detach 不得重置 mirror
 - transport close 不得重置 mirror
+- tmux session killed / mirror unavailable 时，也**不得顺手删除 daemon logical session**
+- 这类事件只能把 logical session 释放出 mirror 绑定，并进入显式 `error/unavailable` 语义
+- tab 是否关闭永远属于 client 显式动作，不属于 daemon mirror 生命周期
 - reconnect 后若看到 `revision -> 1` / `latestEndIndex` 回退，多半是 daemon 自己把 mirror 生命周期做错了
+
+### 5.4 server message 语义冻结
+
+- `closed`
+  - 只允许表示 logical session 被最终关闭
+  - 仅允许来源于：
+    1. client 显式 close
+    2. daemon shutdown / 全局退出
+- `error`
+  - 用于 session 仍保留、但当前业务目标不可用
+  - 例如：
+    - `tmux_session_killed`
+    - `tmux_session_unavailable`
+    - `logical_session_missing`
+    - `session_transport_ticket_invalid`
+- 因此：
+  - tmux session killed **不得**再发 `closed`
+  - mirror destroy **不得**再隐式删除 subscriber logical session
+  - client 收到这类 `error` 后，应保留 tab/session 真相，而不是自动移除
 
 ---
 

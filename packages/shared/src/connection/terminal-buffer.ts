@@ -295,6 +295,7 @@ function buildSessionBufferState(options: {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor?: import('./types').TerminalCursorState | null;
   revision: number;
   cacheLines: number;
   updateKind: SessionBufferState['updateKind'];
@@ -321,6 +322,7 @@ function buildSessionBufferState(options: {
     cols: Math.max(1, Math.floor(options.cols || 80)),
     rows: Math.max(1, Math.floor(options.rows || 24)),
     cursorKeysApp: Boolean(options.cursorKeysApp),
+    cursor: options.cursor ?? null,
     updateKind: options.updateKind,
     revision: Math.max(0, Math.floor(options.revision || 0)),
   };
@@ -335,6 +337,7 @@ export function createSessionBufferState(options: {
   cols?: number;
   rows?: number;
   cursorKeysApp?: boolean;
+  cursor?: import('./types').TerminalCursorState | null;
   revision?: number;
   cacheLines: number;
 }): SessionBufferState {
@@ -358,6 +361,7 @@ export function createSessionBufferState(options: {
     cols: options.cols || 80,
     rows: options.rows || 24,
     cursorKeysApp: Boolean(options.cursorKeysApp),
+    cursor: options.cursor ?? null,
     revision: options.revision ?? 0,
     cacheLines: options.cacheLines,
     updateKind: 'replace',
@@ -589,6 +593,7 @@ export function applyBufferSyncToSessionBuffer(
       cols: payload.cols,
       rows: payload.rows,
       cursorKeysApp: payload.cursorKeysApp,
+      cursor: payload.cursor ?? null,
       revision,
       cacheLines,
     });
@@ -622,6 +627,7 @@ export function applyBufferSyncToSessionBuffer(
     cols: payload.cols,
     rows: payload.rows,
     cursorKeysApp: payload.cursorKeysApp,
+    cursor: payload.cursor ?? null,
     revision,
     cacheLines,
     updateKind: detectUpdateKind(current, sparseWindow),
@@ -650,6 +656,9 @@ export function sessionBuffersEqual(left: SessionBufferState, right: SessionBuff
     || left.cols !== right.cols
     || left.rows !== right.rows
     || left.cursorKeysApp !== right.cursorKeysApp
+    || left.cursor?.rowIndex !== right.cursor?.rowIndex
+    || left.cursor?.col !== right.cursor?.col
+    || left.cursor?.visible !== right.cursor?.visible
     || left.lines.length !== right.lines.length
     || left.gapRanges.length !== right.gapRanges.length
   ) {

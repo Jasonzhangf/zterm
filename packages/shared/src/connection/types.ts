@@ -85,7 +85,8 @@ export interface TerminalBufferPayload {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
-  lines: TerminalIndexedLine[];
+  cursor?: TerminalCursorState | null;
+  lines: WireIndexedLine[];
 }
 
 export interface BufferSyncRequestPayload {
@@ -103,6 +104,7 @@ export interface BufferHeadPayload {
   latestEndIndex: number;
   availableStartIndex?: number;
   availableEndIndex?: number;
+  cursor?: TerminalCursorState | null;
 }
 
 export interface SessionBufferState {
@@ -115,6 +117,7 @@ export interface SessionBufferState {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
+  cursor: TerminalCursorState | null;
   updateKind: 'replace' | 'append' | 'prepend' | 'patch';
   revision: number;
 }

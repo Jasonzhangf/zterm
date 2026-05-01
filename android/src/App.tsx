@@ -369,19 +369,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     }
   }, [createSession, hosts, hostsLoaded, sessions, state.activeSessionId, switchSession]);
 
-  useEffect(() => {
-    if (!state.activeSessionId) {
-      return;
-    }
-    const currentActiveSession = sessions.find((session) => session.id === state.activeSessionId) || null;
-    if (!currentActiveSession) {
-      return;
-    }
-    if (currentActiveSession.state === 'closed' || currentActiveSession.state === 'error') {
-      reconnectSession(currentActiveSession.id);
-    }
-  }, [reconnectSession, sessions, state.activeSessionId]);
-
   const findReusableSession = useCallback((target: Pick<Host, 'bridgeHost' | 'bridgePort' | 'sessionName'>) => {
     const resolvedSessionName = target.sessionName.trim() || target.bridgeHost.trim();
     return state.sessions.find(
@@ -592,9 +579,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       if (shouldActivate) {
         switchSession(existingSession.id);
       }
-      if (existingSession.state === 'error' || existingSession.state === 'closed') {
-        reconnectSession(existingSession.id);
-      }
       recordSessionOpen({
         connectionName: persistedHost.name,
         bridgeHost: persistedHost.bridgeHost,
@@ -620,7 +604,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       setPageState(openTerminalPage(sessionId));
     }
     return { sessionId, host: persistedHost };
-  }, [createSession, findReusableSession, reconnectSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
+  }, [createSession, findReusableSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
 
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, options?: {
     target?: BridgeTarget | null;

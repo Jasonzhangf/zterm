@@ -5,9 +5,11 @@
  */
 
 import type {
-  ScheduleEventPayload,
-  ScheduleJobDraft,
-  ScheduleStatePayload,
+  BridgeClientMessage,
+  BridgeServerMessage,
+  SessionBufferState as SharedSessionBufferState,
+  TerminalCursorState,
+  TerminalGapRange,
 } from '@zterm/shared';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
@@ -52,20 +54,11 @@ export type SessionState =
   | 'error'       // 连接失败
   | 'closed';     // 已关闭
 
-export interface TerminalGapRange {
-  startIndex: number;
-  endIndex: number;
-}
-
-export interface TerminalCursorState {
-  rowIndex: number;   // absolute buffer row index
-  col: number;        // grid column inside the row
-  visible: boolean;
-}
+export type { BufferHeadPayload, BufferSyncRequestPayload, CompactIndexedLine, HostConfigMessage, TerminalBufferPayload, TerminalCursorState, TerminalGapRange, WireIndexedLine } from '@zterm/shared';
 
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
-export interface SessionBufferState {
+export interface SessionBufferState extends Omit<SharedSessionBufferState, 'cursor'> {
   lines: TerminalCell[][];          // sparse cached window rows; gap rows are [] and described by gapRanges
   gapRanges: TerminalGapRange[];    // absolute missing spans inside [startIndex, endIndex)
   startIndex: number;               // absolute index for the first locally cached row
@@ -162,47 +155,6 @@ export interface TerminalIndexedLine {
  *   s = optional sparse style spans [startCol, endCol, fg, bg, flags]
  *       absent or empty = all default (fg=256, bg=256, flags=0, width=1)
  */
-export interface CompactIndexedLine {
-  i: number;
-  t: string;
-  w?: number[];
-  s?: [number, number, number, number, number][];
-}
-
-/** Wire format: either compact (new) or legacy full-cell (old). */
-export type WireIndexedLine = CompactIndexedLine | TerminalIndexedLine;
-
-export interface TerminalBufferPayload {
-  revision: number;
-  startIndex: number;               // authoritative available window start on daemon
-  endIndex: number;                 // authoritative available window end on daemon (exclusive)
-  availableStartIndex?: number;     // authoritative daemon buffer head start (independent from sparse payload window)
-  availableEndIndex?: number;       // authoritative daemon buffer tail end (independent from sparse payload window)
-  cols: number;
-  rows: number;
-  cursorKeysApp: boolean;
-  cursor?: TerminalCursorState | null;
-  lines: WireIndexedLine[];         // concrete rows carried by this message; compact preferred, legacy accepted
-}
-
-export interface BufferSyncRequestPayload {
-  knownRevision: number;
-  localStartIndex: number;
-  localEndIndex: number;
-  requestStartIndex: number;
-  requestEndIndex: number;
-  missingRanges?: TerminalGapRange[];
-}
-
-export interface BufferHeadPayload {
-  sessionId: string;
-  revision: number;
-  latestEndIndex: number;
-  availableStartIndex?: number;
-  availableEndIndex?: number;
-  cursor?: TerminalCursorState | null;
-}
-
 export interface PasteImagePayload {
   name: string;
   mimeType: string;
@@ -460,103 +412,8 @@ export interface CommandHistory {
 // WebSocket 消息协议
 // ============================================
 
-export type ClientMessage =
-  | { type: 'session-open'; payload: HostConfigMessage }
-  | { type: 'connect'; payload: HostConfigMessage }
-  | { type: 'buffer-head-request' }
-  | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
-  | { type: 'debug-log'; payload: { entries: RuntimeDebugLogEntry[] } }
-  | { type: 'list-sessions' }
-  | { type: 'schedule-list'; payload: { sessionName: string } }
-  | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
-  | { type: 'schedule-delete'; payload: { jobId: string } }
-  | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
-  | { type: 'schedule-run-now'; payload: { jobId: string } }
-  | { type: 'tmux-create-session'; payload: { sessionName: string } }
-  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
-  | { type: 'tmux-kill-session'; payload: { sessionName: string } }
-  | { type: 'input'; payload: string }
-  | { type: 'paste-image-start'; payload: PasteImageStartPayload }
-  | { type: 'paste-image'; payload: PasteImagePayload }
-  | { type: 'attach-file-start'; payload: AttachFileStartPayload }
-  | { type: 'resize'; payload: { cols: number; rows: number } }
-  | { type: 'terminal-width-mode'; payload: { mode: TerminalWidthMode; cols?: number } }
-  | { type: 'file-list-request'; payload: FileListRequestPayload }
-  | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
-  | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
-  | { type: 'file-upload-start'; payload: FileUploadStartPayload }
-  | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
-  | { type: 'file-upload-end'; payload: FileUploadEndPayload }
-  | { type: 'ping' }
-  | { type: 'close' };
-
-export type ServerMessage =
-  | {
-      type: 'session-ticket';
-      payload: {
-        clientSessionId: string;
-        sessionTransportToken: string;
-        sessionName: string;
-      };
-    }
-  | {
-      type: 'session-open-failed';
-      payload: {
-        clientSessionId: string;
-        message: string;
-        code?: string;
-      };
-    }
-  | {
-      type: 'connected';
-      payload: {
-        sessionId: string;
-        appUpdate?: {
-          versionCode: number;
-          versionName: string;
-          manifestUrl?: string;
-        };
-      };
-    }
-  | { type: 'buffer-head'; payload: BufferHeadPayload }
-  | { type: 'sessions'; payload: { sessions: string[] } }
-  | { type: 'buffer-sync'; payload: TerminalBufferPayload }
-  | { type: 'schedule-state'; payload: ScheduleStatePayload }
-  | { type: 'schedule-event'; payload: ScheduleEventPayload }
-  | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
-  | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
-  | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }
-  | { type: 'file-list-response'; payload: FileListResponsePayload }
-  | { type: 'file-list-error'; payload: FileListErrorPayload }
-  | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
-  | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
-  | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
-  | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
-  | { type: 'file-upload-progress'; payload: FileUploadProgressPayload }
-  | { type: 'file-upload-complete'; payload: FileUploadCompletePayload }
-  | { type: 'file-upload-error'; payload: FileUploadErrorPayload }
-  | { type: 'error'; payload: { message: string; code?: string } }
-  | { type: 'title'; payload: string }
-  | { type: 'closed'; payload: { reason: string } }
-  | { type: 'pong' };
-
-// 用于 WebSocket 传输的 Host 配置（不含敏感信息的长期存储）
-export interface HostConfigMessage {
-  clientSessionId: string;
-  sessionTransportToken?: string;
-  name: string;
-  bridgeHost: string;
-  bridgePort: number;
-  sessionName: string;
-  cols?: number;
-  rows?: number;
-  terminalWidthMode?: TerminalWidthMode;
-  authToken?: string;
-  autoCommand?: string;
-  authType: 'password' | 'key';
-  password?: string;
-  privateKey?: string;
-}
+export type ClientMessage = BridgeClientMessage;
+export type ServerMessage = BridgeServerMessage;
 
 // ============================================
 // Event 定义（Observability）

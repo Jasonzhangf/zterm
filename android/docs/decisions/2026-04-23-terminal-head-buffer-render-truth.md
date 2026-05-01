@@ -35,7 +35,7 @@ server 只做四件事：
 1. mirror tmux buffer truth
 2. 处理 `buffer-head-request`
 3. 处理 `buffer-sync-request`
-4. 处理 `connect / input / resize`
+4. 处理 `session attach / input / file / schedule / tmux manage`
 
 ### 1.1 server 响应规则
 
@@ -113,11 +113,37 @@ daemon logical client session
 - 新 transport 连接上来时，daemon 先按 `clientSessionId` 找已有 logical client session
 - 找到就**重绑 transport**，不是新建第二个 logical session
 - transport 断开时，只允许 **detach transport**，不得顺手删除 logical client session
+- daemon 不允许维护 client 风格状态机：
+  - 不允许 `session.state = connecting/connected/error/closed`
+  - 不允许 `mirror.state = connecting/connected/error/closed`
+  - 只允许维护 daemon 自己需要的最小事实：
+    - logical session 是否存在
+    - 当前 attached transport id
+    - 当前 ready transport id
+    - mirror 是否 `booting/ready/failed/destroyed`
 - logical client session 只允许由：
   1. client 显式 `close`
   2. daemon shutdown
   3. 显式实现并写进真源的资源回收策略
     触发销毁
+
+### 1.4 daemon 不允许持有客户端 UI/viewport 语义
+
+daemon 不允许维护：
+
+- `title` 作为 session 本地缓存真相
+- `requestOrigin` 作为客户端状态机字段
+- `terminalWidthMode`
+- `requestedAdaptiveCols`
+- active / inactive
+- tab / pane / renderer / follow / reading
+
+补充冻结：
+
+- `resize`
+- `terminal-width-mode`
+
+这两类消息若还存在于旧协议里，daemon 只能忽略；不得再变成 daemon 内部状态机入口。
 - 在本轮真源里，**没有**“ws 一断就删 client session”这条语义
 
 ---

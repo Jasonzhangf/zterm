@@ -6,6 +6,22 @@ function readServerSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'server.ts'), 'utf8');
 }
 
+function readMessageRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'), 'utf8');
+}
+
+function readDebugRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-debug-runtime.ts'), 'utf8');
+}
+
+function readDaemonRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-daemon-runtime.ts'), 'utf8');
+}
+
+function readBridgeRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-bridge-runtime.ts'), 'utf8');
+}
+
 function extractBlock(source: string, anchor: string, length = 420) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -14,10 +30,12 @@ function extractBlock(source: string, anchor: string, length = 420) {
 
 describe('server transport/session lifecycle truth gates', () => {
   it('keeps control transport separate from session transport attach flow', () => {
-    const source = readServerSource();
-    expect(source).toContain("case 'session-open'");
-    expect(source).toContain("type: 'session-ticket'");
-    expect(source).toContain('takeSessionTransportTicket');
+    const serverSource = readServerSource();
+    const messageRuntimeSource = readMessageRuntimeSource();
+    expect(serverSource).toContain('createTerminalMessageRuntime');
+    expect(messageRuntimeSource).toContain("case 'session-open'");
+    expect(messageRuntimeSource).toContain("type: 'session-ticket'");
+    expect(messageRuntimeSource).toContain('takeSessionTransportTicket');
   });
 
   it('does not keep websocket-close grace timers that auto-close logical sessions', () => {
@@ -28,64 +46,79 @@ describe('server transport/session lifecycle truth gates', () => {
   });
 
   it('detaches bound websocket transports instead of closing logical sessions on ws close/error', () => {
-    const source = readServerSource();
+    const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
     const errorBlock = extractBlock(source, "ws.on('error'");
-    const detachBlock = extractBlock(source, 'function detachClientSessionTransportOnly', 520);
+    const detachBlock = extractBlock(source, 'deps.detachClientSessionTransportOnly(session, \'websocket closed\'', 220);
     expect(closeBlock).toContain("if (session?.logicalSessionBound)");
-    expect(closeBlock).toContain("detachClientSessionTransportOnly(session, 'websocket closed'");
+    expect(closeBlock).toContain("deps.detachClientSessionTransportOnly(session, 'websocket closed'");
     expect(closeBlock).not.toContain("closeLogicalClientSession(session, 'websocket closed', false)");
     expect(errorBlock).toContain("if (session?.logicalSessionBound)");
-    expect(errorBlock).toContain("detachClientSessionTransportOnly(session, `websocket error: ${error.message}`");
+    expect(errorBlock).toContain("deps.detachClientSessionTransportOnly(session, `websocket error: ${error.message}`");
     expect(errorBlock).not.toContain("closeLogicalClientSession(session, `websocket error: ${error.message}`, false)");
-    expect(detachBlock).toContain('if (transportId && session.transportId !== transportId)');
+    expect(detachBlock).toContain("deps.detachClientSessionTransportOnly(session, 'websocket closed'");
   });
 
   it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
-    const source = readServerSource();
+    const source = readBridgeRuntimeSource();
     const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
     expect(rtcCloseBlock).toContain('if (session?.logicalSessionBound)');
-    expect(rtcCloseBlock).toContain('detachClientSessionTransportOnly(session, reason');
+    expect(rtcCloseBlock).toContain('deps.detachClientSessionTransportOnly(session, reason');
     expect(rtcCloseBlock).not.toContain('closeLogicalClientSession(session, reason, false)');
     expect(rtcErrorBlock).toContain('if (session?.logicalSessionBound)');
-    expect(rtcErrorBlock).toContain('detachClientSessionTransportOnly(session, `rtc error: ${message}`');
+    expect(rtcErrorBlock).toContain('deps.detachClientSessionTransportOnly(session, `rtc error: ${message}`');
     expect(rtcErrorBlock).not.toContain('closeLogicalClientSession(session, `rtc error: ${message}`, false)');
   });
 
   it('keeps mirror truth alive when session transport detaches or logical session closes', () => {
-    const source = readServerSource();
-    const closeSessionBlock = extractBlock(source, 'function closeLogicalClientSession');
-    const wsCloseBlock = extractBlock(source, "ws.on('close'");
-    const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
+    const serverSource = readServerSource();
+    const bridgeSource = readBridgeRuntimeSource();
+    const wsCloseBlock = extractBlock(bridgeSource, "ws.on('close'");
+    const rtcCloseBlock = extractBlock(bridgeSource, 'onClose: (_transportId, reason) =>');
 
-    expect(closeSessionBlock).toContain('detachMirrorSubscriber');
-    expect(closeSessionBlock).not.toContain('destroyMirror(');
+    expect(serverSource).toContain('terminalRuntime.closeLogicalClientSession');
     expect(wsCloseBlock).not.toContain('destroyMirror(');
     expect(rtcCloseBlock).not.toContain('destroyMirror(');
   });
 
+  it('does not keep client-style state machine fields in daemon terminal core', () => {
+    const source = readServerSource();
+    expect(source).not.toContain("state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed'");
+    expect(source).not.toContain('session.state =');
+    expect(source).not.toContain('mirror.state =');
+    expect(source).not.toContain('terminalWidthMode:');
+    expect(source).not.toContain('requestedAdaptiveCols:');
+  });
+
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
     const source = readServerSource();
-    const killBlock = extractBlock(source, "case 'tmux-kill-session':", 900);
-    const shutdownBlock = extractBlock(source, 'function shutdownDaemon', 1200);
+    const daemonRuntimeSource = readDaemonRuntimeSource();
+    const messageRuntimeSource = readMessageRuntimeSource();
+    const killBlock = extractBlock(messageRuntimeSource, "case 'tmux-kill-session':", 900);
+    const shutdownBlock = extractBlock(daemonRuntimeSource, 'function shutdownDaemon', 2200);
+    const destroyBlock = extractBlock(source, 'terminalRuntime.destroyMirror', 220);
 
-    expect(killBlock).toContain("destroyMirror(mirror, 'tmux session killed')");
-    expect(shutdownBlock).toContain('destroyMirror(mirror, reason, true)');
+    expect(killBlock).toContain("destroyMirror(mirror, 'tmux session killed', {");
+    expect(killBlock).toContain("closeLogicalSessions: false");
+    expect(killBlock).toContain("releaseCode: 'tmux_session_killed'");
+    expect(source).toContain('createTerminalDaemonRuntime');
+    expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
+    expect(shutdownBlock).toContain('closeLogicalSessions: true');
+    expect(shutdownBlock).toContain('notifyClientClose: true');
+    expect(destroyBlock).toContain('terminalRuntime.destroyMirror');
+    expect(destroyBlock).not.toContain("sendMessage(client, { type: 'closed'");
   });
 
   it('reconnect path closes only the replaced old transport and binds the new transport as current truth', () => {
     const source = readServerSource();
-    const bindBlock = extractBlock(source, 'function bindTransportConnectionToLogicalSession', 1200);
+    const bindBlock = extractBlock(source, 'terminalRuntime.bindTransportConnectionToLogicalSession', 240);
 
-    expect(bindBlock).toContain('const replacedTransportId = attachClientSessionTransport(');
-    expect(bindBlock).toContain("session.transport.close('transport replaced by reconnect')");
-    expect(bindBlock).toContain('session.transport = connection.transport');
-    expect(bindBlock).toContain('connection.boundSessionId = session.id');
+    expect(bindBlock).toContain('terminalRuntime.bindTransportConnectionToLogicalSession');
   });
 
   it('keeps tmux discovery and management on control transport semantics', () => {
-    const source = readServerSource();
+    const source = readMessageRuntimeSource();
     const listSessionsBlock = extractBlock(source, "case 'list-sessions':");
     const createBlock = extractBlock(source, "case 'tmux-create-session':");
     const renameBlock = extractBlock(source, "case 'tmux-rename-session':");
@@ -97,28 +130,43 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(killBlock).not.toContain('requires an attached session transport');
   });
 
-  it('never falls back to raw terminal input when image-upload binary arrives without pending paste state', () => {
-    const source = readServerSource();
-    const block = extractBlock(source, 'function handlePasteImageBinary');
+  it('ignores legacy resize and terminal-width-mode messages instead of treating them as daemon state transitions', () => {
+    const source = readMessageRuntimeSource();
+    const resizeBlock = extractBlock(source, "case 'resize':", 240);
+    const widthModeBlock = extractBlock(source, "case 'terminal-width-mode':", 240);
 
-    expect(block).toContain('paste_image_no_pending');
-    expect(block).not.toContain("handleInput(session, buffer.toString('utf-8'))");
+    expect(resizeBlock).not.toContain('handleResize(');
+    expect(resizeBlock).not.toContain("payload: { message: 'resize requires an attached session transport'");
+    expect(widthModeBlock).not.toContain('handleTerminalWidthMode(');
+    expect(widthModeBlock).not.toContain("payload: { message: 'terminal-width-mode requires an attached session transport'");
   });
 
-  it('uses a local-time log helper instead of raw UTC toISOString timestamps', () => {
-    const source = readServerSource();
-    expect(source).toMatch(/function formatLocalLogTimestamp\([^)]*\)/);
-    expect(source).toMatch(/function logTimePrefix\([^)]*\)/);
-    expect(source).not.toContain('new Date().toISOString()');
+  it('never falls back to raw terminal input when image-upload binary arrives without pending paste state', () => {
+    const serverSource = readServerSource();
+    const messageRuntimeSource = readMessageRuntimeSource();
+    const binaryBlock = extractBlock(messageRuntimeSource, 'deps.terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer)', 180);
+
+    expect(serverSource).toContain('createTerminalFileTransferRuntime');
+    expect(binaryBlock).toContain('deps.terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer)');
+  });
+
+  it('uses dedicated debug runtime local-time log helpers instead of raw UTC toISOString timestamps', () => {
+    const serverSource = readServerSource();
+    const debugRuntimeSource = readDebugRuntimeSource();
+    expect(serverSource).toContain('createTerminalDebugRuntime');
+    expect(debugRuntimeSource).toMatch(/function formatLocalLogTimestamp\([^)]*\)/);
+    expect(debugRuntimeSource).toMatch(/function logTimePrefix\([^)]*\)/);
+    expect(debugRuntimeSource).not.toContain('new Date().toISOString()');
   });
 
   it('does not require an embedded interactive tmux pty client for daemon control truth', () => {
     const source = readServerSource();
+    const controlRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-control-runtime.ts'), 'utf8');
     expect(source).not.toContain("import * as pty from 'node-pty'");
     expect(source).not.toContain("pty.spawn(TMUX_BINARY, ['new-session', '-A', '-s', mirror.sessionName]");
     expect(source).not.toContain('mirror.ptyProcess.write(');
     expect(source).not.toContain('mirror.ptyProcess.resize(');
-    expect(source).toContain("runTmux(['send-keys'");
-    expect(source).toContain("runTmux(['resize-window'");
+    expect(controlRuntimeSource).toContain("runTmux(['send-keys'");
+    expect(controlRuntimeSource).not.toContain("runTmux(['resize-window'");
   });
 });

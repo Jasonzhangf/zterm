@@ -1,8 +1,8 @@
 export interface ClientSessionLifecycleState {
   clientSessionId: string;
-  state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
   mirrorKey: string | null;
   transportId: string | null;
+  readyTransportId?: string | null;
   closeTransport?: (reason: string) => void;
 }
 
@@ -14,9 +14,7 @@ export function attachClientSessionTransport<T extends ClientSessionLifecycleSta
   const replacedTransportId = session.transportId;
   session.transportId = transportId;
   session.closeTransport = closeTransport;
-  if (session.state === 'closed') {
-    session.state = 'idle';
-  }
+  session.readyTransportId = null;
   return {
     clientSessionId: session.clientSessionId,
     transportId: session.transportId,
@@ -33,10 +31,8 @@ export function detachClientSessionTransport<T extends ClientSessionLifecycleSta
     return null;
   }
   session.transportId = null;
+  session.readyTransportId = null;
   session.closeTransport = undefined;
-  if (session.state !== 'closed') {
-    session.state = 'idle';
-  }
   return session;
 }
 

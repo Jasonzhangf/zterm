@@ -546,7 +546,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('reconnects only the active tab when foreground resume finds the active session disconnected', async () => {
+  it('delegates disconnected active-tab foreground resume to SessionContext transport truth', async () => {
     sessionHarness.update(
       {
         sessions: [
@@ -579,8 +579,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
-    expect(sessionHarness.reconnectSession).toHaveBeenCalled();
-    expect(sessionHarness.reconnectSession.mock.calls.every(([sessionId]) => sessionId === 's1')).toBe(true);
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
@@ -779,7 +778,7 @@ describe('App dynamic refresh matrix', () => {
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('tab-b');
   });
 
-  it('reconnects the active tab when the restored active session is closed', async () => {
+  it('does not let App eagerly reconnect a restored closed active tab before SessionContext decides transport recovery', async () => {
     sessionHarness.update(
       {
         sessions: [
@@ -801,7 +800,8 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1'));
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
   });
 
   it('persists current open tabs and active tab automatically', async () => {

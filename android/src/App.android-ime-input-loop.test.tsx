@@ -12,8 +12,10 @@ class MockWebSocket {
   static CLOSING = 2;
   static CLOSED = 3;
   static instances: MockWebSocket[] = [];
+  static controlInstances: MockWebSocket[] = [];
 
   readonly url: string;
+  readonly transportRole: 'control' | 'session';
   readyState = MockWebSocket.CONNECTING;
   sent: Array<string | ArrayBuffer> = [];
   onopen: ((event?: Event) => void) | null = null;
@@ -23,11 +25,52 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    const role = (() => {
+      try {
+        const parsed = new URL(url);
+        const explicitRole = parsed.searchParams.get('ztermTransport');
+        if (explicitRole === 'control' || explicitRole === 'session') {
+          return explicitRole;
+        }
+        const normalizedUrl = parsed.toString();
+        const hasExistingControlForTarget = MockWebSocket.controlInstances.some((socket) => socket.url === normalizedUrl);
+        return hasExistingControlForTarget ? 'session' : 'control';
+      } catch {
+        const hasExistingControlForTarget = MockWebSocket.controlInstances.some((socket) => socket.url === url);
+        return hasExistingControlForTarget ? 'session' : 'control';
+      }
+    })();
+    this.transportRole = role;
+    if (role === 'control') {
+      MockWebSocket.controlInstances.push(this);
+      queueMicrotask(() => {
+        if (this.readyState === MockWebSocket.CONNECTING) {
+          this.triggerOpen();
+        }
+      });
+      return;
+    }
     MockWebSocket.instances.push(this);
   }
 
   send(data: string | ArrayBuffer) {
     this.sent.push(data);
+    if (this.transportRole !== 'control' || typeof data !== 'string') {
+      return;
+    }
+    const message = JSON.parse(data);
+    if (message?.type !== 'session-open') {
+      return;
+    }
+    const payload = message.payload || {};
+    this.triggerMessage({
+      type: 'session-ticket',
+      payload: {
+        clientSessionId: payload.clientSessionId,
+        sessionTransportToken: `ticket-${payload.clientSessionId}`,
+        sessionName: payload.sessionName,
+      },
+    } as ServerMessage);
   }
 
   close() {
@@ -46,6 +89,7 @@ class MockWebSocket {
 
   static reset() {
     MockWebSocket.instances = [];
+    MockWebSocket.controlInstances = [];
   }
 }
 
@@ -276,7 +320,28 @@ describe('App Android IME input closed loop', () => {
 
   beforeEach(() => {
     cleanup();
-    localStorage.clear();
+    const storageBacking = new Map<string, string>();
+    const storageShim = {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage;
+    vi.stubGlobal('localStorage', storageShim);
     MockWebSocket.reset();
     ResizeObserverMock.reset();
     imeListeners.clear();

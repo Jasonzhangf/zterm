@@ -101,3 +101,70 @@
 ## 2026-04-27 Terminal transient flower + QuickBar 3-row freeze
 - 1306 现场“花一下后自愈、输入后更快恢复”当前先冻结为 renderer follow frame transient mismatch；先补红测钉死，不允许先拍脑袋改 daemon/buffer。
 - QuickBar 结构冻结：第一行工具栏（文件/图片/同步/截图/状态/键盘），第二行单键，第三行复合键；浮动菜单只留快速输入/剪贴板/自定义快捷内容。
+
+## 2026-05-01 daemon terminal core second slice
+- Goal: continue de-clienting daemon by moving mirror live-sync / tmux attach / session input orchestration out of server transport glue into terminal-runtime.
+- Truth: server.ts should keep transport/http glue only; terminal runtime owns logical session + mirror lifecycle + tmux mirror orchestration, but still shares the same sessions/mirrors maps from server.ts.
+- Success: targeted lifecycle tests + terminal contracts + type-check stay green, and server.ts no longer hosts attach/live-sync/input implementations.
+
+## 2026-05-01 daemon terminal core fourth slice
+- Goal: continue shrinking `server.ts` by moving file list / mkdir / download / upload / remote screenshot / attach-file binary / paste-image binary into a dedicated file-transfer runtime.
+- Truth: daemon file runtime only owns `remote cwd -> fs/screenshot-helper/tmux input -> transfer protocol`; it must not grow client preview/state semantics.
+- Guard: `server.ts` may keep request/session-required checks and protocol dispatch only; no fallback from binary payload to raw terminal input.
+
+## 2026-05-01 daemon terminal core debug slice
+- Symptom: `server.ts` still carried debug/log helper ownership (`local-time timestamp / daemon runtime debug / client-debug normalize / payload summary`), conflicting with the target of transport+shutdown glue only.
+- Decision: move the whole debug/log helper cluster into `terminal-debug-runtime.ts`; keep `server.ts` only destructuring runtime exports and wiring them into http/message/transport runtimes.
+- Verification:
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit`
+  - `pnpm --dir android exec vitest run src/server/server.debug-truth.test.ts src/server/server.transport-runtime-truth.test.ts src/server/server.control-truth.test.ts src/server/server.schedule-truth.test.ts src/server/server.http-truth.test.ts src/server/server.file-transfer-truth.test.ts src/server/server.mirror-capture-truth.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/client-session-lifecycle.test.ts src/server/mirror-lifecycle.test.ts --reporter verbose`
+  - `pnpm --dir android run test:terminal:contracts`
+
+## 2026-05-01 daemon terminal core support + daemon service slice
+- Symptom: even after runtime/control/debug/file/message extraction, `server.ts` still held two non-glue clusters:
+  1. terminal core normalize/sanitize/helper truth
+  2. daemon service helper truth (`resolveTmuxBinary / auth token parse / heartbeat / memory guard / shutdown / listen logs`)
+- Decision:
+  - move terminal helper truth to `terminal-core-support.ts`
+  - move daemon service helper truth to `terminal-daemon-runtime.ts`
+  - keep `server.ts` as wiring shell for `http / ws / rtc / message / transport / shutdown entry`
+- Verification:
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit`
+  - `pnpm --dir android exec vitest run src/server/server.daemon-runtime-truth.test.ts src/server/server.core-support-truth.test.ts src/server/server.debug-truth.test.ts src/server/server.transport-runtime-truth.test.ts src/server/server.control-truth.test.ts src/server/server.schedule-truth.test.ts src/server/server.http-truth.test.ts src/server/server.file-transfer-truth.test.ts src/server/server.mirror-capture-truth.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/client-session-lifecycle.test.ts src/server/mirror-lifecycle.test.ts --reporter verbose`
+  - `pnpm --dir android run test:terminal:contracts`
+
+## 2026-05-01 daemon bridge slice
+- Symptom: after helper/runtime extraction, `server.ts` still directly hosted the last large bridge glue cluster:
+  - ws `connection/pong/message/close/error`
+  - rtc transport `open/close/error`
+  - `/signal` vs `/ws` upgrade routing
+  - relay-host signal bridge to rtc bridge
+- Decision:
+  - move this cluster into `terminal-bridge-runtime.ts`
+  - keep `server.ts` as composition shell that wires `bridge + daemon + message + transport + http`
+- Verification:
+  - `pnpm --dir android exec vitest run src/server/server.bridge-runtime-truth.test.ts src/server/server.daemon-runtime-truth.test.ts src/server/server.core-support-truth.test.ts src/server/server.debug-truth.test.ts src/server/server.transport-runtime-truth.test.ts src/server/server.control-truth.test.ts src/server/server.schedule-truth.test.ts src/server/server.http-truth.test.ts src/server/server.file-transfer-truth.test.ts src/server/server.mirror-capture-truth.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/client-session-lifecycle.test.ts src/server/mirror-lifecycle.test.ts --reporter verbose`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit`
+  - `pnpm --dir android run test:terminal:contracts`
+
+
+## 2026-05-01 protocol truth + daemon restore
+- 先验证后结论：这次“改了 shared 协议但 TS 还像没生效”不是 TypeScript 缓存玄学，而是 workspace 软链真错了。
+- 实际根因：`android/node_modules/@zterm/shared -> ../../../../../../../private/tmp/zterm-safe-7850bd3/packages/shared`
+- 止血动作：`pnpm install --force --config.confirmModulesPurge=false`
+- 修复后软链：`android/node_modules/@zterm/shared -> ../../../packages/shared`
+- 协议收口：
+  - `packages/shared/src/connection/types.ts` 补齐 `cursor / WireIndexedLine / SessionBufferState.cursor`
+  - `packages/shared/src/connection/protocol.ts` 补齐当前 wire 消息：`debug-log / debug-control / tmux-* / paste-image-start / terminal-width-mode / file-create-directory-* / file upload progress+complete 扩展字段`
+  - `android/src/lib/types.ts` 删除本地协议 union/interface 真相，改成 `BridgeClientMessage/BridgeServerMessage` alias + shared re-export
+- 新 source gate：`android/src/lib/protocol-truth.test.ts`
+- daemon 恢复证据：
+  - `/health` = ok, pid=41420
+  - `android/evidence/daemon-mirror/2026-05-01/initial-sync/probe-events.json` 已看到：
+    - sent `session-open`
+    - recv `session-ticket`
+    - sent `connect`
+    - recv `connected`
+    - recv `buffer-head`
+    - recv `buffer-sync` with `wireKind=compact`
+- 额外发现：`server.ts` 装配顺序里 `relayHostClient` 不能早于 bridge runtime；否则会形成 `handleRelaySignal/closeRelayPeer` 未定义使用。这次已收成唯一顺序：daemon runtime -> bridge runtime -> relay host client。

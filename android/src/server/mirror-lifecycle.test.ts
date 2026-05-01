@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  closeMirrorSubscribers,
+  releaseMirrorSubscribers,
   detachMirrorSubscriber,
   type MirrorLifecycleSessionLike,
 } from './mirror-lifecycle';
@@ -8,7 +8,6 @@ import {
 function buildSession(id: string, mirrorKey = 'fin'): MirrorLifecycleSessionLike {
   return {
     id,
-    state: 'connected',
     mirrorKey,
   };
 }
@@ -23,7 +22,7 @@ describe('mirror lifecycle truth', () => {
     expect(result.keepMirrorAlive).toBe(true);
   });
 
-  it('closes and deletes subscriber sessions from daemon session truth', () => {
+  it('releases subscriber sessions from mirror truth without deleting logical sessions', () => {
     const session1 = buildSession('client-1');
     const session2 = buildSession('client-2');
     const sessions = new Map<string, MirrorLifecycleSessionLike>([
@@ -31,13 +30,11 @@ describe('mirror lifecycle truth', () => {
       [session2.id, session2],
     ]);
 
-    const closed = closeMirrorSubscribers(sessions, ['client-1', 'missing', 'client-2']);
+    const released = releaseMirrorSubscribers(sessions, ['client-1', 'missing', 'client-2']);
 
-    expect(closed).toEqual(['client-1', 'client-2']);
-    expect(sessions.size).toBe(0);
-    expect(session1.state).toBe('closed');
+    expect(released).toEqual(['client-1', 'client-2']);
+    expect(sessions.size).toBe(2);
     expect(session1.mirrorKey).toBeNull();
-    expect(session2.state).toBe('closed');
     expect(session2.mirrorKey).toBeNull();
   });
 });

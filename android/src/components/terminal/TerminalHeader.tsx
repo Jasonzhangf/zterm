@@ -7,6 +7,7 @@ const TAB_LONG_PRESS_MS = 920;
 const PLUS_LONG_PRESS_MS = 680;
 const HEADER_TOUCH_SAFE_OFFSET_PX = 20;
 const DOUBLE_TAP_MS = 280;
+const ACTIVE_TAB_CLOSE_ARM_DELAY_MS = 280;
 
 interface TerminalHeaderProps {
   sessions: Session[];
@@ -63,6 +64,7 @@ export function TerminalHeader({
   const plusLongPressTimerRef = useRef<number | null>(null);
   const plusLongPressTriggeredRef = useRef(false);
   const [paneMenuSessionId, setPaneMenuSessionId] = useState<string | null>(null);
+  const [armedClosableSessionId, setArmedClosableSessionId] = useState<string | null>(null);
 
   const closePaneMenu = () => setPaneMenuSessionId(null);
 
@@ -137,6 +139,7 @@ export function TerminalHeader({
 
   useEffect(() => {
     if (!activeSession?.id) {
+      setArmedClosableSessionId(null);
       return;
     }
 
@@ -146,6 +149,15 @@ export function TerminalHeader({
       block: 'nearest',
       behavior: 'smooth',
     });
+
+    setArmedClosableSessionId(null);
+    const timer = window.setTimeout(() => {
+      setArmedClosableSessionId(activeSession.id);
+    }, ACTIVE_TAB_CLOSE_ARM_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -333,6 +345,9 @@ export function TerminalHeader({
                     aria-label="关闭当前 tab"
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (armedClosableSessionId !== session.id) {
+                        return;
+                      }
                       closePaneMenu();
                       onCloseSession(session.id);
                     }}
@@ -357,6 +372,8 @@ export function TerminalHeader({
                       fontWeight: 900,
                       zIndex: 2,
                       WebkitTapHighlightColor: 'transparent',
+                      opacity: armedClosableSessionId === session.id ? 1 : 0.38,
+                      pointerEvents: armedClosableSessionId === session.id ? 'auto' : 'none',
                     }}
                   >
                     ×
