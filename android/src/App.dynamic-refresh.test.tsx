@@ -326,6 +326,28 @@ describe('App dynamic refresh matrix', () => {
     sessionHarness.reset();
     hostHarness.reset();
     capacitorAppHarness.reset();
+    const storageBacking = new Map<string, string>();
+    const storageShim = {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage;
+    vi.stubGlobal('localStorage', storageShim);
     localStorage.clear();
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 's1' }));
   });

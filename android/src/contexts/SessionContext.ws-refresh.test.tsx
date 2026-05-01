@@ -765,7 +765,28 @@ describe('SessionContext websocket dynamic refresh', () => {
 
   beforeEach(() => {
     cleanup();
-    localStorage.clear();
+    const storageBacking = new Map<string, string>();
+    const storageShim = {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage;
+    vi.stubGlobal('localStorage', storageShim);
     MockWebSocket.reset();
     vi.mocked(Filesystem.mkdir).mockClear();
     vi.mocked(Filesystem.writeFile).mockClear();
@@ -2997,6 +3018,88 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     const sentMessagesAfterRevisionAdvance = readSentMessages(ws);
     expect(sentMessagesAfterRevisionAdvance.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+  });
+
+  it('does not supersede same-window tail refresh repeatedly while local snapshot is unchanged', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 132711,
+        endIndex: 133711,
+        revision: 1447,
+        lines: Array.from({ length: 1000 }, (_, index) => [132711 + index, `row-${132711 + index}`] as const),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('1447'));
+    ws.sent.length = 0;
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 1494,
+        latestEndIndex: 133718,
+        availableStartIndex: 130718,
+        availableEndIndex: 133718,
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          knownRevision: 1447,
+          localStartIndex: 132711,
+          localEndIndex: 133711,
+          requestStartIndex: 133711,
+          requestEndIndex: 133718,
+        }),
+      });
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 1498,
+        latestEndIndex: 133718,
+        availableStartIndex: 130718,
+        availableEndIndex: 133718,
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 1505,
+        latestEndIndex: 133718,
+        availableStartIndex: 130718,
+        availableEndIndex: 133718,
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const sentMessages = readSentMessages(ws);
+    expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
   });
 
   it('refreshes only the visible follow viewport when revision advances at the same head end without an explicit tail reanchor demand', async () => {

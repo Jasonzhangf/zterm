@@ -336,6 +336,9 @@ interface SessionPullState {
   targetHeadRevision: number;
   targetStartIndex: number;
   targetEndIndex: number;
+  requestKnownRevision: number;
+  requestLocalStartIndex: number;
+  requestLocalEndIndex: number;
 }
 
 type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullState>>;
@@ -1009,6 +1012,19 @@ function doesSessionPullStateCoverRequest(
   );
 }
 
+function doesSessionPullStateMatchExactLocalSnapshot(
+  pullState: SessionPullState,
+  payload: BufferSyncRequestPayload,
+) {
+  return (
+    pullState.requestKnownRevision === Math.max(0, Math.floor(payload.knownRevision || 0))
+    && pullState.requestLocalStartIndex === Math.max(0, Math.floor(payload.localStartIndex || 0))
+    && pullState.requestLocalEndIndex === Math.max(0, Math.floor(payload.localEndIndex || 0))
+    && pullState.targetStartIndex === Math.max(0, Math.floor(payload.requestStartIndex || 0))
+    && pullState.targetEndIndex === Math.max(0, Math.floor(payload.requestEndIndex || 0))
+  );
+}
+
 export function SessionProvider({
   children,
   wsUrl,
@@ -1197,6 +1213,9 @@ export function SessionProvider({
     targetHeadRevision?: number;
     targetStartIndex?: number;
     targetEndIndex?: number;
+    requestKnownRevision?: number;
+    requestLocalStartIndex?: number;
+    requestLocalEndIndex?: number;
   }) => {
     const current = ensureSessionWireStats(sessionId);
     current.txBytes += estimateWireBytes(data);
@@ -1210,6 +1229,9 @@ export function SessionProvider({
           targetHeadRevision: Math.max(0, Math.floor(options.targetHeadRevision || 0)),
           targetStartIndex: Math.max(0, Math.floor(options.targetStartIndex || 0)),
           targetEndIndex: Math.max(0, Math.floor(options.targetEndIndex || 0)),
+          requestKnownRevision: Math.max(0, Math.floor(options.requestKnownRevision || 0)),
+          requestLocalStartIndex: Math.max(0, Math.floor(options.requestLocalStartIndex || 0)),
+          requestLocalEndIndex: Math.max(0, Math.floor(options.requestLocalEndIndex || 0)),
         },
       } satisfies SessionPullStates;
       sessionPullStateRef.current.set(sessionId, nextPullStates);
@@ -1290,6 +1312,9 @@ export function SessionProvider({
     targetHeadRevision?: number;
     targetStartIndex?: number;
     targetEndIndex?: number;
+    requestKnownRevision?: number;
+    requestLocalStartIndex?: number;
+    requestLocalEndIndex?: number;
   }) => {
     recordSessionTx(sessionId, data, options);
     ws.send(data);
@@ -1819,7 +1844,10 @@ export function SessionProvider({
     const inFlightPull = (sessionPullStateRef.current.get(sessionId) || null)?.[requestPurpose] || null;
     if (inFlightPull) {
       const targetHeadRevision = Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0));
-      if (doesSessionPullStateCoverRequest(inFlightPull, payload)) {
+      if (
+        doesSessionPullStateCoverRequest(inFlightPull, payload)
+        || doesSessionPullStateMatchExactLocalSnapshot(inFlightPull, payload)
+      ) {
         return false;
       }
       runtimeDebug('session.buffer.pull.superseded', {
@@ -1858,6 +1886,9 @@ export function SessionProvider({
         || effectiveSession.buffer.endIndex
         || 0
       )),
+      requestKnownRevision: Math.max(0, Math.floor(payload.knownRevision || 0)),
+      requestLocalStartIndex: Math.max(0, Math.floor(payload.localStartIndex || 0)),
+      requestLocalEndIndex: Math.max(0, Math.floor(payload.localEndIndex || 0)),
     });
     return true;
   }, [clearSessionPullState, sendSocketPayload]);
