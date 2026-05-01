@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from 'child_process';
-import { createWriteStream, mkdirSync, writeFileSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { createServer } from 'net';
 import { WebSocket } from 'ws';
-import * as pty from 'node-pty';
 import type { BufferSyncRequestPayload, ClientMessage, ScheduleEventPayload, ScheduleStatePayload, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 import { loadScheduleStore, saveScheduleStore } from '../src/server/schedule-store';
@@ -18,7 +18,7 @@ const LAB_COLS = 80;
 const LAB_ROWS = 24;
 const WAIT_TIMEOUT_MS = 8000;
 const DAEMON_READY_TIMEOUT_MS = 10000;
-const MANAGED_DAEMON_TEST_PORT = process.env.ZTERM_TEST_DAEMON_PORT || '46333';
+const MANAGED_DAEMON_TEST_PORT = process.env.ZTERM_TEST_DAEMON_PORT?.trim() || '';
 type CaseName =
   | 'codex-live'
   | 'top-live'
@@ -239,12 +239,50 @@ async function waitForDaemonHealth(healthUrl: string, timeoutMs: number = DAEMON
   throw new Error(`daemon health timeout: ${lastError}`);
 }
 
+async function findAvailablePort(host: string) {
+  return await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, host, () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('failed to resolve dynamic daemon port')));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+function resolveTmuxBinary() {
+  const override = process.env.ZTERM_TMUX_BINARY?.trim();
+  if (override) {
+    return override;
+  }
+  const candidates = [
+    '/opt/homebrew/bin/tmux',
+    '/usr/local/bin/tmux',
+    '/usr/bin/tmux',
+    'tmux',
+  ];
+  const existingCandidate = candidates.find((candidate) => candidate === 'tmux' || existsSync(candidate));
+  return existingCandidate || 'tmux';
+}
+
+const TMUX_BINARY = resolveTmuxBinary();
+
 class LabDaemonController {
   private readonly host: string;
 
-  private readonly port: string;
-
-  private readonly healthUrl: string;
+  private port = '';
 
   private readonly logPath: string;
 
@@ -253,15 +291,19 @@ class LabDaemonController {
   constructor() {
     const config = resolveDaemonRuntimeConfig();
     this.host = process.env.ZTERM_HOST || (config.host === '0.0.0.0' ? '127.0.0.1' : config.host);
-    this.port = String(MANAGED_DAEMON_TEST_PORT);
-    this.healthUrl = `http://${this.host}:${this.port}/health`;
     this.logPath = join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder(), 'current-daemon.log');
+  }
+
+  getPort() {
+    return this.port;
   }
 
   async start() {
     if (this.proc) {
       throw new Error('lab daemon is already running');
     }
+    this.port = MANAGED_DAEMON_TEST_PORT || String(await findAvailablePort(this.host));
+    const healthUrl = `http://${this.host}:${this.port}/health`;
     mkdirSync(join(process.cwd(), 'evidence', 'daemon-mirror', currentDateFolder()), { recursive: true });
     const logStream = createWriteStream(this.logPath, { flags: 'a' });
     const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
@@ -278,7 +320,7 @@ class LabDaemonController {
     proc.stdout.pipe(logStream);
     proc.stderr.pipe(logStream);
     this.proc = proc;
-    await waitForDaemonHealth(this.healthUrl);
+    await waitForDaemonHealth(healthUrl);
   }
 
   async stop() {
@@ -316,7 +358,7 @@ class LabDaemonController {
 }
 
 function runTmux(args: string[], options?: { allowFailure?: boolean }) {
-  const result = spawnSync('tmux', args, {
+  const result = spawnSync(TMUX_BINARY, args, {
     encoding: 'utf-8',
     env: { ...process.env, TERM: 'xterm-256color' },
   });
@@ -337,7 +379,7 @@ function getLabPaneId() {
 }
 
 function sessionExists(sessionName: string) {
-  const result = spawnSync('tmux', ['has-session', '-t', sessionName], {
+  const result = spawnSync(TMUX_BINARY, ['has-session', '-t', sessionName], {
     encoding: 'utf-8',
     env: { ...process.env, TERM: 'xterm-256color' },
   });
@@ -510,26 +552,6 @@ function compareTail(oracle: OracleSnapshot, payload: TerminalBufferPayload | nu
   };
 }
 
-function payloadCoversVisibleViewport(oracle: OracleSnapshot, payload: TerminalBufferPayload | null) {
-  if (!payload) {
-    return false;
-  }
-
-  const rowCount = Math.max(1, payload.rows || oracle.paneRows);
-  const viewportBottom = Math.max(
-    0,
-    Number.isFinite(payload.availableEndIndex) ? payload.availableEndIndex! : payload.endIndex,
-  );
-  const startIndex = Math.max(0, viewportBottom - rowCount);
-  const indices = new Set(normalizeWireLines(payload.lines, payload.cols || oracle.paneCols).map((line) => line.index));
-  for (let index = startIndex; index < viewportBottom; index += 1) {
-    if (!indices.has(index)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function replayClientMirrorCompare(
   oracle: OracleSnapshot,
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
@@ -574,15 +596,7 @@ function buildStepResult(
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
   reasonWhenFailed: string,
 ): CaseStepResult {
-  const directPayloadComparable = payloadCoversVisibleViewport(oracle, daemonPayload);
-  const compare = directPayloadComparable
-    ? compareTail(oracle, daemonPayload)
-    : {
-        ok: true,
-        mismatchIndex: null,
-        expected: oracle.lines,
-        actual: oracle.lines,
-      };
+  const compare = compareTail(oracle, daemonPayload);
   const historyLength = history.length;
   const clientMirrorCompare = replayClientMirrorCompare(oracle, history.slice(0, historyLength));
   const ok = compare.ok && clientMirrorCompare.ok;
@@ -632,40 +646,26 @@ async function waitForOracle(
   throw new Error(`timeout waiting for oracle: ${label}`);
 }
 
-class AttachedTmuxOperator {
-  private client: pty.IPty | null = null;
+async function waitForPayloadToMatchOracle(
+  probe: DaemonProbe,
+  label: string,
+  oracle: OracleSnapshot,
+  timeoutMs: number = WAIT_TIMEOUT_MS,
+) {
+  return probe.waitForPayload(label, (payload) => compareTail(oracle, payload).ok, timeoutMs);
+}
 
+class AttachedTmuxOperator {
   async attach() {
-    if (this.client) {
-      return;
-    }
-    this.client = pty.spawn('tmux', ['a', '-t', LAB_SESSION_NAME], {
-      name: 'xterm-256color',
-      cols: LAB_COLS,
-      rows: LAB_ROWS,
-      cwd: process.cwd(),
-      env: { ...process.env, TERM: 'xterm-256color' },
-    });
-    await sleep(500);
+    return;
   }
 
   write(input: string) {
-    if (!this.client) {
-      throw new Error('attached tmux operator is not started');
-    }
-    this.client.write(input);
+    runTmux(['send-keys', '-t', LAB_SESSION_NAME, '-l', '--', input]);
   }
 
   close() {
-    if (!this.client) {
-      return;
-    }
-    try {
-      this.client.kill();
-    } catch (error) {
-      console.warn('[daemon-mirror-lab] Failed to kill attached tmux operator:', error);
-    }
-    this.client = null;
+    return;
   }
 }
 
@@ -1140,9 +1140,16 @@ async function runExternalInputCase(probe: DaemonProbe): Promise<CaseResult> {
   const markerA = '__daemon_external_a__';
   runTmux(['send-keys', '-t', paneId, '-l', `printf 'hello-external-a\\n${markerA}\\n'`]);
   runTmux(['send-keys', '-t', paneId, 'C-m']);
-  const payloadA = await probe.waitForMarker(markerA);
-  await sleep(200);
-  const oracleA = captureOracleSnapshot();
+  await probe.waitForMarker(markerA);
+  const oracleA = await waitForOracle(
+    'external-input-a marker reflects',
+    (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes(markerA)),
+  );
+  const payloadA = await waitForPayloadToMatchOracle(
+    probe,
+    'external-input-a settled payload',
+    oracleA,
+  );
   steps.push(
     buildStepResult('external-input-echo-a', oracleA, payloadA, probe.history, 'daemon external-input mirror diverged from tmux truth'),
   );
@@ -1153,9 +1160,16 @@ async function runExternalInputCase(probe: DaemonProbe): Promise<CaseResult> {
   const markerB = '__daemon_external_b__';
   runTmux(['send-keys', '-t', paneId, '-l', `printf 'hello-external-b\\n${markerB}\\n'`]);
   runTmux(['send-keys', '-t', paneId, 'C-m']);
-  const payloadB = await probe.waitForMarker(markerB);
-  await sleep(200);
-  const oracleB = captureOracleSnapshot();
+  await probe.waitForMarker(markerB);
+  const oracleB = await waitForOracle(
+    'external-input-b marker reflects',
+    (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes(markerB)),
+  );
+  const payloadB = await waitForPayloadToMatchOracle(
+    probe,
+    'external-input-b settled payload',
+    oracleB,
+  );
   steps.push(
     buildStepResult('external-input-echo-b', oracleB, payloadB, probe.history, 'daemon second external-input mirror diverged from tmux truth'),
   );
@@ -1166,9 +1180,16 @@ async function runExternalInputCase(probe: DaemonProbe): Promise<CaseResult> {
   const markerC = '__daemon_external_tail__';
   runTmux(['send-keys', '-t', paneId, '-l', `seq 1 32 | sed 's/^/external-tail-/' && printf '${markerC}\\n'`]);
   runTmux(['send-keys', '-t', paneId, 'C-m']);
-  const payloadC = await probe.waitForMarker(markerC);
-  await sleep(200);
-  const oracleC = captureOracleSnapshot();
+  await probe.waitForMarker(markerC);
+  const oracleC = await waitForOracle(
+    'external-input-tail marker reflects',
+    (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes(markerC)),
+  );
+  const payloadC = await waitForPayloadToMatchOracle(
+    probe,
+    'external-input-tail settled payload',
+    oracleC,
+  );
   steps.push(
     buildStepResult('external-input-echo-tail', oracleC, payloadC, probe.history, 'daemon external tail refresh diverged from tmux truth'),
   );
@@ -1190,9 +1211,16 @@ async function runDaemonRestartRecoverCase(
   const beforeMarker = '__daemon_restart_before__';
   runTmux(['send-keys', '-t', paneId, '-l', `printf 'before-restart\\n${beforeMarker}\\n'`]);
   runTmux(['send-keys', '-t', paneId, 'C-m']);
-  const beforePayload = await probe.waitForMarker(beforeMarker);
-  await sleep(200);
-  const beforeOracle = captureOracleSnapshot();
+  await probe.waitForMarker(beforeMarker);
+  const beforeOracle = await waitForOracle(
+    'daemon restart before marker reflects',
+    (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes(beforeMarker)),
+  );
+  const beforePayload = await waitForPayloadToMatchOracle(
+    probe,
+    'daemon restart before settled payload',
+    beforeOracle,
+  );
   steps.push(
     buildStepResult(
       'daemon-restart-before',
@@ -1208,7 +1236,7 @@ async function runDaemonRestartRecoverCase(
 
   await controller.restart();
 
-  const { wsUrl, authToken } = resolveWsUrl(Boolean(controller));
+  const { wsUrl, authToken } = resolveWsUrl(Boolean(controller), controller);
   const reconnectProbe = new DaemonProbe(wsUrl, authToken);
   try {
     await reconnectProbe.connect();
@@ -1234,10 +1262,18 @@ async function runDaemonRestartRecoverCase(
     const afterMarker = '__daemon_restart_after__';
     runTmux(['send-keys', '-t', paneId, '-l', `printf 'after-restart\\n${afterMarker}\\n'`]);
     runTmux(['send-keys', '-t', paneId, 'C-m']);
-    const afterPayload = await reconnectProbe.waitForMarker(afterMarker);
+    await reconnectProbe.waitForMarker(afterMarker);
     probe.absorb(reconnectProbe, reconnectHistoryCursor);
-    await sleep(200);
-    const afterOracle = captureOracleSnapshot();
+    const afterOracle = await waitForOracle(
+      'daemon restart after marker reflects',
+      (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes(afterMarker)),
+    );
+    const afterPayload = await waitForPayloadToMatchOracle(
+      reconnectProbe,
+      'daemon restart after settled payload',
+      afterOracle,
+    );
+    probe.absorb(reconnectProbe, reconnectHistoryCursor);
     steps.push(
       buildStepResult(
         'daemon-restart-after',
@@ -1279,8 +1315,12 @@ async function runTopLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
     operator.write('q');
     await waitForOracle('top shell return', (oracle) => !oracle.alternateOn && oracle.paneCommand === 'zsh');
     operator.write(`printf '__top_exit_ok__\\n'\r`);
-    const exitPayload = await probe.waitForMarker('__top_exit_ok__');
     const exitOracle = await waitForOracle('top exit marker in shell', (oracle) => !oracle.alternateOn && oracle.paneCommand === 'zsh');
+    const exitPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'top exit settled payload',
+      exitOracle,
+    );
     steps.push(
       buildStepResult(
         'top-exit-shell-return',
@@ -1327,10 +1367,15 @@ async function runCodexLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperat
     }
 
     operator.write(`printf '__codex_live_a__\\n'\r`);
-    const markerPayload = await probe.waitForMarker('__codex_live_a__');
+    await probe.waitForMarker('__codex_live_a__');
     const markerOracle = await waitForOracle(
       'codex shell marker reflects',
       (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes('__codex_live_a__')),
+    );
+    const markerPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'codex shell marker settled payload',
+      markerOracle,
     );
     steps.push(
       buildStepResult(
@@ -1346,10 +1391,15 @@ async function runCodexLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperat
     }
 
     operator.write(`seq 1 36 | sed 's/^/codex-live-/' && printf '__codex_live_tail__\\n'\r`);
-    const tailPayload = await probe.waitForMarker('__codex_live_tail__');
+    await probe.waitForMarker('__codex_live_tail__');
     const tailOracle = await waitForOracle(
       'codex shell tail reflects',
       (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes('__codex_live_tail__')),
+    );
+    const tailPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'codex shell tail settled payload',
+      tailOracle,
     );
     steps.push(
       buildStepResult(
@@ -1477,8 +1527,12 @@ async function runVimLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
     operator.write(':q!\r');
     await waitForOracle('vim shell return', (oracle) => !oracle.alternateOn && oracle.paneCommand === 'zsh');
     operator.write(`printf '__vim_exit_ok__\\n'\r`);
-    const exitPayload = await probe.waitForMarker('__vim_exit_ok__');
     const exitOracle = await waitForOracle('vim exit marker in shell', (oracle) => !oracle.alternateOn && oracle.paneCommand === 'zsh');
+    const exitPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'vim exit settled payload',
+      exitOracle,
+    );
     steps.push(
       buildStepResult(
         'vim-exit-shell-return',
@@ -1610,10 +1664,12 @@ async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
   };
 }
 
-function resolveWsUrl(useManagedDaemon: boolean) {
+function resolveWsUrl(useManagedDaemon: boolean, daemonController: LabDaemonController | null) {
   const config = resolveDaemonRuntimeConfig();
   const base = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
-  const port = useManagedDaemon ? MANAGED_DAEMON_TEST_PORT : String(config.port);
+  const port = useManagedDaemon
+    ? String(daemonController?.getPort() || MANAGED_DAEMON_TEST_PORT || config.port)
+    : String(config.port);
   return {
     wsUrl: `ws://${base}:${port}/ws`,
     authToken: config.authToken,
@@ -1623,7 +1679,7 @@ function resolveWsUrl(useManagedDaemon: boolean) {
 async function runCase(caseName: CaseName, daemonController: LabDaemonController | null) {
   resetLabSession();
   await sleep(150);
-  const { wsUrl, authToken } = resolveWsUrl(Boolean(daemonController));
+  const { wsUrl, authToken } = resolveWsUrl(Boolean(daemonController), daemonController);
   const probe = new DaemonProbe(wsUrl, authToken);
   const operator = new AttachedTmuxOperator();
 
