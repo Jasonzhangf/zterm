@@ -246,6 +246,23 @@ export interface TransferProgress {
   error?: string;
 }
 
+export interface FileCreateDirectoryRequestPayload {
+  requestId: string;
+  path: string;
+  name: string;
+}
+
+export interface FileCreateDirectoryCompletePayload {
+  requestId: string;
+  path: string;
+  name: string;
+}
+
+export interface FileCreateDirectoryErrorPayload {
+  requestId: string;
+  error: string;
+}
+
 export interface FileListRequestPayload {
   requestId: string;
   path: string;

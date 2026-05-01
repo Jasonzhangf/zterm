@@ -135,16 +135,6 @@ export function normalizeBufferLines(lines: Array<TerminalCell[] | string>, cach
   return normalized.slice(normalized.length - cacheLines);
 }
 
-function normalizeIndexedLines(lines: TerminalIndexedLine[]) {
-  return lines
-    .filter((line) => line && Number.isFinite(line.index))
-    .map((line) => ({
-      index: Math.max(0, Math.floor(line.index)),
-      cells: line.cells || EMPTY_ROW,
-    }))
-    .sort((left, right) => left.index - right.index);
-}
-
 function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
   if (left.length !== right.length) {
     return false;

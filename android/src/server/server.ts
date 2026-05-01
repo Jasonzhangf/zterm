@@ -1205,7 +1205,7 @@ async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
     paneRows: metrics.paneRows,
     tmuxAvailableLineCountHint: metrics.tmuxAvailableLineCountHint,
     capturedLineCount: capturedLines.length,
-    canonicalLineCount: nextBufferLines.length,
+    scratchLineCount: nextBufferLines.length,
   });
   const nextBufferStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
 

@@ -35,8 +35,18 @@ async function startMockHelper(socketPath: string, onRequest: (request: any, soc
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(socketPath, () => resolve());
+    const eventServer = server as any;
+    const onError = (error: Error) => {
+      eventServer.removeListener('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      eventServer.removeListener('error', onError);
+      resolve();
+    };
+    eventServer.addListener('error', onError);
+    eventServer.addListener('listening', onListening);
+    server.listen(socketPath);
   });
 
   return server;

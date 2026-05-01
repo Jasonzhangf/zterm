@@ -33,7 +33,7 @@ describe('schedule-dispatch', () => {
     );
 
     expect(result).toEqual({ ok: true });
-    expect(writeToLiveMirror).toHaveBeenCalledWith('main', 'uptime\r');
+    expect(writeToLiveMirror).toHaveBeenCalledWith('main', 'uptime\r', false);
     expect(writeToTmuxSession).not.toHaveBeenCalled();
   });
 

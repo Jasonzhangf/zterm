@@ -7,7 +7,7 @@ export interface ScheduleDispatchResult {
 }
 
 export interface ScheduleDispatchContext {
-  writeToLiveMirror: (sessionName: string, payload: string) => boolean;
+  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
 }
 
@@ -29,7 +29,7 @@ export function dispatchScheduledJob(
   }
 
   const payload = appendEnter(job.payload.text, job.payload.appendEnter);
-  if (context.writeToLiveMirror(sessionName, payload)) {
+  if (context.writeToLiveMirror(sessionName, payload, false)) {
     return { ok: true };
   }
 
