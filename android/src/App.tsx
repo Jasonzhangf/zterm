@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
-import { SessionProvider, useSession } from './contexts/SessionContext';
+import { SessionProvider, SESSION_STATUS_EVENT, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { useHostStorage } from './hooks/useHostStorage';
@@ -21,7 +21,6 @@ import {
   buildPersistedOpenTabFromSession,
   dedupePersistedOpenTabs,
   findReusableOpenTabSession,
-  persistSessionIntentState,
   persistOpenTabsState,
   readPersistedActiveSessionId,
   readPersistedOpenTabs,
@@ -88,6 +87,21 @@ function readPersistedPageState(): AppPageState {
   return openConnectionsPage();
 }
 
+function normalizeOpenTabIntentState(
+  tabs: PersistedOpenTab[],
+  activeSessionId: string | null,
+): { tabs: PersistedOpenTab[]; activeSessionId: string | null } {
+  const dedupedTabs = dedupePersistedOpenTabs(tabs);
+  const normalizedActiveSessionId =
+    activeSessionId && dedupedTabs.some((tab) => tab.sessionId === activeSessionId)
+      ? activeSessionId
+      : dedupedTabs[0]?.sessionId || null;
+  return {
+    tabs: dedupedTabs,
+    activeSessionId: normalizedActiveSessionId,
+  };
+}
+
 export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
   const {
     preferences: appUpdatePreferences,
@@ -143,6 +157,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
+  const openTabStateRef = useRef(normalizeOpenTabIntentState(
+    readPersistedOpenTabs(),
+    readPersistedActiveSessionId(),
+  ));
+  const closedOpenTabSessionIdsRef = useRef(new Set<string>());
   const restoredRouteHandledRef = useRef(false);
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
@@ -157,6 +176,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   );
   const sessions = state.sessions;
 
+  const persistExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
+    const nextState = normalizeOpenTabIntentState(tabs, activeSessionId);
+    openTabStateRef.current = nextState;
+    persistOpenTabsState(nextState.tabs, nextState.activeSessionId);
+    return nextState;
+  }, []);
+
   useEffect(() => {
     sessionsRef.current = state.sessions;
     activeSessionIdRef.current = state.activeSessionId;
@@ -169,26 +195,40 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       return;
     }
 
-    if (restoredTabsHandledRef.current) {
-      persistOpenTabsState(
-        sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-        state.activeSessionId,
-      );
-      return;
-    }
-
     if (sessions.length > 0) {
       restoredTabsHandledRef.current = true;
-      const persistedActiveSessionId = readPersistedActiveSessionId();
+      const currentOpenTabState = openTabStateRef.current;
+      if (currentOpenTabState.tabs.length === 0) {
+        const bootstrapTabs = sessions.map((session) => buildPersistedOpenTabFromSession(session));
+        const bootstrapActiveSessionId =
+          state.activeSessionId && bootstrapTabs.some((tab) => tab.sessionId === state.activeSessionId)
+            ? state.activeSessionId
+            : bootstrapTabs[0]?.sessionId || null;
+        persistExplicitOpenTabs(bootstrapTabs, bootstrapActiveSessionId);
+        return;
+      }
+
+      const knownSessionIds = new Set(currentOpenTabState.tabs.map((tab) => tab.sessionId));
+      const runtimeNewTabs = sessions
+        .filter((session) => (
+          !knownSessionIds.has(session.id)
+          && !closedOpenTabSessionIdsRef.current.has(session.id)
+        ))
+        .map((session) => buildPersistedOpenTabFromSession(session));
+      if (runtimeNewTabs.length > 0) {
+        persistExplicitOpenTabs(
+          [...currentOpenTabState.tabs, ...runtimeNewTabs],
+          currentOpenTabState.activeSessionId || state.activeSessionId,
+        );
+        return;
+      }
+
+      const persistedActiveSessionId = currentOpenTabState.activeSessionId;
       const nextActiveSessionId =
         persistedActiveSessionId
         && sessions.some((session) => session.id === persistedActiveSessionId)
           ? persistedActiveSessionId
           : state.activeSessionId;
-      persistOpenTabsState(
-        sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-        nextActiveSessionId,
-      );
       if (
         nextActiveSessionId
         && state.activeSessionId !== nextActiveSessionId
@@ -199,13 +239,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     }
 
     restoredTabsHandledRef.current = true;
-    const persistedTabs = readPersistedOpenTabs();
+    const currentOpenTabState = openTabStateRef.current;
+    const persistedTabs = currentOpenTabState.tabs;
     if (persistedTabs.length === 0) {
-      persistOpenTabsState([], null);
+      persistExplicitOpenTabs([], null);
       return;
     }
 
-    const persistedActiveSessionId = readPersistedActiveSessionId();
+    const persistedActiveSessionId = currentOpenTabState.activeSessionId;
     const nextActiveSessionId =
       (persistedActiveSessionId && persistedTabs.some((tab) => tab.sessionId === persistedActiveSessionId)
         ? persistedActiveSessionId
@@ -254,7 +295,15 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     if (restoredActiveResolvedSessionId || nextActiveSessionId) {
       switchSession(restoredActiveResolvedSessionId || nextActiveSessionId!);
     }
-  }, [createSession, hosts, hostsLoaded, sessions, state.activeSessionId, switchSession]);
+  }, [
+    createSession,
+    hosts,
+    hostsLoaded,
+    persistExplicitOpenTabs,
+    sessions,
+    state.activeSessionId,
+    switchSession,
+  ]);
 
   useEffect(() => {
     if (restoredRouteHandledRef.current || sessions.length === 0) {
@@ -376,6 +425,34 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const onSessionStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; type?: 'closed' | 'error'; message?: string }>).detail;
+      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
+      if (!sessionId || detail?.type !== 'closed') {
+        return;
+      }
+      closedOpenTabSessionIdsRef.current.add(sessionId);
+      const currentOpenTabState = openTabStateRef.current;
+      const nextTabs = currentOpenTabState.tabs.filter((tab) => tab.sessionId !== sessionId);
+      persistExplicitOpenTabs(
+        nextTabs,
+        currentOpenTabState.activeSessionId === sessionId
+          ? (nextTabs[0]?.sessionId || null)
+          : currentOpenTabState.activeSessionId,
+      );
+    };
+
+    window.addEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
+    return () => {
+      window.removeEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
+    };
+  }, [persistExplicitOpenTabs]);
+
   const sortedHosts = useMemo(() => sortHostsForPicker(hosts, pickerTarget), [hosts, pickerTarget]);
 
   const editingHost = useMemo(() => {
@@ -424,9 +501,21 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     const shouldActivate = options?.activate !== false;
 
     if (existingSession) {
+      closedOpenTabSessionIdsRef.current.delete(existingSession.id);
+      const nextOpenTabs = [
+        ...openTabStateRef.current.tabs.filter((tab) => tab.sessionId !== existingSession.id),
+        buildPersistedOpenTabFromSession({
+          ...existingSession,
+          customName: existingSession.customName,
+        }),
+      ];
       if (shouldActivate) {
         switchSession(existingSession.id);
       }
+      persistExplicitOpenTabs(
+        nextOpenTabs,
+        shouldActivate ? existingSession.id : (openTabStateRef.current.activeSessionId || state.activeSessionId),
+      );
       recordSessionOpen({
         connectionName: persistedHost.name,
         bridgeHost: persistedHost.bridgeHost,
@@ -444,6 +533,22 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       activate: shouldActivate,
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
     });
+    closedOpenTabSessionIdsRef.current.delete(sessionId);
+    const openedTab: PersistedOpenTab = {
+      sessionId,
+      hostId: persistedHost.id,
+      connectionName: persistedHost.name,
+      bridgeHost: persistedHost.bridgeHost,
+      bridgePort: persistedHost.bridgePort,
+      sessionName: persistedHost.sessionName,
+      authToken: persistedHost.authToken,
+      autoCommand: persistedHost.autoCommand,
+      createdAt: Date.now(),
+    };
+    persistExplicitOpenTabs(
+      [...openTabStateRef.current.tabs.filter((tab) => tab.sessionId !== sessionId), openedTab],
+      shouldActivate ? sessionId : (openTabStateRef.current.activeSessionId || state.activeSessionId),
+    );
     recordSessionOpen({
       connectionName: persistedHost.name,
       bridgeHost: persistedHost.bridgeHost,
@@ -455,7 +560,16 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       setPageState(openTerminalPage(sessionId));
     }
     return { sessionId, host: persistedHost };
-  }, [createSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
+  }, [
+    createSession,
+    persistExplicitOpenTabs,
+    recordSessionOpen,
+    rememberBridgeTarget,
+    rememberConnectionHost,
+    sessions,
+    state.activeSessionId,
+    switchSession,
+  ]);
 
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, options?: {
     target?: BridgeTarget | null;
@@ -514,38 +628,46 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
   const handleSwitchSession = useCallback((sessionId: string) => {
-    persistSessionIntentState({
-      sessions,
-      activeSessionId: sessionId,
-    });
+    persistExplicitOpenTabs(openTabStateRef.current.tabs, sessionId);
     switchSession(sessionId);
-  }, [sessions, switchSession]);
+  }, [persistExplicitOpenTabs, switchSession]);
 
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
-    const currentIndex = sessions.findIndex((session) => session.id === sessionId);
+    const currentIndex = openTabStateRef.current.tabs.findIndex((tab) => tab.sessionId === sessionId);
     if (currentIndex >= 0) {
-      const nextSessions = [...sessions];
-      const [moved] = nextSessions.splice(currentIndex, 1);
-      const nextIndex = Math.max(0, Math.min(toIndex, nextSessions.length));
-      nextSessions.splice(nextIndex, 0, moved);
-      persistSessionIntentState({
-        sessions: nextSessions,
-        activeSessionId: state.activeSessionId,
-      });
+      const nextTabs = [...openTabStateRef.current.tabs];
+      const [moved] = nextTabs.splice(currentIndex, 1);
+      const nextIndex = Math.max(0, Math.min(toIndex, nextTabs.length));
+      nextTabs.splice(nextIndex, 0, moved);
+      persistExplicitOpenTabs(nextTabs, openTabStateRef.current.activeSessionId || state.activeSessionId);
     }
     moveSession(sessionId, toIndex);
-  }, [moveSession, sessions, state.activeSessionId]);
+  }, [moveSession, persistExplicitOpenTabs, state.activeSessionId]);
 
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
+    const normalizedName = name.trim();
+    const nextTabs = openTabStateRef.current.tabs.map((tab) => (
+      tab.sessionId === sessionId
+        ? {
+            ...tab,
+            customName: normalizedName || undefined,
+          }
+        : tab
+    ));
+    persistExplicitOpenTabs(nextTabs, openTabStateRef.current.activeSessionId || state.activeSessionId);
     renameSession(sessionId, name);
-  }, [renameSession]);
+  }, [persistExplicitOpenTabs, renameSession, state.activeSessionId]);
 
   const handleCloseSession = useCallback((sessionId: string, source = 'unknown') => {
     const nextSessions = sessions.filter((session) => session.id !== sessionId);
+    const currentOpenTabState = openTabStateRef.current;
+    const nextTabs = currentOpenTabState.tabs.filter((tab) => tab.sessionId !== sessionId);
     const nextActiveSessionId =
       state.activeSessionId === sessionId
-        ? (nextSessions[0]?.id || null)
-        : state.activeSessionId;
+        ? (nextTabs[0]?.sessionId || nextSessions[0]?.id || null)
+        : (currentOpenTabState.activeSessionId === sessionId
+          ? (nextTabs[0]?.sessionId || state.activeSessionId)
+          : (currentOpenTabState.activeSessionId || state.activeSessionId));
     runtimeDebug('app.session.close.request', {
       sessionId,
       source,
@@ -559,16 +681,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       sessionCount: sessions.length,
     });
 
-    persistSessionIntentState({
-      sessions: nextSessions,
-      activeSessionId: nextActiveSessionId,
-    });
+    closedOpenTabSessionIdsRef.current.add(sessionId);
+    persistExplicitOpenTabs(nextTabs, nextActiveSessionId);
     clearSessionDraft(sessionId);
     closeSession(sessionId);
     if (sessions.length === 1) {
       setPageState(openConnectionsPage());
     }
-  }, [clearSessionDraft, closeSession, sessions, state.activeSessionId]);
+  }, [clearSessionDraft, closeSession, persistExplicitOpenTabs, sessions, state.activeSessionId]);
 
   const handleResumeSession = useCallback((sessionId: string) => {
     handleSwitchSession(sessionId);
@@ -746,11 +866,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     });
 
     if (focusSessionId) {
-      persistOpenTabsState(openedTabs, focusSessionId);
+      persistExplicitOpenTabs(openedTabs, focusSessionId);
       switchSession(focusSessionId);
       setPageState(openTerminalPage(focusSessionId));
     }
-  }, [hosts, openDraftAsSession, renameSession, switchSession]);
+  }, [hosts, openDraftAsSession, persistExplicitOpenTabs, renameSession, switchSession]);
 
   const handleResize = useCallback((sessionId: string, cols: number, rows: number) => {
     console.log('[App] Terminal resize:', sessionId, cols, rows);

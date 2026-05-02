@@ -46,6 +46,7 @@ const sessionHarness = vi.hoisted(() => {
   const closeSession = vi.fn();
   const switchSession = vi.fn();
   const moveSession = vi.fn();
+  const renameSession = vi.fn();
   const sendInput = vi.fn();
 
   return {
@@ -58,6 +59,7 @@ const sessionHarness = vi.hoisted(() => {
     closeSession,
     switchSession,
     moveSession,
+    renameSession,
     sendInput,
     update(next: typeof state, stale = staleActiveSession) {
       state = next;
@@ -78,6 +80,7 @@ const sessionHarness = vi.hoisted(() => {
       closeSession.mockReset();
       switchSession.mockReset();
       moveSession.mockReset();
+      renameSession.mockReset();
       sendInput.mockReset();
     },
   };
@@ -137,6 +140,7 @@ vi.mock('@capacitor/app', () => ({
 }));
 
 vi.mock('./contexts/SessionContext', () => ({
+  SESSION_STATUS_EVENT: 'zterm:session-status',
   SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSession: () => ({
     state: sessionHarness.readState(),
@@ -145,7 +149,7 @@ vi.mock('./contexts/SessionContext', () => ({
     closeSession: sessionHarness.closeSession,
     switchSession: sessionHarness.switchSession,
     moveSession: sessionHarness.moveSession,
-    renameSession: vi.fn(),
+    renameSession: sessionHarness.renameSession,
     reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
@@ -177,7 +181,11 @@ vi.mock('./hooks/useHostStorage', () => ({
     hosts: hostHarness.readHosts(),
     isLoaded: hostHarness.readLoaded(),
     addHost: vi.fn(),
-    upsertHost: vi.fn(),
+    upsertHost: vi.fn((host: any) => ({
+      id: host.id || `persisted:${host.bridgeHost}:${host.bridgePort}:${host.sessionName}`,
+      createdAt: host.createdAt || Date.now(),
+      ...host,
+    })),
     updateHost: vi.fn(),
     deleteHost: vi.fn(),
   }),
@@ -242,6 +250,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onCloseSession,
     onTerminalInput,
     onSessionDraftSend,
+    onLoadSavedTabList,
   }: {
     activeSession: { id: string; buffer: { revision: number } } | null;
     sessions: Array<{ id: string }>;
@@ -251,6 +260,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onCloseSession: (sessionId: string) => void;
     onTerminalInput?: (sessionId: string, data: string) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
+    onLoadSavedTabList?: (tabs: Array<any>, activeSessionId?: string) => void;
   }) => (
     <div>
       <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
@@ -312,6 +322,47 @@ vi.mock('./pages/TerminalPage', () => ({
         }}
       >
         send-draft-to-second-tab
+      </button>
+      <button
+        type="button"
+        data-testid="load-saved-tab-list"
+        onClick={() => {
+          onLoadSavedTabList?.([
+            {
+              sessionId: 'saved-a',
+              hostId: 'host-a',
+              connectionName: 'Conn A',
+              bridgeHost: '100.127.23.27',
+              bridgePort: 3333,
+              sessionName: 'alpha',
+              authToken: 'token-a',
+              createdAt: 1,
+            },
+            {
+              sessionId: 'saved-b-old',
+              hostId: 'host-b',
+              connectionName: 'Conn B',
+              bridgeHost: '100.127.23.27',
+              bridgePort: 3333,
+              sessionName: 'beta',
+              authToken: 'token-b',
+              createdAt: 2,
+            },
+            {
+              sessionId: 'saved-b-new',
+              hostId: 'host-b',
+              connectionName: 'Conn B',
+              bridgeHost: '100.127.23.27',
+              bridgePort: 3333,
+              sessionName: 'beta',
+              authToken: 'token-b',
+              customName: 'Keep Me',
+              createdAt: 3,
+            },
+          ], 'saved-b-new');
+        }}
+      >
+        load-saved-tab-list
       </button>
     </div>
   ),
@@ -711,6 +762,111 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
 
+  it('deduplicates restored persisted tabs that point to the same bridge target and tmux session', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-z',
+        createdAt: 1,
+        name: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-z-old',
+        hostId: 'host-z',
+        connectionName: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'tab-z-new',
+        hostId: 'host-z',
+        connectionName: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        customName: 'Keep Me',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-z-new');
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'host-z', sessionName: 'zterm' }),
+      expect.objectContaining({ sessionId: 'tab-z-new', activate: true, connect: true, customName: 'Keep Me' }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-z-new');
+  });
+
+  it('switches to the reused live session id when restore hits a semantic duplicate tab id', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-z',
+        createdAt: 1,
+        name: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => {
+      if (options?.sessionId === 'tab-z-stale') {
+        return 'session-live-z';
+      }
+      return options?.sessionId || 'unknown';
+    });
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-z-stale',
+        hostId: 'host-z',
+        connectionName: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-z-stale');
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('session-live-z');
+  });
+
   it('does not let a stale terminal page focus id override the restored latest active tab truth', async () => {
     sessionHarness.update({
       sessions: [],
@@ -837,7 +993,7 @@ describe('App dynamic refresh matrix', () => {
       makeSession('s1', 1),
     );
 
-    const view = render(
+    render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
@@ -845,23 +1001,7 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('switch-second-tab'));
 
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
-
-    // Simulate the state change that switchSession causes in real SessionContext
-    sessionHarness.update(
-      {
-        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
-        activeSessionId: 's2',
-        connectedCount: 2,
-      } as any,
-      makeSession('s2', 2),
-    );
-    view.rerender(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
-    );
-
-    await waitFor(() => {
-      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
-    });
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
   it('persists programmatic tab activation immediately when sending draft to another tab', async () => {
@@ -874,7 +1014,7 @@ describe('App dynamic refresh matrix', () => {
       makeSession('s1', 1),
     );
 
-    const view = render(
+    render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
@@ -882,23 +1022,7 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('send-draft-to-second-tab'));
 
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
-
-    // Simulate state change
-    sessionHarness.update(
-      {
-        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
-        activeSessionId: 's2',
-        connectedCount: 2,
-      } as any,
-      makeSession('s2', 2),
-    );
-    view.rerender(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
-    );
-
-    await waitFor(() => {
-      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
-    });
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
   it('persists manual tab reorder immediately from terminal UI intent', async () => {
@@ -911,7 +1035,7 @@ describe('App dynamic refresh matrix', () => {
       makeSession('s1', 1),
     );
 
-    const view = render(
+    render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
@@ -919,26 +1043,10 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('move-second-tab-first'));
 
     expect(sessionHarness.moveSession).toHaveBeenCalledWith('s2', 0);
-
-    // Simulate reordered state
-    sessionHarness.update(
-      {
-        sessions: [makeSession('s2', 2), makeSession('s1', 1)],
-        activeSessionId: 's1',
-        connectedCount: 2,
-      } as any,
-      makeSession('s1', 1),
-    );
-    view.rerender(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
-    );
-
-    await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-        expect.objectContaining({ sessionId: 's2' }),
-        expect.objectContaining({ sessionId: 's1' }),
-      ]);
-    });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
   });
 
   it('persists closed tabs immediately and does not restore them on next launch', async () => {
@@ -959,30 +1067,10 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('close-active-tab'));
 
     expect(sessionHarness.closeSession).toHaveBeenCalledWith('s1');
-
-    // Simulate what SessionContext DELETE_SESSION does: remove s1, set active to s2
-    sessionHarness.update(
-      {
-        sessions: [makeSession('s2', 2)],
-        activeSessionId: 's2',
-        connectedCount: 2,
-      } as any,
-      makeSession('s2', 2),
-    );
-
-    // Re-render to trigger state change and auto-persist useEffect
-    view.rerender(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
-    );
-
-    await waitFor(() => {
-      expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
-    });
-    await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-        expect.objectContaining({ sessionId: 's2' }),
-      ]);
-    });
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
 
     view.unmount();
     sessionHarness.reset();
@@ -1001,5 +1089,240 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionName: 'session-s2' }),
       expect.objectContaining({ sessionId: 's2', activate: true, connect: true }),
     );
+  });
+
+  it('does not repersist a closed tab from lingering runtime sessions after the explicit close intent already removed it', async () => {
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+          activeSessionId: 's1',
+          connectedCount: 2,
+        } as any,
+        makeSession('s1', 1),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionId: 's2' }),
+      ]);
+    });
+
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 3), makeSession('s2', 4)],
+          activeSessionId: 's2',
+          connectedCount: 2,
+        } as any,
+        makeSession('s2', 4),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('4'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+  });
+
+  it('removes a remotely closed session from persisted open tabs via the session status event', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('2'));
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionId: 's2' }),
+      ]);
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('zterm:session-status', {
+        detail: { sessionId: 's2', type: 'closed' },
+      }));
+    });
+
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+  });
+
+  it('loads saved tab list with dedupe and keeps requested active tab truth over stale ACTIVE_PAGE focus', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('current-live', 1)],
+        activeSessionId: 'current-live',
+        connectedCount: 1,
+      } as any,
+      makeSession('current-live', 1),
+    );
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      {
+        id: 'host-b',
+        createdAt: 2,
+        name: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'current-live' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('load-saved-tab-list'));
+
+    expect(sessionHarness.createSession).toHaveBeenCalledTimes(2);
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sessionName: 'alpha', bridgeHost: '100.127.23.27' }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sessionName: 'beta', bridgeHost: '100.127.23.27' }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(sessionHarness.renameSession).toHaveBeenCalledWith?.('saved-b-new', 'Keep Me');
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
+  });
+
+  it('restores the saved-tab batch truth on next launch after the batch import persisted OPEN_TABS and ACTIVE_SESSION', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('current-live', 1)],
+        activeSessionId: 'current-live',
+        connectedCount: 1,
+      } as any,
+      makeSession('current-live', 1),
+    );
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      {
+        id: 'host-b',
+        createdAt: 2,
+        name: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'current-live' }));
+
+    const firstMount = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('load-saved-tab-list'));
+
+    await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'saved-a', sessionName: 'alpha' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', sessionName: 'beta', customName: 'Keep Me' }),
+    ]);
+
+    firstMount.unmount();
+    sessionHarness.reset();
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'current-live' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        sessionName: 'alpha',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({ sessionId: 'saved-a', activate: false, connect: false }),
+    );
+    expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionName: 'beta',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        authToken: 'token-b',
+      }),
+      expect.objectContaining({ sessionId: 'saved-b-new', activate: true, connect: true, customName: 'Keep Me' }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
   });
 });

@@ -168,3 +168,256 @@
     - recv `buffer-head`
     - recv `buffer-sync` with `wireKind=compact`
 - 额外发现：`server.ts` 装配顺序里 `relayHostClient` 不能早于 bridge runtime；否则会形成 `handleRelaySignal/closeRelayPeer` 未定义使用。这次已收成唯一顺序：daemon runtime -> bridge runtime -> relay host client。
+
+## 2026-05-02 protocol freeze + client split
+- Goal: 冻结 terminal protocol/document truth，然后对客户端巨型文件做低风险拆分，不改 wire 语义。
+- Constraints: 不改 daemon/client 协议语义；不引入 fallback；先文档后代码；只做 ownership 下沉，不做行为改写。
+- Candidate giant files: SessionContext.tsx (3893 LOC), TerminalQuickBar.tsx (3196 LOC), App.tsx (1265 LOC).
+- Decision: 本轮优先拆 SessionContext 的协议/刷新 helper，原因：它直接承载 head/range/input/transport 协议收发，最需要先从巨型 orchestrator 中分离成可测试模块；QuickBar 后续再拆。
+- Success: docs 明确写出 protocol freeze；SessionContext 下沉 helper 后 type-check + 关键回归通过。
+
+## 2026-05-02 daemon-related split + refresh restore
+- Goal: 先把客户端里与 daemon/transport refresh 直接相关的编排逻辑继续拆出来，并保证 active session refresh 主链不退化。
+- Scope: 优先处理 SessionContext / App 中的 daemon transport + foreground resume + head-first refresh orchestration。
+- Guard: 不改协议语义；不加 fallback；先补/保回归，再改代码。
+- Success: daemon-related ownership 下沉后，type-check + ws-refresh/App.dynamic-refresh 回归继续绿。
+
+## 2026-05-02 terminal truth re-freeze before implementation
+- User hard constraint: **先闭环整个逻辑 -> 更新认知 -> 对齐 AGENTS / skills / docs -> 然后再开始落代码**
+- Re-frozen model:
+  1. daemon 只管 `tmux -> mirror truth`
+  2. transport 是长期复用长链接，不因 foreground/background/tab switch fresh recreate
+  3. renderer 是 visible range 唯一真相，拥有 `follow / reading / renderBottomIndex`
+  4. buffer manager 只管 local sparse buffer / gap repair / merge / line-range patch，不持有 renderer state
+  5. gap 必须先空白占位，再按行/区间局部重刷
+- Current evidence from code audit:
+  - `SessionContext.tsx` / `session-sync-helpers.ts` 仍混有 `renderDemand / follow / reading` 语义
+  - transport 仍偏 `cleanup old socket -> fresh reconnect`
+  - 这与最新冻结模型冲突
+- Next step frozen:
+  - 先完成文档对齐
+  - 再做 client code retain/delete/downshift audit
+  - 再补红测后开始代码收口
+
+## 2026-05-02 client audit retain/delete/downshift result
+- Retain:
+  - `App.tsx -> performForegroundRefresh(...)` 作为 foreground resume 唯一入口
+  - `SessionContext.tsx -> requestSessionBufferHead / applyIncomingBufferSync / active tick / sendInput`
+  - `session-sync-helpers.ts` 中 normalize / pull bookkeeping / availability / impossible-window 这类纯 helper
+- Delete or downshift:
+  - `sessionRenderDemandRef`
+  - `buildFollowRenderDemandState`
+  - `shouldPullFollowBuffer`
+  - `shouldPullReadingBuffer`
+  - `shouldCatchUpFollowTailAfterBufferApply`
+  - `updateSessionViewport` 当前 renderer state / worker demand 混合接口
+  - `session-sync-helpers.ts` 里基于 `renderDemand.mode / viewportEndIndex / viewportRows` 的 planner 语义
+- Transport truth violations found:
+  - `cleanupSocket -> new ws -> connect`
+  - `connectSession / reconnectSession / openSocketConnectHandshake`
+  - `ensureActiveSessionFresh / probeOrReconnectStaleSessionTransport`
+  - 这些仍然带 fresh reconnect/fresh connect 心智，不符合长期复用 transport 真相
+- Frozen implementation order:
+  1. 先把 renderer -> worker 接口收成 visible range declaration
+  2. 再删除 worker 内 follow/reading/renderBottomIndex 语义
+  3. 再收 transport 长链接复用真相
+  4. 最后收 tab/session 去重与持久化
+
+## 2026-05-02 client visible-range 收口（第二刀）
+- 目标：让 SessionContext / session-sync-helpers 不再持有 renderer `follow/reading/renderBottomIndex` 语义，只吃 visible range。
+- 现状：worker 仍通过 `sessionRenderDemandRef + TerminalViewportState.mode` 决定 tail-refresh / reading-repair，违背最新真源。
+- 决策：
+  1. `updateSessionViewport` 只接收 `TerminalVisibleRange`
+  2. `sessionRenderDemandRef` 改为 `sessionVisibleRangeRef`
+  3. tail-refresh 仅基于 daemon head + local buffer + visibleRange(仅提供 viewportRows/endIndex fallback)
+  4. reading repair 改为 `visible-range gap repair`：只要 visible range 内有 gap/缺口就拉 repair，不再依赖 renderer mode
+- 风险控制：保持 wire 协议不动；先补 helper 单测，再跑 ws-refresh / render-scope 回归。
+
+## 2026-05-02 transport third cut plan
+- 目标：transport open/reconnect 只保留一个握手实现，减少 `connectSession` 与 `startReconnectAttempt` 的重复 finalize/onConnected 分叉。
+- 现状：两处都在拼 `pendingSessionTransportOpenIntentsRef`、handshake settle、failure/connected 回调，属于重复的 transport lifecycle 编排。
+- 决策：抽出单一 `queueSessionTransportOpenIntent(...)`，connect/reconnect 只提供 mode-specific hooks；不改 wire 语义。
+
+## 2026-05-02 transport third cut stop-bleed
+- 现象：`SessionContext.tsx` type-check 失败；`SessionContext.ws-refresh.test.tsx` 运行时报 `ReferenceError: Cannot access 'scheduleReconnect' before initialization`。
+- 验证：根因不是第二刀 visible-range，而是第三刀让 `startReconnectAttempt` 与 `scheduleReconnect` 在 `useCallback const` 初始化期互相直接引用。
+- 止血动作：只把 callback 内互调改为 `startReconnectAttemptRef.current?.(...)` / `scheduleReconnectRef.current?.(...)`，不回退第二刀，不改协议。
+- 证据：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot`
+  - `5 files / 115 tests passed`
+- 约束：第三刀后续不能再直接抽 hook 层统一入口；先抽纯 helper / runtime orchestrator，最后再接回 `SessionContext`。
+
+## 2026-05-02 transport third cut helper closeout round-2
+- 本轮只下沉纯 helper：
+  - managed session 复用排序/判定
+  - transport open intent 的 handshake settle / live-failure 去重状态机
+- `SessionContext` 现在只保留：
+  - connect/reconnect 的业务分叉
+  - helper 产物回接到 control transport open
+- 验证：
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts --reporter dot` => `17 passed`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：继续抽 connect/reconnect 的共用 hook-free 配置构造，直到 `SessionContext` 只剩 transport orchestrator 壳。
+
+## 2026-05-02 transport third cut helper closeout round-3
+- 本轮把 `connectSession / reconnectSession / createSession(existing)` 里重复拼的 session metadata / connecting-reconnecting updates / schedule loading state 下沉成纯 helper。
+- 现在 `SessionContext` 在这些点上不再自己散拼 `hostId/connectionName/bridgeHost/...`。
+- 验证：
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts --reporter dot` => `21 passed`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：继续抽 connect/reconnect 的失败分流与 success 回调配置，逐步让 `SessionContext` 只剩 orchestrator 壳。
+
+## 2026-05-02 transport third cut helper closeout round-4
+- 本轮把失败分流里的状态更新真源继续下沉：
+  - reconnect attempt progress
+  - connecting label/sessionName
+  - schedule error state
+  - error / idle-after-block / reconnecting-failure updates
+- 当前 `SessionContext` 在失败分支里已经明显只剩“调用哪个 helper + 调度下一步”的壳。
+- 验证：
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts --reporter dot` => `27 passed`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：继续抽 connected success / reconnect callbacks 的共用配置，最后再看是否能把 connect/reconnect 统一成单一 orchestrator。
+
+## 2026-05-02 transport third cut helper closeout round-5
+- 本轮把 `handleSocketConnectedBaseline(...)` 里散写的 connected baseline 真源继续下沉：
+  - local window 预判
+  - connected updates
+  - schedule-list loading reset
+  - connected 后是否需要 pending tail refresh / request head
+- 验证：
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts --reporter dot` => `31 passed`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：开始收 `connect/reconnect` 的 callback 配置壳，尽量把 `SessionContext` 缩到真正的 orchestrator。
+
+## 2026-05-02 transport third cut helper closeout round-6
+- 本轮开始把 `connect/reconnect` callback 壳里的“做什么”抽成纯计划：
+  - reconnect handshake failure: terminal-error vs retry(nextAttempt)
+  - connected effect: debug event / clear superseded / flush pending input
+  - live failure effect: clear pending intent / token / schedule error / reconnect
+- 当前 `SessionContext` 在这些 callback 里进一步变成“按 plan 执行 side effect”的壳。
+- 验证：
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts --reporter dot` => `34 passed`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：继续把 open-intent 参数装配收成 builder，逼近单一 orchestrator 入口。
+
+## 2026-05-02 transport third cut helper closeout round-7
+- 本轮开始把 callback 壳本地执行器成形：
+  - `applyTransportOpenConnectedEffects`
+  - `applyTransportOpenLiveFailureEffects`
+  - `handleReconnectBeforeConnectSend`
+  - `handleReconnectHandshakeFailure`
+  - `queueReconnectTransportOpenIntent`
+  - `queueConnectTransportOpenIntent`
+- 中途再次出现 TDZ：`startReconnectAttempt` 直接依赖后声明的 `queueReconnectTransportOpenIntent`。
+- 止血方式保持一致：改为 `queueReconnectTransportOpenIntentRef.current?.(...) / queueConnectTransportOpenIntentRef.current?.(...)`，不引入新拓扑耦合。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：继续把 open-intent 参数 builder 收出来，再看 connect/reconnect 是否只剩一层 orchestrator。
+
+## 2026-05-02 transport third cut helper closeout round-8
+- 本轮把 `queueReconnectTransportOpenIntent / queueConnectTransportOpenIntent` 的 open-intent 参数装配抽成 builder。
+- 为避免 builder 再把 hook 依赖拓扑绕乱，新增 effect/handler refs 做桥接。
+- 当前 `queue*TransportOpenIntent` 已明显缩成“取 builder 结果 -> 派发”。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `104 passed`
+- 下一步：判断是否继续把 `connectSession/startReconnectAttempt` 收成单入口，还是在当前层面冻结为“已可维护的唯一壳”。
+
+## 2026-05-02 transport third cut helper closeout round-9
+- 本轮只做最小 A 尝试：新增 `buildSessionTransportPrimeState(...)`，统一 `connectSession / reconnectSession` 的 pre-open prime 真源：
+  - `resolvedSessionName`
+  - `transportHost`
+  - `sessionUpdates`
+- 验证后判断：继续把 `connectSession/startReconnectAttempt` 强合成单一 hook 入口，不再是“低风险收口”，而是会放大：
+  - `useCallback const` 初始化环
+  - ref 桥接数量
+  - TDZ / ReferenceError 风险
+- 因此第三刀当前阶段冻结为：
+  1. helper 真源
+  2. callback 执行器壳
+  3. open-intent builder
+  4. pre-open prime helper
+- 后续若继续收，正确方向不是继续堆 ref，而是先把 transport lifecycle 抽成 hook 外独立 runtime orchestrator。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/lib/app-foreground-refresh.test.ts --reporter dot` => `5 files / 139 tests passed`
+
+## 2026-05-02 tab/session owner audit closeout round-1
+- 审计发现：
+  - `SessionContext` 已经是 session/state/active 的真相 owner
+  - 但 `App.tsx` 仍自带一份：
+    - open-tabs restore/persist helper
+    - live session reuse 判定
+  - 这会让 tab/session 绑定关系继续存在第二语义风险
+- 本轮收口动作：
+  - 新增 `android/src/lib/open-tab-persistence.ts`
+  - 把 `read/persist/dedupe/buildPersistedOpenTab` 全部收进去
+  - 新增 `findReusableOpenTabSession(...)`，直接复用 `findReusableManagedSession(...)`
+  - 删除 `App.tsx` 本地的 `findReusableSession(...)`
+- 结果：
+  - `App.tsx` 继续只做 orchestration
+  - open tab restore/persist/reuse 有了单独 source module
+  - restore 与 quick-open 的复用语义不再分叉
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/lib/open-tab-persistence.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` => `5 files / 119 tests passed`
+
+## 2026-05-02 tab/session owner audit closeout round-2
+- 继续追后发现，round-1 还没彻底关死：
+  - switch/move/close 的持久化大多仍靠 rerender + effect 补写
+  - `handleSendSessionDraft(...)` 直接调 `switchSession(...)`，会绕过 intent 持久化入口
+- 本轮直接收成 intent-time truth：
+  - `persistSessionIntentState(...)`
+  - `handleSwitchSession(...)` 当下写 `ACTIVE_SESSION`
+  - `handleMoveSession(...)` 当下写重排后的 `OPEN_TABS`
+  - `handleCloseSession(...)` 当下写关闭后的 `OPEN_TABS + ACTIVE_SESSION`
+  - `handleSendSessionDraft(...)` 改成走 `handleSwitchSession(...)`
+- 结果：
+  - active/programmatic/move/close 四条 tab intent 现在都不再依赖后续 rerender 才持久化
+  - tab intent 持久化入口收成了单一口径
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/lib/open-tab-persistence.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx --reporter dot` => `3 files / 27 tests passed`
+
+## 2026-05-02 active tab persistence owner audit freeze
+- 这轮不再往下写代码，先判断 owner 边界是否该继续下沉。
+- 审计后结论：`ACTIVE_SESSION` 不该直接沉进 `SessionContext`。
+- 原因：
+  1. `ACTIVE_SESSION` 和 `ACTIVE_PAGE` 是同一条 app restore 语义链
+  2. `App.tsx` 才拥有 page routing / page restore / tab restore orchestration
+  3. `SessionContext` 只该拥有 session runtime/transport/buffer 真相，不该知道 page 是否在 terminal
+- 冻结后的职责：
+  - `SessionContext`：active session runtime truth
+  - `open-tab-persistence.ts`：tab persistence truth
+  - `App.tsx`：把 runtime active 提升为 app restore truth
+- 因此这块到此冻结，不再继续强行下沉，避免 page-state 与 session-state 再次混层。
+
+## 2026-05-02 tab/session source gate closeout round-3
+- 本轮补了 `saved tab list restore` 的 source gate。
+- 过程中定位到两个真实口子：
+  1. `openDraftAsSession(...)` 不透传 `sessionId`，saved-tab load 后 rename/active targeting 会漂
+  2. `handleLoadSavedTabList(...)` 若复用 `handleSwitchSession(...)`，会因为旧 `sessions` 闭包把 `ACTIVE_SESSION` 覆盖回旧值
+- 修法：
+  - `openDraftAsSession(..., { sessionId })`
+  - batch load 完成后走：
+    1. `persistOpenTabsState(openedTabs, focusSessionId)`
+    2. `switchSession(focusSessionId)`
+    3. `setPageState(openTerminalPage(focusSessionId))`
+- 结论：saved-tab load 是**批量恢复路径**，不能简单套普通 single-tab intent handler。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/lib/open-tab-persistence.test.ts --reporter dot` => `3 files / 28 tests passed`
+
+## 2026-05-02 tab/session reopen truth audit
+- 现象：关闭过的 tab 仍会在下次启动时被默认重开；部分 session/tab 即使用户关闭仍会重新出现。
+- 假设：`OPEN_TABS` 被 runtime `sessions[]` 自动回写污染，导致“运行中仍存在的 session”被重新持久化成“下次必须重开”。
+- 验证：`android/src/App.tsx` restore effect 中，`restoredTabsHandledRef.current` 之后会无条件执行 `persistOpenTabsState(sessions.map(buildPersistedOpenTabFromSession(...)), activeSessionId)`；这违反了 open-tab 与 runtime-session 解耦。
+- 决策：本轮改为 App 级显式 `openTabs` 真源；只在明确 tab intent（open/switch/move/close/saved-tab restore）时改写并持久化；禁止 `sessions[] -> OPEN_TABS` 自动回填。
