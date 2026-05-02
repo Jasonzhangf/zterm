@@ -87,8 +87,9 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 1. 自己起 timer
 2. 定时先问 head
 3. 自己比较 local buffer 和 daemon head
-4. 自己决定请求哪段 buffer
-5. head 变了或 gap 补齐了，就通知 renderer
+4. 接收 renderer 声明的 visible range
+5. 自己决定请求哪段 buffer
+6. head 变了或 gap 补齐了，就通知 renderer 对应 line/range patch
 
 ### 2.1 本地 buffer 真相
 - 本地维护一个 sliding buffer，客户端默认/最大保留 **1000 行**
@@ -123,13 +124,15 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 
 ### 2.3 reading 路径
 - reading 不改变 buffer manager 的 head-first 主循环
-- 只是额外多一个输入：renderer 当前 reading window
-- 若 reading window 三屏内不连续，buffer manager 才请求 gap
-- **gap repair 只属于 reading**
+- buffer manager 不持有 `follow / reading / renderBottomIndex`
+- 它只接收 renderer 声明的 **当前 visible range**
+- 若当前 visible range 三屏内不连续，buffer manager 才请求 gap
+- **gap repair 属于 visible range repair，不属于 renderer state ownership**
 
 ### 2.4 禁止事项
 - renderer 不能直接触发 transport pull
 - buffer manager 不能替 renderer 改 mode
+- buffer manager 不能持有 renderer mode / renderBottomIndex / viewport scroll
 - 不能因为本地历史有 gap，就在 follow 下回补整段历史
 - 不能把 snapshot / patch-middle / fallback 再塞回来
 - 不能把 `local window invalid` / `anchor mismatch` / `head mismatch` 实现成“先清空已有本地 buffer 再重拉”
@@ -166,6 +169,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 renderer 只看两件事：
 1. `buffer head`：内容池最新底部
 2. `renderBottomIndex`：当前要显示窗口的底部
+3. `visible range`：当前要画的 absolute rows
 
 它不关心：
 - transport
@@ -204,6 +208,7 @@ renderer 还必须显式区分两种宽度模式：
 - follow 只是在收到 head / buffer 更新后
 - 把 `renderBottomIndex` 对齐到最新底部
 - 然后从本地内容池取当前窗口来画
+- 若窗口里有 gap，先直接画空白占位
 
 ### 3.2 reading
 - 用户上滚立即进入 reading
@@ -227,6 +232,14 @@ renderer 还必须显式区分两种宽度模式：
 3. 用户输入
 
 除此之外，live update / 补 gap / 尾部推进，都不能把用户拉回 follow。
+
+### 3.4 visible range 声明与局部重刷
+
+- renderer 是 **visible range 唯一真相**
+- buffer manager 不得自行猜 renderer 当前窗口
+- renderer 必须把当前 visible range 声明给 buffer manager
+- buffer manager 补齐 gap 后，renderer 只重刷对应 absolute rows / changed range
+- **禁止**“等整窗补齐后再统一出图”
 
 ## 4. UI shell
 
@@ -335,6 +348,7 @@ UI 只负责容器位置与裁切：
 ```text
 tmux truth
 -> daemon log
+-> renderer declare visible range
 -> client buffer manager log
 -> renderer commit log
 -> Android APK 真实画面
@@ -391,13 +405,16 @@ tmux truth
 - renderer scope 回归测试不能只断言 “inactive renderer 还在但 data-active=false”；必须直接断言 **hidden renderer 不在 DOM**，否则会把 DOM 覆盖类问题测成假绿。
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
 - App foreground resume 的真相只能是：**先 probe/resume 当前 active transport，再决定是否 reconnect**；App 不得再按 UI `session.state` 先分叉，否则会把“label stale but transport alive”误杀成重连。
+- foreground/background 的 hidden gate 也必须只有一份真源；若 App 已统一消费 `visibilitychange / resume / appStateChange`，`SessionContext` active tick 不得再自行读取 `document.visibilityState` 做第二份停刷判定。
 - 若 App 首帧就已经持有现存 `sessions[]`，也必须立刻持久化 `OPEN_TABS / ACTIVE_SESSION`；不能因为“这次不是 restore 分支”就跳过首次回写，否则下次冷启动恢复会拿到陈旧 tab 真相。
 - 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。
 - 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
+- 若现场是“有内容但要等补齐才整屏一起跳出来”，优先判 **renderer / buffer manager 边界错**；正确语义是 gap 先空白，补齐后局部重刷
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
+- 若 tmux capture / mirror canonicalize 链路可能收到 extended-color ANSI（`38:2::r:g:b` / `48:2::r:g:b` / `38:5:n` / `48:5:n`）的 colon 语法，进入 parser 前必须先规范化到当前唯一支持的 semicolon 语法；否则颜色会退回 default sentinel，现场表现就是红/绿背景丢失或发灰。
 - transport/session 生命周期若要改，先问自己有没有违反这四条：
   1. 是否又把 per-session ws 当成 transport 真相
   2. 是否又让 reconnect 走 `cleanup old socket -> fresh connect`

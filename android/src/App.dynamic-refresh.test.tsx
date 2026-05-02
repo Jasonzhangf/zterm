@@ -3,6 +3,7 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import App from './App';
 import { STORAGE_KEYS } from './lib/types';
 
 function makeSession(id: string, revision: number) {
@@ -141,10 +142,12 @@ vi.mock('@capacitor/app', () => ({
 
 vi.mock('./contexts/SessionContext', () => ({
   SESSION_STATUS_EVENT: 'zterm:session-status',
-  SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SessionProvider: ({ children, appForegroundActive }: { children: React.ReactNode; appForegroundActive?: boolean }) => (
+    <div data-testid="provider-foreground">{appForegroundActive ? '1' : '0'}{children}</div>
+  ),
   useSession: () => ({
     state: sessionHarness.readState(),
-    sessionDebugMetrics: {},
+    getSessionDebugMetrics: vi.fn(() => null),
     createSession: sessionHarness.createSession,
     closeSession: sessionHarness.closeSession,
     switchSession: sessionHarness.switchSession,
@@ -564,6 +567,32 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('drives SessionProvider foreground truth from lifecycle events', async () => {
+    const view = render(<App />);
+
+    expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(screen.getByTestId('provider-foreground').textContent?.startsWith('0')).toBe(true);
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
+
+    view.unmount();
   });
 
   it('does not reconnect hidden unhealthy tabs during foreground resume', async () => {
@@ -1025,6 +1054,99 @@ describe('App dynamic refresh matrix', () => {
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
+  it('reuses matched imported tabs while creating only the missing semantic session and refreshes persisted metadata from the current draft truth', async () => {
+    sessionHarness.update(
+      {
+        sessions: [
+          {
+            ...makeSession('s1', 1),
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            sessionName: 'alpha',
+            connectionName: 'Old Conn A',
+            hostId: 'old-host-a',
+            authToken: 'token-a',
+            autoCommand: 'old-pwd',
+            customName: 'Pinned A',
+          },
+        ],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      {
+        ...makeSession('s1', 1),
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        connectionName: 'Old Conn A',
+        hostId: 'old-host-a',
+        authToken: 'token-a',
+        autoCommand: 'old-pwd',
+        customName: 'Pinned A',
+      } as any,
+    );
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        autoCommand: 'pwd',
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 's1' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('load-saved-tab-list'));
+
+    expect(sessionHarness.createSession).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+      }),
+      expect.objectContaining({
+        activate: false,
+        sessionId: 'saved-b-new',
+      }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({
+        sessionId: 's1',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        autoCommand: 'pwd',
+      }),
+      expect.objectContaining({
+        sessionId: 'saved-b-new',
+        connectionName: 'Conn B',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        customName: 'Keep Me',
+      }),
+    ]);
+  });
+
   it('persists manual tab reorder immediately from terminal UI intent', async () => {
     sessionHarness.update(
       {
@@ -1136,6 +1258,100 @@ describe('App dynamic refresh matrix', () => {
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('4'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+  });
+
+  it('does not bootstrap open tabs back from runtime sessions after the user explicitly closed the final tab', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1)],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s1');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([]);
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 2)],
+          activeSessionId: 's1',
+          connectedCount: 1,
+        } as any,
+        makeSession('s1', 2),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([]));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+  });
+
+  it('removes the persisted representative when closing a runtime session that reuses the same bridge target', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'persisted-old',
+        hostId: 'host-persisted-old',
+        connectionName: 'conn-shared',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-shared',
+        authToken: 'shared-token',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        authToken: 'token-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'persisted-old');
+
+    sessionHarness.update(
+      {
+        sessions: [
+          {
+            ...makeSession('runtime-new', 1),
+            bridgeHost: '127.0.0.1',
+            bridgePort: 3333,
+            sessionName: 'session-shared',
+            authToken: 'shared-token',
+          },
+          makeSession('s2', 2),
+        ],
+        activeSessionId: 'runtime-new',
+        connectedCount: 2,
+      } as any,
+      makeSession('runtime-new', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    expect(sessionHarness.closeSession).toHaveBeenCalledWith('runtime-new');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's2' }),
     ]);

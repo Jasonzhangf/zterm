@@ -4,14 +4,11 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
 import type {
-  BufferHeadPayload,
-  BufferSyncRequestPayload,
   ClientMessage,
   FileDownloadChunkPayload,
   FileDownloadCompletePayload,
   FileDownloadErrorPayload,
   Host,
-  HostConfigMessage,
   PasteImageStartPayload,
   AttachFileStartPayload,
   RemoteScreenshotCapture,
@@ -24,11 +21,9 @@ import type {
   SessionScheduleState,
   SessionBufferState,
   TerminalCursorState,
-  TerminalViewportState,
   SessionState,
   TerminalBufferPayload,
-  TerminalCell,
-  TerminalGapRange,
+  TerminalVisibleRange,
   TerminalWidthMode,
 } from '../lib/types';
 import { buildEmptyScheduleState } from '@zterm/shared';
@@ -37,14 +32,13 @@ import { getResolvedSessionName } from '../lib/connection-target';
 import {
   ACTIVE_HEAD_REFRESH_TICK_MS,
   DEFAULT_TERMINAL_CACHE_LINES,
-  resolveTerminalRequestWindowLines,
   resolveTerminalRefreshCadence,
+  resolveTerminalRequestWindowLines,
 } from '../lib/mobile-config';
 import { drainRuntimeDebugEntries, getPendingRuntimeDebugEntryCount, isRuntimeDebugEnabled, runtimeDebug, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import {
   applyBufferSyncToSessionBuffer,
   createSessionBufferState,
-  normalizeWireLines,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
 import {
@@ -67,6 +61,56 @@ import {
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+
+import {
+  buildActiveSessionRefreshPlan,
+  buildReconnectHandshakeFailurePlan,
+  buildTransportOpenConnectedEffectPlan,
+  buildTransportOpenLiveFailureEffectPlan,
+  buildConnectedHeadRefreshPlan,
+  buildSessionConnectedUpdates,
+  buildSessionConnectingLabelUpdates,
+  buildSessionConnectionFields,
+  buildSessionErrorUpdates,
+  buildSessionIdleAfterReconnectBlockedUpdates,
+  buildSessionReconnectAttemptProgressUpdates,
+  buildSessionReconnectingFailureUpdates,
+  buildSessionScheduleListLoadingState,
+  buildSessionScheduleErrorState,
+  buildSessionScheduleLoadingState,
+  buildSessionTransportPrimeState,
+  buildDefaultSessionVisibleRange,
+  buildHostConfigMessage,
+  createPendingSessionTransportOpenIntent,
+  findReusableManagedSession,
+  buildSessionBufferSyncRequestPayload,
+  doesSessionPullStateCoverRequest,
+  doesSessionPullStateMatchExactLocalSnapshot,
+  getPrimarySessionPullState,
+  hasActiveSessionPullState,
+  hasImpossibleLocalWindow,
+  hasSessionLocalWindow,
+  normalizeIncomingBufferPayload,
+  normalizeSessionVisibleRangeState,
+  normalizeTerminalCursorState,
+  orderSessionsForReconnect,
+  shouldOpenManagedSessionTransport,
+  visibleRangeStatesEqual,
+  settleSessionPullStatesWithBufferSync,
+  clearSessionPullStateEntry,
+  shouldAutoReconnectSession,
+  shouldCatchUpFollowTailAfterBufferApply,
+  shouldPullFollowBuffer,
+  shouldPullVisibleRangeBuffer,
+  shouldReconnectQueuedActiveInput,
+  type PendingSessionTransportOpenIntent,
+  type QueueSessionTransportOpenIntentOptions as SessionTransportOpenIntentHelperOptions,
+  type SessionBufferHeadState,
+  type SessionPullPurpose,
+  type SessionPullStates,
+  type SessionVisibleRangeState,
+} from './session-sync-helpers';
+export { shouldReconnectActivatedSession, shouldReconnectQueuedActiveInput } from './session-sync-helpers';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
 
@@ -222,10 +266,43 @@ function sessionReducer(state: SessionManagerState, action: SessionAction): Sess
   return reduceSessionAction(state, action);
 }
 
+function sessionDebugMetricsEqual(
+  left: Record<string, SessionDebugOverlayMetrics | undefined>,
+  right: Record<string, SessionDebugOverlayMetrics | undefined>,
+) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  for (const key of leftKeys) {
+    const leftItem = left[key];
+    const rightItem = right[key];
+    if (!leftItem && !rightItem) {
+      continue;
+    }
+    if (!leftItem || !rightItem) {
+      return false;
+    }
+    if (
+      leftItem.uplinkBps !== rightItem.uplinkBps
+      || leftItem.downlinkBps !== rightItem.downlinkBps
+      || leftItem.renderHz !== rightItem.renderHz
+      || leftItem.pullHz !== rightItem.pullHz
+      || leftItem.bufferPullActive !== rightItem.bufferPullActive
+      || leftItem.status !== rightItem.status
+      || leftItem.active !== rightItem.active
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 interface SessionContextValue {
   state: SessionManagerState;
   scheduleStates: Record<string, SessionScheduleState>;
-  sessionDebugMetrics: Record<string, SessionDebugOverlayMetrics | undefined>;
+  getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string) => void;
   switchSession: (id: string) => void;
@@ -244,7 +321,7 @@ interface SessionContextValue {
   ) => Promise<RemoteScreenshotCapture>;
   resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
   setTerminalWidthMode: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
-  updateSessionViewport: (sessionId: string, renderDemand: SessionRenderDemandState) => void;
+  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
@@ -262,6 +339,7 @@ interface SessionProviderProps {
   wsUrl?: string;
   terminalCacheLines?: number;
   bridgeSettings?: BridgeSettings;
+  appForegroundActive?: boolean;
 }
 
 interface CreateSessionOptions {
@@ -280,31 +358,17 @@ interface SessionReconnectRuntime {
   connecting: boolean;
 }
 
-interface SessionBufferHeadState {
-  revision: number;
-  latestEndIndex: number;
-  availableStartIndex?: number;
-  availableEndIndex?: number;
-  seenAt: number;
-}
-
 interface RevisionResetExpectation {
   revision: number;
   latestEndIndex: number;
   seenAt: number;
 }
 
-interface SessionReconnectDecisionOptions {
-  hasSession: boolean;
-  wsReadyState: number | null;
-  reconnectInFlight: boolean;
-}
-
 interface SessionWireStatsSnapshot {
   txBytes: number;
   rxBytes: number;
   renderCommits: number;
-  pullRequests: number;
+  refreshRequests: number;
 }
 
 interface PendingRemoteScreenshotRequest {
@@ -318,32 +382,12 @@ interface PendingRemoteScreenshotRequest {
   reject: (error: Error) => void;
 }
 
-interface PendingSessionTransportOpenIntent {
-  sessionId: string;
-  host: Host;
-  debugScope: 'connect' | 'reconnect';
-  activate?: boolean;
-  onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
-  finalizeFailure: (message: string, retryable: boolean) => void;
-  onConnected: (ws: BridgeTransportSocket) => void;
-}
+type QueueSessionTransportOpenIntentOptions = Omit<
+  SessionTransportOpenIntentHelperOptions,
+  'resolvedSessionName' | 'clearHandshakeTimeout' | 'finalizeSocketFailureBaseline'
+>;
 
-type SessionPullPurpose = 'tail-refresh' | 'reading-repair';
-
-interface SessionPullState {
-  purpose: SessionPullPurpose;
-  startedAt: number;
-  targetHeadRevision: number;
-  targetStartIndex: number;
-  targetEndIndex: number;
-  requestKnownRevision: number;
-  requestLocalStartIndex: number;
-  requestLocalEndIndex: number;
-}
-
-type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullState>>;
-
-type SessionRenderDemandState = TerminalViewportState;
+type QueueSessionTransportOpenIntent = (options: QueueSessionTransportOpenIntentOptions) => void;
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
@@ -364,694 +408,23 @@ function computeReconnectDelay(attempt: number) {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1));
 }
 
-export function shouldReconnectActivatedSession(options: SessionReconnectDecisionOptions) {
-  const transportClosed = (
-    options.wsReadyState === null
-    || options.wsReadyState === WebSocket.CLOSING
-    || options.wsReadyState === WebSocket.CLOSED
-  );
-  return options.hasSession && transportClosed && !options.reconnectInFlight;
-}
-
-export function shouldReconnectQueuedActiveInput(options: {
-  isActiveTarget: boolean;
-  wsReadyState: number | null;
-  reconnectInFlight: boolean;
-}) {
-  const transportClosed = (
-    options.wsReadyState === null
-    || options.wsReadyState === WebSocket.CLOSING
-    || options.wsReadyState === WebSocket.CLOSED
-  );
-  return options.isActiveTarget && transportClosed && !options.reconnectInFlight;
-}
-
-function shouldAutoReconnectSession(options: {
-  sessionId: string;
-  activeSessionId: string | null;
-  force?: boolean;
-}) {
-  if (options.force) {
-    return true;
-  }
-  return options.sessionId === options.activeSessionId;
-}
-
-function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
-  if (typeof input === 'string') {
-    return Array.from(input).map((char) => ({
-      char: char.codePointAt(0) || 32,
-      fg: 256,
-      bg: 256,
-      flags: 0,
-      width: 1,
-    }));
-  }
-
-  if (!Array.isArray(input)) {
-    return [];
-  }
-
-  return input
-    .filter((cell): cell is TerminalCell => Boolean(cell && typeof cell === 'object'))
-    .map((cell) => ({
-      char: typeof cell.char === 'number' ? cell.char : 32,
-      fg: typeof cell.fg === 'number' ? cell.fg : 256,
-      bg: typeof cell.bg === 'number' ? cell.bg : 256,
-      flags: typeof cell.flags === 'number' ? cell.flags : 0,
-      width: typeof cell.width === 'number' ? cell.width : 1,
-    }));
-}
-
-function normalizeTerminalCursorState(
-  input: TerminalBufferPayload['cursor'] | BufferHeadPayload['cursor'],
-): TerminalCursorState | null {
-  return input && typeof input === 'object'
-    ? {
-        rowIndex: typeof input.rowIndex === 'number' && Number.isFinite(input.rowIndex)
-          ? Math.max(0, Math.floor(input.rowIndex))
-          : 0,
-        col: typeof input.col === 'number' && Number.isFinite(input.col)
-          ? Math.max(0, Math.floor(input.col))
-          : 0,
-        visible: Boolean(input.visible),
-      }
-    : null;
-}
-
-function normalizeIncomingBufferPayload(input: TerminalBufferPayload): TerminalBufferPayload {
-  const startIndex =
-    typeof input.startIndex === 'number' && Number.isFinite(input.startIndex)
-      ? Math.max(0, Math.floor(input.startIndex))
-      : 0;
-  const endIndex =
-    typeof input.endIndex === 'number' && Number.isFinite(input.endIndex)
-      ? Math.max(startIndex, Math.floor(input.endIndex))
-      : startIndex;
-  const rows =
-    typeof input.rows === 'number' && Number.isFinite(input.rows)
-      ? Math.max(1, Math.floor(input.rows))
-      : 24;
-
-  return {
-    revision:
-      typeof input.revision === 'number' && Number.isFinite(input.revision)
-        ? input.revision
-        : 0,
-    startIndex,
-    endIndex,
-    availableStartIndex:
-      typeof input.availableStartIndex === 'number' && Number.isFinite(input.availableStartIndex)
-        ? Math.max(0, Math.floor(input.availableStartIndex))
-        : undefined,
-    availableEndIndex:
-      typeof input.availableEndIndex === 'number' && Number.isFinite(input.availableEndIndex)
-        ? Math.max(startIndex, Math.floor(input.availableEndIndex))
-        : undefined,
-    cols:
-      typeof input.cols === 'number' && Number.isFinite(input.cols)
-        ? Math.max(1, Math.floor(input.cols))
-        : 80,
-    rows,
-    cursorKeysApp: Boolean(input.cursorKeysApp),
-    cursor: normalizeTerminalCursorState(input.cursor),
-    lines: Array.isArray(input.lines)
-      ? normalizeWireLines(input.lines, typeof input.cols === 'number' && Number.isFinite(input.cols) ? Math.max(1, Math.floor(input.cols)) : 80)
-          .map((line) => ({
-            index: line.index,
-            cells: normalizeTerminalCellRow(line.cells),
-          }))
-      : [],
-  };
-}
-
-function buildBaseBufferSyncRequestPayload(
-  session: Session,
-): Pick<
-  BufferSyncRequestPayload,
-  'knownRevision' | 'localStartIndex' | 'localEndIndex'
-> {
-  return {
-    knownRevision: Math.max(0, Math.floor(session.buffer.revision || 0)),
-    localStartIndex: Math.max(0, Math.floor(session.buffer.startIndex || 0)),
-    localEndIndex: Math.max(0, Math.floor(session.buffer.endIndex || 0)),
-  };
-}
-
-function resolveRequestedBufferWindow(
-  endIndex: number,
-  viewportRows: number,
-  minStartIndex = 0,
-) {
-  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
-  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
-  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
-  const cacheLines = resolveTerminalRequestWindowLines(safeViewportRows);
-  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
-  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
-  return {
-    requestStartIndex,
-    requestEndIndex,
-  };
-}
-
-function resolveVisibleViewportWindow(
-  endIndex: number,
-  viewportRows: number,
-  minStartIndex = 0,
-) {
-  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
-  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
-  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
-  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
-  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - safeViewportRows);
-  return {
-    requestStartIndex,
-    requestEndIndex,
-  };
-}
-
-function resolveDemandViewportRows(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-) {
-  if (typeof renderDemand?.viewportRows === 'number' && Number.isFinite(renderDemand.viewportRows) && renderDemand.viewportRows > 0) {
-    return Math.max(1, Math.floor(renderDemand.viewportRows));
-  }
-  if (typeof session.buffer.rows === 'number' && Number.isFinite(session.buffer.rows) && session.buffer.rows > 0) {
-    return Math.max(1, Math.floor(session.buffer.rows));
-  }
-  throw new Error(`Session ${session.id} is missing viewportRows truth for buffer request`);
-}
-
-function mergeGapRanges(ranges: TerminalGapRange[]) {
-  if (ranges.length <= 1) {
-    return ranges;
-  }
-  const sorted = [...ranges]
-    .map((range) => ({
-      startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-      endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-    }))
-    .filter((range) => range.endIndex > range.startIndex)
-    .sort((left, right) => left.startIndex - right.startIndex);
-  const merged: TerminalGapRange[] = [];
-  for (const range of sorted) {
-    const current = merged[merged.length - 1];
-    if (!current || range.startIndex > current.endIndex) {
-      merged.push({ ...range });
-      continue;
-    }
-    current.endIndex = Math.max(current.endIndex, range.endIndex);
-  }
-  return merged;
-}
-
-function collectIntersectingGapRanges(
-  gapRanges: TerminalGapRange[],
-  startIndex: number,
-  endIndex: number,
-) {
-  if (endIndex <= startIndex) {
-    return [] as TerminalGapRange[];
-  }
-  return gapRanges
-    .map((range) => ({
-      startIndex: Math.max(startIndex, range.startIndex),
-      endIndex: Math.min(endIndex, range.endIndex),
-    }))
-    .filter((range) => range.endIndex > range.startIndex);
-}
-
-function collectReadingRepairRanges(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  liveHead?: SessionBufferHeadState | null,
-) {
-  if (renderDemand?.mode !== 'reading') {
-    return [] as TerminalGapRange[];
-  }
-
-  const viewportRows = resolveDemandViewportRows(session, renderDemand);
-  const viewportEndIndex = Math.max(0, Math.floor(
-    renderDemand.viewportEndIndex
-    || session.buffer.bufferTailEndIndex
-    || session.buffer.endIndex
-    || 0,
-  ));
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead);
-  const requestWindow = resolveRequestedBufferWindow(
-    viewportEndIndex,
-    viewportRows,
-    availableStartIndex,
-  );
-  const requestStartIndex = requestWindow.requestStartIndex;
-  const requestEndIndex = requestWindow.requestEndIndex;
-  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
-  const missingRanges: TerminalGapRange[] = [];
-
-  if (localStartIndex > requestStartIndex) {
-    missingRanges.push({
-      startIndex: requestStartIndex,
-      endIndex: Math.min(localStartIndex, requestEndIndex),
-    });
-  }
-
-  missingRanges.push(...collectIntersectingGapRanges(
-    session.buffer.gapRanges,
-    requestStartIndex,
-    requestEndIndex,
-  ));
-
-  if (localEndIndex < requestEndIndex) {
-    missingRanges.push({
-      startIndex: Math.max(localEndIndex, requestStartIndex),
-      endIndex: requestEndIndex,
-    });
-  }
-
-  return mergeGapRanges(missingRanges);
-}
-
-function buildTailRefreshBufferSyncRequestPayload(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  options?: {
-    liveHead?: SessionBufferHeadState | null;
-    forceSameEndRefresh?: boolean;
-    invalidLocalWindow?: boolean;
-  },
-): BufferSyncRequestPayload {
-  const viewportRows = resolveDemandViewportRows(session, renderDemand);
-  const viewportEndIndex = Math.max(0, Math.floor(
-    session.daemonHeadEndIndex
-    || renderDemand?.viewportEndIndex
-    || session.buffer.bufferTailEndIndex
-    || session.buffer.endIndex
-    || 0,
-  ));
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead);
-  const authoritativeHeadStartIndex = availableStartIndex;
-  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(session.buffer.endIndex || 0));
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
-  const localRevision = Math.max(0, Math.floor(session.buffer.revision || 0));
-  const localHasWindow = localEndIndex > localStartIndex;
-  const distanceToHead = Math.max(0, viewportEndIndex - localEndIndex);
-  const invalidLocalWindow = Boolean(options?.invalidLocalWindow);
-  const sameEndRevisionAdvanced = (
-    localHasWindow
-    && distanceToHead === 0
-    && daemonRevision > localRevision
-  );
-  let window: { requestStartIndex: number; requestEndIndex: number };
-
-  if (!localHasWindow || invalidLocalWindow || distanceToHead > cacheLines) {
-    window = resolveRequestedBufferWindow(
-      viewportEndIndex,
-      viewportRows,
-      authoritativeHeadStartIndex,
-    );
-  } else if (localEndIndex < viewportEndIndex) {
-    window = {
-      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
-      requestEndIndex: viewportEndIndex,
-    };
-  } else if (sameEndRevisionAdvanced) {
-    // sameEnd: revision advanced, end unchanged (style/cursor update).
-    // Only request visible viewport — never full 3-screen cache.
-    window = resolveVisibleViewportWindow(
-      viewportEndIndex,
-      viewportRows,
-      authoritativeHeadStartIndex,
-    );
-  } else {
-    window = {
-      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
-      requestEndIndex: viewportEndIndex,
-    };
-  }
-  return {
-    ...buildBaseBufferSyncRequestPayload(session),
-    requestStartIndex: window.requestStartIndex,
-    requestEndIndex: window.requestEndIndex,
-  };
-}
-
-function buildReadingBufferSyncRequestPayload(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  liveHead?: SessionBufferHeadState | null,
-): BufferSyncRequestPayload {
-  const viewportRows = resolveDemandViewportRows(session, renderDemand);
-  const viewportEndIndex = Math.max(0, Math.floor(
-    renderDemand?.viewportEndIndex
-    || session.buffer.bufferTailEndIndex
-    || session.buffer.endIndex
-    || 0,
-  ));
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead);
-  const window = resolveRequestedBufferWindow(
-    viewportEndIndex,
-    viewportRows,
-    availableStartIndex,
-  );
-  return {
-    ...buildBaseBufferSyncRequestPayload(session),
-    requestStartIndex: window.requestStartIndex,
-    requestEndIndex: window.requestEndIndex,
-    missingRanges: collectReadingRepairRanges(session, renderDemand, liveHead),
-  };
-}
-
-function buildSessionBufferSyncRequestPayload(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  options?: {
-    purpose?: 'tail-refresh' | 'reading-repair';
-    forceSameEndRefresh?: boolean;
-    liveHead?: SessionBufferHeadState | null;
-    invalidLocalWindow?: boolean;
-  },
-): BufferSyncRequestPayload {
-  const purpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
-  return purpose === 'reading-repair'
-    ? buildReadingBufferSyncRequestPayload(session, renderDemand, options?.liveHead)
-    : buildTailRefreshBufferSyncRequestPayload(session, renderDemand, options);
-}
-
-function buildHostConfigMessage(
-  host: Host,
-  sessionName: string,
-  clientSessionId: string,
-  terminalWidthMode: TerminalWidthMode,
-  sessionTransportToken?: string | null,
-): HostConfigMessage {
-  return {
-    clientSessionId,
-    sessionTransportToken: sessionTransportToken?.trim() || undefined,
-    name: host.name,
-    bridgeHost: host.bridgeHost,
-    bridgePort: host.bridgePort,
-    sessionName,
-    terminalWidthMode,
-    authToken: host.authToken,
-    autoCommand: host.autoCommand,
-    authType: host.authType,
-    password: host.password,
-    privateKey: host.privateKey,
-  };
-}
-
-function buildFollowRenderDemandState(session: Session, previousRenderDemand?: SessionRenderDemandState): SessionRenderDemandState {
-  return {
-    mode: 'follow',
-    viewportRows:
-      typeof previousRenderDemand?.viewportRows === 'number' && Number.isFinite(previousRenderDemand.viewportRows) && previousRenderDemand.viewportRows > 0
-        ? Math.max(1, Math.floor(previousRenderDemand.viewportRows))
-        : resolveDemandViewportRows(session),
-    viewportEndIndex: Math.max(0, Math.floor(
-      session.daemonHeadEndIndex
-      || session.buffer.bufferTailEndIndex
-      || session.buffer.endIndex
-      || 0,
-    )),
-  };
-}
-
-function normalizeSessionRenderDemandState(renderDemand: SessionRenderDemandState): SessionRenderDemandState {
-  return {
-    mode: renderDemand.mode === 'reading' ? 'reading' : 'follow',
-    viewportEndIndex: Math.max(0, Math.floor(renderDemand.viewportEndIndex || 0)),
-    viewportRows: Math.max(1, Math.floor(renderDemand.viewportRows || 1)),
-  };
-}
-
-function renderDemandStatesEqual(left?: SessionRenderDemandState, right?: SessionRenderDemandState) {
-  if (!left || !right) {
-    return false;
-  }
-  if (
-    left.mode !== right.mode
-    || left.viewportEndIndex !== right.viewportEndIndex
-    || left.viewportRows !== right.viewportRows
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function shouldPullFollowBuffer(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-) {
-  const buffer = session.buffer;
-  const viewportRows = resolveDemandViewportRows(session, renderDemand);
-  const desiredEndIndex = Math.max(0, Math.floor(
-    session.daemonHeadEndIndex
-    || renderDemand?.viewportEndIndex
-    || buffer.bufferTailEndIndex
-    || buffer.endIndex
-    || 0,
-  ));
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
-  const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
-  const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
-  const localHasWindow = localEndIndex > localStartIndex;
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
-  const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
-  const sameEndRevisionAdvanced = (
-    localHasWindow
-    && distanceToHead === 0
-    && daemonRevision > localRevision
-  );
-
-  if (!localHasWindow) {
-    return true;
-  }
-  if (distanceToHead > cacheLines) {
-    return true;
-  }
-  if (localEndIndex < desiredEndIndex) {
-    return true;
-  }
-  if (sameEndRevisionAdvanced) {
-    return true;
-  }
-  return false;
-}
-
-function shouldCatchUpFollowTailAfterBufferApply(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  options?: {
-    forceSameEndRefresh?: boolean;
-  },
-) {
-  const buffer = session.buffer;
-  const viewportRows = resolveDemandViewportRows(session, renderDemand);
-  const desiredEndIndex = Math.max(0, Math.floor(
-    session.daemonHeadEndIndex
-    || renderDemand?.viewportEndIndex
-    || buffer.bufferTailEndIndex
-    || buffer.endIndex
-    || 0,
-  ));
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
-  const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
-  const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
-  const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
-  const localHasWindow = localEndIndex > localStartIndex;
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
-  const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
-  const sameEndRevisionAdvanced = (
-    localHasWindow
-    && distanceToHead === 0
-    && daemonRevision > localRevision
-  );
-
-  return (
-    !localHasWindow
-    || distanceToHead > cacheLines
-    || localEndIndex < desiredEndIndex
-    || sameEndRevisionAdvanced
-    || (Boolean(options?.forceSameEndRefresh) && daemonRevision > localRevision)
-  );
-}
-
-function shouldPullReadingBuffer(
-  session: Session,
-  renderDemand?: SessionRenderDemandState,
-  liveHead?: SessionBufferHeadState | null,
-) {
-  return collectReadingRepairRanges(session, renderDemand, liveHead).length > 0;
-}
-
-function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
-  if (!activeSessionId) {
-    return sessions;
-  }
-  return [...sessions].sort((left, right) => {
-    if (left.id === activeSessionId) {
-      return -1;
-    }
-    if (right.id === activeSessionId) {
-      return 1;
-    }
-    return 0;
-  });
-}
-
-function resolveHeadAvailableBounds(
-  session: Session,
-  liveHead?: SessionBufferHeadState | null,
-) {
-  const availableEndIndex = Math.max(0, Math.floor(
-    liveHead?.availableEndIndex
-    ?? liveHead?.latestEndIndex
-    ?? session.daemonHeadEndIndex
-    ?? session.buffer.bufferTailEndIndex
-    ?? session.buffer.endIndex
-    ?? 0,
-  ));
-  const availableStartIndex = Math.max(0, Math.min(
-    availableEndIndex,
-    Math.floor(
-      liveHead?.availableStartIndex
-      ?? session.buffer.bufferHeadStartIndex
-      ?? 0
-    ),
-  ));
-  return {
-    availableStartIndex,
-    availableEndIndex,
-  };
-}
-
-function hasImpossibleLocalWindow(
-  session: Session,
-  liveHead?: SessionBufferHeadState | null,
-) {
-  const { availableEndIndex } = resolveHeadAvailableBounds(session, liveHead);
-  const localStartIndex = Math.max(0, Math.floor(session.buffer.startIndex || 0));
-  const localEndIndex = Math.max(0, Math.floor(session.buffer.endIndex || 0));
-  const localHeadStartIndex = Math.max(0, Math.floor(session.buffer.bufferHeadStartIndex || 0));
-  const localTailEndIndex = Math.max(0, Math.floor(session.buffer.bufferTailEndIndex || 0));
-
-  return (
-    localStartIndex > availableEndIndex
-    || localEndIndex > availableEndIndex
-    || localHeadStartIndex > availableEndIndex
-    || localTailEndIndex > availableEndIndex
-  );
-}
-
-function hasActiveSessionPullState(pullStates?: SessionPullStates | null) {
-  return Boolean(pullStates?.['tail-refresh'] || pullStates?.['reading-repair']);
-}
-
-function getPrimarySessionPullState(pullStates?: SessionPullStates | null) {
-  return pullStates?.['reading-repair'] || pullStates?.['tail-refresh'] || null;
-}
-
-function clearSessionPullStateEntry(
-  pullStates: SessionPullStates | null | undefined,
-  purpose: SessionPullPurpose,
-) {
-  if (!pullStates || !pullStates[purpose]) {
-    return pullStates || null;
-  }
-  const next = { ...pullStates };
-  delete next[purpose];
-  return hasActiveSessionPullState(next) ? next : null;
-}
-
-function doesBufferSyncSatisfyPullState(
-  pullState: SessionPullState,
-  payload: TerminalBufferPayload,
-) {
-  const payloadRevision = Math.max(0, Math.floor(payload.revision || 0));
-  const payloadStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const payloadEndIndex = Math.max(payloadStartIndex, Math.floor(payload.endIndex || 0));
-  return (
-    payloadRevision >= pullState.targetHeadRevision
-    && payloadStartIndex <= pullState.targetStartIndex
-    && payloadEndIndex >= pullState.targetEndIndex
-  );
-}
-
-function settleSessionPullStatesWithBufferSync(
-  pullStates: SessionPullStates | null | undefined,
-  payload: TerminalBufferPayload,
-) {
-  if (!pullStates || !hasActiveSessionPullState(pullStates)) {
-    return null;
-  }
-
-  const activePulls = Object.values(pullStates)
-    .filter((item): item is SessionPullState => Boolean(item))
-    .sort((left, right) => left.startedAt - right.startedAt);
-
-  if (activePulls.length === 0) {
-    return null;
-  }
-
-  if ((payload.lines?.length || 0) === 0) {
-    return clearSessionPullStateEntry(pullStates, activePulls[0]!.purpose);
-  }
-
-  let next: SessionPullStates | null = pullStates;
-  for (const pullState of activePulls) {
-    if (!doesBufferSyncSatisfyPullState(pullState, payload)) {
-      continue;
-    }
-    next = clearSessionPullStateEntry(next, pullState.purpose);
-  }
-  return next;
-}
-
-function doesSessionPullStateCoverRequest(
-  pullState: SessionPullState,
-  payload: BufferSyncRequestPayload,
-) {
-  return (
-    pullState.targetStartIndex <= Math.max(0, Math.floor(payload.requestStartIndex || 0))
-    && pullState.targetEndIndex >= Math.max(0, Math.floor(payload.requestEndIndex || 0))
-  );
-}
-
-function doesSessionPullStateMatchExactLocalSnapshot(
-  pullState: SessionPullState,
-  payload: BufferSyncRequestPayload,
-) {
-  return (
-    pullState.requestKnownRevision === Math.max(0, Math.floor(payload.knownRevision || 0))
-    && pullState.requestLocalStartIndex === Math.max(0, Math.floor(payload.localStartIndex || 0))
-    && pullState.requestLocalEndIndex === Math.max(0, Math.floor(payload.localEndIndex || 0))
-    && pullState.targetStartIndex === Math.max(0, Math.floor(payload.requestStartIndex || 0))
-    && pullState.targetEndIndex === Math.max(0, Math.floor(payload.requestEndIndex || 0))
-  );
-}
-
 export function SessionProvider({
   children,
   wsUrl,
   terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES,
   bridgeSettings = DEFAULT_BRIDGE_SETTINGS,
+  appForegroundActive,
 }: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
   const [scheduleStates, setScheduleStates] = useState<Record<string, SessionScheduleState>>({});
-  const [sessionDebugMetrics, setSessionDebugMetrics] = useState<Record<string, SessionDebugOverlayMetrics | undefined>>({});
+  const sessionDebugMetricsRef = useRef<Record<string, SessionDebugOverlayMetrics | undefined>>({});
   const stateRef = useRef(state);
   const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
   const transportRuntimeStoreRef = useRef(createSessionTransportRuntimeStore());
   const pingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
-  // renderer -> worker declarative demand only; never producer/tail truth
-  const sessionRenderDemandRef = useRef<Map<string, SessionRenderDemandState>>(new Map());
+  // renderer -> worker visible range declaration only; never producer/tail truth
+  const sessionVisibleRangeRef = useRef<Map<string, SessionVisibleRangeState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
   const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
@@ -1072,6 +445,7 @@ export function SessionProvider({
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const fileTransferListeners = useRef<Set<(msg: any) => void>>(new Set());
   const pendingRemoteScreenshotRequestsRef = useRef<Map<string, PendingRemoteScreenshotRequest>>(new Map());
+  const foregroundActiveRef = useRef(appForegroundActive !== false);
   const handleSocketConnectedBaselineRef = useRef<null | ((options: {
     sessionId: string;
     sessionName: string;
@@ -1083,6 +457,70 @@ export function SessionProvider({
     markCompleted: () => boolean;
   }) => { shouldContinue: boolean; manualClosed: boolean })>(null);
   const flushPendingInputQueueRef = useRef<null | ((sessionId: string) => void)>(null);
+  const queueSessionTransportOpenIntentRef = useRef<QueueSessionTransportOpenIntent | null>(null);
+  const queueReconnectTransportOpenIntentRef = useRef<null | ((sessionId: string, host: Host) => void)>(null);
+  const queueConnectTransportOpenIntentRef = useRef<null | ((sessionId: string, host: Host, activate: boolean) => void)>(null);
+  const applyTransportOpenConnectedEffectsRef = useRef<null | ((options: {
+    sessionId: string;
+    debugScope: 'connect' | 'reconnect';
+    sessionName: string;
+    ws: BridgeTransportSocket;
+  }) => void)>(null);
+  const applyTransportOpenLiveFailureEffectsRef = useRef<null | ((options: {
+    sessionId: string;
+    debugScope: 'connect' | 'reconnect';
+    message: string;
+    retryable: boolean;
+  }) => void)>(null);
+  const handleReconnectBeforeConnectSendRef = useRef<null | ((sessionId: string, sessionName: string) => void)>(null);
+  const handleReconnectHandshakeFailureRef = useRef<null | ((options: {
+    sessionId: string;
+    message: string;
+    retryable: boolean;
+  }) => void)>(null);
+  const startReconnectAttemptRef = useRef<null | ((sessionId: string) => void)>(null);
+  const scheduleReconnectRef = useRef<null | ((sessionId: string, message: string, retryable?: boolean, options?: {
+    immediate?: boolean;
+    resetAttempt?: boolean;
+    force?: boolean;
+  }) => void)>(null);
+
+  const applySessionAction = useCallback((action: SessionAction) => {
+    stateRef.current = reduceSessionAction(stateRef.current, action);
+    dispatch(action);
+  }, []);
+
+  const updateSessionSync = useCallback((id: string, updates: Partial<Session>) => {
+    applySessionAction({
+      type: 'UPDATE_SESSION',
+      id,
+      updates,
+    });
+  }, [applySessionAction]);
+
+  const setActiveSessionSync = useCallback((id: string) => {
+    applySessionAction({ type: 'SET_ACTIVE_SESSION', id });
+  }, [applySessionAction]);
+
+  const createSessionSync = useCallback((session: Session, activate: boolean) => {
+    applySessionAction({ type: 'CREATE_SESSION', session, activate });
+  }, [applySessionAction]);
+
+  const deleteSessionSync = useCallback((id: string) => {
+    applySessionAction({ type: 'DELETE_SESSION', id });
+  }, [applySessionAction]);
+
+  const moveSessionSync = useCallback((id: string, toIndex: number) => {
+    applySessionAction({ type: 'MOVE_SESSION', id, toIndex });
+  }, [applySessionAction]);
+
+  const setSessionTitleSync = useCallback((id: string, title: string) => {
+    applySessionAction({ type: 'SET_SESSION_TITLE', id, title });
+  }, [applySessionAction]);
+
+  const incrementConnectedSync = useCallback(() => {
+    applySessionAction({ type: 'INCREMENT_CONNECTED' });
+  }, [applySessionAction]);
 
   const readSessionTransportSocket = useCallback((sessionId: string) => {
     return getSessionTransportSocket(transportRuntimeStoreRef.current, sessionId);
@@ -1213,7 +651,7 @@ export function SessionProvider({
       txBytes: 0,
       rxBytes: 0,
       renderCommits: 0,
-      pullRequests: 0,
+      refreshRequests: 0,
     };
     sessionWireStatsRef.current.set(sessionId, initial);
     return initial;
@@ -1231,7 +669,7 @@ export function SessionProvider({
     const current = ensureSessionWireStats(sessionId);
     current.txBytes += estimateWireBytes(data);
     if (options?.pullPurpose) {
-      current.pullRequests += 1;
+      current.refreshRequests += 1;
       const nextPullStates = {
         ...(sessionPullStateRef.current.get(sessionId) || {}),
         [options.pullPurpose]: {
@@ -1350,17 +788,13 @@ export function SessionProvider({
 
   const applyTransportDiagnostics = useCallback((sessionId: string, socket: BridgeTransportSocket) => {
     const diagnostics = socket.getDiagnostics();
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id: sessionId,
-      updates: {
-        resolvedPath: diagnostics.resolvedPath,
-        resolvedEndpoint: diagnostics.resolvedEndpoint,
-        lastConnectStage: diagnostics.stage,
-        lastError: diagnostics.reason || undefined,
-      },
+    updateSessionSync(sessionId, {
+      resolvedPath: diagnostics.resolvedPath,
+      resolvedEndpoint: diagnostics.resolvedEndpoint,
+      lastConnectStage: diagnostics.stage,
+      lastError: diagnostics.reason || undefined,
     });
-  }, []);
+  }, [updateSessionSync]);
 
   const flushRuntimeDebugLogs = useCallback(() => {
     if (!isRuntimeDebugEnabled() || getPendingRuntimeDebugEntryCount() === 0) {
@@ -1388,6 +822,10 @@ export function SessionProvider({
   }, [sendSocketPayload]);
 
   useEffect(() => {
+    foregroundActiveRef.current = appForegroundActive !== false;
+  }, [appForegroundActive]);
+
+  useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
@@ -1405,7 +843,7 @@ export function SessionProvider({
           txBytes: 0,
           rxBytes: 0,
           renderCommits: 0,
-          pullRequests: 0,
+          refreshRequests: 0,
         };
         const previous = sessionWireStatsPreviousRef.current.get(session.id);
         const deltaMs = previous ? Math.max(250, now - previous.at) : 1000;
@@ -1413,7 +851,7 @@ export function SessionProvider({
         const txBytesDelta = current.txBytes - (previous?.sample.txBytes || 0);
         const rxBytesDelta = current.rxBytes - (previous?.sample.rxBytes || 0);
         const renderDelta = current.renderCommits - (previous?.sample.renderCommits || 0);
-        const pullDelta = current.pullRequests - (previous?.sample.pullRequests || 0);
+        const pullDelta = current.refreshRequests - (previous?.sample.refreshRequests || 0);
         const pullStates = sessionPullStateRef.current.get(session.id) || null;
         const pullState = getPrimarySessionPullState(pullStates);
         const status: SessionDebugOverlayMetrics['status'] =
@@ -1432,6 +870,7 @@ export function SessionProvider({
           pullHz: Math.max(0, Number((pullDelta / deltaSeconds).toFixed(1))),
           bufferPullActive: hasActiveSessionPullState(pullStates),
           status,
+          active: stateRef.current.activeSessionId === session.id,
           updatedAt: now,
         };
 
@@ -1441,7 +880,10 @@ export function SessionProvider({
         });
       }
 
-      setSessionDebugMetrics(nextMetrics);
+      const current = sessionDebugMetricsRef.current;
+      if (!sessionDebugMetricsEqual(current, nextMetrics)) {
+        sessionDebugMetricsRef.current = nextMetrics;
+      }
     }, 500);
 
     return () => window.clearInterval(timer);
@@ -1523,15 +965,6 @@ export function SessionProvider({
     }, CLIENT_PING_INTERVAL_MS);
     pingIntervals.current.set(sessionId, pingInterval);
   }, [sendSocketPayload]);
-
-  function buildConnectedSessionUpdates(sessionId: string) {
-    void sessionId;
-    return {
-      state: 'connected' as const,
-      reconnectAttempt: 0,
-      lastError: undefined,
-    };
-  }
 
   const cleanupControlSocket = useCallback((sessionId: string, shouldClose = false) => {
     const controlSocket = readSessionTargetControlSocket(sessionId);
@@ -1753,9 +1186,9 @@ export function SessionProvider({
 
   const primeSessionTransportSocket = useCallback((sessionId: string, ws: BridgeTransportSocket) => {
     writeSessionTransportSocket(sessionId, ws);
-    dispatch({ type: 'UPDATE_SESSION', id: sessionId, updates: { ws: null } });
+    updateSessionSync(sessionId, { ws: null });
     lastPongAtRef.current.set(sessionId, Date.now());
-  }, [writeSessionTransportSocket]);
+  }, [updateSessionSync, writeSessionTransportSocket]);
 
   const bindSessionTransportSocketLifecycle = useCallback((options: {
     sessionId: string;
@@ -1829,8 +1262,8 @@ export function SessionProvider({
       return false;
     }
 
-    const renderDemand = sessionRenderDemandRef.current.get(sessionId);
-    const requestPurpose = options?.purpose || (renderDemand?.mode === 'reading' ? 'reading-repair' : 'tail-refresh');
+    const visibleRange = sessionVisibleRangeRef.current.get(sessionId);
+    const requestPurpose = options?.purpose || 'tail-refresh';
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
     const effectiveSession = liveHead
       ? {
@@ -1841,7 +1274,7 @@ export function SessionProvider({
       : session;
     const payload = buildSessionBufferSyncRequestPayload(
       effectiveSession,
-      renderDemand,
+      visibleRange,
       {
         purpose: options?.purpose,
         forceSameEndRefresh:
@@ -1854,6 +1287,18 @@ export function SessionProvider({
     );
     const inFlightPull = (sessionPullStateRef.current.get(sessionId) || null)?.[requestPurpose] || null;
     if (inFlightPull) {
+      if (
+        requestPurpose === 'tail-refresh'
+        && doesSessionPullStateMatchExactLocalSnapshot(inFlightPull, payload)
+      ) {
+        return false;
+      }
+      if (
+        requestPurpose === 'reading-repair'
+        && doesSessionPullStateMatchExactLocalSnapshot(inFlightPull, payload)
+      ) {
+        return false;
+      }
       const targetHeadRevision = Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0));
       if (
         doesSessionPullStateCoverRequest(inFlightPull, payload)
@@ -1883,20 +1328,26 @@ export function SessionProvider({
         purpose: requestPurpose,
         payload,
       });
+    const requestTargetStartIndex = Math.max(0, Math.floor(payload.requestStartIndex || 0));
+    const requestTargetEndIndex = Math.max(requestTargetStartIndex, Math.floor(
+      requestPurpose === 'reading-repair'
+        ? (payload.requestEndIndex || 0)
+        : (
+          effectiveSession.daemonHeadEndIndex
+          || payload.requestEndIndex
+          || effectiveSession.buffer.bufferTailEndIndex
+          || effectiveSession.buffer.endIndex
+          || 0
+        ),
+    ));
     sendSocketPayload(sessionId, targetWs, JSON.stringify({
       type: 'buffer-sync-request',
       payload,
     } satisfies ClientMessage), {
       pullPurpose: requestPurpose,
       targetHeadRevision: Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
-      targetStartIndex: Math.max(0, Math.floor(payload.requestStartIndex || 0)),
-      targetEndIndex: Math.max(0, Math.floor(
-        effectiveSession.daemonHeadEndIndex
-        || payload.requestEndIndex
-        || effectiveSession.buffer.bufferTailEndIndex
-        || effectiveSession.buffer.endIndex
-        || 0
-      )),
+      targetStartIndex: requestTargetStartIndex,
+      targetEndIndex: requestTargetEndIndex,
       requestKnownRevision: Math.max(0, Math.floor(payload.knownRevision || 0)),
       requestLocalStartIndex: Math.max(0, Math.floor(payload.localStartIndex || 0)),
       requestLocalEndIndex: Math.max(0, Math.floor(payload.localEndIndex || 0)),
@@ -1920,13 +1371,16 @@ export function SessionProvider({
     const cadence = resolveTerminalRefreshCadence();
     const now = Date.now();
     const lastRequestedAt = lastHeadRequestAtRef.current.get(sessionId) || 0;
-    if (!options?.force && now - lastRequestedAt < cadence.headTickMs) {
+    const minHeadGapMs = cadence.headTickMs;
+    if (!options?.force && now - lastRequestedAt < minHeadGapMs) {
       return false;
     }
     lastHeadRequestAtRef.current.set(sessionId, now);
+    const current = ensureSessionWireStats(sessionId);
+    current.refreshRequests += 1;
     sendSocketPayload(sessionId, targetWs, JSON.stringify({ type: 'buffer-head-request' } satisfies ClientMessage));
     return true;
-  }, [sendSocketPayload]);
+  }, [ensureSessionWireStats, sendSocketPayload]);
 
   const applyIncomingBufferSync = useCallback((sessionId: string, payload: TerminalBufferPayload) => {
     const session = stateRef.current.sessions.find((item) => item.id === sessionId);
@@ -2062,9 +1516,9 @@ export function SessionProvider({
       daemonHeadRevision: liveHead?.revision ?? session.daemonHeadRevision,
       daemonHeadEndIndex: liveHead?.latestEndIndex ?? session.daemonHeadEndIndex,
     };
-    const renderDemand = sessionRenderDemandRef.current.get(sessionId) || buildFollowRenderDemandState(nextSession);
+    const visibleRange = sessionVisibleRangeRef.current.get(sessionId) || buildDefaultSessionVisibleRange(nextSession);
 
-    if (shouldCatchUpFollowTailAfterBufferApply(nextSession, renderDemand, {
+    if (shouldCatchUpFollowTailAfterBufferApply(nextSession, visibleRange, {
       forceSameEndRefresh:
         pendingInputTailRefreshRef.current.has(sessionId)
         || pendingConnectTailRefreshRef.current.has(sessionId)
@@ -2078,12 +1532,12 @@ export function SessionProvider({
       return;
     }
 
-    if (renderDemand.mode !== 'reading' || !shouldPullReadingBuffer(nextSession, renderDemand, liveHead)) {
+    if (!shouldPullVisibleRangeBuffer(nextSession, visibleRange, liveHead)) {
       return;
     }
 
     requestSessionBufferSync(sessionId, {
-      reason: 'buffer-sync-reading-repair-catchup',
+      reason: 'buffer-sync-visible-range-repair-catchup',
       purpose: 'reading-repair',
       sessionOverride: nextSession,
     });
@@ -2227,147 +1681,15 @@ export function SessionProvider({
         return;
       }
 
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: {
-          state: 'reconnecting',
-          reconnectAttempt: liveRuntime.attempt + 1,
-        },
-      });
+      updateSessionSync(sessionId, buildSessionReconnectAttemptProgressUpdates(liveRuntime.attempt + 1));
       writeSessionTransportToken(sessionId, null);
-
-      let handshakeSettled = false;
-      let liveFailureHandled = false;
-      const markHandshakeSettled = () => {
-        if (handshakeSettled) {
-          return false;
-        }
-        handshakeSettled = true;
-        return true;
-      };
-      const finalizeFailure = (message: string, retryable: boolean) => {
-        if (!handshakeSettled) {
-          clearSessionHandshakeTimeout(sessionId);
-          const baseline = finalizeSocketFailureBaselineRef.current?.({
-            sessionId,
-            message,
-            markCompleted: markHandshakeSettled,
-          });
-          if (!baseline) {
-            reconnectRuntimesRef.current.delete(sessionId);
-            return;
-          }
-          const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
-          if (currentReconnectRuntime) {
-            currentReconnectRuntime.connecting = false;
-          }
-          clearSupersededSockets(sessionId, true);
-          if (!baseline.shouldContinue) {
-            reconnectRuntimesRef.current.delete(sessionId);
-            return;
-          }
-
-          if (!retryable) {
-            reconnectRuntimesRef.current.delete(sessionId);
-            dispatch({
-              type: 'UPDATE_SESSION',
-              id: sessionId,
-              updates: {
-                state: 'error',
-                lastError: message,
-              },
-            });
-            emitSessionStatus(sessionId, 'error', message);
-            return;
-          }
-
-          const nextReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || createSessionReconnectRuntime();
-          nextReconnectRuntime.attempt = Math.min(nextReconnectRuntime.attempt + 1, 6);
-          nextReconnectRuntime.connecting = false;
-          reconnectRuntimesRef.current.set(sessionId, nextReconnectRuntime);
-
-          dispatch({
-            type: 'UPDATE_SESSION',
-            id: sessionId,
-            updates: {
-              state: 'reconnecting',
-              lastError: message,
-              reconnectAttempt: nextReconnectRuntime.attempt,
-              ws: null,
-            },
-          });
-          emitSessionStatus(sessionId, 'error', message);
-          startReconnectAttempt(sessionId);
-          return;
-        }
-
-        if (liveFailureHandled) {
-          return;
-        }
-        liveFailureHandled = true;
-        const currentReconnectRuntime = reconnectRuntimesRef.current.get(sessionId) || null;
-        if (currentReconnectRuntime) {
-          currentReconnectRuntime.connecting = false;
-        }
-        cleanupSocket(sessionId);
-        pendingSessionTransportOpenIntentsRef.current.delete(sessionId);
-        writeSessionTransportToken(sessionId, null);
-        clearSupersededSockets(sessionId, true);
-        setScheduleStateForSession(sessionId, (current) => ({
-          ...current,
-          loading: false,
-          error: message,
-        }));
-        scheduleReconnect(sessionId, message, retryable);
-      };
-
-      pendingSessionTransportOpenIntentsRef.current.set(sessionId, {
-        sessionId,
-        host: liveHost,
-        debugScope: 'reconnect',
-        onBeforeConnectSend: ({ sessionName }) => {
-          dispatch({
-            type: 'UPDATE_SESSION',
-            id: sessionId,
-            updates: {
-              state: 'connecting',
-              sessionName,
-            },
-          });
-          setScheduleStateForSession(sessionId, {
-            sessionName,
-            jobs: [],
-            loading: true,
-          });
-        },
-        finalizeFailure,
-        onConnected: (ws) => {
-          if (!markHandshakeSettled()) return;
-          clearSessionHandshakeTimeout(sessionId);
-          const connectedSessionName = getResolvedSessionName(liveHost);
-          runtimeDebug('session.ws.reconnect.connected', {
-            sessionId,
-            activeSessionId: stateRef.current.activeSessionId,
-          });
-          reconnectRuntimesRef.current.delete(sessionId);
-          clearSupersededSockets(sessionId, true);
-          handleSocketConnectedBaselineRef.current?.({
-            sessionId,
-            sessionName: connectedSessionName,
-            ws,
-          });
-          flushPendingInputQueueRef.current?.(sessionId);
-        },
-      });
-      ensureControlTransportForSessionOpen(pendingSessionTransportOpenIntentsRef.current.get(sessionId)!);
+      queueReconnectTransportOpenIntentRef.current?.(sessionId, liveHost);
     }, delay);
   }, [
-    clearSupersededSockets,
-    clearSessionHandshakeTimeout,
-    ensureControlTransportForSessionOpen,
+    updateSessionSync,
     writeSessionTransportToken,
   ]);
+  startReconnectAttemptRef.current = startReconnectAttempt;
 
   const scheduleReconnect = useCallback((
     sessionId: string,
@@ -2385,15 +1707,7 @@ export function SessionProvider({
 
     if (!retryable) {
       reconnectRuntimesRef.current.delete(sessionId);
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: {
-          state: 'error',
-          lastError: message,
-          ws: null,
-        },
-        });
+      updateSessionSync(sessionId, buildSessionErrorUpdates(message, { includeWsNull: true }));
       emitSessionStatus(sessionId, 'error', message);
       return;
     }
@@ -2404,16 +1718,7 @@ export function SessionProvider({
       force: options?.force,
     })) {
       reconnectRuntimesRef.current.delete(sessionId);
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: {
-          state: 'idle',
-          lastError: message,
-          reconnectAttempt: 0,
-          ws: null,
-        },
-      });
+      updateSessionSync(sessionId, buildSessionIdleAfterReconnectBlockedUpdates(message));
       emitSessionStatus(sessionId, 'error', message);
       return;
     }
@@ -2427,136 +1732,298 @@ export function SessionProvider({
     }
     reconnectRuntimesRef.current.set(sessionId, reconnectRuntime);
 
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id: sessionId,
-      updates: {
-        state: 'reconnecting',
-        lastError: message,
-        ws: null,
-      },
-    });
+    updateSessionSync(sessionId, buildSessionReconnectingFailureUpdates(
+      message,
+      reconnectRuntime.attempt,
+    ));
     emitSessionStatus(sessionId, 'error', message);
-    startReconnectAttempt(sessionId);
-  }, [readSessionTransportHost, startReconnectAttempt]);
+    startReconnectAttemptRef.current?.(sessionId);
+  }, [readSessionTransportHost, updateSessionSync]);
+  scheduleReconnectRef.current = scheduleReconnect;
+
+  const queueSessionTransportOpenIntent = useCallback((options: QueueSessionTransportOpenIntentOptions) => {
+    const pendingIntent = createPendingSessionTransportOpenIntent({
+      ...options,
+      resolvedSessionName: getResolvedSessionName(options.host),
+      clearHandshakeTimeout: () => clearSessionHandshakeTimeout(options.sessionId),
+      finalizeSocketFailureBaseline: (baselineOptions) => (
+        finalizeSocketFailureBaselineRef.current?.(baselineOptions) || null
+      ),
+    });
+
+    pendingSessionTransportOpenIntentsRef.current.set(options.sessionId, pendingIntent);
+    ensureControlTransportForSessionOpen(pendingIntent);
+  }, [
+    clearSessionHandshakeTimeout,
+    ensureControlTransportForSessionOpen,
+  ]);
+  queueSessionTransportOpenIntentRef.current = queueSessionTransportOpenIntent;
+
+  const applyTransportOpenConnectedEffects = useCallback((options: {
+    sessionId: string;
+    debugScope: 'connect' | 'reconnect';
+    sessionName: string;
+    ws: BridgeTransportSocket;
+  }) => {
+    const connectedEffectPlan = buildTransportOpenConnectedEffectPlan(options.debugScope);
+    runtimeDebug(connectedEffectPlan.debugEvent, {
+      sessionId: options.sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+    });
+    if (connectedEffectPlan.clearSupersededSockets) {
+      clearSupersededSockets(options.sessionId, true);
+    }
+    handleSocketConnectedBaselineRef.current?.({
+      sessionId: options.sessionId,
+      sessionName: options.sessionName,
+      ws: options.ws,
+    });
+    if (connectedEffectPlan.flushPendingInputQueue) {
+      flushPendingInputQueueRef.current?.(options.sessionId);
+    }
+  }, [clearSupersededSockets]);
+  applyTransportOpenConnectedEffectsRef.current = applyTransportOpenConnectedEffects;
+
+  const applyTransportOpenLiveFailureEffects = useCallback((options: {
+    sessionId: string;
+    debugScope: 'connect' | 'reconnect';
+    message: string;
+    retryable: boolean;
+  }) => {
+    const liveFailureEffectPlan = buildTransportOpenLiveFailureEffectPlan(options.debugScope);
+    cleanupSocket(options.sessionId);
+    if (liveFailureEffectPlan.clearPendingIntent) {
+      pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+    }
+    if (liveFailureEffectPlan.clearTransportToken) {
+      writeSessionTransportToken(options.sessionId, null);
+    }
+    if (liveFailureEffectPlan.clearSupersededSockets) {
+      clearSupersededSockets(options.sessionId, true);
+    }
+    if (liveFailureEffectPlan.clearScheduleErrorState) {
+      setScheduleStateForSession(options.sessionId, (current) => buildSessionScheduleErrorState(current, options.message));
+    }
+    if (liveFailureEffectPlan.scheduleReconnect) {
+      scheduleReconnectRef.current?.(options.sessionId, options.message, options.retryable);
+    }
+  }, [
+    cleanupSocket,
+    clearSupersededSockets,
+    writeSessionTransportToken,
+  ]);
+  applyTransportOpenLiveFailureEffectsRef.current = applyTransportOpenLiveFailureEffects;
+
+  const handleReconnectBeforeConnectSend = useCallback((sessionId: string, sessionName: string) => {
+    updateSessionSync(sessionId, buildSessionConnectingLabelUpdates(sessionName));
+    setScheduleStateForSession(sessionId, buildSessionScheduleLoadingState(sessionName));
+  }, [updateSessionSync]);
+  handleReconnectBeforeConnectSendRef.current = handleReconnectBeforeConnectSend;
+
+  const handleReconnectHandshakeFailure = useCallback((options: {
+    sessionId: string;
+    message: string;
+    retryable: boolean;
+  }) => {
+    const currentReconnectRuntime = reconnectRuntimesRef.current.get(options.sessionId) || null;
+    if (currentReconnectRuntime) {
+      currentReconnectRuntime.connecting = false;
+    }
+    clearSupersededSockets(options.sessionId, true);
+    const reconnectHandshakeFailurePlan = buildReconnectHandshakeFailurePlan({
+      retryable: options.retryable,
+      currentAttempt: currentReconnectRuntime?.attempt || 0,
+    });
+    if (reconnectHandshakeFailurePlan.action === 'terminal-error') {
+      reconnectRuntimesRef.current.delete(options.sessionId);
+      updateSessionSync(options.sessionId, buildSessionErrorUpdates(options.message));
+      emitSessionStatus(options.sessionId, 'error', options.message);
+      return;
+    }
+    const nextReconnectRuntime = reconnectRuntimesRef.current.get(options.sessionId) || createSessionReconnectRuntime();
+    nextReconnectRuntime.attempt = reconnectHandshakeFailurePlan.nextAttempt;
+    nextReconnectRuntime.connecting = false;
+    reconnectRuntimesRef.current.set(options.sessionId, nextReconnectRuntime);
+    updateSessionSync(options.sessionId, buildSessionReconnectingFailureUpdates(
+      options.message,
+      nextReconnectRuntime.attempt,
+    ));
+    emitSessionStatus(options.sessionId, 'error', options.message);
+    startReconnectAttemptRef.current?.(options.sessionId);
+  }, [clearSupersededSockets, updateSessionSync]);
+  handleReconnectHandshakeFailureRef.current = handleReconnectHandshakeFailure;
+
+  const buildReconnectTransportOpenIntentOptions = useCallback((sessionId: string, host: Host): QueueSessionTransportOpenIntentOptions => ({
+    sessionId,
+    host,
+    debugScope: 'reconnect',
+    onBeforeConnectSend: ({ sessionName }) => {
+      handleReconnectBeforeConnectSendRef.current?.(sessionId, sessionName);
+    },
+    onHandshakeFailure: (message, retryable, stage) => {
+      if (stage === 'handshake') {
+        handleReconnectHandshakeFailureRef.current?.({
+          sessionId,
+          message,
+          retryable,
+        });
+        return;
+      }
+      applyTransportOpenLiveFailureEffectsRef.current?.({
+        sessionId,
+        debugScope: 'reconnect',
+        message,
+        retryable,
+      });
+    },
+    onHandshakeConnected: (ws, connectedSessionName) => {
+      reconnectRuntimesRef.current.delete(sessionId);
+      applyTransportOpenConnectedEffectsRef.current?.({
+        sessionId,
+        debugScope: 'reconnect',
+        sessionName: connectedSessionName,
+        ws,
+      });
+    },
+  }), []);
+
+  const buildConnectTransportOpenIntentOptions = useCallback((
+    sessionId: string,
+    host: Host,
+    activate: boolean,
+  ): QueueSessionTransportOpenIntentOptions => ({
+    sessionId,
+    host,
+    debugScope: 'connect',
+    activate,
+    onHandshakeFailure: (message, retryable, stage) => {
+      if (stage === 'live') {
+        applyTransportOpenLiveFailureEffectsRef.current?.({
+          sessionId,
+          debugScope: 'connect',
+          message,
+          retryable,
+        });
+        return;
+      }
+      scheduleReconnectRef.current?.(sessionId, message, retryable);
+    },
+    onHandshakeConnected: (ws, connectedSessionName) => {
+      applyTransportOpenConnectedEffectsRef.current?.({
+        sessionId,
+        debugScope: 'connect',
+        sessionName: connectedSessionName,
+        ws,
+      });
+    },
+  }), []);
+
+  const queueReconnectTransportOpenIntent = useCallback((sessionId: string, host: Host) => {
+    queueSessionTransportOpenIntentRef.current?.(
+      buildReconnectTransportOpenIntentOptions(sessionId, host),
+    );
+  }, [buildReconnectTransportOpenIntentOptions]);
+  queueReconnectTransportOpenIntentRef.current = queueReconnectTransportOpenIntent;
+
+  const queueConnectTransportOpenIntent = useCallback((sessionId: string, host: Host, activate: boolean) => {
+    queueSessionTransportOpenIntentRef.current?.(
+      buildConnectTransportOpenIntentOptions(sessionId, host, activate),
+    );
+  }, [buildConnectTransportOpenIntentOptions]);
+  queueConnectTransportOpenIntentRef.current = queueConnectTransportOpenIntent;
 
   const connectSession = useCallback((sessionId: string, host: Host, activate: boolean) => {
+    const primeState = buildSessionTransportPrimeState(host, 'connect');
     clearReconnectForSession(sessionId);
     cleanupSocket(sessionId, false);
     manualCloseRef.current.delete(sessionId);
-    writeSessionTransportHost(sessionId, {
-      ...host,
-      sessionName: getResolvedSessionName(host),
-    });
+    writeSessionTransportHost(sessionId, primeState.transportHost);
     writeSessionTransportToken(sessionId, null);
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id: sessionId,
-      updates: {
-        hostId: host.id,
-        connectionName: host.name,
-        bridgeHost: host.bridgeHost,
-        bridgePort: host.bridgePort,
-        sessionName: getResolvedSessionName(host),
-        authToken: host.authToken,
-        autoCommand: host.autoCommand,
-        state: 'connecting',
-        reconnectAttempt: 0,
-        lastError: undefined,
-      },
-    });
-    setScheduleStateForSession(sessionId, {
-      sessionName: getResolvedSessionName(host),
-      jobs: [],
-      loading: true,
-    });
+    updateSessionSync(sessionId, primeState.sessionUpdates);
+    setScheduleStateForSession(sessionId, buildSessionScheduleLoadingState(primeState.resolvedSessionName));
     if (activate) {
-      dispatch({ type: 'SET_ACTIVE_SESSION', id: sessionId });
+      setActiveSessionSync(sessionId);
     }
-
-    let handshakeSettled = false;
-    let liveFailureHandled = false;
-    const markHandshakeSettled = () => {
-      if (handshakeSettled) {
-        return false;
-      }
-      handshakeSettled = true;
-      return true;
-    };
-    const finalizeFailure = (message: string, retryable: boolean) => {
-      if (!handshakeSettled) {
-        clearSessionHandshakeTimeout(sessionId);
-        const baseline = finalizeSocketFailureBaseline({
-          sessionId,
-          message,
-          markCompleted: markHandshakeSettled,
-        });
-        if (!baseline.shouldContinue) {
-          return;
-        }
-        scheduleReconnect(sessionId, message, retryable);
-        return;
-      }
-      if (liveFailureHandled) {
-        return;
-      }
-      liveFailureHandled = true;
-      cleanupSocket(sessionId);
-      pendingSessionTransportOpenIntentsRef.current.delete(sessionId);
-      writeSessionTransportToken(sessionId, null);
-      setScheduleStateForSession(sessionId, (current) => ({
-        ...current,
-        loading: false,
-        error: message,
-      }));
-      scheduleReconnect(sessionId, message, retryable);
-    };
-
-    pendingSessionTransportOpenIntentsRef.current.set(sessionId, {
-      sessionId,
-      host,
-      debugScope: 'connect',
-      activate,
-      finalizeFailure,
-      onConnected: (ws) => {
-        if (!markHandshakeSettled()) return;
-        clearSessionHandshakeTimeout(sessionId);
-        const connectedSessionName = getResolvedSessionName(host);
-        runtimeDebug('session.ws.connected', {
-          sessionId,
-          activeSessionId: stateRef.current.activeSessionId,
-        });
-        handleSocketConnectedBaseline({
-          sessionId,
-          sessionName: connectedSessionName,
-          ws,
-        });
-      },
-    });
-    ensureControlTransportForSessionOpen(pendingSessionTransportOpenIntentsRef.current.get(sessionId)!);
+    queueConnectTransportOpenIntentRef.current?.(sessionId, host, activate);
   }, [
     cleanupSocket,
     clearReconnectForSession,
-    clearSessionHandshakeTimeout,
-    scheduleReconnect,
-    ensureControlTransportForSessionOpen,
+    setActiveSessionSync,
+    updateSessionSync,
     writeSessionTransportToken,
   ]);
 
   const createSession = useCallback((host: Host, options?: CreateSessionOptions): string => {
-    const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const sessionName = getResolvedSessionName(host);
+    const resolvedSessionName = getResolvedSessionName(host);
+    const existingSession = findReusableManagedSession({
+      sessions: stateRef.current.sessions,
+      host,
+      resolvedSessionName,
+      activeSessionId: stateRef.current.activeSessionId,
+    });
+    const shouldActivate = options?.activate !== false;
     const shouldConnect = options?.connect !== false;
+
+    if (existingSession) {
+      if (
+        host.id !== existingSession.hostId
+        || host.name !== existingSession.connectionName
+        || host.bridgeHost !== existingSession.bridgeHost
+        || host.bridgePort !== existingSession.bridgePort
+        || resolvedSessionName !== existingSession.sessionName
+        || host.authToken !== existingSession.authToken
+        || host.autoCommand !== existingSession.autoCommand
+        || (options?.customName?.trim() && (
+          options.customName.trim() !== (existingSession.customName || '')
+          || options.customName.trim() !== existingSession.title
+        ))
+      ) {
+        const title = options?.customName?.trim() || existingSession.title || resolvedSessionName;
+        updateSessionSync(existingSession.id, {
+          ...buildSessionConnectionFields(host, resolvedSessionName),
+          customName: options?.customName?.trim() || existingSession.customName,
+          title,
+        });
+      }
+
+      if (shouldActivate && stateRef.current.activeSessionId !== existingSession.id) {
+        setActiveSessionSync(existingSession.id);
+      }
+
+      if (shouldConnect) {
+        const currentTransport = readSessionTransportSocket(existingSession.id);
+        const shouldReconnectExisting = shouldOpenManagedSessionTransport({
+          readyState: currentTransport?.readyState ?? null,
+          hasPendingOpenIntent: pendingSessionTransportOpenIntentsRef.current.has(existingSession.id),
+          sessionState: existingSession.state,
+        });
+        if (shouldReconnectExisting) {
+          connectSession(existingSession.id, host, shouldActivate);
+        }
+      }
+
+      runtimeDebug('session.create.reuse-existing', {
+        requestedSessionId: options?.sessionId || null,
+        reusedSessionId: existingSession.id,
+        bridgeHost: host.bridgeHost,
+        bridgePort: host.bridgePort,
+        sessionName: resolvedSessionName,
+        activeSessionId: stateRef.current.activeSessionId,
+      });
+      return existingSession.id;
+    }
+
+    const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const session: Session = {
       id: sessionId,
       hostId: host.id,
       connectionName: host.name,
       bridgeHost: host.bridgeHost,
       bridgePort: host.bridgePort,
-      sessionName,
+      sessionName: resolvedSessionName,
       authToken: host.authToken,
       autoCommand: host.autoCommand,
-      title: options?.customName?.trim() || sessionName,
+      title: options?.customName?.trim() || resolvedSessionName,
       ws: null,
       state: shouldConnect ? 'connecting' : 'closed',
       hasUnread: false,
@@ -2573,12 +2040,12 @@ export function SessionProvider({
       createdAt: options?.createdAt || Date.now(),
     };
 
-    dispatch({ type: 'CREATE_SESSION', session, activate: options?.activate !== false });
+    createSessionSync(session, shouldActivate);
     if (shouldConnect) {
-      connectSession(sessionId, host, options?.activate !== false);
+      connectSession(sessionId, host, shouldActivate);
     }
     return sessionId;
-  }, [connectSession, resolveSessionCacheLines]);
+  }, [connectSession, createSessionSync, resolveSessionCacheLines, setActiveSessionSync, updateSessionSync]);
 
   const closeSession = useCallback((id: string) => {
     manualCloseRef.current.add(id);
@@ -2604,17 +2071,14 @@ export function SessionProvider({
     pendingInputTailRefreshRef.current.delete(id);
     pendingConnectTailRefreshRef.current.delete(id);
     pendingResumeTailRefreshRef.current.delete(id);
-    sessionRenderDemandRef.current.delete(id);
+    sessionVisibleRangeRef.current.delete(id);
     sessionWireStatsRef.current.delete(id);
     sessionWireStatsPreviousRef.current.delete(id);
-    setSessionDebugMetrics((current) => {
-      if (!(id in current)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
+    if (id in sessionDebugMetricsRef.current) {
+      const nextMetrics = { ...sessionDebugMetricsRef.current };
+      delete nextMetrics[id];
+      sessionDebugMetricsRef.current = nextMetrics;
+    }
     setScheduleStates((current) => {
       if (!(id in current)) {
         return current;
@@ -2623,14 +2087,12 @@ export function SessionProvider({
       delete next[id];
       return next;
     });
-    dispatch({ type: 'DELETE_SESSION', id });
-  }, [cleanupSocket, clearReconnectForSession, clearSessionTransportRuntime, readSessionTargetRuntime, readSessionTransportRuntime, readSessionTransportSocket, sendSocketPayload, writeSessionTransportToken]);
-
-  const switchSession = useCallback((id: string) => dispatch({ type: 'SET_ACTIVE_SESSION', id }), []);
+    deleteSessionSync(id);
+  }, [cleanupSocket, clearReconnectForSession, clearSessionTransportRuntime, deleteSessionSync, readSessionTargetRuntime, readSessionTransportRuntime, readSessionTransportSocket, sendSocketPayload, writeSessionTransportToken]);
 
   const moveSession = useCallback((id: string, toIndex: number) => {
-    dispatch({ type: 'MOVE_SESSION', id, toIndex });
-  }, []);
+    moveSessionSync(id, toIndex);
+  }, [moveSessionSync]);
 
   const renameSession = useCallback((id: string, name: string) => {
     const trimmed = name.trim();
@@ -2639,15 +2101,11 @@ export function SessionProvider({
       return;
     }
 
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id,
-      updates: {
-        customName: trimmed || undefined,
-        title: trimmed || current.sessionName,
-      },
+    updateSessionSync(id, {
+      customName: trimmed || undefined,
+      title: trimmed || current.sessionName,
     });
-  }, []);
+  }, [updateSessionSync]);
 
   const reconnectSession = useCallback((id: string) => {
     clearReconnectForSession(id);
@@ -2683,36 +2141,18 @@ export function SessionProvider({
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
 
+    const primeState = buildSessionTransportPrimeState(host, 'reconnect');
     cleanupSocket(id, false);
     manualCloseRef.current.delete(id);
-    writeSessionTransportHost(id, {
-      ...host,
-      sessionName: getResolvedSessionName(host),
-    });
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id,
-      updates: {
-        hostId: host.id,
-        connectionName: host.name,
-        bridgeHost: host.bridgeHost,
-        bridgePort: host.bridgePort,
-        sessionName: getResolvedSessionName(host),
-        authToken: host.authToken,
-        autoCommand: host.autoCommand,
-        state: 'reconnecting',
-        reconnectAttempt: 0,
-        lastError: undefined,
-        ws: null,
-      },
-    });
+    writeSessionTransportHost(id, primeState.transportHost);
+    updateSessionSync(id, primeState.sessionUpdates);
 
     if (stateRef.current.activeSessionId === id) {
-      dispatch({ type: 'SET_ACTIVE_SESSION', id });
+      setActiveSessionSync(id);
     }
 
     scheduleReconnect(id, 'manual reconnect', true, { immediate: true, resetAttempt: true, force: true });
-  }, [cleanupSocket, clearReconnectForSession, readSessionTargetKey, readSessionTargetRuntime, readSessionTransportHost, scheduleReconnect, writeSessionTransportHost]);
+  }, [cleanupSocket, clearReconnectForSession, readSessionTargetKey, readSessionTargetRuntime, readSessionTransportHost, scheduleReconnect, setActiveSessionSync, updateSessionSync, writeSessionTransportHost]);
 
   const reconnectAllSessions = useCallback(() => {
     runtimeDebug('session.reconnect.all', {
@@ -2728,7 +2168,7 @@ export function SessionProvider({
     }
   }, [reconnectSession]);
 
-  const probeOrReconnectStaleSessionTransport = useCallback((sessionId: string, ws: BridgeTransportSocket, reason: 'active-reentry' | 'active-tick') => {
+  const probeOrReconnectStaleSessionTransport = useCallback((sessionId: string, ws: BridgeTransportSocket, reason: 'active-reentry' | 'active-tick' | 'input') => {
     const lastActivityAt = lastServerActivityAtRef.current.get(sessionId) || 0;
     const lastProbeAt = staleTransportProbeAtRef.current.get(sessionId) || 0;
     if (lastProbeAt <= 0 || lastProbeAt <= lastActivityAt) {
@@ -2765,6 +2205,109 @@ export function SessionProvider({
     reconnectSession(sessionId);
     return 'reconnecting' as const;
   }, [reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
+
+  const ensureActiveSessionFresh = useCallback((options: {
+    sessionId: string;
+    source: 'active-resume' | 'active-reentry' | 'active-tick';
+    forceHead?: boolean;
+    markResumeTail?: boolean;
+    allowReconnectIfUnavailable?: boolean;
+  }) => {
+    const session = stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
+    const transportRuntime = readSessionTransportRuntime(options.sessionId);
+    const targetRuntime = readSessionTargetRuntime(options.sessionId);
+    const ws = readSessionTransportSocket(options.sessionId) || null;
+    const isActive = stateRef.current.activeSessionId === options.sessionId;
+    const sessionState = session?.state ?? null;
+    const reconnectInFlight = isReconnectInFlight(options.sessionId);
+    const pendingTransportOpen = hasPendingSessionTransportOpen(options.sessionId);
+
+    const transportStale = session ? isSessionTransportActivityStale(options.sessionId) : false;
+    const refreshPlan = buildActiveSessionRefreshPlan({
+      hasSession: Boolean(session),
+      isActive,
+      sessionState,
+      wsReadyState: ws?.readyState ?? null,
+      reconnectInFlight,
+      pendingTransportOpen,
+      allowReconnectIfUnavailable: options.allowReconnectIfUnavailable,
+      transportStale,
+      source: options.source,
+    });
+
+    if (refreshPlan.action === 'skip') {
+      runtimeDebug(`session.transport.${options.source}.skip`, {
+        sessionId: options.sessionId,
+        activeSessionId: stateRef.current.activeSessionId,
+        hasSession: Boolean(session),
+        isActive,
+        sessionState,
+        wsReadyState: ws?.readyState ?? null,
+        targetKey: transportRuntime?.targetKey || null,
+        targetSessionCount: targetRuntime?.sessionIds.length || 0,
+        reason: refreshPlan.reason,
+      });
+      return false;
+    }
+
+    runtimeDebug(`session.transport.${options.source}`, {
+      sessionId: options.sessionId,
+      activeSessionId: stateRef.current.activeSessionId,
+      localRevision: session?.buffer.revision ?? null,
+      localStartIndex: session?.buffer.startIndex ?? null,
+      localEndIndex: session?.buffer.endIndex ?? null,
+      transportStale,
+      targetKey: transportRuntime?.targetKey || null,
+      targetSessionCount: targetRuntime?.sessionIds.length || 0,
+      plan: refreshPlan.action,
+    });
+
+    if (refreshPlan.action === 'probe-stale-transport') {
+      if (ws) {
+        probeOrReconnectStaleSessionTransport(options.sessionId, ws, refreshPlan.probeReason);
+        return true;
+      }
+      return false;
+    }
+
+    if (refreshPlan.action === 'request-head') {
+      if (refreshPlan.resetPullBookkeeping) {
+        resetSessionTransportPullBookkeeping(options.sessionId, options.source);
+      }
+      if (options.markResumeTail) {
+        pendingResumeTailRefreshRef.current.add(options.sessionId);
+      }
+      requestSessionBufferHead(options.sessionId, ws, { force: options.forceHead });
+      return true;
+    }
+
+    if (refreshPlan.action === 'reconnect') {
+      reconnectSession(options.sessionId);
+      return true;
+    }
+    return false;
+  }, [
+    hasPendingSessionTransportOpen,
+    isReconnectInFlight,
+    isSessionTransportActivityStale,
+    probeOrReconnectStaleSessionTransport,
+    readSessionTargetRuntime,
+    readSessionTransportRuntime,
+    reconnectSession,
+    requestSessionBufferHead,
+    resetSessionTransportPullBookkeeping,
+  ]);
+
+  const switchSession = useCallback((id: string) => {
+    lastActivatedSessionIdRef.current = id;
+    setActiveSessionSync(id);
+    ensureActiveSessionFresh({
+      sessionId: id,
+      source: 'active-reentry',
+      forceHead: true,
+      allowReconnectIfUnavailable: true,
+    });
+  }, [ensureActiveSessionFresh, setActiveSessionSync]);
 
   const sendMessage = useCallback((sessionId: string, msg: ClientMessage) => {
     const ws = readSessionTransportSocket(sessionId);
@@ -2869,16 +2412,7 @@ export function SessionProvider({
         ...session,
         buffer: nextBuffer,
       };
-      stateRef.current = reduceSessionAction(stateRef.current, {
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: { buffer: nextBuffer },
-      });
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: { buffer: nextBuffer },
-      });
+      updateSessionSync(sessionId, { buffer: nextBuffer });
       session = nextSession;
     }
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
@@ -2886,13 +2420,9 @@ export function SessionProvider({
       session.daemonHeadRevision !== latestRevision
       || session.daemonHeadEndIndex !== latestEndIndex
     ) {
-      dispatch({
-        type: 'UPDATE_SESSION',
-        id: sessionId,
-        updates: {
-          daemonHeadRevision: latestRevision,
-          daemonHeadEndIndex: latestEndIndex,
-        },
+      updateSessionSync(sessionId, {
+        daemonHeadRevision: latestRevision,
+        daemonHeadEndIndex: latestEndIndex,
       });
     }
     if (!isSessionTransportActive(sessionId)) {
@@ -2932,7 +2462,7 @@ export function SessionProvider({
         localRevision,
         localEndIndex,
         localWindowInvalid,
-      renderDemand: sessionRenderDemandRef.current.get(sessionId) || null,
+      visibleRange: sessionVisibleRangeRef.current.get(sessionId) || null,
     });
 
     const demandSession: Session = {
@@ -2954,8 +2484,8 @@ export function SessionProvider({
         localBufferTailEndIndex: session.buffer.bufferTailEndIndex,
       });
     }
-    const renderDemand = sessionRenderDemandRef.current.get(sessionId) || buildFollowRenderDemandState(session);
-    const needsTailRefresh = revisionResetDetected || localWindowInvalid || shouldPullFollowBuffer(demandSession, renderDemand);
+    const visibleRange = sessionVisibleRangeRef.current.get(sessionId) || buildDefaultSessionVisibleRange(session);
+    const needsTailRefresh = revisionResetDetected || localWindowInvalid || shouldPullFollowBuffer(demandSession, visibleRange);
     if (needsTailRefresh) {
       requestSessionBufferSync(sessionId, {
         reason:
@@ -2970,17 +2500,13 @@ export function SessionProvider({
       return;
     }
 
-    if (renderDemand.mode !== 'reading') {
-      return;
-    }
-
-    const needsReadingRepair = shouldPullReadingBuffer(demandSession, renderDemand, liveHead);
+    const needsReadingRepair = shouldPullVisibleRangeBuffer(demandSession, visibleRange, liveHead);
     if (!needsReadingRepair) {
       return;
     }
 
     requestSessionBufferSync(sessionId, {
-      reason: 'buffer-head-reading-repair',
+      reason: 'buffer-head-visible-range-repair',
       purpose: 'reading-repair',
       sessionOverride: demandSession,
     });
@@ -3103,7 +2629,7 @@ export function SessionProvider({
         });
         break;
       case 'title':
-        dispatch({ type: 'SET_SESSION_TITLE', id: options.sessionId, title: msg.payload });
+        setSessionTitleSync(options.sessionId, msg.payload);
         break;
       case 'image-pasted':
         break;
@@ -3214,36 +2740,28 @@ export function SessionProvider({
     ws: BridgeTransportSocket;
   }) => {
     const currentSession = stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
-    const hadLocalWindowBeforeConnected =
-      Boolean(currentSession)
-      && Math.max(0, Math.floor(currentSession!.buffer.endIndex || 0))
-        > Math.max(0, Math.floor(currentSession!.buffer.startIndex || 0))
-      && Math.max(0, Math.floor(currentSession!.buffer.revision || 0)) > 0;
+    const hadLocalWindowBeforeConnected = hasSessionLocalWindow(currentSession);
     applyTransportDiagnostics(options.sessionId, options.ws);
-    dispatch({
-      type: 'UPDATE_SESSION',
-      id: options.sessionId,
-      updates: buildConnectedSessionUpdates(options.sessionId),
-    });
-    setScheduleStateForSession(options.sessionId, (current) => ({
-      ...current,
-      sessionName: options.sessionName,
-      loading: true,
-      error: undefined,
-    }));
+    updateSessionSync(options.sessionId, buildSessionConnectedUpdates());
+    setScheduleStateForSession(options.sessionId, (current) => (
+      buildSessionScheduleListLoadingState(current, options.sessionName)
+    ));
     sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
       type: 'schedule-list',
       payload: { sessionName: options.sessionName },
     } satisfies ClientMessage));
-    const shouldLiveRefresh = isSessionTransportActive(options.sessionId);
-    if (shouldLiveRefresh) {
-      if (hadLocalWindowBeforeConnected) {
-        pendingConnectTailRefreshRef.current.add(options.sessionId);
-      }
+    const connectedHeadRefreshPlan = buildConnectedHeadRefreshPlan({
+      shouldLiveRefresh: isSessionTransportActive(options.sessionId),
+      hadLocalWindowBeforeConnected,
+    });
+    if (connectedHeadRefreshPlan.shouldMarkPendingConnectTailRefresh) {
+      pendingConnectTailRefreshRef.current.add(options.sessionId);
+    }
+    if (connectedHeadRefreshPlan.shouldRequestHead) {
       requestSessionBufferHead(options.sessionId, options.ws, { force: true });
     }
-    dispatch({ type: 'INCREMENT_CONNECTED' });
-  }, [applyTransportDiagnostics, isSessionTransportActive, requestSessionBufferHead, setScheduleStateForSession]);
+    incrementConnectedSync();
+  }, [applyTransportDiagnostics, incrementConnectedSync, isSessionTransportActive, requestSessionBufferHead, setScheduleStateForSession]);
   handleSocketConnectedBaselineRef.current = handleSocketConnectedBaseline;
 
   const finalizeSocketFailureBaseline = useCallback((options: {
@@ -3276,71 +2794,32 @@ export function SessionProvider({
   finalizeSocketFailureBaselineRef.current = finalizeSocketFailureBaseline;
 
   const resumeActiveSessionTransport = useCallback((sessionId: string) => {
-    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
-    const transportRuntime = readSessionTransportRuntime(sessionId);
-    const targetRuntime = readSessionTargetRuntime(sessionId);
-    const ws = readSessionTransportSocket(sessionId) || null;
-    const isActive = stateRef.current.activeSessionId === sessionId;
-    const sessionState = session?.state ?? null;
-    const canResumeByTransportTruth = (
-      Boolean(session)
-      && sessionState !== 'closed'
-      && sessionState !== 'error'
-      && Boolean(ws)
-      && ws!.readyState === WebSocket.OPEN
-      && isActive
-    );
-    if (
-      !canResumeByTransportTruth
-    ) {
-      runtimeDebug('session.transport.resume-active.skip', {
-        sessionId,
-        activeSessionId: stateRef.current.activeSessionId,
-        hasSession: Boolean(session),
-        sessionState,
-        wsReadyState: ws?.readyState ?? null,
-        isActive,
-        targetKey: transportRuntime?.targetKey || null,
-        targetSessionCount: targetRuntime?.sessionIds.length || 0,
-      });
-      return false;
-    }
-    const activeSession = session as Session;
-    const activeWs = ws as BridgeTransportSocket;
-
-    runtimeDebug('session.transport.resume-active', {
+    return ensureActiveSessionFresh({
       sessionId,
-      activeSessionId: stateRef.current.activeSessionId,
-      localRevision: activeSession.buffer.revision,
-      localStartIndex: activeSession.buffer.startIndex,
-      localEndIndex: activeSession.buffer.endIndex,
-      transportStale: isSessionTransportActivityStale(sessionId),
-      targetKey: transportRuntime?.targetKey || null,
-      targetSessionCount: targetRuntime?.sessionIds.length || 0,
+      source: 'active-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
     });
-    resetSessionTransportPullBookkeeping(sessionId, 'active-resume');
-    pendingResumeTailRefreshRef.current.add(sessionId);
-    requestSessionBufferHead(sessionId, activeWs, { force: true });
-    return true;
-  }, [isSessionTransportActivityStale, readSessionTargetRuntime, readSessionTransportRuntime, requestSessionBufferHead, resetSessionTransportPullBookkeeping]);
+  }, [ensureActiveSessionFresh]);
 
-  const updateSessionViewport = useCallback((sessionId: string, renderDemand: SessionRenderDemandState) => {
-    const normalized = normalizeSessionRenderDemandState(renderDemand);
-    const previous = sessionRenderDemandRef.current.get(sessionId);
-    if (renderDemandStatesEqual(previous, normalized)) {
+  const updateSessionViewport = useCallback((sessionId: string, visibleRange: TerminalVisibleRange) => {
+    const normalized = normalizeSessionVisibleRangeState(visibleRange);
+    const previous = sessionVisibleRangeRef.current.get(sessionId);
+    if (visibleRangeStatesEqual(previous, normalized)) {
       return;
     }
-    sessionRenderDemandRef.current.set(sessionId, normalized);
-    if (!isSessionTransportActive(sessionId) || normalized.mode !== 'reading') {
+    sessionVisibleRangeRef.current.set(sessionId, normalized);
+    if (!isSessionTransportActive(sessionId)) {
       return;
     }
     const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
     const liveHead = sessionBufferHeadsRef.current.get(sessionId) || null;
-    if (!session || !shouldPullReadingBuffer(session, normalized, liveHead)) {
+    if (!session || !shouldPullVisibleRangeBuffer(session, normalized, liveHead)) {
       return;
     }
     requestSessionBufferSync(sessionId, {
-      reason: 'viewport-reading-demand',
+      reason: 'viewport-visible-range-demand',
       purpose: 'reading-repair',
       sessionOverride: session,
     });
@@ -3355,34 +2834,13 @@ export function SessionProvider({
       return;
     }
     lastActivatedSessionIdRef.current = state.activeSessionId;
-    const activeSessionId = state.activeSessionId;
-    const activeSession = state.sessions.find((item) => item.id === activeSessionId) || null;
-    const ws = readSessionTransportSocket(activeSessionId) || null;
-    if (
-      activeSession
-      && ws
-      && ws.readyState === WebSocket.OPEN
-      && isSessionTransportActivityStale(activeSessionId)
-      && !isReconnectInFlight(activeSessionId)
-    ) {
-      probeOrReconnectStaleSessionTransport(activeSessionId, ws, 'active-reentry');
-      return;
-    }
-    resetSessionTransportPullBookkeeping(activeSessionId, 'active-reentry');
-    if (requestSessionBufferHead(activeSessionId, ws, { force: true })) {
-      return;
-    }
-    if (hasPendingSessionTransportOpen(activeSessionId)) {
-      return;
-    }
-    if (shouldReconnectActivatedSession({
-      hasSession: Boolean(activeSession),
-      wsReadyState: ws?.readyState ?? null,
-      reconnectInFlight: isReconnectInFlight(activeSessionId),
-    })) {
-      reconnectSession(activeSessionId);
-    }
-  }, [hasPendingSessionTransportOpen, isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, reconnectSession, requestSessionBufferHead, resetSessionTransportPullBookkeeping, state.activeSessionId, state.sessions]);
+    ensureActiveSessionFresh({
+      sessionId: state.activeSessionId,
+      source: 'active-reentry',
+      forceHead: true,
+      allowReconnectIfUnavailable: true,
+    });
+  }, [ensureActiveSessionFresh, state.activeSessionId, state.sessions]);
 
   const flushPendingInputQueue = useCallback((sessionId: string) => {
     const ws = readSessionTransportSocket(sessionId);
@@ -3427,7 +2885,7 @@ export function SessionProvider({
         if (cancelled) {
           return;
         }
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        if (!foregroundActiveRef.current) {
           scheduleNext();
           return;
         }
@@ -3436,27 +2894,11 @@ export function SessionProvider({
           scheduleNext();
           return;
         }
-        const session = stateRef.current.sessions.find((item) => item.id === activeSessionId) || null;
-        const ws = readSessionTransportSocket(activeSessionId) || null;
-        if (
-          !session
-          || !ws
-          || ws.readyState !== WebSocket.OPEN
-        ) {
-          scheduleNext();
-          return;
-        }
-
-        if (
-          isSessionTransportActivityStale(activeSessionId)
-          && !isReconnectInFlight(activeSessionId)
-        ) {
-          probeOrReconnectStaleSessionTransport(activeSessionId, ws, 'active-tick');
-          scheduleNext();
-          return;
-        }
-
-        requestSessionBufferHead(activeSessionId, ws);
+        ensureActiveSessionFresh({
+          sessionId: activeSessionId,
+          source: 'active-tick',
+          allowReconnectIfUnavailable: false,
+        });
         scheduleNext();
       }, ACTIVE_HEAD_REFRESH_TICK_MS);
     };
@@ -3469,7 +2911,7 @@ export function SessionProvider({
         window.clearTimeout(timer);
       }
     };
-  }, [isReconnectInFlight, isSessionTransportActivityStale, probeOrReconnectStaleSessionTransport, requestSessionBufferHead]);
+  }, [ensureActiveSessionFresh]);
 
   const sendInput = useCallback((sessionId: string, data: string) => {
     const targetSessionId = sessionId.trim();
@@ -3493,6 +2935,8 @@ export function SessionProvider({
 
     const ws = readSessionTransportSocket(targetSessionId);
     const transportStale = isSessionTransportActivityStale(targetSessionId);
+    const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
+    const reconnectInFlight = isReconnectInFlight(targetSessionId);
     if (ws && ws.readyState === WebSocket.OPEN) {
       runtimeDebug('session.input.send', {
         sessionId: targetSessionId,
@@ -3503,6 +2947,9 @@ export function SessionProvider({
       markPendingInputTailRefresh(targetSessionId, session.buffer.revision);
       sendSocketPayload(targetSessionId, ws, JSON.stringify({ type: 'input', payload: data }));
       requestSessionBufferHead(targetSessionId, ws, { force: true });
+      if (transportStale && isActiveTarget && !reconnectInFlight) {
+        probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
+      }
       return;
     }
 
@@ -3511,13 +2958,14 @@ export function SessionProvider({
       why: transportStale ? 'stale-open-transport' : 'transport-unavailable',
       size: data.length,
       preview: data.slice(0, 32),
+      isActiveTarget,
+      reconnectInFlight,
+      wsReadyState: ws?.readyState ?? null,
     });
     enqueuePendingInput(targetSessionId, data);
     if (hasPendingSessionTransportOpen(targetSessionId)) {
       return;
     }
-    const isActiveTarget = stateRef.current.activeSessionId === targetSessionId;
-    const reconnectInFlight = isReconnectInFlight(targetSessionId);
     const shouldForceReconnect = transportStale
       ? isActiveTarget && !reconnectInFlight
       : shouldReconnectQueuedActiveInput({
@@ -3528,7 +2976,7 @@ export function SessionProvider({
     if (shouldForceReconnect) {
       reconnectSession(targetSessionId);
     }
-  }, [enqueuePendingInput, hasPendingSessionTransportOpen, isReconnectInFlight, isSessionTransportActivityStale, markPendingInputTailRefresh, reconnectSession, requestSessionBufferHead]);
+  }, [enqueuePendingInput, hasPendingSessionTransportOpen, isReconnectInFlight, isSessionTransportActivityStale, markPendingInputTailRefresh, probeOrReconnectStaleSessionTransport, reconnectSession, requestSessionBufferHead]);
 
   const ensureSessionReadyForPaste = useCallback(async (sessionId: string, timeoutMs = IMAGE_PASTE_READY_TIMEOUT_MS) => {
     const readReadyState = () => {
@@ -3688,6 +3136,38 @@ export function SessionProvider({
       || buildEmptyScheduleState(stateRef.current.sessions.find((session) => session.id === sessionId)?.sessionName || '');
   }, []);
 
+  const getSessionDebugMetrics = useCallback((sessionId: string) => {
+    const session = stateRef.current.sessions.find((item) => item.id === sessionId) || null;
+    const metrics = sessionDebugMetricsRef.current[sessionId] || null;
+    const fallbackStatus: SessionDebugOverlayMetrics['status'] =
+      session?.state === 'error' ? 'error'
+      : session?.state === 'closed' ? 'closed'
+      : session?.state === 'reconnecting' ? 'reconnecting'
+      : session?.state === 'connecting' ? 'connecting'
+      : 'waiting';
+    if (!metrics) {
+      return session
+        ? {
+            uplinkBps: 0,
+            downlinkBps: 0,
+            renderHz: 0,
+            pullHz: 0,
+            bufferPullActive: false,
+            status: fallbackStatus,
+            active: stateRef.current.activeSessionId === sessionId,
+            updatedAt: Date.now(),
+          }
+        : null;
+    }
+    if (metrics.active === (stateRef.current.activeSessionId === sessionId)) {
+      return metrics;
+    }
+    return {
+      ...metrics,
+      active: stateRef.current.activeSessionId === sessionId,
+    };
+  }, []);
+
   useEffect(() => () => {
     for (const pending of pendingRemoteScreenshotRequestsRef.current.values()) {
       clearRemoteScreenshotTimeout(pending);
@@ -3715,7 +3195,7 @@ export function SessionProvider({
   const value: SessionContextValue = {
     state,
     scheduleStates,
-    sessionDebugMetrics,
+    getSessionDebugMetrics,
     createSession,
     closeSession,
     switchSession,

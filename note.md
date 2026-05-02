@@ -421,3 +421,8 @@
 - 假设：`OPEN_TABS` 被 runtime `sessions[]` 自动回写污染，导致“运行中仍存在的 session”被重新持久化成“下次必须重开”。
 - 验证：`android/src/App.tsx` restore effect 中，`restoredTabsHandledRef.current` 之后会无条件执行 `persistOpenTabsState(sessions.map(buildPersistedOpenTabFromSession(...)), activeSessionId)`；这违反了 open-tab 与 runtime-session 解耦。
 - 决策：本轮改为 App 级显式 `openTabs` 真源；只在明确 tab intent（open/switch/move/close/saved-tab restore）时改写并持久化；禁止 `sessions[] -> OPEN_TABS` 自动回填。
+## 2026-05-02 foreground/ansi audit
+- 现象1：A=1 但恢复后刷新率极低，像仍处于后台/hidden cadence。已定位 SessionContext active tick 直接读 document.visibilityState，与 App.tsx 的 Capacitor appState/resume 双真源并存。
+- 现象2：红绿背景变灰。TerminalView 本地 ANSI 0-15/256 映射看起来正确；WasmBridge 实测分号 truecolor / ANSI 41/42 能正确得到 bg=196/46/1/2。
+- 新发现：WasmBridge 对冒号格式 truecolor SGR（48:2::r:g:b / 38:2::...）完全不生效，返回 DEFAULT_COLOR=256；若 tmux capture 输出该格式，客户端会落回 theme 默认/透明，肉眼像灰。需查 tmux capture 实际输出格式。
+- 结论倾向：前后台问题先收口客户端唯一前后台真源；颜色问题高概率是 parser 不支持 colon-style SGR 或 capture 链输出格式问题，而非 TerminalView palette。

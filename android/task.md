@@ -167,6 +167,7 @@
 - [ ] mobile-15.29 renderer cursor echo closeout：Android client 不得自行改 cursor 样式；renderer 只能回显 payload。补 renderer theme / follow 场景回归，防止再引入客户端 cursor 第二语义
 - [ ] mobile-15.30 renderer measured-cell-width closeout：renderer 列宽改成客户端实测像素真相，删除 `1ch / 2ch` 作为终端列宽语义；补 mixed ASCII/CJK 对齐回归
 - [ ] mobile-15.31 active transport liveness closeout：session 活性判定不能只看 `connected/open`；active re-entry / resume 若无新的 head/range/pong 进展，必须判旧 transport 失活并重建，补“切 tab 挂住、重进秒好”回归
+  - 新冻结：foreground hidden gate 只能来自 App lifecycle orchestrator；`SessionContext` active tick 不得再直接读取 `document.visibilityState`
 - [ ] mobile-15.32 transport/session lifecycle closeout：client session 与 ws/rtc transport 解耦；inactive tab 只停取数，不关闭 session/transport；daemon 侧 reconnect 复用同一 `clientSessionId` logical session，并补 shutdown 统一回收回归
   - 冻结真源：`docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`
   - 第一轮关闭顺序：
@@ -326,3 +327,102 @@
 - [x] mobile-15.32c daemon restore closeout：先恢复本地 daemon 可运行，再继续拆分
   - 2026-05-01 已验证：`daemon:status` running；`/health` ok；`initial-sync/probe-events.json` 看到 `session-open -> session-ticket -> connect -> connected -> buffer-head -> buffer-sync`
 - [ ] 下一步：继续分拆前，先把 protocol 真源更新到 docs/decision，并检查所有直接从 `../lib/types` 读协议的调用点是否还能进一步下沉到 shared/helper
+## Epic-010 protocol freeze + client file split
+
+- [x] T1 冻结 terminal shared protocol 真源（shared protocol/types + Android re-export 口径）
+- [x] T2 文档补 protocol freeze 门禁（decision / dev-workflow / CACHE）
+- [ ] T3 拆分 `SessionContext.tsx` 的协议/刷新 helper，保持 wire 语义不变
+- [ ] T4 拆分 `TerminalQuickBar.tsx` UI shell helper / panel ownership
+- [ ] T5 巨型文件拆分后补 type-check + 关键 regression
+
+## Epic-011 terminal truth closeout before code changes
+
+- [x] T1 对齐 `AGENTS / architecture / dev-workflow / terminal decisions / local skill`
+- [x] T2 冻结最新 terminal 四层模型：
+  - daemon 只管 `tmux -> mirror truth`
+  - transport 长期复用，不因 foreground/background/tab switch fresh recreate
+  - renderer 是 visible range 唯一真相
+  - buffer manager 只管 local sparse buffer / gap repair，不持有 renderer state
+  - gap 先空白，占位后按行/区间 patch 重刷
+- [ ] T3 按新真源重新审计 `SessionContext.tsx / session-sync-helpers.ts / App.tsx`
+- [x] T4 列出保留 / 删除 / 下沉清单
+- [x] T5 先补红测，再开始代码收口
+- [x] T6 第二刀：renderer -> worker visible-range declaration 收口，删除 worker 内 follow/reading mode 语义
+- [ ] T7 第三刀：transport lifecycle 收口，foreground/background/tab switch 只 resume/probe，不 fresh recreate
+  - 2026-05-02 止血已完成：修复 `SessionContext.tsx` 中 `startReconnectAttempt <-> scheduleReconnect` TDZ，恢复 `115 tests passed`
+  - 下一步：先抽纯 transport lifecycle helper / orchestrator，再继续唯一实现收口
+  - 2026-05-02 第二轮 helper 收口已完成：managed-session 复用判定 + transport open intent 握手状态机 已下沉到 `session-sync-helpers.ts`
+  - 2026-05-02 第三轮 helper 收口已完成：session connection metadata / connecting-reconnecting updates / schedule loading state 已下沉到 `session-sync-helpers.ts`
+  - 2026-05-02 第四轮 helper 收口已完成：失败分流里的状态更新真源 已下沉到 `session-sync-helpers.ts`
+  - 2026-05-02 第五轮 helper 收口已完成：connected baseline 的状态/判定真源 已下沉到 `session-sync-helpers.ts`
+  - 2026-05-02 第六轮 helper 收口已完成：connect/reconnect callback 配置计划 已下沉到 `session-sync-helpers.ts`
+  - 2026-05-02 第七轮收口已完成：callback 本地执行器壳 已在 `SessionContext.tsx` 成形，并用 ref 打断新 TDZ
+  - 2026-05-02 第八轮收口已完成：open-intent 参数 builder 已成形，queue 层只剩装配与派发
+  - 2026-05-02 第九轮收口已完成：`connectSession / reconnectSession` 的 pre-open 重复预处理已下沉为 `buildSessionTransportPrimeState(...)`
+  - 2026-05-02 当前阶段冻结：不再继续强合 `connectSession/startReconnectAttempt` 为单一 hook orchestrator；若继续收口，必须先抽 hook 外 transport lifecycle runtime orchestrator
+
+### Epic-011 审计结果（2026-05-02）
+
+#### A. 保留
+
+- `App.tsx`
+  - foreground resume 入口 `performForegroundRefresh(...)`
+  - active tab 恢复触发点
+- `SessionContext.tsx`
+  - `requestSessionBufferHead(...)`
+  - `applyIncomingBufferSync(...)`
+  - active tick 定时器
+  - input queue / sendInput 主链
+- `session-sync-helpers.ts`
+  - `normalizeIncomingBufferPayload(...)`
+  - pull bookkeeping / head availability / impossible local window 等纯 helper
+
+#### B. 删除 / 改造
+
+- `SessionContext.tsx`
+  - `sessionRenderDemandRef`
+  - `buildFollowRenderDemandState(...)`
+  - `shouldPullFollowBuffer(...)`
+  - `shouldPullReadingBuffer(...)`
+  - `shouldCatchUpFollowTailAfterBufferApply(...)`
+  - `updateSessionViewport(...)` 当前“renderer state -> worker state”混合口径
+- `session-sync-helpers.ts`
+  - 所有以 `renderDemand.mode / viewportEndIndex / viewportRows` 为中心的 buffer planner 语义
+  - `buildReadingBufferSyncRequestPayload(...)`
+  - `buildTailRefreshBufferSyncRequestPayload(...)` 当前仍把 renderer demand 混入 worker 主规划
+  - `TerminalViewportState` 当前命名仍是 renderer state + worker demand 混合，需要改成 visible-range declaration 真相
+
+#### C. transport 侧必须收口的点
+
+- `SessionContext.tsx`
+  - `cleanupSocket(...) -> open new ws -> connect`
+  - `connectSession(...)`
+  - `reconnectSession(...)`
+  - `openSocketConnectHandshake(...)`
+  - `ensureActiveSessionFresh(...)`
+  - `probeOrReconnectStaleSessionTransport(...)`
+- 当前问题：
+  - foreground/background/tab switch 仍可能进入 fresh reconnect 语义
+  - stale probe 后仍容易走 `cleanup old socket -> fresh connect`
+  - session transport 还不是“稳定对象，只在真正失活/close 时重建”
+
+#### D. 固定改造顺序
+
+1. 先把 renderer -> worker 接口从 `renderDemand` 改成 **visible range declaration**
+2. 再把 worker 内 `follow/reading/renderBottomIndex` 语义全部删掉
+3. 再收 transport：foreground/background/tab switch 只 resume/probe，不 fresh recreate
+4. 最后才审 tab/session 去重与持久化
+
+#### E. tab/session 去重与持久化（2026-05-02 新进度）
+
+- 第一轮已完成：
+  - `App.tsx` 的 open-tab restore/persist/reuse helper 已抽到 `android/src/lib/open-tab-persistence.ts`
+  - `App.tsx` 本地 live-session 复用判定已删除，改为复用 `findReusableManagedSession(...)` 语义
+- 第二轮已完成：
+  - switch/move/close/programmatic-activate 改成 intent-time 持久化，不再依赖 rerender + effect 补写
+  - `handleSendSessionDraft(...)` 已改为走唯一 `handleSwitchSession(...)` 入口
+- 当前剩余：
+  - 2026-05-02 审计结论：`ACTIVE_SESSION` 不继续下沉到 `SessionContext`，冻结留在 `App` orchestration
+  - 后续只允许继续补 source gate，不再改 owner 边界
+  - 2026-05-02 新增 source gate 已完成：saved-tab batch restore 不得被旧 `ACTIVE_PAGE.focusSessionId` 污染 active truth
+  - 2026-05-02 对应修复已完成：`openDraftAsSession` 支持 `sessionId` 透传；`handleLoadSavedTabList` 走显式 batch persist + direct switch

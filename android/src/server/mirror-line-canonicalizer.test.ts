@@ -72,4 +72,29 @@ describe('canonicalizeCapturedMirrorLines', () => {
       expect.objectContaining({ char: 'N'.codePointAt(0), fg: 256, bg: 2, width: 1 }),
     ]);
   });
+
+  it('normalizes colon-style extended background colors before parser canonicalization', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48:2::255:0:0mRED\u001b[0m',
+        '\u001b[48:2::0:255:0mGREEN\u001b[0m',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 3)).toEqual([
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
+      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
+    ]);
+    expect(rows[1]?.slice(0, 5)).toEqual([
+      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+      expect.objectContaining({ char: 'N'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+    ]);
+  });
 });
