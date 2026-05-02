@@ -17,6 +17,20 @@ import { useSessionDraftStorage } from './hooks/useSessionDraftStorage';
 import { useSessionHistoryStorage } from './hooks/useSessionHistoryStorage';
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { runtimeDebug } from './lib/runtime-debug';
+import {
+  buildPersistedOpenTabFromSession,
+  dedupePersistedOpenTabs,
+  findReusableOpenTabSession,
+  persistSessionIntentState,
+  persistOpenTabsState,
+  readPersistedActiveSessionId,
+  readPersistedOpenTabs,
+} from './lib/open-tab-persistence';
+import {
+  createForegroundRefreshRuntime,
+  markForegroundRuntimeHidden,
+  performForegroundRefresh,
+} from './lib/app-foreground-refresh';
 import { openConnectionPropertiesPage, openConnectionsPage, openSettingsPage, openTerminalPage, type AppPageState } from './lib/page-state';
 import {
   buildCleanDraft,
@@ -27,7 +41,7 @@ import {
   sortHostsForPicker,
   type BridgeTarget,
 } from './lib/session-picker';
-import { STORAGE_KEYS, type Host, type PersistedOpenTab, type Session } from './lib/types';
+import { STORAGE_KEYS, type Host, type PersistedOpenTab } from './lib/types';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -39,13 +53,6 @@ interface AppContentProps {
 }
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
-
-function summarizeResumeSessions(sessions: Array<{ id: string; state: string }>) {
-  return sessions.map((session) => ({
-    id: session.id,
-    state: session.state,
-  }));
-}
 
 function readPersistedPageState(): AppPageState {
   if (typeof window === 'undefined') {
@@ -79,129 +86,6 @@ function readPersistedPageState(): AppPageState {
   }
 
   return openConnectionsPage();
-}
-
-function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const candidate = input as Partial<PersistedOpenTab>;
-  const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId.trim() : '';
-  const hostId = typeof candidate.hostId === 'string' ? candidate.hostId.trim() : '';
-  const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
-  const sessionName = typeof candidate.sessionName === 'string' ? candidate.sessionName.trim() : '';
-  const connectionName = typeof candidate.connectionName === 'string' ? candidate.connectionName.trim() : '';
-
-  if (!sessionId || !bridgeHost || !sessionName) {
-    return null;
-  }
-
-  return {
-    sessionId,
-    hostId,
-    connectionName: connectionName || sessionName,
-    bridgeHost,
-    bridgePort:
-      typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
-        ? candidate.bridgePort
-        : 3333,
-    sessionName,
-    authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
-    autoCommand: typeof candidate.autoCommand === 'string' ? candidate.autoCommand : undefined,
-    customName: typeof candidate.customName === 'string' && candidate.customName.trim()
-      ? candidate.customName.trim()
-      : undefined,
-    createdAt:
-      typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
-        ? candidate.createdAt
-        : Date.now(),
-  };
-}
-
-function readPersistedOpenTabs() {
-  if (typeof window === 'undefined') {
-    return [] as PersistedOpenTab[];
-  }
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
-    if (!raw) {
-      return [] as PersistedOpenTab[];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [] as PersistedOpenTab[];
-    }
-    return parsed
-      .map(normalizePersistedOpenTab)
-      .filter((item): item is PersistedOpenTab => item !== null);
-  } catch (error) {
-    console.error('[App] Failed to restore open tabs:', error);
-    return [] as PersistedOpenTab[];
-  }
-}
-
-function readPersistedActiveSessionId() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION);
-    return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
-  } catch (error) {
-    console.error('[App] Failed to restore active session:', error);
-    return null;
-  }
-}
-
-function buildPersistedOpenTabFromSession(session: Pick<
-  Session,
-  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
->): PersistedOpenTab {
-  return {
-    sessionId: session.id,
-    hostId: session.hostId,
-    connectionName: session.connectionName,
-    bridgeHost: session.bridgeHost,
-    bridgePort: session.bridgePort,
-    sessionName: session.sessionName,
-    authToken: session.authToken,
-    autoCommand: session.autoCommand,
-    customName: session.customName,
-    createdAt: session.createdAt,
-  };
-}
-
-function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
-    persistActiveSessionId(activeSessionId);
-  } catch (error) {
-    console.error('[App] Failed to persist open tabs:', error);
-  }
-}
-
-function persistActiveSessionId(activeSessionId: string | null) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    const normalized = typeof activeSessionId === 'string' ? activeSessionId.trim() : '';
-    if (normalized) {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, normalized);
-      return;
-    }
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
-  } catch (error) {
-    console.error('[App] Failed to persist active session:', error);
-  }
 }
 
 export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProps) {
@@ -261,8 +145,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
   const restoredRouteHandledRef = useRef(false);
   const restoredTabsHandledRef = useRef(false);
-  const wasHiddenRef = useRef(false);
-  const lastResumeAtRef = useRef(0);
+  const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(state.sessions);
   const activeSessionIdRef = useRef<string | null>(state.activeSessionId);
   const resumeActiveSessionTransportRef = useRef(resumeActiveSessionTransport);
@@ -327,6 +210,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       (persistedActiveSessionId && persistedTabs.some((tab) => tab.sessionId === persistedActiveSessionId)
         ? persistedActiveSessionId
         : persistedTabs[0]?.sessionId) || null;
+    let restoredActiveResolvedSessionId: string | null = null;
     for (const tab of persistedTabs) {
       const existingHost = hosts.find((host) => host.id === tab.hostId) || null;
       const host: Host = existingHost
@@ -356,28 +240,21 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             lastConnected: tab.createdAt,
           };
 
-      createSession(host, {
+      const restoredSessionId = createSession(host, {
         activate: tab.sessionId === nextActiveSessionId,
         connect: tab.sessionId === nextActiveSessionId,
         customName: tab.customName,
         createdAt: tab.createdAt,
         sessionId: tab.sessionId,
       });
+      if (tab.sessionId === nextActiveSessionId) {
+        restoredActiveResolvedSessionId = restoredSessionId;
+      }
     }
-    if (nextActiveSessionId) {
-      switchSession(nextActiveSessionId);
+    if (restoredActiveResolvedSessionId || nextActiveSessionId) {
+      switchSession(restoredActiveResolvedSessionId || nextActiveSessionId!);
     }
   }, [createSession, hosts, hostsLoaded, sessions, state.activeSessionId, switchSession]);
-
-  const findReusableSession = useCallback((target: Pick<Host, 'bridgeHost' | 'bridgePort' | 'sessionName'>) => {
-    const resolvedSessionName = target.sessionName.trim() || target.bridgeHost.trim();
-    return state.sessions.find(
-      (session) =>
-        session.bridgeHost === target.bridgeHost &&
-        session.bridgePort === target.bridgePort &&
-        session.sessionName === resolvedSessionName,
-    ) || null;
-  }, [state.sessions]);
 
   useEffect(() => {
     if (restoredRouteHandledRef.current || sessions.length === 0) {
@@ -430,75 +307,42 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   }, [pruneDrafts, sessions]);
 
   useEffect(() => {
-    const notifyResume = (reason: string) => {
-      const currentSessions = sessionsRef.current;
-      if (currentSessions.length === 0) {
-        runtimeDebug('app.resume.skip', { reason, why: 'no-sessions' });
-        return;
-      }
-      const now = Date.now();
-      if (now - lastResumeAtRef.current < 800) {
-        runtimeDebug('app.resume.skip', {
-          reason,
-          why: 'debounced',
-          deltaMs: now - lastResumeAtRef.current,
-          sessions: summarizeResumeSessions(currentSessions),
-        });
-        return;
-      }
-      lastResumeAtRef.current = now;
-      runtimeDebug('app.resume.fire', {
+    const notifyResume = (reason: 'visibilitychange' | 'resume' | 'appStateChange') => {
+      performForegroundRefresh({
         reason,
-        sessions: summarizeResumeSessions(currentSessions),
+        sessions: sessionsRef.current.map((session) => ({ id: session.id, state: session.state })),
+        activeSessionId: activeSessionIdRef.current,
+        resumeActiveSessionTransport: resumeActiveSessionTransportRef.current,
+        reconnectSession: reconnectSessionRef.current,
+        runtime: foregroundRefreshRuntimeRef.current,
+        log: (entry) => {
+          console.debug('[App] foreground resume actions ->', entry);
+        },
       });
-      const activeSessionId = activeSessionIdRef.current;
-      if (!activeSessionId) {
-        runtimeDebug('app.resume.skip', {
-          reason,
-          why: 'no-active-session',
-          sessions: summarizeResumeSessions(currentSessions),
-        });
-        return;
-      }
-
-      const currentActiveSession = currentSessions.find((session) => session.id === activeSessionId) || null;
-      const resumed = resumeActiveSessionTransportRef.current(activeSessionId);
-      console.debug('[App] foreground resume actions ->', {
-        reason,
-        activeSessionId,
-        sessionState: currentActiveSession?.state || 'missing',
-        action: resumed ? 'resume-active-transport' : 'reconnect-active-session',
-      });
-      if (!resumed) {
-        reconnectSessionRef.current(activeSessionId);
-      }
     };
 
     const markHidden = () => {
-      wasHiddenRef.current = true;
-      runtimeDebug('app.visibility.hidden', {
-        visibilityState: document.visibilityState,
-      });
+      markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
     };
 
     const onVisibilityChange = () => {
       runtimeDebug('app.visibility.change', {
         visibilityState: document.visibilityState,
-        wasHidden: wasHiddenRef.current,
+        wasHidden: foregroundRefreshRuntimeRef.current.wasHidden,
       });
       if (document.visibilityState === 'hidden') {
         markHidden();
         return;
       }
 
-      if (document.visibilityState === 'visible' && wasHiddenRef.current) {
-        wasHiddenRef.current = false;
+      if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
+        foregroundRefreshRuntimeRef.current.wasHidden = false;
         notifyResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
-      wasHiddenRef.current = false;
+      foregroundRefreshRuntimeRef.current.wasHidden = false;
       runtimeDebug('app.document.resume', {});
       notifyResume('resume');
     };
@@ -506,13 +350,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       runtimeDebug('app.capacitor.appStateChange', {
         isActive,
-        wasHidden: wasHiddenRef.current,
+        wasHidden: foregroundRefreshRuntimeRef.current.wasHidden,
       });
       if (!isActive) {
         markHidden();
         return;
       }
-      wasHiddenRef.current = false;
+      foregroundRefreshRuntimeRef.current.wasHidden = false;
       notifyResume('appStateChange');
     });
 
@@ -568,11 +412,15 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
 
   const openDraftAsSession = useCallback((
     draft: Omit<Host, 'id' | 'createdAt'>,
-    options?: { rememberName?: string; activate?: boolean; navigate?: boolean },
+    options?: { rememberName?: string; activate?: boolean; navigate?: boolean; sessionId?: string },
   ) => {
     rememberBridgeTarget(normalizeBridgeTarget(draft), options?.rememberName || draft.name || draft.bridgeHost);
     const persistedHost = rememberConnectionHost(buildTransientHostFromDraft(draft));
-    const existingSession = findReusableSession(persistedHost);
+    const existingSession = findReusableOpenTabSession({
+      sessions: state.sessions,
+      host: persistedHost,
+      activeSessionId: state.activeSessionId,
+    });
     const shouldActivate = options?.activate !== false;
 
     if (existingSession) {
@@ -592,7 +440,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       return { sessionId: existingSession.id, host: persistedHost };
     }
 
-    const sessionId = createSession(persistedHost, { activate: shouldActivate });
+    const sessionId = createSession(persistedHost, {
+      activate: shouldActivate,
+      ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+    });
     recordSessionOpen({
       connectionName: persistedHost.name,
       bridgeHost: persistedHost.bridgeHost,
@@ -604,7 +455,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
       setPageState(openTerminalPage(sessionId));
     }
     return { sessionId, host: persistedHost };
-  }, [createSession, findReusableSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
+  }, [createSession, recordSessionOpen, rememberBridgeTarget, rememberConnectionHost, sessions, state.activeSessionId, switchSession]);
 
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, options?: {
     target?: BridgeTarget | null;
@@ -663,24 +514,61 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
   const handleSwitchSession = useCallback((sessionId: string) => {
+    persistSessionIntentState({
+      sessions,
+      activeSessionId: sessionId,
+    });
     switchSession(sessionId);
-  }, [switchSession]);
+  }, [sessions, switchSession]);
 
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
+    const currentIndex = sessions.findIndex((session) => session.id === sessionId);
+    if (currentIndex >= 0) {
+      const nextSessions = [...sessions];
+      const [moved] = nextSessions.splice(currentIndex, 1);
+      const nextIndex = Math.max(0, Math.min(toIndex, nextSessions.length));
+      nextSessions.splice(nextIndex, 0, moved);
+      persistSessionIntentState({
+        sessions: nextSessions,
+        activeSessionId: state.activeSessionId,
+      });
+    }
     moveSession(sessionId, toIndex);
-  }, [moveSession]);
+  }, [moveSession, sessions, state.activeSessionId]);
 
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
     renameSession(sessionId, name);
   }, [renameSession]);
 
-  const handleCloseSession = useCallback((sessionId: string) => {
+  const handleCloseSession = useCallback((sessionId: string, source = 'unknown') => {
+    const nextSessions = sessions.filter((session) => session.id !== sessionId);
+    const nextActiveSessionId =
+      state.activeSessionId === sessionId
+        ? (nextSessions[0]?.id || null)
+        : state.activeSessionId;
+    runtimeDebug('app.session.close.request', {
+      sessionId,
+      source,
+      activeSessionId: state.activeSessionId,
+      sessions: sessions.map((session) => ({ id: session.id, state: session.state, title: session.title })),
+    });
+    console.warn('[App] close session request', {
+      sessionId,
+      source,
+      activeSessionId: state.activeSessionId,
+      sessionCount: sessions.length,
+    });
+
+    persistSessionIntentState({
+      sessions: nextSessions,
+      activeSessionId: nextActiveSessionId,
+    });
     clearSessionDraft(sessionId);
     closeSession(sessionId);
     if (sessions.length === 1) {
       setPageState(openConnectionsPage());
     }
-  }, [clearSessionDraft, closeSession, sessions]);
+  }, [clearSessionDraft, closeSession, sessions, state.activeSessionId]);
 
   const handleResumeSession = useCallback((sessionId: string) => {
     handleSwitchSession(sessionId);
@@ -795,8 +683,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
 
   const handleLoadSavedTabList = useCallback((tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => {
     let focusSessionId: string | null = null;
+    const openedTabs: PersistedOpenTab[] = [];
 
-    tabs.forEach((tab, index) => {
+    dedupePersistedOpenTabs(tabs).forEach((tab, index) => {
       const existingHost = hosts.find((host) => host.id === tab.hostId) || null;
       const host: Host = existingHost
         ? {
@@ -829,6 +718,20 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
         rememberName: host.name,
         activate: false,
         navigate: false,
+        sessionId: tab.sessionId,
+      });
+
+      openedTabs.push({
+        sessionId: opened.sessionId,
+        hostId: opened.host.id,
+        connectionName: opened.host.name,
+        bridgeHost: opened.host.bridgeHost,
+        bridgePort: opened.host.bridgePort,
+        sessionName: opened.host.sessionName,
+        authToken: opened.host.authToken,
+        autoCommand: opened.host.autoCommand,
+        customName: tab.customName?.trim() || undefined,
+        createdAt: tab.createdAt,
       });
 
       if (tab.customName?.trim()) {
@@ -843,10 +746,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     });
 
     if (focusSessionId) {
-      handleSwitchSession(focusSessionId);
+      persistOpenTabsState(openedTabs, focusSessionId);
+      switchSession(focusSessionId);
       setPageState(openTerminalPage(focusSessionId));
     }
-  }, [handleSwitchSession, hosts, openDraftAsSession, renameSession]);
+  }, [hosts, openDraftAsSession, renameSession, switchSession]);
 
   const handleResize = useCallback((sessionId: string, cols: number, rows: number) => {
     console.log('[App] Terminal resize:', sessionId, cols, rows);
@@ -902,11 +806,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
     const normalized = value.replace(/\r?\n/g, '\r');
     const payload = /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
     if (activeSession?.id !== sessionId) {
-      switchSession(sessionId);
+      handleSwitchSession(sessionId);
     }
     handleTerminalInput(sessionId, payload);
     clearSessionDraft(sessionId);
-  }, [activeSession?.id, clearSessionDraft, handleTerminalInput, switchSession]);
+  }, [activeSession?.id, clearSessionDraft, handleSwitchSession, handleTerminalInput]);
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
@@ -1011,7 +915,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings }: AppContentProp
             onResize={handleResize}
             onTerminalInput={handleTerminalInput}
             inputResetEpochBySession={inputResetEpochBySession}
-            onTerminalViewportChange={(sessionId, viewState) => {
+            onTerminalVisibleRangeChange={(sessionId, viewState) => {
               updateSessionViewport(sessionId, viewState);
             }}
             onImagePaste={sendImagePaste}

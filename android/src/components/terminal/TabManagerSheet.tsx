@@ -12,7 +12,7 @@ interface TabManagerSheetProps {
   onClose: () => void;
   onSwitchSession: (id: string) => void;
   onRenameSession: (id: string, name: string) => void;
-  onCloseSession: (id: string) => void;
+  onCloseSession: (id: string, source?: string) => void;
   onMoveSession: (id: string, toIndex: number) => void;
   onOpenQuickTabPicker: () => void;
   onSaveCurrentTabList: (name: string) => void;
@@ -469,7 +469,12 @@ export function TabManagerSheet({
                     ✎
                   </button>
                   <button
-                    onClick={() => onCloseSession(session.id)}
+                    type="button"
+                    tabIndex={-1}
+                    onFocus={(event) => event.currentTarget.blur()}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onCloseSession(session.id, 'tab-manager-close-button')}
                     style={{
                       width: '36px',
                       height: '36px',

@@ -78,7 +78,7 @@ describe('TerminalHeader', () => {
     expect(root?.style.padding).toBe('44px 6px 6px');
   });
 
-  it('renders a close button on the active tab and forwards close callback', () => {
+  it('renders a close button on the active tab and requires explicit second tap to close', () => {
     const session = makeSession();
     const onCloseSession = vi.fn();
     const onSwitchSession = vi.fn();
@@ -98,11 +98,9 @@ describe('TerminalHeader', () => {
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    act(() => {
-      vi.advanceTimersByTime(300);
-    });
+    expect(onCloseSession).not.toHaveBeenCalled();
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).toHaveBeenCalledWith('session-1');
+    expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
     expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
@@ -151,11 +149,35 @@ describe('TerminalHeader', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     expect(onCloseSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
+    expect(onCloseSession).toHaveBeenCalledWith('session-2', 'terminal-header-close-button');
+  });
 
+  it('clears close confirmation if the second tap does not happen in time', () => {
+    const session = makeSession();
+    const onCloseSession = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={[session]}
+        activeSession={session}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     act(() => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(1700);
     });
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).toHaveBeenCalledWith('session-2');
+    expect(onCloseSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
+    expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
   });
 });

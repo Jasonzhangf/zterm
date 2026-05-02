@@ -7,7 +7,7 @@ const TAB_LONG_PRESS_MS = 920;
 const PLUS_LONG_PRESS_MS = 680;
 const HEADER_TOUCH_SAFE_OFFSET_PX = 20;
 const DOUBLE_TAP_MS = 280;
-const ACTIVE_TAB_CLOSE_ARM_DELAY_MS = 280;
+const ACTIVE_TAB_CLOSE_CONFIRM_WINDOW_MS = 1600;
 
 interface TerminalHeaderProps {
   sessions: Session[];
@@ -18,7 +18,7 @@ interface TerminalHeaderProps {
   onOpenTabManager: () => void;
   onSwitchSession: (id: string) => void;
   onRenameSession: (id: string, name: string) => void;
-  onCloseSession: (id: string) => void;
+  onCloseSession: (id: string, source?: string) => void;
   splitVisible?: boolean;
   sessionPaneAssignments?: Partial<Record<string, TerminalSplitPaneId>>;
   onAssignSessionToPane?: (id: string, paneId: TerminalSplitPaneId) => void;
@@ -63,6 +63,7 @@ export function TerminalHeader({
   const longPressTriggeredRef = useRef(false);
   const plusLongPressTimerRef = useRef<number | null>(null);
   const plusLongPressTriggeredRef = useRef(false);
+  const closeConfirmTimerRef = useRef<number | null>(null);
   const [paneMenuSessionId, setPaneMenuSessionId] = useState<string | null>(null);
   const [armedClosableSessionId, setArmedClosableSessionId] = useState<string | null>(null);
 
@@ -84,6 +85,14 @@ export function TerminalHeader({
       window.clearTimeout(plusLongPressTimerRef.current);
       plusLongPressTimerRef.current = null;
     }
+  };
+
+  const clearCloseConfirm = () => {
+    if (closeConfirmTimerRef.current !== null) {
+      window.clearTimeout(closeConfirmTimerRef.current);
+      closeConfirmTimerRef.current = null;
+    }
+    setArmedClosableSessionId(null);
   };
 
   const openPaneMenu = (sessionId: string) => {
@@ -139,25 +148,17 @@ export function TerminalHeader({
 
   useEffect(() => {
     if (!activeSession?.id) {
-      setArmedClosableSessionId(null);
-      return;
+      clearCloseConfirm();
+      return clearCloseConfirm;
     }
-
     const activeTab = tabsScrollerRef.current?.querySelector<HTMLElement>(`[data-session-id="${activeSession.id}"]`);
     activeTab?.scrollIntoView({
       inline: 'center',
       block: 'nearest',
       behavior: 'smooth',
     });
-
-    setArmedClosableSessionId(null);
-    const timer = window.setTimeout(() => {
-      setArmedClosableSessionId(activeSession.id);
-    }, ACTIVE_TAB_CLOSE_ARM_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
+    clearCloseConfirm();
+    return clearCloseConfirm;
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -175,6 +176,7 @@ export function TerminalHeader({
   useEffect(() => () => {
     clearLongPress();
     clearPlusLongPress();
+    clearCloseConfirm();
   }, []);
 
   return (
@@ -342,14 +344,25 @@ export function TerminalHeader({
                 {active ? (
                   <button
                     type="button"
+                    tabIndex={-1}
                     aria-label="关闭当前 tab"
+                    onFocus={(event) => event.currentTarget.blur()}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (armedClosableSessionId !== session.id) {
+                      if (armedClosableSessionId === session.id) {
+                        clearCloseConfirm();
+                        closePaneMenu();
+                        onCloseSession(session.id, 'terminal-header-close-button');
                         return;
                       }
-                      closePaneMenu();
-                      onCloseSession(session.id);
+                      clearCloseConfirm();
+                      setArmedClosableSessionId(session.id);
+                      closeConfirmTimerRef.current = window.setTimeout(() => {
+                        setArmedClosableSessionId((current) => (current === session.id ? null : current));
+                        closeConfirmTimerRef.current = null;
+                      }, ACTIVE_TAB_CLOSE_CONFIRM_WINDOW_MS);
                     }}
                     style={{
                       position: 'absolute',
@@ -365,15 +378,18 @@ export function TerminalHeader({
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      backgroundColor: 'rgba(255,255,255,0.14)',
+                      backgroundColor:
+                        armedClosableSessionId === session.id
+                          ? 'rgba(255,124,146,0.22)'
+                          : 'rgba(255,255,255,0.14)',
                       color: active ? tone.accent : mobileTheme.colors.textPrimary,
                       fontSize: '13px',
                       lineHeight: 1,
                       fontWeight: 900,
                       zIndex: 2,
                       WebkitTapHighlightColor: 'transparent',
-                      opacity: armedClosableSessionId === session.id ? 1 : 0.38,
-                      pointerEvents: armedClosableSessionId === session.id ? 'auto' : 'none',
+                      opacity: armedClosableSessionId === session.id ? 1 : 0.72,
+                      pointerEvents: 'auto',
                     }}
                   >
                     ×
