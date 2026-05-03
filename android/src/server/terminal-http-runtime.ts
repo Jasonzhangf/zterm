@@ -127,8 +127,8 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       },
       sessions: {
         total: sessionEntries.length,
-        attached: sessionEntries.filter((session) => Boolean(session.transportId)).length,
-        ready: sessionEntries.filter((session) => Boolean(session.readyTransportId)).length,
+        attached: sessionEntries.filter((session) => Boolean(session.transport)).length,
+        ready: sessionEntries.filter((session) => Boolean(session.connectedSent)).length,
       },
       mirrors: {
         total: mirrorEntries.length,
@@ -176,10 +176,9 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         sessionName: session.sessionName,
         mirrorKey: session.mirrorKey,
         transportId: session.transportId,
-        readyTransportId: session.readyTransportId,
+        connectedSent: session.connectedSent,
         wsAlive: session.wsAlive,
-        requestOrigin: session.transportRequestOrigin,
-        logicalSessionBound: session.logicalSessionBound,
+        requestOrigin: session.requestOrigin,
       })),
       mirrors: mirrorEntries.map((mirror) => ({
         key: mirror.key,

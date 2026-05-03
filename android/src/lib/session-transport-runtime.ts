@@ -5,7 +5,6 @@ export interface SessionTransportRuntime {
   sessionId: string;
   targetKey: string;
   host: Host;
-  sessionTransportToken: string | null;
   activeSocket: BridgeTransportSocket | null;
   supersededSockets: BridgeTransportSocket[];
 }
@@ -133,10 +132,6 @@ export function upsertSessionTransportRuntime(
     sessionId,
     targetKey: nextTarget.key,
     host: normalizedHost,
-    sessionTransportToken:
-      current && current.targetKey === nextTarget.key
-        ? current.sessionTransportToken
-        : null,
     activeSocket: current?.activeSocket || null,
     supersededSockets: current?.supersededSockets ? [...current.supersededSockets] : [],
   };
@@ -168,13 +163,6 @@ export function getSessionTransportSocket(
   return store.sessions.get(sessionId)?.activeSocket || null;
 }
 
-export function getSessionTransportToken(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-) {
-  return store.sessions.get(sessionId)?.sessionTransportToken || null;
-}
-
 export function setSessionTransportSocket(
   store: SessionTransportRuntimeStore,
   sessionId: string,
@@ -185,19 +173,6 @@ export function setSessionTransportSocket(
     return null;
   }
   runtime.activeSocket = socket;
-  return runtime;
-}
-
-export function setSessionTransportToken(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-  token: string | null,
-) {
-  const runtime = store.sessions.get(sessionId);
-  if (!runtime) {
-    return null;
-  }
-  runtime.sessionTransportToken = typeof token === 'string' && token.trim() ? token.trim() : null;
   return runtime;
 }
 

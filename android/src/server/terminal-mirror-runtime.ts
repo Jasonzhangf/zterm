@@ -77,6 +77,23 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
 
+  function stopMirrorLiveSync(mirror: SessionMirror) {
+    if (mirror.liveSyncTimer) {
+      clearTimeout(mirror.liveSyncTimer);
+      mirror.liveSyncTimer = null;
+    }
+  }
+
+  function mirrorHasAttachedTransportSubscriber(mirror: SessionMirror) {
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (session?.transport) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function createMirror(sessionName: string): SessionMirror {
     const mirror: SessionMirror = {
       key: sessionName,
@@ -156,22 +173,19 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lastScrollbackCount = -1;
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
-    if (mirror.liveSyncTimer) {
-      clearTimeout(mirror.liveSyncTimer);
-      mirror.liveSyncTimer = null;
-    }
+    stopMirrorLiveSync(mirror);
     mirrors.delete(mirror.key);
   }
 
   function ensureSessionReady(session: ClientSession, mirror: SessionMirror) {
     session.sessionName = mirror.sessionName;
-    if (!session.transportId || session.readyTransportId === session.transportId) {
+    if (!session.transport || session.connectedSent) {
       return;
     }
-    session.readyTransportId = session.transportId;
+    session.connectedSent = true;
     deps.sendMessage(session, {
       type: 'connected',
-      payload: deps.buildConnectedPayload(session.id, session.transportRequestOrigin),
+      payload: deps.buildConnectedPayload(session.id, session.requestOrigin),
     });
     deps.sendScheduleStateToSession(session, mirror.sessionName);
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
@@ -252,13 +266,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.lifecycle !== 'ready') {
       return;
     }
-    if (mirror.liveSyncTimer) {
-      clearTimeout(mirror.liveSyncTimer);
+    if (!mirrorHasAttachedTransportSubscriber(mirror)) {
+      stopMirrorLiveSync(mirror);
+      return;
     }
+    stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
+      if (mirror.lifecycle !== 'ready' || !mirrorHasAttachedTransportSubscriber(mirror)) {
+        return;
+      }
       void syncMirrorCanonicalBuffer(mirror).finally(() => {
-        if (mirror.lifecycle === 'ready') {
+        if (mirror.lifecycle === 'ready' && mirrorHasAttachedTransportSubscriber(mirror)) {
           scheduleMirrorLiveSync(mirror, 33);
         }
       });
@@ -390,7 +409,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     session.sessionName = nextSessionName;
     session.mirrorKey = nextMirrorKey;
-    session.readyTransportId = null;
+    session.connectedSent = false;
 
     let mirror = existingMirror;
     if (!mirror) {
@@ -405,6 +424,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     if (mirror.lifecycle === 'ready') {
       ensureSessionReady(session, mirror);
+      scheduleMirrorLiveSync(mirror, 0);
       return;
     }
 

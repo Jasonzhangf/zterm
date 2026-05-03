@@ -1,7 +1,19 @@
 # 2026-04-28 terminal transport / session lifecycle truth
 
-> 本文档冻结 terminal `client session / transport / daemon logical session` 的唯一真源。  
+> 本文档冻结 terminal `client session / transport` 的唯一真源，并明确：**daemon 不持有客户端逻辑**。  
 > 若旧实现、旧测试、旧口头理解与本文冲突，以本文为准。
+
+> 2026-05-03 补充冻结：server/daemon 不关心也不能关心任何客户端逻辑/状态机。  
+> 包括但不限于：`logical client session`、`clientSessionId` 作为 daemon owner、`readyTransportId`、`session transport token`、`attach/resume state machine`、`active tab`、`foreground/background`、`viewport/pane/width mode`。  
+> 若协议兼容期仍接收相关字段，只允许作为一次性 attach 参数或透传字段，不得进入 daemon 长期状态真相。
+
+> 2026-05-03 第二刀补充冻结：  
+> `clientSessionId` 继续保留为 **client-owned stable identity**；  
+> `sessionTransportToken / session-ticket` 继续保留为 **attach-only wire material**。  
+> 它们可存在于兼容协议与客户端握手流程，但：
+> 1. daemon 不得把它们提升为长期业务真相  
+> 2. client 不得把 `sessionTransportToken` 塞进长期 transport runtime store  
+> 3. `sessionTransportToken` 只允许存在于 attach/open 的临时握手上下文中
 
 ## 背景
 
@@ -46,12 +58,27 @@ session transport
 client session
   = stable business object identified by clientSessionId
 
-daemon logical client session
-  = stable server-side session object bound by clientSessionId
+daemon attach fact
+  = transport/mirror attach fact created during attach/open
+  != standalone client-style business session
 
 active/inactive
   = only polling cadence / data pull behavior
 ```
+
+## 协议冻结补充（2026-05-02）
+
+terminal wire protocol 现已冻结到两份唯一真源：
+
+1. `packages/shared/src/connection/protocol.ts`：message kind / payload shape 真源
+2. `packages/shared/src/connection/types.ts`：buffer / cursor / wire line 真源
+
+Android / daemon 后续规则：
+
+- **允许新增 message kind / payload 字段**，但必须先更新 shared protocol/types，再更新 consumer
+- **不允许改写既有 message 的语义** 来“偷偷提速”或补 fallback
+- `android/src/lib/types.ts` 只允许做 shared re-export / app local model，**不得再次本地重定义 wire protocol**
+- client 巨型文件拆分（如 `SessionContext.tsx`）只允许做 helper ownership 下沉，不得顺手改变协议语义
 
 ---
 
@@ -62,7 +89,7 @@ active/inactive
 daemon 只负责：
 
 1. 维护 tmux mirror truth
-2. 维护 daemon logical client session
+2. 维护 transport attach / detach fact
 3. 维护 transport attach / detach
 4. 回答 head / range / input / file / schedule 等协议
 
@@ -79,9 +106,7 @@ daemon **不负责**：
 
 daemon terminal core 只允许保留这些最小事实：
 
-- logical session registry
 - `transportId`
-- `readyTransportId`
 - `sessionName`
 - `mirrorKey`
 - transport attach / detach
@@ -111,7 +136,7 @@ daemon terminal core 只允许保留这些最小事实：
 不允许继续把 daemon terminal core 业务编排长期内联在 `server.ts`。  
 以下逻辑必须收敛到独立 terminal core 模块：
 
-- logical session lifecycle
+- transport attach / detach orchestration
 - mirror lifecycle
 - mirror live sync
 - tmux attach / start / input orchestration
@@ -190,6 +215,7 @@ session transport 的生命周期：
 
 - session 首次 attach 后建立
 - tab 切换 / foreground / background / inactive 时都不应主动销毁
+- 这些场景只允许暂停或恢复取数，不允许 fresh recreate transport
 - 只有：
   - 用户显式 close 该 session
   - daemon 不可达且该 session retry 终止
@@ -210,22 +236,27 @@ client session 是稳定业务对象，唯一标识是 `clientSessionId`。
 
 client session **不是** transport。
 
-### 1.4 daemon logical client session
+### 1.4 daemon attach fact
 
-daemon 侧每个 `clientSessionId` 对应一个稳定 logical session。
+daemon 不拥有 client-style logical session。
 
-它与 transport 的关系固定为：
+daemon 只允许持有：
 
-```text
-logical session
-  -> attached transport (0..1)
-```
+- transport 物理连接事实
+- tmux / mirror 事实
+- 某条 transport 当前 attach 到哪个 tmux target / mirror 的事实
+
+若兼容协议 attach/open 期间传入 `clientSessionId`：
+
+- 只能把它当作 client-owned identity 的一次性关联参数
+- 不得把它提升为 daemon 长期 owner
+- 不得据此在 daemon 内创建“稳定 logical client session 对象”
 
 硬规则：
 
-- transport 断开时，只允许 `detach transport`
-- reconnect 时，只允许重新 `attach transport`
-- 不允许因为 ws close / tab inactive / foreground 切换而把 logical session 当场销毁
+- transport 断开时，只允许清理该 transport 自身 attach fact
+- reconnect 时，只允许重新 attach 新 transport
+- 不允许因为 ws close / tab inactive / foreground 切换而推导“client session 已死亡”
 
 ---
 
@@ -251,7 +282,7 @@ session 创建或恢复时：
 
 1. 先找目标 target 的 control transport
 2. 通过 control transport attach / resume 指定 `clientSessionId`
-3. 为该 `clientSessionId` 生成**当前唯一有效**的 `session transport token`
+3. 若兼容协议仍需要 ticket/token，只允许返回**本次 attach/open 的临时 wire material**
 4. 为该 `clientSessionId` 建立或复用自己独立的 session transport
    - session transport 只能用当前有效 ticket attach
    - 同一 session 再次 open/resume/retarget 后，旧 ticket 必须立即失效
@@ -299,11 +330,11 @@ inactive tab 只表示：
 
 - 停止主动高频拉 head/range
 - 允许降到低频甚至 0 取数
+- session transport / control transport 继续长期复用
 
 但 inactive **绝不表示**：
 
 - 关闭 client session
-- 关闭 daemon logical session
 - 关闭 control transport
 - 关闭 session transport
 - 重建 buffer truth
@@ -348,39 +379,41 @@ session attach/resume 只需要：
 
 daemon transport close 时：
 
-- 若 session 已 logical-bound
+- 若该 transport 已 attach 到某个 tmux target / mirror
   - 只做 `detach transport`
-  - 不得立即销毁 logical session
+  - 不得顺手推导“client session 已关闭”
 
-### 5.2 logical session 回收
+### 5.2 daemon 不得持有 client session 回收语义
 
-本轮冻结里，logical session 只允许由以下事件销毁：
+本轮冻结里，daemon 根本不应存在“client session 对象回收”这类状态机。
 
-1. client 显式 close session
-2. daemon shutdown
-3. 后续若新增明确的资源回收策略，必须先写入真源文档并补回归
+允许清理的只有：
+
+1. transport 自身关闭后的 transport 记录
+2. attach/open 临时 ticket / token / pending intent
+3. daemon shutdown 时的 daemon 本地 runtime
 
 在此之前，不允许：
 
-- ws close grace timeout 自动销毁
-- inactive timeout 自动销毁
-- foreground/background 切换自动销毁
+- ws close grace timeout 回收 client-style logical session
+- inactive timeout 回收 client-style logical session
+- foreground/background 切换回收 client-style logical session
 
 ### 5.3 mirror 生命周期
 
-mirror truth 与 transport / logical session 也必须解耦：
+mirror truth 与 transport / client session 也必须解耦：
 
-- logical session detach 不得重置 mirror
+- transport detach 不得重置 mirror
 - transport close 不得重置 mirror
-- tmux session killed / mirror unavailable 时，也**不得顺手删除 daemon logical session**
-- 这类事件只能把 logical session 释放出 mirror 绑定，并进入显式 `error/unavailable` 语义
+- tmux session killed / mirror unavailable 时，也**不得顺手推导 client session 被删除**
+- 这类事件只能更新 daemon 自己的 tmux/mirror 可用性语义，并进入显式 `error/unavailable` 语义
 - tab 是否关闭永远属于 client 显式动作，不属于 daemon mirror 生命周期
 - reconnect 后若看到 `revision -> 1` / `latestEndIndex` 回退，多半是 daemon 自己把 mirror 生命周期做错了
 
 ### 5.4 server message 语义冻结
 
 - `closed`
-  - 只允许表示 logical session 被最终关闭
+  - 只允许表示 daemon 侧目标被显式关闭，不得暗含 client session 状态机
   - 仅允许来源于：
     1. client 显式 close
     2. daemon shutdown / 全局退出
@@ -391,9 +424,9 @@ mirror truth 与 transport / logical session 也必须解耦：
     - `tmux_session_unavailable`
     - `logical_session_missing`
     - `session_transport_ticket_invalid`
-- 因此：
+  - 因此：
   - tmux session killed **不得**再发 `closed`
-  - mirror destroy **不得**再隐式删除 subscriber logical session
+  - mirror destroy **不得**再隐式推导 subscriber client session 被删除
   - client 收到这类 `error` 后，应保留 tab/session 真相，而不是自动移除
 
 ---
@@ -406,7 +439,7 @@ mirror truth 与 transport / logical session 也必须解耦：
 2. reconnect 直接 `cleanupSocket(..., true)` 杀旧 transport
 3. transport open 后重新发整套 fresh connect
 4. transport 活性仅靠 `readyState === OPEN`
-5. daemon transport close 后 grace timeout 自动回收 logical session
+5. daemon transport close 后 grace timeout 自动回收 client-style logical session / attach state
 6. active / inactive 语义漂移为 session / transport 生命周期
 
 ---
@@ -419,8 +452,8 @@ mirror truth 与 transport / logical session 也必须解耦：
 2. inactive tab 停 polling 但不 close session / transport
 3. foreground resume 优先复用原 session transport；control transport 不承载高频流量
 4. active re-entry 只重启 head-first loop，不 fresh recreate session
-5. daemon transport close 后，same `clientSessionId` 能 attach 回原 logical session
-6. daemon shutdown 才统一回收 logical session / mirror 相关资源
+5. daemon transport close 后，same `clientSessionId` 能重新 attach 到原 tmux target / mirror truth
+6. daemon shutdown 才统一回收 daemon 本地 transport / mirror 相关资源
 
 ---
 
@@ -429,6 +462,7 @@ mirror truth 与 transport / logical session 也必须解耦：
 ```text
 transport 是物理链路
 session 是稳定业务对象
-daemon logical session 是稳定服务端对象
+daemon 只保留自己的 transport attach fact 与 mirror truth
 active/inactive 只影响取数，不影响它们的身份
+foreground/background/tab switch 只影响取数，不得 fresh recreate transport
 ```

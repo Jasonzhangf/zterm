@@ -1,39 +1,65 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
 import { DeviceClipboardPlugin, isNativeClipboardSupported } from '../../plugins/DeviceClipboardPlugin';
+import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
 import {
-  buildTerminalShortcutSequence,
-  buildTerminalShortcutTokensFromSequence,
-  resolveTerminalShortcutLabel,
-  type TerminalShortcutToken,
-} from '../../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
-
-const FLOATING_BUBBLE_SIZE = 48;
-const FLOATING_BUBBLE_MARGIN = 10;
-const FLOATING_BUBBLE_DRAG_THRESHOLD_PX = 8;
-const QUICK_BAR_SIDE_PADDING = 6;
-const QUICK_BAR_ROW_GAP = 4;
-const QUICK_BAR_FIXED_COLUMNS = 3;
-const FIXED_BUTTON_MIN_WIDTH = 48;
-const FIXED_CLUSTER_PADDING_X = 3;
-const REPEATABLE_ACTION_LONG_PRESS_MS = 420;
-const REPEATABLE_ACTION_REPEAT_MS = 90;
-const CLIPBOARD_HISTORY_STORAGE_KEY = 'zterm:clipboard-history';
-const MAX_CLIPBOARD_HISTORY = 100;
-const FLOATING_BUBBLE_POSITION_STORAGE_KEY = 'zterm:floating-bubble-position';
-
-const SHORTCUT_PRESETS: ShortcutPreset[] = [
-  { label: 'Esc', sequence: '\x1b', kind: 'key', row: 'top-scroll' },
-  { label: 'Bksp', sequence: '\x7f', kind: 'key', row: 'top-scroll' },
-  { label: 'Tab', sequence: '\t', kind: 'key', row: 'top-scroll' },
-  { label: 'Enter', sequence: '\r', kind: 'key', row: 'top-scroll' },
-  { label: 'Space', sequence: ' ', kind: 'key', row: 'top-scroll' },
-  { label: '继续', sequence: '继续执行\r', kind: 'text', row: 'bottom-scroll' },
-  { label: 'Paste', sequence: '\x16', kind: 'text', row: 'bottom-scroll' },
-  { label: 'S-Tab', sequence: '\x1b[Z', kind: 'text', row: 'bottom-scroll' },
-  { label: 'S-Enter', sequence: '\n', kind: 'text', row: 'bottom-scroll' },
-];
+  CLIPBOARD_HISTORY_STORAGE_KEY,
+  FIXED_BUTTON_MIN_WIDTH,
+  FIXED_CLUSTER_PADDING_X,
+  FLOATING_BUBBLE_DRAG_THRESHOLD_PX,
+  FLOATING_BUBBLE_MARGIN,
+  FLOATING_BUBBLE_POSITION_STORAGE_KEY,
+  FLOATING_BUBBLE_SIZE,
+  QUICK_BAR_FIXED_COLUMNS,
+  QUICK_BAR_ROW_GAP,
+  QUICK_BAR_SIDE_PADDING,
+  REPEATABLE_ACTION_LONG_PRESS_MS,
+  REPEATABLE_ACTION_REPEAT_MS,
+  SHORTCUT_COMMON_TOKENS,
+  SHORTCUT_KEYBOARD_TOKENS,
+  SHORTCUT_ROW_META,
+  SHORTCUT_ROW_ORDER,
+  blurCurrentTarget,
+  bubbleViewportRectWithInset,
+  buildVisibleShortcutRowActions,
+  compactOverlayIconButton,
+  compactOverlayTextButton,
+  createDraftActionId,
+  createShortcutActionId,
+  dedupeClipboardHistory,
+  floatingPillButton,
+  formatSnippetPreview,
+  isSingleShortcutToken,
+  isSpaceShortcutLabel,
+  lightEditorInputStyle,
+  moveItem,
+  moveShortcutActionWithinRow,
+  normalizeClipboardHistory,
+  normalizeDraftActions,
+  normalizeSequenceForImmediateSend,
+  normalizeShortcutActions,
+  overlayIconButton,
+  overlayTextButton,
+  readStoredBubblePosition,
+  renderShortcutVisualNode,
+  resolveOverlayViewportMetrics,
+  resolvePresetShortcutTokens,
+  resolveShortcutComposerLabelFromSequence,
+  resolveShortcutDisplayMeta,
+  resolveShortcutVisualLabel,
+  shortcutTokenGridButton,
+  sortShortcutActions,
+  toDraftActions,
+  validateShortcutTokensForRow,
+  type DraftQuickAction,
+  type DraftShortcutAction,
+  type FloatingPanelTab,
+  type ShortcutEditorMode,
+  type ShortcutEditorTab,
+  type ShortcutRow,
+  type ShortcutToken,
+} from './terminal-quickbar-helpers';
+import { buildTerminalShortcutSequence } from '../../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
 
 interface TerminalQuickBarProps {
   activeSessionId?: string | null;
@@ -69,556 +95,7 @@ interface TerminalQuickBarProps {
   onShortcutUse?: (shortcutId: string) => void;
 }
 
-interface DraftQuickAction extends QuickAction {
-  textInput: string;
-}
-
-type FloatingPanelTab = 'quick-actions' | 'clipboard';
-
-interface DraftShortcutAction extends TerminalShortcutAction {}
-
-type ShortcutToken = TerminalShortcutToken;
-
-interface ShortcutPreset extends ShortcutToken {
-  row?: 'top-scroll' | 'bottom-scroll';
-}
-
-type ShortcutEditorTab = 'keyboard' | 'common';
-type ShortcutEditorMode = 'list' | 'form';
-type ShortcutRow = 'top-scroll' | 'bottom-scroll';
-
-const SHORTCUT_ROW_ORDER: ShortcutRow[] = ['top-scroll', 'bottom-scroll'];
-
-const SHORTCUT_ROW_META: Record<
-  ShortcutRow,
-  {
-    title: string;
-    summary: string;
-    addLabel: string;
-    formTag: string;
-    formHint: string;
-    inputPlaceholder: string;
-  }
-> = {
-  'top-scroll': {
-    title: '第二行（单按键）',
-    summary: 'Esc / Tab / Enter / Space / 单个字符',
-    addLabel: '+ 添加单按键',
-    formTag: '当前编辑：第二行单按键',
-    formHint: '这里只放单个按键，不支持 Ctrl / Shift 等组合。',
-    inputPlaceholder: '输入单个字母/数字/符号',
-  },
-  'bottom-scroll': {
-    title: '第三行（组合键）',
-    summary: 'Ctrl + C / Shift + Tab / Continue / Paste',
-    addLabel: '+ 添加组合键',
-    formTag: '当前编辑：第三行组合键',
-    formHint: '这里放组合键或复合动作，单按键请放到第二行。',
-    inputPlaceholder: '输入组合键里的目标字符，例如 c',
-  },
-};
-
-const SHORTCUT_KEYBOARD_TOKENS: ShortcutToken[] = [
-  { label: 'Ctrl', sequence: '__CTRL__', kind: 'modifier' },
-  { label: 'Option', sequence: '__OPTION__', kind: 'modifier' },
-  { label: 'Command', sequence: '__COMMAND__', kind: 'modifier' },
-  { label: 'Shift', sequence: '__SHIFT__', kind: 'modifier' },
-  { label: 'Tab', sequence: '\t', kind: 'key' },
-  { label: 'Esc', sequence: '\x1b', kind: 'key' },
-  { label: 'Return', sequence: '\r', kind: 'key' },
-  { label: 'Space', sequence: ' ', kind: 'key' },
-  { label: 'Delete', sequence: '\x7f', kind: 'key' },
-  { label: 'F1', sequence: '\x1bOP', kind: 'key' },
-  { label: 'F2', sequence: '\x1bOQ', kind: 'key' },
-  { label: 'F3', sequence: '\x1bOR', kind: 'key' },
-  { label: ',', sequence: ',', kind: 'text' },
-  { label: '.', sequence: '.', kind: 'text' },
-  { label: '/', sequence: '/', kind: 'text' },
-  { label: 'F4', sequence: '\x1bOS', kind: 'key' },
-  { label: 'F5', sequence: '\x1b[15~', kind: 'key' },
-  { label: 'F6', sequence: '\x1b[17~', kind: 'key' },
-  { label: '-', sequence: '-', kind: 'text' },
-  { label: '↑', sequence: '\x1b[A', kind: 'key' },
-  { label: '+', sequence: '+', kind: 'text' },
-  { label: 'F7', sequence: '\x1b[18~', kind: 'key' },
-  { label: 'F8', sequence: '\x1b[19~', kind: 'key' },
-  { label: 'F9', sequence: '\x1b[20~', kind: 'key' },
-  { label: '←', sequence: '\x1b[D', kind: 'key' },
-  { label: '↓', sequence: '\x1b[B', kind: 'key' },
-  { label: '→', sequence: '\x1b[C', kind: 'key' },
-  { label: 'F10', sequence: '\x1b[21~', kind: 'key' },
-  { label: 'F11', sequence: '\x1b[23~', kind: 'key' },
-  { label: 'F12', sequence: '\x1b[24~', kind: 'key' },
-];
-
-const SHORTCUT_COMMON_TOKENS: ShortcutToken[] = [
-  { label: '继续', sequence: '继续执行\r', kind: 'text' },
-  { label: 'Cmd+V', sequence: '\x16', kind: 'text' },
-  { label: 'Bksp', sequence: '\x7f', kind: 'key' },
-  { label: 'Esc', sequence: '\x1b', kind: 'key' },
-  { label: 'Tab', sequence: '\t', kind: 'key' },
-  { label: 'Enter', sequence: '\r', kind: 'key' },
-  { label: 'Space', sequence: ' ', kind: 'key' },
-  { label: 'S-Tab', sequence: '\x1b[Z', kind: 'key' },
-  { label: 'S-Enter', sequence: '\n', kind: 'key' },
-  { label: '↑', sequence: '\x1b[A', kind: 'key' },
-  { label: '↓', sequence: '\x1b[B', kind: 'key' },
-  { label: '←', sequence: '\x1b[D', kind: 'key' },
-  { label: '→', sequence: '\x1b[C', kind: 'key' },
-];
-
-const SIMPLE_SHORTCUT_PRESET_SEQUENCES = new Set([
-  '\x1b',
-  '\x7f',
-  '\t',
-  '\r',
-  ' ',
-  '\x1b[A',
-  '\x1b[B',
-  '\x1b[C',
-  '\x1b[D',
-  '\x1bOP',
-  '\x1bOQ',
-  '\x1bOR',
-  '\x1bOS',
-  '\x1b[15~',
-  '\x1b[17~',
-  '\x1b[18~',
-  '\x1b[19~',
-  '\x1b[20~',
-  '\x1b[21~',
-  '\x1b[23~',
-  '\x1b[24~',
-]);
-
-const MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS: Record<string, string> = {
-  Option: 'Opt',
-  Command: 'Cmd',
-  Return: 'Enter',
-  Delete: 'Del',
-};
-
-const SHORTCUT_VISUAL_LABELS: Record<string, string> = {
-  Esc: 'Esc',
-  Tab: 'Tab',
-  Enter: '↩',
-  Return: '↩',
-  Space: 'Space',
-  Bksp: '⌫',
-  Delete: '⌫',
-  Ctrl: 'Ctrl',
-  Control: 'Ctrl',
-  Shift: 'Shift',
-  Option: 'Opt',
-  Opt: 'Opt',
-  Alt: 'Alt',
-  Command: 'Cmd',
-  Cmd: 'Cmd',
-  'S-Tab': '⇧ Tab',
-  'S-Enter': '⇧ ↩',
-};
-
-function editorInputStyle() {
-  return {
-    width: '100%',
-    minHeight: '44px',
-    padding: '10px 12px',
-    borderRadius: '14px',
-    border: '1px solid rgba(255,255,255,0.12)',
-    backgroundColor: '#1f2437',
-    color: '#fff',
-    fontSize: '14px',
-  } as const;
-}
-
-function resolveShortcutTokenDisplayLabel(label: string) {
-  return MOBILE_SHORTCUT_TOKEN_DISPLAY_LABELS[label] || label;
-}
-
-function resolveShortcutVisualLabel(label: string) {
-  const normalized = resolveShortcutTokenDisplayLabel(label);
-  return SHORTCUT_VISUAL_LABELS[label] || SHORTCUT_VISUAL_LABELS[normalized] || normalized;
-}
-
-function isSpaceShortcutLabel(label: string) {
-  return resolveShortcutTokenDisplayLabel(label) === 'Space';
-}
-
-function shouldRenderShortcutKeycap(label: string) {
-  const normalized = resolveShortcutTokenDisplayLabel(label);
-  return isSpaceShortcutLabel(label) || Object.prototype.hasOwnProperty.call(SHORTCUT_VISUAL_LABELS, label) || Object.prototype.hasOwnProperty.call(SHORTCUT_VISUAL_LABELS, normalized);
-}
-
-function renderShortcutVisualNode(label: string, variant: 'button' | 'list' | 'token' = 'button') {
-  if (!shouldRenderShortcutKeycap(label)) {
-    return resolveShortcutVisualLabel(label);
-  }
-
-  const metrics = variant === 'list'
-    ? { minWidth: '44px', height: '30px', padding: '0 12px', borderWidth: '2px', fontSize: '18px', fontWeight: 800, radius: '10px' }
-    : variant === 'token'
-      ? { minWidth: '34px', height: '24px', padding: '0 8px', borderWidth: '1.8px', fontSize: '13px', fontWeight: 800, radius: '8px' }
-      : { minWidth: '30px', height: '22px', padding: '0 8px', borderWidth: '1.8px', fontSize: '13px', fontWeight: 800, radius: '8px' };
-
-  if (isSpaceShortcutLabel(label)) {
-    const spaceMetrics = variant === 'list'
-      ? { width: '52px', height: '20px' }
-      : variant === 'token'
-        ? { width: '40px', height: '18px' }
-        : { width: '38px', height: '16px' };
-
-    return (
-      <span
-        data-shortcut-keycap="space"
-        data-shortcut-space-visual="true"
-        aria-hidden="true"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: spaceMetrics.width,
-          height: spaceMetrics.height,
-          borderRadius: variant === 'list' ? '10px' : '8px',
-          border: `${metrics.borderWidth} solid currentColor`,
-          boxSizing: 'border-box',
-          verticalAlign: 'middle',
-          backgroundColor: 'rgba(255,255,255,0.05)',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)',
-        }}
-      >
-        <span
-          style={{
-            display: 'block',
-            width: variant === 'list' ? '28px' : variant === 'token' ? '22px' : '20px',
-            height: variant === 'list' ? '3px' : '2.5px',
-            borderRadius: '999px',
-            backgroundColor: 'currentColor',
-            opacity: 0.92,
-          }}
-        />
-      </span>
-    );
-  }
-
-  return (
-    <span
-      data-shortcut-keycap={resolveShortcutTokenDisplayLabel(label)}
-      aria-hidden="true"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: metrics.minWidth,
-        height: metrics.height,
-        padding: metrics.padding,
-        borderRadius: metrics.radius,
-        border: `${metrics.borderWidth} solid currentColor`,
-        boxSizing: 'border-box',
-        verticalAlign: 'middle',
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)',
-        fontSize: metrics.fontSize,
-        fontWeight: metrics.fontWeight,
-        letterSpacing: resolveShortcutVisualLabel(label).length > 2 ? '-0.01em' : 0,
-        lineHeight: 1,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {resolveShortcutVisualLabel(label)}
-    </span>
-  );
-}
-
-function formatShortcutSequencePreview(label: string, sequence: string) {
-  const tokens = buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
-  if (tokens.length > 0) {
-    return tokens
-      .map((token) => resolveShortcutVisualLabel(token.label))
-      .join(tokens.length > 1 ? ' ' : '')
-      .trim();
-  }
-
-  return formatSnippetPreview(sequence);
-}
-
-function resolveShortcutDisplayMeta(label: string, sequence: string) {
-  const normalizedLabel = resolveShortcutTokenDisplayLabel(label || '');
-  const visualLabel = resolveShortcutVisualLabel(label || '');
-  const preview = formatShortcutSequencePreview(label || '', sequence);
-  const titleUsesKeycap = Boolean(label) && shouldRenderShortcutKeycap(label);
-
-  if (!label) {
-    return {
-      title: '未命名',
-      subtitle: preview || '(空)',
-      titleUsesKeycap: false,
-      titleSourceLabel: '',
-    };
-  }
-
-  if (titleUsesKeycap) {
-    return {
-      title: visualLabel,
-      subtitle: isSpaceShortcutLabel(label) ? normalizedLabel : '',
-      titleUsesKeycap: true,
-      titleSourceLabel: normalizedLabel,
-    };
-  }
-
-  return {
-    title: label,
-    subtitle: preview || '(空)',
-    titleUsesKeycap: false,
-    titleSourceLabel: label,
-  };
-}
-
-function createDraftActionId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-
-  return `quick-action-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
-function toDraftActions(actions: QuickAction[]): DraftQuickAction[] {
-  return actions.map((action) => ({
-    ...action,
-    textInput: action.sequence.replace(/\r/g, '\n'),
-  }));
-}
-
-function normalizeDraftActions(actions: DraftQuickAction[]): QuickAction[] {
-  return actions.map(({ textInput, ...action }, index) => ({
-    ...action,
-    order: index,
-    sequence: textInput.replace(/\r?\n/g, '\r'),
-  }));
-}
-
-function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
-  if (fromIndex === toIndex || toIndex < 0 || toIndex >= items.length) {
-    return items;
-  }
-
-  const next = [...items];
-  const [item] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, item);
-  return next;
-}
-
-function moveShortcutActionWithinRow(
-  actions: DraftShortcutAction[],
-  row: ShortcutRow,
-  fromIndex: number,
-  toIndex: number,
-) {
-  const rowItems = actions.filter((action) => action.row === row);
-  if (fromIndex === toIndex || toIndex < 0 || toIndex >= rowItems.length) {
-    return actions;
-  }
-
-  const movedRowItems = moveItem(rowItems, fromIndex, toIndex);
-  const rowQueues = new Map<string, DraftShortcutAction[]>();
-  rowQueues.set(row, [...movedRowItems]);
-
-  return actions.map((action) => {
-    if (action.row !== row) {
-      return action;
-    }
-    return rowQueues.get(row)?.shift() || action;
-  });
-}
-
-function blurCurrentTarget(target: EventTarget | null) {
-  if (target instanceof HTMLButtonElement) {
-    target.blur();
-  }
-}
-
-function normalizeClipboardHistory(input: unknown): string[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-
-  return input
-    .filter((item): item is string => typeof item === 'string')
-    .filter((item) => item.length > 0)
-    .slice(0, MAX_CLIPBOARD_HISTORY);
-}
-
-function dedupeClipboardHistory(items: string[]) {
-  return Array.from(new Set(items.filter((item) => item.length > 0))).slice(0, MAX_CLIPBOARD_HISTORY);
-}
-
-function readStoredBubblePosition() {
-  if (typeof window === 'undefined') {
-    return { x: null, y: null } as { x: number | null; y: number | null };
-  }
-
-  try {
-    const raw = localStorage.getItem(FLOATING_BUBBLE_POSITION_STORAGE_KEY);
-    if (!raw) {
-      return { x: null, y: null };
-    }
-    const parsed = JSON.parse(raw) as Partial<{ x: number; y: number }>;
-    const x = typeof parsed.x === 'number' && Number.isFinite(parsed.x) ? parsed.x : null;
-    const y = typeof parsed.y === 'number' && Number.isFinite(parsed.y) ? parsed.y : null;
-    return { x, y };
-  } catch (error) {
-    console.warn('[TerminalQuickBar] Failed to read stored floating bubble position:', error);
-    return { x: null, y: null };
-  }
-}
-
-function bubbleViewportRectWithInset(keyboardInsetPx: number) {
-  if (typeof window === 'undefined') {
-    return {
-      width: FLOATING_BUBBLE_SIZE,
-      height: FLOATING_BUBBLE_SIZE,
-    };
-  }
-
-  const visualViewport = window.visualViewport;
-  const viewportWidth = Math.round(visualViewport?.width || window.innerWidth || FLOATING_BUBBLE_SIZE);
-  const viewportHeight = Math.round(
-    visualViewport?.height || Math.max(FLOATING_BUBBLE_SIZE, (window.innerHeight || FLOATING_BUBBLE_SIZE) - Math.max(0, keyboardInsetPx)),
-  );
-
-  return {
-    width: Math.max(viewportWidth, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
-    height: Math.max(viewportHeight, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
-  };
-}
-
-function resolveOverlayViewportMetrics(keyboardInsetPx: number) {
-  if (typeof window === 'undefined') {
-    return {
-      sheetHeightPx: null as number | null,
-      bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)),
-    };
-  }
-
-  const layoutHeight = Math.max(0, Math.round(window.innerHeight || 0));
-  const visualViewport = window.visualViewport;
-  if (!visualViewport) {
-    return {
-      sheetHeightPx: Math.max(320, layoutHeight - 16),
-      bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)),
-    };
-  }
-
-  const visibleBottom = Math.max(
-    0,
-    Math.round((visualViewport.height || 0) + (visualViewport.offsetTop || 0)),
-  );
-  const occludedBottom = Math.max(0, layoutHeight - visibleBottom);
-  const bottomInsetPx = Math.max(
-    occludedBottom,
-    Math.max(0, Math.round(keyboardInsetPx || 0)),
-  );
-
-  return {
-    sheetHeightPx: Math.max(320, visibleBottom - 16),
-    bottomInsetPx,
-  };
-}
-
-function createShortcutActionId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-
-  return `shortcut-action-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
-function normalizeSequenceForImmediateSend(value: string) {
-  const normalized = value.replace(/\r?\n/g, '\r');
-  if (!normalized.trim()) {
-    return '';
-  }
-  return /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
-}
-
-function isSingleShortcutToken(token: ShortcutToken) {
-  if (token.kind === 'modifier') {
-    return false;
-  }
-  if (token.kind === 'key') {
-    return true;
-  }
-  if (token.kind === 'text') {
-    return token.sequence.length === 1;
-  }
-  if (SIMPLE_SHORTCUT_PRESET_SEQUENCES.has(token.sequence)) {
-    return true;
-  }
-  return token.sequence.length === 1 && !/[\x00-\x1f]/.test(token.sequence);
-}
-
-function validateShortcutTokensForRow(
-  row: ShortcutRow,
-  tokens: ShortcutToken[],
-  built: ReturnType<typeof buildTerminalShortcutSequence>,
-) {
-  if (tokens.length === 0 || built.error) {
-    return '';
-  }
-
-  if (row === 'top-scroll') {
-    if (tokens.some((token) => token.kind === 'modifier')) {
-      return '第二行只支持单按键，不支持 Ctrl / Shift 等组合。';
-    }
-    if (tokens.length !== 1 || !isSingleShortcutToken(tokens[0])) {
-      return '第二行只支持单个按键。';
-    }
-    return '';
-  }
-
-  if (tokens.length === 1 && isSingleShortcutToken(tokens[0])) {
-    return '第三行用于组合键或复合动作，单按键请放到第二行。';
-  }
-
-  return '';
-}
-
-function inferShortcutRow(label: string, sequence: string): ShortcutRow {
-  const tokens = buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
-  const built = buildTerminalShortcutSequence(tokens);
-  return validateShortcutTokensForRow('top-scroll', tokens, built) ? 'bottom-scroll' : 'top-scroll';
-}
-
-function sortShortcutActions(actions: TerminalShortcutAction[]) {
-  return [...actions].sort((left, right) => {
-    if (left.row !== right.row) {
-      return SHORTCUT_ROW_ORDER.indexOf(left.row) - SHORTCUT_ROW_ORDER.indexOf(right.row);
-    }
-    return left.order - right.order;
-  });
-}
-
-function normalizeShortcutActions(actions: DraftShortcutAction[]): TerminalShortcutAction[] {
-  const grouped = new Map<ShortcutRow, DraftShortcutAction[]>();
-  grouped.set('top-scroll', []);
-  grouped.set('bottom-scroll', []);
-  actions.forEach((action) => {
-    const row = inferShortcutRow(action.label, action.sequence);
-    grouped.get(row)?.push({
-      ...action,
-      row,
-    });
-  });
-
-  return SHORTCUT_ROW_ORDER.flatMap((row) =>
-    (grouped.get(row) || []).map((action, index) => ({
-      ...action,
-      order: index,
-      row,
-    })),
-  );
-}
-
-export function TerminalQuickBar({
+function TerminalQuickBarComponent({
   activeSessionId,
   quickActions,
   shortcutActions,
@@ -706,6 +183,11 @@ export function TerminalQuickBar({
   const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
   const shortcutEditorScrollRef = useRef<HTMLDivElement | null>(null);
   const domEditorFocusTimerRef = useRef<number | null>(null);
+  const quickInputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const quickInputSessionIdRef = useRef<string | null>(activeSessionId || null);
+  const quickInputDirtyRef = useRef(false);
+  const quickInputValueRef = useRef(sessionDraft || '');
+  const [quickInputValue, setQuickInputValue] = useState(sessionDraft || '');
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => {
@@ -745,15 +227,58 @@ export function TerminalQuickBar({
     ? `${overlayViewportMetrics.sheetHeightPx}px`
     : 'calc(100dvh - 16px)';
   const overlayBottomInsetStyle = `${overlayViewportMetrics.bottomInsetPx}px`;
+  const persistQuickInputValue = useCallback((nextValue: string) => {
+    quickInputDirtyRef.current = true;
+    quickInputValueRef.current = nextValue;
+    setQuickInputValue(nextValue);
+    onSessionDraftChange?.(nextValue);
+  }, [onSessionDraftChange]);
+
+  useEffect(() => {
+    quickInputValueRef.current = quickInputValue;
+    if ((sessionDraft || '') === quickInputValue) {
+      quickInputDirtyRef.current = false;
+    }
+  }, [quickInputValue, sessionDraft]);
+
+  useEffect(() => {
+    const nextSessionId = activeSessionId || null;
+    const nextPersistedValue = sessionDraft || '';
+    const sessionChanged = quickInputSessionIdRef.current !== nextSessionId;
+    quickInputSessionIdRef.current = nextSessionId;
+    const quickInputFocused =
+      typeof document !== 'undefined'
+      && document.activeElement === quickInputTextareaRef.current;
+
+    if (sessionChanged) {
+      quickInputDirtyRef.current = false;
+      quickInputValueRef.current = nextPersistedValue;
+      setQuickInputValue(nextPersistedValue);
+      return;
+    }
+
+    if (!quickInputFocused || !quickInputDirtyRef.current || nextPersistedValue === quickInputValueRef.current) {
+      quickInputValueRef.current = nextPersistedValue;
+      setQuickInputValue((current) => (current === nextPersistedValue ? current : nextPersistedValue));
+      if (nextPersistedValue === quickInputValueRef.current) {
+        quickInputDirtyRef.current = false;
+      }
+    }
+  }, [activeSessionId, sessionDraft]);
+
   const appendToDraft = (value: string) => {
-    onSessionDraftChange?.(`${sessionDraft || ''}${value}`);
+    persistQuickInputValue(`${quickInputValueRef.current || ''}${value}`);
   };
 
   const sendSessionDraft = () => {
-    const payload = normalizeSequenceForImmediateSend(sessionDraft);
+    const payload = normalizeSequenceForImmediateSend(quickInputValueRef.current);
     if (!payload) {
       return;
     }
+    quickInputDirtyRef.current = false;
+    quickInputValueRef.current = '';
+    setQuickInputValue('');
+    onSessionDraftChange?.('');
     onSessionDraftSend?.(payload);
   };
 
@@ -1265,7 +790,7 @@ export function TerminalQuickBar({
   };
 
   const buildShortcutTokensFromSequence = (label: string, sequence: string): ShortcutToken[] => {
-    return buildTerminalShortcutTokensFromSequence(label, sequence, SHORTCUT_PRESETS);
+    return resolvePresetShortcutTokens(label, sequence);
   };
 
   const syncDraftShortcutTokens = (tokens: ShortcutToken[]) => {
@@ -1355,7 +880,7 @@ export function TerminalQuickBar({
       return;
     }
 
-    const nextLabel = resolveTerminalShortcutLabel(draftShortcutLabel, draftShortcutBuild.preview);
+    const nextLabel = resolveShortcutComposerLabelFromSequence(draftShortcutLabel.trim() || draftShortcutBuild.preview);
 
     const nextActions = editingShortcutId
       ? draftShortcutActions.map((action) =>
@@ -2508,8 +2033,9 @@ export function TerminalQuickBar({
                 }}
               >
                 <textarea
-                  value={sessionDraft}
-                  onChange={(event) => onSessionDraftChange?.(event.target.value)}
+                  ref={quickInputTextareaRef}
+                  value={quickInputValue}
+                  onChange={(event) => persistQuickInputValue(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
@@ -2537,14 +2063,14 @@ export function TerminalQuickBar({
               <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
                 <button
                   onClick={() => {
-                    const trimmed = sessionDraft.trim();
+                    const trimmed = quickInputValueRef.current.trim();
                     if (!trimmed) {
                       return;
                     }
                     const nextAction: QuickAction = {
                       id: createDraftActionId(),
                       label: trimmed.slice(0, 12) || '新片段',
-                      sequence: sessionDraft.replace(/\r?\n/g, '\r'),
+                      sequence: quickInputValueRef.current.replace(/\r?\n/g, '\r'),
                       order: sortedQuickActions.length,
                     };
                     onQuickActionsChange?.([...sortedQuickActions, nextAction]);
@@ -2564,7 +2090,7 @@ export function TerminalQuickBar({
                 <button
                   onClick={() => {
                     setFloatingMenuOpen(false);
-                    onOpenScheduleComposer?.(sessionDraft);
+                    onOpenScheduleComposer?.(quickInputValueRef.current);
                   }}
                   disabled={!activeSessionId}
                   style={{
@@ -3050,147 +2576,5 @@ export function TerminalQuickBar({
   );
 }
 
-function formatSnippetPreview(value: string) {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 24);
-}
-
-function lightEditorInputStyle() {
-  return {
-    ...editorInputStyle(),
-    backgroundColor: '#f4f6fb',
-    border: '1px solid rgba(23, 27, 45, 0.1)',
-    color: mobileTheme.colors.lightText,
-  } as const;
-}
-
-function buildVisibleShortcutRowActions(
-  row: ShortcutRow,
-  shortcutActions: TerminalShortcutAction[],
-) {
-  const customRowActions = shortcutActions.filter((action) => action.row === row);
-  const customBySequence = new Map<string, { id: string; label: string; sequence: string }>();
-  customRowActions.forEach((action) => {
-    if (!customBySequence.has(action.sequence)) {
-      customBySequence.set(action.sequence, action);
-    }
-  });
-
-  const visibleActions: Array<{ id: string; label: string; sequence: string }> = [];
-  const consumedSequences = new Set<string>();
-
-  SHORTCUT_PRESETS
-    .filter((preset) => preset.row === row)
-    .forEach((preset) => {
-      const customAction = customBySequence.get(preset.sequence);
-      if (customAction) {
-        visibleActions.push({
-          id: customAction.id,
-          label: customAction.label,
-          sequence: customAction.sequence,
-        });
-        consumedSequences.add(customAction.sequence);
-        return;
-      }
-      visibleActions.push({
-        id: `preset-${row}-${preset.label}-${preset.sequence}`,
-        label: preset.label,
-        sequence: preset.sequence,
-      });
-      consumedSequences.add(preset.sequence);
-    });
-
-  customRowActions.forEach((action) => {
-    if (consumedSequences.has(action.sequence)) {
-      return;
-    }
-    visibleActions.push({
-      id: action.id,
-      label: action.label,
-      sequence: action.sequence,
-    });
-    consumedSequences.add(action.sequence);
-  });
-
-  return visibleActions;
-}
-
-function overlayIconButton(disabled: boolean) {
-  return {
-    width: '32px',
-    height: '32px',
-    borderRadius: '999px',
-    border: 'none',
-    backgroundColor: disabled ? '#f3f5f9' : '#eef2f8',
-    color: disabled ? '#c3cad7' : mobileTheme.colors.lightText,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontWeight: 700,
-    flexShrink: 0,
-  } as const;
-}
-
-function compactOverlayIconButton(disabled: boolean) {
-  return {
-    ...overlayIconButton(disabled),
-    width: '30px',
-    height: '30px',
-    fontSize: '16px',
-  } as const;
-}
-
-function overlayTextButton(backgroundColor: string, color: string) {
-  return {
-    minHeight: '34px',
-    padding: '0 12px',
-    borderRadius: '999px',
-    border: 'none',
-    backgroundColor,
-    color,
-    cursor: 'pointer',
-    fontWeight: 700,
-    flexShrink: 0,
-  } as const;
-}
-
-function compactOverlayTextButton(backgroundColor: string, color: string) {
-  return {
-    ...overlayTextButton(backgroundColor, color),
-    minHeight: '30px',
-    padding: '0 10px',
-    fontSize: '14px',
-  } as const;
-}
-
-function floatingPillButton(backgroundColor: string, color: string) {
-  return {
-    minHeight: '34px',
-    padding: '0 12px',
-    borderRadius: '999px',
-    border: 'none',
-    backgroundColor,
-    color,
-    cursor: 'pointer',
-    fontWeight: 700,
-    flexShrink: 0,
-  } as const;
-}
-
-function shortcutTokenGridButton(isModifier: boolean, active: boolean) {
-  return {
-    minHeight: '62px',
-    borderRadius: '14px',
-    border: active ? '1px solid rgba(22, 119, 255, 0.28)' : '1px solid rgba(23, 27, 45, 0.12)',
-    backgroundColor: active
-      ? 'rgba(22, 119, 255, 0.10)'
-      : isModifier
-        ? '#ffffff'
-        : '#f7f9fc',
-    color: active ? '#1677ff' : mobileTheme.colors.lightText,
-    cursor: 'pointer',
-    fontWeight: 700,
-    fontSize: '12px',
-    padding: '6px 4px',
-    textAlign: 'center',
-    boxShadow: active ? '0 4px 10px rgba(22, 119, 255, 0.08)' : 'none',
-    overflow: 'hidden',
-  } as const;
-}
+export const TerminalQuickBar = memo(TerminalQuickBarComponent);
+TerminalQuickBar.displayName = 'TerminalQuickBar';

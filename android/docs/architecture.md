@@ -6,7 +6,7 @@
 2. `architecture.md`：模块边界
 3. `docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局 / Mac 共享壳决策
 4. `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 唯一真源
-5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport / daemon logical session 生命周期真源
+5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport 生命周期真源（daemon 不持有客户端逻辑）
 6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
 7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot helper 唯一真源
 8. `dev-workflow.md`：执行门禁
@@ -24,25 +24,31 @@
 - Session/Transport：WebSocket、tmux bridge 会话状态
 - Session/Transport 不变量：
   - `bridge target = bridgeHost + bridgePort + authToken`
-  - 每个 bridge target 只允许一个长期存活的 **control transport**
-  - 每个 `clientSessionId` 只允许一个稳定的 **per-session transport**
-  - `client session` 是稳定业务对象，不是 transport
-  - `daemon logical client session` 也是稳定对象，不是 transport
-  - control transport 只承载 auth / create / attach / resume / close 等低频控制
-  - head / range / input 等高频流量只走 per-session transport，不复用到 control transport
-  - active / inactive 只影响取数频率，不影响 session / transport 身份
-  - foreground / background / tab switch 不得成为 fresh recreate session 的理由
+  - `client session` 是客户端稳定业务对象，不是 transport
+  - daemon **不关心也不能关心任何客户端逻辑/状态机**
+  - daemon 不允许持有 `logical client session / clientSessionId owner / readyTransportId / active tab / foreground / background / viewport / width-mode / pane`
+  - 若协议兼容期仍存在相关字段，只允许作为一次性 attach 入参，不得在 daemon 内部成为长期状态真相
+  - active / inactive 只影响客户端取数频率，不影响客户端 session / transport 身份
+  - foreground / background / tab switch 不得成为客户端 fresh recreate transport 的理由
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
-- Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer
-- Client Mirror Buffer 不变量：窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相；client 不得先清空已有本地 buffer 再重拉
-- Client Render Window：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
+- Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer；只持有本地 sparse buffer / gap ranges / visible-range repair plan
+- Client Mirror Buffer 不变量：
+  - 窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相
+  - client 不得先清空已有本地 buffer 再重拉
+  - buffer manager 不持有 `follow / reading / renderBottomIndex`
+  - buffer manager 只吃 daemon head + renderer 声明的 visible range
+- Client Render Window：唯一状态是 `follow / reading + renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
+- Client Render Window 不变量：
+  - renderer 是 visible range 唯一真相
+  - gap 先空白占位，不等待补齐
+  - buffer patch 到达后只按行/区间重刷，不整屏重算
 - Client Render Width Mode：`adaptive-phone | mirror-fixed`
 - Client Render Width 不变量：
   - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
   - `mirror-fixed` 下 viewport / IME / safe-area / shell 宽度变化不得回写 daemon mirror / tmux 宽度
   - `mirror-fixed` 下自动关闭左右滑切 tab，避免与 horizontal pan 冲突
 - Android Shell：Capacitor、通知、后台服务
-- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；维护 canonical buffer 与 per-session 调度真源
+- Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 - Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
 
@@ -210,13 +216,15 @@ daemon server
       client buffer manager
         ├─ 自己起 timer
         ├─ 定时先问 head
-        ├─ 比较 local buffer 与 daemon head
-        ├─ 决定补 diff / 直接跳到最新三屏 / reading gap repair
-        └─ 维护本地 1000 行 sparse sliding buffer
+        ├─ 比较 local sparse buffer 与 daemon head
+        ├─ 结合 renderer 声明的 visible range 计算 gap / diff
+        ├─ 决定补 diff / 直接跳到最新三屏 / visible gap repair
+        └─ 维护本地 1000 行 sparse sliding buffer + line/range patch
                 ↓
       renderer
         ├─ follow / reading
         ├─ renderBottomIndex
+        ├─ visible range
         └─ render window
                 ↓
       UI shell
@@ -229,20 +237,21 @@ daemon server
 - daemon 不得碰：
   - follow / reading
   - renderer
+  - visible range
   - planner / prefetch / snapshot / fallback
   - gap 判断与客户端拉取策略
 - daemon 每个 session 只维护自己的 canonical buffer；多 session = 多个并行 canonical buffer
 - 任何 daemon 回复都必须带当前 head；但 daemon 不关心客户端为何请求这个区间
-- client buffer manager 是独立 worker，只关心 daemon 同步，不关心渲染
-- client buffer manager 每轮都先问 head，再决定请求范围
+- client buffer manager 是独立 worker，只关心 daemon 同步，不关心渲染模式
+- client buffer manager 每轮都先问 head，再结合当前 local sparse buffer 与 renderer 声明的 visible range 决定请求范围
 - 若本地为空、失真或离 head 超过三屏：直接请求最新三屏并移动本地窗口；中间不补
 - 若本地仍接近 head：只补 diff
-- reading 时若 renderer 当前窗口不连续：只补 reading gap
+- renderer 当前窗口不连续时：只补 visible gap
 - 即使本地工作窗口判断错误，也只能重算 request plan / 缺口；**不能**把已有 absolute-index 本地 buffer truth 清空成空窗
-- renderer 只有 `follow / reading` 两种模式，只维护 `renderBottomIndex`
+- renderer 只有 `follow / reading` 两种模式，只维护 `renderBottomIndex` 与 visible range
 - renderer 不修改 buffer，不参与 transport 规划，不直接 request daemon
 - 用户上滚进入 reading；重新进入 / 下滚到底 / 输入退出 reading 回 follow
-- buffer manager 只通知“head 变了 / buffer 变了 / gap ready 了”，renderer 自己决定是否刷新当前窗口
+- renderer 遇到 gap 先画空白占位；buffer manager 补齐后只推对应行/区间 patch，renderer 自己决定局部刷新
 - UI shell 只移动容器；IME 不得进入 buffer / render 真相链
 
 ## Connection / Session 真源

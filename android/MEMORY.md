@@ -8,6 +8,9 @@
 
 ## Key Decisions
 
+- [2026-05-02] terminal 四层模型再次冻结：daemon 只管 `tmux -> mirror truth`；renderer 是 visible range 唯一真相；buffer manager 只管 local sparse buffer / gap repair，不持有 `follow / reading / renderBottomIndex`；gap 必须先空白占位，再按行/区间 patch 重刷
+- [2026-05-02] terminal transport 也再次冻结：transport 必须长期复用长链接；同一 `bridge target` 只允许一个 control transport，同一 `clientSessionId` 只允许一个稳定 per-session transport；foreground/background/tab switch 只影响取数，不得 fresh recreate transport
+
 - [2026-04-18] 先把流程真源拆成 spec / architecture / dev-workflow / task / CACHE / MEMORY / evidence
 - [2026-04-18] skill 只承载跨任务可复用的动作、门禁、反模式
 - [2026-04-18] runtime 改动必须走 build + sync + 安装态验证

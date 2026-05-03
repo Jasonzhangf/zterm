@@ -96,9 +96,8 @@ export function normalizeMirrorCaptureLines(
     alternateOn: boolean;
   },
 ) {
-  return options.alternateOn
-    ? normalizeCapturedLineBlock(raw, options.paneRows)
-    : normalizeCapturedLineBlock(raw);
+  void options;
+  return normalizeCapturedLineBlock(raw);
 }
 
 export function toIndexedLines(startIndex: number, lines: TerminalCell[][]): TerminalIndexedLine[] {

@@ -31,18 +31,16 @@ export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> 
 
 export interface ClientSession {
   id: string;
-  clientSessionId: string;
-  transportId: string | null;
-  readyTransportId: string | null;
+  transportId: string;
   transport: ClientSessionTransport | null;
   closeTransport?: (reason: string) => void;
-  transportRequestOrigin: string;
+  requestOrigin: string;
   sessionName: string;
   mirrorKey: string | null;
   wsAlive: boolean;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
-  logicalSessionBound: boolean;
+  connectedSent: boolean;
 }
 
 export interface SessionMirror {

@@ -1,12 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { SavedTabList, Session } from '../../lib/types';
+import type { SavedTabList } from '../../lib/types';
 
 const DRAG_HANDLE_LONG_PRESS_MS = 360;
 
+export interface TabManagerSessionItem {
+  id: string;
+  bridgeHost: string;
+  bridgePort: number;
+  sessionName: string;
+  customName?: string;
+  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay';
+}
+
 interface TabManagerSheetProps {
   open: boolean;
-  sessions: Session[];
+  sessions: TabManagerSessionItem[];
   activeSessionId?: string | null;
   savedTabLists: SavedTabList[];
   onClose: () => void;
@@ -35,7 +44,7 @@ function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
-function formatResolvedPath(path?: Session['resolvedPath']) {
+function formatResolvedPath(path?: TabManagerSessionItem['resolvedPath']) {
   switch (path) {
     case 'tailscale':
       return 'Tailscale';
@@ -52,7 +61,7 @@ function formatResolvedPath(path?: Session['resolvedPath']) {
   }
 }
 
-function moveSessionItem(sessions: Session[], sessionId: string, toIndex: number) {
+function moveSessionItem(sessions: TabManagerSessionItem[], sessionId: string, toIndex: number) {
   const currentIndex = sessions.findIndex((session) => session.id === sessionId);
   if (currentIndex < 0) {
     return sessions;
@@ -69,7 +78,7 @@ function moveSessionItem(sessions: Session[], sessionId: string, toIndex: number
   return nextSessions;
 }
 
-export function TabManagerSheet({
+function TabManagerSheetComponent({
   open,
   sessions,
   activeSessionId,
@@ -101,6 +110,7 @@ export function TabManagerSheet({
     offsetY: number;
   } | null>(null);
   const dragStateRef = useRef<typeof dragState>(null);
+  const lastPointerCloseIntentRef = useRef<{ sessionId: string; at: number } | null>(null);
 
   useEffect(() => {
     dragStateRef.current = dragState;
@@ -141,7 +151,7 @@ export function TabManagerSheet({
     }
   };
 
-  const requestRename = (session: Session) => {
+  const requestRename = (session: TabManagerSessionItem) => {
     const next = window.prompt('Rename tab', session.customName || session.sessionName)?.trim();
     if (!next) {
       return;
@@ -470,11 +480,26 @@ export function TabManagerSheet({
                   </button>
                   <button
                     type="button"
+                    aria-label={`关闭 ${session.customName || session.sessionName}`}
                     tabIndex={-1}
                     onFocus={(event) => event.currentTarget.blur()}
                     onMouseDown={(event) => event.preventDefault()}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => onCloseSession(session.id, 'tab-manager-close-button')}
+                    onPointerUp={(event) => {
+                      event.stopPropagation();
+                      lastPointerCloseIntentRef.current = { sessionId: session.id, at: Date.now() };
+                      onCloseSession(session.id, 'tab-manager-close-button');
+                    }}
+                    onClick={() => {
+                      const recentPointer = lastPointerCloseIntentRef.current;
+                      if (
+                        recentPointer
+                        && recentPointer.sessionId === session.id
+                        && Date.now() - recentPointer.at < 600
+                      ) {
+                        return;
+                      }
+                      onCloseSession(session.id, 'tab-manager-close-button');
+                    }}
                     style={{
                       width: '36px',
                       height: '36px',
@@ -658,3 +683,6 @@ export function TabManagerSheet({
     </div>
   );
 }
+
+export const TabManagerSheet = memo(TabManagerSheetComponent);
+TabManagerSheet.displayName = 'TabManagerSheet';

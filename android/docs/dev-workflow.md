@@ -47,6 +47,19 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - future Mac 的实现也必须先沿 shared app-layer / platform shell 的边界推进，不能把 Android 页面逻辑复制一份到 `mac/`
 
 
+## Protocol freeze 门禁
+
+- terminal wire protocol 的唯一真源固定为：
+  - `packages/shared/src/connection/protocol.ts`
+  - `packages/shared/src/connection/types.ts`
+- `android/src/lib/types.ts` 只能 re-export shared wire type；不得再本地复制 `ClientMessage / ServerMessage / HostConfigMessage / Buffer*Payload`
+- 任何协议变更必须按顺序：
+  1. 先更新 shared protocol/types 真源
+  2. 再补 source gate / contract test
+  3. 再改 daemon / client consumer
+- 任何“只为性能”做的改动，不允许通过裁剪既有 payload 语义达成
+- 客户端巨型文件拆分只能做 ownership 下沉，不得借拆分之机修改 wire 行为
+
 ## Terminal buffer 重构门禁
 
 - 任何 terminal buffer / scroll / cursor 改动，先更新：
@@ -55,8 +68,13 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
   - `docs/daemon-mirror-test-plan.md`
   - `docs/terminal-test-loop-checklist.md`
 - 未完成 ownership 拆分前，禁止继续在 `TerminalView.tsx` 叠加 projection / anchor / scroll patch
-- daemon 侧提交前必须证明：它只维护 session canonical truth，只回答 head / range，且每次回复都带 head；不承载显示逻辑，不承载策略
-- client 侧提交前必须证明：buffer worker / renderer container / UI shell 已拆开，renderer 不直接驱动 transport
+- daemon 侧提交前必须证明：它只维护 session canonical truth，只回答 head / range，且每次回复都带 head；不承载显示逻辑，不承载策略，也不持有任何 client 状态机
+- client 侧提交前必须证明：
+  - buffer worker / renderer container / UI shell 已拆开
+  - buffer worker 不持有 `follow / reading / renderBottomIndex`
+  - renderer 是 visible range 唯一真相
+  - gap 策略是“先空白占位，再按行/区间 patch”
+  - transport 是长期复用长链接，foreground/background/tab switch 不得 fresh recreate transport
 
 ### Terminal 真回环门禁（新增硬规则）
 

@@ -10,6 +10,8 @@ import {
   shouldReconnectQueuedActiveInput,
   useSession,
 } from './SessionContext';
+import { useSessionBufferSnapshot } from '../lib/session-buffer-store';
+import { useSessionHeadSnapshot } from '../lib/session-head-store';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
@@ -217,6 +219,8 @@ function SessionHarness() {
     resumeActiveSessionTransport,
     updateSessionViewport,
     getSessionDebugMetrics,
+    getSessionBufferStore,
+    getSessionHeadStore,
   } = useSession();
   const [remoteScreenshotResult, setRemoteScreenshotResult] = useState('idle');
   const [remoteScreenshotPhase, setRemoteScreenshotPhase] = useState('idle');
@@ -226,21 +230,24 @@ function SessionHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
-  const renderedLines = activeSession?.buffer.lines.map(cellsToLine) || [];
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
+  const renderedLines = activeBuffer?.lines.map(cellsToLine) || [];
   const emitFollowViewport = () => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
@@ -256,14 +263,14 @@ function SessionHarness() {
   return (
     <div>
       <div data-testid="session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="session-revision">{activeBuffer?.revision ?? -1}</div>
       <div data-testid="session-cursor">
-        {activeSession?.buffer.cursor
-          ? `${activeSession.buffer.cursor.rowIndex}:${activeSession.buffer.cursor.col}:${activeSession.buffer.cursor.visible ? 'visible' : 'hidden'}`
+        {activeBuffer?.cursor
+          ? `${activeBuffer.cursor.rowIndex}:${activeBuffer.cursor.col}:${activeBuffer.cursor.visible ? 'visible' : 'hidden'}`
           : 'null'}
       </div>
-      <div data-testid="session-start-index">{activeSession?.buffer.startIndex ?? -1}</div>
-      <div data-testid="session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
+      <div data-testid="session-start-index">{activeBuffer?.startIndex ?? -1}</div>
+      <div data-testid="session-end-index">{activeBuffer?.endIndex ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
       <div data-testid="session-debug-status">{activeSession ? (getSessionDebugMetrics(activeSession.id)?.status || 'missing') : 'missing'}</div>
       <div data-testid="session-buffer-pull-active">{activeSession && getSessionDebugMetrics(activeSession.id)?.bufferPullActive ? 'true' : 'false'}</div>
@@ -324,7 +331,7 @@ function SessionHarness() {
       <button
         type="button"
         onClick={() => updateSessionViewport('session-1', {
-          startIndex: 56,
+          startIndex: 8,
           endIndex: 80,
           viewportRows: 24,
         })}
@@ -334,8 +341,8 @@ function SessionHarness() {
       <button
         type="button"
         onClick={() => updateSessionViewport('session-1', {
-          startIndex: 56,
-          endIndex: 80,
+          startIndex: 96,
+          endIndex: 120,
           viewportRows: 24,
         })}
       >
@@ -346,7 +353,16 @@ function SessionHarness() {
 }
 
 function MultiSessionHarness() {
-  const { state, createSession, switchSession, reconnectAllSessions, updateSessionViewport, getSessionDebugMetrics } = useSession();
+  const {
+    state,
+    createSession,
+    switchSession,
+    reconnectAllSessions,
+    updateSessionViewport,
+    getSessionDebugMetrics,
+    getSessionBufferStore,
+    getSessionHeadStore,
+  } = useSession();
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1', activate: true });
@@ -354,27 +370,34 @@ function MultiSessionHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const sessionBufferStore = getSessionBufferStore();
+  const sessionHeadStore = getSessionHeadStore();
+  const activeBufferSnapshot = useSessionBufferSnapshot(sessionBufferStore, activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(sessionHeadStore, activeSession?.id || null);
+  const session1BufferSnapshot = useSessionBufferSnapshot(sessionBufferStore, 'session-1');
+  const session2BufferSnapshot = useSessionBufferSnapshot(sessionBufferStore, 'session-2');
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
@@ -386,10 +409,10 @@ function MultiSessionHarness() {
         {state.sessions.find((session) => session.id === 'session-2')?.state || 'missing'}
       </div>
       <div data-testid="session-1-revision">
-        {state.sessions.find((session) => session.id === 'session-1')?.buffer.revision ?? -1}
+        {session1BufferSnapshot.buffer.revision ?? -1}
       </div>
       <div data-testid="session-2-revision">
-        {state.sessions.find((session) => session.id === 'session-2')?.buffer.revision ?? -1}
+        {session2BufferSnapshot.buffer.revision ?? -1}
       </div>
       <div data-testid="session-1-debug-active">
         {getSessionDebugMetrics('session-1')?.active ? 'true' : 'false'}
@@ -441,7 +464,7 @@ function MultiSessionHarness() {
 }
 
 function StaleFollowHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -462,38 +485,41 @@ function StaleFollowHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="stale-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="stale-session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="stale-session-revision">{activeBuffer?.revision ?? -1}</div>
     </div>
   );
 }
 
 function StaleFollowVisibleTruthHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -514,42 +540,45 @@ function StaleFollowVisibleTruthHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="stale-visible-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="stale-visible-session-revision">{activeSession?.buffer.revision ?? -1}</div>
-      <div data-testid="stale-visible-session-start-index">{activeSession?.buffer.startIndex ?? -1}</div>
-      <div data-testid="stale-visible-session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
-      <div data-testid="stale-visible-session-first-line">{cellsToLine(activeSession?.buffer.lines[0] || [])}</div>
-      <div data-testid="stale-visible-session-last-line">{cellsToLine(activeSession?.buffer.lines[activeSession?.buffer.lines.length ? activeSession.buffer.lines.length - 1 : 0] || [])}</div>
+      <div data-testid="stale-visible-session-revision">{activeBuffer?.revision ?? -1}</div>
+      <div data-testid="stale-visible-session-start-index">{activeBuffer?.startIndex ?? -1}</div>
+      <div data-testid="stale-visible-session-end-index">{activeBuffer?.endIndex ?? -1}</div>
+      <div data-testid="stale-visible-session-first-line">{cellsToLine(activeBuffer?.lines[0] || [])}</div>
+      <div data-testid="stale-visible-session-last-line">{cellsToLine(activeBuffer?.lines[activeBuffer?.lines.length ? activeBuffer.lines.length - 1 : 0] || [])}</div>
     </div>
   );
 }
 
 function FarBehindFollowHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -570,38 +599,41 @@ function FarBehindFollowHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="far-behind-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="far-behind-session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="far-behind-session-revision">{activeBuffer?.revision ?? -1}</div>
     </div>
   );
 }
 
 function NearHeadFollowHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -622,38 +654,41 @@ function NearHeadFollowHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="near-head-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="near-head-session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="near-head-session-revision">{activeBuffer?.revision ?? -1}</div>
     </div>
   );
 }
 
 function NearHeadGapFollowHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     const sparseBuffer = applyBufferSyncToSessionBuffer(
@@ -678,38 +713,41 @@ function NearHeadGapFollowHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="near-head-gap-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="near-head-gap-session-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="near-head-gap-session-revision">{activeBuffer?.revision ?? -1}</div>
     </div>
   );
 }
 
 function CompactFollowImmediateApplyHarness() {
-  const { state, createSession, updateSessionViewport } = useSession();
+  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -730,34 +768,37 @@ function CompactFollowImmediateApplyHarness() {
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
+  const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !activeBuffer) {
       return;
     }
     const endIndex = Math.max(
       0,
       Math.floor(
-        activeSession.daemonHeadEndIndex
-        || activeSession.buffer.bufferTailEndIndex
-        || activeSession.buffer.endIndex
+        activeHeadSnapshot.daemonHeadEndIndex
+        || activeBuffer.bufferTailEndIndex
+        || activeBuffer.endIndex
         || 0,
       ),
     );
-    const viewportRows = Math.max(1, Math.floor(activeSession.buffer.rows || 24));
+    const viewportRows = Math.max(1, Math.floor(activeBuffer.rows || 24));
     updateSessionViewport(activeSession.id, {
       startIndex: Math.max(0, endIndex - viewportRows),
       endIndex,
       viewportRows,
     });
-  }, [activeSession?.id, updateSessionViewport]);
+  }, [activeBuffer, activeSession?.id, updateSessionViewport]);
 
   return (
     <div>
       <div data-testid="compact-follow-session-state">{activeSession?.state || 'missing'}</div>
-      <div data-testid="compact-follow-session-revision">{activeSession?.buffer.revision ?? -1}</div>
-      <div data-testid="compact-follow-session-start-index">{activeSession?.buffer.startIndex ?? -1}</div>
-      <div data-testid="compact-follow-session-end-index">{activeSession?.buffer.endIndex ?? -1}</div>
+      <div data-testid="compact-follow-session-revision">{activeBuffer?.revision ?? -1}</div>
+      <div data-testid="compact-follow-session-start-index">{activeBuffer?.startIndex ?? -1}</div>
+      <div data-testid="compact-follow-session-end-index">{activeBuffer?.endIndex ?? -1}</div>
     </div>
   );
 }
@@ -1215,6 +1256,54 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
+
+  it('clears stale in-flight pull bookkeeping on explicit active resume and re-issues head-first refresh', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 90,
+        endIndex: 120,
+        revision: 1,
+        lines: [[119, 'tail-before-stall']],
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-lines').textContent).toContain('tail-before-stall'));
+
+    ws.sent.length = 0;
+    fireEvent.click(screen.getByText('send-input'));
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.sent.length = 0;
+    fireEvent.click(screen.getByText('resume-active'));
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+    });
+    expect(readSentMessages(ws).some((item) => item.type === 'buffer-sync-request')).toBe(false);
+  });
+
   it('reconnects the active tab when switching back to a stale session whose websocket is already closed', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -1558,6 +1647,66 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
 
       expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+
+  it('does not stack multiple active-tick loops across provider rerenders', async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      ws.sent.length = 0;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+
+      ws.sent.length = 0;
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+
+      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -1936,6 +2085,73 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeLessThanOrEqual(1);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
     }, { timeout: 220 });
+  });
+
+
+  it('does not let pong-only traffic keep a stalled active transport healthy forever', async () => {
+    vi.useFakeTimers();
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = 1000;
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws1 = MockWebSocket.instances[0]!;
+      ws1.triggerOpen();
+      ws1.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+      ws1.triggerMessage({
+        type: 'buffer-sync',
+        payload: indexedPayload({
+          startIndex: 90,
+          endIndex: 120,
+          revision: 1,
+          lines: [[119, 'tail-before-pong-stall']],
+        }),
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('session-lines').textContent).toContain('tail-before-pong-stall');
+
+      ws1.sent.length = 0;
+      now = 42000;
+      ws1.triggerMessage({ type: 'pong' });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+
+      const firstTickMessages = readSentMessages(ws1);
+      expect(firstTickMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+
+      ws1.sent.length = 0;
+      now = 44050;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1700);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(MockWebSocket.controlInstances.length).toBeGreaterThanOrEqual(1);
+      expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('input immediately requests head and follows with a tail fetch when a newer head arrives', async () => {
@@ -2757,7 +2973,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('sends the same stable clientSessionId in both initial connect and reconnect handshakes', async () => {
+  it('keeps the same client-owned stable clientSessionId across initial connect and reconnect handshakes', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -2972,7 +3188,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   }, 15000);
 
-  it('does not serialize same-host session reconnect behind a host-global gate', async () => {
+  it('does not serialize same-host session reconnect behind a host-global gate while preserving per-session client ids', async () => {
     try {
       render(
         <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">

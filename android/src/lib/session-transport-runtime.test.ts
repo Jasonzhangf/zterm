@@ -12,13 +12,11 @@ import {
   getSessionTransportHost,
   getSessionTransportRuntime,
   getSessionTransportSocket,
-  getSessionTransportToken,
   moveSessionTransportSocketToSuperseded,
   removeSessionTransportRuntime,
   setSessionTargetControlTransport,
   setTargetControlTransport,
   setSessionTransportSocket,
-  setSessionTransportToken,
   upsertSessionTransportRuntime,
 } from './session-transport-runtime';
 
@@ -106,28 +104,6 @@ describe('session transport runtime store', () => {
     expect(getSessionTransportSocket(store, 'session-2')).toBeNull();
     expect(getSessionTargetControlTransport(store, 'session-1')).toBe(controlSocket);
     expect(getSessionTargetControlTransport(store, 'session-2')).toBe(controlSocket);
-  });
-
-  it('keeps session transport token as per-session truth and clears it when the session retargets', () => {
-    const store = createSessionTransportRuntimeStore();
-    upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
-
-    setSessionTransportToken(store, 'session-1', 'ticket-a');
-    expect(getSessionTransportToken(store, 'session-1')).toBe('ticket-a');
-
-    upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha-renamed' }));
-    expect(getSessionTransportToken(store, 'session-1')).toBe('ticket-a');
-
-    upsertSessionTransportRuntime(
-      store,
-      'session-1',
-      makeHost({
-        bridgeHost: '100.64.0.9',
-        authToken: 'token-z',
-        sessionName: 'alpha',
-      }),
-    );
-    expect(getSessionTransportToken(store, 'session-1')).toBeNull();
   });
 
   it('moves replaced session sockets into superseded truth without affecting siblings', () => {

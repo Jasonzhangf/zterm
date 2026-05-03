@@ -26,11 +26,9 @@ describe('server terminal core support truth gates', () => {
     expect(source).toContain('sanitizeSessionName,');
     expect(source).toContain('getMirrorKey,');
     expect(source).toContain('mirrorCursorEqual,');
-    expect(source).toContain('normalizeClientSessionId,');
     expect(source).toContain('normalizeTerminalCols,');
     expect(source).toContain('normalizeTerminalRows,');
     expect(source).toContain('normalizeBufferSyncRequestPayload,');
-    expect(source).toContain('normalizeSessionTransportToken,');
     expect(source).toContain('} = terminalCoreSupport;');
   });
 
@@ -41,11 +39,9 @@ describe('server terminal core support truth gates', () => {
     expect(source).not.toContain('function sanitizeSessionName(');
     expect(source).not.toContain('function getMirrorKey(');
     expect(source).not.toContain('function mirrorCursorEqual(');
-    expect(source).not.toContain('function normalizeClientSessionId(');
     expect(source).not.toContain('function normalizeTerminalCols(');
     expect(source).not.toContain('function normalizeTerminalRows(');
     expect(source).not.toContain('function normalizeBufferSyncRequestPayload(');
-    expect(source).not.toContain('function normalizeSessionTransportToken(');
   });
 
   it('keeps terminal helper implementations inside dedicated support module', () => {

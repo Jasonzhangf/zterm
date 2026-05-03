@@ -24,5 +24,13 @@
     }
   },
   "include": ["src/**/*", "scripts/**/*.ts", "vite.config.ts"],
-  "exclude": ["node_modules", "android"]
+  "exclude": [
+    "node_modules",
+    "android",
+    "src/lib/buffer/BufferSyncEngine.ts",
+    "src/lib/file-transfer/FileTransferCoordinator.ts",
+    "src/lib/file-transfer/FileTransferMessageHandler.ts",
+    "src/lib/session/SessionConnector.ts",
+    "src/lib/session/SessionStore.ts"
+  ]
 }

@@ -58,6 +58,28 @@ function stubVisualViewport(overrides?: Partial<VisualViewport>) {
 describe('TerminalQuickBar', () => {
   beforeEach(() => {
     cleanup();
+    const storageBacking = new Map<string, string>();
+    const storageShim = {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage;
+    vi.stubGlobal('localStorage', storageShim);
     localStorage.clear();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
     stubVisualViewport();
@@ -393,6 +415,54 @@ describe('TerminalQuickBar', () => {
     await waitFor(() => {
       expect(onEditorDomFocusChange).toHaveBeenCalledWith(true);
       expect(onEditorDomFocusChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  it('keeps local quick-input textarea value stable while parent rerenders with stale sessionDraft during active editing', async () => {
+    const onSessionDraftChange = vi.fn();
+
+    function Harness() {
+      const [sessionDraft] = React.useState('');
+      const [tick, setTick] = React.useState(0);
+      return (
+        <div>
+          <button type="button" onClick={() => setTick((current) => current + 1)}>rerender</button>
+          <div data-testid="tick">{tick}</div>
+          <TerminalQuickBar
+            activeSessionId="session-1"
+            quickActions={[]}
+            shortcutActions={[]}
+            sessionDraft={sessionDraft}
+            onSendSequence={vi.fn()}
+            onSessionDraftChange={(value) => {
+              onSessionDraftChange(value);
+              // simulate parent persistence lag: do not immediately update sessionDraft prop
+            }}
+            onSessionDraftSend={vi.fn()}
+            onQuickActionsChange={vi.fn()}
+            onShortcutActionsChange={vi.fn()}
+            onOpenScheduleComposer={vi.fn()}
+            onMeasuredHeightChange={vi.fn()}
+          />
+        </div>
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+    const textarea = screen.getByPlaceholderText('预输入内容，按 session 持久化') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: 'draft typing' } });
+
+    expect(textarea.value).toBe('draft typing');
+    expect(onSessionDraftChange).toHaveBeenLastCalledWith('draft typing');
+
+    fireEvent.click(screen.getByText('rerender'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tick').textContent).toBe('1');
+      expect((screen.getByPlaceholderText('预输入内容，按 session 持久化') as HTMLTextAreaElement).value).toBe('draft typing');
     });
   });
 

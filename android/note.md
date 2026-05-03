@@ -107,3 +107,57 @@
     - 60s grace timer 与 explicit-only close 设计冲突
 - Jason 2026-04-28 文件传输功能依然无反应：
   - 需要端到端排查：客户端发送是否到 daemon、daemon 处理逻辑、文件实际传输
+
+[2026-05-02] tab close root cause
+- 现象：真机顶部 active tab 的 × 看起来“无法关闭”。
+- 验证：TerminalHeader 现有实现是 1600ms 内二次点击确认，不是单击关闭；组件测试与 open-tab 持久化测试均通过，说明更像交互语义错误而非 close 链路断裂。
+- 决策：保持关闭真源仍在 App/SessionContext；仅移除 Header 隐藏式二次确认，恢复为单击关闭，避免用户感知为失效。
+
+[2026-05-02] mobile-16.12 width-mode manager first cut
+- 目标：先做不阻塞主链的 `mobile-16.12`，把 width-mode 散落逻辑收成单一模块，不碰 transport/buffer 主链。
+- 已做：
+  - 新增 `src/lib/terminal-width-mode-manager.ts`
+  - 收口 width-mode options / normalize / bridge-settings update / daemon payload builder
+  - `SettingsPage.tsx` 与 `SessionContext.tsx` 已切到 manager
+- 验证：
+  - width-mode + settings + mirror-geometry 相关 22 tests passed
+- 现状：
+  - 整仓 tsc 仍被现有 `src/lib/buffer/BufferSyncEngine.ts` 半成品阻塞，非本刀新问题
+
+- 2026-05-03 mobile-16.13 调试记录：
+  - 现象：`viewport-reading-gap` 不发 repair，或 `reading -> follow` 前多发一条 repair。
+  - 真因 1：`daemonHeadEndIndex=0` 被当作 authoritative known head，visible repair window 被错误截空。
+  - 真因 2：无 authoritative head 时，新的 follow viewport 会在 `requestSessionBufferSync` 中 supersede 已在途 reading-repair，导致测试边界来回摆。
+  - 收口：helper 恢复 reading repair 的 request-window 缺口判定；SessionContext 只在 authoritative head 已知时允许 reading-repair supersede。
+
+- 2026-05-03 mobile-16.14 第一刀：
+  - 目标：继续缩小 `SessionContext`，优先抽不碰 daemon/session 主链的 runtime。
+  - 选择：先抽 `remote screenshot runtime`，因为它只负责 requestId、timeout、chunk aggregation、promise settle，不持有 terminal buffer/render/transport 真相。
+  - 已做：新增 `src/lib/remote-screenshot-runtime.ts` + 单测；`SessionContext` 改为纯接线。
+  - 验证：remote screenshot 自测 4/4；原 `SessionContext.ws-refresh` 截图两测保绿。
+
+- 2026-05-03 mobile-16.14 第二刀：
+  - 目标：继续移除 `SessionContext` 中 file/screenshot message 分发重复逻辑。
+  - 已做：新增 `src/lib/file-transfer-message-runtime.ts`，把 listener registry、message classify、screenshot hook 调用、listener error isolate 收到一个 runtime。
+  - 效果：`SessionContext` 的 server message switch 对 file transfer 只剩单入口 dispatch。
+
+- 2026-05-03 mobile-16.14 第三刀调试记录：
+  - 目标：继续缩 `SessionContext.tsx`，优先抽 transport runtime，不碰 buffer/render 真相。
+  - 已做：新增 `src/contexts/session-context-transport-runtime.ts`，收口 transport accessor、control socket cleanup/open/message、session socket open/bind。
+  - 新踩中的坑：若直接 `const { ... } = createSessionContextTransportAccessors(...)` 放在 render 里，每次 render 都产出新函数，导致一串 `useCallback/useEffect` 依赖活循环，vitest 直接挂死。
+  - 收口：改为 `const transportAccessorsRef = useRef(createSessionContextTransportAccessors(...)); const { ... } = transportAccessorsRef.current;`，保证 accessor identity 稳定。
+  - 结果：`SessionContext.ws-refresh.test.tsx` 全量 93/93 恢复；`App.dynamic-refresh` 与 `TerminalPage.render-scope` 仍绿。
+
+[2026-05-03] TerminalPage lifecycle audit: listener cleanup currently removes from current window.visualViewport / navigator.virtualKeyboard object instead of captured registration instance; add lifecycle cleanup regression before changing implementation.
+
+
+[2026-05-03] SessionContext stale-open transport audit: confirmed one real bug and one false-red. Real bug: session transport `pong` was incorrectly counted as `lastServerActivityAt`, which kept stale-open WS falsely healthy and blocked reconnect escalation. Fixed by excluding `pong` from `recordSessionRx()` on session transport and never recording control-transport traffic as session activity. False-red: the new `pong-only` stale transport test originally timed out because it used `waitFor(...)` under fake timers before the first buffer-sync paint settled; converted it to explicit microtask flush + synchronous assertion, then verified reconnect path deterministically (control socket opens + second session socket created).
+
+[2026-05-03] Verified gates after stale-open transport fix:
+- `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t 'does not let pong-only traffic keep a stalled active transport healthy forever|does not treat pong as a head-refresh ack and avoids duplicate input refresh requests|does not stack multiple active-tick loops across provider rerenders|uses App-provided foreground truth instead of directly reading document visibility for active tick refresh' --reporter dot`
+- `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.lifecycle-cleanup.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/pages/TerminalPage.render-isolation.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/components/terminal/TerminalHeader.test.tsx src/components/terminal/TabManagerSheet.test.tsx --reporter dot`
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+All green locally. Next focus stays on remaining real-world slowness after app resume / multi-tab switching; likely still inside client SessionContext refresh scheduling, not daemon protocol.
+
+
+[2026-05-03] Tab-switch lag audit: found duplicated active-session refresh trigger in client SessionContext. `switchSession()` both set active session and immediately called `ensureActiveSessionFresh(active-reentry)`, while the dedicated `useEffect([state.activeSessionId])` also called the same active-reentry path on the same switch. This doubled head refresh / reconnect decision work on every tab switch. Fixed by keeping `switchSession()` pure (`setActiveSessionSync` only) and leaving active-reentry refresh solely to the activeSessionId effect as the unique truth.

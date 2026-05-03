@@ -60,6 +60,11 @@ tmux truth
 2. cursor / pane metrics truth
    - `tmux display-message -p -t <session> '#{cursor_x} #{cursor_y} #{cursor_flag} #{pane_width} #{pane_height} #{history_size} #{alternate_on} #{pane_current_command}'`
 
+注意：
+- 普通 screen 下 `history_size` 只表示 scrollback，不包含当前可见 pane 行数
+- daemon 计算 canonical total lines 时必须使用 `history_size + pane_height`
+- `alternate_on` 不能把同一个 session 的 buffer 重置成 pane-height 小窗；同一 session 必须保持连续 absolute rows
+
 说明：
 - `last-screen-equal` / `viewport-bottom-equal` 这类断言，一律以当前可见 screen 为准，优先抓 `capture-pane -M`
 - 即使是普通 shell，在 attached tmux client 下默认 `capture-pane` 也可能偏向历史而不是当前 visible viewport，导致把正确 mirror 误判成 blank

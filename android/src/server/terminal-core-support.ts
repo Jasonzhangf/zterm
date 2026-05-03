@@ -17,14 +17,12 @@ export interface TerminalCoreSupport {
     left: TerminalCursorState | null | undefined,
     right: TerminalCursorState | null | undefined,
   ) => boolean;
-  normalizeClientSessionId: (input?: string) => string;
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
   normalizeBufferSyncRequestPayload: (
     session: Pick<ClientSession, 'id'>,
     request: BufferSyncRequestPayload,
   ) => BufferSyncRequestPayload;
-  normalizeSessionTransportToken: (input?: string) => string;
 }
 
 export function createTerminalCoreSupport(
@@ -56,14 +54,6 @@ export function createTerminalCoreSupport(
       return false;
     }
     return left.rowIndex === right.rowIndex && left.col === right.col && left.visible === right.visible;
-  }
-
-  function normalizeClientSessionId(input?: string) {
-    const candidate = (input || '').trim();
-    if (!candidate) {
-      throw new Error('connect payload missing clientSessionId');
-    }
-    return candidate;
   }
 
   function normalizeTerminalCols(cols: number | undefined) {
@@ -107,23 +97,13 @@ export function createTerminalCoreSupport(
     };
   }
 
-  function normalizeSessionTransportToken(input?: string) {
-    const token = (input || '').trim();
-    if (!token) {
-      throw new Error('connect payload missing sessionTransportToken');
-    }
-    return token;
-  }
-
   return {
     resolveMirrorCacheLines,
     sanitizeSessionName,
     getMirrorKey,
     mirrorCursorEqual,
-    normalizeClientSessionId,
     normalizeTerminalCols,
     normalizeTerminalRows,
     normalizeBufferSyncRequestPayload,
-    normalizeSessionTransportToken,
   };
 }

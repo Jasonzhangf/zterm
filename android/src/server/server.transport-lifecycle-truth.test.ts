@@ -33,9 +33,20 @@ describe('server transport/session lifecycle truth gates', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
     expect(serverSource).toContain('createTerminalMessageRuntime');
+    expect(serverSource).toContain('sessionTransportAttachTokens');
     expect(messageRuntimeSource).toContain("case 'session-open'");
     expect(messageRuntimeSource).toContain("type: 'session-ticket'");
-    expect(messageRuntimeSource).toContain('takeSessionTransportTicket');
+    expect(messageRuntimeSource).not.toContain('takeSessionTransportTicket');
+    expect(messageRuntimeSource).toContain('issueSessionTransportToken(payload.clientSessionId)');
+    expect(messageRuntimeSource).toContain('consumeSessionTransportToken(token, payload.clientSessionId)');
+    expect(messageRuntimeSource).toContain('createTransportBoundSession');
+  });
+
+  it('documents session-ticket/sessionTransportToken as attach-only compatibility wire material', () => {
+    const source = readMessageRuntimeSource();
+    expect(source).toContain('Compatibility-only attach handshake:');
+    expect(source).toContain('session-ticket / sessionTransportToken remain attach-only wire material');
+    expect(source).toContain('daemon must not promote either into daemon-owned long-lived business truth');
   });
 
   it('does not keep websocket-close grace timers that auto-close logical sessions', () => {
@@ -49,35 +60,35 @@ describe('server transport/session lifecycle truth gates', () => {
     const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
     const errorBlock = extractBlock(source, "ws.on('error'");
-    const detachBlock = extractBlock(source, 'deps.detachClientSessionTransportOnly(session, \'websocket closed\'', 220);
-    expect(closeBlock).toContain("if (session?.logicalSessionBound)");
-    expect(closeBlock).toContain("deps.detachClientSessionTransportOnly(session, 'websocket closed'");
+    const detachBlock = extractBlock(source, "deps.detachSessionTransportOnly(session, 'websocket closed'", 220);
+    expect(closeBlock).toContain("if (session)");
+    expect(closeBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
     expect(closeBlock).not.toContain("closeLogicalClientSession(session, 'websocket closed', false)");
-    expect(errorBlock).toContain("if (session?.logicalSessionBound)");
-    expect(errorBlock).toContain("deps.detachClientSessionTransportOnly(session, `websocket error: ${error.message}`");
+    expect(errorBlock).toContain("if (session)");
+    expect(errorBlock).toContain("deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`");
     expect(errorBlock).not.toContain("closeLogicalClientSession(session, `websocket error: ${error.message}`, false)");
-    expect(detachBlock).toContain("deps.detachClientSessionTransportOnly(session, 'websocket closed'");
+    expect(detachBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
   });
 
   it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
     const source = readBridgeRuntimeSource();
     const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
-    expect(rtcCloseBlock).toContain('if (session?.logicalSessionBound)');
-    expect(rtcCloseBlock).toContain('deps.detachClientSessionTransportOnly(session, reason');
+    expect(rtcCloseBlock).toContain('if (session)');
+    expect(rtcCloseBlock).toContain('deps.detachSessionTransportOnly(session, reason');
     expect(rtcCloseBlock).not.toContain('closeLogicalClientSession(session, reason, false)');
-    expect(rtcErrorBlock).toContain('if (session?.logicalSessionBound)');
-    expect(rtcErrorBlock).toContain('deps.detachClientSessionTransportOnly(session, `rtc error: ${message}`');
+    expect(rtcErrorBlock).toContain('if (session)');
+    expect(rtcErrorBlock).toContain('deps.detachSessionTransportOnly(session, `rtc error: ${message}`');
     expect(rtcErrorBlock).not.toContain('closeLogicalClientSession(session, `rtc error: ${message}`, false)');
   });
 
-  it('keeps mirror truth alive when session transport detaches or logical session closes', () => {
+  it('keeps mirror truth alive when session transport detaches or session closes', () => {
     const serverSource = readServerSource();
     const bridgeSource = readBridgeRuntimeSource();
     const wsCloseBlock = extractBlock(bridgeSource, "ws.on('close'");
     const rtcCloseBlock = extractBlock(bridgeSource, 'onClose: (_transportId, reason) =>');
 
-    expect(serverSource).toContain('terminalRuntime.closeLogicalClientSession');
+    expect(serverSource).toContain('terminalRuntime.closeSession');
     expect(wsCloseBlock).not.toContain('destroyMirror(');
     expect(rtcCloseBlock).not.toContain('destroyMirror(');
   });
@@ -112,9 +123,9 @@ describe('server transport/session lifecycle truth gates', () => {
 
   it('reconnect path closes only the replaced old transport and binds the new transport as current truth', () => {
     const source = readServerSource();
-    const bindBlock = extractBlock(source, 'terminalRuntime.bindTransportConnectionToLogicalSession', 240);
+    const bindBlock = extractBlock(source, 'terminalRuntime.bindConnectionToSession', 240);
 
-    expect(bindBlock).toContain('terminalRuntime.bindTransportConnectionToLogicalSession');
+    expect(bindBlock).toContain('terminalRuntime.bindConnectionToSession');
   });
 
   it('keeps tmux discovery and management on control transport semantics', () => {

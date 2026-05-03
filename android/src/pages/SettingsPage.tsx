@@ -12,6 +12,10 @@ import { APP_VERSION_CODE } from '../lib/app-version';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
 import { formatTargetBadge } from '../lib/network-target';
+import {
+  TERMINAL_WIDTH_MODE_OPTIONS,
+  updateBridgeSettingsTerminalWidthMode,
+} from '../lib/terminal-width-mode-manager';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -338,16 +342,13 @@ export function SettingsPage({
             `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 只允许按手机屏宽调整 cols，不再改 rows。
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            {([
-              { id: 'mirror-fixed', label: 'Mirror Fixed' },
-              { id: 'adaptive-phone', label: 'Adaptive Phone' },
-            ] as const).map((option) => {
+            {TERMINAL_WIDTH_MODE_OPTIONS.map((option) => {
               const active = draft.terminalWidthMode === option.id;
               return (
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => setDraft((current) => ({ ...current, terminalWidthMode: option.id }))}
+                  onClick={() => setDraft((current) => updateBridgeSettingsTerminalWidthMode(current, option.id))}
                   style={{
                     flex: 1,
                     minHeight: '48px',

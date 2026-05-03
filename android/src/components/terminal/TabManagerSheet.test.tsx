@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TabManagerSheet } from './TabManagerSheet';
+import { TabManagerSheet, type TabManagerSessionItem } from './TabManagerSheet';
 import type { Session } from '../../lib/types';
 
 class ResizeObserverMock {
@@ -41,6 +41,17 @@ function buildSession(id: string, sessionName: string): Session {
   };
 }
 
+
+function toTabManagerSession(session: Session): TabManagerSessionItem {
+  return {
+    id: session.id,
+    bridgeHost: session.bridgeHost,
+    bridgePort: session.bridgePort,
+    sessionName: session.sessionName,
+    customName: session.customName,
+    resolvedPath: session.resolvedPath,
+  };
+}
 describe('TabManagerSheet', () => {
   beforeEach(() => {
     cleanup();
@@ -66,9 +77,9 @@ describe('TabManagerSheet', () => {
       <TabManagerSheet
         open
         sessions={[
-          buildSession('s1', 'tab-1'),
-          buildSession('s2', 'tab-2'),
-          buildSession('s3', 'tab-3'),
+          toTabManagerSession(buildSession('s1', 'tab-1')),
+          toTabManagerSession(buildSession('s2', 'tab-2')),
+          toTabManagerSession(buildSession('s3', 'tab-3')),
         ]}
         activeSessionId="s1"
         savedTabLists={[]}
@@ -112,5 +123,36 @@ describe('TabManagerSheet', () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 170 });
 
     expect(onMoveSession).toHaveBeenCalledWith('s1', 2);
+  });
+
+  it('closes a tab from pointer events used by touch devices', () => {
+    const onCloseSession = vi.fn();
+    render(
+      <TabManagerSheet
+        open
+        sessions={[
+          toTabManagerSession(buildSession('s1', 'tab-1')),
+          toTabManagerSession(buildSession('s2', 'tab-2')),
+        ]}
+        activeSessionId="s1"
+        savedTabLists={[]}
+        onClose={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+        onMoveSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onSaveCurrentTabList={vi.fn()}
+        onLoadSavedTabList={vi.fn()}
+        onDeleteSavedTabList={vi.fn()}
+        onExportCurrentTabList={vi.fn(() => '')}
+        onExportSavedTabList={vi.fn(() => '')}
+        onImportSavedTabLists={vi.fn(() => ({ ok: true, message: 'ok' }))}
+      />,
+    );
+
+    const closeButton = screen.getByRole('button', { name: '关闭 tab-1' });
+    fireEvent.pointerUp(closeButton, { pointerId: 7 });
+    expect(onCloseSession).toHaveBeenCalledWith('s1', 'tab-manager-close-button');
   });
 });

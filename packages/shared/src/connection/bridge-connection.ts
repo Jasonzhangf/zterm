@@ -17,10 +17,15 @@ export interface BridgeConnectionOptions {
 /**
  * Open a bridge connection to the daemon.
  *
- * Uses two-phase handshake (matching daemon session-transport-ticket protocol):
+ * Uses two-phase handshake (matching current daemon wire protocol):
  *   1. On WebSocket open → send `session-open` with hostConfig
  *   2. On receiving `session-ticket` → send `connect` with sessionTransportToken
  *   3. On receiving `connected` → connection is fully established
+ *
+ * Wire-compat note:
+ * - `clientSessionId` remains client-owned identity
+ * - `sessionTransportToken` / `session-ticket` remain attach-only wire fields
+ * - daemon must not promote either into daemon-side client/session business truth
  */
 export function openBridgeConnection(
   target: BridgeTarget,

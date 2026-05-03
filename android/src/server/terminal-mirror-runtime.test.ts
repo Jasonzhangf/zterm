@@ -5,9 +5,7 @@ import type { ClientSession, SessionMirror } from './terminal-runtime-types';
 function createSession(id = 'session-1'): ClientSession {
   return {
     id,
-    clientSessionId: id,
     transportId: 'transport-1',
-    readyTransportId: null,
     transport: {
       kind: 'ws',
       readyState: 1,
@@ -15,13 +13,13 @@ function createSession(id = 'session-1'): ClientSession {
       close: vi.fn(),
     },
     closeTransport: vi.fn(),
-    transportRequestOrigin: 'http://127.0.0.1:3333',
+    requestOrigin: 'http://127.0.0.1:3333',
     sessionName: 'demo',
     mirrorKey: null,
     wsAlive: true,
     pendingPasteImage: null,
     pendingAttachFile: null,
-    logicalSessionBound: true,
+    connectedSent: false,
   };
 }
 
@@ -117,11 +115,94 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(ensureTmuxSession).toHaveBeenCalledTimes(1);
     expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
     expect(session.mirrorKey).toBe('demo');
-    expect(session.readyTransportId).toBe('transport-1');
+    expect(session.connectedSent).toBe(true);
     expect(sendMessage).toHaveBeenCalledWith(
       session,
       expect.objectContaining({ type: 'connected' }),
     );
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
+  });
+
+  it('stops recurring live sync when no subscriber keeps an attached transport', async () => {
+    vi.useFakeTimers();
+    try {
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime();
+      const session = createSession();
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        name: 'demo',
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      const mirror = mirrors.get('demo');
+      expect(mirror?.lifecycle).toBe('ready');
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      session.transport = null;
+      session.connectedSent = false;
+
+      vi.advanceTimersByTime(34);
+      await Promise.resolve();
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restarts live sync when a new attached session reuses an already-ready mirror', async () => {
+    vi.useFakeTimers();
+    try {
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime();
+      const firstSession = createSession('session-1');
+      sessions.set(firstSession.id, firstSession);
+
+      await runtime.attachTmux(firstSession, {
+        name: 'demo',
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      const mirror = mirrors.get('demo');
+      expect(mirror?.lifecycle).toBe('ready');
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      firstSession.transport = null;
+      firstSession.connectedSent = false;
+
+      const secondSession = createSession('session-2');
+      secondSession.transportId = 'transport-2';
+      sessions.set(secondSession.id, secondSession);
+
+      await runtime.attachTmux(secondSession, {
+        name: 'demo',
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+      expect(secondSession.mirrorKey).toBe('demo');
+      expect(secondSession.connectedSent).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

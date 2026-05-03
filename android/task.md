@@ -361,6 +361,21 @@
   - 2026-05-02 第九轮收口已完成：`connectSession / reconnectSession` 的 pre-open 重复预处理已下沉为 `buildSessionTransportPrimeState(...)`
   - 2026-05-02 当前阶段冻结：不再继续强合 `connectSession/startReconnectAttempt` 为单一 hook orchestrator；若继续收口，必须先抽 hook 外 transport lifecycle runtime orchestrator
 
+## Epic-012 mobile-16 SessionContext God Object 拆分（非阻塞先行）
+
+- [x] T1 `mobile-16.12` TerminalWidthModeManager 收口
+  - 2026-05-02 第一刀已落地：
+    - 新增 `src/lib/terminal-width-mode-manager.ts`
+    - `SettingsPage.tsx` width-mode 选项/normalize/update 已改走 manager
+    - `SessionContext.tsx` `setTerminalWidthMode(...)` payload 已改走 manager
+  - 已验证：
+    - `pnpm --dir android exec vitest run src/lib/terminal-width-mode-manager.test.ts src/lib/bridge-settings.test.ts src/pages/SettingsPage.theme.test.tsx src/server/mirror-geometry.test.ts --reporter dot`
+    - `22 passed`
+  - 当前阻塞：
+    - 整仓 `tsc` 被现有 `src/lib/buffer/BufferSyncEngine.ts` 半成品错误挡住，需在后续 buffer 拆分任务中一起收口
+- [x] T2 `mobile-16.13` Runtime Debug 指标剥离
+- [ ] T3 `mobile-16.14` SessionContext 最终瘦身到 450 行以内
+
 ### Epic-011 审计结果（2026-05-02）
 
 #### A. 保留
@@ -426,3 +441,37 @@
   - 后续只允许继续补 source gate，不再改 owner 边界
   - 2026-05-02 新增 source gate 已完成：saved-tab batch restore 不得被旧 `ACTIVE_PAGE.focusSessionId` 污染 active truth
   - 2026-05-02 对应修复已完成：`openDraftAsSession` 支持 `sessionId` 透传；`handleLoadSavedTabList` 走显式 batch persist + direct switch
+
+- [x] mobile-16.13 Runtime Debug 指标剥离：剩余 reading-repair 触发/去重边界已收口。
+  - 修复：`src/contexts/session-sync-helpers.ts`、`src/contexts/SessionContext.tsx`
+  - 验证：
+    - `pnpm exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/SessionContext.ws-refresh.test.tsx -t 'requests visible-range repair when local mirror misses the declared request window history|builds reading-repair payload from visible range request window and gaps|does not emit an extra repair request before head when the same session returns from reading to follow|does not issue duplicate reading-repair requests while the local snapshot is unchanged' --reporter dot`
+    - `pnpm exec vitest run src/lib/session-debug-metrics-store.test.ts src/lib/runtime-debug-flush.test.ts src/lib/runtime-debug.test.ts src/lib/app-foreground-refresh.test.ts src/pages/TerminalPage.render-scope.test.tsx --reporter dot`
+
+- [~] T3 `mobile-16.14` SessionContext 最终瘦身到 450 行以内
+  - 2026-05-03 第一刀已落地：
+    - 新增 `src/lib/remote-screenshot-runtime.ts`
+    - 新增 `src/lib/remote-screenshot-runtime.test.ts`
+    - `SessionContext.tsx` 不再持有 remote screenshot pending map / timeout / chunk assemble 细节
+  - 已验证：
+    - `pnpm exec vitest run src/lib/remote-screenshot-runtime.test.ts --reporter dot`
+    - `pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t 'streams remote screenshot chunks into preview payload and reports progress phases|fails remote screenshot request explicitly when no progress arrives before timeout|does not emit an extra repair request before head when the same session returns from reading to follow|does not issue duplicate reading-repair requests while the local snapshot is unchanged' --reporter dot`
+    - `pnpm exec vitest run src/lib/session-debug-metrics-store.test.ts src/lib/runtime-debug-flush.test.ts src/pages/TerminalPage.render-scope.test.tsx --reporter dot`
+
+  - 2026-05-03 第二刀已落地：
+    - 新增 `src/lib/file-transfer-message-runtime.ts`
+    - 新增 `src/lib/file-transfer-message-runtime.test.ts`
+    - `SessionContext.tsx` file/screenshot message dispatch 已改单入口 runtime
+  - 已验证补充：
+    - `pnpm exec vitest run src/lib/file-transfer-message-runtime.test.ts src/lib/remote-screenshot-runtime.test.ts --reporter dot`
+    - `pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t 'streams remote screenshot chunks into preview payload and reports progress phases|fails remote screenshot request explicitly when no progress arrives before timeout' --reporter dot`
+    - `pnpm exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot`
+
+  - 2026-05-03 第三刀已落地（transport runtime first cut）：
+    - 新增 `src/contexts/session-context-transport-runtime.ts`
+    - `SessionContext.tsx` 已移除 transport accessor / control transport / session socket lifecycle 的第一批内联细节
+    - 本刀只收 ownership，不改协议真相
+  - 已验证补充：
+    - `timeout 60 pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` -> `93 passed`
+    - `timeout 25 pnpm exec vitest run src/App.dynamic-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx --reporter dot` -> `33 passed`
+    - `timeout 40 pnpm exec tsc -p tsconfig.json --noEmit --pretty false` 仍被既有 `src/lib/buffer/BufferSyncEngine.ts` / `src/lib/session/SessionConnector.ts` 半成品阻塞，非本刀新增

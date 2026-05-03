@@ -19,14 +19,19 @@ function makeSession(id: string, revision: number) {
     state: 'connected' as const,
     hasUnread: false,
     createdAt: 1,
+    daemonHeadRevision: revision,
+    daemonHeadEndIndex: revision,
     buffer: {
       lines: [],
+      gapRanges: [],
       startIndex: 0,
       endIndex: 0,
-      viewportEndIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
       cols: 80,
       rows: 24,
       cursorKeysApp: false,
+      cursor: null,
       updateKind: 'replace' as const,
       revision,
     },
@@ -34,6 +39,48 @@ function makeSession(id: string, revision: number) {
 }
 
 const sessionHarness = vi.hoisted(() => {
+  const snapshots = new Map<string, { buffer: any }>();
+  const headSnapshots = new Map<string, { daemonHeadRevision: number; daemonHeadEndIndex: number }>();
+  const bufferStore = {
+    getSnapshot(sessionId: string) {
+      return snapshots.get(sessionId) || {
+        buffer: {
+          lines: [],
+          gapRanges: [],
+          startIndex: 0,
+          endIndex: 0,
+          bufferHeadStartIndex: 0,
+          bufferTailEndIndex: 0,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          cursor: null,
+          updateKind: 'replace',
+          revision: 0,
+        },
+      };
+    },
+    subscribe() {
+      return () => undefined;
+    },
+    setBuffer(sessionId: string, buffer: any) {
+      snapshots.set(sessionId, { buffer });
+      return true;
+    },
+  };
+  const headStore = {
+    getSnapshot(sessionId: string) {
+      const snapshot = headSnapshots.get(sessionId);
+      return snapshot ? { revision: snapshot.daemonHeadRevision, ...snapshot } : { revision: 0, daemonHeadRevision: 0, daemonHeadEndIndex: 0 };
+    },
+    subscribe() {
+      return () => undefined;
+    },
+    setHead(sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) {
+      headSnapshots.set(sessionId, { ...head });
+      return true;
+    },
+  };
   let state = {
     sessions: [makeSession('s1', 1)],
     activeSessionId: 's1',
@@ -50,9 +97,22 @@ const sessionHarness = vi.hoisted(() => {
   const renameSession = vi.fn();
   const sendInput = vi.fn();
 
+  const syncBuffersFromState = (nextState: typeof state) => {
+    nextState.sessions.forEach((session) => {
+      bufferStore.setBuffer(session.id, session.buffer);
+      headStore.setHead(session.id, {
+        daemonHeadRevision: session.daemonHeadRevision || 0,
+        daemonHeadEndIndex: session.daemonHeadEndIndex || 0,
+      });
+    });
+  };
+  syncBuffersFromState(state);
+
   return {
     readState: () => state,
     readStaleActiveSession: () => staleActiveSession,
+    readBufferStore: () => bufferStore,
+    readHeadStore: () => headStore,
     reconnectAllSessions,
     reconnectSession,
     resumeActiveSessionTransport,
@@ -65,6 +125,7 @@ const sessionHarness = vi.hoisted(() => {
     update(next: typeof state, stale = staleActiveSession) {
       state = next;
       staleActiveSession = stale;
+      syncBuffersFromState(state);
     },
     reset() {
       state = {
@@ -73,6 +134,7 @@ const sessionHarness = vi.hoisted(() => {
         connectedCount: 1,
       };
       staleActiveSession = state.sessions[0];
+      syncBuffersFromState(state);
       reconnectAllSessions.mockReset();
       reconnectSession.mockReset();
       resumeActiveSessionTransport.mockReset();
@@ -147,6 +209,7 @@ vi.mock('./contexts/SessionContext', () => ({
   ),
   useSession: () => ({
     state: sessionHarness.readState(),
+    scheduleStates: {},
     getSessionDebugMetrics: vi.fn(() => null),
     createSession: sessionHarness.createSession,
     closeSession: sessionHarness.closeSession,
@@ -157,10 +220,25 @@ vi.mock('./contexts/SessionContext', () => ({
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
+    getSession: vi.fn((id: string) => sessionHarness.readState().sessions.find((session) => session.id === id) || null),
+    getSessionRenderBufferSnapshot: vi.fn((sessionId: string) => sessionHarness.readBufferStore().getSnapshot(sessionId).buffer),
+    getSessionBufferStore: vi.fn(() => sessionHarness.readBufferStore()),
+    getSessionHeadStore: vi.fn(() => sessionHarness.readHeadStore()),
     sendInput: sessionHarness.sendInput,
     sendImagePaste: vi.fn(),
+    sendFileAttach: vi.fn(),
+    requestRemoteScreenshot: vi.fn(),
+    sendMessageRaw: vi.fn(),
+    onFileTransferMessage: vi.fn(() => vi.fn()),
     resizeTerminal: vi.fn(),
+    setTerminalWidthMode: vi.fn(),
     updateSessionViewport: vi.fn(),
+    requestScheduleList: vi.fn(),
+    upsertScheduleJob: vi.fn(),
+    deleteScheduleJob: vi.fn(),
+    toggleScheduleJob: vi.fn(),
+    runScheduleJobNow: vi.fn(),
+    getSessionScheduleState: vi.fn(() => ({ sessionName: '', jobs: [], loading: false })),
   }),
 }));
 
@@ -247,6 +325,7 @@ vi.mock('./pages/TerminalPage', () => ({
   TerminalPage: ({
     activeSession,
     sessions,
+    sessionBufferStore,
     inputResetEpochBySession,
     onSwitchSession,
     onMoveSession,
@@ -255,8 +334,9 @@ vi.mock('./pages/TerminalPage', () => ({
     onSessionDraftSend,
     onLoadSavedTabList,
   }: {
-    activeSession: { id: string; buffer: { revision: number } } | null;
+    activeSession: { id: string } | null;
     sessions: Array<{ id: string }>;
+    sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer: { revision: number } } };
     inputResetEpochBySession?: Record<string, number>;
     onSwitchSession: (sessionId: string) => void;
     onMoveSession: (sessionId: string, toIndex: number) => void;
@@ -264,9 +344,13 @@ vi.mock('./pages/TerminalPage', () => ({
     onTerminalInput?: (sessionId: string, data: string) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
     onLoadSavedTabList?: (tabs: Array<any>, activeSessionId?: string) => void;
-  }) => (
+  }) => {
+    const activeRevision = activeSession && sessionBufferStore
+      ? sessionBufferStore.getSnapshot(activeSession.id).buffer.revision
+      : -1;
+    return (
     <div>
-      <div data-testid="terminal-revision">{activeSession?.buffer.revision ?? -1}</div>
+      <div data-testid="terminal-revision">{activeRevision}</div>
       <div data-testid="terminal-input-reset-epoch">{activeSession ? (inputResetEpochBySession?.[activeSession.id] || 0) : -1}</div>
       <button
         type="button"
@@ -368,7 +452,8 @@ vi.mock('./pages/TerminalPage', () => ({
         load-saved-tab-list
       </button>
     </div>
-  ),
+  );
+  },
 }));
 
 import { AppContent } from './App';

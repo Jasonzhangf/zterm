@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEYS, type Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
@@ -146,6 +146,32 @@ function makeSession(id: string): Session {
 }
 
 describe('TerminalPage tab isolation', () => {
+  beforeEach(() => {
+    const storageBacking = new Map<string, string>();
+    const storageShim = {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage;
+    vi.stubGlobal('localStorage', storageShim);
+    localStorage.clear();
+  });
+
   afterEach(() => {
     cleanup();
     localStorage.clear();
@@ -302,7 +328,7 @@ describe('TerminalPage tab isolation', () => {
     expect(onSessionDraftSend).toHaveBeenCalledWith('draft-send', 's1');
   });
 
-  it('auto closes split when width shrinks back from wide profile to single-column', () => {
+  it('auto closes split when width shrinks back from wide profile to single-column', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -348,7 +374,9 @@ describe('TerminalPage tab isolation', () => {
     });
     fireEvent(window, new Event('resize'));
 
-    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
+    });
   });
 
   it('persists split layout and restores it on remount', () => {

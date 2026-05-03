@@ -1418,7 +1418,6 @@ describe('TerminalView minimal mirror render', () => {
             cursorKeysApp={reanchoredTail.buffer.cursorKeysApp}
             cursor={session.buffer.cursor}
             active
-            bufferPullActive
           onResize={vi.fn()}
           onInput={vi.fn()}
           onViewportChange={onViewportChange}
@@ -2172,7 +2171,6 @@ describe('TerminalView minimal mirror render', () => {
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
-          bufferPullActive
           onResize={vi.fn()}
           onInput={vi.fn()}
           onViewportChange={onViewportChange}

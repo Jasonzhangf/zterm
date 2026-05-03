@@ -88,6 +88,12 @@ export interface TerminalViewportState {
   viewportRows: number;
 }
 
+export interface TerminalVisibleRange {
+  startIndex: number;
+  endIndex: number;
+  viewportRows: number;
+}
+
 export interface TerminalViewportSize {
   cols: number;
   rows: number;
@@ -96,6 +102,21 @@ export interface TerminalViewportSize {
 export type TerminalResizeHandler = (sessionId: string, cols: number, rows: number) => void;
 export type TerminalWidthModeHandler = (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
 export type TerminalViewportChangeHandler = (sessionId: string, viewState: TerminalViewportState) => void;
+export type TerminalVisibleRangeChangeHandler = (sessionId: string, visibleRange: TerminalVisibleRange) => void;
+
+export interface SessionRenderBufferSnapshot {
+  lines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
+  startIndex: number;
+  endIndex: number;
+  bufferHeadStartIndex: number;
+  bufferTailEndIndex: number;
+  cols: number;
+  rows: number;
+  cursorKeysApp: boolean;
+  cursor: TerminalCursorState | null;
+  revision: number;
+}
 
 export interface Session {
   id: string;
@@ -129,6 +150,7 @@ export interface SessionDebugOverlayMetrics {
   pullHz: number;
   bufferPullActive: boolean;
   status: 'waiting' | 'refreshing' | 'loading' | 'reconnecting' | 'error' | 'closed' | 'connecting';
+  active: boolean;
   updatedAt: number;
 }
 

@@ -22,6 +22,8 @@ import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runti
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, ClientSession>;
   mirrors: Map<string, SessionMirror>;
+  issueSessionTransportToken: (clientSessionId: string) => string;
+  consumeSessionTransportToken: (token: string, clientSessionId: string) => boolean;
   scheduleEngine: {
     listBySession: (sessionName: string) => ScheduleJob[];
     upsert: (job: ScheduleJobDraft) => void;
@@ -39,25 +41,21 @@ export interface TerminalMessageRuntimeDeps {
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
-  normalizeClientSessionId: (input?: string) => string;
-  normalizeSessionTransportToken: (input?: string) => string;
   normalizeBufferSyncRequestPayload: (
     session: ClientSession,
     request: BufferSyncRequestPayload,
   ) => BufferSyncRequestPayload;
-  getOrCreateLogicalClientSession: (clientSessionId: string, requestOrigin: string) => ClientSession;
-  bindTransportConnectionToLogicalSession: (
+  createTransportBoundSession: (connection: TerminalTransportConnection) => ClientSession;
+  bindConnectionToSession: (
     connection: TerminalTransportConnection,
     session: ClientSession,
   ) => ClientSession;
-  issueSessionTransportTicket: (clientSessionId: string) => { token: string };
-  takeSessionTransportTicket: (token: string) => { clientSessionId: string } | null;
   getMirrorKey: (sessionName: string) => string;
   getClientMirror: (session: ClientSession) => SessionMirror | null;
   sendBufferHeadToSession: (session: ClientSession, mirror: SessionMirror) => void;
   attachTmux: (session: ClientSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: ClientSession, data: string) => void;
-  closeLogicalClientSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
+  closeSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
@@ -68,7 +66,7 @@ export interface TerminalMessageRuntimeDeps {
 }
 
 export interface TerminalMessageRuntime {
-  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => ClientSession;
+  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => ClientSession | null;
   handleSessionTransportConnect: (
     connection: TerminalTransportConnection,
     payload: HostConfigMessage,
@@ -80,51 +78,41 @@ export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
   function handleSessionOpen(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    const clientSessionId = deps.normalizeClientSessionId(payload.clientSessionId);
-    const logicalSession = deps.getOrCreateLogicalClientSession(clientSessionId, connection.requestOrigin);
     connection.role = 'control';
     connection.boundSessionId = null;
     const sessionName = deps.sanitizeSessionName(payload.sessionName || payload.name);
-    const issued = deps.issueSessionTransportTicket(clientSessionId);
+    const sessionTransportToken = deps.issueSessionTransportToken(payload.clientSessionId);
+    // Compatibility-only attach handshake:
+    // - clientSessionId remains client-owned identity
+    // - session-ticket / sessionTransportToken remain attach-only wire material
+    // - daemon must not promote either into daemon-owned long-lived business truth
     deps.sendTransportMessage(connection.transport, {
       type: 'session-ticket',
       payload: {
-        clientSessionId,
-        sessionTransportToken: issued.token,
+        clientSessionId: payload.clientSessionId,
+        sessionTransportToken,
         sessionName,
       },
     });
-    return logicalSession;
+    return null;
   }
 
   function handleSessionTransportConnect(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    const clientSessionId = deps.normalizeClientSessionId(payload.clientSessionId);
-    const token = deps.normalizeSessionTransportToken(payload.sessionTransportToken);
-    const ticket = deps.takeSessionTransportTicket(token);
-    if (!ticket || ticket.clientSessionId !== clientSessionId) {
+    // The token is only a one-shot attach proof for this transport connection.
+    const token = (payload.sessionTransportToken || '').trim();
+    if (!token || !deps.consumeSessionTransportToken(token, payload.clientSessionId)) {
       deps.sendTransportMessage(connection.transport, {
         type: 'error',
         payload: {
-          message: 'Invalid session transport ticket',
-          code: 'session_transport_ticket_invalid',
+          message: 'Invalid transport attach token',
+          code: 'transport_attach_invalid',
         },
       });
-      connection.closeTransport('session transport ticket invalid');
+      connection.closeTransport('transport attach invalid');
       return null;
     }
-    const logicalSession = deps.sessions.get(clientSessionId) || null;
-    if (!logicalSession) {
-      deps.sendTransportMessage(connection.transport, {
-        type: 'error',
-        payload: {
-          message: `Logical client session ${clientSessionId} not found`,
-          code: 'logical_session_missing',
-        },
-      });
-      connection.closeTransport('logical client session missing');
-      return null;
-    }
-    return deps.bindTransportConnectionToLogicalSession(connection, logicalSession);
+    const serverSession = deps.createTransportBoundSession(connection);
+    return deps.bindConnectionToSession(connection, serverSession);
   }
 
   async function handleMessage(connection: TerminalTransportConnection, rawData: RawData, isBinary = false) {
@@ -279,9 +267,9 @@ export function createTerminalMessageRuntime(
         break;
       case 'connect':
         try {
-          const logicalSession = handleSessionTransportConnect(connection, message.payload);
-          if (logicalSession) {
-            void deps.attachTmux(logicalSession, message.payload as TerminalAttachPayload);
+          const serverSession = handleSessionTransportConnect(connection, message.payload);
+          if (serverSession) {
+            void deps.attachTmux(serverSession, message.payload as TerminalAttachPayload);
           }
         } catch (error) {
           deps.sendTransportMessage(connection.transport, {
@@ -471,7 +459,7 @@ export function createTerminalMessageRuntime(
           connection.closeTransport('client requested close');
           break;
         }
-        deps.closeLogicalClientSession(session, 'client requested close', false);
+        deps.closeSession(session, 'client requested close', false);
         break;
       case 'file-list-request':
         if (!session) {

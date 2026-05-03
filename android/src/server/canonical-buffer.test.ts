@@ -38,15 +38,13 @@ describe('resolveCanonicalAvailableLineCount', () => {
 });
 
 describe('normalizeMirrorCaptureLines', () => {
-  it('keeps alternate-screen blank rows so mirror lines stay pane-height aligned', () => {
+  it('does not pad alternate-screen captures into a pane-height-only window', () => {
     expect(normalizeMirrorCaptureLines('row-1\nrow-2\n', {
       paneRows: 4,
       alternateOn: true,
     })).toEqual([
       'row-1',
       'row-2',
-      '',
-      '',
     ]);
   });
 

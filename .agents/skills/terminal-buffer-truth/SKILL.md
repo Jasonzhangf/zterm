@@ -24,12 +24,12 @@ tmux truth
 
 ## 1. daemon server
 
-server 是独立层，只做：
+server / daemon 是独立层，只做：
 
 1. mirror tmux truth
 2. 回 `buffer-head-request`
 3. 回 `buffer-sync-request`
-4. 处理 session attach / input / file / schedule / tmux 基础控制
+4. 处理 transport 级 input / file / schedule / tmux 基础控制
 
 ### 1.0 daemon 唯一心智
 
@@ -37,7 +37,7 @@ server 是独立层，只做：
 tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 ```
 
-- daemon **不关心客户端**
+- daemon **不关心也不能关心任何客户端逻辑/状态**
 - daemon 只维护自己的 tmux mirror truth
 - daemon 内部也必须 **读写解耦**
   - 写侧：`tmux -> mirror store`
@@ -63,19 +63,35 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - mirror 生命周期也必须独立：
   - client 断开 / 切 tab / 暂时没有 subscriber，不得销毁 mirror truth 再重建
   - 否则 reconnect 后出现 `revision -> 1` / `latestEndIndex` 回退，不是 tmux 变了，而是 daemon 自己把 absolute truth 丢了
-- daemon client session 和 transport 也必须独立：
-  - logical client session 是稳定对象
-  - ws/rtc transport 是可替换物理连接
-  - transport 断开只允许 detach transport，不允许顺手删 logical client session
-  - reconnect 必须按同一个 `clientSessionId` 重新绑定，不是新建第二份 session 语义
+- daemon 只允许持有自己的服务端真相：
+  - ws/rtc transport 是 daemon 可持有的物理连接真相
+  - mirror 是 daemon 可持有的 terminal 真相
+  - tmux session / file transfer / schedule 是 daemon 可持有的业务真相
+  - transport 断开只影响该 transport 自身，不允许推导客户端 active/inactive/foreground/background 语义
+  - 多客户端只表示“多个 transport/订阅者读同一 mirror”，不是 daemon 维护一份客户端状态机
 - daemon 不允许保留 client 风格状态机：
   - 不允许 `session.state`
   - 不允许 `mirror.state`
   - 不允许 `terminalWidthMode / requestedAdaptiveCols`
   - 不允许把 `resize / terminal-width-mode` 做成 daemon 内部状态推进入口
+  - 不允许 `logical client session`
+  - 不允许 `clientSessionId` 成为 daemon 内部长期状态 owner
+  - 不允许 `readyTransportId`
+  - 不允许 `session transport token / attach-resume state machine`
+  - 不允许 `active tab / foreground / background / pane / viewport / visible range / width mode`
+- 若协议兼容期仍接收这些字段：
+  - 只能作为一次性 attach 参数或调试透传
+  - 不得写入 daemon 长期状态
+  - 不得反向驱动 mirror / tmux / transport 生命周期
+- `clientSessionId / sessionTransportToken / session-ticket` 的额外冻结：
+  - `clientSessionId` 是 **client-owned session identity**
+  - `sessionTransportToken / session-ticket` 是 **attach-only wire material**
+  - 它们可以留在协议兼容层
+  - 但不得成为 daemon 业务真相
+  - client 侧也不得把 `sessionTransportToken` 放进长期 transport runtime store；它只能是 handshake 期间的临时 attach 材料
 - daemon terminal core 的**代码组织**也必须收口：
   - `server.ts` 只保留 transport/http glue
-  - session lifecycle / mirror lifecycle / live sync / attach / input orchestration 必须下沉到独立 terminal core 模块
+  - mirror lifecycle / live sync / attach / input orchestration 必须下沉到独立 terminal core 模块
   - file list / mkdir / download / upload / remote screenshot / attach-file binary / paste-image binary 也必须下沉到独立 runtime
   - 禁止一边说“daemon 不关心客户端”，一边把 terminal core 业务散落回 `server.ts`
 
@@ -146,23 +162,17 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
 - transport topology 也必须冻结：
-  - `bridge target = bridgeHost + bridgePort + authToken`
-  - 每个 bridge target 只允许一个长期存活的 **control transport**
-  - 每个 `clientSessionId` 只允许一个稳定的 **per-session transport**
-  - control transport 只做 auth / create / attach / resume / close 等低频控制
-  - head / range / input 等高频流量只走 per-session transport，不得全部塞进 control transport
-  - session attach / resume 必须复用 control transport，但 session data 仍各自独立
-  - auth 也只属于 control transport；只要 control transport 没断，就不应重复 auth
-  - target runtime 生命周期也必须独立：最后一个 session 离开后，若 control transport 还活着，target runtime 仍保留；只有 `0 session + no control transport` 才允许删除
-  - session transport token 也必须是**每个 clientSessionId 独立真相**：同一 session 只允许一个当前有效 ticket；retarget/close 后旧 ticket 必须失效
+  - daemon 只认 **transport connection truth**
+  - daemon 不认 `clientSessionId`、不认 control/session 两级客户端状态机
+  - daemon 不负责客户端 auth 复用策略、session 恢复策略、active transport 选择策略
+  - 客户端如果需要长期复用长链接，这是**客户端 transport owner** 的职责，不得下沉到 daemon 变成客户端状态机
 - active / inactive 只影响“是否继续取数”，不影响 logical session / transport 身份：
   - inactive tab 不主动高频拉 head/range
   - 但**不是**关闭 session
   - 也**不是**关闭 transport
-- reconnect 只能是 **same session identity retry**；不能通过“cleanup old socket -> 当成 brand-new session connect”重建第二份 session 语义
-- reconnect bookkeeping 也必须按 **session** 隔离：
-  - 不允许再做 `same host -> reconnect bucket -> activeSessionId` 的跨 session 串行门
-  - 一个 session 的旧 ws / handshake 卡住，**不得**挡住同 host 其他 session
+- reconnect / resume / foreground/background / tab active 都是**客户端逻辑**
+  - daemon 不能持有这些状态机
+  - daemon 只暴露稳定 mirror read/write 接口和基础 transport 接入能力
 
 ## 3. renderer
 
@@ -308,7 +318,7 @@ UI 只负责容器位置与裁切：
 - stream-mode
 - planner
 - viewport prefetch 第二链路
-- `ws close -> daemon delete logical client session`
+- `ws close -> daemon 推导客户端状态并修改 mirror/tmux 生命周期`
 - `inactive tab -> close session / close transport`
 - `reconnect -> new client session semantics`
 - daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture

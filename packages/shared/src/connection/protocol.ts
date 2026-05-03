@@ -128,7 +128,16 @@ export interface RemoteScreenshotCapture {
 }
 
 export interface HostConfigMessage {
+  /**
+   * Client-owned stable session identity.
+   * Compatibility only: daemon may consume it as an attach hint / echo field,
+   * but must not treat it as daemon-side logical-session truth.
+   */
   clientSessionId: string;
+  /**
+   * Compatibility-only attach token for the two-phase transport handshake.
+   * This is wire-level attach material, not a daemon-owned long-lived business truth.
+   */
   sessionTransportToken?: string;
   name: string;
   bridgeHost: string;
@@ -200,6 +209,11 @@ export type BridgeBufferMessage =
 
 export type BridgeServerControlMessage =
   | {
+      /**
+       * Compatibility-only control reply for opening a session transport.
+       * The payload may be echoed back by the client, but it must not become
+       * daemon-side client/session state truth.
+       */
       type: 'session-ticket';
       payload: {
         clientSessionId: string;
@@ -208,6 +222,9 @@ export type BridgeServerControlMessage =
       };
     }
   | {
+      /**
+       * Compatibility-only handshake failure for the two-phase attach flow.
+       */
       type: 'session-open-failed';
       payload: {
         clientSessionId: string;

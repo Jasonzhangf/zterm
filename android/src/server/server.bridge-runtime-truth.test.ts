@@ -46,10 +46,10 @@ describe('server bridge runtime truth gates', () => {
     const wsBlock = extractBlock(source, 'function handleWebSocketConnection(');
     const upgradeBlock = extractBlock(source, 'function handleServerUpgrade(');
 
-    expect(rtcBlock).toContain("deps.detachClientSessionTransportOnly(session, reason, connection.transportId)");
+    expect(rtcBlock).toContain("deps.detachSessionTransportOnly(session, reason, connection.transportId)");
     expect(rtcBlock).toContain('deps.connections.delete(connection.id)');
     expect(wsBlock).toContain("ws.on('close', () => {");
-    expect(wsBlock).toContain("deps.detachClientSessionTransportOnly(session, 'websocket closed', connection.transportId)");
+    expect(wsBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId)");
     expect(upgradeBlock).toContain("if (pathname === '/signal')");
     expect(upgradeBlock).toContain("if (pathname !== '/' && pathname !== '/ws')");
   });

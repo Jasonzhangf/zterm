@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../lib/types';
-import { TerminalHeader } from './TerminalHeader';
+import { TerminalHeader, type TerminalHeaderSessionItem } from './TerminalHeader';
 
 if (!HTMLElement.prototype.scrollIntoView) {
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -56,13 +55,24 @@ function makeSession(): Session {
   };
 }
 
+
+function toHeaderSession(session: Session): TerminalHeaderSessionItem {
+  return {
+    id: session.id,
+    bridgeHost: session.bridgeHost,
+    bridgePort: session.bridgePort,
+    sessionName: session.sessionName,
+    customName: session.customName,
+    resolvedPath: session.resolvedPath,
+  };
+}
 describe('TerminalHeader', () => {
   it('uses the UI-shell top inset as the single header padding truth', () => {
     const session = makeSession();
     const { container } = render(
       <TerminalHeader
-        sessions={[session]}
-        activeSession={session}
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
         topInsetPx={24}
         onBack={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
@@ -78,15 +88,15 @@ describe('TerminalHeader', () => {
     expect(root?.style.padding).toBe('44px 6px 6px');
   });
 
-  it('renders a close button on the active tab and requires explicit second tap to close', () => {
+  it('renders a close button on the active tab and closes on single tap', () => {
     const session = makeSession();
     const onCloseSession = vi.fn();
     const onSwitchSession = vi.fn();
 
     render(
       <TerminalHeader
-        sessions={[session]}
-        activeSession={session}
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
         topInsetPx={0}
         onBack={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
@@ -98,13 +108,34 @@ describe('TerminalHeader', () => {
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
     expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
-  it('does not let the same tap that switches tabs instantly close the newly active tab', () => {
+  it('keeps active-tab close working on touch events used by touch devices', () => {
+    const session = makeSession();
+    const onCloseSession = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+      />,
+    );
+
+    const closeButton = screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!;
+    fireEvent.touchEnd(closeButton);
+    expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
+  });
+
+  it('switches tab first and only closes after explicit close tap on the newly active tab', () => {
     const session1 = makeSession();
     const session2 = {
       ...makeSession(),
@@ -118,8 +149,8 @@ describe('TerminalHeader', () => {
 
     const { rerender } = render(
       <TerminalHeader
-        sessions={[session1, session2]}
-        activeSession={session1}
+        sessions={[toHeaderSession(session1), toHeaderSession(session2)]}
+        activeSession={toHeaderSession(session1)}
         topInsetPx={0}
         onBack={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
@@ -135,8 +166,8 @@ describe('TerminalHeader', () => {
 
     rerender(
       <TerminalHeader
-        sessions={[session1, session2]}
-        activeSession={session2}
+        sessions={[toHeaderSession(session1), toHeaderSession(session2)]}
+        activeSession={toHeaderSession(session2)}
         topInsetPx={0}
         onBack={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
@@ -148,36 +179,6 @@ describe('TerminalHeader', () => {
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     expect(onCloseSession).toHaveBeenCalledWith('session-2', 'terminal-header-close-button');
-  });
-
-  it('clears close confirmation if the second tap does not happen in time', () => {
-    const session = makeSession();
-    const onCloseSession = vi.fn();
-
-    render(
-      <TerminalHeader
-        sessions={[session]}
-        activeSession={session}
-        topInsetPx={0}
-        onBack={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onOpenTabManager={vi.fn()}
-        onSwitchSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={onCloseSession}
-      />,
-    );
-
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    act(() => {
-      vi.advanceTimersByTime(1700);
-    });
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
-    expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
   });
 });

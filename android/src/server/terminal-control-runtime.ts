@@ -14,6 +14,7 @@ export interface TerminalControlRuntimeDeps {
 export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
+  ensureTmuxSessionAlternateScreenDisabled: (sessionName: string) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   listTmuxSessions: () => string[];
@@ -85,6 +86,10 @@ export function createTerminalControlRuntime(
     return result;
   }
 
+  function ensureTmuxSessionAlternateScreenDisabled(sessionName: string) {
+    runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off']);
+  }
+
   function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
     runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
     if (appendEnter) {
@@ -128,6 +133,7 @@ export function createTerminalControlRuntime(
   return {
     runTmux,
     runCommand,
+    ensureTmuxSessionAlternateScreenDisabled,
     writeToTmuxSession,
     writeToLiveMirror,
     listTmuxSessions,

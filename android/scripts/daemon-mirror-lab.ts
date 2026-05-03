@@ -1098,9 +1098,12 @@ function writeFailedCaseEvidence(caseName: CaseName, reason: string, probe: Daem
 }
 
 async function runInitialSyncCase(probe: DaemonProbe): Promise<CaseResult> {
-  const payload = await probe.waitForPayload('initial sync ready');
-  await sleep(200);
   const oracle = captureOracleSnapshot();
+  const payload = await waitForPayloadToMatchOracle(
+    probe,
+    'initial sync settled payload',
+    oracle,
+  );
   return finalizeCase('initial-sync', [
     buildStepResult('initial-sync', oracle, payload, probe.history, 'daemon last screen != tmux last screen on initial sync'),
   ]);

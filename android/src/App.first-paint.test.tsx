@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
+import { useSessionBufferSnapshot } from './lib/session-buffer-store';
+import { useSessionHeadSnapshot } from './lib/session-head-store';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -241,12 +243,20 @@ vi.mock('./pages/TerminalPage', () => ({
     activeSession,
     onSwitchSession,
     onTerminalViewportChange,
+    sessionHeadStore,
+    sessionBufferStore,
   }: {
     sessions: any[];
     activeSession: any;
     onSwitchSession: (sessionId: string) => void;
     onTerminalViewportChange?: (sessionId: string, state: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
+    sessionHeadStore?: { getSnapshot: (sessionId: string) => { daemonHeadEndIndex: number } };
+    sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer: { lines: any[]; bufferTailEndIndex: number; endIndex: number } } };
   }) => {
+    const activeBufferSnapshot = useSessionBufferSnapshot(sessionBufferStore as any, activeSession?.id || null);
+    const activeHeadSnapshot = useSessionHeadSnapshot(sessionHeadStore as any, activeSession?.id || null);
+    const liveBuffer = activeSession ? activeBufferSnapshot.buffer : activeSession?.buffer;
+
     useEffect(() => {
       if (!activeSession || !onTerminalViewportChange) {
         return;
@@ -256,17 +266,17 @@ vi.mock('./pages/TerminalPage', () => ({
         viewportEndIndex: Math.max(
           0,
           Math.floor(
-            activeSession.daemonHeadEndIndex
-            || activeSession.buffer.bufferTailEndIndex
-            || activeSession.buffer.endIndex
+            activeHeadSnapshot.daemonHeadEndIndex
+            || liveBuffer?.bufferTailEndIndex
+            || liveBuffer?.endIndex
             || 0,
           ),
         ),
         viewportRows: 24,
       });
-    }, [activeSession?.id, activeSession?.daemonHeadEndIndex, activeSession?.buffer?.bufferTailEndIndex, activeSession?.buffer?.endIndex, onTerminalViewportChange]);
+    }, [activeHeadSnapshot.daemonHeadEndIndex, activeSession?.id, liveBuffer?.bufferTailEndIndex, liveBuffer?.endIndex, onTerminalViewportChange]);
 
-    const activeLines = (activeSession?.buffer?.lines || []).map(encodeCells).join('|');
+    const activeLines = (liveBuffer?.lines || []).map(encodeCells).join('|');
     return (
       <div data-testid="terminal-page">
         <div data-testid="active-session-id">{activeSession?.id || 'missing'}</div>

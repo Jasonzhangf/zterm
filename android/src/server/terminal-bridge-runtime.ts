@@ -19,7 +19,7 @@ export interface TerminalBridgeRuntimeDeps {
     transport: DaemonTransportConnection['transport'],
     requestOrigin: string,
   ) => DaemonTransportConnection;
-  detachClientSessionTransportOnly: (session: ClientSession, reason: string, transportId?: string) => void;
+  detachSessionTransportOnly: (session: ClientSession, reason: string, transportId?: string) => void;
   handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
@@ -57,16 +57,16 @@ export function createTerminalBridgeRuntime(
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
           const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-          if (session?.logicalSessionBound) {
-            deps.detachClientSessionTransportOnly(session, reason, connection.transportId);
+          if (session) {
+            deps.detachSessionTransportOnly(session, reason, connection.transportId);
           }
           deps.connections.delete(connection.id);
         },
         onError: (_transportId, message) => {
           console.error(`[${deps.logTimePrefix()}] rtc transport ${connection.id} error: ${message}`);
           const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-          if (session?.logicalSessionBound) {
-            deps.detachClientSessionTransportOnly(session, `rtc error: ${message}`, connection.transportId);
+          if (session) {
+            deps.detachSessionTransportOnly(session, `rtc error: ${message}`, connection.transportId);
           }
           deps.connections.delete(connection.id);
         },
@@ -109,8 +109,8 @@ export function createTerminalBridgeRuntime(
     ws.on('close', () => {
       console.log(`[${deps.logTimePrefix()}] websocket transport ${connection.id} closed`);
       const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session?.logicalSessionBound) {
-        deps.detachClientSessionTransportOnly(session, 'websocket closed', connection.transportId);
+      if (session) {
+        deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
       }
       deps.connections.delete(connection.id);
     });
@@ -118,8 +118,8 @@ export function createTerminalBridgeRuntime(
     ws.on('error', (error) => {
       console.error(`[${deps.logTimePrefix()}] websocket transport ${connection.id} error: ${error.message}`);
       const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session?.logicalSessionBound) {
-        deps.detachClientSessionTransportOnly(session, `websocket error: ${error.message}`, connection.transportId);
+      if (session) {
+        deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`, connection.transportId);
       }
       deps.connections.delete(connection.id);
     });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useEffect } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
@@ -30,12 +30,28 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
   },
 }));
 
+const renderCounts = new Map<string, number>();
+
+function bumpRenderCount(key: string) {
+  renderCounts.set(key, (renderCounts.get(key) || 0) + 1);
+}
+
+function readRenderCount(key: string) {
+  return renderCounts.get(key) || 0;
+}
+
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: () => <div data-testid="terminal-header" />,
+  TerminalHeader: () => {
+    bumpRenderCount('terminal-header');
+    return <div data-testid="terminal-header" />;
+  },
 }));
 
 vi.mock('../components/terminal/TabManagerSheet', () => ({
-  TabManagerSheet: () => null,
+  TabManagerSheet: ({ open }: { open?: boolean }) => {
+    bumpRenderCount('tab-manager-sheet');
+    return open ? <div data-testid="tab-manager-sheet" /> : null;
+  },
 }));
 
 vi.mock('../components/terminal/SessionScheduleSheet', () => ({
@@ -127,11 +143,25 @@ function makeSession(id: string): Session {
   };
 }
 
+function makeDebugMetrics(active: boolean) {
+  return {
+    uplinkBps: 0,
+    downlinkBps: 0,
+    renderHz: 0,
+    pullHz: 0,
+    bufferPullActive: false,
+    status: 'waiting' as const,
+    active,
+    updatedAt: 1,
+  };
+}
+
 function renderTerminalPage(sessions: Session[], activeSession: Session | null) {
   return render(
     <TerminalPage
       sessions={sessions}
       activeSession={activeSession}
+      getSessionDebugMetrics={(sessionId) => makeDebugMetrics(activeSession?.id === sessionId)}
       onSwitchSession={vi.fn()}
       onMoveSession={vi.fn()}
       onRenameSession={vi.fn()}
@@ -151,6 +181,8 @@ function renderTerminalPage(sessions: Session[], activeSession: Session | null) 
 
 describe('TerminalPage renderer scope', () => {
   beforeEach(() => {
+    renderCounts.clear();
+    vi.useFakeTimers();
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -179,20 +211,27 @@ describe('TerminalPage renderer scope', () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
-  it('renders only the active session renderer when split is disabled and switches body with active session', () => {
+  it('keeps inactive renderers mounted but hides them when split is disabled and switches body with active session', () => {
     const session1 = makeSession('s1');
     const session2 = makeSession('s2');
     const view = renderTerminalPage([session1, session2], session1);
 
+    const activePane = screen.getByTestId('terminal-view-s1').parentElement as HTMLElement;
+    const inactivePane = screen.getByTestId('terminal-view-s2').parentElement as HTMLElement;
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
-    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(activePane.style.visibility).toBe('visible');
+    expect(inactivePane.style.visibility).toBe('hidden');
 
     view.rerender(
       <TerminalPage
         sessions={[session1, session2]}
         activeSession={session2}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's2')}
         onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -209,8 +248,12 @@ describe('TerminalPage renderer scope', () => {
       />,
     );
 
+    const nextActivePane = screen.getByTestId('terminal-view-s2').parentElement as HTMLElement;
+    const nextInactivePane = screen.getByTestId('terminal-view-s1').parentElement as HTMLElement;
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('true');
-    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('false');
+    expect(nextActivePane.style.visibility).toBe('visible');
+    expect(nextInactivePane.style.visibility).toBe('hidden');
   });
 
   it('renders only split-visible renderers when split mode is enabled', () => {
@@ -235,6 +278,19 @@ describe('TerminalPage renderer scope', () => {
     expect(screen.queryByTestId('terminal-view-s3')).toBeNull();
   });
 
+  it('does not rerender header when only debug overlay polling ticks', () => {
+    const session1 = makeSession('s1');
+    renderTerminalPage([session1], session1);
+
+    const headerRenderCountBefore = readRenderCount('terminal-header');
+
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
+
+    expect(readRenderCount('terminal-header')).toBe(headerRenderCountBefore);
+  });
+
   it('uses debug overlay only for overlay observability while line numbers stay independently controlled', () => {
     const session1 = makeSession('s1');
     const session2 = makeSession('s2');
@@ -242,12 +298,14 @@ describe('TerminalPage renderer scope', () => {
 
     expect(screen.getByText('渲染')).not.toBeNull();
     expect(screen.getByText('follow')).not.toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('1');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     view.rerender(
       <TerminalPage
         sessions={[session1, session2]}
         activeSession={session2}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's2')}
         onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -265,7 +323,8 @@ describe('TerminalPage renderer scope', () => {
     );
 
     expect(screen.getByText('reading')).not.toBeNull();
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('1');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-show-line-numbers')).toBe('false');
   });
 
   it('toggles debug overlay off and on from the 状态 quickbar button without changing line numbers', () => {
@@ -273,17 +332,17 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1], session1);
 
     expect(screen.getByText('渲染')).not.toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
     expect(screen.queryByText('渲染')).toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
     expect(screen.getByText('渲染')).not.toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
   });
 
   it('toggles absolute line numbers independently from the 行号 quickbar button', () => {
@@ -291,13 +350,13 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1], session1);
 
     expect(screen.getByText('渲染')).not.toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '行号' }));
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
     expect(screen.getByText('渲染')).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '行号' }));
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
   });
 });

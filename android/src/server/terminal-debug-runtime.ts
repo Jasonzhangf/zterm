@@ -85,7 +85,7 @@ export function createTerminalDebugRuntime(
       {
         sessionId: session.id,
         tmuxSessionName: session.sessionName || 'unknown',
-        requestOrigin: session.transportRequestOrigin,
+        requestOrigin: session.requestOrigin,
       },
       entries,
     );

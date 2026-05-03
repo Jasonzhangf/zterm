@@ -1,14 +1,17 @@
 import type { RuntimeDebugLogEntry } from './types';
 
 const RUNTIME_DEBUG_STORAGE_KEY = 'zterm:runtime-debug-log';
+const RUNTIME_DEBUG_CONSOLE_STORAGE_KEY = 'zterm:runtime-debug-console';
 const MAX_RUNTIME_DEBUG_QUEUE = 120;
 const MAX_RUNTIME_DEBUG_PAYLOAD_CHARS = 900;
 const MAX_RUNTIME_DEBUG_BATCH_ENTRIES = 8;
 const MAX_RUNTIME_DEBUG_BATCH_CHARS = 4800;
+const HIGH_FREQUENCY_RUNTIME_DEBUG_MIN_INTERVAL_MS = 500;
 
 let runtimeDebugSequence = 0;
 let droppedRuntimeDebugEntries = 0;
 const runtimeDebugQueue: RuntimeDebugLogEntry[] = [];
+const runtimeDebugLastSampleAt = new Map<string, number>();
 
 function safeReadStorageFlag() {
   if (typeof window === 'undefined') {
@@ -25,6 +28,19 @@ function safeReadStorageFlag() {
 
 export function isRuntimeDebugEnabled() {
   return safeReadStorageFlag();
+}
+
+function shouldMirrorRuntimeDebugToConsole() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(RUNTIME_DEBUG_CONSOLE_STORAGE_KEY) === '1';
+  } catch (error) {
+    console.warn('[runtime-debug] Failed to read runtime debug console flag:', error);
+    return false;
+  }
 }
 
 export function setRuntimeDebugEnabled(enabled: boolean) {
@@ -80,12 +96,29 @@ function enqueueRuntimeDebugEntry(entry: RuntimeDebugLogEntry) {
   }
 }
 
+function shouldSampleRuntimeDebugScope(scope: string) {
+  return (
+    scope === 'session.buffer.head'
+    || scope === 'session.buffer.request'
+    || scope.startsWith('session.transport.active-tick')
+  );
+}
+
 export function runtimeDebug(scope: string, payload?: unknown) {
   if (!safeReadStorageFlag()) {
     return;
   }
 
-  const timestamp = new Date().toISOString();
+  const now = Date.now();
+  if (shouldSampleRuntimeDebugScope(scope)) {
+    const previousAt = runtimeDebugLastSampleAt.get(scope) || 0;
+    if (now - previousAt < HIGH_FREQUENCY_RUNTIME_DEBUG_MIN_INTERVAL_MS) {
+      return;
+    }
+    runtimeDebugLastSampleAt.set(scope, now);
+  }
+
+  const timestamp = new Date(now).toISOString();
   const normalizedPayload = normalizePayload(payload);
   enqueueRuntimeDebugEntry({
     seq: ++runtimeDebugSequence,
@@ -95,6 +128,10 @@ export function runtimeDebug(scope: string, payload?: unknown) {
   });
 
   if (typeof process !== 'undefined' && process.env.VITEST) {
+    return;
+  }
+
+  if (!shouldMirrorRuntimeDebugToConsole()) {
     return;
   }
 
@@ -144,5 +181,6 @@ export {
   MAX_RUNTIME_DEBUG_BATCH_CHARS,
   MAX_RUNTIME_DEBUG_PAYLOAD_CHARS,
   MAX_RUNTIME_DEBUG_QUEUE,
+  RUNTIME_DEBUG_CONSOLE_STORAGE_KEY,
   RUNTIME_DEBUG_STORAGE_KEY,
 };

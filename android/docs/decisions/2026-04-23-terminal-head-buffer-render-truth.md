@@ -2,7 +2,7 @@
 
 > 本文档是 terminal 链路唯一真源。若旧文档、旧实现、旧测试与本文冲突，以本文为准。
 
-> 补充：transport / logical session 生命周期已单独冻结在  
+> 补充：transport 生命周期已单独冻结在  
 > `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`。  
 > 本文档只负责 `daemon mirror / buffer manager / renderer / UI shell` 四层内容真相。
 
@@ -21,8 +21,8 @@ tmux truth
 ### 冻结原则
 
 1. **server 独立**：只 mirror tmux truth，只回答 head 和 range
-2. **buffer manager 独立**：只管和 daemon 同步，不管渲染
-3. **renderer 独立**：只管 render window，不管 buffer 拉取
+2. **buffer manager 独立**：只管和 daemon 同步 + 本地 sparse buffer / gap repair，不管渲染状态
+3. **renderer 独立**：只管 render window / visible range，不管 buffer 拉取
 4. **UI shell 独立**：只管容器位置与裁切，不管内容真相
 5. **不允许 fallback / snapshot / planner / 第二语义**
 
@@ -35,7 +35,7 @@ server 只做四件事：
 1. mirror tmux buffer truth
 2. 处理 `buffer-head-request`
 3. 处理 `buffer-sync-request`
-4. 处理 `session attach / input / file / schedule / tmux manage`
+4. 处理 transport 级 `input / file / schedule / tmux manage`
 
 ### 1.1 server 响应规则
 
@@ -69,6 +69,7 @@ type BufferSyncResponse = {
 - 不做 snapshot / fallback
 - 不做 gap 判断
 - 不做 renderer 决策
+- 不做 visible range 决策
 - 不做“客户端应该拉哪段”的策略
 - 不因 client 断开 / 切 tab / subscriber 归零就销毁 mirror truth；mirror 的 `revision / latestEndIndex / absolute line window` 不能随着 client 生命周期重置
 
@@ -91,41 +92,35 @@ single capture
 - 这类 split 会制造第二语义，也容易在短历史场景下把尾部内容重复拼进 mirror
 - daemon 可以读取 tmux 的 pane rows / cols / alternate-screen 这些**源事实**，但不能基于它们派生“显示策略”
 
-### 1.3 daemon client-session / transport 生命周期
+### 1.3 daemon transport / mirror 生命周期
 
 daemon 侧还要额外冻结一条真源：
 
-1. **daemon client session** 是稳定逻辑对象
-2. **transport(ws / rtc)** 是可替换物理连接
-3. **mirror** 仍然只代表 tmux truth
+1. **transport(ws / rtc)** 是 daemon 可持有的物理连接事实
+2. **mirror** 仍然只代表 tmux truth
+3. daemon 不持有客户端逻辑 session 状态机
 
 关系固定为：
 
 ```text
 tmux truth
   -> mirror
-daemon logical client session
-  -> attached transport (0..1)
+daemon transport connection
+  -> optionally bound session transport
 ```
 
 硬规则：
 
-- 新 transport 连接上来时，daemon 先按 `clientSessionId` 找已有 logical client session
-- 找到就**重绑 transport**，不是新建第二个 logical session
-- transport 断开时，只允许 **detach transport**，不得顺手删除 logical client session
+- 新 transport 连接上来时，daemon 只处理 transport attach / detach
+- 若协议兼容期仍携带 `clientSessionId / sessionTransportToken`，它们只能作为 attach 参数
+- transport 断开时，只允许 **detach transport**，不得顺手推导客户端逻辑状态
 - daemon 不允许维护 client 风格状态机：
   - 不允许 `session.state = connecting/connected/error/closed`
   - 不允许 `mirror.state = connecting/connected/error/closed`
   - 只允许维护 daemon 自己需要的最小事实：
-    - logical session 是否存在
-    - 当前 attached transport id
-    - 当前 ready transport id
+    - 当前 transport 是否存在/绑定
     - mirror 是否 `booting/ready/failed/destroyed`
-- logical client session 只允许由：
-  1. client 显式 `close`
-  2. daemon shutdown
-  3. 显式实现并写进真源的资源回收策略
-    触发销毁
+- daemon 不允许因为 active/inactive/tab/foreground/background 推导 transport 生命周期
 
 ### 1.4 daemon 不允许持有客户端 UI/viewport 语义
 
@@ -157,9 +152,10 @@ buffer manager 是客户端唯一 buffer worker。
 - 自己起 timer
 - 定时先问 head
 - 比较本地 local buffer 与 daemon head
+- 接收 renderer 声明的 visible range
 - 决定这次该请求哪段 buffer
 - merge 到本地 sliding buffer
-- 在 head 变化或 gap repair 完成后通知 renderer
+- 在 head 变化或 gap repair 完成后产出 line/range patch 并通知 renderer
 
 ### 2.2 本地 buffer 结构
 
@@ -216,17 +212,21 @@ buffer manager 是客户端唯一 buffer worker。
 
 reading 不改变 head-first 主循环。
 
-它只是给 buffer manager 额外一个渲染需求：
-- 当前 reading window 是多少
-- 当前 reading window 内是否有 gap
+buffer manager 不理解 “follow / reading” 模式本身。  
+它只接收 renderer 声明的 **当前 visible range**，然后判断：
 
-只有 reading window 不连续时，buffer manager 才请求 gap。
+- 当前 visible range 内哪些 absolute rows 已存在
+- 哪些 rows 是 gap
+- gap 是否需要请求 repair
+
+只有当前 visible range 不连续时，buffer manager 才请求 gap。
 
 ### 2.5 buffer manager 明确不做
 
 - 不关心 renderer 的 DOM / scroll / IME
 - 不关心容器位置
 - 不直接修改 renderer 的 mode
+- 不持有 `follow / reading / renderBottomIndex`
 - 不在 follow 下因为历史 gap 去回补整段旧历史
 - 不允许 snapshot / patch-middle / fallback
 - 不允许因为 `local window invalid` / `anchor mismatch` / `head mismatch` 把已有本地 buffer truth 重置成空窗
@@ -271,6 +271,7 @@ renderer 只消费本地内容池，不驱动 transport。
 renderer 只维护：
 - `mode`: `follow | reading`
 - `renderBottomIndex`
+- `visible range`
 
 派生：
 
@@ -279,11 +280,15 @@ renderTopIndex = renderBottomIndex - viewportRows
 renderWindow = [renderTopIndex, renderBottomIndex)
 ```
 
+并且 renderer 必须把这个 visible range 声明给 buffer manager；
+buffer manager 不得自行反推 renderer 当前窗口。
+
 ### 3.2 follow
 
 - follow 时，收到 head / buffer 更新后
 - 将 `renderBottomIndex` 对齐到最新底部
 - 重新从本地 buffer 取当前窗口渲染
+- 若当前窗口有 gap，先直接画空白占位，不等待补齐
 
 ### 3.3 reading
 
@@ -291,6 +296,7 @@ renderWindow = [renderTopIndex, renderBottomIndex)
 - reading 时只改自己的 `renderBottomIndex`
 - 取的是 reading head 往回 3 屏的渲染窗口
 - buffer 更新不会自动改变滚动语义
+- 若当前窗口有 gap，仍先按已有行渲染，缺的行画空白占位
 
 ### 3.4 reading 退出条件
 
@@ -308,6 +314,7 @@ renderWindow = [renderTopIndex, renderBottomIndex)
 - 不修改 cursor 真相；cursor 颜色 / 样式 / 位置语义都不能由 Android client 自己二次生成
 - 不允许把“窗口不连续”解释成“已有内容不存在”
 - 当前窗口缺行时，应继续消费已有 absolute-index 内容，并把缺口显式视为 gap / blank marker，而不是把整屏当空
+- buffer manager 补齐后，renderer 只重刷对应 absolute rows / changed range，不整屏重算
 
 ### 3.6 宽度模式真源
 
@@ -444,8 +451,9 @@ UI shell 只负责：
 ```text
 tmux truth
 -> daemon response
--> client buffer manager merge
--> renderer commit
+-> renderer declare visible range
+-> client buffer manager merge / patch
+-> renderer commit / rerender patched rows
 -> Android APK 真实画面
 ```
 
