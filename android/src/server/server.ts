@@ -34,7 +34,6 @@ import {
   createTerminalRuntime,
   type ClientSession,
   type SessionMirror,
-  type TerminalAttachPayload,
 } from './terminal-runtime';
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
@@ -180,8 +179,8 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   wtermHomeDir: WTERM_HOME_DIR,
   platform: process.platform,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
-  getClientMirror,
-  scheduleMirrorLiveSync,
+  getClientMirror: terminalRuntime.getClientMirror,
+  scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   writeToTmuxSession: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
   writeToLiveMirror: (sessionName, payload, appendEnter) =>
@@ -259,60 +258,15 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   logTimePrefix,
 });
 
-function getClientMirror(session: ClientSession) {
-  return terminalRuntime.getClientMirror(session);
-}
-
-function createTransportBoundSession(connection: DaemonTransportConnection) {
-  return terminalRuntime.createTransportBoundSession(connection);
-}
-
-function bindConnectionToSession(connection: DaemonTransportConnection, session: ClientSession) {
-  return terminalRuntime.bindConnectionToSession(connection, session);
-}
-
-function detachSessionTransportOnly(session: ClientSession, reason: string, transportId?: string) {
-  terminalRuntime.detachSessionTransportOnly(session, reason, transportId);
-}
-
-function closeSession(session: ClientSession, reason: string, notifyClient = false) {
-  terminalRuntime.closeSession(session, reason, notifyClient);
-}
-
-function destroyMirror(
-  mirror: SessionMirror,
-  reason: string,
-  options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
-) {
-  terminalRuntime.destroyMirror(mirror, reason, options);
-}
-
-
-function sendBufferHeadToSession(session: ClientSession, mirror: SessionMirror) {
-  terminalRuntime.sendBufferHeadToSession(session, mirror);
-}
-
-function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs?: number) {
-  terminalRuntime.scheduleMirrorLiveSync(mirror, delayMs);
-}
-
-async function attachTmux(session: ClientSession, payload: TerminalAttachPayload) {
-  await terminalRuntime.attachTmux(session, payload);
-}
-
-function handleInput(session: ClientSession, data: string) {
-  terminalRuntime.handleInput(session, data);
-}
-
 const terminalMessageRuntime = createTerminalMessageRuntime({
   sessions,
   sendTransportMessage,
   sendMessage,
   normalizeBufferSyncRequestPayload,
-  getClientMirror,
-  sendBufferHeadToSession,
-  handleInput,
-  closeSession,
+  getClientMirror: terminalRuntime.getClientMirror,
+  sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
+  handleInput: terminalRuntime.handleInput,
+  closeSession: terminalRuntime.closeSession,
   terminalFileTransferRuntime,
   handleClientDebugLog,
   controlRuntimeDeps: {
@@ -330,12 +284,12 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     runTmux,
     sanitizeSessionName,
     createTransportBoundSession: (connection) =>
-      createTransportBoundSession(connection as DaemonTransportConnection),
+      terminalRuntime.createTransportBoundSession(connection as DaemonTransportConnection),
     bindConnectionToSession: (connection, session) =>
-      bindConnectionToSession(connection as DaemonTransportConnection, session),
+      terminalRuntime.bindConnectionToSession(connection as DaemonTransportConnection, session),
     getMirrorKey,
-    attachTmux,
-    destroyMirror,
+    attachTmux: terminalRuntime.attachTmux,
+    destroyMirror: terminalRuntime.destroyMirror,
   },
 });
 
@@ -381,7 +335,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
     }
     sessionsMap.clear();
   },
-  destroyMirror,
+  destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),
   disposeRelayHostClient: () => relayHostClient.dispose(),
@@ -408,7 +362,7 @@ const terminalBridgeRuntime = createTerminalBridgeRuntime({
   createWebSocketSessionTransport,
   createRtcSessionTransport,
   createTransportConnection,
-  detachSessionTransportOnly,
+  detachSessionTransportOnly: terminalRuntime.detachSessionTransportOnly,
   handleMessage: (connection, rawData, isBinary) =>
     terminalMessageRuntime.handleMessage(connection as DaemonTransportConnection, rawData, isBinary),
 });

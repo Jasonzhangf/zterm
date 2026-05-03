@@ -10,12 +10,9 @@ import type {
 } from './session-sync-helpers';
 import {
   bindSessionTransportSocketLifecycleOrchestrationRuntime,
-  cleanupControlSocketOrchestrationRuntime,
-  ensureControlTransportForSessionOpenOrchestrationRuntime,
-  failPendingControlTargetIntentsOrchestrationRuntime,
-  handleControlTransportMessageOrchestrationRuntime,
   primeSessionTransportSocketRuntime,
 } from './session-context-transport-lifecycle-runtime';
+import { createSessionControlTransportOrchestrationRuntime } from './session-context-transport-control-orchestration-runtime';
 import {
   applyTransportOpenConnectedEffectsRuntime,
   applyTransportOpenLiveFailureEffectsRuntime,
@@ -112,71 +109,28 @@ export function createSessionTransportOrchestrationRuntime(options: {
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
   ) => void;
 }) {
-  const cleanupControlSocket = (sessionId: string, shouldClose = false) => {
-    cleanupControlSocketOrchestrationRuntime({
-      sessionId,
-      shouldClose,
-      readSessionTargetControlSocket: options.readSessionTargetControlSocket,
-      writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
-    });
-  };
-
-  const handleControlTransportMessage = (transportOptions: {
-    sessionId: string;
-    host: Host;
-    ws: BridgeTransportSocket;
-  }, msg: ServerMessage) => {
-    handleControlTransportMessageOrchestrationRuntime({
-      sessionId: transportOptions.sessionId,
-      openSessionTransportByIntent,
+  let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
+  const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
+    terminalWidthMode: options.terminalWidthMode,
+    refs: {
       pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-      clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
-      writeSessionTransportToken: options.writeSessionTransportToken,
-      msg,
-    });
-  };
-
-  const failPendingControlTargetIntents = (sessionId: string, message: string, retryable: boolean) => {
-    failPendingControlTargetIntentsOrchestrationRuntime({
-      sessionId,
-      message,
-      retryable,
-      readSessionTargetRuntime: options.readSessionTargetRuntime,
-      pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-      clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
-      writeSessionTransportToken: options.writeSessionTransportToken,
-    });
-  };
-
-  const ensureControlTransportForSessionOpen = (intent: PendingSessionTransportOpenIntent) => {
-    ensureControlTransportForSessionOpenOrchestrationRuntime({
-      intent,
-      terminalWidthMode: options.terminalWidthMode,
-      readSessionTargetControlSocket: options.readSessionTargetControlSocket,
-      readSessionTargetRuntime: options.readSessionTargetRuntime,
-      readSessionTargetKey: options.readSessionTargetKey,
-      pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-      sendSocketPayload: options.sendSocketPayload,
-      clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
-      setSessionHandshakeTimeout: options.setSessionHandshakeTimeout,
-      failPendingControlTargetIntents,
-      buildTraversalSocketForHost: options.buildTraversalSocketForHost,
-      writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
-      applyTransportDiagnostics: options.applyTransportDiagnostics,
-      runtimeDebug: options.runtimeDebug,
-      recordSessionRx: options.recordSessionRx,
-      handleControlTransportMessage: ({ sessionId }, nextMsg) => {
-        handleControlTransportMessage({
-          sessionId,
-          host: intent.host,
-          ws: options.readSessionTargetControlSocket(sessionId)
-            || options.buildTraversalSocketForHost(intent.host, 'control'),
-        }, nextMsg);
-      },
-      cleanupControlSocket,
-      sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
-    });
-  };
+    },
+    readSessionTargetControlSocket: options.readSessionTargetControlSocket,
+    readSessionTargetRuntime: options.readSessionTargetRuntime,
+    readSessionTargetKey: options.readSessionTargetKey,
+    writeSessionTransportToken: options.writeSessionTransportToken,
+    writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
+    clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
+    setSessionHandshakeTimeout: options.setSessionHandshakeTimeout,
+    sendSocketPayload: options.sendSocketPayload,
+    buildTraversalSocketForHost: options.buildTraversalSocketForHost,
+    applyTransportDiagnostics: options.applyTransportDiagnostics,
+    runtimeDebug: options.runtimeDebug,
+    recordSessionRx: options.recordSessionRx,
+    openSessionTransportByIntent: (intent) => openSessionTransportByIntentRef?.(intent) || null,
+    sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
+  });
+  const { cleanupControlSocket, ensureControlTransportForSessionOpen } = controlTransportRuntime;
 
   const primeSessionTransportSocket = (sessionId: string, ws: BridgeTransportSocket) => {
     primeSessionTransportSocketRuntime({
@@ -282,6 +236,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       writeSessionTransportToken: options.writeSessionTransportToken,
     });
   }
+  openSessionTransportByIntentRef = openSessionTransportByIntent;
 
   const startReconnectAttempt = (sessionId: string) => {
     startReconnectAttemptRuntime({
