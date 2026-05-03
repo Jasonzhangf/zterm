@@ -100,6 +100,7 @@ export type ReconnectHandshakeFailurePlan =
 export interface PendingSessionTransportOpenIntent {
   sessionId: string;
   host: Host;
+  resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
   activate?: boolean;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
@@ -141,6 +142,7 @@ export function createPendingSessionTransportOpenIntent(
   return {
     sessionId: options.sessionId,
     host: options.host,
+    resolvedSessionName: options.resolvedSessionName,
     debugScope: options.debugScope,
     activate: options.activate,
     onBeforeConnectSend: options.onBeforeConnectSend,

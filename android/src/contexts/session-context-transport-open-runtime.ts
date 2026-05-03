@@ -107,6 +107,7 @@ export function openSessionTransportByIntentRuntime(options: {
   bindSessionTransportSocketLifecycle: (options: {
     sessionId: string;
     host: Host;
+    resolvedSessionName: string;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
     activate?: boolean;
@@ -137,6 +138,7 @@ export function openSessionTransportByIntentRuntime(options: {
   options.bindSessionTransportSocketLifecycle({
     sessionId,
     host,
+    resolvedSessionName: options.intent.resolvedSessionName,
     ws,
     debugScope,
     activate,

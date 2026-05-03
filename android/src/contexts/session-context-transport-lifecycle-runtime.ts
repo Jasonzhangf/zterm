@@ -1,5 +1,6 @@
 import type { Host, ServerMessage, TerminalWidthMode } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { buildSessionConnectPayload, buildSessionOpenPayload } from './session-context-transport-wire-runtime';
 import {
   bindSessionTransportSocketLifecycle as bindSessionTransportSocketLifecycleBaseRuntime,
   cleanupControlTransportSocket as cleanupControlTransportSocketBaseRuntime,
@@ -81,7 +82,18 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
-  ensureControlTransportForSessionOpenBaseRuntime(options);
+  ensureControlTransportForSessionOpenBaseRuntime({
+    ...options,
+    intent: {
+      ...options.intent,
+      hostConfigPayload: buildSessionOpenPayload({
+        host: options.intent.host,
+        resolvedSessionName: options.intent.resolvedSessionName,
+        sessionId: options.intent.sessionId,
+        terminalWidthMode: options.terminalWidthMode,
+      }),
+    },
+  });
 }
 
 export function primeSessionTransportSocketRuntime(options: {
@@ -99,6 +111,7 @@ export function primeSessionTransportSocketRuntime(options: {
 export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options: {
   sessionId: string;
   host: Host;
+  resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   activate?: boolean;
@@ -130,7 +143,16 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
   onConnected: () => void;
   sessionHandshakeTimeoutMs: number;
 }) {
-  bindSessionTransportSocketLifecycleBaseRuntime(options);
+  bindSessionTransportSocketLifecycleBaseRuntime({
+    ...options,
+    connectMessagePayload: buildSessionConnectPayload({
+      host: options.host,
+      resolvedSessionName: options.resolvedSessionName,
+      sessionId: options.sessionId,
+      terminalWidthMode: options.terminalWidthMode,
+      sessionTransportToken: options.readSessionTransportToken(options.sessionId),
+    }),
+  });
 }
 
 export function openSocketConnectHandshakeOrchestrationRuntime(options: Parameters<typeof openSocketConnectHandshakeBaseRuntime>[0]) {

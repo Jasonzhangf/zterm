@@ -1,5 +1,6 @@
 import type { Host, ServerMessage, Session, SessionScheduleState, TerminalWidthMode } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { getResolvedSessionName } from '../lib/connection-target';
 import type {
   QueueSessionTransportOpenIntentOptions,
   SessionReconnectRuntime,
@@ -231,6 +232,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     bindSessionTransportSocketLifecycleOrchestrationRuntime({
       sessionId: bindOptions.sessionId,
       host: bindOptions.host,
+      resolvedSessionName: getResolvedSessionName(bindOptions.host),
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
       activate: bindOptions.activate,

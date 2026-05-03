@@ -14,6 +14,10 @@ function readMessageControlRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-control-runtime.ts'), 'utf8');
 }
 
+function readAttachTokenRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-attach-token-runtime.ts'), 'utf8');
+}
+
 function readDebugRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-debug-runtime.ts'), 'utf8');
 }
@@ -37,16 +41,26 @@ describe('server transport/session lifecycle truth gates', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
     const controlRuntimeSource = readMessageControlRuntimeSource();
+    const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
     expect(serverSource).toContain('createTerminalMessageRuntime');
-    expect(serverSource).toContain('sessionTransportAttachTokens');
+    expect(serverSource).toContain('createTerminalAttachTokenRuntime');
     expect(messageRuntimeSource).toContain("case 'session-open'");
     expect(messageRuntimeSource).not.toContain('takeSessionTransportTicket');
     expect(messageRuntimeSource).toContain('handleSessionOpenMessageRuntime');
     expect(messageRuntimeSource).toContain('handleSessionTransportConnectRuntime');
     expect(controlRuntimeSource).toContain("type: 'session-ticket'");
-    expect(controlRuntimeSource).toContain('issueSessionTransportToken(payload.clientSessionId)');
-    expect(controlRuntimeSource).toContain('consumeSessionTransportToken(token, payload.clientSessionId)');
+    expect(attachTokenRuntimeSource).toContain('issueSessionTransportToken(clientSessionId');
+    expect(attachTokenRuntimeSource).toContain('function consumeSessionTransportToken(token: string, clientSessionId: string)');
+    expect(attachTokenRuntimeSource).toContain('sessionTransportAttachTokens');
     expect(controlRuntimeSource).toContain('createTransportBoundSession');
+  });
+
+  it('keeps attach token runtime outside server.ts so daemon glue stays thinner', () => {
+    const serverSource = readServerSource();
+    const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
+    expect(serverSource).toContain('createTerminalAttachTokenRuntime');
+    expect(serverSource).not.toContain('const sessionTransportAttachTokens = new Map<string, string>()');
+    expect(attachTokenRuntimeSource).toContain('const sessionTransportAttachTokens = new Map<string, string>()');
   });
 
   it('documents session-ticket/sessionTransportToken as attach-only compatibility wire material', () => {

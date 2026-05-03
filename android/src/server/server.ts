@@ -58,6 +58,7 @@ import {
   resolveTmuxBinary,
 } from './terminal-daemon-runtime';
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
+import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -90,9 +91,9 @@ const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 const sessions = new Map<string, ClientSession>();
 const connections = new Map<string, DaemonTransportConnection>();
 const mirrors = new Map<string, SessionMirror>();
-const sessionTransportAttachTokens = new Map<string, string>();
 const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
+const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
 let terminalTransportRuntimeSendMessage: (session: ClientSession, message: ServerMessage) => void;
@@ -317,19 +318,8 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   controlRuntimeDeps: {
     sessions,
     mirrors,
-    issueSessionTransportToken: (clientSessionId) => {
-      const token = crypto.randomUUID();
-      sessionTransportAttachTokens.set(token, clientSessionId);
-      return token;
-    },
-    consumeSessionTransportToken: (token, clientSessionId) => {
-      const owner = sessionTransportAttachTokens.get(token);
-      if (!owner || owner !== clientSessionId) {
-        return false;
-      }
-      sessionTransportAttachTokens.delete(token);
-      return true;
-    },
+    issueSessionTransportToken: terminalAttachTokenRuntime.issueSessionTransportToken,
+    consumeSessionTransportToken: terminalAttachTokenRuntime.consumeSessionTransportToken,
     scheduleEngine,
     sendTransportMessage,
     sendMessage,

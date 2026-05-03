@@ -1,4 +1,4 @@
-import type { ClientMessage, Host, ServerMessage, TerminalWidthMode } from '../lib/types';
+import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
 import { getResolvedSessionName } from '../lib/connection-target';
 import {
   clearSessionSupersededSockets,
@@ -16,10 +16,11 @@ import {
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import {
-  buildHostConfigMessage,
-  type PendingSessionTransportOpenIntent,
-} from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+
+type PendingSessionTransportWireIntent = PendingSessionTransportOpenIntent & {
+  hostConfigPayload: HostConfigMessage;
+};
 
 export interface SessionContextTransportAccessors {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -160,8 +161,7 @@ export function handleControlTransportMessage(options: {
 }
 
 export function ensureControlTransportForSessionOpen(options: {
-  intent: PendingSessionTransportOpenIntent;
-  terminalWidthMode: TerminalWidthMode;
+  intent: PendingSessionTransportWireIntent;
   readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
   readSessionTargetKey: (sessionId: string) => string | null;
@@ -186,24 +186,18 @@ export function ensureControlTransportForSessionOpen(options: {
     const targetRuntime = options.readSessionTargetRuntime(anchorSessionId);
     const targetSessionIds = targetRuntime?.sessionIds || [anchorSessionId];
     for (const targetSessionId of targetSessionIds) {
-      const pendingIntent = options.pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) || null;
+      const pendingIntent = options.pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) as PendingSessionTransportWireIntent | null;
       if (!pendingIntent) {
         continue;
       }
-      const pendingSessionName = getResolvedSessionName(pendingIntent.host);
       options.sendSocketPayload(targetSessionId, socket, JSON.stringify({
         type: 'session-open',
-        payload: buildHostConfigMessage(
-          pendingIntent.host,
-          pendingSessionName,
-          targetSessionId,
-          options.terminalWidthMode,
-        ),
-      } satisfies ClientMessage));
+        payload: pendingIntent.hostConfigPayload,
+      }));
       options.runtimeDebug('session.control.session-open-sent', {
         sessionId: targetSessionId,
         targetKey: options.readSessionTargetKey(targetSessionId),
-        sessionName: pendingSessionName,
+        sessionName: pendingIntent.resolvedSessionName,
       });
       options.clearSessionHandshakeTimeout(targetSessionId);
       options.setSessionHandshakeTimeout(targetSessionId, () => {
@@ -275,13 +269,13 @@ export function ensureControlTransportForSessionOpen(options: {
 export function openSocketConnectHandshake(options: {
   sessionId: string;
   host: Host;
+  resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   activate?: boolean;
-  terminalWidthMode: TerminalWidthMode;
   readActiveSessionId: () => string | null;
-  readSessionTransportToken: (sessionId: string) => string | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  connectMessagePayload: HostConfigMessage;
   runtimeDebug: RuntimeDebugFn;
   flushRuntimeDebugLogs: () => void;
   startSocketHeartbeat: (
@@ -292,7 +286,7 @@ export function openSocketConnectHandshake(options: {
   finalizeFailure: (message: string, retryable: boolean) => void;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
 }) {
-  const sessionName = getResolvedSessionName(options.host);
+  const sessionName = options.resolvedSessionName;
   options.runtimeDebug(`session.ws.${options.debugScope}.onopen`, {
     sessionId: options.sessionId,
     activeSessionId: options.readActiveSessionId(),
@@ -301,17 +295,10 @@ export function openSocketConnectHandshake(options: {
       : { targetSessionName: sessionName }),
   });
   options.onBeforeConnectSend?.({ sessionName });
-  const sessionTransportToken = options.readSessionTransportToken(options.sessionId);
   options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
     type: 'connect',
-    payload: buildHostConfigMessage(
-      options.host,
-      sessionName,
-      options.sessionId,
-      options.terminalWidthMode,
-      sessionTransportToken,
-    ),
-  } satisfies ClientMessage));
+    payload: options.connectMessagePayload,
+  }));
   options.runtimeDebug(`session.ws.${options.debugScope}.connect-sent`, {
     sessionId: options.sessionId,
     tmuxViewportFromUiShell: false,
@@ -323,13 +310,13 @@ export function openSocketConnectHandshake(options: {
 export function bindSessionTransportSocketLifecycle(options: {
   sessionId: string;
   host: Host;
+  resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   activate?: boolean;
-  terminalWidthMode: TerminalWidthMode;
   readActiveSessionId: () => string | null;
-  readSessionTransportToken: (sessionId: string) => string | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  connectMessagePayload: HostConfigMessage;
   runtimeDebug: RuntimeDebugFn;
   flushRuntimeDebugLogs: () => void;
   startSocketHeartbeat: (
@@ -361,13 +348,13 @@ export function bindSessionTransportSocketLifecycle(options: {
     openSocketConnectHandshake({
       sessionId,
       host,
+      resolvedSessionName: options.resolvedSessionName,
       ws,
       debugScope,
       activate,
-      terminalWidthMode: options.terminalWidthMode,
       readActiveSessionId: options.readActiveSessionId,
-      readSessionTransportToken: options.readSessionTransportToken,
       sendSocketPayload: options.sendSocketPayload,
+      connectMessagePayload: options.connectMessagePayload,
       runtimeDebug: options.runtimeDebug,
       flushRuntimeDebugLogs: options.flushRuntimeDebugLogs,
       startSocketHeartbeat: options.startSocketHeartbeat,
