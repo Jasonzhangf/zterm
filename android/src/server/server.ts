@@ -305,43 +305,48 @@ function handleInput(session: ClientSession, data: string) {
 
 const terminalMessageRuntime = createTerminalMessageRuntime({
   sessions,
-  mirrors,
-  issueSessionTransportToken: (clientSessionId) => {
-    const token = crypto.randomUUID();
-    sessionTransportAttachTokens.set(token, clientSessionId);
-    return token;
-  },
-  consumeSessionTransportToken: (token, clientSessionId) => {
-    const owner = sessionTransportAttachTokens.get(token);
-    if (!owner || owner !== clientSessionId) {
-      return false;
-    }
-    sessionTransportAttachTokens.delete(token);
-    return true;
-  },
-  scheduleEngine,
   sendTransportMessage,
   sendMessage,
-  sendScheduleStateToSession,
-  listTmuxSessions,
-  createDetachedTmuxSession,
-  renameTmuxSession,
-  runTmux,
-  sanitizeSessionName,
   normalizeBufferSyncRequestPayload,
-  createTransportBoundSession: (connection) =>
-    createTransportBoundSession(connection as DaemonTransportConnection),
-  bindConnectionToSession: (connection, session) =>
-    bindConnectionToSession(connection as DaemonTransportConnection, session),
-  getMirrorKey,
   getClientMirror,
   sendBufferHeadToSession,
-  attachTmux,
   handleInput,
   closeSession,
-  destroyMirror,
   terminalFileTransferRuntime,
   handleClientDebugLog,
+  controlRuntimeDeps: {
+    sessions,
+    mirrors,
+    issueSessionTransportToken: (clientSessionId) => {
+      const token = crypto.randomUUID();
+      sessionTransportAttachTokens.set(token, clientSessionId);
+      return token;
+    },
+    consumeSessionTransportToken: (token, clientSessionId) => {
+      const owner = sessionTransportAttachTokens.get(token);
+      if (!owner || owner !== clientSessionId) {
+        return false;
+      }
+      sessionTransportAttachTokens.delete(token);
+      return true;
+    },
+    scheduleEngine,
+    sendTransportMessage,
+    sendMessage,
+    sendScheduleStateToSession,
+    listTmuxSessions,
+    createDetachedTmuxSession,
+    renameTmuxSession,
+    runTmux,
+    sanitizeSessionName,
+    createTransportBoundSession: (connection) =>
+      createTransportBoundSession(connection as DaemonTransportConnection),
+    bindConnectionToSession: (connection, session) =>
+      bindConnectionToSession(connection as DaemonTransportConnection, session),
+    getMirrorKey,
+    attachTmux,
+    destroyMirror,
+  },
 });
 
 const server = createServer((request, response) => terminalHttpRuntime.handleHttpRequest(request, response));

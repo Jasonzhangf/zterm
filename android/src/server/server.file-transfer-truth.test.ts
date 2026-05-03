@@ -10,8 +10,12 @@ function readMessageRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'), 'utf8');
 }
 
-function readFileTransferRuntimeSource() {
-  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-runtime.ts'), 'utf8');
+function readFileTransferListRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-list-runtime.ts'), 'utf8');
+}
+
+function readFileTransferBinaryRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-binary-runtime.ts'), 'utf8');
 }
 
 function extractBlock(source: string, anchor: string, length = 1200) {
@@ -59,7 +63,7 @@ describe('server file-transfer truth gates', () => {
   });
 
   it('keeps remote cwd truth in file runtime via tmux pane current path', () => {
-    const source = readFileTransferRuntimeSource();
+    const source = readFileTransferListRuntimeSource();
     const listBlock = extractBlock(source, 'function handleFileListRequest(');
     const mkdirBlock = extractBlock(source, 'function handleFileCreateDirectoryRequest(');
 
@@ -70,7 +74,7 @@ describe('server file-transfer truth gates', () => {
   });
 
   it('keeps binary handlers fail-fast and never falls back to raw terminal input', () => {
-    const source = readFileTransferRuntimeSource();
+    const source = readFileTransferBinaryRuntimeSource();
     const binaryBlock = extractBlock(source, 'function handleBinaryPayload(');
     const pasteBinaryBlock = extractBlock(source, 'function handlePasteImageBinary(');
     const attachBinaryBlock = extractBlock(source, 'function handleAttachFileBinary(');
@@ -83,7 +87,7 @@ describe('server file-transfer truth gates', () => {
   });
 
   it('keeps remote screenshot explicit capturing -> transferring flow in the dedicated runtime', () => {
-    const source = readFileTransferRuntimeSource();
+    const source = readFileTransferListRuntimeSource();
     const block = extractBlock(source, 'async function handleRemoteScreenshotRequest(', 2200);
 
     expect(block).toContain("type: 'remote-screenshot-status'");

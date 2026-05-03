@@ -1,68 +1,43 @@
 import type { RawData } from 'ws';
-import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
-import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import type {
   BufferSyncRequestPayload,
   ClientMessage,
   HostConfigMessage,
   RuntimeDebugLogEntry,
-  ScheduleJobDraft,
   ServerMessage,
 } from '../lib/types';
 import type {
   ClientSession,
   ClientSessionTransport,
   SessionMirror,
-  TerminalAttachPayload,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
+import {
+  handleListSessionsMessageRuntime,
+  handleScheduleMessageRuntime,
+  handleSessionOpenMessageRuntime,
+  handleSessionTransportConnectRuntime,
+  handleTmuxControlMessageRuntime,
+} from './terminal-message-control-runtime';
+import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
 
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, ClientSession>;
-  mirrors: Map<string, SessionMirror>;
-  issueSessionTransportToken: (clientSessionId: string) => string;
-  consumeSessionTransportToken: (token: string, clientSessionId: string) => boolean;
-  scheduleEngine: {
-    listBySession: (sessionName: string) => ScheduleJob[];
-    upsert: (job: ScheduleJobDraft) => void;
-    delete: (jobId: string) => void;
-    toggle: (jobId: string, enabled: boolean) => void;
-    runNow: (jobId: string) => Promise<unknown>;
-    renameSession: (currentName: string, nextName: string) => void;
-    markSessionMissing: (sessionName: string, reason: string) => void;
-  };
   sendTransportMessage: (transport: ClientSessionTransport | null | undefined, message: ServerMessage) => void;
   sendMessage: (session: ClientSession, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: ClientSession, sessionName?: string) => void;
-  listTmuxSessions: () => string[];
-  createDetachedTmuxSession: (sessionName?: string) => string;
-  renameTmuxSession: (currentName?: string, nextName?: string) => string;
-  runTmux: (args: string[]) => { ok: true; stdout: string };
-  sanitizeSessionName: (input?: string) => string;
   normalizeBufferSyncRequestPayload: (
     session: ClientSession,
     request: BufferSyncRequestPayload,
   ) => BufferSyncRequestPayload;
-  createTransportBoundSession: (connection: TerminalTransportConnection) => ClientSession;
-  bindConnectionToSession: (
-    connection: TerminalTransportConnection,
-    session: ClientSession,
-  ) => ClientSession;
-  getMirrorKey: (sessionName: string) => string;
   getClientMirror: (session: ClientSession) => SessionMirror | null;
   sendBufferHeadToSession: (session: ClientSession, mirror: SessionMirror) => void;
-  attachTmux: (session: ClientSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: ClientSession, data: string) => void;
   closeSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
-  destroyMirror: (
-    mirror: SessionMirror,
-    reason: string,
-    options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
-  ) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
   handleClientDebugLog: (session: ClientSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
 }
 
 export interface TerminalMessageRuntime {
@@ -78,41 +53,11 @@ export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
   function handleSessionOpen(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    connection.role = 'control';
-    connection.boundSessionId = null;
-    const sessionName = deps.sanitizeSessionName(payload.sessionName || payload.name);
-    const sessionTransportToken = deps.issueSessionTransportToken(payload.clientSessionId);
-    // Compatibility-only attach handshake:
-    // - clientSessionId remains client-owned identity
-    // - session-ticket / sessionTransportToken remain attach-only wire material
-    // - daemon must not promote either into daemon-owned long-lived business truth
-    deps.sendTransportMessage(connection.transport, {
-      type: 'session-ticket',
-      payload: {
-        clientSessionId: payload.clientSessionId,
-        sessionTransportToken,
-        sessionName,
-      },
-    });
-    return null;
+    return handleSessionOpenMessageRuntime(deps.controlRuntimeDeps, connection, payload);
   }
 
   function handleSessionTransportConnect(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    // The token is only a one-shot attach proof for this transport connection.
-    const token = (payload.sessionTransportToken || '').trim();
-    if (!token || !deps.consumeSessionTransportToken(token, payload.clientSessionId)) {
-      deps.sendTransportMessage(connection.transport, {
-        type: 'error',
-        payload: {
-          message: 'Invalid transport attach token',
-          code: 'transport_attach_invalid',
-        },
-      });
-      connection.closeTransport('transport attach invalid');
-      return null;
-    }
-    const serverSession = deps.createTransportBoundSession(connection);
-    return deps.bindConnectionToSession(connection, serverSession);
+    return handleSessionTransportConnectRuntime(deps.controlRuntimeDeps, connection, payload);
   }
 
   async function handleMessage(connection: TerminalTransportConnection, rawData: RawData, isBinary = false) {
@@ -173,103 +118,28 @@ export function createTerminalMessageRuntime(
         }
         break;
       case 'list-sessions':
-        try {
-          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: `Failed to list tmux sessions: ${err}`, code: 'list_sessions_failed' },
-          });
-        }
+        handleListSessionsMessageRuntime(deps.controlRuntimeDeps, connection);
         break;
       case 'schedule-list':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'schedule-list requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.sendScheduleStateToSession(session, deps.sanitizeSessionName(message.payload.sessionName || session.sessionName));
+        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
       case 'schedule-upsert':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'schedule-upsert requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        try {
-          const normalized = normalizeScheduleDraft(
-            {
-              ...message.payload.job,
-              targetSessionName: deps.sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName),
-            },
-            {
-              now: new Date(),
-              existing: message.payload.job.id
-                ? deps.scheduleEngine.listBySession(
-                  deps.sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName),
-                ).find((job) => job.id === message.payload.job.id) || null
-                : null,
-            },
-          );
-          if (!normalized.targetSessionName) {
-            deps.sendMessage(session, {
-              type: 'error',
-              payload: { message: 'Missing target session', code: 'schedule_invalid_target' },
-            });
-            break;
-          }
-          deps.scheduleEngine.upsert({
-            ...message.payload.job,
-            targetSessionName: normalized.targetSessionName,
-          });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          deps.sendMessage(session, {
-            type: 'error',
-            payload: { message: `Failed to save schedule: ${err}`, code: 'schedule_upsert_failed' },
-          });
-        }
+        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
       case 'schedule-delete':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'schedule-delete requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.scheduleEngine.delete(message.payload.jobId);
+        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
       case 'schedule-toggle':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'schedule-toggle requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled));
+        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
       case 'schedule-run-now':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'schedule-run-now requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        void deps.scheduleEngine.runNow(message.payload.jobId);
+        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
       case 'connect':
         try {
           const serverSession = handleSessionTransportConnect(connection, message.payload);
           if (serverSession) {
-            void deps.attachTmux(serverSession, message.payload as TerminalAttachPayload);
+            void deps.controlRuntimeDeps.attachTmux(serverSession, message.payload);
           }
         } catch (error) {
           deps.sendTransportMessage(connection.transport, {
@@ -364,69 +234,13 @@ export function createTerminalMessageRuntime(
         deps.handleClientDebugLog(session, message.payload);
         break;
       case 'tmux-create-session':
-        try {
-          deps.createDetachedTmuxSession(message.payload.sessionName);
-          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: `Failed to create tmux session: ${err}`, code: 'tmux_create_failed' },
-          });
-        }
+        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
         break;
       case 'tmux-rename-session':
-        try {
-          const currentName = deps.sanitizeSessionName(message.payload.sessionName);
-          const nextName = deps.renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName);
-          const currentKey = deps.getMirrorKey(currentName);
-          const nextKey = deps.getMirrorKey(nextName);
-          deps.scheduleEngine.renameSession(currentName, nextName);
-          const mirror = deps.mirrors.get(currentKey);
-          if (mirror && currentKey !== nextKey) {
-            deps.mirrors.delete(currentKey);
-            mirror.key = nextKey;
-            mirror.sessionName = nextKey;
-            deps.mirrors.set(nextKey, mirror);
-            for (const sessionId of mirror.subscribers) {
-              const client = deps.sessions.get(sessionId);
-              if (!client) {
-                continue;
-              }
-              client.mirrorKey = nextKey;
-              client.sessionName = nextKey;
-              deps.sendMessage(client, { type: 'title', payload: nextKey });
-            }
-          }
-          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: `Failed to rename tmux session: ${err}`, code: 'tmux_rename_failed' },
-          });
-        }
+        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
         break;
       case 'tmux-kill-session':
-        try {
-          const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-          deps.runTmux(['kill-session', '-t', sessionName]);
-          deps.scheduleEngine.markSessionMissing(sessionName, 'session killed');
-          const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
-          if (mirror) {
-            deps.destroyMirror(mirror, 'tmux session killed', {
-              closeLogicalSessions: false,
-              releaseCode: 'tmux_session_killed',
-            });
-          }
-          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: `Failed to kill tmux session: ${err}`, code: 'tmux_kill_failed' },
-          });
-        }
+        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
         break;
       case 'input':
         if (!session) {

@@ -10,6 +10,10 @@ function readMessageRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'), 'utf8');
 }
 
+function readMessageControlRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-control-runtime.ts'), 'utf8');
+}
+
 function readDebugRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-debug-runtime.ts'), 'utf8');
 }
@@ -32,18 +36,21 @@ describe('server transport/session lifecycle truth gates', () => {
   it('keeps control transport separate from session transport attach flow', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
+    const controlRuntimeSource = readMessageControlRuntimeSource();
     expect(serverSource).toContain('createTerminalMessageRuntime');
     expect(serverSource).toContain('sessionTransportAttachTokens');
     expect(messageRuntimeSource).toContain("case 'session-open'");
-    expect(messageRuntimeSource).toContain("type: 'session-ticket'");
     expect(messageRuntimeSource).not.toContain('takeSessionTransportTicket');
-    expect(messageRuntimeSource).toContain('issueSessionTransportToken(payload.clientSessionId)');
-    expect(messageRuntimeSource).toContain('consumeSessionTransportToken(token, payload.clientSessionId)');
-    expect(messageRuntimeSource).toContain('createTransportBoundSession');
+    expect(messageRuntimeSource).toContain('handleSessionOpenMessageRuntime');
+    expect(messageRuntimeSource).toContain('handleSessionTransportConnectRuntime');
+    expect(controlRuntimeSource).toContain("type: 'session-ticket'");
+    expect(controlRuntimeSource).toContain('issueSessionTransportToken(payload.clientSessionId)');
+    expect(controlRuntimeSource).toContain('consumeSessionTransportToken(token, payload.clientSessionId)');
+    expect(controlRuntimeSource).toContain('createTransportBoundSession');
   });
 
   it('documents session-ticket/sessionTransportToken as attach-only compatibility wire material', () => {
-    const source = readMessageRuntimeSource();
+    const source = readMessageControlRuntimeSource();
     expect(source).toContain('Compatibility-only attach handshake:');
     expect(source).toContain('session-ticket / sessionTransportToken remain attach-only wire material');
     expect(source).toContain('daemon must not promote either into daemon-owned long-lived business truth');
@@ -105,8 +112,8 @@ describe('server transport/session lifecycle truth gates', () => {
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
     const source = readServerSource();
     const daemonRuntimeSource = readDaemonRuntimeSource();
-    const messageRuntimeSource = readMessageRuntimeSource();
-    const killBlock = extractBlock(messageRuntimeSource, "case 'tmux-kill-session':", 900);
+    const controlRuntimeSource = readMessageControlRuntimeSource();
+    const killBlock = extractBlock(controlRuntimeSource, "case 'tmux-kill-session':", 900);
     const shutdownBlock = extractBlock(daemonRuntimeSource, 'function shutdownDaemon', 2200);
     const destroyBlock = extractBlock(source, 'terminalRuntime.destroyMirror', 220);
 
@@ -130,10 +137,11 @@ describe('server transport/session lifecycle truth gates', () => {
 
   it('keeps tmux discovery and management on control transport semantics', () => {
     const source = readMessageRuntimeSource();
+    const controlRuntimeSource = readMessageControlRuntimeSource();
     const listSessionsBlock = extractBlock(source, "case 'list-sessions':");
-    const createBlock = extractBlock(source, "case 'tmux-create-session':");
-    const renameBlock = extractBlock(source, "case 'tmux-rename-session':");
-    const killBlock = extractBlock(source, "case 'tmux-kill-session':");
+    const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':");
+    const renameBlock = extractBlock(controlRuntimeSource, "case 'tmux-rename-session':");
+    const killBlock = extractBlock(controlRuntimeSource, "case 'tmux-kill-session':");
 
     expect(listSessionsBlock).not.toContain('requires an attached session transport');
     expect(createBlock).not.toContain('requires an attached session transport');
