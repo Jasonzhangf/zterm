@@ -1,4 +1,4 @@
-import type { Host, ServerMessage, Session, SessionScheduleState, TerminalWidthMode } from '../lib/types';
+import type { Host, ServerMessage, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
@@ -45,7 +45,6 @@ interface MutableRefObject<T> {
 
 export function createSessionTransportOrchestrationRuntime(options: {
   stateRef: MutableRefObject<{ activeSessionId: string | null }>;
-  terminalWidthMode: TerminalWidthMode;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
   refs: {
@@ -97,6 +96,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
+  recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
   flushRuntimeDebugLogs: () => void;
   startSocketHeartbeat: (
@@ -111,7 +111,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
 }) {
   let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
   const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
-    terminalWidthMode: options.terminalWidthMode,
     refs: {
       pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
     },
@@ -126,7 +125,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     buildTraversalSocketForHost: options.buildTraversalSocketForHost,
     applyTransportDiagnostics: options.applyTransportDiagnostics,
     runtimeDebug: options.runtimeDebug,
-    recordSessionRx: options.recordSessionRx,
+    recordControlTransportRxBytes: options.recordControlTransportRxBytes,
     openSessionTransportByIntent: (intent) => openSessionTransportByIntentRef?.(intent) || null,
     sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
   });
@@ -175,6 +174,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
 
   const bindSessionTransportSocketLifecycle = (bindOptions: {
     sessionId: string;
+    openRequestId: string;
     host: Host;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
@@ -182,16 +182,18 @@ export function createSessionTransportOrchestrationRuntime(options: {
     finalizeFailure: (message: string, retryable: boolean) => void;
     onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
     onConnected: () => void;
+    onClosed?: (reason?: string) => void;
   }) => {
     bindSessionTransportSocketLifecycleOrchestrationRuntime({
       sessionId: bindOptions.sessionId,
+      openRequestId: bindOptions.openRequestId,
       host: bindOptions.host,
       resolvedSessionName: getResolvedSessionName(bindOptions.host),
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
       activate: bindOptions.activate,
-      terminalWidthMode: options.terminalWidthMode,
       readActiveSessionId: () => options.stateRef.current.activeSessionId,
+      readSessionTransportSocket: options.readSessionTransportSocket,
       readSessionTransportToken: options.readSessionTransportToken,
       sendSocketPayload: options.sendSocketPayload,
       runtimeDebug: options.runtimeDebug,
@@ -220,6 +222,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       finalizeFailure: bindOptions.finalizeFailure,
       onBeforeConnectSend: bindOptions.onBeforeConnectSend,
       onConnected: bindOptions.onConnected,
+      onClosed: bindOptions.onClosed,
       sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
     });
   };
@@ -368,6 +371,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       applyTransportOpenLiveFailureEffects,
       reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
       applyTransportOpenConnectedEffects,
+      emitSessionStatus,
     });
   };
 
@@ -383,6 +387,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       applyTransportOpenLiveFailureEffects,
       scheduleReconnect,
       applyTransportOpenConnectedEffects,
+      emitSessionStatus,
     });
   };
 

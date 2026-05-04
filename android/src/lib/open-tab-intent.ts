@@ -11,6 +11,37 @@ export interface OpenTabIntentState {
   activeSessionId: string | null;
 }
 
+export function openTabIntentStatesEqual(
+  left: OpenTabIntentState,
+  right: OpenTabIntentState,
+) {
+  if (left.activeSessionId !== right.activeSessionId) {
+    return false;
+  }
+  if (left.tabs.length !== right.tabs.length) {
+    return false;
+  }
+  for (let index = 0; index < left.tabs.length; index += 1) {
+    const leftTab = left.tabs[index]!;
+    const rightTab = right.tabs[index]!;
+    if (
+      leftTab.sessionId !== rightTab.sessionId
+      || leftTab.hostId !== rightTab.hostId
+      || leftTab.connectionName !== rightTab.connectionName
+      || leftTab.bridgeHost !== rightTab.bridgeHost
+      || leftTab.bridgePort !== rightTab.bridgePort
+      || leftTab.sessionName !== rightTab.sessionName
+      || (leftTab.authToken || '') !== (rightTab.authToken || '')
+      || (leftTab.autoCommand || '') !== (rightTab.autoCommand || '')
+      || (leftTab.customName || '') !== (rightTab.customName || '')
+      || leftTab.createdAt !== rightTab.createdAt
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function normalizeOpenTabIntentState(
   tabs: PersistedOpenTab[],
   activeSessionId: string | null,
@@ -44,20 +75,58 @@ export function mergeRuntimeSessionsIntoOpenTabIntentState(
     'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
   >>,
   closedSessionIds: ReadonlySet<string>,
+  closedReuseKeys?: ReadonlySet<string>,
 ): OpenTabIntentState {
-  const knownSessionIds = new Set(currentState.tabs.map((tab) => tab.sessionId));
-  const runtimeNewTabs = sessions
-    .filter((session) => !knownSessionIds.has(session.id) && !closedSessionIds.has(session.id))
-    .map((session) => buildPersistedOpenTabFromSession(session));
+  const nextTabs = [...currentState.tabs];
+  let nextActiveSessionId = currentState.activeSessionId;
+  let changed = false;
 
-  if (runtimeNewTabs.length === 0) {
+  for (const session of sessions) {
+    if (closedSessionIds.has(session.id)) {
+      continue;
+    }
+
+    const runtimeTab = buildPersistedOpenTabFromSession(session);
+    const runtimeReuseKey = buildPersistedOpenTabReuseKey(runtimeTab);
+    if (closedReuseKeys?.has(runtimeReuseKey)) {
+      continue;
+    }
+    const existingIndex = nextTabs.findIndex((tab) => (
+      buildPersistedOpenTabReuseKey(tab) === runtimeReuseKey
+    ));
+
+    if (existingIndex >= 0) {
+      const existingTab = nextTabs[existingIndex]!;
+      if (existingTab.sessionId === runtimeTab.sessionId) {
+        continue;
+      }
+      nextTabs[existingIndex] = {
+        ...runtimeTab,
+        customName: existingTab.customName?.trim() || runtimeTab.customName,
+        createdAt: existingTab.createdAt || runtimeTab.createdAt,
+      };
+      if (nextActiveSessionId === existingTab.sessionId) {
+        nextActiveSessionId = runtimeTab.sessionId;
+      }
+      changed = true;
+      continue;
+    }
+
+    if (nextTabs.some((tab) => tab.sessionId === runtimeTab.sessionId)) {
+      continue;
+    }
+
+    // OPEN_TABS is explicit client truth once it exists.
+    // Runtime sessions may refresh or replace an existing semantic tab,
+    // but must not append runtime-only tabs back into the persisted set.
+    continue;
+  }
+
+  if (!changed) {
     return currentState;
   }
 
-  return normalizeOpenTabIntentState(
-    [...currentState.tabs, ...runtimeNewTabs],
-    currentState.activeSessionId,
-  );
+  return normalizeOpenTabIntentState(nextTabs, nextActiveSessionId);
 }
 
 export function resolveRuntimeActiveSessionIdForOpenTabs(

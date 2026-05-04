@@ -8,18 +8,18 @@ import type {
   PasteImagePayload,
   PasteImageStartPayload,
 } from '../lib/types';
-import type { ClientSession, PendingBinaryTransfer } from './terminal-runtime-types';
+import type { TerminalSession, PendingBinaryTransfer } from './terminal-runtime-types';
 import type {
   PendingUploadState,
   TerminalFileTransferRuntimeDeps,
 } from './terminal-file-transfer-types';
 
 export interface TerminalFileTransferBinaryRuntime {
-  handlePasteImage: (session: ClientSession, payload: PasteImagePayload) => void;
-  handleFileUploadStart: (session: ClientSession, payload: FileUploadStartPayload) => void;
-  handleFileUploadChunk: (session: ClientSession, payload: FileUploadChunkPayload) => void;
-  handleFileUploadEnd: (session: ClientSession, payload: FileUploadEndPayload) => void;
-  handleBinaryPayload: (session: ClientSession, buffer: Buffer) => void;
+  handlePasteImage: (session: TerminalSession, payload: PasteImagePayload) => void;
+  handleFileUploadStart: (session: TerminalSession, payload: FileUploadStartPayload) => void;
+  handleFileUploadChunk: (session: TerminalSession, payload: FileUploadChunkPayload) => void;
+  handleFileUploadEnd: (session: TerminalSession, payload: FileUploadEndPayload) => void;
+  handleBinaryPayload: (session: TerminalSession, buffer: Buffer) => void;
 }
 
 export function createTerminalFileTransferBinaryRuntime(
@@ -123,8 +123,8 @@ export function createTerminalFileTransferBinaryRuntime(
     };
   }
 
-  function emitImagePaste(session: ClientSession, payload: { name: string; mimeType: string; pasteSequence?: string }, bufferFactory: () => { sourcePath: string; pngPath: string; bytes: number }) {
-    const mirror = deps.getClientMirror(session);
+  function emitImagePaste(session: TerminalSession, payload: { name: string; mimeType: string; pasteSequence?: string }, bufferFactory: () => { sourcePath: string; pngPath: string; bytes: number }) {
+    const mirror = deps.getSessionMirror(session);
     if (!mirror || mirror.lifecycle !== 'ready') {
       deps.sendMessage(session, {
         type: 'error',
@@ -165,11 +165,11 @@ export function createTerminalFileTransferBinaryRuntime(
     }
   }
 
-  function handlePasteImage(session: ClientSession, payload: PasteImagePayload) {
+  function handlePasteImage(session: TerminalSession, payload: PasteImagePayload) {
     emitImagePaste(session, payload, () => persistClipboardImage(payload));
   }
 
-  function handleFileUploadStart(session: ClientSession, payload: FileUploadStartPayload) {
+  function handleFileUploadStart(session: TerminalSession, payload: FileUploadStartPayload) {
     const { requestId, targetDir, fileName, fileSize, chunkCount } = payload;
 
     mkdirSync(targetDir, { recursive: true });
@@ -189,7 +189,7 @@ export function createTerminalFileTransferBinaryRuntime(
     });
   }
 
-  function handleFileUploadChunk(session: ClientSession, payload: FileUploadChunkPayload) {
+  function handleFileUploadChunk(session: TerminalSession, payload: FileUploadChunkPayload) {
     const { requestId, chunkIndex, dataBase64 } = payload;
     const upload = pendingUploads.get(requestId);
 
@@ -207,7 +207,7 @@ export function createTerminalFileTransferBinaryRuntime(
     });
   }
 
-  function handleFileUploadEnd(session: ClientSession, payload: FileUploadEndPayload) {
+  function handleFileUploadEnd(session: TerminalSession, payload: FileUploadEndPayload) {
     const { requestId } = payload;
     const upload = pendingUploads.get(requestId);
 
@@ -244,7 +244,7 @@ export function createTerminalFileTransferBinaryRuntime(
     }
   }
 
-  function handleAttachFileBinary(session: ClientSession, buffer: Buffer) {
+  function handleAttachFileBinary(session: TerminalSession, buffer: Buffer) {
     const pendingTransfer = session.pendingAttachFile;
     const consume = consumePendingBinaryTransfer<AttachFileStartPayload>(pendingTransfer, buffer);
     session.pendingAttachFile = consume.pending;
@@ -267,7 +267,7 @@ export function createTerminalFileTransferBinaryRuntime(
       return;
     }
 
-    const mirror = deps.getClientMirror(session);
+    const mirror = deps.getSessionMirror(session);
     if (!mirror || mirror.lifecycle !== 'ready') {
       deps.sendMessage(session, {
         type: 'error',
@@ -301,7 +301,7 @@ export function createTerminalFileTransferBinaryRuntime(
     }
   }
 
-  function handlePasteImageBinary(session: ClientSession, buffer: Buffer) {
+  function handlePasteImageBinary(session: TerminalSession, buffer: Buffer) {
     const pendingTransfer = session.pendingPasteImage;
     const consume = consumePendingBinaryTransfer<PasteImageStartPayload>(pendingTransfer, buffer);
     session.pendingPasteImage = consume.pending;
@@ -334,7 +334,7 @@ export function createTerminalFileTransferBinaryRuntime(
     ));
   }
 
-  function handleBinaryPayload(session: ClientSession, buffer: Buffer) {
+  function handleBinaryPayload(session: TerminalSession, buffer: Buffer) {
     if (session.pendingAttachFile) {
       handleAttachFileBinary(session, buffer);
       return;

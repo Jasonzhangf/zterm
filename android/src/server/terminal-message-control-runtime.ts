@@ -6,18 +6,18 @@ import type {
   ServerMessage,
 } from '../lib/types';
 import type {
-  ClientSession,
-  ClientSessionTransport,
+  TerminalSession,
+  TerminalSessionTransport,
   SessionMirror,
   TerminalAttachPayload,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 
 export interface TerminalMessageControlRuntimeDeps {
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
-  issueSessionTransportToken: (clientSessionId: string) => string;
-  consumeSessionTransportToken: (token: string, clientSessionId: string) => boolean;
+  issueSessionTransportToken: () => string;
+  consumeSessionTransportToken: (token: string) => boolean;
   scheduleEngine: {
     listBySession: (sessionName: string) => ScheduleJob[];
     upsert: (job: ScheduleJobDraft) => void;
@@ -27,21 +27,21 @@ export interface TerminalMessageControlRuntimeDeps {
     renameSession: (currentName: string, nextName: string) => void;
     markSessionMissing: (sessionName: string, reason: string) => void;
   };
-  sendTransportMessage: (transport: ClientSessionTransport | null | undefined, message: ServerMessage) => void;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: ClientSession, sessionName?: string) => void;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (sessionName?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
-  createTransportBoundSession: (connection: TerminalTransportConnection) => ClientSession;
+  createTransportBoundSession: (connection: TerminalTransportConnection) => TerminalSession;
   bindConnectionToSession: (
     connection: TerminalTransportConnection,
-    session: ClientSession,
-  ) => ClientSession;
+    session: TerminalSession,
+  ) => TerminalSession;
   getMirrorKey: (sessionName: string) => string;
-  attachTmux: (session: ClientSession, payload: TerminalAttachPayload) => Promise<void>;
+  attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
@@ -56,16 +56,18 @@ export function handleSessionOpenMessageRuntime(
 ) {
   connection.role = 'control';
   connection.boundSessionId = null;
-  const sessionName = deps.sanitizeSessionName(payload.sessionName || payload.name);
-  const sessionTransportToken = deps.issueSessionTransportToken(payload.clientSessionId);
+  const sessionName = deps.sanitizeSessionName(payload.sessionName);
+  const sessionTransportToken = deps.issueSessionTransportToken();
   // Compatibility-only attach handshake:
-  // - clientSessionId remains client-owned identity
+  // - openRequestId remains client-local request correlation
   // - session-ticket / sessionTransportToken remain attach-only wire material
   // - daemon must not promote either into daemon-owned long-lived business truth
+  // - daemon does not keep openRequestId as token owner; token is one-shot attach proof only
   deps.sendTransportMessage(connection.transport, {
     type: 'session-ticket',
     payload: {
-      clientSessionId: payload.clientSessionId,
+      openRequestId: payload.openRequestId,
+      clientSessionId: payload.clientSessionId?.trim() || undefined,
       sessionTransportToken,
       sessionName,
     },
@@ -80,7 +82,7 @@ export function handleSessionTransportConnectRuntime(
 ) {
   // The token is only a one-shot attach proof for this transport connection.
   const token = (payload.sessionTransportToken || '').trim();
-  if (!token || !deps.consumeSessionTransportToken(token, payload.clientSessionId)) {
+  if (!token || !deps.consumeSessionTransportToken(token)) {
     deps.sendTransportMessage(connection.transport, {
       type: 'error',
       payload: {
@@ -112,14 +114,14 @@ export function handleListSessionsMessageRuntime(
 
 export function handleScheduleMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
-  session: ClientSession | null,
+  session: TerminalSession | null,
   message:
     | { type: 'schedule-list'; payload: { sessionName: string } }
     | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
     | { type: 'schedule-delete'; payload: { jobId: string } }
     | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
     | { type: 'schedule-run-now'; payload: { jobId: string } },
-  transport: ClientSessionTransport | null | undefined,
+  transport: TerminalSessionTransport | null | undefined,
 ) {
   if (!session) {
     deps.sendTransportMessage(transport, {

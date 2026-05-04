@@ -159,3 +159,5 @@
 - 终端发热先查运行态 debug overlay / 高频 metrics setState / console spam；这些比布局本身更容易在手机上造成明显发热
 - terminal 持久化不要把 `remoteSnapshot` / `outputHistory` 这种高频变化大对象每帧写进 localStorage；恢复态优先保留按行 `bufferLines`，真正的 viewport/cursor 靠 reconnect 后服务端刷新
 - Electron 打包壳与交互验证要分层：`.app` 负责验证 build/package/window 可执行；细粒度表单交互更适合走浏览器 dev server（同一 renderer 代码），再回到 `.app` 验证桌面壳仍可启动
+- [2026-05-03] 源码树污染冻结：`android/src/`、`packages/shared/src/`、`android/vite.config.js` 不允许出现由 TS/JSX 生成的 `.js` 产物；真源只允许 `.ts/.tsx`。已新增 `android/scripts/check-no-source-js-pollution.mjs` 并接入 `android/package.json -> type-check`。后续一旦再有 `.js` sibling 写回源码树，直接视为构建/工具链违规。
+- [2026-05-04] transport stale gate 要覆盖**写侧 request**，不只覆盖 `ws.onmessage/onclose/onerror/onopen`。`buffer-head-request` / `buffer-sync-request` 若接受外部 `ws` override，必须先校验它仍等于 `readSessionTransportSocket(sessionId)`；旧 superseded socket 即使只是晚到触发 request，也会把当前 session transport 真相重新污染。

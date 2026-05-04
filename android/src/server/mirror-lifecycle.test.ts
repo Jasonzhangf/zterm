@@ -22,7 +22,7 @@ describe('mirror lifecycle truth', () => {
     expect(result.keepMirrorAlive).toBe(true);
   });
 
-  it('releases subscriber sessions from mirror truth without deleting logical sessions', () => {
+  it('releases subscriber sessions from mirror truth without deleting bound sessions', () => {
     const session1 = buildSession('client-1');
     const session2 = buildSession('client-2');
     const sessions = new Map<string, MirrorLifecycleSessionLike>([

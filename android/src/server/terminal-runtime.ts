@@ -3,7 +3,7 @@ import type { ServerMessage } from '../lib/types';
 import { detachMirrorSubscriber } from './mirror-lifecycle';
 import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
 import type {
-  ClientSession,
+  TerminalSession,
   SessionMirror,
   TerminalAttachPayload,
   TerminalGeometry,
@@ -14,10 +14,10 @@ import type {
 interface TerminalRuntimeDeps {
   defaultSessionName: string;
   defaultViewport: { cols: number; rows: number };
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: ClientSession, sessionName?: string) => void;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (
     sessionId: string,
     requestOrigin?: string,
@@ -57,57 +57,57 @@ interface TerminalRuntimeDeps {
 }
 
 export interface TerminalRuntime {
-  sessions: () => Map<string, ClientSession>;
+  sessions: () => Map<string, TerminalSession>;
   mirrors: () => Map<string, SessionMirror>;
-  getSession: (sessionId: string) => ClientSession | null;
+  getSession: (sessionId: string) => TerminalSession | null;
   getMirrorByKey: (mirrorKey: string) => SessionMirror | null;
   createMirror: (sessionName: string) => SessionMirror;
-  getClientMirror: (session: ClientSession) => SessionMirror | null;
-  createTransportBoundSession: (connection: TerminalTransportConnection) => ClientSession;
-  bindConnectionToSession: (connection: TerminalTransportConnection, session: ClientSession) => ClientSession;
-  detachSessionTransportOnly: (session: ClientSession, reason: string, transportId?: string) => void;
-  closeSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
+  getSessionMirror: (session: TerminalSession) => SessionMirror | null;
+  createTransportBoundSession: (connection: TerminalTransportConnection) => TerminalSession;
+  bindConnectionToSession: (connection: TerminalTransportConnection, session: TerminalSession) => TerminalSession;
+  detachSessionTransportOnly: (session: TerminalSession, reason: string, transportId?: string) => void;
+  closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
     options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
-  ensureSessionReady: (session: ClientSession, mirror: SessionMirror) => void;
-  sendBufferHeadToSession: (session: ClientSession, mirror: SessionMirror) => void;
+  ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
+  sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
-  attachTmux: (session: ClientSession, payload: TerminalAttachPayload) => Promise<void>;
-  handleInput: (session: ClientSession, data: string) => void;
+  attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  handleInput: (session: TerminalSession, data: string) => void;
 }
 
 export {
-  type ClientSession,
+  type TerminalSession,
   type SessionMirror,
   type TerminalAttachPayload,
   type TerminalGeometry,
   type TerminalTransportConnection,
   type TmuxPaneMetrics,
 } from './terminal-runtime-types';
-export { type ClientSessionTransport, type PendingBinaryTransfer } from './terminal-runtime-types';
+export { type TerminalSessionTransport, type PendingBinaryTransfer } from './terminal-runtime-types';
 
 export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
 
-  function createTransportBoundSession(connection: TerminalTransportConnection): ClientSession {
-    const session: ClientSession = {
+  function createTransportBoundSession(connection: TerminalTransportConnection): TerminalSession {
+    connection.transport.requestOrigin = connection.requestOrigin;
+    connection.transport.connectedSent = false;
+    const session: TerminalSession = {
       id: connection.transportId,
       transportId: connection.transportId,
       transport: connection.transport,
       closeTransport: connection.closeTransport,
-      requestOrigin: connection.requestOrigin,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
-      wsAlive: true,
       pendingPasteImage: null,
       pendingAttachFile: null,
-      connectedSent: false,
     };
     sessions.set(session.id, session);
     connection.role = 'session';
@@ -123,7 +123,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     return mirrors.get(mirrorKey) || null;
   }
 
-  function getClientMirror(session: ClientSession) {
+  function getSessionMirror(session: TerminalSession) {
     if (!session.mirrorKey) {
       return null;
     }
@@ -132,25 +132,24 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
 
   function bindConnectionToSession(
     connection: TerminalTransportConnection,
-    session: ClientSession,
+    session: TerminalSession,
   ) {
     session.id = connection.transportId;
     session.transportId = connection.transportId;
     session.transport = connection.transport;
     session.closeTransport = connection.closeTransport;
-    session.requestOrigin = connection.requestOrigin;
-    session.wsAlive = true;
-    session.connectedSent = false;
+    connection.transport.requestOrigin = connection.requestOrigin;
+    connection.transport.connectedSent = false;
     connection.role = 'session';
     connection.boundSessionId = session.id;
-    const mirror = getClientMirror(session);
+    const mirror = getSessionMirror(session);
     if (mirror?.lifecycle === 'ready') {
       mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
     }
     return session;
   }
 
-  function detachSessionTransportOnly(session: ClientSession, reason: string, transportId?: string) {
+  function detachSessionTransportOnly(session: TerminalSession, reason: string, transportId?: string) {
     const current = sessions.get(session.id);
     if (!current || current !== session) {
       return;
@@ -162,21 +161,27 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     session.closeTransport = undefined;
     session.pendingPasteImage = null;
     session.pendingAttachFile = null;
-    session.wsAlive = false;
     deps.daemonRuntimeDebug('transport-detached', {
       sessionId: session.id,
       sessionName: session.sessionName,
       type: 'closed',
       payload: { reason },
     });
+    const mirror = getSessionMirror(session);
+    if (mirror) {
+      const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
+      mirror.subscribers = detachResult.nextSubscribers;
+    }
+    session.mirrorKey = null;
+    sessions.delete(session.id);
   }
 
-  function closeSession(session: ClientSession, reason: string, notifyClient = false) {
+  function closeSession(session: TerminalSession, reason: string, notifyClient = false) {
     const current = sessions.get(session.id);
     if (!current || current !== session) {
       return;
     }
-    const mirror = getClientMirror(session);
+    const mirror = getSessionMirror(session);
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
@@ -200,7 +205,6 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
 
     session.transport = null;
     session.closeTransport = undefined;
-    session.wsAlive = false;
     session.pendingPasteImage = null;
     session.pendingAttachFile = null;
     session.mirrorKey = null;
@@ -230,8 +234,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     autoCommandDelayMs: deps.autoCommandDelayMs,
     waitMs: deps.waitMs,
     logTimePrefix: deps.logTimePrefix,
-    closeLogicalClientSession: closeSession,
-    getClientMirror,
+    closeLogicalTerminalSession: closeSession,
+    getSessionMirror,
   });
 
   return {
@@ -240,7 +244,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     getSession,
     getMirrorByKey,
     createMirror: mirrorRuntime.createMirror,
-    getClientMirror,
+    getSessionMirror,
     createTransportBoundSession,
     bindConnectionToSession,
     detachSessionTransportOnly,
@@ -248,6 +252,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     destroyMirror: mirrorRuntime.destroyMirror,
     ensureSessionReady: mirrorRuntime.ensureSessionReady,
     sendBufferHeadToSession: mirrorRuntime.sendBufferHeadToSession,
+    refreshMirrorHeadForSession: mirrorRuntime.refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer: mirrorRuntime.syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync: mirrorRuntime.scheduleMirrorLiveSync,
     startMirror: mirrorRuntime.startMirror,

@@ -21,6 +21,10 @@ function hexToRgbString(hex: string) {
   return `rgb(${red}, ${green}, ${blue})`;
 }
 
+function firstRenderedCell(container: HTMLElement) {
+  return container.querySelector('[data-terminal-row="true"] > span > span') as HTMLSpanElement;
+}
+
 describe('TerminalView terminal themes', () => {
   const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
@@ -94,7 +98,7 @@ describe('TerminalView terminal themes', () => {
       </div>,
     );
 
-    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const cellNode = firstRenderedCell(view.container);
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
     expect(cellNode).toBeTruthy();
@@ -128,7 +132,7 @@ describe('TerminalView terminal themes', () => {
       </div>,
     );
 
-    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const cellNode = firstRenderedCell(view.container);
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
     expect(cellNode.style.color).toBe(hexToRgbString('#222222'));
@@ -161,7 +165,7 @@ describe('TerminalView terminal themes', () => {
       </div>,
     );
 
-    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const cellNode = firstRenderedCell(view.container);
     expect(cellNode.dataset.terminalCursor).toBe('true');
     expect(cellNode.style.background).toBe(hexToRgbString('#cdd6f4'));
     expect(cellNode.style.color).toBe(hexToRgbString('#1e1e2e'));
@@ -192,7 +196,7 @@ describe('TerminalView terminal themes', () => {
       </div>,
     );
 
-    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const cellNode = firstRenderedCell(view.container);
     expect(cellNode.dataset.terminalCursor).toBeUndefined();
     expect(cellNode.style.background).toBe(hexToRgbString('#cdd6f4'));
     expect(cellNode.style.color).toBe(hexToRgbString('#1e1e2e'));
@@ -222,11 +226,44 @@ describe('TerminalView terminal themes', () => {
       </div>,
     );
 
-    const cellNode = view.container.querySelector('[data-terminal-row="true"] span') as HTMLSpanElement;
+    const cellNode = firstRenderedCell(view.container);
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
     expect(cellNode.style.color).toBe(hexToRgbString('#008b00'));
     expect(scroller.style.backgroundColor).toBe(hexToRgbString('#000000'));
+  });
+
+  it('maps ANSI red/green and bright red/green backgrounds without collapsing them to grayscale', () => {
+    const row = [[
+      { char: 'R'.codePointAt(0) || 82, fg: 256, bg: 1, flags: 0, width: 1 },
+      { char: ' '.codePointAt(0) || 32, fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 'G'.codePointAt(0) || 71, fg: 256, bg: 2, flags: 0, width: 1 },
+      { char: ' '.codePointAt(0) || 32, fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 'A'.codePointAt(0) || 65, fg: 256, bg: 9, flags: 0, width: 1 },
+      { char: ' '.codePointAt(0) || 32, fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 'B'.codePointAt(0) || 66, fg: 256, bg: 10, flags: 0, width: 1 },
+    ]];
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-ansi-bg"
+          initialBufferLines={row}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          active
+          fontSize={5}
+          themeId="classic-dark"
+        />
+      </div>,
+    );
+
+    const cells = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
+    expect(cells[0]?.style.background).toBe(hexToRgbString('#f44747'));
+    expect(cells[2]?.style.background).toBe(hexToRgbString('#6a9955'));
+    expect(cells[4]?.style.background).toBe(hexToRgbString('#f44747'));
+    expect(cells[6]?.style.background).toBe(hexToRgbString('#6a9955'));
   });
 
   it('uses measured pixel cell widths for mixed ASCII/CJK rows instead of browser ch units', async () => {
@@ -286,7 +323,7 @@ describe('TerminalView terminal themes', () => {
       );
 
       await waitFor(() => {
-        const spans = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] span')) as HTMLSpanElement[];
+        const spans = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
         expect(spans[0]?.style.width).toBe('7px');
         expect(spans[1]?.style.width).toBe('14px');
         expect(spans[2]?.style.width).toBe('0px');

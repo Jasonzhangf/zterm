@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
-import { useSessionBufferSnapshot } from './lib/session-buffer-store';
-import { useSessionHeadSnapshot } from './lib/session-head-store';
+import { useSessionRenderBufferSnapshot } from './lib/session-render-buffer-store';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -69,8 +68,8 @@ class MockWebSocket {
     this.triggerMessage({
       type: 'session-ticket',
       payload: {
-        clientSessionId: payload.clientSessionId,
-        sessionTransportToken: `ticket-${payload.clientSessionId}`,
+        openRequestId: payload.openRequestId,
+        sessionTransportToken: `ticket-${payload.openRequestId}`,
         sessionName: payload.sessionName,
       },
     } as ServerMessage);
@@ -243,18 +242,15 @@ vi.mock('./pages/TerminalPage', () => ({
     activeSession,
     onSwitchSession,
     onTerminalViewportChange,
-    sessionHeadStore,
     sessionBufferStore,
   }: {
     sessions: any[];
     activeSession: any;
     onSwitchSession: (sessionId: string) => void;
     onTerminalViewportChange?: (sessionId: string, state: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
-    sessionHeadStore?: { getSnapshot: (sessionId: string) => { daemonHeadEndIndex: number } };
     sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer: { lines: any[]; bufferTailEndIndex: number; endIndex: number } } };
   }) => {
-    const activeBufferSnapshot = useSessionBufferSnapshot(sessionBufferStore as any, activeSession?.id || null);
-    const activeHeadSnapshot = useSessionHeadSnapshot(sessionHeadStore as any, activeSession?.id || null);
+    const activeBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore as any, activeSession?.id || null);
     const liveBuffer = activeSession ? activeBufferSnapshot.buffer : activeSession?.buffer;
 
     useEffect(() => {
@@ -266,7 +262,7 @@ vi.mock('./pages/TerminalPage', () => ({
         viewportEndIndex: Math.max(
           0,
           Math.floor(
-            activeHeadSnapshot.daemonHeadEndIndex
+            liveBuffer?.daemonHeadEndIndex
             || liveBuffer?.bufferTailEndIndex
             || liveBuffer?.endIndex
             || 0,
@@ -274,7 +270,7 @@ vi.mock('./pages/TerminalPage', () => ({
         ),
         viewportRows: 24,
       });
-    }, [activeHeadSnapshot.daemonHeadEndIndex, activeSession?.id, liveBuffer?.bufferTailEndIndex, liveBuffer?.endIndex, onTerminalViewportChange]);
+    }, [activeSession?.id, liveBuffer?.daemonHeadEndIndex, liveBuffer?.bufferTailEndIndex, liveBuffer?.endIndex, onTerminalViewportChange]);
 
     const activeLines = (liveBuffer?.lines || []).map(encodeCells).join('|');
     return (

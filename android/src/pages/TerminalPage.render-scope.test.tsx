@@ -215,17 +215,13 @@ describe('TerminalPage renderer scope', () => {
     vi.useRealTimers();
   });
 
-  it('keeps inactive renderers mounted but hides them when split is disabled and switches body with active session', () => {
+  it('renders only the active renderer when split is disabled and swaps mounted body on tab switch', () => {
     const session1 = makeSession('s1');
     const session2 = makeSession('s2');
     const view = renderTerminalPage([session1, session2], session1);
 
-    const activePane = screen.getByTestId('terminal-view-s1').parentElement as HTMLElement;
-    const inactivePane = screen.getByTestId('terminal-view-s2').parentElement as HTMLElement;
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
-    expect(activePane.style.visibility).toBe('visible');
-    expect(inactivePane.style.visibility).toBe('hidden');
+    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
 
     view.rerender(
       <TerminalPage
@@ -248,12 +244,8 @@ describe('TerminalPage renderer scope', () => {
       />,
     );
 
-    const nextActivePane = screen.getByTestId('terminal-view-s2').parentElement as HTMLElement;
-    const nextInactivePane = screen.getByTestId('terminal-view-s1').parentElement as HTMLElement;
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('false');
-    expect(nextActivePane.style.visibility).toBe('visible');
-    expect(nextInactivePane.style.visibility).toBe('hidden');
+    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
   it('renders only split-visible renderers when split mode is enabled', () => {
@@ -358,5 +350,157 @@ describe('TerminalPage renderer scope', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '行号' }));
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
+  });
+
+  it('does not repeat live session notifications when the visible pane id set is unchanged', () => {
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const onLiveSessionIdsChange = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(1);
+    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']);
+
+    view.rerender(
+      <TerminalPage
+        sessions={[
+          session1,
+          {
+            ...session2,
+            state: 'reconnecting',
+            lastError: 'probe timeout',
+          },
+        ]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches live session notifications to the new active tab in non-split mode without keeping the previous tab live', () => {
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const onLiveSessionIdsChange = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(1);
+    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']);
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session2}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's2')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(2);
+    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s2']);
+    expect(onLiveSessionIdsChange).not.toHaveBeenLastCalledWith(['s1', 's2']);
+  });
+
+  it('clears live session notifications on unmount so SessionContext does not keep refreshing stale panes', () => {
+    const session1 = makeSession('s1');
+    const onLiveSessionIdsChange = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledWith(['s1']);
+
+    view.unmount();
+
+    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith([]);
   });
 });

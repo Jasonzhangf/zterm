@@ -6,17 +6,19 @@ import type {
   TerminalCursorState,
 } from '../lib/types';
 
-export interface ClientSessionTransport {
+export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';
   readyState: number;
   sendText: (text: string) => void;
   close: (reason?: string) => void;
   ping?: () => void;
+  requestOrigin?: string;
+  connectedSent?: boolean;
 }
 
 export interface TerminalTransportConnection {
   transportId: string;
-  transport: ClientSessionTransport;
+  transport: TerminalSessionTransport;
   closeTransport: (reason: string) => void;
   requestOrigin: string;
   role: 'pending' | 'control' | 'session';
@@ -29,18 +31,15 @@ export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> 
   chunks: Buffer[];
 }
 
-export interface ClientSession {
+export interface TerminalSession {
   id: string;
   transportId: string;
-  transport: ClientSessionTransport | null;
+  transport: TerminalSessionTransport | null;
   closeTransport?: (reason: string) => void;
-  requestOrigin: string;
   sessionName: string;
   mirrorKey: string | null;
-  wsAlive: boolean;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
-  connectedSent: boolean;
 }
 
 export interface SessionMirror {
@@ -70,7 +69,6 @@ export interface TerminalGeometry {
 }
 
 export interface TerminalAttachPayload {
-  name: string;
   sessionName: string;
   cols?: number;
   rows?: number;

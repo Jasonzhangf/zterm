@@ -15,14 +15,13 @@ export interface PerformForegroundRefreshOptions {
   sessions: ResumeSessionSnapshot[];
   activeSessionId: string | null;
   resumeActiveSessionTransport: (sessionId: string) => boolean;
-  reconnectSession: (sessionId: string) => void;
   runtime: ForegroundRefreshRuntime;
   debounceMs?: number;
   log?: (entry: {
     reason: string;
     activeSessionId: string;
     sessionState: string;
-    action: 'resume-active-transport' | 'reconnect-active-session';
+    action: 'delegate-active-session-refresh' | 'skip-active-session-refresh';
   }) => void;
 }
 
@@ -88,10 +87,7 @@ export function performForegroundRefresh(options: PerformForegroundRefreshOption
     reason: options.reason,
     activeSessionId,
     sessionState: currentActiveSession?.state || 'missing',
-    action: resumed ? 'resume-active-transport' : 'reconnect-active-session',
+    action: resumed ? 'delegate-active-session-refresh' : 'skip-active-session-refresh',
   });
-  if (!resumed) {
-    options.reconnectSession(activeSessionId);
-  }
-  return true;
+  return resumed;
 }

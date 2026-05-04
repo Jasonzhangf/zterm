@@ -14,6 +14,33 @@
 > 1. daemon 不得把它们提升为长期业务真相  
 > 2. client 不得把 `sessionTransportToken` 塞进长期 transport runtime store  
 > 3. `sessionTransportToken` 只允许存在于 attach/open 的临时握手上下文中
+>
+> 2026-05-04 第三刀补充冻结：  
+> daemon 不得再用 `clientSessionId` 做 token owner / ticket owner。  
+> `sessionTransportToken` 在 daemon 内只能表现为 **one-shot opaque attach proof**；  
+> `clientSessionId` 仅允许原样回显给 client 做本地匹配，不得成为 daemon token store 的 ownership key。
+>
+> 2026-05-04 第四刀补充冻结：  
+> attach/open 两阶段握手里的 wire correlation 已从 `clientSessionId` 收口为 `openRequestId`。  
+> `openRequestId` 只表示 **client-local open intent correlation**，仅用于把：
+> - `session-open` 对回 `session-ticket`
+> - `connect` / `session-open-failed` 对回本地 open intent
+>
+> 它不是稳定 session identity；daemon 不得持有 `openRequestId` 的长期 owner 语义。
+>
+> 2026-05-04 第五刀补充冻结（兼容止血）：  
+> 由于已有安装态客户端仍可能按旧 wire 读取 `clientSessionId`，因此在协议兼容窗口内：
+> 1. `session-ticket`
+> 2. `session-open-failed`
+>
+> 允许 **同时携带**：
+> - 新字段：`openRequestId`
+> - 旧兼容字段：`clientSessionId`
+>
+> 但这条兼容只允许存在于 **wire echo / client 本地匹配**：
+> - daemon 不得重新把 `clientSessionId` 提升为 token owner / attach owner
+> - client 新逻辑必须优先按 `openRequestId` 匹配
+> - `clientSessionId` 仅允许作为旧安装态恢复连接的兼容回显，不得重新成为新协议主语义
 
 ## 背景
 
@@ -79,6 +106,7 @@ Android / daemon 后续规则：
 - **不允许改写既有 message 的语义** 来“偷偷提速”或补 fallback
 - `android/src/lib/types.ts` 只允许做 shared re-export / app local model，**不得再次本地重定义 wire protocol**
 - client 巨型文件拆分（如 `SessionContext.tsx`）只允许做 helper ownership 下沉，不得顺手改变协议语义
+- 对已发布安装态仍在使用的协议字段，**迁移时必须保留显式兼容窗口**；不得在没有双向兼容的情况下直接切换 handshake owner 字段
 
 ---
 
@@ -124,6 +152,7 @@ daemon terminal core 只允许保留这些最小事实：
 - `session.terminalWidthMode`
 - `session.requestedAdaptiveCols`
 - 任何 active/inactive / tab / pane / renderer 语义
+- transport heartbeat liveness / request origin / connected-handshake sent 这类观测值若存在，也只能挂在 **transport connection fact** 上，不能漂移成 session owned truth
 
 ### 1.1.2 代码组织约束
 
@@ -398,6 +427,31 @@ daemon transport close 时：
 - ws close grace timeout 回收 client-style logical session
 - inactive timeout 回收 client-style logical session
 - foreground/background 切换回收 client-style logical session
+
+### 5.5 client request socket owner 语义冻结
+
+client 侧凡是要向 session transport 发请求的入口，例如：
+
+- `buffer-head-request`
+- `buffer-sync-request`
+- 后续任何 session-scoped request
+
+都必须满足：
+
+1. 默认从 `readSessionTransportSocket(sessionId)` 读取当前 active socket
+2. 如果上层因回调链路显式传入 `ws`，该 `ws` 只能作为**一致性校验后的同一对象引用**
+3. 一旦发现 `passedWs !== activeWs`，必须直接拒绝本次请求，不得继续发送
+
+原因：
+
+- superseded / stale socket 的晚到回调可能还会触发 `head`、`range`、`probe`
+- 即使消息处理回调本身已经做了 stale gate，只要写侧请求还允许旧 ws 继续发包，transport 真相仍会被旧链路污染
+
+一句话：
+
+```text
+旧 ws 不仅不能读，也不能写
+```
 
 ### 5.3 mirror 生命周期
 

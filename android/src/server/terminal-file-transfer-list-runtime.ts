@@ -16,7 +16,7 @@ import type {
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { requestRemoteScreenshotViaHelper } from './remote-screenshot-helper-client';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
-import type { ClientSession } from './terminal-runtime-types';
+import type { TerminalSession } from './terminal-runtime-types';
 import {
   FILE_CHUNK_SIZE,
   REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS,
@@ -24,16 +24,16 @@ import {
 } from './terminal-file-transfer-types';
 
 export interface TerminalFileTransferListRuntime {
-  handleFileListRequest: (session: ClientSession, payload: FileListRequestPayload) => void;
-  handleFileCreateDirectoryRequest: (session: ClientSession, payload: FileCreateDirectoryRequestPayload) => void;
-  handleFileDownloadRequest: (session: ClientSession, payload: FileDownloadRequestPayload) => void;
-  handleRemoteScreenshotRequest: (session: ClientSession, payload: RemoteScreenshotRequestPayload) => Promise<void>;
+  handleFileListRequest: (session: TerminalSession, payload: FileListRequestPayload) => void;
+  handleFileCreateDirectoryRequest: (session: TerminalSession, payload: FileCreateDirectoryRequestPayload) => void;
+  handleFileDownloadRequest: (session: TerminalSession, payload: FileDownloadRequestPayload) => void;
+  handleRemoteScreenshotRequest: (session: TerminalSession, payload: RemoteScreenshotRequestPayload) => Promise<void>;
 }
 
 export function createTerminalFileTransferListRuntime(
   deps: TerminalFileTransferRuntimeDeps,
 ): TerminalFileTransferListRuntime {
-  function sendFileDownloadBuffer(session: ClientSession, requestId: string, fileName: string, fileBuffer: Buffer) {
+  function sendFileDownloadBuffer(session: TerminalSession, requestId: string, fileName: string, fileBuffer: Buffer) {
     const totalChunks = Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE);
     let index = 0;
 
@@ -71,7 +71,7 @@ export function createTerminalFileTransferListRuntime(
     return `remote-screenshot-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
   }
 
-  function handleFileListRequest(session: ClientSession, payload: FileListRequestPayload) {
+  function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
     const { requestId, path: requestedPath, showHidden } = payload;
 
     try {
@@ -121,7 +121,7 @@ export function createTerminalFileTransferListRuntime(
     }
   }
 
-  function handleFileCreateDirectoryRequest(session: ClientSession, payload: FileCreateDirectoryRequestPayload) {
+  function handleFileCreateDirectoryRequest(session: TerminalSession, payload: FileCreateDirectoryRequestPayload) {
     const { requestId, path: requestedPath, name: requestedName } = payload;
 
     try {
@@ -149,7 +149,7 @@ export function createTerminalFileTransferListRuntime(
     }
   }
 
-  function handleFileDownloadRequest(session: ClientSession, payload: FileDownloadRequestPayload) {
+  function handleFileDownloadRequest(session: TerminalSession, payload: FileDownloadRequestPayload) {
     const { requestId, remotePath, fileName } = payload;
 
     try {
@@ -171,7 +171,7 @@ export function createTerminalFileTransferListRuntime(
     }
   }
 
-  async function handleRemoteScreenshotRequest(session: ClientSession, payload: RemoteScreenshotRequestPayload) {
+  async function handleRemoteScreenshotRequest(session: TerminalSession, payload: RemoteScreenshotRequestPayload) {
     const requestId = typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
     if (!requestId) {
       deps.sendMessage(session, {

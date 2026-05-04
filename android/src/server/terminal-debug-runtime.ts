@@ -1,20 +1,20 @@
 import type { RuntimeDebugLogEntry, ServerMessage } from '../lib/types';
 import type { RuntimeDebugStore } from './runtime-debug-store';
-import type { ClientSession } from './terminal-runtime-types';
+import type { TerminalSession } from './terminal-runtime-types';
 
 export interface TerminalDebugRuntimeDeps {
   daemonRuntimeDebugEnabled: boolean;
   maxClientDebugBatchLogEntries: number;
   maxClientDebugLogPayloadChars: number;
   clientRuntimeDebugStore: RuntimeDebugStore;
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
 }
 
 export interface TerminalDebugRuntime {
   logTimePrefix: (date?: Date) => string;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
-  handleClientDebugLog: (session: ClientSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
 }
 
 export function createTerminalDebugRuntime(
@@ -75,7 +75,7 @@ export function createTerminalDebugRuntime(
       }));
   }
 
-  function handleClientDebugLog(session: ClientSession, payload: { entries: RuntimeDebugLogEntry[] }) {
+  function handleClientDebugLog(session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) {
     const entries = normalizeClientDebugEntries(Array.isArray(payload.entries) ? payload.entries : []);
     if (entries.length === 0) {
       return;
@@ -85,7 +85,7 @@ export function createTerminalDebugRuntime(
       {
         sessionId: session.id,
         tmuxSessionName: session.sessionName || 'unknown',
-        requestOrigin: session.requestOrigin,
+        requestOrigin: session.transport?.requestOrigin,
       },
       entries,
     );

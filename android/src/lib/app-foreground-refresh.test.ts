@@ -24,10 +24,9 @@ describe('app foreground refresh orchestrator', () => {
     expect(runtime.wasHidden).toBe(true);
   });
 
-  it('explicitly resumes active transport on foreground restore and reconnects only when resume returns false', () => {
+  it('delegates foreground restore to SessionContext refresh truth only once', () => {
     const runtime = createForegroundRefreshRuntime();
     const resumeActiveSessionTransport = vi.fn(() => false);
-    const reconnectSession = vi.fn();
     const log = vi.fn();
 
     const fired = performForegroundRefresh({
@@ -35,33 +34,29 @@ describe('app foreground refresh orchestrator', () => {
       sessions: [{ id: 's1', state: 'connected' }],
       activeSessionId: 's1',
       resumeActiveSessionTransport,
-      reconnectSession,
       runtime,
       log,
     });
 
-    expect(fired).toBe(true);
+    expect(fired).toBe(false);
     expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
-    expect(reconnectSession).toHaveBeenCalledWith('s1');
     expect(log).toHaveBeenCalledWith({
       reason: 'resume',
       activeSessionId: 's1',
       sessionState: 'connected',
-      action: 'reconnect-active-session',
+      action: 'skip-active-session-refresh',
     });
   });
 
   it('debounces duplicate foreground restore bursts', () => {
     const runtime = createForegroundRefreshRuntime();
     const resumeActiveSessionTransport = vi.fn(() => true);
-    const reconnectSession = vi.fn();
 
     expect(performForegroundRefresh({
       reason: 'visibilitychange',
       sessions: [{ id: 's1', state: 'connected' }],
       activeSessionId: 's1',
       resumeActiveSessionTransport,
-      reconnectSession,
       runtime,
     })).toBe(true);
 
@@ -70,11 +65,9 @@ describe('app foreground refresh orchestrator', () => {
       sessions: [{ id: 's1', state: 'connected' }],
       activeSessionId: 's1',
       resumeActiveSessionTransport,
-      reconnectSession,
       runtime,
     })).toBe(false);
 
     expect(resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(reconnectSession).not.toHaveBeenCalled();
   });
 });

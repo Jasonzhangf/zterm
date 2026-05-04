@@ -40,6 +40,7 @@ export function requestSessionBufferSyncOrchestrationRuntime(options: {
     sessionOverride?: Session | null;
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
+    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
   };
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
@@ -94,6 +95,7 @@ export function handleBufferHeadOrchestrationRuntime(options: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   requestSessionBufferSync: (
@@ -127,7 +129,7 @@ export function applyIncomingBufferSyncOrchestrationRuntime(options: {
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
-  recordSessionRenderCommit: (sessionId: string) => void;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   requestSessionBufferSync: (
     sessionId: string,
@@ -138,6 +140,7 @@ export function applyIncomingBufferSyncOrchestrationRuntime(options: {
       sessionOverride?: Session | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     },
   ) => boolean;
 }) {
@@ -152,6 +155,7 @@ export function handleSocketServerMessageOrchestrationRuntime(options: {
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
+    onClosed: (reason?: string) => void;
   };
   msg: ServerMessage;
   refs: {

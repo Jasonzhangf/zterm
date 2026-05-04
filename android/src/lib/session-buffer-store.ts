@@ -26,6 +26,34 @@ const EMPTY_SNAPSHOT: SessionBufferStoreSnapshot = {
   buffer: EMPTY_BUFFER,
 };
 
+function cloneBufferLines(lines: SessionBufferState['lines']) {
+  return lines.map((row) => row.map((cell) => ({ ...cell })));
+}
+
+function cloneGapRanges(gapRanges: SessionBufferState['gapRanges']) {
+  return gapRanges.map((range) => ({ ...range }));
+}
+
+function cloneCursor(cursor: SessionBufferState['cursor']) {
+  if (!cursor) {
+    return null;
+  }
+  return {
+    rowIndex: cursor.rowIndex,
+    col: cursor.col,
+    visible: cursor.visible,
+  };
+}
+
+function cloneSessionBuffer(buffer: SessionBufferState): SessionBufferState {
+  return {
+    ...buffer,
+    lines: cloneBufferLines(buffer.lines),
+    gapRanges: cloneGapRanges(buffer.gapRanges),
+    cursor: cloneCursor(buffer.cursor),
+  };
+}
+
 export function createSessionBufferStore(): SessionBufferStore {
   const snapshots = new Map<string, SessionBufferStoreSnapshot>();
   const listeners = new Map<string, Set<() => void>>();
@@ -67,7 +95,7 @@ export function createSessionBufferStore(): SessionBufferStore {
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer,
+      buffer: cloneSessionBuffer(buffer),
     });
     notify(sessionId);
     return true;

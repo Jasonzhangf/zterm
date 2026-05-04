@@ -161,6 +161,7 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalTh
 
   style.color = colors.fg;
   style.background = colors.bg;
+  style.backgroundColor = colors.bg;
   if (cell.flags & FLAG_BOLD) style.fontWeight = '700';
   if (cell.flags & FLAG_DIM) style.opacity = '0.5';
   if (cell.flags & FLAG_ITALIC) style.fontStyle = 'italic';

@@ -111,6 +111,8 @@ export interface SessionRenderBufferSnapshot {
   endIndex: number;
   bufferHeadStartIndex: number;
   bufferTailEndIndex: number;
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
   cols: number;
   rows: number;
   cursorKeysApp: boolean;

@@ -12,7 +12,6 @@ import type {
   TerminalCursorState,
   TerminalGapRange,
   TerminalVisibleRange,
-  TerminalWidthMode,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
@@ -43,7 +42,7 @@ export type ActiveRefreshSource = 'active-resume' | 'active-reentry' | 'active-t
 
 export interface ActiveSessionRefreshPlanOptions {
   hasSession: boolean;
-  isActive: boolean;
+  isRefreshTarget: boolean;
   sessionState: string | null;
   wsReadyState: number | null;
   reconnectInFlight: boolean;
@@ -99,6 +98,7 @@ export type ReconnectHandshakeFailurePlan =
 
 export interface PendingSessionTransportOpenIntent {
   sessionId: string;
+  openRequestId: string;
   host: Host;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
@@ -106,10 +106,12 @@ export interface PendingSessionTransportOpenIntent {
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onConnected: (ws: BridgeTransportSocket) => void;
+  onClosed?: (reason?: string) => void;
 }
 
 export interface QueueSessionTransportOpenIntentOptions {
   sessionId: string;
+  openRequestId?: string;
   host: Host;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
@@ -117,6 +119,7 @@ export interface QueueSessionTransportOpenIntentOptions {
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onHandshakeConnected?: (ws: BridgeTransportSocket, sessionName: string) => void;
   onHandshakeFailure?: (message: string, retryable: boolean, stage: SessionTransportOpenFailureStage) => void;
+  onClosed?: (reason?: string) => void;
   clearHandshakeTimeout: () => void;
   finalizeSocketFailureBaseline: (options: {
     sessionId: string;
@@ -141,11 +144,13 @@ export function createPendingSessionTransportOpenIntent(
 
   return {
     sessionId: options.sessionId,
+    openRequestId: options.openRequestId || buildSessionOpenRequestId(options.sessionId),
     host: options.host,
     resolvedSessionName: options.resolvedSessionName,
     debugScope: options.debugScope,
     activate: options.activate,
     onBeforeConnectSend: options.onBeforeConnectSend,
+    onClosed: options.onClosed,
     finalizeFailure: (message: string, retryable: boolean) => {
       if (!handshakeSettled) {
         options.clearHandshakeTimeout();
@@ -174,6 +179,13 @@ export function createPendingSessionTransportOpenIntent(
       options.onHandshakeConnected?.(ws, options.resolvedSessionName);
     },
   };
+}
+
+let sessionOpenRequestSequence = 0;
+
+export function buildSessionOpenRequestId(sessionId: string) {
+  sessionOpenRequestSequence += 1;
+  return `${sessionId}:open:${sessionOpenRequestSequence}`;
 }
 
 export function buildTransportOpenConnectedEffectPlan(
@@ -427,7 +439,7 @@ export function shouldReconnectQueuedActiveInput(options: {
 }
 
 export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanOptions): ActiveSessionRefreshPlan {
-  if (!options.hasSession || !options.isActive) {
+  if (!options.hasSession || !options.isRefreshTarget) {
     return { action: 'skip', reason: 'inactive-or-missing-session' };
   }
 
@@ -572,22 +584,6 @@ function resolveRequestedBufferWindow(
   const cacheLines = resolveTerminalRequestWindowLines(safeViewportRows);
   const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
   const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
-  return {
-    requestStartIndex,
-    requestEndIndex,
-  };
-}
-
-function resolveVisibleViewportWindow(
-  endIndex: number,
-  viewportRows: number,
-  minStartIndex = 0,
-) {
-  const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
-  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
-  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
-  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
-  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - safeViewportRows);
   return {
     requestStartIndex,
     requestEndIndex,
@@ -767,6 +763,7 @@ function buildTailRefreshBufferSyncRequestPayload(
     liveHead?: SessionBufferHeadState | null;
     forceSameEndRefresh?: boolean;
     invalidLocalWindow?: boolean;
+    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
@@ -788,9 +785,28 @@ function buildTailRefreshBufferSyncRequestPayload(
     && distanceToHead === 0
     && daemonRevision > localRevision
   );
+  const sameEndWindowHasLocalGaps = (
+    sameEndRevisionAdvanced
+    && collectIntersectingGapRanges(
+      buffer.gapRanges,
+      Math.max(authoritativeHeadStartIndex, viewportEndIndex - viewportRows),
+      viewportEndIndex,
+    ).length > 0
+  );
   let window: { requestStartIndex: number; requestEndIndex: number };
 
-  if (!localHasWindow || invalidLocalWindow || distanceToHead > cacheLines) {
+  if (options?.requestWindowOverride) {
+    window = {
+      requestStartIndex: Math.max(
+        authoritativeHeadStartIndex,
+        Math.floor(options.requestWindowOverride.requestStartIndex || 0),
+      ),
+      requestEndIndex: Math.max(
+        authoritativeHeadStartIndex,
+        Math.floor(options.requestWindowOverride.requestEndIndex || 0),
+      ),
+    };
+  } else if (!localHasWindow || invalidLocalWindow || distanceToHead > cacheLines) {
     window = resolveRequestedBufferWindow(
       viewportEndIndex,
       viewportRows,
@@ -801,8 +817,13 @@ function buildTailRefreshBufferSyncRequestPayload(
       requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
       requestEndIndex: viewportEndIndex,
     };
+  } else if (sameEndRevisionAdvanced && sameEndWindowHasLocalGaps) {
+    window = {
+      requestStartIndex: Math.max(authoritativeHeadStartIndex, viewportEndIndex - viewportRows),
+      requestEndIndex: viewportEndIndex,
+    };
   } else if (sameEndRevisionAdvanced) {
-    window = resolveVisibleViewportWindow(
+    window = resolveRequestedBufferWindow(
       viewportEndIndex,
       viewportRows,
       authoritativeHeadStartIndex,
@@ -851,6 +872,7 @@ export function buildSessionBufferSyncRequestPayload(
     forceSameEndRefresh?: boolean;
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
+    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
@@ -863,27 +885,18 @@ export function buildSessionBufferSyncRequestPayload(
 export function buildHostConfigMessage(
   host: Host,
   sessionName: string,
-  clientSessionId: string,
-  terminalWidthMode: TerminalWidthMode,
+  openRequestId: string,
   sessionTransportToken?: string | null,
 ): HostConfigMessage {
-  // Compatibility freeze:
-  // - clientSessionId remains a client-owned stable session identity
+  // Handshake freeze:
+  // - openRequestId is client-local request correlation only
   // - sessionTransportToken remains attach-only wire material
   // Neither field is allowed to become daemon-side long-lived business truth.
   return {
-    clientSessionId,
+    openRequestId,
     sessionTransportToken: sessionTransportToken?.trim() || undefined,
-    name: host.name,
-    bridgeHost: host.bridgeHost,
-    bridgePort: host.bridgePort,
     sessionName,
-    terminalWidthMode,
-    authToken: host.authToken,
     autoCommand: host.autoCommand,
-    authType: host.authType,
-    password: host.password,
-    privateKey: host.privateKey,
   };
 }
 
@@ -1148,10 +1161,20 @@ function doesBufferSyncSatisfyPullState(
       && payloadEndIndex >= pullState.targetEndIndex
     );
   }
-  return (
-    payloadRevision >= pullState.targetHeadRevision
-    && payloadStartIndex <= pullState.targetStartIndex
+  const settlesExistingWindowRefresh = (
+    pullState.requestLocalEndIndex >= pullState.targetEndIndex
+    && pullState.requestLocalStartIndex <= pullState.targetStartIndex
+    && pullState.requestKnownRevision < pullState.targetHeadRevision
+    && payloadRevision >= pullState.targetHeadRevision
     && payloadEndIndex >= pullState.targetEndIndex
+  );
+  return (
+    settlesExistingWindowRefresh
+    || (
+      payloadRevision >= pullState.targetHeadRevision
+      && payloadStartIndex <= pullState.targetStartIndex
+      && payloadEndIndex >= pullState.targetEndIndex
+    )
   );
 }
 

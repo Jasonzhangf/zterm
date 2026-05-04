@@ -5,7 +5,7 @@ import type {
 } from '../lib/types';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import type {
-  ClientSession,
+  TerminalSession,
   SessionMirror,
   TerminalAttachPayload,
   TerminalGeometry,
@@ -14,10 +14,10 @@ import type {
 
 export interface TerminalMirrorRuntimeDeps {
   defaultViewport: { cols: number; rows: number };
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: ClientSession, sessionName?: string) => void;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (
     sessionId: string,
     requestOrigin?: string,
@@ -53,8 +53,8 @@ export interface TerminalMirrorRuntimeDeps {
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
-  closeLogicalClientSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
-  getClientMirror: (session: ClientSession) => SessionMirror | null;
+  closeLogicalTerminalSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
+  getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
 
 export interface TerminalMirrorRuntime {
@@ -64,13 +64,14 @@ export interface TerminalMirrorRuntime {
     reason: string,
     options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
-  ensureSessionReady: (session: ClientSession, mirror: SessionMirror) => void;
-  sendBufferHeadToSession: (session: ClientSession, mirror: SessionMirror) => void;
+  ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
+  sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
-  attachTmux: (session: ClientSession, payload: TerminalAttachPayload) => Promise<void>;
-  handleInput: (session: ClientSession, data: string) => void;
+  attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  handleInput: (session: TerminalSession, data: string) => void;
 }
 
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
@@ -82,16 +83,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       clearTimeout(mirror.liveSyncTimer);
       mirror.liveSyncTimer = null;
     }
-  }
-
-  function mirrorHasAttachedTransportSubscriber(mirror: SessionMirror) {
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      if (session?.transport) {
-        return true;
-      }
-    }
-    return false;
   }
 
   function createMirror(sessionName: string): SessionMirror {
@@ -158,7 +149,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (!client) {
           continue;
         }
-        deps.closeLogicalClientSession(client, reason, Boolean(options.notifyClientClose));
+        deps.closeLogicalTerminalSession(client, reason, Boolean(options.notifyClientClose));
       }
     } else {
       releaseMirrorForSubscribers(mirror, reason, options?.releaseCode || 'tmux_session_unavailable');
@@ -177,15 +168,15 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirrors.delete(mirror.key);
   }
 
-  function ensureSessionReady(session: ClientSession, mirror: SessionMirror) {
+  function ensureSessionReady(session: TerminalSession, mirror: SessionMirror) {
     session.sessionName = mirror.sessionName;
-    if (!session.transport || session.connectedSent) {
+    if (!session.transport || session.transport.connectedSent) {
       return;
     }
-    session.connectedSent = true;
+    session.transport.connectedSent = true;
     deps.sendMessage(session, {
       type: 'connected',
-      payload: deps.buildConnectedPayload(session.id, session.requestOrigin),
+      payload: deps.buildConnectedPayload(session.id, session.transport.requestOrigin),
     });
     deps.sendScheduleStateToSession(session, mirror.sessionName);
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
@@ -201,7 +192,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
-  function sendBufferHeadToSession(session: ClientSession, mirror: SessionMirror) {
+  function sendBufferHeadToSession(session: TerminalSession, mirror: SessionMirror) {
     if (!session.transport || session.transport.readyState !== 1) {
       return;
     }
@@ -210,6 +201,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       type: 'buffer-head',
       payload: deps.buildBufferHeadPayload(session.id, mirror),
     });
+  }
+
+  async function refreshMirrorHeadForSession(session: TerminalSession, mirror: SessionMirror) {
+    if (mirror.lifecycle !== 'ready') {
+      return false;
+    }
+    const captured = await syncMirrorCanonicalBuffer(mirror);
+    if (!captured) {
+      return false;
+    }
+    sendBufferHeadToSession(session, mirror);
+    return true;
   }
 
   async function syncMirrorCanonicalBuffer(
@@ -266,21 +269,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.lifecycle !== 'ready') {
       return;
     }
-    if (!mirrorHasAttachedTransportSubscriber(mirror)) {
-      stopMirrorLiveSync(mirror);
-      return;
-    }
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
-      if (mirror.lifecycle !== 'ready' || !mirrorHasAttachedTransportSubscriber(mirror)) {
+      if (mirror.lifecycle !== 'ready') {
         return;
       }
-      void syncMirrorCanonicalBuffer(mirror).finally(() => {
-        if (mirror.lifecycle === 'ready' && mirrorHasAttachedTransportSubscriber(mirror)) {
-          scheduleMirrorLiveSync(mirror, 33);
-        }
-      });
+      void syncMirrorCanonicalBuffer(mirror);
     }, Math.max(0, delayMs));
   }
 
@@ -329,7 +324,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         throw new Error('Failed to capture canonical tmux buffer during initial sync');
       }
       announceMirrorSubscribersReady(mirror);
-      scheduleMirrorLiveSync(mirror, 33);
     } catch (error) {
       mirror.lifecycle = 'failed';
       console.error(
@@ -357,14 +351,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       setTimeout(() => {
         if (mirror.lifecycle === 'ready') {
           deps.writeToTmuxSession(mirror.sessionName, command, true);
-          scheduleMirrorLiveSync(mirror, 33);
+          scheduleMirrorLiveSync(mirror, 0);
         }
       }, deps.autoCommandDelayMs);
     }
   }
 
-  async function attachTmux(session: ClientSession, payload: TerminalAttachPayload) {
-    const nextSessionName = deps.sanitizeSessionName(payload.sessionName || payload.name);
+  async function attachTmux(session: TerminalSession, payload: TerminalAttachPayload) {
+    const nextSessionName = deps.sanitizeSessionName(payload.sessionName);
     const nextMirrorKey = deps.getMirrorKey(nextSessionName);
     const existingMirror = mirrors.get(nextMirrorKey) || null;
     const existingTmuxGeometry = existingMirror
@@ -401,7 +395,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     const requestedCols = deps.normalizeTerminalCols(requestedGeometry.cols);
     const requestedRows = deps.normalizeTerminalRows(requestedGeometry.rows);
 
-    const previousMirror = deps.getClientMirror(session);
+    const previousMirror = deps.getSessionMirror(session);
     if (previousMirror) {
       const detachResult = detachMirrorSubscriber(previousMirror.subscribers, session.id);
       previousMirror.subscribers = detachResult.nextSubscribers;
@@ -409,7 +403,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     session.sessionName = nextSessionName;
     session.mirrorKey = nextMirrorKey;
-    session.connectedSent = false;
+    if (session.transport) {
+      session.transport.connectedSent = false;
+    }
 
     let mirror = existingMirror;
     if (!mirror) {
@@ -424,18 +420,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     if (mirror.lifecycle === 'ready') {
       ensureSessionReady(session, mirror);
-      scheduleMirrorLiveSync(mirror, 0);
       return;
     }
 
     await startMirror(mirror, { cols: requestedCols, rows: requestedRows, autoCommand: payload.autoCommand });
   }
 
-  function handleInput(session: ClientSession, data: string) {
-    const mirror = deps.getClientMirror(session);
+  function handleInput(session: TerminalSession, data: string) {
+    const mirror = deps.getSessionMirror(session);
     if (mirror?.lifecycle === 'ready') {
       deps.writeToLiveMirror(mirror.sessionName, data, false);
-      scheduleMirrorLiveSync(mirror, 33);
+      scheduleMirrorLiveSync(mirror, 0);
     }
   }
 
@@ -444,6 +439,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     destroyMirror,
     ensureSessionReady,
     sendBufferHeadToSession,
+    refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,
     startMirror,

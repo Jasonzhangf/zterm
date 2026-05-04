@@ -89,14 +89,76 @@ describe('open-tab intent truth', () => {
     expect(state.activeSessionId).toBe('s2');
   });
 
-  it('merges new runtime sessions without reintroducing explicitly closed ids', () => {
+  it('does not append runtime-only sessions when OPEN_TABS already exists as explicit client truth', () => {
     const state = mergeRuntimeSessionsIntoOpenTabIntentState(
       normalizeOpenTabIntentState([makeTab('s1')], 's1'),
       [makeSession('s1'), makeSession('s2'), makeSession('s3')],
       new Set(['s3']),
     );
 
-    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+  });
+
+  it('does not merge a runtime semantic duplicate back after that reuse key was explicitly closed', () => {
+    const state = mergeRuntimeSessionsIntoOpenTabIntentState(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          createdAt: 1,
+        }),
+        makeTab('s2', { createdAt: 2 }),
+      ], 's2'),
+      [
+        makeSession('runtime-new', {
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+        }),
+        makeSession('s2', { createdAt: 2 }),
+      ],
+      new Set<string>(),
+      new Set<string>(['100.127.23.27::3333::tmux-shared::shared-token']),
+    );
+
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['persisted-old', 's2']);
+    expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('replaces a semantic duplicate persisted tab with the live runtime session id instead of appending a duplicate tab', () => {
+    const state = mergeRuntimeSessionsIntoOpenTabIntentState(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          customName: 'Keep Me',
+          createdAt: 1,
+        }),
+        makeTab('s2', { createdAt: 2 }),
+      ], 'persisted-old'),
+      [
+        makeSession('runtime-new', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          customName: undefined,
+        }),
+        makeSession('s2', { createdAt: 2 }),
+      ],
+      new Set<string>(),
+    );
+
+    expect(state.tabs).toEqual([
+      expect.objectContaining({
+        sessionId: 'runtime-new',
+        sessionName: 'tmux-shared',
+        customName: 'Keep Me',
+      }),
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+    expect(state.activeSessionId).toBe('runtime-new');
   });
 
   it('upserts, activates, renames and moves with a single pure truth module', () => {

@@ -2,7 +2,7 @@
  * SessionContext - 管理 Session 状态、重连和持久化
  */
 
-import React, { createContext, useContext, useReducer, useRef } from 'react';
+import React, { createContext, useContext, useMemo, useReducer, useRef } from 'react';
 import type {
   SessionScheduleState,
 } from '../lib/types';
@@ -42,13 +42,13 @@ export function SessionProvider({
   const stateRef = useRef(state);
   const scheduleStatesRef = useRef<Record<string, SessionScheduleState>>({});
   const {
-    sessionStore,
     scheduleStates,
     setScheduleStates,
     refs: {
       sessionDebugMetricsStoreRef,
       transportRuntimeStoreRef,
       sessionBufferStoreRef,
+      sessionRenderGateRef,
       sessionHeadStoreRef,
       pingIntervalsRef,
       handshakeTimeoutsRef,
@@ -56,11 +56,11 @@ export function SessionProvider({
       lastPongAtRef,
       lastServerActivityAtRef,
       staleTransportProbeAtRef,
-      viewportSizeRef,
       reconnectRuntimesRef,
       manualCloseRef,
       pendingInputQueueRef,
       lastActivatedSessionIdRef,
+      lastActiveReentryAtRef,
       sessionBufferHeadsRef,
       sessionRevisionResetRef,
       pendingInputTailRefreshRef,
@@ -85,6 +85,7 @@ export function SessionProvider({
     scheduleStates: assembledScheduleStates,
     getSessionRenderBufferSnapshot,
     getSessionBufferStore,
+    getSessionRenderBufferStore,
     getSessionHeadStore,
     createSession,
     closeSession,
@@ -93,14 +94,13 @@ export function SessionProvider({
     renameSession,
     reconnectSession,
     reconnectAllSessions,
+    setLiveSessionIds,
     resumeActiveSessionTransport,
     sendMessage,
     sendInput,
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
-    resizeTerminal,
-    setTerminalWidthMode,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -119,7 +119,6 @@ export function SessionProvider({
     dispatch,
     scheduleStates,
     scheduleStatesRef,
-    sessionStore,
     setScheduleStates,
     bridgeSettings,
     terminalCacheLines,
@@ -128,6 +127,7 @@ export function SessionProvider({
       sessionDebugMetricsStoreRef,
       transportRuntimeStoreRef,
       sessionBufferStoreRef,
+      sessionRenderGateRef,
       sessionHeadStoreRef,
       pingIntervalsRef,
       handshakeTimeoutsRef,
@@ -135,11 +135,11 @@ export function SessionProvider({
       lastPongAtRef,
       lastServerActivityAtRef,
       staleTransportProbeAtRef,
-      viewportSizeRef,
       reconnectRuntimesRef,
       manualCloseRef,
       pendingInputQueueRef,
       lastActivatedSessionIdRef,
+      lastActiveReentryAtRef,
       sessionBufferHeadsRef,
       sessionRevisionResetRef,
       pendingInputTailRefreshRef,
@@ -159,9 +159,7 @@ export function SessionProvider({
     },
   });
 
-  const value: SessionContextValue = buildSessionContextValueRuntime({
-    state,
-    scheduleStates: assembledScheduleStates,
+  const contextRuntimeRef = useRef({
     getSessionDebugMetrics,
     createSession,
     closeSession,
@@ -170,14 +168,13 @@ export function SessionProvider({
     renameSession,
     reconnectSession,
     reconnectAllSessions,
+    setLiveSessionIds,
     resumeActiveSessionTransport,
     sendMessage,
     sendInput,
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
-    resizeTerminal,
-    setTerminalWidthMode,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -189,11 +186,94 @@ export function SessionProvider({
     getSession,
     getSessionRenderBufferSnapshot,
     getSessionBufferStore,
+    getSessionRenderBufferStore,
     getSessionHeadStore,
+    sendMessageRaw,
+  });
+
+  contextRuntimeRef.current = {
+    getSessionDebugMetrics,
+    createSession,
+    closeSession,
+    switchSession,
+    moveSession,
+    renameSession,
+    reconnectSession,
+    reconnectAllSessions,
+    setLiveSessionIds,
+    resumeActiveSessionTransport,
+    sendMessage,
+    sendInput,
+    sendImagePaste,
+    sendFileAttach,
+    requestRemoteScreenshot,
+    updateSessionViewport,
+    requestScheduleList,
+    upsertScheduleJob,
+    deleteScheduleJob,
+    toggleScheduleJob,
+    runScheduleJobNow,
+    getSessionScheduleState,
+    getActiveSession,
+    getSession,
+    getSessionRenderBufferSnapshot,
+    getSessionBufferStore,
+    getSessionRenderBufferStore,
+    getSessionHeadStore,
+    sendMessageRaw,
+  };
+
+  const stableFacade = useMemo(() => ({
+    getSessionDebugMetrics: (sessionId: string) => contextRuntimeRef.current.getSessionDebugMetrics(sessionId),
+    createSession: (...args: Parameters<typeof createSession>) => contextRuntimeRef.current.createSession(...args),
+    closeSession: (id: string) => contextRuntimeRef.current.closeSession(id),
+    switchSession: (id: string) => contextRuntimeRef.current.switchSession(id),
+    moveSession: (id: string, toIndex: number) => contextRuntimeRef.current.moveSession(id, toIndex),
+    renameSession: (id: string, name: string) => contextRuntimeRef.current.renameSession(id, name),
+    reconnectSession: (id: string) => contextRuntimeRef.current.reconnectSession(id),
+    reconnectAllSessions: () => contextRuntimeRef.current.reconnectAllSessions(),
+    setLiveSessionIds: (ids: string[]) => contextRuntimeRef.current.setLiveSessionIds(ids),
+    resumeActiveSessionTransport: (id: string) => contextRuntimeRef.current.resumeActiveSessionTransport(id),
+    sendMessage: (sessionId: string, msg: Parameters<typeof sendMessage>[1]) => (
+      contextRuntimeRef.current.sendMessage(sessionId, msg)
+    ),
+    sendInput: (sessionId: string, data: string) => contextRuntimeRef.current.sendInput(sessionId, data),
+    sendImagePaste: (sessionId: string, file: File) => contextRuntimeRef.current.sendImagePaste(sessionId, file),
+    sendFileAttach: (sessionId: string, file: File) => contextRuntimeRef.current.sendFileAttach(sessionId, file),
+    requestRemoteScreenshot: (
+      sessionId: string,
+      onProgress?: Parameters<typeof requestRemoteScreenshot>[1],
+    ) => contextRuntimeRef.current.requestRemoteScreenshot(sessionId, onProgress),
+    updateSessionViewport: (
+      sessionId: string,
+      visibleRange: Parameters<typeof updateSessionViewport>[1],
+    ) => contextRuntimeRef.current.updateSessionViewport(sessionId, visibleRange),
+    requestScheduleList: (sessionId: string) => contextRuntimeRef.current.requestScheduleList(sessionId),
+    upsertScheduleJob: (sessionId: string, job: Parameters<typeof upsertScheduleJob>[1]) => (
+      contextRuntimeRef.current.upsertScheduleJob(sessionId, job)
+    ),
+    deleteScheduleJob: (sessionId: string, jobId: string) => contextRuntimeRef.current.deleteScheduleJob(sessionId, jobId),
+    toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => (
+      contextRuntimeRef.current.toggleScheduleJob(sessionId, jobId, enabled)
+    ),
+    runScheduleJobNow: (sessionId: string, jobId: string) => contextRuntimeRef.current.runScheduleJobNow(sessionId, jobId),
+    getSessionScheduleState: (sessionId: string) => contextRuntimeRef.current.getSessionScheduleState(sessionId),
+    getActiveSession: () => contextRuntimeRef.current.getActiveSession(),
+    getSession: (id: string) => contextRuntimeRef.current.getSession(id),
+    getSessionRenderBufferSnapshot: (sessionId: string) => contextRuntimeRef.current.getSessionRenderBufferSnapshot(sessionId),
+    getSessionBufferStore: () => contextRuntimeRef.current.getSessionBufferStore(),
+    getSessionRenderBufferStore: () => contextRuntimeRef.current.getSessionRenderBufferStore(),
+    getSessionHeadStore: () => contextRuntimeRef.current.getSessionHeadStore(),
     onFileTransferMessage: (handler: (msg: any) => void) => {
       return fileTransferMessageRuntimeRef.current.subscribe(handler);
     },
-    sendMessageRaw,
+    sendMessageRaw: (sessionId: string, msg: unknown) => contextRuntimeRef.current.sendMessageRaw(sessionId, msg),
+  }), [fileTransferMessageRuntimeRef]);
+
+  const value: SessionContextValue = buildSessionContextValueRuntime({
+    state,
+    scheduleStates: assembledScheduleStates,
+    ...stableFacade,
   });
 
   return React.createElement(SessionContext.Provider, { value }, children);

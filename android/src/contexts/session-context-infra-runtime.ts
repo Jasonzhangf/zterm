@@ -6,12 +6,12 @@ import { TraversalSocket } from '../lib/traversal/socket';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
+import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import {
   clearSessionPullState as clearSessionPullStateRuntime,
   isSessionTransportActivityStale as isSessionTransportActivityStaleRuntime,
   markPendingInputTailRefresh as markPendingInputTailRefreshRuntime,
-  recordSessionRenderCommit as recordSessionRenderCommitRuntime,
   recordSessionRx as recordSessionRxRuntime,
   recordSessionTx as recordSessionTxRuntime,
   resetSessionTransportPullBookkeeping as resetSessionTransportPullBookkeepingRuntime,
@@ -30,6 +30,7 @@ import {
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
 import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
+import { hasPendingSessionTransportOpenIntent } from './session-context-open-intent-store';
 
 export function applySessionActionRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -37,8 +38,13 @@ export function applySessionActionRuntime(options: {
   reduceSessionAction: (state: SessionManagerState, action: SessionAction) => SessionManagerState;
   dispatch: React.Dispatch<SessionAction>;
 }) {
-  options.stateRef.current = options.reduceSessionAction(options.stateRef.current, options.action);
+  const nextState = options.reduceSessionAction(options.stateRef.current, options.action);
+  if (nextState === options.stateRef.current) {
+    return false;
+  }
+  options.stateRef.current = nextState;
   options.dispatch(options.action);
+  return true;
 }
 
 export function readSessionBufferSnapshotRuntime(options: {
@@ -52,14 +58,12 @@ export function updateSessionSyncRuntime(options: {
   id: string;
   updates: Partial<Session>;
   applySessionAction: (action: SessionAction) => void;
-  sessionStore: { updateSession: (id: string, updates: Partial<Session>) => void };
 }) {
   options.applySessionAction({
     type: 'UPDATE_SESSION',
     id: options.id,
     updates: options.updates,
   });
-  options.sessionStore.updateSession(options.id, options.updates);
 }
 
 export function setActiveSessionSyncRuntime(options: {
@@ -69,37 +73,34 @@ export function setActiveSessionSyncRuntime(options: {
   options.applySessionAction({ type: 'SET_ACTIVE_SESSION', id: options.id });
 }
 
+export function setLiveSessionsSyncRuntime(options: {
+  ids: string[];
+  applySessionAction: (action: SessionAction) => void;
+}) {
+  options.applySessionAction({ type: 'SET_LIVE_SESSIONS', ids: options.ids });
+}
+
 export function createSessionSyncRuntime(options: {
   session: Session;
   activate: boolean;
   applySessionAction: (action: SessionAction) => void;
-  sessionStore: { addSession: (session: Session) => void };
-  setActiveSessionSync: (id: string) => void;
 }) {
   options.applySessionAction({ type: 'CREATE_SESSION', session: options.session, activate: options.activate });
-  options.sessionStore.addSession(options.session);
-  if (options.activate) {
-    options.setActiveSessionSync(options.session.id);
-  }
 }
 
 export function deleteSessionSyncRuntime(options: {
   id: string;
   applySessionAction: (action: SessionAction) => void;
-  sessionStore: { deleteSession: (id: string) => void };
 }) {
   options.applySessionAction({ type: 'DELETE_SESSION', id: options.id });
-  options.sessionStore.deleteSession(options.id);
 }
 
 export function moveSessionSyncRuntime(options: {
   id: string;
   toIndex: number;
   applySessionAction: (action: SessionAction) => void;
-  sessionStore: { moveSession: (id: string, toIndex: number) => void };
 }) {
   options.applySessionAction({ type: 'MOVE_SESSION', id: options.id, toIndex: options.toIndex });
-  options.sessionStore.moveSession(options.id, options.toIndex);
 }
 
 export function setSessionTitleSyncRuntime(options: {
@@ -145,14 +146,20 @@ export function isSessionTransportActiveRuntime(options: {
   sessionId: string;
   stateRef: { current: SessionManagerState };
 }) {
-  return options.stateRef.current.activeSessionId === options.sessionId;
+  return (
+    options.stateRef.current.activeSessionId === options.sessionId
+    || options.stateRef.current.liveSessionIds.includes(options.sessionId)
+  );
 }
 
 export function hasPendingSessionTransportOpenRuntime(options: {
   sessionId: string;
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
 }) {
-  return options.pendingSessionTransportOpenIntentsRef.current.has(options.sessionId);
+  return hasPendingSessionTransportOpenIntent(
+    options.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof hasPendingSessionTransportOpenIntent>[0],
+    options.sessionId,
+  );
 }
 
 export function isReconnectInFlightRuntime(options: {
@@ -187,9 +194,9 @@ export function resolveSessionCacheLinesRuntime(options: {
 
 export function getSessionRenderBufferSnapshotRuntime(options: {
   sessionId: string;
-  sessionBufferStoreRef: { current: { getSnapshot: (sessionId: string) => { buffer: SessionRenderBufferSnapshot } } };
+  sessionRenderStoreRef: { current: { getSnapshot: (sessionId: string) => { buffer: SessionRenderBufferSnapshot } } };
 }): SessionRenderBufferSnapshot {
-  return options.sessionBufferStoreRef.current.getSnapshot(options.sessionId).buffer;
+  return options.sessionRenderStoreRef.current.getSnapshot(options.sessionId).buffer;
 }
 
 export function recordSessionTxInfraRuntime(options: {
@@ -216,11 +223,20 @@ export function recordSessionRxInfraRuntime(options: {
   recordSessionRxRuntime(options as Parameters<typeof recordSessionRxRuntime>[0]);
 }
 
-export function recordSessionRenderCommitInfraRuntime(options: {
+export function recordSessionRxBytesOnlyInfraRuntime(options: {
   sessionId: string;
-  sessionDebugMetricsStoreRef: { current: unknown };
+  data: string | ArrayBuffer;
+  refs: {
+    sessionDebugMetricsStoreRef: { current: { recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void } };
+  };
 }) {
-  recordSessionRenderCommitRuntime(options as Parameters<typeof recordSessionRenderCommitRuntime>[0]);
+  options.refs.sessionDebugMetricsStoreRef.current.recordRxBytes(options.sessionId, options.data);
+}
+
+export function getSessionRenderBufferStoreRuntime(options: {
+  sessionRenderGateRef: { current: { getRenderStore: () => SessionRenderBufferStore } };
+}) {
+  return options.sessionRenderGateRef.current.getRenderStore();
 }
 
 export function markPendingInputTailRefreshInfraRuntime(options: {

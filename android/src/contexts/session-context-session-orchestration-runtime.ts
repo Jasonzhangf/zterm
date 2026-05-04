@@ -32,13 +32,16 @@ interface SessionLifecycleRuntimeOptions {
     manualCloseRef: MutableRefObject<Set<string>>;
     pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
-    viewportSizeRef: MutableRefObject<Map<string, { cols: number; rows: number }>>;
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
       setBuffer: (sessionId: string, buffer: SessionBufferState) => void;
+      deleteSession: (sessionId: string) => void;
+    }>;
+    sessionRenderGateRef: MutableRefObject<{
       deleteSession: (sessionId: string) => void;
     }>;
     sessionHeadStoreRef: MutableRefObject<{
@@ -70,6 +73,7 @@ interface SessionLifecycleRuntimeOptions {
   ) => void;
   clearReconnectForSession: (sessionId: string) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
+  cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -88,6 +92,7 @@ interface SessionLifecycleRuntimeOptions {
   ) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number; startIndex: number; endIndex: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
+  resolveTerminalRefreshCadence: () => { headTickMs: number };
   isSessionTransportActive: (sessionId: string) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
@@ -143,12 +148,13 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         manualCloseRef: options.refs.manualCloseRef,
         pendingInputQueueRef: options.refs.pendingInputQueueRef,
         pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-        viewportSizeRef: options.refs.viewportSizeRef,
         pendingInputTailRefreshRef: options.refs.pendingInputTailRefreshRef,
         pendingConnectTailRefreshRef: options.refs.pendingConnectTailRefreshRef,
         pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
+        lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
         sessionVisibleRangeRef: options.refs.sessionVisibleRangeRef,
         sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
+        sessionRenderGateRef: options.refs.sessionRenderGateRef,
         sessionHeadStoreRef: options.refs.sessionHeadStoreRef,
         sessionDebugMetricsStoreRef: options.refs.sessionDebugMetricsStoreRef,
       },
@@ -159,6 +165,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       sendSocketPayload: options.sendSocketPayload,
       runtimeDebug: options.runtimeDebug,
       cleanupSocket: options.cleanupSocket,
+      cleanupControlSocket: options.cleanupControlSocket,
       writeSessionTransportToken: options.writeSessionTransportToken,
       clearSessionTransportRuntime: options.clearSessionTransportRuntime,
       setScheduleStates: options.setScheduleStates,
@@ -243,6 +250,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       refs: {
         stateRef: options.refs.stateRef,
         pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
+        lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
@@ -255,6 +263,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       probeOrReconnectStaleSessionTransport,
       resetSessionTransportPullBookkeeping: options.resetSessionTransportPullBookkeeping,
       requestSessionBufferHead: options.requestSessionBufferHead,
+      resolveTerminalRefreshCadence: options.resolveTerminalRefreshCadence,
       reconnectSession,
     });
   };

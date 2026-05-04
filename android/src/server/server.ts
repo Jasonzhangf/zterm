@@ -32,7 +32,7 @@ import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
 import {
   createTerminalRuntime,
-  type ClientSession,
+  type TerminalSession,
   type SessionMirror,
 } from './terminal-runtime';
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
@@ -87,7 +87,7 @@ const MEMORY_GUARD_INTERVAL_MS = 30_000;
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
-const sessions = new Map<string, ClientSession>();
+const sessions = new Map<string, TerminalSession>();
 const connections = new Map<string, DaemonTransportConnection>();
 const mirrors = new Map<string, SessionMirror>();
 const scheduleStore = loadScheduleStore();
@@ -95,7 +95,7 @@ const clientRuntimeDebugStore = createRuntimeDebugStore();
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
-let terminalTransportRuntimeSendMessage: (session: ClientSession, message: ServerMessage) => void;
+let terminalTransportRuntimeSendMessage: (session: TerminalSession, message: ServerMessage) => void;
 const terminalDebugRuntime = createTerminalDebugRuntime({
   daemonRuntimeDebugEnabled: DAEMON_RUNTIME_DEBUG,
   maxClientDebugBatchLogEntries: MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES,
@@ -179,7 +179,7 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   wtermHomeDir: WTERM_HOME_DIR,
   platform: process.platform,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
-  getClientMirror: terminalRuntime.getClientMirror,
+  getSessionMirror: terminalRuntime.getSessionMirror,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   writeToTmuxSession: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
@@ -263,8 +263,9 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   sendTransportMessage,
   sendMessage,
   normalizeBufferSyncRequestPayload,
-  getClientMirror: terminalRuntime.getClientMirror,
+  getSessionMirror: terminalRuntime.getSessionMirror,
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
+  refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
   handleInput: terminalRuntime.handleInput,
   closeSession: terminalRuntime.closeSession,
   terminalFileTransferRuntime,
@@ -327,7 +328,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   server,
   wss,
   logTimePrefix,
-  shutdownClientSessions: (sessionsMap, reason) => {
+  shutdownTerminalSessions: (sessionsMap, reason) => {
     for (const session of sessionsMap.values()) {
       if (session.transport && session.closeTransport) {
         session.closeTransport(reason);

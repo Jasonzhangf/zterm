@@ -64,6 +64,7 @@ export function handleBufferHeadRuntime(options: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
   requestSessionBufferSync: (
@@ -74,6 +75,7 @@ export function handleBufferHeadRuntime(options: {
       sessionOverride?: Session | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     },
   ) => boolean;
 }) {
@@ -101,6 +103,19 @@ export function handleBufferHeadRuntime(options: {
   });
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
 
+  const activeTransport = options.isSessionTransportActive(options.sessionId);
+  if (!activeTransport) {
+    options.runtimeDebug('session.buffer.head.inactive-drop', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      latestRevision: options.latestRevision,
+      latestEndIndex: options.latestEndIndex,
+      availableStartIndex: options.availableStartIndex ?? null,
+      availableEndIndex: options.availableEndIndex ?? null,
+    });
+    return;
+  }
+
   const normalizedCursor = normalizeTerminalCursorState(options.cursor);
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
   const cursorChanged = (
@@ -115,6 +130,7 @@ export function handleBufferHeadRuntime(options: {
     };
     const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
     if (changed) {
+      options.scheduleSessionRenderCommit(options.sessionId);
       session = {
         ...session,
         buffer: nextBuffer,
@@ -122,14 +138,14 @@ export function handleBufferHeadRuntime(options: {
     }
   }
 
-  options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
+  const headChanged = options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
     daemonHeadRevision: options.latestRevision,
     daemonHeadEndIndex: options.latestEndIndex,
   });
-  const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
-  if (!options.isSessionTransportActive(options.sessionId)) {
-    return;
+  if (headChanged) {
+    options.scheduleSessionRenderCommit(options.sessionId);
   }
+  const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
 
   const plannerBuffer = cursorChanged
     ? {
@@ -234,6 +250,7 @@ export function requestSessionBufferSyncRuntime(options: {
     sessionOverride?: Session | null;
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
+    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
   };
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
@@ -266,7 +283,12 @@ export function requestSessionBufferSyncRuntime(options: {
   const session = options.requestOptions?.sessionOverride
     || options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId)
     || null;
-  const targetWs = options.requestOptions?.ws || options.readSessionTransportSocket(options.sessionId);
+  const activeWs = options.readSessionTransportSocket(options.sessionId);
+  const requestedWs = options.requestOptions?.ws || null;
+  if (requestedWs && activeWs !== requestedWs) {
+    return false;
+  }
+  const targetWs = requestedWs || activeWs;
   if (!session || !targetWs || targetWs.readyState !== WebSocket.OPEN) {
     return false;
   }
@@ -292,6 +314,7 @@ export function requestSessionBufferSyncRuntime(options: {
         || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId),
       liveHead: options.requestOptions?.liveHead || liveHead || null,
       invalidLocalWindow: Boolean(options.requestOptions?.invalidLocalWindow),
+      requestWindowOverride: options.requestOptions?.requestWindowOverride || null,
       bufferOverride: localBuffer,
     },
   );
@@ -379,7 +402,11 @@ export function requestSessionBufferHeadRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   resolveTerminalRefreshCadence: () => { headTickMs: number };
 }) {
-  const targetWs = options.ws || options.readSessionTransportSocket(options.sessionId) || null;
+  const activeWs = options.readSessionTransportSocket(options.sessionId) || null;
+  if (options.ws && activeWs !== options.ws) {
+    return false;
+  }
+  const targetWs = options.ws || activeWs;
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
   if (
     !session
@@ -420,7 +447,7 @@ export function applyIncomingBufferSyncRuntime(options: {
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: RuntimeDebugFn;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
-  recordSessionRenderCommit: (sessionId: string) => void;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   requestSessionBufferSync: (
     sessionId: string,
@@ -430,6 +457,7 @@ export function applyIncomingBufferSyncRuntime(options: {
       sessionOverride?: Session | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     },
   ) => boolean;
 }) {
@@ -438,6 +466,21 @@ export function applyIncomingBufferSyncRuntime(options: {
     return;
   }
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
+  const activeTransport = options.isSessionTransportActive(options.sessionId);
+  if (!activeTransport) {
+    options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
+    options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
+    options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+    options.runtimeDebug('session.buffer.sync.inactive-drop', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      incoming: options.summarizeBufferPayload(options.payload),
+      localRevision: localBuffer.revision,
+      localStartIndex: localBuffer.startIndex,
+      localEndIndex: localBuffer.endIndex,
+    });
+    return;
+  }
   const revisionResetExpectation = options.refs.sessionRevisionResetRef.current.get(options.sessionId) || null;
   const lowerRevisionPayload = revisionResetExpectation
     && Math.max(0, Math.floor(options.payload.revision || 0)) <= Math.max(0, Math.floor(localBuffer.revision || 0))
@@ -545,11 +588,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     gapRangeCount: nextBuffer.gapRanges.length,
     lineCount: nextBuffer.lines.length,
   });
-  options.recordSessionRenderCommit(options.sessionId);
-
-  if (!options.isSessionTransportActive(options.sessionId)) {
-    return;
-  }
+  options.scheduleSessionRenderCommit(options.sessionId);
 
   const nextSession: Session = {
     ...session,
@@ -571,6 +610,15 @@ export function applyIncomingBufferSyncRuntime(options: {
       reason: 'buffer-sync-catchup',
       purpose: 'tail-refresh',
       sessionOverride: nextSession,
+      requestWindowOverride:
+        liveHead
+        && nextBuffer.revision < Math.max(0, Math.floor(liveHead.revision || 0))
+        && Math.max(0, Math.floor(options.payload.endIndex || 0)) >= Math.max(0, Math.floor(nextBuffer.endIndex || 0))
+          ? {
+              requestStartIndex: Math.max(0, Math.floor(options.payload.startIndex || 0)),
+              requestEndIndex: Math.max(0, Math.floor(options.payload.endIndex || 0)),
+            }
+          : null,
     });
     return;
   }

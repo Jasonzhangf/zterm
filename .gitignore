@@ -26,3 +26,9 @@ mac/dist/
 mac/dist-electron/
 mac/out/
 mac/*.tsbuildinfo
+# source-of-truth trees must never contain generated JS siblings
+android/src/**/*.js
+android/src/**/*.js.map
+packages/shared/src/**/*.js
+packages/shared/src/**/*.js.map
+android/vite.config.js

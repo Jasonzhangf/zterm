@@ -12,6 +12,7 @@ import type {
   TerminalCursorState,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { deletePendingSessionTransportOpenIntent } from './session-context-open-intent-store';
 
 interface MutableRefObject<T> {
   current: T;
@@ -43,6 +44,7 @@ export function handleSocketServerMessageRuntime(options: {
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
+    onClosed: (reason?: string) => void;
   };
   msg: ServerMessage;
   refs: {
@@ -156,7 +158,11 @@ export function handleSocketServerMessageRuntime(options: {
       params.onFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
       break;
     case 'closed':
-      params.onFailure(msg.payload.reason || 'socket closed', true);
+      params.ws.onopen = null;
+      params.ws.onmessage = null;
+      params.ws.onerror = null;
+      params.ws.onclose = null;
+      params.onClosed(msg.payload.reason || 'socket closed');
       break;
     case 'sessions':
       break;
@@ -240,7 +246,10 @@ export function finalizeSocketFailureBaselineRuntime(options: {
   }
 
   options.cleanupSocket(options.sessionId);
-  options.refs.pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+  deletePendingSessionTransportOpenIntent(
+    options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
+    options.sessionId,
+  );
   options.writeSessionTransportToken(options.sessionId, null);
   options.setScheduleStateForSession(options.sessionId, (current) => ({
     ...current,

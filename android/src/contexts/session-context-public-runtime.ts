@@ -1,5 +1,4 @@
 import { buildEmptyScheduleState } from '@zterm/shared';
-import { buildTerminalWidthModePayload } from '../lib/terminal-width-mode-manager';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type {
   ClientMessage,
@@ -8,8 +7,8 @@ import type {
   SessionBufferState,
   SessionDebugOverlayMetrics,
   SessionScheduleState,
+  TerminalViewportState,
   TerminalVisibleRange,
-  TerminalWidthMode,
 } from '../lib/types';
 import {
   normalizeSessionVisibleRangeState,
@@ -18,6 +17,30 @@ import {
   type SessionBufferHeadState,
   type SessionVisibleRangeState,
 } from './session-sync-helpers';
+
+type SessionViewportDemand = TerminalVisibleRange | TerminalViewportState;
+
+function normalizeSessionViewportDemand(demand: SessionViewportDemand): {
+  mode: 'follow' | 'reading' | null;
+  visibleRange: SessionVisibleRangeState;
+} {
+  if ('mode' in demand) {
+    const viewportRows = Math.max(1, Math.floor(demand.viewportRows || 1));
+    const endIndex = Math.max(0, Math.floor(demand.viewportEndIndex || 0));
+    return {
+      mode: demand.mode,
+      visibleRange: normalizeSessionVisibleRangeState({
+        startIndex: Math.max(0, endIndex - viewportRows),
+        endIndex,
+        viewportRows,
+      }),
+    };
+  }
+  return {
+    mode: null,
+    visibleRange: normalizeSessionVisibleRangeState(demand),
+  };
+}
 
 interface ScheduleStateSetter {
   (
@@ -136,7 +159,7 @@ export function runScheduleJobNowRuntime(options: {
 
 export function updateSessionViewportRuntime(options: {
   sessionId: string;
-  visibleRange: TerminalVisibleRange;
+  visibleRange: SessionViewportDemand;
   sessionVisibleRangeRef: { current: Map<string, SessionVisibleRangeState> };
   isSessionTransportActive: (sessionId: string) => boolean;
   sessions: Session[];
@@ -152,13 +175,17 @@ export function updateSessionViewportRuntime(options: {
     },
   ) => boolean;
 }) {
-  const normalized = normalizeSessionVisibleRangeState(options.visibleRange);
+  const { mode, visibleRange } = normalizeSessionViewportDemand(options.visibleRange);
+  const normalized = visibleRange;
   const previous = options.sessionVisibleRangeRef.current.get(options.sessionId);
   if (visibleRangeStatesEqual(previous, normalized)) {
     return;
   }
   options.sessionVisibleRangeRef.current.set(options.sessionId, normalized);
   if (!options.isSessionTransportActive(options.sessionId)) {
+    return;
+  }
+  if (mode === 'follow') {
     return;
   }
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;
@@ -171,42 +198,6 @@ export function updateSessionViewportRuntime(options: {
     reason: 'viewport-visible-range-demand',
     purpose: 'reading-repair',
     sessionOverride: session,
-  });
-}
-
-export function resizeTerminalRuntime(options: {
-  sessionId: string;
-  cols: number;
-  rows: number;
-  viewportSizeRef: { current: Map<string, { cols: number; rows: number }> };
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
-}) {
-  const targetSessionId = options.sessionId.trim();
-  if (!targetSessionId) {
-    return;
-  }
-
-  const previous = options.viewportSizeRef.current.get(targetSessionId);
-  if (previous && previous.cols === options.cols && previous.rows === options.rows) {
-    return;
-  }
-  options.viewportSizeRef.current.set(targetSessionId, { cols: options.cols, rows: options.rows });
-  options.sendMessage(targetSessionId, { type: 'resize', payload: { cols: options.cols, rows: options.rows } });
-}
-
-export function setTerminalWidthModeRuntime(options: {
-  sessionId: string;
-  mode: TerminalWidthMode;
-  cols?: number | null;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
-}) {
-  const targetSessionId = options.sessionId.trim();
-  if (!targetSessionId) {
-    return;
-  }
-  options.sendMessage(targetSessionId, {
-    type: 'terminal-width-mode',
-    payload: buildTerminalWidthModePayload(options.mode, options.cols),
   });
 }
 

@@ -144,7 +144,7 @@
     - 九键中文 caret 是否回正
     - 语音转文字后是否仍能立即继续输入
 - [ ] mobile-15.11 buffer store closeout：把 client 本地 buffer trim 真相从“3 屏”改回“1000 行 sliding window”，请求窗口仍保持三屏，不再混用
-- [ ] mobile-15.12 daemon mirror lifecycle closeout：daemon mirror 不能再跟 subscriber 生命周期绑定；当前 `orphan destroy -> mirror recreate` 会把 `revision/latestEndIndex` 重置，破坏 daemon 绝对行号真相并触发 client revision-reset 链路
+- [x] mobile-15.12 daemon mirror lifecycle closeout：daemon mirror 不能再跟 subscriber 生命周期绑定；当前 `orphan destroy -> mirror recreate` 会把 `revision/latestEndIndex` 重置，破坏 daemon 绝对行号真相并触发 client revision-reset 链路
 - [x] mobile-15.13 daemon client-session bookkeeping closeout：`destroyMirror()` 不再越权删除 subscriber logical session；tmux kill 改为 `error(code=tmux_session_killed)`，logical session 保留到显式 close / daemon shutdown
 - [ ] mobile-15.14 terminal 测试矩阵 closeout：把 checklist 映射到现有自动测试与缺口，固定补测顺序（voice/CJK commit、follow overdrag blank-frame、buffer truth reset violation、payload inflation）
 - [ ] mobile-15.15 renderer follow-state closeout：live tail refresh / pending follow realign 不得把底部 follow 自动打进 reading；先补本地回归，再修 renderer 状态机
@@ -186,6 +186,7 @@
     - client `connect/reconnect` websocket lifecycle 已共享单一路径，避免两份 handshake/timeout/socket-failure 编排继续分叉
     - daemon `transport close/error -> detach-only` source gate 已纳入 `test:terminal:contracts`
     - daemon `session transport ticket` 与 client `sessionTransportToken` 真相已落地基础模块/单测；下一刀直接把 control transport -> issue ticket -> session transport attach 串起来
+- [x] mobile-15.32a.13 closed-tab owner closeout：server `type='closed'` 不再回落 reconnect/error；client 走 `closed -> session-status -> applyClosedOpenTabIntent -> closeSession/persist` 单一路径，并补真实 ws 回归
 - [ ] mobile-15.32a daemon terminal core de-client closeout：daemon terminal core 删除客户端状态机与 viewport/UI 语义
   - 冻结：
     1. daemon 只保留 `logical session / transport attach-detach / readyTransportId / mirror lifecycle`
@@ -206,6 +207,12 @@
     - 第六刀第五小步已完成：terminal core normalize/sanitize/helper 已从 `server.ts` 下沉到 `terminal-core-support.ts`
     - 第六刀第六小步已完成：daemon service helper (`resolveTmuxBinary / auth token parse / heartbeat / memory guard / shutdown / listen logs`) 已从 `server.ts` 下沉到 `terminal-daemon-runtime.ts`
     - 第六刀第七小步已完成：bridge glue (`ws connect / rtc transport lifecycle / upgrade route / relay-signal bridge`) 已从 `server.ts` 下沉到 `terminal-bridge-runtime.ts`
+    - 第六刀第八小步已完成：`requestOrigin / wsAlive / connectedSent` 从 daemon `ClientSession` 真相移出，收回 transport/connection fact；`resolveMirrorSubscriberGeometry()` 已删除，避免 daemon 残留 client width subscriber 语义入口
+    - 第六刀第九小步已完成：server 物理删除 `resize / terminal-width-mode` 空 handler；`sessionTransportToken` 改为 daemon 内 one-shot opaque attach proof，不再以 `clientSessionId` 做 token owner
+    - 第六刀第十小步已完成：attach/open wire correlation 从 `clientSessionId` 收口为 `openRequestId`；wire 上已删除 `bridgeHost / bridgePort / auth / terminalWidthMode / name` 这类 client-only 字段；daemon server 内 `ClientSession* / logical client session` 命名已物理清理为 terminal/bound session 语义
+    - 第六刀第十一步已完成：client transport handshake truth 收口；`openRequestId` 改为 one-shot open intent correlation，客户端不再用稳定 `sessionId` 伪装握手 request id
+    - 第六刀第十二步已完成：`pendingSessionTransportOpenIntentsRef` 已收口到 `session-context-open-intent-store.ts`；pending open intent 的 `get/set/delete/has/findByRequestId` 不再散落直接操作 `Map`
+    - 第六刀第十三步已完成：App route restore 不再二次 `switchSession(...)`；active session restore 只保留 open-tab/session restore 链，route restore 只负责 terminal page focus
     - 当前验证：`pnpm --dir android exec tsc -p tsconfig.json --noEmit` 通过；13 个 daemon truth/lifecycle gate = `51 passed`；`pnpm --dir android run test:terminal:contracts` = `24 files passed / 266 tests passed`
 - [ ] mobile-15.33 renderer transient follow-frame closeout：live refresh / shell relayout 时不得先花屏/白屏再靠输入自愈；先补红测，再修 `TerminalView` follow 实时对齐
 - [ ] mobile-15.34 QuickBar 老布局回归 closeout：壳体改成三栏，前两栏保持老布局（左侧固定六键 `状态/↑/键盘 + ←/↓/→` + 右侧两行快捷滚动区），第三栏恢复文件/图片/同步/截图工具栏；工具栏不得重复；固定按钮不得超界

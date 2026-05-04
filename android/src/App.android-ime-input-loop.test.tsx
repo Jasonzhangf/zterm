@@ -66,8 +66,8 @@ class MockWebSocket {
     this.triggerMessage({
       type: 'session-ticket',
       payload: {
-        clientSessionId: payload.clientSessionId,
-        sessionTransportToken: `ticket-${payload.clientSessionId}`,
+        openRequestId: payload.openRequestId,
+        sessionTransportToken: `ticket-${payload.openRequestId}`,
         sessionName: payload.sessionName,
       },
     } as ServerMessage);

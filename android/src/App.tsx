@@ -20,11 +20,10 @@ import { runtimeDebug } from './lib/runtime-debug';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import {
   buildPersistedOpenTabFromHostSession,
-  findReusableOpenTabSession,
-  persistActiveSessionId,
+  buildPersistedOpenTabReuseKey,
   persistOpenTabsState,
   readPersistedActiveSessionId,
-  readPersistedOpenTabs,
+  readPersistedOpenTabsState,
   resolveHostForPersistedOpenTab,
 } from './lib/open-tab-persistence';
 import {
@@ -34,9 +33,9 @@ import {
   mergeRuntimeSessionsIntoOpenTabIntentState,
   moveOpenTabIntentSession,
   normalizeOpenTabIntentState,
+  openTabIntentStatesEqual,
   renameOpenTabIntentSession,
   resolveRequestedOpenTabFocusSessionId,
-  resolveRuntimeActiveSessionIdForOpenTabs,
   upsertOpenTabIntentSession,
 } from './lib/open-tab-intent';
 import { dedupePersistedOpenTabs } from './lib/open-tab-persistence';
@@ -45,7 +44,14 @@ import {
   markForegroundRuntimeHidden,
   performForegroundRefresh,
 } from './lib/app-foreground-refresh';
-import { openConnectionPropertiesPage, openConnectionsPage, openSettingsPage, openTerminalPage, type AppPageState } from './lib/page-state';
+import {
+  openConnectionPropertiesPage,
+  openConnectionsPage,
+  openSettingsPage,
+  openTerminalPage,
+  resolvePersistedPageStateTruth,
+  type AppPageState,
+} from './lib/page-state';
 import {
   buildCleanDraft,
   buildDraftFromTmuxSession,
@@ -72,7 +78,7 @@ type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 function buildSessionStructureSignature(
   sessions: Array<Pick<
     Session,
-    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt' | 'title' | 'state'
+    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
   >>,
 ) {
   return JSON.stringify(sessions.map((session) => sessionShapeFromSession(session)));
@@ -80,7 +86,7 @@ function buildSessionStructureSignature(
 
 function sessionShapeFromSession(session: Pick<
   Session,
-  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt' | 'title' | 'state'
+  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
 >) {
   return {
     id: session.id,
@@ -93,8 +99,6 @@ function sessionShapeFromSession(session: Pick<
     autoCommand: session.autoCommand || '',
     customName: session.customName || '',
     createdAt: session.createdAt,
-    title: session.title,
-    state: session.state,
   };
 }
 
@@ -157,7 +161,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     switchSession,
     moveSession,
     renameSession,
-    reconnectSession,
+    setLiveSessionIds,
     resumeActiveSessionTransport,
     sendInput,
     sendImagePaste,
@@ -165,16 +169,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     requestRemoteScreenshot,
     sendMessageRaw,
     onFileTransferMessage,
-    resizeTerminal,
-    setTerminalWidthMode,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
     deleteScheduleJob,
     toggleScheduleJob,
     runScheduleJobNow,
-    getSessionBufferStore,
-    getSessionHeadStore,
+    getSessionRenderBufferStore,
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
@@ -186,45 +187,189 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   const { sessionGroups, recordSessionOpen, recordSessionGroupOpen, setSessionGroupSelection, deleteSessionGroup } = useSessionHistoryStorage();
   const [pageState, setPageState] = useState<AppPageState>(() => readPersistedPageState());
   const [inputResetEpochBySession, setInputResetEpochBySession] = useState<Record<string, number>>({});
+  const [followResetEpoch, setFollowResetEpoch] = useState(0);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
-  const openTabStateRef = useRef(normalizeOpenTabIntentState(
-    readPersistedOpenTabs(),
+  const persistedOpenTabsBootstrapRef = useRef(readPersistedOpenTabsState());
+  const [openTabState, setOpenTabState] = useState(() => normalizeOpenTabIntentState(
+    persistedOpenTabsBootstrapRef.current.tabs,
     readPersistedActiveSessionId(),
   ));
+  const openTabStateRef = useRef(openTabState);
+  const hasPersistedOpenTabsTruthRef = useRef(persistedOpenTabsBootstrapRef.current.hasStoredValue);
   const closedOpenTabSessionIdsRef = useRef(new Set<string>());
+  const closedOpenTabReuseKeysRef = useRef(new Set<string>());
   const restoredRouteHandledRef = useRef(false);
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(state.sessions);
   const activeSessionIdRef = useRef<string | null>(state.activeSessionId);
+  const bridgeSettingsRef = useRef(bridgeSettings);
   const resumeActiveSessionTransportRef = useRef(resumeActiveSessionTransport);
-  const reconnectSessionRef = useRef(reconnectSession);
+  const hostsRef = useRef(hosts);
+  const ensureTerminalPageFocusRef = useRef<(sessionId?: string | null) => void>(() => undefined);
+  const openDraftAsSessionRef = useRef<((host: Host, options?: {
+    rememberName?: string;
+    activate?: boolean;
+    navigate?: boolean;
+    sessionId?: string;
+  }) => { sessionId: string; host: Host }) | null>(null);
+  const persistAndSwitchExplicitOpenTabsRef = useRef<((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
+    tabs: PersistedOpenTab[];
+    activeSessionId: string | null;
+  }) | null>(null);
+  const renameSessionRef = useRef(renameSession);
 
   const activeSession = useMemo(
     () => state.sessions.find((session) => session.id === state.activeSessionId) || null,
     [state.activeSessionId, state.sessions],
   );
   const sessions = state.sessions;
+  const terminalSessions = useMemo(() => {
+    if (openTabState.tabs.length === 0) {
+      return [] as Session[];
+    }
+    const runtimeSessionsById = new Map(sessions.map((session) => [session.id, session]));
+    return openTabState.tabs
+      .map((tab) => runtimeSessionsById.get(tab.sessionId) || null)
+      .filter((session): session is Session => session !== null);
+  }, [openTabState.tabs, sessions]);
+  const terminalActiveSession = useMemo(() => {
+    if (terminalSessions.length === 0) {
+      return null;
+    }
+    const runtimeSessionsById = new Map(terminalSessions.map((session) => [session.id, session]));
+    return runtimeSessionsById.get(state.activeSessionId || '')
+      || runtimeSessionsById.get(openTabState.activeSessionId || '')
+      || terminalSessions[0]
+      || null;
+  }, [openTabState.activeSessionId, state.activeSessionId, terminalSessions]);
+  const terminalActiveSessionIdRef = useRef<string | null>(terminalActiveSession?.id || null);
   const sessionStructureSignature = useMemo(
     () => buildSessionStructureSignature(sessions),
     [sessions],
   );
+  const sessionIdsSignature = useMemo(
+    () => sessions.map((session) => session.id).join('||'),
+    [sessionStructureSignature],
+  );
+  const sessionIds = useMemo(
+    () => sessions.map((session) => session.id),
+    [sessionIdsSignature, sessions],
+  );
 
   const persistExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
     const nextState = normalizeOpenTabIntentState(tabs, activeSessionId);
+    if (!openTabIntentStatesEqual(openTabStateRef.current, nextState)) {
+      setOpenTabState(nextState);
+    }
     openTabStateRef.current = nextState;
+    hasPersistedOpenTabsTruthRef.current = true;
     persistOpenTabsState(nextState.tabs, nextState.activeSessionId);
     return nextState;
   }, []);
 
+  const persistAndSwitchExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
+    const nextState = persistExplicitOpenTabs(tabs, activeSessionId);
+    if (nextState.activeSessionId) {
+      switchSession(nextState.activeSessionId);
+    }
+    return nextState;
+  }, [persistExplicitOpenTabs, switchSession]);
+
+  const ensureTerminalPageFocus = useCallback((sessionId?: string | null) => {
+    const normalizedSessionId = typeof sessionId === 'string' && sessionId.trim().length > 0
+      ? sessionId.trim()
+      : undefined;
+    setPageState((current) => (
+      current.kind === 'terminal' && current.focusSessionId === normalizedSessionId
+        ? current
+        : openTerminalPage(normalizedSessionId)
+    ));
+  }, []);
+
+  const applyClosedOpenTabIntent = useCallback((sessionId: string, options?: {
+    runtimeActiveSessionId?: string | null;
+    fallbackSessionIds?: string[];
+    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>>;
+    closeRuntimeSession?: boolean;
+    clearDraft?: boolean;
+    source?: string;
+  }) => {
+    const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (!normalizedSessionId) {
+      return openTabStateRef.current;
+    }
+
+    const runtimeSessions = options?.runtimeSessions || sessionsRef.current;
+    const targetRuntimeSession = runtimeSessions.find((session) => session.id === normalizedSessionId) || null;
+    const targetTab = openTabStateRef.current.tabs.find((tab) => tab.sessionId === normalizedSessionId) || null;
+    const closedReuseKeySource = targetTab || targetRuntimeSession;
+    if (closedReuseKeySource) {
+      closedOpenTabReuseKeysRef.current.add(buildPersistedOpenTabReuseKey({
+        bridgeHost: closedReuseKeySource.bridgeHost,
+        bridgePort: closedReuseKeySource.bridgePort,
+        sessionName: closedReuseKeySource.sessionName,
+        authToken: closedReuseKeySource.authToken,
+      }));
+    }
+    const nextOpenTabState = closeOpenTabIntentSession(openTabStateRef.current, normalizedSessionId, {
+      runtimeActiveSessionId: options?.runtimeActiveSessionId ?? activeSessionIdRef.current,
+      fallbackSessionIds: options?.fallbackSessionIds ?? runtimeSessions.map((session) => session.id),
+      runtimeSessions,
+    });
+
+    closedOpenTabSessionIdsRef.current.add(normalizedSessionId);
+    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId);
+
+    if (options?.clearDraft) {
+      clearSessionDraft(normalizedSessionId);
+    }
+    if (options?.closeRuntimeSession) {
+      closeSession(normalizedSessionId);
+    }
+
+    setPageState((current) => {
+      if (current.kind !== 'terminal') {
+        return current;
+      }
+      if (nextOpenTabState.tabs.length === 0) {
+        return openConnectionsPage();
+      }
+      return openTerminalPage(nextOpenTabState.activeSessionId || undefined);
+    });
+
+    return nextOpenTabState;
+  }, [clearSessionDraft, closeSession, persistExplicitOpenTabs]);
+
   useEffect(() => {
     sessionsRef.current = state.sessions;
     activeSessionIdRef.current = state.activeSessionId;
+    bridgeSettingsRef.current = bridgeSettings;
+    hostsRef.current = hosts;
+    terminalActiveSessionIdRef.current = terminalActiveSession?.id || null;
     resumeActiveSessionTransportRef.current = resumeActiveSessionTransport;
-    reconnectSessionRef.current = reconnectSession;
-  }, [reconnectSession, resumeActiveSessionTransport, state.activeSessionId, state.sessions]);
+  }, [
+    bridgeSettings,
+    hosts,
+    resumeActiveSessionTransport,
+    state.activeSessionId,
+    state.sessions,
+    terminalActiveSession,
+  ]);
+
+  useEffect(() => {
+    ensureTerminalPageFocusRef.current = ensureTerminalPageFocus;
+  }, [ensureTerminalPageFocus]);
+
+  useEffect(() => {
+    persistAndSwitchExplicitOpenTabsRef.current = persistAndSwitchExplicitOpenTabs;
+  }, [persistAndSwitchExplicitOpenTabs]);
+
+  useEffect(() => {
+    renameSessionRef.current = renameSession;
+  }, [renameSession]);
 
   const runtimeSessionStructure = useMemo(() => sessions.map((session) => ({
     id: session.id,
@@ -237,8 +382,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     autoCommand: session.autoCommand,
     customName: session.customName,
     createdAt: session.createdAt,
-    title: session.title,
-    state: session.state,
   })), [sessionStructureSignature]);
 
   useEffect(() => {
@@ -250,11 +393,20 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       const currentOpenTabState = openTabStateRef.current;
       const shouldBootstrapFromRuntime =
         !restoredTabsHandledRef.current
-        && currentOpenTabState.tabs.length === 0;
+        && currentOpenTabState.tabs.length === 0
+        && !hasPersistedOpenTabsTruthRef.current;
       restoredTabsHandledRef.current = true;
       if (shouldBootstrapFromRuntime) {
+        runtimeDebug('app.open-tabs.bootstrap-from-runtime', {
+          activeSessionId: state.activeSessionId,
+          runtimeSessionIds: runtimeSessionStructure.map((session) => session.id),
+        });
         const bootstrapState = buildBootstrapOpenTabIntentStateFromSessions(runtimeSessionStructure, state.activeSessionId);
         persistExplicitOpenTabs(bootstrapState.tabs, bootstrapState.activeSessionId);
+        return;
+      }
+
+      if (currentOpenTabState.tabs.length === 0 && hasPersistedOpenTabsTruthRef.current) {
         return;
       }
 
@@ -262,22 +414,26 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         currentOpenTabState,
         runtimeSessionStructure,
         closedOpenTabSessionIdsRef.current,
+        closedOpenTabReuseKeysRef.current,
       );
       if (runtimeMergedState !== currentOpenTabState) {
+        runtimeDebug('app.open-tabs.runtime-merge-rewrite', {
+          beforeSessionIds: currentOpenTabState.tabs.map((tab) => tab.sessionId),
+          afterSessionIds: runtimeMergedState.tabs.map((tab) => tab.sessionId),
+          activeSessionId: runtimeMergedState.activeSessionId,
+        });
         persistExplicitOpenTabs(runtimeMergedState.tabs, runtimeMergedState.activeSessionId);
         return;
       }
 
-      const nextActiveSessionId = resolveRuntimeActiveSessionIdForOpenTabs(
-        currentOpenTabState,
-        runtimeSessionStructure,
-        state.activeSessionId,
-      );
+      const requestedActiveSessionId = currentOpenTabState.activeSessionId;
+      const runtimeSessionIds = new Set(runtimeSessionStructure.map((session) => session.id));
       if (
-        nextActiveSessionId
-        && state.activeSessionId !== nextActiveSessionId
+        requestedActiveSessionId
+        && runtimeSessionIds.has(requestedActiveSessionId)
+        && state.activeSessionId !== requestedActiveSessionId
       ) {
-        switchSession(nextActiveSessionId);
+        persistAndSwitchExplicitOpenTabs(currentOpenTabState.tabs, requestedActiveSessionId);
       }
       return;
     }
@@ -295,7 +451,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       (persistedActiveSessionId && persistedTabs.some((tab) => tab.sessionId === persistedActiveSessionId)
         ? persistedActiveSessionId
         : persistedTabs[0]?.sessionId) || null;
-    let restoredActiveResolvedSessionId: string | null = null;
+    const restoredSessionIdRemap = new Map<string, string>();
     for (const tab of persistedTabs) {
       const host: Host = resolveHostForPersistedOpenTab({
         tab,
@@ -310,17 +466,45 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         createdAt: tab.createdAt,
         sessionId: tab.sessionId,
       });
-      if (tab.sessionId === nextActiveSessionId) {
-        restoredActiveResolvedSessionId = restoredSessionId;
+      runtimeDebug('app.session.restore.persisted-tab', {
+        requestedSessionId: tab.sessionId,
+        restoredSessionId,
+        bridgeHost: tab.bridgeHost,
+        bridgePort: tab.bridgePort,
+        sessionName: tab.sessionName,
+        activate: tab.sessionId === nextActiveSessionId,
+      });
+      if (restoredSessionId !== tab.sessionId) {
+        restoredSessionIdRemap.set(tab.sessionId, restoredSessionId);
       }
     }
-    if (restoredActiveResolvedSessionId || nextActiveSessionId) {
-      switchSession(restoredActiveResolvedSessionId || nextActiveSessionId!);
+    if (restoredSessionIdRemap.size > 0 || nextActiveSessionId) {
+      const resolvedTabs = restoredSessionIdRemap.size > 0
+        ? persistedTabs.map((tab) => {
+          const remappedSessionId = restoredSessionIdRemap.get(tab.sessionId);
+          return remappedSessionId
+            ? { ...tab, sessionId: remappedSessionId }
+            : tab;
+        })
+        : persistedTabs;
+      const restoredActiveSessionId = nextActiveSessionId
+        ? (restoredSessionIdRemap.get(nextActiveSessionId) || nextActiveSessionId)
+        : null;
+      if (restoredSessionIdRemap.size > 0) {
+        if (restoredActiveSessionId) {
+          persistAndSwitchExplicitOpenTabs(resolvedTabs, restoredActiveSessionId);
+        } else {
+          persistExplicitOpenTabs(resolvedTabs, null);
+        }
+      } else if (restoredActiveSessionId) {
+        switchSession(restoredActiveSessionId);
+      }
     }
   }, [
     createSession,
     hosts,
     hostsLoaded,
+    persistAndSwitchExplicitOpenTabs,
     persistExplicitOpenTabs,
     runtimeSessionStructure,
     state.activeSessionId,
@@ -335,45 +519,51 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     restoredRouteHandledRef.current = true;
     const persistedPage = readPersistedPageState();
     if (persistedPage.kind === 'terminal') {
-      const restoredActiveSessionId = state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
-        ? state.activeSessionId
-        : null;
       const targetSessionId =
-        restoredActiveSessionId
+        (state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
+          ? state.activeSessionId
+          : null)
         || activeSession?.id
         || sessions[0].id;
-      if (targetSessionId && activeSession?.id !== targetSessionId) {
-        switchSession(targetSessionId);
-      }
-      setPageState(openTerminalPage(targetSessionId));
+      ensureTerminalPageFocus(targetSessionId);
       return;
     }
     setPageState(persistedPage);
-  }, [activeSession, sessions, switchSession]);
+  }, [activeSession?.id, ensureTerminalPageFocus, sessionIdsSignature, sessions.length, state.activeSessionId]);
+
+  useEffect(() => {
+    if (!state.activeSessionId) {
+      return;
+    }
+    ensureTerminalPageFocus(state.activeSessionId);
+  }, [ensureTerminalPageFocus, state.activeSessionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
     try {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify(pageState));
+      localStorage.setItem(
+        STORAGE_KEYS.ACTIVE_PAGE,
+        JSON.stringify(resolvePersistedPageStateTruth(pageState, state.activeSessionId)),
+      );
     } catch (error) {
       console.error('[App] Failed to persist page state:', error);
     }
-  }, [pageState]);
+  }, [pageState, state.activeSessionId]);
 
   useEffect(() => {
-    pruneDrafts(sessions.map((session) => session.id));
-  }, [pruneDrafts, sessions]);
+    pruneDrafts(sessionIds);
+  }, [pruneDrafts, sessionIds, sessionIdsSignature]);
 
   useEffect(() => {
     const notifyResume = (reason: 'visibilitychange' | 'resume' | 'appStateChange') => {
+      setFollowResetEpoch((current) => current + 1);
       performForegroundRefresh({
         reason,
         sessions: sessionsRef.current.map((session) => ({ id: session.id, state: session.state })),
         activeSessionId: activeSessionIdRef.current,
         resumeActiveSessionTransport: resumeActiveSessionTransportRef.current,
-        reconnectSession: reconnectSessionRef.current,
         runtime: foregroundRefreshRuntimeRef.current,
         log: (entry) => {
           console.debug('[App] foreground resume actions ->', entry);
@@ -448,23 +638,39 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     const onSessionStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string; type?: 'closed' | 'error'; message?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
-      if (!sessionId || detail?.type !== 'closed') {
+      if (!sessionId) {
         return;
       }
-      closedOpenTabSessionIdsRef.current.add(sessionId);
-      const nextOpenTabState = closeOpenTabIntentSession(openTabStateRef.current, sessionId, {
-        runtimeActiveSessionId: state.activeSessionId,
-        fallbackSessionIds: state.sessions.map((session) => session.id),
-        runtimeSessions: state.sessions,
+      runtimeDebug('app.session.status', {
+        sessionId,
+        type: detail?.type || 'unknown',
+        message: detail?.message || null,
+        activeSessionId: activeSessionIdRef.current,
+        sessions: sessionsRef.current.map((session) => ({
+          id: session.id,
+          state: session.state,
+          title: session.title,
+        })),
       });
-      persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId);
+      if (detail?.type === 'closed') {
+        applyClosedOpenTabIntent(sessionId, {
+          runtimeSessions: sessionsRef.current,
+          runtimeActiveSessionId: activeSessionIdRef.current,
+          fallbackSessionIds: sessionsRef.current
+            .filter((session) => session.id !== sessionId)
+            .map((session) => session.id),
+          closeRuntimeSession: true,
+          clearDraft: true,
+          source: 'session-status-closed',
+        });
+      }
     };
 
     window.addEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
     return () => {
       window.removeEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
     };
-  }, [persistExplicitOpenTabs]);
+  }, [applyClosedOpenTabIntent]);
 
   const sortedHosts = useMemo(() => sortHostsForPicker(hosts, pickerTarget), [hosts, pickerTarget]);
 
@@ -506,50 +712,27 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   ) => {
     rememberBridgeTarget(normalizeBridgeTarget(draft), options?.rememberName || draft.name || draft.bridgeHost);
     const persistedHost = rememberConnectionHost(buildTransientHostFromDraft(draft));
-    const existingSession = findReusableOpenTabSession({
-      sessions: state.sessions,
-      host: persistedHost,
-      activeSessionId: state.activeSessionId,
-    });
     const shouldActivate = options?.activate !== false;
-
-    if (existingSession) {
-      closedOpenTabSessionIdsRef.current.delete(existingSession.id);
-      const nextOpenTabState = upsertOpenTabIntentSession(
-        openTabStateRef.current,
-        buildPersistedOpenTabFromHostSession({
-          sessionId: existingSession.id,
-          host: persistedHost,
-          customName: existingSession.customName,
-          createdAt: existingSession.createdAt,
-        }),
-        {
-          activate: shouldActivate,
-          fallbackActiveSessionId: state.activeSessionId,
-        },
-      );
-      if (shouldActivate) {
-        switchSession(existingSession.id);
-      }
-      persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId);
-      recordSessionOpen({
-        connectionName: persistedHost.name,
-        bridgeHost: persistedHost.bridgeHost,
-        bridgePort: persistedHost.bridgePort,
-        sessionName: persistedHost.sessionName,
-        authToken: persistedHost.authToken,
-      });
-      if (options?.navigate !== false) {
-        setPageState(openTerminalPage(existingSession.id));
-      }
-      return { sessionId: existingSession.id, host: persistedHost };
-    }
+    runtimeDebug('app.session.open-draft', {
+      requestedSessionId: options?.sessionId || null,
+      bridgeHost: draft.bridgeHost,
+      bridgePort: draft.bridgePort,
+      sessionName: draft.sessionName,
+      activate: shouldActivate,
+      navigate: options?.navigate !== false,
+    });
 
     const sessionId = createSession(persistedHost, {
       activate: shouldActivate,
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
     });
     closedOpenTabSessionIdsRef.current.delete(sessionId);
+    closedOpenTabReuseKeysRef.current.delete(buildPersistedOpenTabReuseKey({
+      bridgeHost: persistedHost.bridgeHost,
+      bridgePort: persistedHost.bridgePort,
+      sessionName: persistedHost.sessionName,
+      authToken: persistedHost.authToken,
+    }));
     const openedTab: PersistedOpenTab = {
       sessionId,
       hostId: persistedHost.id,
@@ -578,19 +761,22 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       authToken: persistedHost.authToken,
     });
     if (options?.navigate !== false) {
-      setPageState(openTerminalPage(sessionId));
+      ensureTerminalPageFocus(sessionId);
     }
     return { sessionId, host: persistedHost };
   }, [
     createSession,
     persistExplicitOpenTabs,
+    ensureTerminalPageFocus,
     recordSessionOpen,
     rememberBridgeTarget,
     rememberConnectionHost,
-    sessions,
     state.activeSessionId,
-    switchSession,
   ]);
+
+  useEffect(() => {
+    openDraftAsSessionRef.current = openDraftAsSession;
+  }, [openDraftAsSession]);
 
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, options?: {
     target?: BridgeTarget | null;
@@ -598,18 +784,21 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   }) => {
     setPickerMode(mode);
     setPickerInitialSessions(options?.initialSelectedSessions || []);
+    const currentBridgeSettings = bridgeSettingsRef.current;
     setPickerTarget(
       options?.target || buildPreferredTarget(
-        bridgeSettings.servers,
+        currentBridgeSettings.servers,
         {
-          bridgeHost: bridgeSettings.targetHost,
-          bridgePort: bridgeSettings.targetPort,
-          authToken: bridgeSettings.targetAuthToken,
+          bridgeHost: currentBridgeSettings.targetHost,
+          bridgePort: currentBridgeSettings.targetPort,
+          authToken: currentBridgeSettings.targetAuthToken,
         },
-        mode === 'quick-tab' ? activeSession : null,
+        mode === 'quick-tab'
+          ? (sessionsRef.current.find((session) => session.id === terminalActiveSessionIdRef.current) || null)
+          : null,
       ),
     );
-  }, [activeSession, bridgeSettings]);
+  }, []);
 
   const handleQuickConnectDraft = useCallback((draft: Omit<Host, 'id' | 'createdAt'>, rememberName?: string) => {
     return openDraftAsSession(draft, { rememberName, activate: true, navigate: true }).sessionId;
@@ -639,8 +828,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       sessionNames,
     });
     setPickerMode(null);
-    setPageState(openTerminalPage(focusSessionId || undefined));
-  }, [bridgeSettings.servers, hosts, openDraftAsSession, recordSessionGroupOpen]);
+    ensureTerminalPageFocus(focusSessionId || undefined);
+  }, [bridgeSettings.servers, ensureTerminalPageFocus, hosts, openDraftAsSession, recordSessionGroupOpen]);
 
   const handleOpenSingleTmuxSession = useCallback((target: BridgeTarget, sessionName: string) => {
     const draft = buildDraftFromTmuxSession(hosts, bridgeSettings.servers, target, sessionName);
@@ -650,55 +839,53 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
 
   const handleSwitchSession = useCallback((sessionId: string) => {
     const nextOpenTabState = activateOpenTabIntentSession(openTabStateRef.current, sessionId);
-    openTabStateRef.current = nextOpenTabState;
-    persistActiveSessionId(nextOpenTabState.activeSessionId);
-    switchSession(sessionId);
-  }, [switchSession]);
+    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId);
+    if (nextOpenTabState.activeSessionId && nextOpenTabState.activeSessionId !== activeSessionIdRef.current) {
+      switchSession(nextOpenTabState.activeSessionId);
+    }
+    ensureTerminalPageFocus(sessionId);
+  }, [ensureTerminalPageFocus, persistExplicitOpenTabs, switchSession]);
 
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
     const nextOpenTabState = moveOpenTabIntentSession(openTabStateRef.current, sessionId, toIndex);
-    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId || state.activeSessionId);
+    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId || activeSessionIdRef.current);
     moveSession(sessionId, toIndex);
-  }, [moveSession, persistExplicitOpenTabs, state.activeSessionId]);
+  }, [moveSession, persistExplicitOpenTabs]);
 
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
     const nextOpenTabState = renameOpenTabIntentSession(openTabStateRef.current, sessionId, name);
-    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId || state.activeSessionId);
+    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId || activeSessionIdRef.current);
     renameSession(sessionId, name);
-  }, [persistExplicitOpenTabs, renameSession, state.activeSessionId]);
+  }, [persistExplicitOpenTabs, renameSession]);
 
   const handleCloseSession = useCallback((sessionId: string, source = 'unknown') => {
-    const nextSessions = sessions.filter((session) => session.id !== sessionId);
-    const nextOpenTabState = closeOpenTabIntentSession(openTabStateRef.current, sessionId, {
-      runtimeActiveSessionId: state.activeSessionId,
-      fallbackSessionIds: nextSessions.map((session) => session.id),
-      runtimeSessions: sessions,
-    });
+    const runtimeSessions = sessionsRef.current;
+    const runtimeActiveSessionId = activeSessionIdRef.current;
     runtimeDebug('app.session.close.request', {
       sessionId,
       source,
-      activeSessionId: state.activeSessionId,
-      sessions: sessions.map((session) => ({ id: session.id, state: session.state, title: session.title })),
+      activeSessionId: runtimeActiveSessionId,
+      sessions: runtimeSessions.map((session) => ({ id: session.id, state: session.state, title: session.title })),
     });
     console.warn('[App] close session request', {
       sessionId,
       source,
-      activeSessionId: state.activeSessionId,
-      sessionCount: sessions.length,
+      activeSessionId: runtimeActiveSessionId,
+      sessionCount: runtimeSessions.length,
     });
 
-    closedOpenTabSessionIdsRef.current.add(sessionId);
-    persistExplicitOpenTabs(nextOpenTabState.tabs, nextOpenTabState.activeSessionId);
-    clearSessionDraft(sessionId);
-    closeSession(sessionId);
-    if (sessions.length === 1) {
-      setPageState(openConnectionsPage());
-    }
-  }, [clearSessionDraft, closeSession, persistExplicitOpenTabs, sessions, state.activeSessionId]);
+    applyClosedOpenTabIntent(sessionId, {
+      runtimeSessions,
+      runtimeActiveSessionId,
+      fallbackSessionIds: runtimeSessions.filter((session) => session.id !== sessionId).map((session) => session.id),
+      closeRuntimeSession: true,
+      clearDraft: true,
+      source,
+    });
+  }, [applyClosedOpenTabIntent]);
 
   const handleResumeSession = useCallback((sessionId: string) => {
     handleSwitchSession(sessionId);
-    setPageState(openTerminalPage(sessionId));
   }, [handleSwitchSession]);
 
   const handleOpenGroupSession = useCallback((group: { bridgeHost: string; bridgePort: number; authToken?: string }, sessionName: string) => {
@@ -803,28 +990,36 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     });
 
     if (focusSessionId) {
-      setPageState(openTerminalPage(focusSessionId));
+      ensureTerminalPageFocus(focusSessionId);
     }
-  }, [bridgeSettings.servers, hosts, openDraftAsSession, recordSessionGroupOpen]);
+  }, [bridgeSettings.servers, ensureTerminalPageFocus, hosts, openDraftAsSession, recordSessionGroupOpen]);
 
   const handleLoadSavedTabList = useCallback((tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => {
     const dedupedTabs = dedupePersistedOpenTabs(tabs);
     const openedTabs: PersistedOpenTab[] = [];
+    runtimeDebug('app.saved-tab-list.load', {
+      requestedActiveSessionId: requestedActiveSessionId || null,
+      sessionIds: dedupedTabs.map((tab) => tab.sessionId),
+      bridgeTargets: dedupedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
+    });
 
     dedupedTabs.forEach((tab) => {
       const host: Host = resolveHostForPersistedOpenTab({
         tab,
-        hosts,
+        hosts: hostsRef.current,
         fallbackIdPrefix: 'saved',
         fallbackLastConnected: Date.now(),
       });
 
-      const opened = openDraftAsSession(host, {
+      const opened = openDraftAsSessionRef.current?.(host, {
         rememberName: host.name,
         activate: false,
         navigate: false,
         sessionId: tab.sessionId,
       });
+      if (!opened) {
+        throw new Error('openDraftAsSession ref unavailable while loading saved tab list');
+      }
 
       openedTabs.push(buildPersistedOpenTabFromHostSession({
         sessionId: opened.sessionId,
@@ -834,7 +1029,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       }));
 
       if (tab.customName?.trim()) {
-        renameSession(opened.sessionId, tab.customName.trim());
+        renameSessionRef.current(opened.sessionId, tab.customName.trim());
       }
     });
 
@@ -845,16 +1040,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         : null;
 
     if (focusSessionId) {
-      persistExplicitOpenTabs(openedTabs, focusSessionId);
-      switchSession(focusSessionId);
-      setPageState(openTerminalPage(focusSessionId));
+      const persistAndSwitch = persistAndSwitchExplicitOpenTabsRef.current;
+      if (!persistAndSwitch) {
+        throw new Error('persistAndSwitchExplicitOpenTabs ref unavailable while loading saved tab list');
+      }
+      persistAndSwitch(openedTabs, focusSessionId);
+      ensureTerminalPageFocusRef.current(focusSessionId);
     }
-  }, [hosts, openDraftAsSession, persistExplicitOpenTabs, renameSession, switchSession]);
-
-  const handleResize = useCallback((sessionId: string, cols: number, rows: number) => {
-    console.log('[App] Terminal resize:', sessionId, cols, rows);
-    resizeTerminal(sessionId, cols, rows);
-  }, [resizeTerminal]);
+  }, []);
 
   const handleAddNew = useCallback(() => {
     openSessionPicker('new-connection');
@@ -904,12 +1097,61 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     }
     const normalized = value.replace(/\r?\n/g, '\r');
     const payload = /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
-    if (activeSession?.id !== sessionId) {
+    if (activeSessionIdRef.current !== sessionId) {
       handleSwitchSession(sessionId);
     }
     handleTerminalInput(sessionId, payload);
     clearSessionDraft(sessionId);
-  }, [activeSession?.id, clearSessionDraft, handleSwitchSession, handleTerminalInput]);
+  }, [clearSessionDraft, handleSwitchSession, handleTerminalInput]);
+
+  const handleOpenConnectionsPage = useCallback(() => {
+    setPageState(openConnectionsPage());
+  }, []);
+
+  const handleOpenSettingsPage = useCallback(() => {
+    setPageState(openSettingsPage());
+  }, []);
+
+  const handleOpenQuickTabPicker = useCallback(() => {
+    openSessionPicker('quick-tab');
+  }, [openSessionPicker]);
+
+  const handleTerminalVisibleRangeChange = useCallback((sessionId: string, viewState: Parameters<typeof updateSessionViewport>[1]) => {
+    updateSessionViewport(sessionId, viewState);
+  }, [updateSessionViewport]);
+
+  const handleQuickActionInput = useCallback((sequence: string, sessionId?: string) => {
+    const targetSessionId = sessionId || terminalActiveSessionIdRef.current;
+    if (!targetSessionId) {
+      return;
+    }
+    handleTerminalInput(targetSessionId, sequence);
+  }, [handleTerminalInput]);
+
+  const handleSessionDraftChange = useCallback((value: string, sessionId?: string) => {
+    const targetSessionId = sessionId || terminalActiveSessionIdRef.current;
+    if (!targetSessionId) {
+      return;
+    }
+    setSessionDraft(targetSessionId, value);
+  }, [setSessionDraft]);
+
+  const handleSessionDraftSend = useCallback((value: string, sessionId?: string) => {
+    const targetSessionId = sessionId || terminalActiveSessionIdRef.current;
+    if (!targetSessionId) {
+      return;
+    }
+    handleSendSessionDraft(targetSessionId, value);
+  }, [handleSendSessionDraft]);
+
+  const sessionRenderBufferStore = useMemo(() => getSessionRenderBufferStore(), [getSessionRenderBufferStore]);
+  const shortcutFrequencyMap = useMemo(
+    () => (bridgeSettings.shortcutSmartSort ? shortcutFrequencyStorage.getFrequencyMap() : undefined),
+    [bridgeSettings.shortcutSmartSort, shortcutFrequencyStorage],
+  );
+  const handleShortcutUse = bridgeSettings.shortcutSmartSort
+    ? shortcutFrequencyStorage.recordShortcutUse
+    : undefined;
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
@@ -955,7 +1197,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onEdit={handleEdit}
             onDelete={handleDelete}
             onAddNew={handleAddNew}
-            onOpenSettings={() => setPageState(openSettingsPage())}
+            onOpenSettings={handleOpenSettingsPage}
           />
         )}
 
@@ -999,63 +1241,42 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
                 terminalThemeId: themeId,
               }));
             }}
-            onBack={() => setPageState(openConnectionsPage())}
+            onBack={handleOpenConnectionsPage}
           />
         )}
 
         {pageState.kind === 'terminal' && (
           <TerminalPage
-            sessions={sessions}
-            activeSession={activeSession}
+            sessions={terminalSessions}
+            activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
-            sessionBufferStore={getSessionBufferStore()}
-            sessionHeadStore={getSessionHeadStore()}
+            sessionBufferStore={sessionRenderBufferStore}
             onSwitchSession={handleSwitchSession}
             onMoveSession={handleMoveSession}
             onRenameSession={handleRenameSession}
             onCloseSession={handleCloseSession}
-            onOpenConnections={() => setPageState(openConnectionsPage())}
-            onOpenQuickTabPicker={() => openSessionPicker('quick-tab')}
-            onResize={handleResize}
+            onOpenConnections={handleOpenConnectionsPage}
+            onOpenQuickTabPicker={handleOpenQuickTabPicker}
+            onResize={undefined}
             onTerminalInput={handleTerminalInput}
+            onLiveSessionIdsChange={setLiveSessionIds}
             inputResetEpochBySession={inputResetEpochBySession}
-            onTerminalVisibleRangeChange={(sessionId, viewState) => {
-              updateSessionViewport(sessionId, viewState);
-            }}
+            followResetEpoch={followResetEpoch}
+            onTerminalVisibleRangeChange={handleTerminalVisibleRangeChange}
             onImagePaste={sendImagePaste}
             onFileAttach={sendFileAttach}
-            onOpenSettings={() => setPageState(openSettingsPage())}
+            onOpenSettings={handleOpenSettingsPage}
             onRequestRemoteScreenshot={requestRemoteScreenshot}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
-            onQuickActionInput={(sequence, sessionId) => {
-              const targetSessionId = sessionId || activeSession?.id;
-              if (!targetSessionId) {
-                return;
-              }
-              handleTerminalInput(targetSessionId, sequence);
-            }}
+            onQuickActionInput={handleQuickActionInput}
             onQuickActionsChange={setQuickActions}
             onShortcutActionsChange={setShortcutActions}
-            sessionDraft={activeSession ? (sessionDrafts[activeSession.id] || '') : ''}
-            sessionDrafts={sessionDrafts}
-            onSessionDraftChange={(value, sessionId) => {
-              const targetSessionId = sessionId || activeSession?.id;
-              if (!targetSessionId) {
-                return;
-              }
-              setSessionDraft(targetSessionId, value);
-            }}
-            onSessionDraftSend={(value, sessionId) => {
-              const targetSessionId = sessionId || activeSession?.id;
-              if (!targetSessionId) {
-                return;
-              }
-              handleSendSessionDraft(targetSessionId, value);
-            }}
+            sessionDraft={terminalActiveSession ? (sessionDrafts[terminalActiveSession.id] || '') : ''}
+            onSessionDraftChange={handleSessionDraftChange}
+            onSessionDraftSend={handleSessionDraftSend}
             onLoadSavedTabList={handleLoadSavedTabList}
-            scheduleState={activeSession ? scheduleStates[activeSession.id] || null : null}
-            scheduleStateBySessionId={scheduleStates}
+            scheduleState={terminalActiveSession ? scheduleStates[terminalActiveSession.id] || null : null}
             onRequestScheduleList={requestScheduleList}
             onUpsertScheduleJob={upsertScheduleJob}
             onDeleteScheduleJob={deleteScheduleJob}
@@ -1063,12 +1284,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onRunScheduleJobNow={runScheduleJobNow}
             terminalThemeId={bridgeSettings.terminalThemeId}
             terminalWidthMode={bridgeSettings.terminalWidthMode}
-            onTerminalWidthModeChange={setTerminalWidthMode}
             onSendMessage={sendMessageRaw}
             onFileTransferMessage={onFileTransferMessage}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}
-            shortcutFrequencyMap={bridgeSettings.shortcutSmartSort ? shortcutFrequencyStorage.getFrequencyMap() : undefined}
-            onShortcutUse={bridgeSettings.shortcutSmartSort ? shortcutFrequencyStorage.recordShortcutUse : undefined}
+            shortcutFrequencyMap={shortcutFrequencyMap}
+            onShortcutUse={handleShortcutUse}
           />
         )}
       </div>

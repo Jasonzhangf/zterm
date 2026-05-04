@@ -23,7 +23,7 @@ export interface BridgeConnectionOptions {
  *   3. On receiving `connected` → connection is fully established
  *
  * Wire-compat note:
- * - `clientSessionId` remains client-owned identity
+ * - `openRequestId` remains client-owned identity
  * - `sessionTransportToken` / `session-ticket` remain attach-only wire fields
  * - daemon must not promote either into daemon-side client/session business truth
  */
@@ -50,7 +50,7 @@ export function openBridgeConnection(
       switch (message.type) {
         case 'session-ticket': {
           // Phase 2: got the ticket, now send connect with the token
-          const ticket = (message as { type: 'session-ticket'; payload: { clientSessionId: string; sessionTransportToken: string; sessionName: string } }).payload;
+          const ticket = (message as { type: 'session-ticket'; payload: { openRequestId: string; sessionTransportToken: string; sessionName: string } }).payload;
           const connectPayload: HostConfigMessage = {
             ...hostConfig,
             sessionTransportToken: ticket.sessionTransportToken,
@@ -59,7 +59,7 @@ export function openBridgeConnection(
           break;
         }
         case 'session-open-failed': {
-          const payload = (message as { type: 'session-open-failed'; payload: { clientSessionId: string; message: string; code?: string } }).payload;
+          const payload = (message as { type: 'session-open-failed'; payload: { openRequestId: string; message: string; code?: string } }).payload;
           handlers.onError?.(payload.message, payload.code);
           break;
         }

@@ -8,8 +8,8 @@ import type {
   ServerMessage,
 } from '../lib/types';
 import type {
-  ClientSession,
-  ClientSessionTransport,
+  TerminalSession,
+  TerminalSessionTransport,
   SessionMirror,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
@@ -24,34 +24,48 @@ import {
 import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
 
 export interface TerminalMessageRuntimeDeps {
-  sessions: Map<string, ClientSession>;
-  sendTransportMessage: (transport: ClientSessionTransport | null | undefined, message: ServerMessage) => void;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
+  sessions: Map<string, TerminalSession>;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   normalizeBufferSyncRequestPayload: (
-    session: ClientSession,
+    session: TerminalSession,
     request: BufferSyncRequestPayload,
   ) => BufferSyncRequestPayload;
-  getClientMirror: (session: ClientSession) => SessionMirror | null;
-  sendBufferHeadToSession: (session: ClientSession, mirror: SessionMirror) => void;
-  handleInput: (session: ClientSession, data: string) => void;
-  closeSession: (session: ClientSession, reason: string, notifyClient?: boolean) => void;
+  getSessionMirror: (session: TerminalSession) => SessionMirror | null;
+  sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
+  handleInput: (session: TerminalSession, data: string) => void;
+  closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
-  handleClientDebugLog: (session: ClientSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
   controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
 }
 
 export interface TerminalMessageRuntime {
-  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => ClientSession | null;
+  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => TerminalSession | null;
   handleSessionTransportConnect: (
     connection: TerminalTransportConnection,
     payload: HostConfigMessage,
-  ) => ClientSession | null;
+  ) => TerminalSession | null;
   handleMessage: (connection: TerminalTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
 export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
+  function sendSessionNotReadyError(
+    session: TerminalSession,
+    operation: 'buffer-head-request' | 'buffer-sync-request',
+  ) {
+    deps.sendMessage(session, {
+      type: 'error',
+      payload: {
+        message: `${operation} requires a ready mirror`,
+        code: 'session_not_ready',
+      },
+    });
+  }
+
   function handleSessionOpen(connection: TerminalTransportConnection, payload: HostConfigMessage) {
     return handleSessionOpenMessageRuntime(deps.controlRuntimeDeps, connection, payload);
   }
@@ -110,7 +124,8 @@ export function createTerminalMessageRuntime(
           deps.sendTransportMessage(connection.transport, {
             type: 'session-open-failed',
             payload: {
-              clientSessionId: message.payload?.clientSessionId || '',
+              openRequestId: message.payload?.openRequestId || '',
+              clientSessionId: message.payload?.clientSessionId?.trim() || undefined,
               message: error instanceof Error ? error.message : 'Invalid session-open payload',
               code: 'session_open_invalid',
             },
@@ -159,11 +174,12 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        const mirror = deps.getClientMirror(session);
+        const mirror = deps.getSessionMirror(session);
         if (!mirror || mirror.lifecycle !== 'ready') {
+          sendSessionNotReadyError(session, 'buffer-head-request');
           break;
         }
-        deps.sendBufferHeadToSession(session, mirror);
+        await deps.refreshMirrorHeadForSession(session, mirror);
         break;
       }
       case 'paste-image-start':
@@ -202,8 +218,9 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        const mirror = deps.getClientMirror(session);
+        const mirror = deps.getSessionMirror(session);
         if (!mirror || mirror.lifecycle !== 'ready') {
+          sendSessionNotReadyError(session, 'buffer-sync-request');
           break;
         }
         let request: BufferSyncRequestPayload;
@@ -261,9 +278,6 @@ export function createTerminalMessageRuntime(
           break;
         }
         deps.terminalFileTransferRuntime.handlePasteImage(session, message.payload);
-        break;
-      case 'resize':
-      case 'terminal-width-mode':
         break;
       case 'ping':
         deps.sendTransportMessage(connection.transport, { type: 'pong' });

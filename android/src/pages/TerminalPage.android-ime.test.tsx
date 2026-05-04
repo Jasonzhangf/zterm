@@ -617,7 +617,7 @@ describe('TerminalPage Android IME bridge', () => {
       />,
     );
 
-    const terminalStage = screen.getByTestId('terminal-stage');
+    const terminalStage = screen.getByTestId('terminal-stage-shell');
     const quickBarShell = screen.getByTestId('terminal-quickbar-shell');
     expect(terminalStage.getAttribute('style') || '').toContain('bottom: 78px;');
     expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');

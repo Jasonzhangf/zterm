@@ -44,7 +44,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
-  recordSessionRenderCommit: (sessionId: string) => void;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   setScheduleStateForSession: (
     sessionId: string,
@@ -137,6 +137,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       readSessionTransportSocket: options.readSessionTransportSocket,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       commitSessionBufferUpdate,
+      scheduleSessionRenderCommit: options.scheduleSessionRenderCommit,
       isSessionTransportActive: options.isSessionTransportActive,
       runtimeDebug: options.runtimeDebug,
       requestSessionBufferSync,
@@ -161,7 +162,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       summarizeBufferPayload: options.summarizeBufferPayload,
       runtimeDebug: options.runtimeDebug,
       commitSessionBufferUpdate,
-      recordSessionRenderCommit: options.recordSessionRenderCommit,
+      scheduleSessionRenderCommit: options.scheduleSessionRenderCommit,
       isSessionTransportActive: options.isSessionTransportActive,
       requestSessionBufferSync,
     });
@@ -174,6 +175,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
+    onClosed: (reason?: string) => void;
   }, msg: ServerMessage) => {
     handleSocketServerMessageOrchestrationRuntime({
       params: messageOptions,

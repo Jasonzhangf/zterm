@@ -1,20 +1,20 @@
 import type { ScheduleEventPayload, ScheduleStatePayload } from '../lib/types';
 import type { ServerMessage } from '../lib/types';
 import { ScheduleEngine, type ScheduleExecutionResult } from './schedule-engine';
-import type { ClientSession } from './terminal-runtime-types';
+import type { TerminalSession } from './terminal-runtime-types';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 
 export interface TerminalScheduleRuntimeDeps {
   initialJobs: ScheduleJob[];
   saveJobs: (jobs: ScheduleJob[]) => void;
   executeJob: (job: ScheduleJob) => Promise<ScheduleExecutionResult> | ScheduleExecutionResult;
-  sessions: Map<string, ClientSession>;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
+  sessions: Map<string, TerminalSession>;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
 }
 
 export interface TerminalScheduleRuntime {
   scheduleEngine: ScheduleEngine;
-  sendScheduleStateToSession: (session: ClientSession, sessionName?: string) => void;
+  sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   dispose: () => void;
 }
 
@@ -28,7 +28,7 @@ export function createTerminalScheduleRuntime(
     };
   }
 
-  function sendScheduleStateToSession(session: ClientSession, sessionName = session.sessionName) {
+  function sendScheduleStateToSession(session: TerminalSession, sessionName = session.sessionName) {
     if (!sessionName) {
       return;
     }

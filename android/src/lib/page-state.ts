@@ -24,3 +24,13 @@ export const openTerminalPage = (focusSessionId?: string): AppPageState => ({
   kind: 'terminal',
   focusSessionId,
 });
+
+export const resolvePersistedPageStateTruth = (
+  pageState: AppPageState,
+  activeSessionId: string | null,
+): AppPageState => {
+  if (pageState.kind !== 'terminal') {
+    return pageState;
+  }
+  return openTerminalPage(pageState.focusSessionId || activeSessionId || undefined);
+};

@@ -7,10 +7,11 @@ import type {
   SessionBufferState,
   SessionDebugOverlayMetrics,
   SessionScheduleState,
+  TerminalViewportState,
   TerminalVisibleRange,
-  TerminalWidthMode,
 } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
+import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type {
   CreateSessionOptions,
@@ -24,11 +25,9 @@ import {
   getSessionRuntime,
   getSessionScheduleStateRuntime,
   requestScheduleListRuntime,
-  resizeTerminalRuntime,
   runScheduleJobNowRuntime,
   sendMessageRawRuntime,
   sendMessageRuntime,
-  setTerminalWidthModeRuntime,
   toggleScheduleJobRuntime,
   updateSessionViewportRuntime,
   upsertScheduleJobRuntime,
@@ -41,7 +40,6 @@ export function createSessionPublicFacadeRuntime(options: {
   scheduleStatesRef: { current: Record<string, SessionScheduleState> };
   sessionVisibleRangeRef: { current: Map<string, any> };
   sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
-  viewportSizeRef: { current: Map<string, { cols: number; rows: number }> };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   setScheduleStateForSession: (
@@ -68,6 +66,7 @@ export function createSessionPublicFacadeRuntime(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
+  setLiveSessionIdsSync: (ids: string[]) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   sessionDebugMetricsStoreRef: {
     current: {
@@ -130,6 +129,10 @@ export function createSessionPublicFacadeRuntime(options: {
     });
   };
 
+  const setLiveSessionIds = (ids: string[]) => {
+    options.setLiveSessionIdsSync(ids);
+  };
+
   const resumeActiveSessionTransport = (sessionId: string) => {
     return options.ensureActiveSessionFresh({
       sessionId,
@@ -140,7 +143,7 @@ export function createSessionPublicFacadeRuntime(options: {
     });
   };
 
-  const updateSessionViewport = (sessionId: string, visibleRange: TerminalVisibleRange) => {
+  const updateSessionViewport = (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => {
     updateSessionViewportRuntime({
       sessionId,
       visibleRange,
@@ -150,25 +153,6 @@ export function createSessionPublicFacadeRuntime(options: {
       sessionBufferHeadsRef: options.sessionBufferHeadsRef,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferSync: options.requestSessionBufferSync,
-    });
-  };
-
-  const resizeTerminal = (sessionId: string, cols: number, rows: number) => {
-    resizeTerminalRuntime({
-      sessionId,
-      cols,
-      rows,
-      viewportSizeRef: options.viewportSizeRef,
-      sendMessage,
-    });
-  };
-
-  const setTerminalWidthMode = (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {
-    setTerminalWidthModeRuntime({
-      sessionId,
-      mode,
-      cols,
-      sendMessage,
     });
   };
 
@@ -224,10 +208,9 @@ export function createSessionPublicFacadeRuntime(options: {
     deleteScheduleJob,
     toggleScheduleJob,
     runScheduleJobNow,
+    setLiveSessionIds,
     resumeActiveSessionTransport,
     updateSessionViewport,
-    resizeTerminal,
-    setTerminalWidthMode,
     getActiveSession,
     getSession,
     getSessionScheduleState,
@@ -247,6 +230,7 @@ export function buildSessionContextValueRuntime(options: {
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
+  setLiveSessionIds: (ids: string[]) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
@@ -256,9 +240,7 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
-  resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
-  setTerminalWidthMode: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
-  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange) => void;
+  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
@@ -269,6 +251,7 @@ export function buildSessionContextValueRuntime(options: {
   getSession: (id: string) => Session | null;
   getSessionRenderBufferSnapshot: (sessionId: string) => any;
   getSessionBufferStore: () => SessionBufferStore;
+  getSessionRenderBufferStore: () => SessionRenderBufferStore;
   getSessionHeadStore: () => SessionHeadStore;
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
@@ -284,14 +267,13 @@ export function buildSessionContextValueRuntime(options: {
     renameSession: options.renameSession,
     reconnectSession: options.reconnectSession,
     reconnectAllSessions: options.reconnectAllSessions,
+    setLiveSessionIds: options.setLiveSessionIds,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,
     sendMessage: options.sendMessage,
     sendInput: options.sendInput,
     sendImagePaste: options.sendImagePaste,
     sendFileAttach: options.sendFileAttach,
     requestRemoteScreenshot: options.requestRemoteScreenshot,
-    resizeTerminal: options.resizeTerminal,
-    setTerminalWidthMode: options.setTerminalWidthMode,
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
     upsertScheduleJob: options.upsertScheduleJob,
@@ -303,6 +285,7 @@ export function buildSessionContextValueRuntime(options: {
     getSession: options.getSession,
     getSessionRenderBufferSnapshot: options.getSessionRenderBufferSnapshot,
     getSessionBufferStore: options.getSessionBufferStore,
+    getSessionRenderBufferStore: options.getSessionRenderBufferStore,
     getSessionHeadStore: options.getSessionHeadStore,
     onFileTransferMessage: options.onFileTransferMessage,
     sendMessageRaw: options.sendMessageRaw,

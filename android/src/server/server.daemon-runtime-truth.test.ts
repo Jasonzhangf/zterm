@@ -52,7 +52,7 @@ describe('server daemon runtime truth gates', () => {
     expect(authBlock).toContain("new URL(rawUrl || '/', 'ws://localhost')");
     expect(heartbeatBlock).toContain("connection.transport.close('heartbeat timeout')");
     expect(heartbeatBlock).toContain('connection.transport.ping?.()');
-    expect(shutdownBlock).toContain('deps.shutdownClientSessions(deps.sessions, reason)');
+    expect(shutdownBlock).toContain('deps.shutdownTerminalSessions(deps.sessions, reason)');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
     expect(shutdownBlock).toContain('deps.server.close((error) => {');
   });

@@ -7,9 +7,9 @@
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
     "prebuild": "pnpm run test:terminal:regression",
     "dev": "portless android.zterm vite",
-    "build": "node ./scripts/bump-build-version.mjs && tsc && vite build",
+    "build": "node ./scripts/bump-build-version.mjs && pnpm run type-check && vite build",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit",
+    "type-check": "pnpm run check:no-source-js-pollution && tsc --noEmit",
     "test:terminal:contracts": "pnpm exec vitest run src/server/buffer-sync-contract.test.ts src/server/daemon-service-script.test.ts src/server/daemon-mirror-lab-script.test.ts src/server/client-session-lifecycle.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/server.schedule-truth.test.ts src/server/server.control-truth.test.ts src/server/server.transport-runtime-truth.test.ts src/server/server.debug-truth.test.ts src/server/server.core-support-truth.test.ts src/server/server.daemon-runtime-truth.test.ts src/server/server.bridge-runtime-truth.test.ts src/server/session-transport-ticket.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/components/terminal/TerminalHeader.test.tsx src/components/terminal/FileTransferSheet.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/lib/protocol-truth.test.ts src/lib/session-transport-runtime.test.ts src/lib/terminal-buffer-replay.evidence.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx",
     "test:terminal:regression": "pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run daemon:mirror:close-loop && pnpm run test:relay:smoke",
     "serve:server": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; tsx src/server/server.ts",
@@ -34,7 +34,8 @@
     "prepare:update-bundle": "node ./scripts/prepare-update-bundle.mjs",
     "test:common-user-flows": "pnpm exec vitest run src/lib/tmux-sessions.test.ts src/pages/ConnectionPropertiesPage.test.tsx src/pages/ConnectionsPage.test.tsx src/server/schedule-store.test.ts src/server/schedule-dispatch.test.ts src/server/next-fire.test.ts src/server/schedule-engine.test.ts",
     "test:relay:smoke": "tsx scripts/traversal-relay-local-smoke.ts",
-    "test:android:apk-smoke": "tsx scripts/android-apk-smoke.ts"
+    "test:android:apk-smoke": "tsx scripts/android-apk-smoke.ts",
+    "check:no-source-js-pollution": "node ./scripts/check-no-source-js-pollution.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

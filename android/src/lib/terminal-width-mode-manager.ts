@@ -29,18 +29,4 @@ export function updateBridgeSettingsTerminalWidthMode(
   };
 }
 
-export function buildTerminalWidthModePayload(mode: unknown, cols?: number | null) {
-  const normalizedMode = normalizeTerminalWidthMode(mode);
-  if (normalizedMode !== 'adaptive-phone') {
-    return { mode: normalizedMode } as const;
-  }
 
-  const normalizedCols =
-    typeof cols === 'number' && Number.isFinite(cols) && cols > 0
-      ? Math.max(1, Math.floor(cols))
-      : null;
-
-  return normalizedCols === null
-    ? ({ mode: normalizedMode } as const)
-    : ({ mode: normalizedMode, cols: normalizedCols } as const);
-}

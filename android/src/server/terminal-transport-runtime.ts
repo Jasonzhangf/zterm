@@ -2,8 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import type { ServerMessage } from '../lib/types';
 import type {
-  ClientSession,
-  ClientSessionTransport,
+  TerminalSession,
+  TerminalSessionTransport,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import type { RtcServerTransport } from './rtc-bridge';
@@ -14,20 +14,20 @@ export interface DaemonTransportConnection extends TerminalTransportConnection {
 }
 
 export interface TerminalTransportRuntimeDeps {
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   connections: Map<string, DaemonTransportConnection>;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
 }
 
 export interface TerminalTransportRuntime {
-  createWebSocketSessionTransport: (ws: WebSocket) => ClientSessionTransport;
-  createRtcSessionTransport: (transport: RtcServerTransport) => ClientSessionTransport;
-  sendTransportMessage: (transport: ClientSessionTransport | null | undefined, message: ServerMessage) => void;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
+  createWebSocketSessionTransport: (ws: WebSocket) => TerminalSessionTransport;
+  createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   createTransportConnection: (
-    transport: ClientSessionTransport,
+    transport: TerminalSessionTransport,
     requestOrigin: string,
   ) => DaemonTransportConnection;
 }
@@ -35,9 +35,11 @@ export interface TerminalTransportRuntime {
 export function createTerminalTransportRuntime(
   deps: TerminalTransportRuntimeDeps,
 ): TerminalTransportRuntime {
-  function createWebSocketSessionTransport(ws: WebSocket): ClientSessionTransport {
+  function createWebSocketSessionTransport(ws: WebSocket): TerminalSessionTransport {
     return {
       kind: 'ws',
+      requestOrigin: undefined,
+      connectedSent: false,
       get readyState() {
         return ws.readyState;
       },
@@ -53,9 +55,11 @@ export function createTerminalTransportRuntime(
     };
   }
 
-  function createRtcSessionTransport(transport: RtcServerTransport): ClientSessionTransport {
+  function createRtcSessionTransport(transport: RtcServerTransport): TerminalSessionTransport {
     return {
       kind: 'rtc',
+      requestOrigin: undefined,
+      connectedSent: false,
       get readyState() {
         return transport.readyState;
       },
@@ -68,14 +72,14 @@ export function createTerminalTransportRuntime(
     };
   }
 
-  function sendTransportMessage(transport: ClientSessionTransport | null | undefined, message: ServerMessage) {
+  function sendTransportMessage(transport: TerminalSessionTransport | null | undefined, message: ServerMessage) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }
     transport.sendText(JSON.stringify(message));
   }
 
-  function sendMessage(session: ClientSession, message: ServerMessage) {
+  function sendMessage(session: TerminalSession, message: ServerMessage) {
     if (session.transport && session.transport.readyState === WebSocket.OPEN) {
       if (message.type === 'buffer-sync' || message.type === 'connected') {
         deps.daemonRuntimeDebug('send', {
@@ -104,7 +108,9 @@ export function createTerminalTransportRuntime(
     }
   }
 
-  function createTransportConnection(transport: ClientSessionTransport, requestOrigin: string): DaemonTransportConnection {
+  function createTransportConnection(transport: TerminalSessionTransport, requestOrigin: string): DaemonTransportConnection {
+    transport.requestOrigin = requestOrigin;
+    transport.connectedSent = false;
     const connection: DaemonTransportConnection = {
       id: uuidv4(),
       transportId: uuidv4(),

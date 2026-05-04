@@ -129,28 +129,26 @@ export interface RemoteScreenshotCapture {
 
 export interface HostConfigMessage {
   /**
-   * Client-owned stable session identity.
-   * Compatibility only: daemon may consume it as an attach hint / echo field,
-   * but must not treat it as daemon-side logical-session truth.
+   * Client-generated one-shot request identity for the control -> session attach handshake.
+   * It exists only so the client can match `session-ticket` / `session-open-failed` replies
+   * back to its local open intent. It is not daemon-owned business truth.
    */
-  clientSessionId: string;
+  openRequestId: string;
   /**
-   * Compatibility-only attach token for the two-phase transport handshake.
-   * This is wire-level attach material, not a daemon-owned long-lived business truth.
+   * Legacy client-owned session identity kept only for wire compatibility with
+   * pre-openRequestId clients. Daemon must not promote it into daemon-owned
+   * business truth.
+   */
+  clientSessionId?: string;
+  /**
+   * One-shot attach proof for the second phase of the transport handshake.
+   * It is opaque wire material, not daemon-owned business truth.
    */
   sessionTransportToken?: string;
-  name: string;
-  bridgeHost: string;
-  bridgePort: number;
   sessionName: string;
   cols?: number;
   rows?: number;
-  terminalWidthMode?: 'adaptive-phone' | 'mirror-fixed';
-  authToken?: string;
   autoCommand?: string;
-  authType: 'password' | 'key';
-  password?: string;
-  privateKey?: string;
 }
 
 export interface PasteImageStartPayload {
@@ -192,8 +190,6 @@ export type BridgeClientMessage =
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
-  | { type: 'resize'; payload: { cols: number; rows: number } }
-  | { type: 'terminal-width-mode'; payload: { mode: 'adaptive-phone' | 'mirror-fixed'; cols?: number } }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
@@ -216,7 +212,8 @@ export type BridgeServerControlMessage =
        */
       type: 'session-ticket';
       payload: {
-        clientSessionId: string;
+        openRequestId: string;
+        clientSessionId?: string;
         sessionTransportToken: string;
         sessionName: string;
       };
@@ -227,7 +224,8 @@ export type BridgeServerControlMessage =
        */
       type: 'session-open-failed';
       payload: {
-        clientSessionId: string;
+        openRequestId: string;
+        clientSessionId?: string;
         message: string;
         code?: string;
       };

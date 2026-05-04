@@ -14,7 +14,6 @@ export interface SessionProviderAssembliesSharedOptions {
   dispatch: Dispatch<SessionAction>;
   scheduleStates: Record<string, SessionScheduleState>;
   scheduleStatesRef: MutableRefObject<Record<string, SessionScheduleState>>;
-  sessionStore: any;
   setScheduleStates: Dispatch<SetStateAction<Record<string, SessionScheduleState>>>;
   bridgeSettings: BridgeSettings;
   terminalCacheLines: number;
@@ -25,6 +24,7 @@ export interface SessionProviderAssembliesSharedOptions {
 export interface SessionProviderCoreAssembliesResult {
   getSessionRenderBufferSnapshot: SessionContextValue['getSessionRenderBufferSnapshot'];
   getSessionBufferStore: SessionContextValue['getSessionBufferStore'];
+  getSessionRenderBufferStore: SessionContextValue['getSessionRenderBufferStore'];
   getSessionHeadStore: SessionContextValue['getSessionHeadStore'];
   flushRuntimeDebugLogs: () => void;
   clearReconnectForSession: (sessionId: string) => void;
@@ -38,6 +38,7 @@ export interface SessionProviderCoreAssembliesResult {
   ) => void;
   readSessionBufferSnapshot: (sessionId: string) => any;
   setActiveSessionSync: (id: string) => void;
+  setLiveSessionIdsSync: (ids: string[]) => void;
   createSessionSync: (session: any, activate: boolean) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
@@ -47,6 +48,7 @@ export interface SessionProviderCoreAssembliesResult {
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   resolveSessionCacheLines: (rows?: number | null) => number;
+  scheduleSessionRenderCommit: (sessionId: string) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
@@ -65,4 +67,5 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionBufferHead?: (sessionId: string) => any;
   requestSessionBufferSync: (sessionId: string, options?: any) => boolean;
   requestSessionBufferHead: (sessionId: string, ws?: any, options?: { force?: boolean }) => boolean;
+  resolveTerminalRefreshCadence: () => { headTickMs: number };
 }

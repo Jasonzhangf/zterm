@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { TerminalShortcutAction } from '../lib/types';
 import { DEFAULT_SHORTCUT_ACTIONS, STORAGE_KEYS } from '../lib/types';
 import { buildTerminalShortcutSequence, buildTerminalShortcutTokensFromSequence } from '../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
@@ -112,17 +112,21 @@ export function useShortcutActionStorage() {
     }
   }, []);
 
-  const setShortcutActions = (nextShortcutActions: TerminalShortcutAction[]) => {
+  const setShortcutActions = useCallback((nextShortcutActions: TerminalShortcutAction[]) => {
     const sorted = sortShortcutActions(nextShortcutActions);
     setShortcutActionsState(sorted);
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEYS.SHORTCUT_ACTIONS, JSON.stringify(sorted));
     }
-  };
+  }, []);
+
+  const resetShortcutActions = useCallback(() => {
+    setShortcutActions(DEFAULT_SHORTCUT_ACTIONS);
+  }, [setShortcutActions]);
 
   return {
     shortcutActions,
     setShortcutActions,
-    resetShortcutActions: () => setShortcutActions(DEFAULT_SHORTCUT_ACTIONS),
+    resetShortcutActions,
   };
 }

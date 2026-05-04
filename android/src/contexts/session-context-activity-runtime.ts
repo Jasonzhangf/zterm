@@ -81,8 +81,9 @@ export function ensureActiveSessionFreshRuntime(options: {
     allowReconnectIfUnavailable?: boolean;
   };
   refs: {
-    stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
+    stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
   };
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
@@ -99,6 +100,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   ) => 'probed' | 'waiting' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
+  resolveTerminalRefreshCadence: () => { headTickMs: number };
   reconnectSession: (sessionId: string) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
@@ -106,6 +108,9 @@ export function ensureActiveSessionFreshRuntime(options: {
   const targetRuntime = options.readSessionTargetRuntime(options.refreshOptions.sessionId);
   const ws = options.readSessionTransportSocket(options.refreshOptions.sessionId) || null;
   const isActive = options.refs.stateRef.current.activeSessionId === options.refreshOptions.sessionId;
+  const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
+    && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
+  const isRefreshTarget = isActive || isLive;
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
@@ -113,7 +118,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
   const refreshPlan = buildActiveSessionRefreshPlan({
     hasSession: Boolean(session),
-    isActive,
+    isRefreshTarget,
     sessionState,
     wsReadyState: ws?.readyState ?? null,
     reconnectInFlight,
@@ -129,6 +134,8 @@ export function ensureActiveSessionFreshRuntime(options: {
       activeSessionId: options.refs.stateRef.current.activeSessionId,
       hasSession: Boolean(session),
       isActive,
+      isLive,
+      isRefreshTarget,
       sessionState,
       wsReadyState: ws?.readyState ?? null,
       targetKey: transportRuntime?.targetKey || null,
@@ -142,6 +149,9 @@ export function ensureActiveSessionFreshRuntime(options: {
   options.runtimeDebug(`session.transport.${options.refreshOptions.source}`, {
     sessionId: options.refreshOptions.sessionId,
     activeSessionId: options.refs.stateRef.current.activeSessionId,
+    isActive,
+    isLive,
+    isRefreshTarget,
     localRevision: localBuffer.revision ?? null,
     localStartIndex: localBuffer.startIndex ?? null,
     localEndIndex: localBuffer.endIndex ?? null,
@@ -170,15 +180,36 @@ export function ensureActiveSessionFreshRuntime(options: {
         options.refreshOptions.source,
       );
     }
+
+    const now = Date.now();
+    const cadence = options.resolveTerminalRefreshCadence();
+    const lastActiveReentryAt = options.refs.lastActiveReentryAtRef.current.get(options.refreshOptions.sessionId) || 0;
+    const shouldForceHeadRequest = Boolean(options.refreshOptions.forceHead);
+    const shouldSkipImmediateForcedResumeHead = (
+      options.refreshOptions.source === 'active-resume'
+      && shouldForceHeadRequest
+      && ws?.readyState === WebSocket.OPEN
+      && lastActiveReentryAt > 0
+      && now - lastActiveReentryAt < cadence.headTickMs
+    );
+
     if (options.refreshOptions.markResumeTail) {
       options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
     }
-    options.requestSessionBufferHead(
+
+    if (shouldSkipImmediateForcedResumeHead) {
+      return true;
+    }
+
+    const requested = options.requestSessionBufferHead(
       options.refreshOptions.sessionId,
       ws,
       { force: options.refreshOptions.forceHead },
     );
-    return true;
+    if (requested && options.refreshOptions.source === 'active-reentry') {
+      options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, now);
+    }
+    return requested;
   }
 
   if (refreshPlan.action === 'reconnect') {

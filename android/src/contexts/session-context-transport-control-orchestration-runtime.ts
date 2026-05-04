@@ -1,4 +1,4 @@
-import type { Host, ServerMessage, TerminalWidthMode } from '../lib/types';
+import type { Host, ServerMessage } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
 import {
@@ -13,7 +13,6 @@ interface MutableRefObject<T> {
 }
 
 export function createSessionControlTransportOrchestrationRuntime(options: {
-  terminalWidthMode: TerminalWidthMode;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   };
@@ -28,7 +27,7 @@ export function createSessionControlTransportOrchestrationRuntime(options: {
   buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
-  recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
+  recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   openSessionTransportByIntent: ((intent: PendingSessionTransportOpenIntent) => void) | null;
   sessionHandshakeTimeoutMs: number;
 }) {
@@ -48,6 +47,9 @@ export function createSessionControlTransportOrchestrationRuntime(options: {
       pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
       clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
       writeSessionTransportToken: options.writeSessionTransportToken,
+      failPendingControlTargetIntents: (anchorSessionId, message, retryable) => {
+        failPendingControlTargetIntents(anchorSessionId, message, retryable);
+      },
       msg,
     });
   };
@@ -67,7 +69,6 @@ export function createSessionControlTransportOrchestrationRuntime(options: {
   const ensureControlTransportForSessionOpen = (intent: PendingSessionTransportOpenIntent) => {
     ensureControlTransportForSessionOpenOrchestrationRuntime({
       intent,
-      terminalWidthMode: options.terminalWidthMode,
       readSessionTargetControlSocket: options.readSessionTargetControlSocket,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
       readSessionTargetKey: options.readSessionTargetKey,
@@ -80,7 +81,7 @@ export function createSessionControlTransportOrchestrationRuntime(options: {
       writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
       applyTransportDiagnostics: options.applyTransportDiagnostics,
       runtimeDebug: options.runtimeDebug,
-      recordSessionRx: options.recordSessionRx,
+      recordControlTransportRxBytes: options.recordControlTransportRxBytes,
       handleControlTransportMessage: ({ sessionId }, nextMsg) => {
         handleControlTransportMessage(sessionId, nextMsg);
       },

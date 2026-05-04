@@ -2,7 +2,7 @@ import { createReadStream, existsSync, readFileSync } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
 import type { RuntimeDebugStore } from './runtime-debug-store';
-import type { ClientSession, SessionMirror } from './terminal-runtime-types';
+import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 
 export interface TerminalHttpRuntimeDeps {
   host: string;
@@ -12,7 +12,7 @@ export interface TerminalHttpRuntimeDeps {
   appUpdateVersionCode: number;
   appUpdateVersionName: string;
   appUpdateManifestUrl: string;
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   clientRuntimeDebugStore: RuntimeDebugStore;
   resolveDebugRouteLimit: (input: string | null | undefined) => number;
@@ -128,7 +128,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       sessions: {
         total: sessionEntries.length,
         attached: sessionEntries.filter((session) => Boolean(session.transport)).length,
-        ready: sessionEntries.filter((session) => Boolean(session.connectedSent)).length,
+        ready: sessionEntries.filter((session) => Boolean(session.transport?.connectedSent)).length,
       },
       mirrors: {
         total: mirrorEntries.length,
@@ -176,9 +176,8 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         sessionName: session.sessionName,
         mirrorKey: session.mirrorKey,
         transportId: session.transportId,
-        connectedSent: session.connectedSent,
-        wsAlive: session.wsAlive,
-        requestOrigin: session.requestOrigin,
+        connectedSent: Boolean(session.transport?.connectedSent),
+        requestOrigin: session.transport?.requestOrigin || null,
       })),
       mirrors: mirrorEntries.map((mirror) => ({
         key: mirror.key,

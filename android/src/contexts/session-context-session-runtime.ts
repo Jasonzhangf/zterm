@@ -15,6 +15,10 @@ import {
   shouldAutoReconnectSession,
   shouldOpenManagedSessionTransport,
 } from './session-sync-helpers';
+import {
+  deletePendingSessionTransportOpenIntent,
+  hasPendingSessionTransportOpenIntent,
+} from './session-context-open-intent-store';
 
 interface MutableRefObject<T> {
   current: T;
@@ -43,6 +47,17 @@ interface SessionReconnectRuntime {
   timer: number | null;
   nextDelayMs: number | null;
   connecting: boolean;
+}
+
+function clearReconnectRuntimeEntry(
+  reconnectRuntimes: Map<string, SessionReconnectRuntime>,
+  sessionId: string,
+) {
+  const reconnectRuntime = reconnectRuntimes.get(sessionId) || null;
+  if (reconnectRuntime?.timer) {
+    clearTimeout(reconnectRuntime.timer);
+  }
+  reconnectRuntimes.delete(sessionId);
 }
 
 export function connectSessionRuntime(options: {
@@ -146,7 +161,10 @@ export function createSessionRuntime(options: {
       const currentTransport = options.readSessionTransportSocket(existingSession.id);
       const shouldReconnectExisting = shouldOpenManagedSessionTransport({
         readyState: currentTransport?.readyState ?? null,
-        hasPendingOpenIntent: options.refs.pendingSessionTransportOpenIntentsRef.current.has(existingSession.id),
+        hasPendingOpenIntent: hasPendingSessionTransportOpenIntent(
+          options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof hasPendingSessionTransportOpenIntent>[0],
+          existingSession.id,
+        ),
         sessionState: existingSession.state,
       });
       if (shouldReconnectExisting) {
@@ -197,6 +215,16 @@ export function createSessionRuntime(options: {
     daemonHeadRevision: session.daemonHeadRevision || 0,
     daemonHeadEndIndex: session.daemonHeadEndIndex || 0,
   });
+  options.runtimeDebug('session.create.new', {
+    sessionId,
+    requestedSessionId: options.createOptions?.sessionId || null,
+    bridgeHost: options.host.bridgeHost,
+    bridgePort: options.host.bridgePort,
+    sessionName: resolvedSessionName,
+    activate: shouldActivate,
+    connect: shouldConnect,
+    activeSessionId: options.refs.stateRef.current.activeSessionId,
+  });
   options.createSessionSync(session, shouldActivate);
   if (shouldConnect) {
     options.connectSession(sessionId, options.host, shouldActivate);
@@ -210,12 +238,13 @@ export function closeSessionRuntime(options: {
     manualCloseRef: MutableRefObject<Set<string>>;
     pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
-    viewportSizeRef: MutableRefObject<Map<string, { cols: number; rows: number }>>;
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
+    sessionRenderGateRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
     sessionHeadStoreRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
     sessionDebugMetricsStoreRef: MutableRefObject<{ clearSession: (sessionId: string) => void }>;
   };
@@ -226,6 +255,7 @@ export function closeSessionRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   runtimeDebug: RuntimeDebugFn;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
+  cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   clearSessionTransportRuntime: (sessionId: string) => unknown;
   setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
@@ -233,7 +263,10 @@ export function closeSessionRuntime(options: {
 }) {
   options.refs.manualCloseRef.current.add(options.sessionId);
   options.refs.pendingInputQueueRef.current.delete(options.sessionId);
-  options.refs.pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+  deletePendingSessionTransportOpenIntent(
+    options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
+    options.sessionId,
+  );
   options.clearReconnectForSession(options.sessionId);
   const transportRuntime = options.readSessionTransportRuntime(options.sessionId);
   const targetRuntime = options.readSessionTargetRuntime(options.sessionId);
@@ -247,15 +280,19 @@ export function closeSessionRuntime(options: {
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
   });
-  options.cleanupSocket(options.sessionId, false);
+  options.cleanupSocket(options.sessionId, true);
+  if ((targetRuntime?.sessionIds.length || 0) <= 1) {
+    options.cleanupControlSocket(options.sessionId, true);
+  }
   options.writeSessionTransportToken(options.sessionId, null);
   options.clearSessionTransportRuntime(options.sessionId);
-  options.refs.viewportSizeRef.current.delete(options.sessionId);
   options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
   options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
   options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+  options.refs.lastActiveReentryAtRef.current.delete(options.sessionId);
   options.refs.sessionVisibleRangeRef.current.delete(options.sessionId);
   options.refs.sessionBufferStoreRef.current.deleteSession(options.sessionId);
+  options.refs.sessionRenderGateRef.current.deleteSession(options.sessionId);
   options.refs.sessionHeadStoreRef.current.deleteSession(options.sessionId);
   options.refs.sessionDebugMetricsStoreRef.current.clearSession(options.sessionId);
   options.setScheduleStates((current) => {
@@ -346,11 +383,6 @@ export function reconnectSessionRuntime(options: {
   options.refs.manualCloseRef.current.delete(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
   options.updateSessionSync(options.sessionId, primeState.sessionUpdates);
-
-  if (options.refs.stateRef.current.activeSessionId === options.sessionId) {
-    options.setActiveSessionSync(options.sessionId);
-  }
-
   options.scheduleReconnect(options.sessionId, 'manual reconnect', true, {
     immediate: true,
     resetAttempt: true,
@@ -400,15 +432,16 @@ export function scheduleReconnectRuntime(options: {
   startReconnectAttempt: (sessionId: string) => void;
 }) {
   if (options.refs.manualCloseRef.current.has(options.sessionId)) {
-    options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
     return;
   }
   if (!options.readSessionTransportHost(options.sessionId)) {
+    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
     return;
   }
 
   if (!options.retryable) {
-    options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionErrorUpdates(options.message, { includeWsNull: true }));
     options.emitSessionStatus(options.sessionId, 'error', options.message);
     return;
@@ -419,7 +452,7 @@ export function scheduleReconnectRuntime(options: {
     activeSessionId: options.refs.stateRef.current.activeSessionId,
     force: options.reconnectOptions?.force,
   })) {
-    options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(options.message));
     options.emitSessionStatus(options.sessionId, 'error', options.message);
     return;

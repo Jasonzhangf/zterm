@@ -2,12 +2,12 @@ import type { IncomingMessage } from 'http';
 import type { Socket } from 'net';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
-import type { ClientSession } from './terminal-runtime';
+import type { TerminalSession } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 
 export interface TerminalBridgeRuntimeDeps {
   requiredAuthToken: string;
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   connections: Map<string, DaemonTransportConnection>;
   wss: WebSocketServer;
   logTimePrefix: () => string;
@@ -19,7 +19,7 @@ export interface TerminalBridgeRuntimeDeps {
     transport: DaemonTransportConnection['transport'],
     requestOrigin: string,
   ) => DaemonTransportConnection;
-  detachSessionTransportOnly: (session: ClientSession, reason: string, transportId?: string) => void;
+  detachSessionTransportOnly: (session: TerminalSession, reason: string, transportId?: string) => void;
   handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
@@ -48,10 +48,6 @@ export function createTerminalBridgeRuntime(
       return {
         onMessage: (_transportId, data, isBinary) => {
           connection.wsAlive = true;
-          const boundSession = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-          if (boundSession) {
-            boundSession.wsAlive = true;
-          }
           void deps.handleMessage(connection, data, isBinary);
         },
         onClose: (_transportId, reason) => {
@@ -91,18 +87,10 @@ export function createTerminalBridgeRuntime(
 
     ws.on('pong', () => {
       connection.wsAlive = true;
-      const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session) {
-        session.wsAlive = true;
-      }
     });
 
     ws.on('message', (rawData, isBinary) => {
       connection.wsAlive = true;
-      const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session) {
-        session.wsAlive = true;
-      }
       void deps.handleMessage(connection, rawData, isBinary);
     });
 

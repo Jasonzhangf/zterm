@@ -89,6 +89,10 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - 它们可以留在协议兼容层
   - 但不得成为 daemon 业务真相
   - client 侧也不得把 `sessionTransportToken` 放进长期 transport runtime store；它只能是 handshake 期间的临时 attach 材料
+- 若兼容层仍需要握手关联字段，优先使用：
+  - `openRequestId` = **client-local open intent correlation**
+  - `sessionTransportToken` = **daemon one-shot attach proof**
+  - 禁止再把 `clientSessionId` 放回 daemon token owner / primary wire correlation 语义
 - daemon terminal core 的**代码组织**也必须收口：
   - `server.ts` 只保留 transport/http glue
   - mirror lifecycle / live sync / attach / input orchestration 必须下沉到独立 terminal core 模块
@@ -424,6 +428,8 @@ tmux truth
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
+- 任何 `buffer-head-request` / `buffer-sync-request` 若允许调用方显式传 `ws`，都必须先校验：**该 ws 仍是当前 session 的 active transport socket**；旧 superseded socket 只能被物理关闭或忽略，绝不能继续拿来发 head/range 请求污染当前 transport 真相。
+- transport 生命周期门禁不只覆盖 `onopen/onmessage/onerror/onclose`；凡是“旧 ws 回调里继续触发 request/head/probe”的路径，也必须有同样的 active-socket gate，否则 stale transport 仍会在写侧继续推进错误状态。
 - 若 tmux capture / mirror canonicalize 链路可能收到 extended-color ANSI（`38:2::r:g:b` / `48:2::r:g:b` / `38:5:n` / `48:5:n`）的 colon 语法，进入 parser 前必须先规范化到当前唯一支持的 semicolon 语法；否则颜色会退回 default sentinel，现场表现就是红/绿背景丢失或发灰。
 - transport/session 生命周期若要改，先问自己有没有违反这四条：
   1. 是否又把 per-session ws 当成 transport 真相

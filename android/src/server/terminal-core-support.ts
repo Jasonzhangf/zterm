@@ -2,7 +2,7 @@ import type {
   BufferSyncRequestPayload,
   TerminalCursorState,
 } from '../lib/types';
-import type { ClientSession } from './terminal-runtime-types';
+import type { TerminalSession } from './terminal-runtime-types';
 
 export interface TerminalCoreSupportDeps {
   defaultSessionName: string;
@@ -20,7 +20,7 @@ export interface TerminalCoreSupport {
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
   normalizeBufferSyncRequestPayload: (
-    session: Pick<ClientSession, 'id'>,
+    session: Pick<TerminalSession, 'id'>,
     request: BufferSyncRequestPayload,
   ) => BufferSyncRequestPayload;
 }
@@ -71,7 +71,7 @@ export function createTerminalCoreSupport(
   }
 
   function normalizeBufferSyncRequestPayload(
-    session: Pick<ClientSession, 'id'>,
+    session: Pick<TerminalSession, 'id'>,
     request: BufferSyncRequestPayload,
   ): BufferSyncRequestPayload {
     const localStartIndex = Number.isFinite(request.localStartIndex)

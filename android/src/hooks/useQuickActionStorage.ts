@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { QuickAction } from '../lib/types';
 import { DEFAULT_QUICK_ACTIONS, STORAGE_KEYS } from '../lib/types';
 
@@ -25,17 +25,21 @@ export function useQuickActionStorage() {
     }
   }, []);
 
-  const setQuickActions = (nextQuickActions: QuickAction[]) => {
+  const setQuickActions = useCallback((nextQuickActions: QuickAction[]) => {
     const sorted = sortQuickActions(nextQuickActions);
     setQuickActionsState(sorted);
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEYS.QUICK_ACTIONS, JSON.stringify(sorted));
     }
-  };
+  }, []);
+
+  const resetQuickActions = useCallback(() => {
+    setQuickActions(DEFAULT_QUICK_ACTIONS);
+  }, [setQuickActions]);
 
   return {
     quickActions,
     setQuickActions,
-    resetQuickActions: () => setQuickActions(DEFAULT_QUICK_ACTIONS),
+    resetQuickActions,
   };
 }

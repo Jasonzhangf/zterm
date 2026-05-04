@@ -10,6 +10,7 @@ const quickBarRenderCounter = { count: 0 };
 let previousQuickBarProps: Record<string, unknown> | null = null;
 let quickBarChangedKeys: string[] = [];
 const terminalViewRenderCounter = new Map<string, number>();
+const terminalHeaderRenderCounter = { count: 0 };
 
 function bumpTerminalViewRender(sessionId: string) {
   terminalViewRenderCounter.set(sessionId, (terminalViewRenderCounter.get(sessionId) || 0) + 1);
@@ -39,7 +40,15 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: () => <div data-testid="terminal-header" />,
+  TerminalHeader: memo(() => {
+    terminalHeaderRenderCounter.count += 1;
+    return (
+      <div
+        data-testid="terminal-header"
+        data-render-count={terminalHeaderRenderCounter.count}
+      />
+    );
+  }),
 }));
 
 vi.mock('../components/terminal/TabManagerSheet', () => ({
@@ -180,6 +189,7 @@ describe('TerminalPage render isolation', () => {
     previousQuickBarProps = null;
     quickBarChangedKeys = [];
     terminalViewRenderCounter.clear();
+    terminalHeaderRenderCounter.count = 0;
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -275,6 +285,149 @@ describe('TerminalPage render isolation', () => {
 
     expect(readRenderCount('terminal-view-s1')).toBe(activeTerminalRenderCountBefore);
     expect(readRenderCount('terminal-view-s2')).toBe(inactiveTerminalRenderCountBefore);
+  });
+
+  it('does not rerender terminal shell when only an inactive tab runtime status changes', () => {
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const props = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+      onLoadSavedTabList: vi.fn(),
+    };
+    const view = render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    const terminalRenderCountBefore = readRenderCount('terminal-view-s1');
+    const quickBarRenderCountBefore = readRenderCount('terminal-quickbar');
+    const headerRenderCountBefore = readRenderCount('terminal-header');
+
+    const nextInactiveSession = {
+      ...session2,
+      state: 'reconnecting' as const,
+      lastError: 'probe timeout',
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1, nextInactiveSession]}
+        activeSession={session1}
+        {...props}
+      />
+    );
+
+    expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
+    expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
+    expect(readRenderCount('terminal-header')).toBe(headerRenderCountBefore);
+  });
+
+  it('does not rerender terminal shell when only the active tab runtime status changes', () => {
+    const session1 = makeSession('s1');
+    const props = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+      onLoadSavedTabList: vi.fn(),
+    };
+    const view = render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    const terminalRenderCountBefore = readRenderCount('terminal-view-s1');
+    const quickBarRenderCountBefore = readRenderCount('terminal-quickbar');
+
+    const nextActiveSession = {
+      ...session1,
+      state: 'reconnecting' as const,
+      lastError: 'probe timeout',
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[nextActiveSession]}
+        activeSession={nextActiveSession}
+        {...props}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(3100);
+    });
+
+    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('连接已断开，正在重连');
+    expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
+    expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
+  });
+
+  it('does not rerender terminal shell on a plain rerender when live session wiring changes are semantically irrelevant', () => {
+    const session1 = makeSession('s1');
+    const props = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      onLiveSessionIdsChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+      onLoadSavedTabList: vi.fn(),
+    };
+    const view = render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    const terminalRenderCountBefore = readRenderCount('terminal-view-s1');
+    const quickBarRenderCountBefore = readRenderCount('terminal-quickbar');
+    const headerRenderCountBefore = readRenderCount('terminal-header');
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
+    expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
+    expect(readRenderCount('terminal-header')).toBe(headerRenderCountBefore);
   });
 
   it('does not rerender TerminalView or QuickBar when debug overlay polling ticks', () => {

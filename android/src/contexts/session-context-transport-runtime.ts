@@ -17,6 +17,12 @@ import {
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import {
+  deletePendingSessionTransportOpenIntent,
+  findPendingSessionTransportOpenIntentByRequestId,
+  getPendingSessionTransportOpenIntent,
+  setPendingSessionTransportOpenIntent,
+} from './session-context-open-intent-store';
 
 type PendingSessionTransportWireIntent = PendingSessionTransportOpenIntent & {
   hostConfigPayload: HostConfigMessage;
@@ -96,12 +102,15 @@ export function failPendingControlTargetIntents(options: {
   const targetRuntime = options.readSessionTargetRuntime(options.sessionId);
   const targetSessionIds = targetRuntime?.sessionIds || [options.sessionId];
   for (const targetSessionId of targetSessionIds) {
-    const pending = options.pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) || null;
+    const pending = getPendingSessionTransportOpenIntent(
+      options.pendingSessionTransportOpenIntentsRef.current,
+      targetSessionId,
+    );
     if (!pending) {
       continue;
     }
     options.clearSessionHandshakeTimeout(targetSessionId);
-    options.pendingSessionTransportOpenIntentsRef.current.delete(targetSessionId);
+    deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, targetSessionId);
     options.writeSessionTransportToken(targetSessionId, null);
     pending.finalizeFailure(options.message, options.retryable);
   }
@@ -113,42 +122,71 @@ export function handleControlTransportMessage(options: {
   pendingSessionTransportOpenIntentsRef: { current: Map<string, PendingSessionTransportOpenIntent> };
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => unknown;
+  failPendingControlTargetIntents?: (sessionId: string, message: string, retryable: boolean) => void;
 }, msg: ServerMessage) {
+  const findIntentByWireIdentity = (payload: { openRequestId?: string; clientSessionId?: string }) => {
+    const byOpenRequestId = typeof payload.openRequestId === 'string' && payload.openRequestId.trim()
+      ? findPendingSessionTransportOpenIntentByRequestId(
+        options.pendingSessionTransportOpenIntentsRef.current,
+        payload.openRequestId,
+      )
+      : null;
+    if (byOpenRequestId) {
+      return byOpenRequestId;
+    }
+    const legacySessionId = payload.clientSessionId?.trim() || '';
+    if (!legacySessionId) {
+      return null;
+    }
+    return getPendingSessionTransportOpenIntent(
+      options.pendingSessionTransportOpenIntentsRef.current,
+      legacySessionId,
+    );
+  };
+
   switch (msg.type) {
     case 'session-ticket': {
       const payload = msg.payload;
-      const intent = options.pendingSessionTransportOpenIntentsRef.current.get(payload.clientSessionId) || null;
+      const intent = findIntentByWireIdentity(payload);
       if (!intent) {
         return;
       }
-      if (payload.clientSessionId !== intent.sessionId) {
-        return;
-      }
-      options.clearSessionHandshakeTimeout(payload.clientSessionId);
-      options.writeSessionTransportToken(payload.clientSessionId, payload.sessionTransportToken);
-      options.pendingSessionTransportOpenIntentsRef.current.delete(payload.clientSessionId);
+      options.clearSessionHandshakeTimeout(intent.sessionId);
+      options.writeSessionTransportToken(intent.sessionId, payload.sessionTransportToken);
+      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, intent.sessionId);
       options.openSessionTransportByIntent?.(intent);
       return;
     }
     case 'session-open-failed': {
       const payload = msg.payload;
-      const intent = options.pendingSessionTransportOpenIntentsRef.current.get(payload.clientSessionId) || null;
+      const intent = findIntentByWireIdentity(payload);
       if (!intent) {
         return;
       }
-      options.clearSessionHandshakeTimeout(payload.clientSessionId);
-      options.pendingSessionTransportOpenIntentsRef.current.delete(payload.clientSessionId);
-      options.writeSessionTransportToken(payload.clientSessionId, null);
+      options.clearSessionHandshakeTimeout(intent.sessionId);
+      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, intent.sessionId);
+      options.writeSessionTransportToken(intent.sessionId, null);
       intent.finalizeFailure(payload.message, false);
       return;
     }
     case 'error': {
-      const intent = options.pendingSessionTransportOpenIntentsRef.current.get(options.sessionId) || null;
+      if (options.failPendingControlTargetIntents) {
+        options.failPendingControlTargetIntents(
+          options.sessionId,
+          msg.payload.message,
+          msg.payload.code !== 'unauthorized',
+        );
+        return;
+      }
+      const intent = getPendingSessionTransportOpenIntent(
+        options.pendingSessionTransportOpenIntentsRef.current,
+        options.sessionId,
+      );
       if (!intent) {
         return;
       }
       options.clearSessionHandshakeTimeout(options.sessionId);
-      options.pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, options.sessionId);
       options.writeSessionTransportToken(options.sessionId, null);
       intent.finalizeFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
       return;
@@ -174,19 +212,23 @@ export function ensureControlTransportForSessionOpen(options: {
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   runtimeDebug: RuntimeDebugFn;
-  recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
+  recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   handleControlTransportMessage: (options: { sessionId: string }, msg: ServerMessage) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
   const { sessionId, host } = options.intent;
+  setPendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, options.intent);
   const existingControlSocket = options.readSessionTargetControlSocket(sessionId);
 
   const flushPendingSessionOpens = (anchorSessionId: string, socket: BridgeTransportSocket) => {
     const targetRuntime = options.readSessionTargetRuntime(anchorSessionId);
     const targetSessionIds = targetRuntime?.sessionIds || [anchorSessionId];
     for (const targetSessionId of targetSessionIds) {
-      const pendingIntent = options.pendingSessionTransportOpenIntentsRef.current.get(targetSessionId) as PendingSessionTransportWireIntent | null;
+      const pendingIntent = getPendingSessionTransportOpenIntent(
+        options.pendingSessionTransportOpenIntentsRef.current,
+        targetSessionId,
+      ) as PendingSessionTransportWireIntent | null;
       if (!pendingIntent) {
         continue;
       }
@@ -234,7 +276,7 @@ export function ensureControlTransportForSessionOpen(options: {
   };
   controlSocket.onmessage = (event) => {
     try {
-      options.recordSessionRx(sessionId, event.data);
+      options.recordControlTransportRxBytes(sessionId, event.data);
       if (typeof event.data !== 'string') {
         return;
       }
@@ -315,6 +357,7 @@ export function bindSessionTransportSocketLifecycle(options: {
   debugScope: 'connect' | 'reconnect';
   activate?: boolean;
   readActiveSessionId: () => string | null;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   connectMessagePayload: HostConfigMessage;
   runtimeDebug: RuntimeDebugFn;
@@ -335,15 +378,21 @@ export function bindSessionTransportSocketLifecycle(options: {
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
+    onClosed: (reason?: string) => void;
   }, msg: ServerMessage) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onConnected: () => void;
+  onClosed?: (reason?: string) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
   const { sessionId, host, ws, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected } = options;
+  const isCurrentActiveSocket = () => options.readSessionTransportSocket(sessionId) === ws;
 
   ws.onopen = () => {
+    if (!isCurrentActiveSocket()) {
+      return;
+    }
     options.applyTransportDiagnostics(sessionId, ws);
     openSocketConnectHandshake({
       sessionId,
@@ -368,6 +417,9 @@ export function bindSessionTransportSocketLifecycle(options: {
   };
 
   ws.onmessage = (event) => {
+    if (!isCurrentActiveSocket()) {
+      return;
+    }
     try {
       options.recordSessionRx(sessionId, event.data);
       if (typeof event.data !== 'string') {
@@ -381,12 +433,25 @@ export function bindSessionTransportSocketLifecycle(options: {
         debugScope,
         onConnected,
         onFailure: finalizeFailure,
+        onClosed: (reason) => {
+          options.onClosed?.(reason);
+        },
       }, msg);
     } catch (error) {
       finalizeFailure(error instanceof Error ? error.message : 'parse error', true);
     }
   };
 
-  ws.onerror = () => finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
-  ws.onclose = () => finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+  ws.onerror = () => {
+    if (!isCurrentActiveSocket()) {
+      return;
+    }
+    finalizeFailure(ws.getDiagnostics().reason || 'transport error', true);
+  };
+  ws.onclose = () => {
+    if (!isCurrentActiveSocket()) {
+      return;
+    }
+    finalizeFailure(ws.getDiagnostics().reason || 'socket closed', true);
+  };
 }

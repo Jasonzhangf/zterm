@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import type { Server } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { ClientSession, SessionMirror } from './terminal-runtime';
+import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 
 export interface DestroyMirrorOptions {
@@ -27,13 +27,13 @@ export interface TerminalDaemonRuntimeDeps {
   memoryGuardMaxRssBytes: number;
   memoryGuardMaxHeapUsedBytes: number;
   startupPortConflictExitCode: number;
-  sessions: Map<string, ClientSession>;
+  sessions: Map<string, TerminalSession>;
   connections: Map<string, DaemonTransportConnection>;
   mirrors: Map<string, SessionMirror>;
   server: Server;
   wss: WebSocketServer;
   logTimePrefix: () => string;
-  shutdownClientSessions: (sessions: Map<string, ClientSession>, reason: string) => void;
+  shutdownTerminalSessions: (sessions: Map<string, TerminalSession>, reason: string) => void;
   destroyMirror: (mirror: SessionMirror, reason: string, options?: DestroyMirrorOptions) => void;
   disposeScheduleRuntime: () => void;
   startRelayHostClient: () => void;
@@ -122,10 +122,6 @@ export function createTerminalDaemonRuntime(
         }
 
         connection.wsAlive = false;
-        const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-        if (session) {
-          session.wsAlive = false;
-        }
         try {
           connection.transport.ping?.();
         } catch (error) {
@@ -183,7 +179,7 @@ export function createTerminalDaemonRuntime(
       }
     }
     deps.connections.clear();
-    deps.shutdownClientSessions(deps.sessions, reason);
+    deps.shutdownTerminalSessions(deps.sessions, reason);
 
     for (const mirror of [...deps.mirrors.values()]) {
       deps.destroyMirror(mirror, reason, {

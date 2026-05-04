@@ -127,7 +127,6 @@ daemon transport connection
 daemon 不允许维护：
 
 - `title` 作为 session 本地缓存真相
-- `requestOrigin` 作为客户端状态机字段
 - `terminalWidthMode`
 - `requestedAdaptiveCols`
 - active / inactive
@@ -140,6 +139,8 @@ daemon 不允许维护：
 
 这两类消息若还存在于旧协议里，daemon 只能忽略；不得再变成 daemon 内部状态机入口。
 - 在本轮真源里，**没有**“ws 一断就删 client session”这条语义
+- daemon 可临时持有 transport 级观测字段（如 heartbeat liveness、request origin、connected handshake sent），
+  但它们只属于 **physical transport fact**，不得写进 logical session / mirror 真相，更不得反推客户端 active/tab/foreground 语义
 
 ---
 

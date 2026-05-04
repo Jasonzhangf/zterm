@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { BridgeSettings } from './bridge-settings';
 import {
   TERMINAL_WIDTH_MODE_OPTIONS,
-  buildTerminalWidthModePayload,
   normalizeTerminalWidthMode,
   updateBridgeSettingsTerminalWidthMode,
 } from './terminal-width-mode-manager';
@@ -46,20 +45,5 @@ describe('terminal-width-mode-manager', () => {
       terminalWidthMode: 'adaptive-phone',
     });
     expect(updateBridgeSettingsTerminalWidthMode(next, 'adaptive-phone')).toBe(next);
-  });
-
-  it('builds daemon width-mode payloads with normalized cols only for adaptive-phone', () => {
-    expect(buildTerminalWidthModePayload('mirror-fixed', 120)).toEqual({
-      mode: 'mirror-fixed',
-    });
-
-    expect(buildTerminalWidthModePayload('adaptive-phone', 91.8)).toEqual({
-      mode: 'adaptive-phone',
-      cols: 91,
-    });
-
-    expect(buildTerminalWidthModePayload('adaptive-phone', null)).toEqual({
-      mode: 'adaptive-phone',
-    });
   });
 });

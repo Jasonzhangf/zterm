@@ -9,7 +9,7 @@ import type {
   RemoteScreenshotRequestPayload,
   ServerMessage,
 } from '../lib/types';
-import type { ClientSession, SessionMirror } from './terminal-runtime-types';
+import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 
 export const FILE_CHUNK_SIZE = 256 * 1024;
 export const REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000;
@@ -28,8 +28,8 @@ export interface TerminalFileTransferRuntimeDeps {
   downloadsDir: string;
   wtermHomeDir: string;
   platform: NodeJS.Platform;
-  sendMessage: (session: ClientSession, message: ServerMessage) => void;
-  getClientMirror: (session: ClientSession) => SessionMirror | null;
+  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  getSessionMirror: (session: TerminalSession) => SessionMirror | null;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
@@ -39,13 +39,13 @@ export interface TerminalFileTransferRuntimeDeps {
 }
 
 export interface TerminalFileTransferRuntime {
-  handlePasteImage: (session: ClientSession, payload: PasteImagePayload) => void;
-  handleFileListRequest: (session: ClientSession, payload: FileListRequestPayload) => void;
-  handleFileCreateDirectoryRequest: (session: ClientSession, payload: FileCreateDirectoryRequestPayload) => void;
-  handleFileDownloadRequest: (session: ClientSession, payload: FileDownloadRequestPayload) => void;
-  handleRemoteScreenshotRequest: (session: ClientSession, payload: RemoteScreenshotRequestPayload) => Promise<void>;
-  handleFileUploadStart: (session: ClientSession, payload: FileUploadStartPayload) => void;
-  handleFileUploadChunk: (session: ClientSession, payload: FileUploadChunkPayload) => void;
-  handleFileUploadEnd: (session: ClientSession, payload: FileUploadEndPayload) => void;
-  handleBinaryPayload: (session: ClientSession, buffer: Buffer) => void;
+  handlePasteImage: (session: TerminalSession, payload: PasteImagePayload) => void;
+  handleFileListRequest: (session: TerminalSession, payload: FileListRequestPayload) => void;
+  handleFileCreateDirectoryRequest: (session: TerminalSession, payload: FileCreateDirectoryRequestPayload) => void;
+  handleFileDownloadRequest: (session: TerminalSession, payload: FileDownloadRequestPayload) => void;
+  handleRemoteScreenshotRequest: (session: TerminalSession, payload: RemoteScreenshotRequestPayload) => Promise<void>;
+  handleFileUploadStart: (session: TerminalSession, payload: FileUploadStartPayload) => void;
+  handleFileUploadChunk: (session: TerminalSession, payload: FileUploadChunkPayload) => void;
+  handleFileUploadEnd: (session: TerminalSession, payload: FileUploadEndPayload) => void;
+  handleBinaryPayload: (session: TerminalSession, buffer: Buffer) => void;
 }

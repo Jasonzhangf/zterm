@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { SessionDebugOverlayMetrics, SessionScheduleState, SessionState } from '../lib/types';
 import type { SessionManagerState, SessionReconnectRuntime } from './session-context-core';
 import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-sync-helpers';
@@ -31,6 +31,7 @@ export function useSessionContextLifecycle(options: {
     sessionDebugMetricsStoreRef: { current: SessionDebugMetricsStoreLike };
     sessionPullStateRef: { current: Map<string, unknown> };
     lastActivatedSessionIdRef: { current: string | null };
+    lastActiveReentryAtRef: { current: Map<string, number> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
     handshakeTimeoutsRef: { current: Map<string, number> };
@@ -51,6 +52,9 @@ export function useSessionContextLifecycle(options: {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
 }) {
+  const ensureActiveSessionFreshRef = useRef(options.ensureActiveSessionFresh);
+  const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
+
   useEffect(() => {
     options.refs.foregroundActiveRef.current = options.appForegroundActive !== false;
   }, [options.appForegroundActive]);
@@ -62,6 +66,14 @@ export function useSessionContextLifecycle(options: {
   useEffect(() => {
     options.refs.scheduleStatesRef.current = options.scheduleStates;
   }, [options.scheduleStates]);
+
+  useEffect(() => {
+    ensureActiveSessionFreshRef.current = options.ensureActiveSessionFresh;
+  }, [options.ensureActiveSessionFresh]);
+
+  useEffect(() => {
+    flushRuntimeDebugLogsRef.current = options.flushRuntimeDebugLogs;
+  }, [options.flushRuntimeDebugLogs]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -94,20 +106,20 @@ export function useSessionContextLifecycle(options: {
       return;
     }
     options.refs.lastActivatedSessionIdRef.current = options.state.activeSessionId;
-    options.ensureActiveSessionFresh({
+    ensureActiveSessionFreshRef.current({
       sessionId: options.state.activeSessionId,
       source: 'active-reentry',
       forceHead: true,
       allowReconnectIfUnavailable: true,
     });
-  }, [options.ensureActiveSessionFresh, options.state.activeSessionId]);
+  }, [options.state.activeSessionId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      options.flushRuntimeDebugLogs();
+      flushRuntimeDebugLogsRef.current();
     }, options.clientRuntimeDebugFlushIntervalMs);
     return () => window.clearInterval(timer);
-  }, [options.flushRuntimeDebugLogs, options.clientRuntimeDebugFlushIntervalMs]);
+  }, [options.clientRuntimeDebugFlushIntervalMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,15 +137,17 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const activeSessionId = options.refs.stateRef.current.activeSessionId;
-        if (!activeSessionId) {
+        const liveSessionIds = options.refs.stateRef.current.liveSessionIds;
+        if (!Array.isArray(liveSessionIds) || liveSessionIds.length === 0) {
           scheduleNext();
           return;
         }
-        options.ensureActiveSessionFresh({
-          sessionId: activeSessionId,
-          source: 'active-tick',
-          allowReconnectIfUnavailable: false,
+        liveSessionIds.forEach((sessionId) => {
+          ensureActiveSessionFreshRef.current({
+            sessionId,
+            source: 'active-tick',
+            allowReconnectIfUnavailable: false,
+          });
         });
         scheduleNext();
       }, options.activeHeadRefreshTickMs);
@@ -147,7 +161,7 @@ export function useSessionContextLifecycle(options: {
         window.clearTimeout(timer);
       }
     };
-  }, [options.ensureActiveSessionFresh, options.activeHeadRefreshTickMs]);
+  }, [options.activeHeadRefreshTickMs]);
 
   useEffect(() => () => {
     options.refs.remoteScreenshotRuntimeRef.current.dispose(

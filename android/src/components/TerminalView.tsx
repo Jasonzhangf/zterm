@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useSessionBufferSnapshot, type SessionBufferStore } from '../lib/session-buffer-store';
-import { useSessionHeadSnapshot, type SessionHeadStore } from '../lib/session-head-store';
+import { useSessionRenderBufferSnapshot, type SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import { getTerminalThemePreset, type TerminalThemePreset } from '@zterm/shared';
 import type {
   TerminalCell,
@@ -14,20 +13,21 @@ import type {
 
 interface TerminalViewProps {
   sessionId: string | null;
-  sessionBufferStore?: SessionBufferStore | null;
-  sessionHeadStore?: SessionHeadStore | null;
+  sessionBufferStore?: SessionRenderBufferStore | null;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
   initialBufferLines?: TerminalCell[][];
   bufferStartIndex?: number;
   bufferEndIndex?: number;
   bufferHeadStartIndex?: number;
   bufferTailEndIndex?: number;
-  daemonHeadRevision?: number;
-  daemonHeadEndIndex?: number;
   bufferGapRanges?: TerminalGapRange[];
   cursorKeysApp?: boolean;
   cursor?: TerminalCursorState | null;
   active?: boolean;
+  live?: boolean;
   inputResetEpoch?: number;
+  followResetEpoch?: number;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
   onInput?: (sessionId: string, data: string) => void;
@@ -175,6 +175,7 @@ function cellStyle(
 
   style.color = colors.fg;
   style.background = colors.bg;
+  style.backgroundColor = colors.bg;
   if (cell.flags & FLAG_BOLD) style.fontWeight = '700';
   if (cell.flags & FLAG_DIM) style.opacity = '0.5';
   if (cell.flags & FLAG_ITALIC) style.fontStyle = 'italic';
@@ -301,7 +302,7 @@ const VisibleRow = memo(function VisibleRow({
   cellWidthPx,
   isGap,
   theme,
-  cursor,
+  cursorColumn,
   showAbsoluteLineNumbers = false,
   discontinuousLineNumber = false,
 }: {
@@ -312,7 +313,7 @@ const VisibleRow = memo(function VisibleRow({
   cellWidthPx: number;
   isGap: boolean;
   theme: TerminalThemePreset;
-  cursor: TerminalCursorState | null;
+  cursorColumn: number;
   showAbsoluteLineNumbers?: boolean;
   discontinuousLineNumber?: boolean;
 }) {
@@ -369,11 +370,6 @@ const VisibleRow = memo(function VisibleRow({
       </div>
     );
   }
-
-  const cursorColumn = cursor && cursor.visible && cursor.rowIndex === absoluteIndex
-    ? resolveCursorCellColumn(row, cursor.col)
-    : -1;
-
   return (
     <div
       data-terminal-row="true"
@@ -409,9 +405,7 @@ const VisibleRow = memo(function VisibleRow({
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
   && prev.theme === next.theme
-  && prev.cursor?.rowIndex === next.cursor?.rowIndex
-  && prev.cursor?.col === next.cursor?.col
-  && prev.cursor?.visible === next.cursor?.visible
+  && prev.cursorColumn === next.cursorColumn
   && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
   && prev.discontinuousLineNumber === next.discontinuousLineNumber
 ));
@@ -419,18 +413,20 @@ const VisibleRow = memo(function VisibleRow({
 function TerminalViewComponent({
   sessionId,
   sessionBufferStore = null,
-  sessionHeadStore = null,
+  daemonHeadRevision: _daemonHeadRevision,
+  daemonHeadEndIndex,
   initialBufferLines,
   bufferStartIndex = 0,
   bufferEndIndex,
   bufferHeadStartIndex: _bufferHeadStartIndex,
   bufferTailEndIndex,
-  daemonHeadEndIndex,
   bufferGapRanges = [],
   cursorKeysApp = false,
   cursor = null,
   active = false,
+  live: _live,
   inputResetEpoch = 0,
+  followResetEpoch = 0,
   allowDomFocus = true,
   domInputOffscreen = false,
   onInput,
@@ -447,9 +443,10 @@ function TerminalViewComponent({
   showAbsoluteLineNumbers = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
+  const refreshActive = active;
   const swipeTabEnabled = widthMode !== 'mirror-fixed' && Boolean(onSwipeTab);
-  const sessionBufferSnapshot = useSessionBufferSnapshot(sessionBufferStore || undefined as any, sessionBufferStore ? sessionId : null);
-  const sessionHeadSnapshot = useSessionHeadSnapshot(sessionHeadStore || undefined as any, sessionHeadStore ? sessionId : null);
+  const sessionBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore || undefined as any, sessionBufferStore ? sessionId : null);
+  const renderSnapshotRevision = sessionBufferSnapshot.revision;
   const renderBuffer = sessionBufferStore && sessionId
     ? sessionBufferSnapshot.buffer
     : {
@@ -467,6 +464,14 @@ function TerminalViewComponent({
           : (typeof bufferEndIndex === 'number' && Number.isFinite(bufferEndIndex)
             ? Math.max(bufferStartIndex, Math.floor(bufferEndIndex))
             : bufferStartIndex + (initialBufferLines || []).length),
+        daemonHeadRevision: Math.max(0, Math.floor(_daemonHeadRevision || 0)),
+        daemonHeadEndIndex: typeof daemonHeadEndIndex === 'number' && Number.isFinite(daemonHeadEndIndex)
+          ? Math.max(bufferStartIndex, Math.floor(daemonHeadEndIndex))
+          : (typeof bufferTailEndIndex === 'number' && Number.isFinite(bufferTailEndIndex)
+            ? Math.max(bufferStartIndex, Math.floor(bufferTailEndIndex))
+            : (typeof bufferEndIndex === 'number' && Number.isFinite(bufferEndIndex)
+              ? Math.max(bufferStartIndex, Math.floor(bufferEndIndex))
+              : bufferStartIndex + (initialBufferLines || []).length)),
         cols: 80,
         rows: DEFAULT_ROWS,
         cursorKeysApp,
@@ -477,13 +482,10 @@ function TerminalViewComponent({
   const bufferLines = renderBuffer.lines || [];
   const effectiveBufferEndIndex = Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.endIndex || (renderBuffer.startIndex + bufferLines.length)));
   const bufferTailAnchorEndIndex = Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.bufferTailEndIndex || effectiveBufferEndIndex));
-  const liveDaemonHeadEndIndex = sessionHeadStore && sessionId
-    ? sessionHeadSnapshot.daemonHeadEndIndex
-    : daemonHeadEndIndex;
-  const daemonTailAnchorEndIndex = typeof liveDaemonHeadEndIndex === 'number' && Number.isFinite(liveDaemonHeadEndIndex)
-    ? Math.max(renderBuffer.startIndex, Math.floor(liveDaemonHeadEndIndex))
+  const demandHeadEndIndex = typeof renderBuffer.daemonHeadEndIndex === 'number' && Number.isFinite(renderBuffer.daemonHeadEndIndex)
+    ? Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.daemonHeadEndIndex))
     : bufferTailAnchorEndIndex;
-  const followDemandAnchorEndIndex = Math.max(bufferTailAnchorEndIndex, daemonTailAnchorEndIndex);
+  const followDemandAnchorEndIndex = Math.max(bufferTailAnchorEndIndex, demandHeadEndIndex);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -494,6 +496,8 @@ function TerminalViewComponent({
   const followScrollSyncTimerRef = useRef<number | null>(null);
   const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
   const pendingFollowRenderBottomIndexRef = useRef<number | null>(null);
+  const pendingImmediateFollowScrollSyncRef = useRef(false);
+  const lastQueuedFollowRenderBottomIndexRef = useRef<number | null>(null);
   const pendingFollowScrollSyncRef = useRef(false);
   const pendingFollowViewportRealignRef = useRef(false);
   const recentViewportLayoutChangeRef = useRef(false);
@@ -501,13 +505,15 @@ function TerminalViewComponent({
   const lastSettledScrollTopRef = useRef(0);
   const hasSettledFollowFrameRef = useRef(false);
   const syncScrollHostToRenderBottomRef = useRef<(nextRenderBottomIndex: number) => void>(() => {});
+  const runViewportRefreshRef = useRef<() => void>(() => {});
   const readingModeRef = useRef(false);
   const suppressProgrammaticScrollRef = useRef(false);
-  const wasActiveRef = useRef(active);
-  const previousRefreshActiveRef = useRef(active);
+  const wasActiveRef = useRef(refreshActive);
+  const previousRefreshActiveRef = useRef(refreshActive);
   const previousRefreshSessionIdRef = useRef<string | null>(sessionId);
   const previousSessionIdRef = useRef<string | null>(sessionId);
   const previousInputResetEpochRef = useRef(inputResetEpoch);
+  const previousFollowResetEpochRef = useRef(followResetEpoch);
   const previousFollowViewportMetricsRef = useRef<{
     viewportRows: number;
     rowHeightPx: number;
@@ -563,26 +569,33 @@ function TerminalViewComponent({
   const visibleStartOffset = Math.max(0, visibleWindowStartIndex - renderBuffer.startIndex);
   const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
   const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
-  const visibleRows = useMemo(() => {
+  const renderRows = useMemo(() => {
     const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean; viewportOffset: number }> = [];
-    for (let dataOffset = 0; dataOffset < bufferLines.length; dataOffset += 1) {
+    const visibleDataStartOffset = Math.max(0, renderStartOffset - leadingBlankRows);
+    const visibleDataEndOffset = Math.max(
+      visibleDataStartOffset,
+      Math.min(bufferLines.length, renderEndOffset - leadingBlankRows),
+    );
+
+    for (let dataOffset = visibleDataStartOffset; dataOffset < visibleDataEndOffset; dataOffset += 1) {
       const viewportOffset = leadingBlankRows + dataOffset;
-      if (viewportOffset < renderStartOffset || viewportOffset >= renderEndOffset) {
-        continue;
-      }
       const absoluteIndex = renderBuffer.startIndex + dataOffset;
-      const row = bufferLines[dataOffset] || [];
       rows.push({
         absoluteIndex,
-        row,
+        row: bufferLines[dataOffset] || [],
         isGap: isGapIndex(renderBuffer.gapRanges, absoluteIndex),
         viewportOffset,
       });
     }
     return rows;
-  }, [bufferLines, leadingBlankRows, renderEndOffset, renderStartOffset, renderBuffer.gapRanges, renderBuffer.startIndex]);
-
-  const renderRows = visibleRows;
+  }, [
+    bufferLines,
+    leadingBlankRows,
+    renderEndOffset,
+    renderStartOffset,
+    renderBuffer.gapRanges,
+    renderBuffer.startIndex,
+  ]);
   const termGridPaddingTopPx = renderRows.length > 0
     ? renderRows[0]!.viewportOffset * rowHeightPx
     : totalRows * rowHeightPx;
@@ -604,6 +617,14 @@ function TerminalViewComponent({
     const end = input.value.length;
     input.setSelectionRange(end, end);
   }, [allowDomFocus]);
+  const sessionIdRef = useRef(sessionId);
+  const onInputRef = useRef(onInput);
+  const focusTerminalRef = useRef(focusTerminal);
+  const cursorKeysAppRef = useRef(renderBuffer.cursorKeysApp);
+  sessionIdRef.current = sessionId;
+  onInputRef.current = onInput;
+  focusTerminalRef.current = focusTerminal;
+  cursorKeysAppRef.current = renderBuffer.cursorKeysApp;
 
   const resolveScrollTopForRenderBottomIndex = useCallback((nextRenderBottomIndex: number) => {
     const topOffset = Math.max(
@@ -654,7 +675,7 @@ function TerminalViewComponent({
 
   const syncViewport = useCallback(() => {
     const host = containerRef.current;
-    if (!host || !active || !sessionId) {
+    if (!host || !refreshActive || !sessionId) {
       return;
     }
 
@@ -685,7 +706,7 @@ function TerminalViewComponent({
     const widthSignalCols = widthMode === 'adaptive-phone' ? nextViewport.cols : null;
     const previousWidthSignal = lastWidthModeSignalRef.current;
     const shouldEmitWidthModeSignal = Boolean(
-      active
+      refreshActive
       && sessionId
       && onWidthModeChange
       && (
@@ -726,12 +747,12 @@ function TerminalViewComponent({
       onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
-  }, [active, fontSize, onResize, onWidthModeChange, rowHeight, sessionId, viewportClientHeightPx, viewportRows, widthMode]);
+  }, [fontSize, onResize, onWidthModeChange, refreshActive, rowHeight, sessionId, viewportClientHeightPx, viewportRows, widthMode]);
 
   const emitRenderDemand = useCallback((nextMode: 'follow' | 'reading', nextRenderBottomIndex: number, options?: {
     viewportEndIndex?: number;
   }) => {
-    if (!active || !sessionId || !onViewportChange) {
+    if (!refreshActive || !sessionId || !onViewportChange) {
       return;
     }
 
@@ -750,7 +771,7 @@ function TerminalViewComponent({
       viewportEndIndex,
       viewportRows,
     });
-  }, [active, followDemandAnchorEndIndex, onViewportChange, renderBuffer.startIndex, sessionId, viewportRows]);
+  }, [followDemandAnchorEndIndex, onViewportChange, refreshActive, renderBuffer.startIndex, sessionId, viewportRows]);
 
   const applyScrollState = useCallback((nextScrollTop: number, host?: HTMLDivElement | null) => {
     const { nextMode, nextRenderBottomIndex } = resolveRenderDemandFromScroll(nextScrollTop, host);
@@ -787,7 +808,21 @@ function TerminalViewComponent({
   const queueFollowScrollSync = useCallback((nextRenderBottomIndex: number, options?: {
     guardPendingFollowDrift?: boolean;
   }) => {
-    pendingFollowRenderBottomIndexRef.current = nextRenderBottomIndex;
+    const normalizedTarget = Math.max(minimumRenderBottomIndex, Math.floor(nextRenderBottomIndex));
+    const samePendingTarget = pendingFollowRenderBottomIndexRef.current === normalizedTarget;
+    const sameQueuedTarget = lastQueuedFollowRenderBottomIndexRef.current === normalizedTarget;
+    if (
+      samePendingTarget
+      && sameQueuedTarget
+      && (followScrollSyncTimerRef.current !== null || pendingFollowScrollSyncRef.current)
+    ) {
+      if (options?.guardPendingFollowDrift) {
+        pendingFollowScrollSyncRef.current = true;
+      }
+      return;
+    }
+    pendingFollowRenderBottomIndexRef.current = normalizedTarget;
+    lastQueuedFollowRenderBottomIndexRef.current = normalizedTarget;
     pendingFollowScrollSyncRef.current = pendingFollowScrollSyncRef.current
       || Boolean(options?.guardPendingFollowDrift);
     if (followScrollSyncTimerRef.current !== null) {
@@ -797,12 +832,13 @@ function TerminalViewComponent({
       followScrollSyncTimerRef.current = null;
       const pendingRenderBottomIndex = pendingFollowRenderBottomIndexRef.current;
       pendingFollowRenderBottomIndexRef.current = null;
+      lastQueuedFollowRenderBottomIndexRef.current = null;
       if (pendingRenderBottomIndex === null) {
         return;
       }
       syncScrollHostToRenderBottomRef.current(pendingRenderBottomIndex);
     }, 0);
-  }, []);
+  }, [minimumRenderBottomIndex]);
 
   const cancelPendingFollowScrollSync = useCallback(() => {
     if (followScrollSyncTimerRef.current !== null) {
@@ -814,6 +850,8 @@ function TerminalViewComponent({
       recentViewportLayoutChangeTimerRef.current = null;
     }
     pendingFollowRenderBottomIndexRef.current = null;
+    pendingImmediateFollowScrollSyncRef.current = false;
+    lastQueuedFollowRenderBottomIndexRef.current = null;
     pendingFollowScrollSyncRef.current = false;
     pendingFollowViewportRealignRef.current = false;
     recentViewportLayoutChangeRef.current = false;
@@ -824,6 +862,7 @@ function TerminalViewComponent({
     resetReportedViewport?: boolean;
     guardPendingFollowDrift?: boolean;
     queueScrollSync?: boolean;
+    immediateScrollSync?: boolean;
   }) => {
     const nextRenderBottomIndex = followVisualBottomIndex;
     if (options?.resetReportedViewport) {
@@ -832,6 +871,9 @@ function TerminalViewComponent({
     readingModeRef.current = false;
     setReadingMode(false);
     setRenderBottomIndex(nextRenderBottomIndex);
+    if (options?.immediateScrollSync) {
+      pendingImmediateFollowScrollSyncRef.current = true;
+    }
     if (options?.queueScrollSync !== false) {
       queueFollowScrollSync(nextRenderBottomIndex, {
         guardPendingFollowDrift: options?.guardPendingFollowDrift,
@@ -854,6 +896,9 @@ function TerminalViewComponent({
   }, [effectiveRenderBottomIndex, emitRenderDemand]);
 
   const reconcileViewportAfterBufferShift = useCallback(() => {
+    if (!refreshActive) {
+      return;
+    }
     if (!readingModeRef.current) {
       alignRenderBottomToFollow({
         guardPendingFollowDrift: hasSettledFollowFrameRef.current,
@@ -882,6 +927,7 @@ function TerminalViewComponent({
     alignRenderBottomToFollow,
     effectiveRenderBottomIndex,
     emitReadingRenderDemand,
+    refreshActive,
     maxScrollTop,
     maximumRenderBottomIndex,
     minimumRenderBottomIndex,
@@ -895,6 +941,7 @@ function TerminalViewComponent({
   const runViewportRefresh = useCallback(() => {
     syncViewport();
   }, [syncViewport]);
+  runViewportRefreshRef.current = runViewportRefresh;
 
   const resetTouchGesture = useCallback(() => {
     touchGestureRef.current = {
@@ -915,25 +962,27 @@ function TerminalViewComponent({
     previousSessionIdRef.current = sessionId;
     setReadingMode(false);
     setRenderBottomIndex(followVisualBottomIndex);
+    pendingImmediateFollowScrollSyncRef.current = true;
     lastReportedViewportRef.current = '';
     previousRefreshSessionIdRef.current = sessionId;
     previousInputResetEpochRef.current = inputResetEpoch;
-  }, [followVisualBottomIndex, inputResetEpoch, sessionId]);
+    previousFollowResetEpochRef.current = followResetEpoch;
+  }, [followResetEpoch, followVisualBottomIndex, inputResetEpoch, sessionId]);
 
-  useEffect(() => {
-    const becameActive = active && !wasActiveRef.current;
-    wasActiveRef.current = active;
-    if (!active) {
+  useLayoutEffect(() => {
+    const becameActive = refreshActive && !wasActiveRef.current;
+    wasActiveRef.current = refreshActive;
+    if (!refreshActive) {
       return;
     }
     if (!becameActive) {
       return;
     }
-    alignRenderBottomToFollow({ resetReportedViewport: true });
-  }, [active, alignRenderBottomToFollow]);
+    alignRenderBottomToFollow({ resetReportedViewport: true, immediateScrollSync: true });
+  }, [alignRenderBottomToFollow, refreshActive]);
 
-  useEffect(() => {
-    if (!active) {
+  useLayoutEffect(() => {
+    if (!refreshActive) {
       previousInputResetEpochRef.current = inputResetEpoch;
       return;
     }
@@ -941,27 +990,39 @@ function TerminalViewComponent({
       return;
     }
     previousInputResetEpochRef.current = inputResetEpoch;
-    alignRenderBottomToFollow({ resetReportedViewport: true });
-  }, [active, alignRenderBottomToFollow, inputResetEpoch]);
+    alignRenderBottomToFollow({ resetReportedViewport: true, immediateScrollSync: true });
+  }, [alignRenderBottomToFollow, inputResetEpoch, refreshActive]);
+
+  useLayoutEffect(() => {
+    if (!refreshActive) {
+      previousFollowResetEpochRef.current = followResetEpoch;
+      return;
+    }
+    if (previousFollowResetEpochRef.current === followResetEpoch) {
+      return;
+    }
+    previousFollowResetEpochRef.current = followResetEpoch;
+    alignRenderBottomToFollow({ resetReportedViewport: true, immediateScrollSync: true });
+  }, [alignRenderBottomToFollow, followResetEpoch, refreshActive]);
 
   useEffect(() => {
-    const becameActive = active && !previousRefreshActiveRef.current;
+    const becameActive = refreshActive && !previousRefreshActiveRef.current;
     const sessionChanged = previousRefreshSessionIdRef.current !== sessionId;
-    previousRefreshActiveRef.current = active;
+    previousRefreshActiveRef.current = refreshActive;
     previousRefreshSessionIdRef.current = sessionId;
-    if (!active) {
+    if (!refreshActive) {
       return;
     }
     if (!becameActive && !sessionChanged) {
       return;
     }
     runViewportRefresh();
-  }, [active, runViewportRefresh, sessionId]);
+  }, [refreshActive, runViewportRefresh, sessionId]);
 
   useEffect(() => {
     reconcileViewportAfterBufferShift();
   }, [
-    active,
+    refreshActive,
     renderBuffer.gapRanges,
     bufferLines,
     renderBuffer.startIndex,
@@ -969,35 +1030,34 @@ function TerminalViewComponent({
     followDemandAnchorEndIndex,
     maxScrollTop,
     reconcileViewportAfterBufferShift,
+    renderSnapshotRevision,
     sessionId,
     viewportRows,
   ]);
 
-  useEffect(() => {
-    if (!active || readingModeRef.current) {
-      return;
-    }
-    queueFollowScrollSync(followVisualBottomIndex);
-  }, [active, followVisualBottomIndex, queueFollowScrollSync]);
-
   useLayoutEffect(() => {
-    if (!active || readingModeRef.current) {
+    if (!refreshActive || readingModeRef.current) {
       return;
     }
     const pendingRenderBottomIndex = pendingFollowRenderBottomIndexRef.current;
+    const shouldSyncImmediately = pendingImmediateFollowScrollSyncRef.current;
+    if (pendingRenderBottomIndex === null && !shouldSyncImmediately) {
+      return;
+    }
     if (followScrollSyncTimerRef.current !== null) {
       window.clearTimeout(followScrollSyncTimerRef.current);
       followScrollSyncTimerRef.current = null;
     }
     pendingFollowRenderBottomIndexRef.current = null;
+    pendingImmediateFollowScrollSyncRef.current = false;
     syncScrollHostToRenderBottom(pendingRenderBottomIndex ?? followVisualBottomIndex);
   }, [
-    active,
-    renderBuffer.gapRanges,
-    bufferLines,
+    refreshActive,
+    renderBuffer.revision,
     renderBuffer.startIndex,
     effectiveBufferEndIndex,
     followVisualBottomIndex,
+    renderSnapshotRevision,
     rowHeightPx,
     syncScrollHostToRenderBottom,
     viewportRows,
@@ -1007,7 +1067,7 @@ function TerminalViewComponent({
     const previousMetrics = previousFollowViewportMetricsRef.current;
     previousFollowViewportMetricsRef.current = { viewportRows, rowHeightPx, clientHeightPx: viewportClientHeightPx };
 
-    if (!active || readingModeRef.current) {
+    if (!refreshActive || readingModeRef.current) {
       return;
     }
 
@@ -1023,32 +1083,33 @@ function TerminalViewComponent({
     }
 
     syncScrollHostToRenderBottom(followVisualBottomIndex);
-  }, [active, followVisualBottomIndex, rowHeightPx, syncScrollHostToRenderBottom, viewportClientHeightPx, viewportRows]);
+  }, [followVisualBottomIndex, refreshActive, rowHeightPx, syncScrollHostToRenderBottom, viewportClientHeightPx, viewportRows]);
 
   useEffect(() => {
     const host = containerRef.current;
     if (!host) {
       return;
     }
-    runViewportRefresh();
-    const observer = new ResizeObserver(() => runViewportRefresh());
+    runViewportRefreshRef.current();
+    const observer = new ResizeObserver(() => runViewportRefreshRef.current());
     observer.observe(host);
     return () => observer.disconnect();
-  }, [runViewportRefresh]);
+  }, []);
 
   useEffect(() => {
-    if (!active) {
+    if (!refreshActive) {
       return;
     }
     emitRenderDemandSignalsForCurrentFrame();
   }, [
-    active,
+    refreshActive,
     renderBuffer.gapRanges,
     bufferLines,
     renderBuffer.startIndex,
     effectiveBufferEndIndex,
     emitRenderDemandSignalsForCurrentFrame,
     followDemandAnchorEndIndex,
+    renderSnapshotRevision,
     viewportRows,
   ]);
 
@@ -1085,10 +1146,11 @@ function TerminalViewComponent({
     let flushRetryTimer: number | null = null;
 
     const sendTerminalInput = (value: string) => {
-      if (!sessionId) {
+      const currentSessionId = sessionIdRef.current;
+      if (!currentSessionId) {
         return;
       }
-      onInput?.(sessionId, value);
+      onInputRef.current?.(currentSessionId, value);
     };
 
     const clearScheduledFlush = () => {
@@ -1111,7 +1173,7 @@ function TerminalViewComponent({
       }
       sendTerminalInput(input.value.replace(/\n/g, '\r'));
       input.value = '';
-      focusTerminal();
+      focusTerminalRef.current();
     };
 
     const scheduleFlushDomInputValue = () => {
@@ -1182,7 +1244,7 @@ function TerminalViewComponent({
         }
       }
 
-      const arrows = renderBuffer.cursorKeysApp ? APP_CURSOR_KEYS : NORMAL_CURSOR_KEYS;
+      const arrows = cursorKeysAppRef.current ? APP_CURSOR_KEYS : NORMAL_CURSOR_KEYS;
       if (event.key in arrows) {
         event.preventDefault();
         sendTerminalInput(arrows[event.key as keyof typeof arrows]);
@@ -1231,7 +1293,7 @@ function TerminalViewComponent({
       input.removeEventListener('change', handleChange);
       input.removeEventListener('keydown', handleKeyDown);
     };
-  }, [allowDomFocus, focusTerminal, onInput, renderBuffer.cursorKeysApp, sessionId]);
+  }, [allowDomFocus]);
 
   useEffect(() => {
     if (!active || !allowDomFocus) {
@@ -1423,7 +1485,11 @@ function TerminalViewComponent({
             cellWidthPx={resolvedCellWidthPx}
             isGap={isGap}
             theme={theme}
-            cursor={renderBuffer.cursor}
+            cursorColumn={
+              renderBuffer.cursor && renderBuffer.cursor.visible && renderBuffer.cursor.rowIndex === absoluteIndex
+                ? resolveCursorCellColumn(row, renderBuffer.cursor.col)
+                : -1
+            }
             showAbsoluteLineNumbers={showAbsoluteLineNumbers}
             discontinuousLineNumber={isGap || hasDiscontinuousNeighbor(renderRows, rowIndex)}
           />
@@ -1436,7 +1502,10 @@ function TerminalViewComponent({
         autoCapitalize="off"
         autoCorrect="off"
         autoComplete="off"
+        enterKeyHint="done"
+        inputMode="text"
         spellCheck={false}
+        aria-hidden={domInputOffscreen ? 'true' : undefined}
         style={{
           position: 'absolute',
           left: '-9999px',

@@ -1,4 +1,4 @@
-import type { Host, ServerMessage, TerminalWidthMode } from '../lib/types';
+import type { Host, ServerMessage } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { buildSessionConnectPayload, buildSessionOpenPayload } from './session-context-transport-wire-runtime';
 import {
@@ -39,6 +39,7 @@ export function handleControlTransportMessageOrchestrationRuntime(options: {
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => unknown;
+  failPendingControlTargetIntents?: (sessionId: string, message: string, retryable: boolean) => void;
   msg: ServerMessage;
 }) {
   handleControlTransportMessageBaseRuntime({
@@ -47,6 +48,7 @@ export function handleControlTransportMessageOrchestrationRuntime(options: {
     pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
     clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
     writeSessionTransportToken: options.writeSessionTransportToken,
+    failPendingControlTargetIntents: options.failPendingControlTargetIntents,
   }, options.msg);
 }
 
@@ -64,7 +66,6 @@ export function failPendingControlTargetIntentsOrchestrationRuntime(options: {
 
 export function ensureControlTransportForSessionOpenOrchestrationRuntime(options: {
   intent: PendingSessionTransportOpenIntent;
-  terminalWidthMode: TerminalWidthMode;
   readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
   readSessionTargetKey: (sessionId: string) => string | null;
@@ -77,7 +78,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
-  recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
+  recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   handleControlTransportMessage: (options: { sessionId: string }, msg: ServerMessage) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   sessionHandshakeTimeoutMs: number;
@@ -90,7 +91,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
         host: options.intent.host,
         resolvedSessionName: options.intent.resolvedSessionName,
         sessionId: options.intent.sessionId,
-        terminalWidthMode: options.terminalWidthMode,
+        openRequestId: options.intent.openRequestId,
       }),
     },
   });
@@ -110,13 +111,14 @@ export function primeSessionTransportSocketRuntime(options: {
 
 export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options: {
   sessionId: string;
+  openRequestId: string;
   host: Host;
   resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   activate?: boolean;
-  terminalWidthMode: TerminalWidthMode;
   readActiveSessionId: () => string | null;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportToken: (sessionId: string) => string | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
@@ -137,10 +139,12 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
     debugScope: 'connect' | 'reconnect';
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
+    onClosed: (reason?: string) => void;
   }, msg: ServerMessage) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onConnected: () => void;
+  onClosed?: (reason?: string) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
   bindSessionTransportSocketLifecycleBaseRuntime({
@@ -149,9 +153,10 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
       host: options.host,
       resolvedSessionName: options.resolvedSessionName,
       sessionId: options.sessionId,
-      terminalWidthMode: options.terminalWidthMode,
+      openRequestId: options.openRequestId,
       sessionTransportToken: options.readSessionTransportToken(options.sessionId),
     }),
+    onClosed: options.onClosed,
   });
 }
 

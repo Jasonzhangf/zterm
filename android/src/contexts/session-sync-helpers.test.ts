@@ -35,6 +35,7 @@ import {
   visibleRangeStatesEqual,
   doesSessionPullStateCoverRequest,
   doesSessionPullStateMatchExactLocalSnapshot,
+  settleSessionPullStatesWithBufferSync,
 } from './session-sync-helpers';
 
 function makeSession(overrides?: Partial<Session>): Session {
@@ -74,7 +75,7 @@ describe('session sync helper refresh planner', () => {
   it('requests head on foreground resume for active open transport', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
-      isActive: true,
+      isRefreshTarget: true,
       sessionState: 'connected',
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
@@ -91,7 +92,7 @@ describe('session sync helper refresh planner', () => {
   it('probes stale active transport before reconnecting', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
-      isActive: true,
+      isRefreshTarget: true,
       sessionState: 'connected',
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
@@ -108,7 +109,7 @@ describe('session sync helper refresh planner', () => {
   it('reconnects when active foreground restore finds no usable transport and reconnect is allowed', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
-      isActive: true,
+      isRefreshTarget: true,
       sessionState: 'closed',
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: false,
@@ -122,7 +123,7 @@ describe('session sync helper refresh planner', () => {
   it('skips active tick when reconnect is already in flight', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
-      isActive: true,
+      isRefreshTarget: true,
       sessionState: 'reconnecting',
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: true,
@@ -131,6 +132,23 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-tick',
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
+  });
+
+  it('requests head for a live non-focused pane target', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
   });
 });
 
@@ -431,6 +449,7 @@ describe('session sync helper transport open intent truth', () => {
 
     intent.finalizeFailure('boom', true);
 
+    expect(intent.openRequestId).toMatch(/^s-1:open:/);
     expect(clearHandshakeTimeout).toHaveBeenCalledTimes(1);
     expect(finalizeSocketFailureBaseline).toHaveBeenCalledTimes(1);
     expect(onHandshakeFailure).toHaveBeenCalledWith('boom', true, 'handshake');
@@ -458,6 +477,29 @@ describe('session sync helper transport open intent truth', () => {
     expect(onHandshakeConnected).toHaveBeenCalledWith(expect.anything(), 'tmux-1');
     expect(onHandshakeFailure).toHaveBeenCalledTimes(1);
     expect(onHandshakeFailure).toHaveBeenCalledWith('late-boom', true, 'live');
+  });
+
+  it('generates a fresh openRequestId per pending open intent', () => {
+    const intent1 = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn(),
+    });
+    const intent2 = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'reconnect',
+      clearHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn(),
+    });
+
+    expect(intent1.openRequestId).not.toBe(intent2.openRequestId);
+    expect(intent1.openRequestId).not.toBe('s-1');
+    expect(intent2.openRequestId).not.toBe('s-1');
   });
 
   it('suppresses handshake continuation when baseline says stop', () => {
@@ -551,6 +593,34 @@ describe('session sync helper visible-range truth', () => {
     })).toBe(true);
   });
 
+  it('re-fetches the full follow request window when daemon revision advances without tail growth', () => {
+    const session = makeSession({
+      daemonHeadRevision: 7,
+      daemonHeadEndIndex: 120,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 80,
+        endIndex: 120,
+        revision: 6,
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      {
+        startIndex: 96,
+        endIndex: 120,
+        viewportRows: 24,
+      },
+      { purpose: 'tail-refresh' },
+    )).toMatchObject({
+      knownRevision: 6,
+      localStartIndex: 80,
+      localEndIndex: 120,
+      requestStartIndex: 48,
+      requestEndIndex: 120,
+    });
+  });
+
   it('builds reading-repair payload from visible range request window and gaps', () => {
     const session = makeSession({
       daemonHeadEndIndex: 80,
@@ -576,6 +646,31 @@ describe('session sync helper visible-range truth', () => {
         { startIndex: 8, endIndex: 56 },
         { startIndex: 72, endIndex: 76 },
       ],
+    });
+  });
+
+  it('keeps same-end follow refresh on the current tail screen when local tail still has gaps', () => {
+    const session = makeSession({
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        gapRanges: [{ startIndex: 68, endIndex: 69 }],
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { purpose: 'tail-refresh' },
+    )).toMatchObject({
+      knownRevision: 5,
+      localStartIndex: 8,
+      localEndIndex: 80,
+      requestStartIndex: 56,
+      requestEndIndex: 80,
     });
   });
 
@@ -689,5 +784,28 @@ describe('session sync helper pull-state truth', () => {
       requestStartIndex: 187519,
       requestEndIndex: 187550,
     })).toBe(true);
+  });
+
+  it('treats a compact same-end tail payload as settling an existing-window refresh', () => {
+    expect(settleSessionPullStatesWithBufferSync({
+      'tail-refresh': {
+        purpose: 'tail-refresh',
+        startedAt: 1,
+        targetHeadRevision: 7,
+        targetStartIndex: 48,
+        targetEndIndex: 120,
+        requestKnownRevision: 5,
+        requestLocalStartIndex: 0,
+        requestLocalEndIndex: 120,
+      },
+    }, {
+      revision: 7,
+      startIndex: 96,
+      endIndex: 120,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      lines: [{ index: 96, cells: [] }],
+    })).toBe(null);
   });
 });

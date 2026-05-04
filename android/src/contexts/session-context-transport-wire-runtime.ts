@@ -1,17 +1,16 @@
-import type { Host, HostConfigMessage, TerminalWidthMode } from '../lib/types';
+import type { Host, HostConfigMessage } from '../lib/types';
 import { buildHostConfigMessage } from './session-sync-helpers';
 
 export function buildSessionOpenPayload(options: {
   host: Host;
   resolvedSessionName: string;
   sessionId: string;
-  terminalWidthMode: TerminalWidthMode;
+  openRequestId: string;
 }): HostConfigMessage {
   return buildHostConfigMessage(
     options.host,
     options.resolvedSessionName,
-    options.sessionId,
-    options.terminalWidthMode,
+    options.openRequestId,
   );
 }
 
@@ -19,14 +18,13 @@ export function buildSessionConnectPayload(options: {
   host: Host;
   resolvedSessionName: string;
   sessionId: string;
-  terminalWidthMode: TerminalWidthMode;
+  openRequestId: string;
   sessionTransportToken?: string | null;
 }): HostConfigMessage {
   return buildHostConfigMessage(
     options.host,
     options.resolvedSessionName,
-    options.sessionId,
-    options.terminalWidthMode,
+    options.openRequestId,
     options.sessionTransportToken,
   );
 }

@@ -16,6 +16,7 @@ import {
   createSessionSyncRuntime,
   createTransportInfraAccessorsRuntime,
   deleteSessionSyncRuntime,
+  getSessionRenderBufferStoreRuntime,
   getSessionRenderBufferSnapshotRuntime,
   hasPendingSessionTransportOpenRuntime,
   incrementConnectedSyncRuntime,
@@ -26,13 +27,14 @@ import {
   moveSessionSyncRuntime,
   readSessionBufferSnapshotRuntime,
   readSessionTransportTokenRuntime,
-  recordSessionRenderCommitInfraRuntime,
   recordSessionRxInfraRuntime,
+  recordSessionRxBytesOnlyInfraRuntime,
   recordSessionTxInfraRuntime,
   resetSessionTransportPullBookkeepingInfraRuntime,
   resolveSessionCacheLinesRuntime,
   sendSocketPayloadInfraRuntime,
   setActiveSessionSyncRuntime,
+  setLiveSessionsSyncRuntime,
   setScheduleStateForSessionRuntime,
   setSessionHandshakeTimeoutInfraRuntime,
   setSessionTitleSyncRuntime,
@@ -46,14 +48,9 @@ export function createSessionInfraFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
   dispatch: React.Dispatch<SessionAction>;
   reduceSessionAction: (state: SessionManagerState, action: SessionAction) => SessionManagerState;
-  sessionStore: {
-    addSession: (session: Session) => void;
-    updateSession: (id: string, updates: Partial<Session>) => void;
-    deleteSession: (id: string) => void;
-    moveSession: (id: string, toIndex: number) => void;
-  };
   transportRuntimeStoreRef: { current: any };
   sessionBufferStoreRef: { current: any };
+  sessionRenderGateRef: { current: any };
   sessionHeadStoreRef: { current: any };
   sessionDebugMetricsStoreRef: { current: any };
   scheduleStatesRef: { current: Record<string, SessionScheduleState> };
@@ -99,7 +96,6 @@ export function createSessionInfraFacadeRuntime(options: {
       id,
       updates,
       applySessionAction,
-      sessionStore: options.sessionStore,
     });
   };
 
@@ -110,13 +106,18 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
+  const setLiveSessionIdsSync = (ids: string[]) => {
+    setLiveSessionsSyncRuntime({
+      ids,
+      applySessionAction,
+    });
+  };
+
   const createSessionSync = (session: Session, activate: boolean) => {
     createSessionSyncRuntime({
       session,
       activate,
       applySessionAction,
-      sessionStore: options.sessionStore,
-      setActiveSessionSync,
     });
   };
 
@@ -124,7 +125,6 @@ export function createSessionInfraFacadeRuntime(options: {
     deleteSessionSyncRuntime({
       id,
       applySessionAction,
-      sessionStore: options.sessionStore,
     });
   };
 
@@ -133,7 +133,6 @@ export function createSessionInfraFacadeRuntime(options: {
       id,
       toIndex,
       applySessionAction,
-      sessionStore: options.sessionStore,
     });
   };
 
@@ -200,12 +199,23 @@ export function createSessionInfraFacadeRuntime(options: {
   const getSessionRenderBufferSnapshot = (sessionId: string): SessionRenderBufferSnapshot => {
     return getSessionRenderBufferSnapshotRuntime({
       sessionId,
-      sessionBufferStoreRef: options.sessionBufferStoreRef,
+      sessionRenderStoreRef: {
+        current: getSessionRenderBufferStoreRuntime({
+          sessionRenderGateRef: options.sessionRenderGateRef,
+        }),
+      },
     });
   };
 
   const getSessionBufferStore = () => options.sessionBufferStoreRef.current;
+  const getSessionRenderBufferStore = () => getSessionRenderBufferStoreRuntime({
+    sessionRenderGateRef: options.sessionRenderGateRef,
+  });
   const getSessionHeadStore = () => options.sessionHeadStoreRef.current;
+
+  const scheduleSessionRenderCommit = (sessionId: string) => {
+    options.sessionRenderGateRef.current.scheduleCommit(sessionId);
+  };
 
   const recordSessionTx = (sessionId: string, data: string | ArrayBuffer, recordOptions?: RecordSessionTxOptions) => {
     recordSessionTxInfraRuntime({
@@ -231,10 +241,13 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
-  const recordSessionRenderCommit = (sessionId: string) => {
-    recordSessionRenderCommitInfraRuntime({
+  const recordSessionRxBytesOnly = (sessionId: string, data: string | ArrayBuffer) => {
+    recordSessionRxBytesOnlyInfraRuntime({
       sessionId,
-      sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
+      data,
+      refs: {
+        sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
+      },
     });
   };
 
@@ -383,6 +396,7 @@ export function createSessionInfraFacadeRuntime(options: {
     readSessionBufferSnapshot,
     updateSessionSync,
     setActiveSessionSync,
+    setLiveSessionIdsSync,
     createSessionSync,
     deleteSessionSync,
     moveSessionSync,
@@ -397,10 +411,12 @@ export function createSessionInfraFacadeRuntime(options: {
     resolveSessionCacheLines,
     getSessionRenderBufferSnapshot,
     getSessionBufferStore,
+    getSessionRenderBufferStore,
     getSessionHeadStore,
+    scheduleSessionRenderCommit,
     recordSessionTx,
     recordSessionRx,
-    recordSessionRenderCommit,
+    recordSessionRxBytesOnly,
     markPendingInputTailRefresh,
     clearSessionPullState,
     settleSessionPullState,

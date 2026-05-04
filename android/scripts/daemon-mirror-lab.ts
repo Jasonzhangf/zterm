@@ -672,9 +672,7 @@ class AttachedTmuxOperator {
 class DaemonProbe {
   private readonly wsUrl: string;
 
-  private readonly authToken: string;
-
-  private readonly clientSessionId: string;
+  private readonly openRequestId: string;
 
   private controlWs: WebSocket | null = null;
 
@@ -698,8 +696,7 @@ class DaemonProbe {
 
   constructor(wsUrl: string, authToken: string) {
     this.wsUrl = authToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : wsUrl;
-    this.authToken = authToken;
-    this.clientSessionId = `probe-${Math.random().toString(36).slice(2, 10)}`;
+    this.openRequestId = `probe-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   get payload() {
@@ -744,25 +741,21 @@ class DaemonProbe {
       this.controlWs = controlWs;
 
       controlWs.on('open', () => {
+        const sessionOpenPayload = {
+          openRequestId: this.openRequestId,
+          sessionName: LAB_SESSION_NAME,
+          cols: LAB_COLS,
+          rows: LAB_ROWS,
+        };
         const sessionOpenMessage: ClientMessage = {
           type: 'session-open',
-          payload: {
-            clientSessionId: this.clientSessionId,
-            name: LAB_SESSION_NAME,
-            bridgeHost: '127.0.0.1',
-            bridgePort: 0,
-            sessionName: LAB_SESSION_NAME,
-            cols: LAB_COLS,
-            rows: LAB_ROWS,
-            authToken: this.authToken,
-            authType: 'password',
-          },
+          payload: sessionOpenPayload,
         };
         this.eventHistory.push({
           at: nowStamp(),
           direction: 'sent',
           type: sessionOpenMessage.type,
-          payload: summarizeProbeMessage(sessionOpenMessage.type, sessionOpenMessage.payload),
+          payload: summarizeProbeMessage(sessionOpenMessage.type, sessionOpenPayload),
         });
         controlWs.send(JSON.stringify(sessionOpenMessage));
       });
@@ -787,26 +780,22 @@ class DaemonProbe {
           const sessionWs = new WebSocket(this.buildTransportUrl('session'));
           this.ws = sessionWs;
           sessionWs.on('open', () => {
+            const connectPayload = {
+              openRequestId: this.openRequestId,
+              sessionTransportToken: message.payload.sessionTransportToken,
+              sessionName: LAB_SESSION_NAME,
+              cols: LAB_COLS,
+              rows: LAB_ROWS,
+            };
             const connectMessage: ClientMessage = {
               type: 'connect',
-              payload: {
-                clientSessionId: this.clientSessionId,
-                sessionTransportToken: message.payload.sessionTransportToken,
-                name: LAB_SESSION_NAME,
-                bridgeHost: '127.0.0.1',
-                bridgePort: 0,
-                sessionName: LAB_SESSION_NAME,
-                cols: LAB_COLS,
-                rows: LAB_ROWS,
-                authToken: this.authToken,
-                authType: 'password',
-              },
+              payload: connectPayload,
             };
             this.eventHistory.push({
               at: nowStamp(),
               direction: 'sent',
               type: connectMessage.type,
-              payload: summarizeProbeMessage(connectMessage.type, connectMessage.payload),
+              payload: summarizeProbeMessage(connectMessage.type, connectPayload),
             });
             sessionWs.send(JSON.stringify(connectMessage));
           });

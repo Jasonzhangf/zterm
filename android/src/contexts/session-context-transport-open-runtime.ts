@@ -18,6 +18,10 @@ import {
   createPendingSessionTransportOpenIntent,
   type PendingSessionTransportOpenIntent,
 } from './session-sync-helpers';
+import {
+  deletePendingSessionTransportOpenIntent,
+  setPendingSessionTransportOpenIntent,
+} from './session-context-open-intent-store';
 
 interface MutableRefObject<T> {
   current: T;
@@ -106,6 +110,7 @@ export function openSessionTransportByIntentRuntime(options: {
   primeSessionTransportSocket: (sessionId: string, ws: BridgeTransportSocket) => void;
   bindSessionTransportSocketLifecycle: (options: {
     sessionId: string;
+    openRequestId: string;
     host: Host;
     resolvedSessionName: string;
     ws: BridgeTransportSocket;
@@ -114,10 +119,11 @@ export function openSessionTransportByIntentRuntime(options: {
     finalizeFailure: (message: string, retryable: boolean) => void;
     onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
     onConnected: () => void;
+    onClosed?: (reason?: string) => void;
   }) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
 }) {
-  const { sessionId, host, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected } = options.intent;
+  const { sessionId, host, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected, onClosed } = options.intent;
   const sessionTransportToken = options.readSessionTransportToken(sessionId);
   if (!sessionTransportToken) {
     finalizeFailure('missing session transport token', true);
@@ -137,6 +143,7 @@ export function openSessionTransportByIntentRuntime(options: {
 
   options.bindSessionTransportSocketLifecycle({
     sessionId,
+    openRequestId: options.intent.openRequestId,
     host,
     resolvedSessionName: options.intent.resolvedSessionName,
     ws,
@@ -148,6 +155,7 @@ export function openSessionTransportByIntentRuntime(options: {
       options.writeSessionTransportToken(sessionId, null);
       onConnected(ws);
     },
+    onClosed,
   });
 }
 
@@ -162,6 +170,7 @@ export function queueSessionTransportOpenIntentRuntime(options: {
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   ensureControlTransportForSessionOpen: (intent: PendingSessionTransportOpenIntent) => void;
 }) {
+  options.clearSessionHandshakeTimeout(options.intentOptions.sessionId);
   const pendingIntent = createPendingSessionTransportOpenIntent({
     ...options.intentOptions,
     resolvedSessionName: getResolvedSessionName(options.intentOptions.host),
@@ -171,7 +180,7 @@ export function queueSessionTransportOpenIntentRuntime(options: {
     ),
   });
 
-  options.pendingSessionTransportOpenIntentsRef.current.set(options.intentOptions.sessionId, pendingIntent);
+  setPendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, pendingIntent);
   options.ensureControlTransportForSessionOpen(pendingIntent);
 }
 
@@ -226,7 +235,7 @@ export function applyTransportOpenLiveFailureEffectsRuntime(options: {
   const liveFailureEffectPlan = buildTransportOpenLiveFailureEffectPlan(options.debugScope);
   options.cleanupSocket(options.sessionId);
   if (liveFailureEffectPlan.clearPendingIntent) {
-    options.pendingSessionTransportOpenIntentsRef.current.delete(options.sessionId);
+    deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, options.sessionId);
   }
   if (liveFailureEffectPlan.clearTransportToken) {
     options.writeSessionTransportToken(options.sessionId, null);
@@ -318,6 +327,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
     sessionName: string;
     ws: BridgeTransportSocket;
   }) => void;
+  emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -351,6 +361,10 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
         ws,
       });
     },
+    onClosed: (reason) => {
+      options.reconnectRuntimesRef.current.delete(options.sessionId);
+      options.emitSessionStatus(options.sessionId, 'closed', reason);
+    },
   };
 }
 
@@ -371,6 +385,7 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
     sessionName: string;
     ws: BridgeTransportSocket;
   }) => void;
+  emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -396,6 +411,9 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
         sessionName: connectedSessionName,
         ws,
       });
+    },
+    onClosed: (reason) => {
+      options.emitSessionStatus(options.sessionId, 'closed', reason);
     },
   };
 }

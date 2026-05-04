@@ -10,11 +10,12 @@ import type {
   SessionDebugOverlayMetrics,
   SessionScheduleState,
   SessionState,
+  TerminalViewportState,
   TerminalVisibleRange,
-  TerminalWidthMode,
 } from '../lib/types';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
+import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type {
   QueueSessionTransportOpenIntentOptions as SessionTransportOpenIntentHelperOptions,
@@ -26,6 +27,8 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 export interface SessionManagerState {
   sessions: Session[];
   activeSessionId: string | null;
+  liveSessionIds: string[];
+  liveSessionIdsExplicit: boolean;
   connectedCount: number;
 }
 
@@ -35,6 +38,7 @@ export type SessionAction =
   | { type: 'MOVE_SESSION'; id: string; toIndex: number }
   | { type: 'DELETE_SESSION'; id: string }
   | { type: 'SET_ACTIVE_SESSION'; id: string }
+  | { type: 'SET_LIVE_SESSIONS'; ids: string[] }
   | { type: 'SET_SESSION_STATE'; id: string; state: SessionState }
   | { type: 'SET_SESSION_TITLE'; id: string; title: string }
   | { type: 'INCREMENT_CONNECTED' }
@@ -43,24 +47,52 @@ export type SessionAction =
 export const initialSessionManagerState: SessionManagerState = {
   sessions: [],
   activeSessionId: null,
+  liveSessionIds: [],
+  liveSessionIdsExplicit: false,
   connectedCount: 0,
 };
+
+function areSessionPatchFieldsEqual(session: Session, updates: Partial<Session>) {
+  const entries = Object.entries(updates) as Array<[keyof Session, Session[keyof Session]]>;
+  if (entries.length === 0) {
+    return true;
+  }
+  return entries.every(([key, value]) => Object.is(session[key], value));
+}
 
 export function reduceSessionAction(state: SessionManagerState, action: SessionAction): SessionManagerState {
   switch (action.type) {
     case 'CREATE_SESSION': {
       const nextSessions = [...state.sessions.filter((session) => session.id !== action.session.id), action.session];
+      const nextActiveSessionId = action.activate ? action.session.id : state.activeSessionId || action.session.id;
+      const nextLiveSessionIds = state.liveSessionIdsExplicit
+        ? (
+          state.liveSessionIds.includes(action.session.id)
+            ? state.liveSessionIds
+            : state.liveSessionIds
+        )
+        : (nextActiveSessionId ? [nextActiveSessionId] : []);
       return {
         ...state,
         sessions: nextSessions,
-        activeSessionId: action.activate ? action.session.id : state.activeSessionId || action.session.id,
+        activeSessionId: nextActiveSessionId,
+        liveSessionIds: nextLiveSessionIds,
       };
     }
-    case 'UPDATE_SESSION':
-      return {
-        ...state,
-        sessions: state.sessions.map((session) => (session.id === action.id ? { ...session, ...action.updates } : session)),
-      };
+    case 'UPDATE_SESSION': {
+      let changed = false;
+      const nextSessions = state.sessions.map((session) => {
+        if (session.id !== action.id) {
+          return session;
+        }
+        if (areSessionPatchFieldsEqual(session, action.updates)) {
+          return session;
+        }
+        changed = true;
+        return { ...session, ...action.updates };
+      });
+      return changed ? { ...state, sessions: nextSessions } : state;
+    }
     case 'MOVE_SESSION': {
       const currentIndex = state.sessions.findIndex((session) => session.id === action.id);
       if (currentIndex < 0) {
@@ -80,24 +112,69 @@ export function reduceSessionAction(state: SessionManagerState, action: SessionA
     }
     case 'DELETE_SESSION': {
       const nextSessions = state.sessions.filter((session) => session.id !== action.id);
+      const nextActiveSessionId = state.activeSessionId === action.id ? (nextSessions[0]?.id || null) : state.activeSessionId;
+      const filteredLiveSessionIds = state.liveSessionIds.filter((sessionId) => sessionId !== action.id);
+      const nextLiveSessionIds = state.liveSessionIdsExplicit
+        ? (
+          filteredLiveSessionIds.length === 0 && nextActiveSessionId
+            ? [nextActiveSessionId]
+            : filteredLiveSessionIds
+        )
+        : (nextActiveSessionId ? [nextActiveSessionId] : []);
       return {
         ...state,
         sessions: nextSessions,
-        activeSessionId: state.activeSessionId === action.id ? (nextSessions[0]?.id || null) : state.activeSessionId,
+        activeSessionId: nextActiveSessionId,
+        liveSessionIds: nextLiveSessionIds,
       };
     }
-    case 'SET_ACTIVE_SESSION':
-      return { ...state, activeSessionId: action.id };
-    case 'SET_SESSION_STATE':
+    case 'SET_ACTIVE_SESSION': {
+      if (state.activeSessionId === action.id) {
+        return state;
+      }
       return {
         ...state,
-        sessions: state.sessions.map((session) => (session.id === action.id ? { ...session, state: action.state } : session)),
+        activeSessionId: action.id,
+        liveSessionIds: state.liveSessionIdsExplicit ? state.liveSessionIds : [action.id],
       };
-    case 'SET_SESSION_TITLE':
+    }
+    case 'SET_LIVE_SESSIONS': {
+      const normalizedIds = Array.from(new Set(action.ids.filter((id) => typeof id === 'string' && id.trim().length > 0)));
+      const liveSessionIds = normalizedIds.filter((id) => state.sessions.some((session) => session.id === id));
+      if (
+        liveSessionIds.length === state.liveSessionIds.length
+        && liveSessionIds.every((id, index) => state.liveSessionIds[index] === id)
+      ) {
+        return state;
+      }
       return {
         ...state,
-        sessions: state.sessions.map((session) => (session.id === action.id ? { ...session, title: action.title } : session)),
+        liveSessionIds,
+        liveSessionIdsExplicit: true,
       };
+    }
+    case 'SET_SESSION_STATE': {
+      let changed = false;
+      const nextSessions = state.sessions.map((session) => {
+        if (session.id !== action.id || session.state === action.state) {
+          return session;
+        }
+        changed = true;
+        return { ...session, state: action.state };
+      });
+      return changed ? { ...state, sessions: nextSessions } : state;
+    }
+    case 'SET_SESSION_TITLE': {
+      let changed = false;
+      const nextSessions = state.sessions.map((session) => {
+        if (session.id !== action.id || session.title === action.title) {
+          return session;
+        }
+        changed = true;
+        return { ...session, title: action.title };
+      });
+      return changed ? { ...state, sessions: nextSessions } : state;
+    }
     case 'INCREMENT_CONNECTED':
       return { ...state, connectedCount: state.connectedCount + 1 };
     case 'DECREMENT_CONNECTED':
@@ -118,6 +195,7 @@ export interface SessionContextValue {
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string) => void;
   switchSession: (id: string) => void;
+  setLiveSessionIds: (ids: string[]) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
@@ -131,9 +209,7 @@ export interface SessionContextValue {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
-  resizeTerminal: (sessionId: string, cols: number, rows: number) => void;
-  setTerminalWidthMode: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
-  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange) => void;
+  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
@@ -144,6 +220,7 @@ export interface SessionContextValue {
   getSession: (id: string) => Session | null;
   getSessionRenderBufferSnapshot: (sessionId: string) => SessionRenderBufferSnapshot;
   getSessionBufferStore: () => SessionBufferStore;
+  getSessionRenderBufferStore: () => SessionRenderBufferStore;
   getSessionHeadStore: () => SessionHeadStore;
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;

@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react';
 import type { Host, ServerMessage, SessionScheduleState } from '../lib/types';
-import { SessionStore } from '../lib/session/SessionStore';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
 import { createSessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
+import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
 import type {
   PendingSessionTransportOpenIntent,
@@ -43,24 +43,29 @@ type HandleSocketServerMessageFn = (params: {
 export function useSessionProviderRuntime(options: {
   appForegroundActive?: boolean;
 }) {
-  const sessionStoreRef = useRef(new SessionStore());
-  const sessionStore = sessionStoreRef.current;
   const [scheduleStates, setScheduleStates] = useState<Record<string, SessionScheduleState>>({});
   const sessionDebugMetricsStoreRef = useRef(createSessionDebugMetricsStore());
   const transportRuntimeStoreRef = useRef(createSessionTransportRuntimeStore());
   const sessionBufferStoreRef = useRef(createSessionBufferStore());
   const sessionHeadStoreRef = useRef(createSessionHeadStore());
+  const sessionRenderGateRef = useRef(createSessionRenderGate({
+    liveBufferStore: sessionBufferStoreRef.current,
+    liveHeadStore: sessionHeadStoreRef.current,
+    recordSessionRenderCommit: (sessionId: string) => {
+      sessionDebugMetricsStoreRef.current.recordRenderCommit(sessionId);
+    },
+  }));
   const pingIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
   const sessionVisibleRangeRef = useRef<Map<string, SessionVisibleRangeState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
   const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
-  const viewportSizeRef = useRef<Map<string, { cols: number; rows: number }>>(new Map());
   const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
   const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
+  const lastActiveReentryAtRef = useRef<Map<string, number>>(new Map());
   const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const pendingInputTailRefreshRef = useRef<Map<string, { requestedAt: number; localRevision: number }>>(new Map());
@@ -95,13 +100,13 @@ export function useSessionProviderRuntime(options: {
   const handleSocketServerMessageRef = useRef<HandleSocketServerMessageFn | null>(null);
 
   return {
-    sessionStore,
     scheduleStates,
     setScheduleStates,
     refs: {
       sessionDebugMetricsStoreRef,
       transportRuntimeStoreRef,
       sessionBufferStoreRef,
+      sessionRenderGateRef,
       sessionHeadStoreRef,
       pingIntervalsRef,
       handshakeTimeoutsRef,
@@ -109,11 +114,11 @@ export function useSessionProviderRuntime(options: {
       lastPongAtRef,
       lastServerActivityAtRef,
       staleTransportProbeAtRef,
-      viewportSizeRef,
       reconnectRuntimesRef,
       manualCloseRef,
       pendingInputQueueRef,
       lastActivatedSessionIdRef,
+      lastActiveReentryAtRef,
       sessionBufferHeadsRef,
       sessionRevisionResetRef,
       pendingInputTailRefreshRef,

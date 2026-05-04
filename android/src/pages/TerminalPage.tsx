@@ -1,10 +1,9 @@
-import { memo as ReactMemo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { TerminalView } from '../components/TerminalView';
-import type { SessionBufferStore } from '../lib/session-buffer-store';
-import type { SessionHeadStore } from '../lib/session-head-store';
+import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type SessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
@@ -13,6 +12,7 @@ import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
+import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { resolveLayoutProfile, type LayoutProfile } from '../../../packages/shared/src/layout/profile';
@@ -25,7 +25,6 @@ import {
   type SavedTabList,
   type Session,
   type SessionDebugOverlayMetrics,
-  type SessionDraftMap,
   type SessionScheduleState,
   type ScheduleJobDraft,
   type TerminalLayoutState,
@@ -72,6 +71,72 @@ const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
       }}
     >
       {children}
+    </div>
+  );
+});
+
+const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
+  connectionIssueVisible,
+  networkOnline,
+  activeSessionState,
+  activeSessionLastError,
+}: {
+  connectionIssueVisible: boolean;
+  networkOnline: boolean;
+  activeSessionState: Session['state'] | null | undefined;
+  activeSessionLastError?: string;
+}) {
+  const networkBanner = !connectionIssueVisible
+    ? null
+    : !networkOnline
+      ? {
+          tone: '#ff6b6b',
+          background: 'rgba(109, 24, 33, 0.92)',
+          border: 'rgba(255, 107, 107, 0.42)',
+          title: '网络已断开',
+          detail: '当前网络不可用，终端不会继续刷新。',
+        }
+      : activeSessionState === 'reconnecting'
+        ? {
+            tone: '#ffb020',
+            background: 'rgba(97, 63, 13, 0.92)',
+            border: 'rgba(255, 176, 32, 0.42)',
+            title: '连接已断开，正在重连',
+            detail: activeSessionLastError || '网络或 daemon 连接已中断，正在指数退避重试。',
+          }
+        : activeSessionState === 'error'
+          ? {
+              tone: '#ff6b6b',
+              background: 'rgba(109, 24, 33, 0.92)',
+              border: 'rgba(255, 107, 107, 0.42)',
+              title: '连接失败',
+              detail: activeSessionLastError || '当前 tab 已断开，请检查网络或服务器状态。',
+            }
+          : null;
+
+  if (!networkBanner) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="terminal-network-banner"
+      style={{
+        margin: '0 10px 8px',
+        padding: '9px 12px',
+        borderRadius: '12px',
+        border: `1px solid ${networkBanner.border}`,
+        background: networkBanner.background,
+        color: '#fff',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.18)',
+      }}
+    >
+      <div style={{ fontSize: '13px', fontWeight: 800, color: networkBanner.tone }}>
+        {networkBanner.title}
+      </div>
+      <div style={{ marginTop: '3px', fontSize: '12px', lineHeight: 1.35, color: 'rgba(255,255,255,0.9)' }}>
+        {networkBanner.detail}
+      </div>
     </div>
   );
 });
@@ -171,12 +236,13 @@ function normalizeTerminalLayoutState(input: unknown): TerminalLayoutState | nul
 }
 
 function readPersistedTerminalLayoutState(): TerminalLayoutState | null {
-  if (typeof window === 'undefined') {
+  const storage = getBrowserStorage();
+  if (!storage) {
     return null;
   }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
+    const raw = storage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
     return normalizeTerminalLayoutState(raw ? JSON.parse(raw) : null);
   } catch (error) {
     console.error('[TerminalPage] Failed to load terminal layout:', error);
@@ -185,12 +251,13 @@ function readPersistedTerminalLayoutState(): TerminalLayoutState | null {
 }
 
 function persistTerminalLayoutState(layout: TerminalLayoutState) {
-  if (typeof window === 'undefined') {
+  const storage = getBrowserStorage();
+  if (!storage) {
     return;
   }
 
   try {
-    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(layout));
+    storage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(layout));
   } catch (error) {
     console.error('[TerminalPage] Failed to persist terminal layout:', error);
   }
@@ -200,9 +267,9 @@ interface TerminalPageProps {
   sessions: Session[];
   activeSession: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
-  sessionBufferStore?: SessionBufferStore | null;
-  sessionHeadStore?: SessionHeadStore | null;
+  sessionBufferStore?: SessionRenderBufferStore | null;
   inputResetEpochBySession?: Record<string, number>;
+  followResetEpoch?: number;
   onSwitchSession: (id: string) => void;
   onMoveSession: (id: string, toIndex: number) => void;
   onRenameSession: (id: string, name: string) => void;
@@ -213,6 +280,7 @@ interface TerminalPageProps {
   onTerminalInput?: (sessionId: string, data: string) => void;
   onTerminalViewportChange?: TerminalViewportChangeHandler;
   onTerminalVisibleRangeChange?: TerminalVisibleRangeChangeHandler;
+  onLiveSessionIdsChange?: (ids: string[]) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   onOpenSettings?: () => void;
@@ -226,12 +294,10 @@ interface TerminalPageProps {
   onQuickActionsChange?: (actions: QuickAction[]) => void;
   onShortcutActionsChange?: (actions: TerminalShortcutAction[]) => void;
   sessionDraft: string;
-  sessionDrafts?: SessionDraftMap;
   onSessionDraftChange?: (value: string, sessionId?: string) => void;
   onSessionDraftSend?: (value: string, sessionId?: string) => void;
   onLoadSavedTabList: (tabs: PersistedOpenTab[], activeSessionId?: string) => void;
   scheduleState?: SessionScheduleState | null;
-  scheduleStateBySessionId?: Record<string, SessionScheduleState | null | undefined>;
   onRequestScheduleList?: (sessionId: string) => void;
   onUpsertScheduleJob?: (sessionId: string, job: ScheduleJobDraft) => void;
   onDeleteScheduleJob?: (sessionId: string, jobId: string) => void;
@@ -263,6 +329,54 @@ interface TerminalTabChromeItem {
   customName?: string;
   createdAt: number;
   resolvedPath?: Session['resolvedPath'];
+}
+
+function terminalPageSessionUiKey(
+  session: Session | null | undefined,
+  options?: { includeRuntimeStatus?: boolean },
+) {
+  if (!session) {
+    return '';
+  }
+  return [
+    session.id,
+    session.hostId,
+    session.connectionName,
+    session.bridgeHost,
+    String(session.bridgePort),
+    session.sessionName,
+    session.title,
+    session.customName || '',
+    String(session.createdAt),
+    session.resolvedPath || '',
+    session.authToken || '',
+    session.autoCommand || '',
+    options?.includeRuntimeStatus ? session.state : '',
+    options?.includeRuntimeStatus ? (session.lastError || '') : '',
+  ].join('::');
+}
+
+function terminalPageSessionsUiKey(sessions: Session[]) {
+  return sessions.map((session) => terminalPageSessionUiKey(session)).join('||');
+}
+
+function resolveSessionInputEpoch(
+  inputResetEpochBySession: Record<string, number> | undefined,
+  sessionId: string | null | undefined,
+) {
+  if (!sessionId) {
+    return -1;
+  }
+  return inputResetEpochBySession?.[sessionId] || 0;
+}
+
+function resolveRenderedSessionsInputEpochKey(
+  inputResetEpochBySession: Record<string, number> | undefined,
+  sessions: Session[],
+) {
+  return sessions
+    .map((session) => `${session.id}:${resolveSessionInputEpoch(inputResetEpochBySession, session.id)}`)
+    .join('||');
 }
 
 function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
@@ -455,6 +569,194 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   );
 });
 
+const TerminalStageShell = ReactMemo(function TerminalStageShell({
+  activeSession,
+  sessionBufferStore,
+  renderedPaneSessions,
+  visiblePaneSessionIds,
+  splitVisible,
+  terminalChromeBottomPx,
+  terminalImeLiftPx,
+  inputResetEpochBySession,
+  followResetEpoch,
+  terminalKeyboardRequested,
+  isAndroid,
+  onResize,
+  onTerminalInput,
+  onTerminalWidthModeChange,
+  handleTerminalViewportChange,
+  handleSwipeTab,
+  handleActiveTerminalActivateInput,
+  focusNonce,
+  terminalFontSize,
+  terminalThemeId,
+  terminalWidthMode,
+  absoluteLineNumbersVisible,
+}: {
+  activeSession: Session | null;
+  sessionBufferStore?: SessionRenderBufferStore | null;
+  renderedPaneSessions: Session[];
+  visiblePaneSessionIds: string[];
+  splitVisible: boolean;
+  terminalChromeBottomPx: number;
+  terminalImeLiftPx: number;
+  inputResetEpochBySession?: Record<string, number>;
+  followResetEpoch?: number;
+  terminalKeyboardRequested: boolean;
+  isAndroid: boolean;
+  onResize?: TerminalResizeHandler;
+  onTerminalInput?: (sessionId: string, data: string) => void;
+  onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
+  handleTerminalViewportChange: TerminalViewportChangeHandler;
+  handleSwipeTab: (sessionId: string, direction: 'previous' | 'next') => void;
+  handleActiveTerminalActivateInput: () => void;
+  focusNonce: number;
+  terminalFontSize: number;
+  terminalThemeId?: string;
+  terminalWidthMode: TerminalWidthMode;
+  absoluteLineNumbersVisible: boolean;
+}) {
+  const terminalPaneStyle = useCallback((paneSessionId: string): CSSProperties => {
+    if (!splitVisible) {
+      const isActivePaneSession = paneSessionId === activeSession?.id;
+      return {
+        position: 'absolute',
+        inset: 0,
+        visibility: isActivePaneSession ? 'visible' : 'hidden',
+        opacity: isActivePaneSession ? 1 : 0,
+        zIndex: isActivePaneSession ? 1 : 0,
+      };
+    }
+    const paneIndex = visiblePaneSessionIds.indexOf(paneSessionId);
+    if (paneIndex < 0) {
+      return {
+        position: 'absolute',
+        inset: 0,
+        visibility: 'hidden',
+        pointerEvents: 'none',
+      };
+    }
+    return {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: paneIndex === 0 ? 0 : '50%',
+      width: '50%',
+      paddingLeft: paneIndex === 0 ? 0 : '4px',
+      paddingRight: paneIndex === 0 ? '4px' : 0,
+      boxSizing: 'border-box',
+    };
+  }, [activeSession?.id, splitVisible, visiblePaneSessionIds]);
+
+  return (
+    <div
+      data-testid="terminal-stage-shell"
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: `${terminalChromeBottomPx + terminalImeLiftPx}px`,
+        display: 'flex',
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          margin: '0 4px',
+          borderRadius: '14px',
+          backgroundColor: mobileTheme.colors.canvas,
+          overflow: 'hidden',
+          border: `1px solid ${mobileTheme.colors.cardBorder}`,
+          position: 'relative',
+          overscrollBehaviorY: 'contain',
+        }}
+      >
+        {activeSession ? (
+          renderedPaneSessions.map((session) => {
+            const sessionIsActive = session.id === activeSession?.id;
+            return (
+              <div
+                key={session.id}
+                style={{
+                  ...terminalPaneStyle(session.id),
+                  pointerEvents: sessionIsActive ? 'auto' : 'none',
+                  borderRadius: splitVisible ? '12px' : undefined,
+                  outline: splitVisible && sessionIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
+                  outlineOffset: splitVisible && sessionIsActive ? '-2px' : undefined,
+                  overflow: 'hidden',
+                }}
+              >
+                <TerminalView
+                  sessionId={session.id}
+                  sessionBufferStore={sessionBufferStore}
+                  active={sessionIsActive}
+                  inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
+                  followResetEpoch={sessionIsActive ? followResetEpoch : 0}
+                  allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
+                  domInputOffscreen={isAndroid}
+                  onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
+                  onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
+                  onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
+                  onInput={sessionIsActive ? onTerminalInput : undefined}
+                  onViewportChange={handleTerminalViewportChange}
+                  onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
+                  focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
+                  fontSize={terminalFontSize}
+                  rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
+                  themeId={terminalThemeId || 'default'}
+                  widthMode={terminalWidthMode}
+                  showAbsoluteLineNumbers={absoluteLineNumbersVisible}
+                />
+              </div>
+            );
+          })
+        ) : (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: mobileTheme.colors.textSecondary,
+              gap: '10px',
+            }}
+          >
+            <div style={{ fontSize: '18px', fontWeight: 700 }}>No terminal attached</div>
+            <div style={{ fontSize: '14px' }}>Go back to Connections and open a host card.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}, (prev, next) => (
+  terminalPageSessionUiKey(prev.activeSession) === terminalPageSessionUiKey(next.activeSession)
+  && terminalPageSessionsUiKey(prev.renderedPaneSessions) === terminalPageSessionsUiKey(next.renderedPaneSessions)
+  && prev.sessionBufferStore === next.sessionBufferStore
+  && prev.splitVisible === next.splitVisible
+  && prev.terminalChromeBottomPx === next.terminalChromeBottomPx
+  && prev.terminalImeLiftPx === next.terminalImeLiftPx
+  && resolveRenderedSessionsInputEpochKey(prev.inputResetEpochBySession, prev.renderedPaneSessions)
+    === resolveRenderedSessionsInputEpochKey(next.inputResetEpochBySession, next.renderedPaneSessions)
+  && prev.followResetEpoch === next.followResetEpoch
+  && prev.terminalKeyboardRequested === next.terminalKeyboardRequested
+  && prev.isAndroid === next.isAndroid
+  && prev.onResize === next.onResize
+  && prev.onTerminalInput === next.onTerminalInput
+  && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
+  && prev.handleTerminalViewportChange === next.handleTerminalViewportChange
+  && prev.handleSwipeTab === next.handleSwipeTab
+  && prev.handleActiveTerminalActivateInput === next.handleActiveTerminalActivateInput
+  && prev.focusNonce === next.focusNonce
+  && prev.terminalFontSize === next.terminalFontSize
+  && prev.terminalThemeId === next.terminalThemeId
+  && prev.terminalWidthMode === next.terminalWidthMode
+  && prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible
+  && prev.visiblePaneSessionIds.join('||') === next.visiblePaneSessionIds.join('||')
+));
+
 
 function toPersistedOpenTab(session: Session): PersistedOpenTab {
   return {
@@ -605,13 +907,13 @@ function normalizeSavedTabList(input: unknown): SavedTabList | null {
   };
 }
 
-export function TerminalPage({
+function TerminalPageComponent({
   sessions,
   activeSession,
   getSessionDebugMetrics,
   sessionBufferStore = null,
-  sessionHeadStore = null,
   inputResetEpochBySession,
+  followResetEpoch = 0,
   onSwitchSession,
   onMoveSession,
   onRenameSession,
@@ -622,6 +924,7 @@ export function TerminalPage({
   onTerminalInput,
   onTerminalViewportChange,
   onTerminalVisibleRangeChange,
+  onLiveSessionIdsChange,
   onImagePaste,
   onFileAttach,
   onOpenSettings: _onOpenSettings,
@@ -632,12 +935,10 @@ export function TerminalPage({
   onQuickActionsChange,
   onShortcutActionsChange,
   sessionDraft,
-  sessionDrafts,
   onSessionDraftChange,
   onSessionDraftSend,
   onLoadSavedTabList,
   scheduleState,
-  scheduleStateBySessionId,
   onRequestScheduleList,
   onUpsertScheduleJob,
   onDeleteScheduleJob,
@@ -745,12 +1046,13 @@ export function TerminalPage({
   }, [updateViewportMetrics]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    const storage = getBrowserStorage();
+    if (!storage) {
       return;
     }
 
     try {
-      const raw = localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS);
+      const raw = storage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS);
       if (!raw) {
         return;
       }
@@ -766,11 +1068,12 @@ export function TerminalPage({
 
   const persistSavedTabLists = (nextLists: SavedTabList[]) => {
     setSavedTabLists(nextLists);
-    if (typeof window === 'undefined') {
+    const storage = getBrowserStorage();
+    if (!storage) {
       return;
     }
     try {
-      localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify(nextLists));
+      storage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify(nextLists));
     } catch (error) {
       console.error('[TerminalPage] Failed to persist saved tab lists:', error);
     }
@@ -812,15 +1115,23 @@ export function TerminalPage({
     ? visiblePaneSessionIds
         .map((sessionId) => sessions.find((session) => session.id === sessionId) || null)
         .filter((session): session is Session => Boolean(session))
-    : sessions;
-  const chromeSessions = useMemo(() => sessions.map(toTerminalTabChromeItem), [sessions]);
+    : (activeSession ? [activeSession] : []);
+  const livePaneSessionIds = useMemo(
+    () => renderedPaneSessions.map((session) => session.id),
+    [renderedPaneSessions],
+  );
+  const livePaneSessionIdsKey = useMemo(
+    () => livePaneSessionIds.join('||'),
+    [livePaneSessionIds],
+  );
+  const headerSessionsUiKey = useMemo(() => terminalPageSessionsUiKey(sessions), [sessions]);
+  const activeHeaderSessionUiKey = useMemo(() => terminalPageSessionUiKey(activeSession), [activeSession]);
+  const chromeSessions = useMemo(() => sessions.map(toTerminalTabChromeItem), [headerSessionsUiKey]);
   const activeChromeSession = useMemo(() => (
     activeSession ? toTerminalTabChromeItem(activeSession) : null
-  ), [activeSession]);
-  const activeDraft = activeSession?.id && sessionDrafts ? sessionDrafts[activeSession.id] || '' : sessionDraft;
-  const activeScheduleState = activeSession?.id && scheduleStateBySessionId
-    ? scheduleStateBySessionId[activeSession.id] || null
-    : scheduleState || null;
+  ), [activeHeaderSessionUiKey]);
+  const activeDraft = sessionDraft;
+  const activeScheduleState = scheduleState || null;
   const activeSessionRef = useRef(activeSession);
   const sessionsRef = useRef(sessions);
   const splitPaneAssignmentsRef = useRef(splitPaneAssignments);
@@ -829,6 +1140,26 @@ export function TerminalPage({
   const activePaneIdRef = useRef<TerminalSplitPaneId>(activePaneId);
   const passivePaneIdRef = useRef<TerminalSplitPaneId>(passivePaneId);
   const secondarySessionIdRef = useRef<string | null>(secondarySession?.id || null);
+  const previousLivePaneSessionIdsKeyRef = useRef<string>('');
+
+  useLayoutEffect(() => {
+    if (!onLiveSessionIdsChange) {
+      previousLivePaneSessionIdsKeyRef.current = livePaneSessionIdsKey;
+      return;
+    }
+    if (previousLivePaneSessionIdsKeyRef.current === livePaneSessionIdsKey) {
+      return;
+    }
+    previousLivePaneSessionIdsKeyRef.current = livePaneSessionIdsKey;
+    onLiveSessionIdsChange(livePaneSessionIds);
+  }, [livePaneSessionIds, livePaneSessionIdsKey, onLiveSessionIdsChange]);
+
+  useEffect(() => {
+    return () => {
+      previousLivePaneSessionIdsKeyRef.current = '';
+      onLiveSessionIdsChange?.([]);
+    };
+  }, [onLiveSessionIdsChange]);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -1557,33 +1888,6 @@ export function TerminalPage({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  const networkBanner = !connectionIssueVisible
-    ? null
-    : !networkOnline
-    ? {
-        tone: '#ff6b6b',
-        background: 'rgba(109, 24, 33, 0.92)',
-        border: 'rgba(255, 107, 107, 0.42)',
-        title: '网络已断开',
-        detail: '当前网络不可用，终端不会继续刷新。',
-      }
-    : activeSession?.state === 'reconnecting'
-      ? {
-          tone: '#ffb020',
-          background: 'rgba(97, 63, 13, 0.92)',
-          border: 'rgba(255, 176, 32, 0.42)',
-          title: '连接已断开，正在重连',
-          detail: activeSession.lastError || '网络或 daemon 连接已中断，正在指数退避重试。',
-        }
-      : activeSession?.state === 'error'
-        ? {
-            tone: '#ff6b6b',
-            background: 'rgba(109, 24, 33, 0.92)',
-            border: 'rgba(255, 107, 107, 0.42)',
-            title: '连接失败',
-            detail: activeSession.lastError || '当前 tab 已断开，请检查网络或服务器状态。',
-          }
-        : null;
   const shellHeight = Math.max(0, typeof window !== 'undefined' ? window.innerHeight : 0);
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
@@ -1739,38 +2043,6 @@ export function TerminalPage({
     setSplitEnabled(false);
   }, [assignSessionToPane]);
 
-  const terminalPaneStyle = (paneSessionId: string): CSSProperties => {
-    if (!splitVisible) {
-      const isActivePaneSession = paneSessionId === activeSession?.id;
-      return {
-        position: 'absolute',
-        inset: 0,
-        visibility: isActivePaneSession ? 'visible' : 'hidden',
-        opacity: isActivePaneSession ? 1 : 0,
-        zIndex: isActivePaneSession ? 1 : 0,
-      };
-    }
-    const paneIndex = visiblePaneSessionIds.indexOf(paneSessionId);
-    if (paneIndex < 0) {
-      return {
-        position: 'absolute',
-        inset: 0,
-        visibility: 'hidden',
-        pointerEvents: 'none',
-      };
-    }
-    return {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: paneIndex === 0 ? 0 : '50%',
-      width: '50%',
-      paddingLeft: paneIndex === 0 ? 0 : '4px',
-      paddingRight: paneIndex === 0 ? '4px' : 0,
-      boxSizing: 'border-box',
-    };
-  };
-
   const handleTerminalViewportChange = useCallback<TerminalViewportChangeHandler>((sessionId, viewState) => {
     sessionViewportModeStoreRef.current.setMode(sessionId, viewState.mode);
     onTerminalViewportChange?.(sessionId, viewState);
@@ -1895,26 +2167,12 @@ export function TerminalPage({
           onMoveSessionToOtherPane={moveSessionToOtherPane}
         />
       </div>
-      {networkBanner && (
-        <div
-          style={{
-            margin: '0 10px 8px',
-            padding: '9px 12px',
-            borderRadius: '12px',
-            border: `1px solid ${networkBanner.border}`,
-            background: networkBanner.background,
-            color: '#fff',
-            boxShadow: '0 10px 24px rgba(0,0,0,0.18)',
-          }}
-        >
-          <div style={{ fontSize: '13px', fontWeight: 800, color: networkBanner.tone }}>
-            {networkBanner.title}
-          </div>
-          <div style={{ marginTop: '3px', fontSize: '12px', lineHeight: 1.35, color: 'rgba(255,255,255,0.9)' }}>
-            {networkBanner.detail}
-          </div>
-        </div>
-      )}
+      <TerminalNetworkBanner
+        connectionIssueVisible={connectionIssueVisible}
+        networkOnline={networkOnline}
+        activeSessionState={activeSession?.state}
+        activeSessionLastError={activeSession?.lastError}
+      />
       <div
         style={{
           flex: 1,
@@ -1923,87 +2181,30 @@ export function TerminalPage({
           overflow: 'hidden',
         }}
       >
-        <div
-          data-testid="terminal-stage"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: `${terminalChromeBottomPx + terminalImeLiftPx}px`,
-            display: 'flex',
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              margin: '0 4px',
-              borderRadius: '14px',
-              backgroundColor: mobileTheme.colors.canvas,
-              overflow: 'hidden',
-              border: `1px solid ${mobileTheme.colors.cardBorder}`,
-              position: 'relative',
-              overscrollBehaviorY: 'contain',
-            }}
-          >
-            {activeSession ? (
-              renderedPaneSessions.map((session) => {
-                const sessionIsActive = session.id === activeSession?.id;
-                return (
-                  <div
-                    key={session.id}
-                    style={{
-                      ...terminalPaneStyle(session.id),
-                      pointerEvents: sessionIsActive ? 'auto' : 'none',
-                      borderRadius: splitVisible ? '12px' : undefined,
-                      outline: splitVisible && sessionIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
-                      outlineOffset: splitVisible && sessionIsActive ? '-2px' : undefined,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <TerminalView
-                      sessionId={session.id}
-                      sessionBufferStore={sessionBufferStore}
-                      sessionHeadStore={sessionHeadStore}
-                      active={sessionIsActive}
-                      inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
-                      allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
-                      domInputOffscreen={isAndroid}
-                      onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
-                      onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
-                      onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
-                      onInput={sessionIsActive ? onTerminalInput : undefined}
-                      onViewportChange={sessionIsActive ? handleTerminalViewportChange : undefined}
-                      onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
-                      focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
-                      fontSize={terminalFontSize}
-                      rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
-                      themeId={terminalThemeId}
-                      widthMode={terminalWidthMode}
-                      showAbsoluteLineNumbers={absoluteLineNumbersVisible}
-                    />
-                  </div>
-                );
-              })
-            ) : (
-              <div
-                style={{
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: mobileTheme.colors.textSecondary,
-                  gap: '10px',
-                }}
-              >
-                <div style={{ fontSize: '18px', fontWeight: 700 }}>No terminal attached</div>
-                <div style={{ fontSize: '14px' }}>Go back to Connections and open a host card.</div>
-              </div>
-            )}
-          </div>
-        </div>
+        <TerminalStageShell
+          activeSession={activeSession}
+          sessionBufferStore={sessionBufferStore}
+          renderedPaneSessions={renderedPaneSessions}
+          visiblePaneSessionIds={visiblePaneSessionIds}
+          splitVisible={splitVisible}
+          terminalChromeBottomPx={terminalChromeBottomPx}
+          terminalImeLiftPx={terminalImeLiftPx}
+          inputResetEpochBySession={inputResetEpochBySession}
+          followResetEpoch={followResetEpoch}
+          terminalKeyboardRequested={terminalKeyboardRequested}
+          isAndroid={isAndroid}
+          onResize={onResize}
+          onTerminalInput={onTerminalInput}
+          onTerminalWidthModeChange={onTerminalWidthModeChange}
+          handleTerminalViewportChange={handleTerminalViewportChange}
+          handleSwipeTab={handleSwipeTab}
+          handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
+          focusNonce={focusNonce}
+          terminalFontSize={terminalFontSize}
+          terminalThemeId={terminalThemeId}
+          terminalWidthMode={terminalWidthMode}
+          absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+        />
         <TerminalDebugOverlay
           visible={debugOverlayVisible}
           session={activeSession}
@@ -2077,3 +2278,59 @@ export function TerminalPage({
     </div>
   );
 }
+
+function terminalPagePropsEqual(
+  prev: Readonly<TerminalPageProps>,
+  next: Readonly<TerminalPageProps>,
+) {
+  return (
+    terminalPageSessionsUiKey(prev.sessions) === terminalPageSessionsUiKey(next.sessions)
+    && terminalPageSessionUiKey(prev.activeSession, { includeRuntimeStatus: true })
+      === terminalPageSessionUiKey(next.activeSession, { includeRuntimeStatus: true })
+    && prev.getSessionDebugMetrics === next.getSessionDebugMetrics
+    && prev.sessionBufferStore === next.sessionBufferStore
+    && resolveSessionInputEpoch(prev.inputResetEpochBySession, prev.activeSession?.id)
+      === resolveSessionInputEpoch(next.inputResetEpochBySession, next.activeSession?.id)
+    && prev.followResetEpoch === next.followResetEpoch
+    && prev.onSwitchSession === next.onSwitchSession
+    && prev.onMoveSession === next.onMoveSession
+    && prev.onRenameSession === next.onRenameSession
+    && prev.onCloseSession === next.onCloseSession
+    && prev.onOpenConnections === next.onOpenConnections
+    && prev.onOpenQuickTabPicker === next.onOpenQuickTabPicker
+    && prev.onResize === next.onResize
+    && prev.onTerminalInput === next.onTerminalInput
+    && prev.onTerminalViewportChange === next.onTerminalViewportChange
+    && prev.onLiveSessionIdsChange === next.onLiveSessionIdsChange
+    && prev.onTerminalVisibleRangeChange === next.onTerminalVisibleRangeChange
+    && prev.onImagePaste === next.onImagePaste
+    && prev.onFileAttach === next.onFileAttach
+    && prev.onOpenSettings === next.onOpenSettings
+    && prev.onRequestRemoteScreenshot === next.onRequestRemoteScreenshot
+    && prev.quickActions === next.quickActions
+    && prev.shortcutActions === next.shortcutActions
+    && prev.onQuickActionInput === next.onQuickActionInput
+    && prev.onQuickActionsChange === next.onQuickActionsChange
+    && prev.onShortcutActionsChange === next.onShortcutActionsChange
+    && prev.sessionDraft === next.sessionDraft
+    && prev.onSessionDraftChange === next.onSessionDraftChange
+    && prev.onSessionDraftSend === next.onSessionDraftSend
+    && prev.onLoadSavedTabList === next.onLoadSavedTabList
+    && prev.scheduleState === next.scheduleState
+    && prev.onRequestScheduleList === next.onRequestScheduleList
+    && prev.onUpsertScheduleJob === next.onUpsertScheduleJob
+    && prev.onDeleteScheduleJob === next.onDeleteScheduleJob
+    && prev.onToggleScheduleJob === next.onToggleScheduleJob
+    && prev.onRunScheduleJobNow === next.onRunScheduleJobNow
+    && prev.terminalThemeId === next.terminalThemeId
+    && prev.terminalWidthMode === next.terminalWidthMode
+    && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
+    && prev.onSendMessage === next.onSendMessage
+    && prev.onFileTransferMessage === next.onFileTransferMessage
+    && prev.shortcutSmartSort === next.shortcutSmartSort
+    && prev.shortcutFrequencyMap === next.shortcutFrequencyMap
+    && prev.onShortcutUse === next.onShortcutUse
+  );
+}
+
+export const TerminalPage = ReactMemo(TerminalPageComponent, terminalPagePropsEqual);

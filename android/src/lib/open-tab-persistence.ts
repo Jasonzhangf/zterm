@@ -109,25 +109,44 @@ export function dedupePersistedOpenTabs(tabs: PersistedOpenTab[]) {
 }
 
 export function readPersistedOpenTabs() {
+  return readPersistedOpenTabsState().tabs;
+}
+
+export function readPersistedOpenTabsState() {
   if (typeof window === 'undefined') {
-    return [] as PersistedOpenTab[];
+    return {
+      tabs: [] as PersistedOpenTab[],
+      hasStoredValue: false,
+    };
   }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
     if (!raw) {
-      return [] as PersistedOpenTab[];
+      return {
+        tabs: [] as PersistedOpenTab[],
+        hasStoredValue: false,
+      };
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      return [] as PersistedOpenTab[];
+      return {
+        tabs: [] as PersistedOpenTab[],
+        hasStoredValue: false,
+      };
     }
-    return dedupePersistedOpenTabs(parsed
-      .map(normalizePersistedOpenTab)
-      .filter((item): item is PersistedOpenTab => item !== null));
+    return {
+      tabs: dedupePersistedOpenTabs(parsed
+        .map(normalizePersistedOpenTab)
+        .filter((item): item is PersistedOpenTab => item !== null)),
+      hasStoredValue: true,
+    };
   } catch (error) {
     console.error('[open-tab-persistence] Failed to restore open tabs:', error);
-    return [] as PersistedOpenTab[];
+    return {
+      tabs: [] as PersistedOpenTab[],
+      hasStoredValue: false,
+    };
   }
 }
 
@@ -185,19 +204,6 @@ export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: 
   } catch (error) {
     console.error('[open-tab-persistence] Failed to persist open tabs:', error);
   }
-}
-
-export function persistSessionIntentState(options: {
-  sessions: Array<Pick<
-    Session,
-    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
-  >>;
-  activeSessionId: string | null;
-}) {
-  persistOpenTabsState(
-    options.sessions.map((session) => buildPersistedOpenTabFromSession(session)),
-    options.activeSessionId,
-  );
 }
 
 export function findReusableOpenTabSession(options: {

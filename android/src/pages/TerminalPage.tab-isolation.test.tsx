@@ -290,7 +290,6 @@ describe('TerminalPage tab isolation', () => {
         shortcutActions={[]}
         onQuickActionInput={onQuickActionInput}
         sessionDraft="draft-s1"
-        sessionDrafts={{ s1: 'draft-s1', s2: 'draft-s2' }}
         onSessionDraftChange={onSessionDraftChange}
         onSessionDraftSend={onSessionDraftSend}
         onLoadSavedTabList={vi.fn()}
@@ -313,7 +312,7 @@ describe('TerminalPage tab isolation', () => {
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onswipetab')).toBe('true');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-oninput')).toBe('false');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onresize')).toBe('false');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onviewport')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onviewport')).toBe('true');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onswipetab')).toBe('false');
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-active-session-id')).toBe('s1');
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-session-draft')).toBe('draft-s1');

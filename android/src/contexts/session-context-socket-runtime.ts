@@ -70,6 +70,11 @@ export function startSocketHeartbeat(options: {
   clientPongTimeoutMs: number;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
+  const existingHeartbeat = options.pingIntervalsRef.current.get(options.sessionId);
+  if (existingHeartbeat) {
+    clearInterval(existingHeartbeat);
+    options.pingIntervalsRef.current.delete(options.sessionId);
+  }
   const pingInterval = setInterval(() => {
     if (options.ws.readyState !== WebSocket.OPEN) {
       return;

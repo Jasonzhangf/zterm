@@ -49,9 +49,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(messageRuntimeSource).toContain('handleSessionOpenMessageRuntime');
     expect(messageRuntimeSource).toContain('handleSessionTransportConnectRuntime');
     expect(controlRuntimeSource).toContain("type: 'session-ticket'");
-    expect(attachTokenRuntimeSource).toContain('issueSessionTransportToken(clientSessionId');
-    expect(attachTokenRuntimeSource).toContain('function consumeSessionTransportToken(token: string, clientSessionId: string)');
-    expect(attachTokenRuntimeSource).toContain('sessionTransportAttachTokens');
+    expect(attachTokenRuntimeSource).toContain('issueSessionTransportToken()');
+    expect(attachTokenRuntimeSource).toContain('function consumeSessionTransportToken(token: string)');
+    expect(attachTokenRuntimeSource).toContain('const sessionTransportAttachTokens = new Set<string>()');
     expect(controlRuntimeSource).toContain('createTransportBoundSession');
   });
 
@@ -60,7 +60,8 @@ describe('server transport/session lifecycle truth gates', () => {
     const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
     expect(serverSource).toContain('createTerminalAttachTokenRuntime');
     expect(serverSource).not.toContain('const sessionTransportAttachTokens = new Map<string, string>()');
-    expect(attachTokenRuntimeSource).toContain('const sessionTransportAttachTokens = new Map<string, string>()');
+    expect(serverSource).not.toContain('const sessionTransportAttachTokens = new Set<string>()');
+    expect(attachTokenRuntimeSource).toContain('const sessionTransportAttachTokens = new Set<string>()');
   });
 
   it('documents session-ticket/sessionTransportToken as attach-only compatibility wire material', () => {
@@ -68,39 +69,53 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(source).toContain('Compatibility-only attach handshake:');
     expect(source).toContain('session-ticket / sessionTransportToken remain attach-only wire material');
     expect(source).toContain('daemon must not promote either into daemon-owned long-lived business truth');
+    expect(source).toContain('openRequestId remains client-local request correlation');
+    expect(source).toContain('daemon does not keep openRequestId as token owner');
   });
 
-  it('does not keep websocket-close grace timers that auto-close logical sessions', () => {
+  it('keeps legacy clientSessionId only as wire-echo compatibility instead of restoring daemon ownership', () => {
+    const controlSource = readMessageControlRuntimeSource();
+    const messageRuntimeSource = readMessageRuntimeSource();
+    const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
+
+    expect(controlSource).toContain('clientSessionId: payload.clientSessionId?.trim() || undefined');
+    expect(messageRuntimeSource).toContain('clientSessionId: message.payload?.clientSessionId?.trim() || undefined');
+    expect(attachTokenRuntimeSource).not.toContain('clientSessionId');
+    expect(controlSource).not.toContain('payload.clientSessionId) =>');
+    expect(controlSource).not.toContain('clientSessionId, sessionTransportToken');
+  });
+
+  it('does not keep websocket-close grace timers that auto-close bound sessions', () => {
     const source = readServerSource();
     expect(source).not.toContain('_detachTimer');
     expect(source).not.toContain('grace expired');
     expect(source).not.toContain('grace timer handles cleanup');
   });
 
-  it('detaches bound websocket transports instead of closing logical sessions on ws close/error', () => {
+  it('detaches bound websocket transports instead of closing bound sessions on ws close/error', () => {
     const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
     const errorBlock = extractBlock(source, "ws.on('error'");
     const detachBlock = extractBlock(source, "deps.detachSessionTransportOnly(session, 'websocket closed'", 220);
     expect(closeBlock).toContain("if (session)");
     expect(closeBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
-    expect(closeBlock).not.toContain("closeLogicalClientSession(session, 'websocket closed', false)");
+    expect(closeBlock).not.toContain("closeLogicalTerminalSession(session, 'websocket closed', false)");
     expect(errorBlock).toContain("if (session)");
     expect(errorBlock).toContain("deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`");
-    expect(errorBlock).not.toContain("closeLogicalClientSession(session, `websocket error: ${error.message}`, false)");
+    expect(errorBlock).not.toContain("closeLogicalTerminalSession(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
   });
 
-  it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
+  it('detaches bound rtc transports instead of closing bound sessions on rtc close/error', () => {
     const source = readBridgeRuntimeSource();
     const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
     expect(rtcCloseBlock).toContain('if (session)');
     expect(rtcCloseBlock).toContain('deps.detachSessionTransportOnly(session, reason');
-    expect(rtcCloseBlock).not.toContain('closeLogicalClientSession(session, reason, false)');
+    expect(rtcCloseBlock).not.toContain('closeLogicalTerminalSession(session, reason, false)');
     expect(rtcErrorBlock).toContain('if (session)');
     expect(rtcErrorBlock).toContain('deps.detachSessionTransportOnly(session, `rtc error: ${message}`');
-    expect(rtcErrorBlock).not.toContain('closeLogicalClientSession(session, `rtc error: ${message}`, false)');
+    expect(rtcErrorBlock).not.toContain('closeLogicalTerminalSession(session, `rtc error: ${message}`, false)');
   });
 
   it('keeps mirror truth alive when session transport detaches or session closes', () => {
@@ -163,15 +178,10 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(killBlock).not.toContain('requires an attached session transport');
   });
 
-  it('ignores legacy resize and terminal-width-mode messages instead of treating them as daemon state transitions', () => {
+  it('physically removes legacy resize and terminal-width-mode handlers from daemon message runtime', () => {
     const source = readMessageRuntimeSource();
-    const resizeBlock = extractBlock(source, "case 'resize':", 240);
-    const widthModeBlock = extractBlock(source, "case 'terminal-width-mode':", 240);
-
-    expect(resizeBlock).not.toContain('handleResize(');
-    expect(resizeBlock).not.toContain("payload: { message: 'resize requires an attached session transport'");
-    expect(widthModeBlock).not.toContain('handleTerminalWidthMode(');
-    expect(widthModeBlock).not.toContain("payload: { message: 'terminal-width-mode requires an attached session transport'");
+    expect(source).not.toContain("case 'resize':");
+    expect(source).not.toContain("case 'terminal-width-mode':");
   });
 
   it('never falls back to raw terminal input when image-upload binary arrives without pending paste state', () => {
