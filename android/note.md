@@ -533,3 +533,7 @@ All green locally. Next focus stays on remaining real-world slowness after app r
   4. 但无论 LaunchAgent 还是 direct helper，helper 内执行 `/usr/sbin/screencapture -x ...` 都返回 `could not create image from display`；
   5. 本地自造 code-sign cert 虽能 import，但 `security find-identity -p codesigning` 仍是 0 valid identities，说明当前机器不存在可用于稳定签名/TCC 闭环的有效 code-sign identity。
 - 冻结结论：当前 Mac 截图剩余 blocker 是 **安装态签名/TCC 身份链**，不是 daemon/helper 业务逻辑；继续改业务代码不能闭环。
+
+- 追加验证：已用临时 keychain + 本地自签 `ZTerm Local Code Signing` 成功给 `/Applications/ZTerm.app` 做完整 `codesign --force --deep`，并通过 `codesign --verify --deep --strict`。
+- 追加验证：helper 增加最小可见窗口后，仍然无法触发 `kTCCServiceScreenCapture/com.zterm.mac` 新记录；`tccutil reset ScreenCapture com.zterm.mac` 后数据库保持空，helper 内 `screencapture` 仍返回 `could not create image from display`。
+- 冻结结论更新：剩余 blocker 不仅是“业务代码/无签名”，而是 **当前机器上的自签 app identity 仍不足以进入 macOS Screen Recording 可授权链**；后续必须接正式可授权签名身份或采用系统级已授权宿主执行截图。

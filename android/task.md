@@ -489,3 +489,5 @@
   - Android 客户端 race/fail-fast 已收口；Mac helper 已改成 GUI helper + `screencapture` 唯一路径。
   - 当前剩余 blocker：macOS 安装态签名/TCC 身份链未闭环；现机器无 valid code-sign identity，helper 在 direct / launch-agent 两种模式下都 `could not create image from display`。
   - 下一步不是继续改业务逻辑，而是补正式签名身份/稳定 app code requirement 后重跑 TCC 授权链。
+
+  - 新证据：临时 keychain 自签可完成 app 级有效 codesign，但仍不触发 TCC ScreenCapture 授权/记录；因此下一步需要正式可授权 identity，而不是继续改 helper 业务逻辑。

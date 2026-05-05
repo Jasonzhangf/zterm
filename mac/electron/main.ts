@@ -17,6 +17,7 @@ type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: n
 const localTmuxManager = new LocalTmuxManager();
 const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
 let screenshotHelperServer: ScreenshotHelperServerController | null = null;
+let screenshotHelperWindow: BrowserWindow | null = null;
 
 process.on('uncaughtException', (err) => {
   console.error('[MAIN UNCAUGHT]', err);
@@ -91,6 +92,49 @@ function installHelperOnlyAppMenu() {
   }
 }
 
+function createScreenshotHelperWindow() {
+  if (screenshotHelperWindow && !screenshotHelperWindow.isDestroyed()) {
+    screenshotHelperWindow.show();
+    screenshotHelperWindow.focus();
+    return screenshotHelperWindow;
+  }
+
+  const helperWindow = new BrowserWindow({
+    width: 420,
+    height: 180,
+    resizable: false,
+    minimizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    show: true,
+    title: 'ZTerm Screenshot Helper',
+    backgroundColor: '#10131b',
+    webPreferences: {
+      sandbox: false,
+    },
+  });
+
+  helperWindow.on('closed', () => {
+    screenshotHelperWindow = null;
+  });
+
+  const helperHtml = `
+    <html>
+      <body style="margin:0;background:#10131b;color:#dbeafe;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;">
+        <div style="padding:20px;max-width:320px;text-align:center;line-height:1.5;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:8px;">ZTerm Screenshot Helper</div>
+          <div style="font-size:13px;color:#93c5fd;">
+            首次截图时 macOS 可能会要求授予 Screen Recording 权限。授权完成后可保留此窗口最小化。
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+  void helperWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(helperHtml)}`);
+  screenshotHelperWindow = helperWindow;
+  return helperWindow;
+}
+
 app.whenReady().then(async () => {
   if (screenshotHelperOnlyMode) {
     app.setName('ZTerm Screenshot Helper');
@@ -99,6 +143,8 @@ app.whenReady().then(async () => {
   if (screenshotHelperOnlyMode) {
     persistScreenshotHelperRuntimeState(DEFAULT_REMOTE_SCREENSHOT_HELPER_SOCKET_PATH);
     installHelperOnlyAppMenu();
+    createScreenshotHelperWindow();
+    app.focus({ steal: true });
   }
   ipcMain.handle('zterm:local-tmux:list-sessions', () => localTmuxManager.listSessions());
   ipcMain.handle('zterm:local-tmux:connect', (_event, payload: { clientId: string; sessionName: string; cols: number; rows: number; mode?: 'active' | 'idle' }) =>
@@ -185,6 +231,7 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (screenshotHelperOnlyMode) {
+      createScreenshotHelperWindow();
       return;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
