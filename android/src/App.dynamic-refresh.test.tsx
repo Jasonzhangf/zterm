@@ -783,7 +783,7 @@ describe('App dynamic refresh matrix', () => {
     expect(terminalPageRenderSpy).not.toHaveBeenCalled();
   });
 
-  it('does not rerender TerminalPage when only an inactive session input-reset epoch changes', async () => {
+  it('switches to the requested tab and rerenders TerminalPage when sending a draft to another tab', async () => {
     const bridgeSettings = { servers: [] } as any;
     sessionHarness.update(
       {
@@ -804,8 +804,8 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('send-draft-to-second-tab'));
     view.rerender(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={vi.fn()} />);
 
-    expect(terminalPageRenderSpy).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-revision').textContent).toBe('1');
+    expect(terminalPageRenderSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('terminal-revision').textContent).toBe('9');
   });
 
   it('keeps TerminalPage memo stable across a plain App rerender when terminal-facing props have no semantic change', async () => {
@@ -1589,6 +1589,54 @@ describe('App dynamic refresh matrix', () => {
         kind: 'terminal',
         focusSessionId: 's2',
       });
+    });
+  });
+
+  it('renders the persisted open-tab active session as terminal body truth even when runtime active session still points to another tab', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 's1',
+        hostId: 'host-s1',
+        connectionName: 'conn-s1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s1',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's2');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 's2' }));
+
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2'));
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('2'));
+
+    const lastRender = terminalPageRenderSpy.mock.calls[terminalPageRenderSpy.mock.calls.length - 1]?.[0];
+    expect(lastRender).toMatchObject({
+      activeSessionId: 's2',
+      sessionIds: ['s1', 's2'],
+      activeRevision: 2,
     });
   });
 

@@ -17,6 +17,15 @@ describe('resolveRemoteScreenshotErrorMessage', () => {
     expect(message).toBe('截图 helper 当前无法从显示器创建图像');
   });
 
+  it('maps helper screen capture permission failure to explicit system settings guidance', () => {
+    const message = resolveRemoteScreenshotErrorMessage(
+      new Error('screen capture permission denied: Command failed: screencapture -x /tmp/a.png\ncould not create image from display\n'),
+      15000,
+    );
+
+    expect(message).toBe('截图 helper 缺少系统截图权限，请在 Mac 系统设置 -> 隐私与安全性 -> 屏幕与系统音频录制 中允许 ZTerm');
+  });
+
   it('keeps timeout errors explicit', () => {
     const message = resolveRemoteScreenshotErrorMessage({ killed: true }, 15000);
     expect(message).toBe('remote screenshot timed out after 15000ms');

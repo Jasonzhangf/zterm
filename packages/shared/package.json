@@ -9,7 +9,8 @@
     "./types": "./src/connection/types.ts",
     "./protocol": "./src/connection/protocol.ts",
     "./mobile-config": "./src/connection/mobile-config.ts",
-    "./schedule-types": "./src/schedule/types.ts"
+    "./schedule-types": "./src/schedule/types.ts",
+    "./react/terminal-view": "./src/react/terminal-view.tsx"
   },
   "peerDependencies": {
     "react": "^19.0.0"

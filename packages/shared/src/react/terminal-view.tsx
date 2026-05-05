@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@jsonstudio/wtermmod-react/css';
 import { getTerminalThemePreset, type TerminalThemePreset } from '../terminal/theme';
+import { DEFAULT_TERMINAL_COLOR, packedTruecolorToCss } from '../terminal/color';
 import type { TerminalCell, TerminalGapRange, TerminalRenderBufferProjection } from '../connection/types';
 
 interface ViewState {
@@ -27,7 +28,7 @@ interface TerminalViewProps {
 }
 
 const DEFAULT_ROWS = 24;
-const DEFAULT_COLOR = 256;
+const DEFAULT_COLOR = DEFAULT_TERMINAL_COLOR;
 const FLAG_BOLD = 0x01;
 const FLAG_DIM = 0x02;
 const FLAG_ITALIC = 0x04;
@@ -62,6 +63,8 @@ const TERMINAL_FONT_STACK = [
 const XTERM_6X6_STEPS = [0, 95, 135, 175, 215, 255] as const;
 const OVERSCAN_ROWS = 4;
 const PRELOAD_MARGIN_ROWS = 12;
+const BLOCK_SHADE_CODEPOINT_MIN = 0x2580;
+const BLOCK_SHADE_CODEPOINT_MAX = 0x259f;
 
 function emptyProjection(): TerminalRenderBufferProjection {
   return {
@@ -103,6 +106,10 @@ function colorToCSS(index: number, theme: TerminalThemePreset): string | null {
   if (index === DEFAULT_COLOR) {
     return null;
   }
+  const packedTruecolor = packedTruecolorToCss(index);
+  if (packedTruecolor) {
+    return packedTruecolor;
+  }
   if (index < 16) {
     return theme.colors[index] || theme.foreground;
   }
@@ -115,6 +122,45 @@ function colorToCSS(index: number, theme: TerminalThemePreset): string | null {
   }
   const level = (index - 232) * 10 + 8;
   return `rgb(${level},${level},${level})`;
+}
+
+function parseCssColorToRgb(color: string, fallback: string): [number, number, number] {
+  const candidate = (color || '').trim() || fallback.trim();
+  if (candidate.startsWith('#')) {
+    const normalized = candidate.slice(1);
+    const hex = normalized.length === 3
+      ? normalized.split('').map((part) => `${part}${part}`).join('')
+      : normalized;
+    if (hex.length === 6) {
+      return [
+        Number.parseInt(hex.slice(0, 2), 16) || 0,
+        Number.parseInt(hex.slice(2, 4), 16) || 0,
+        Number.parseInt(hex.slice(4, 6), 16) || 0,
+      ];
+    }
+  }
+
+  const rgbMatch = candidate.match(/^rgb\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*\)$/i);
+  if (rgbMatch) {
+    return [
+      Number.parseInt(rgbMatch[1] || '0', 10) || 0,
+      Number.parseInt(rgbMatch[2] || '0', 10) || 0,
+      Number.parseInt(rgbMatch[3] || '0', 10) || 0,
+    ];
+  }
+
+  if (candidate === 'transparent') {
+    return parseCssColorToRgb(fallback, fallback);
+  }
+
+  return parseCssColorToRgb(fallback, fallback);
+}
+
+function mixCssColors(fg: string, bg: string, fgRatio: number, fallbackBg: string) {
+  const [fr, fgGreen, fb] = parseCssColorToRgb(fg, fallbackBg);
+  const [br, bgGreen, bb] = parseCssColorToRgb(bg, fallbackBg);
+  const mix = (front: number, back: number) => Math.round((front * fgRatio) + (back * (1 - fgRatio)));
+  return `rgb(${mix(fr, br)},${mix(fgGreen, bgGreen)},${mix(fb, bb)})`;
 }
 
 function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
@@ -137,9 +183,105 @@ function resolveColors(inputCell: TerminalCell, theme: TerminalThemePreset) {
   };
 }
 
+function resolveDimmedForeground(fg: string, bg: string, themeBackground: string) {
+  return mixCssColors(fg, bg, 0.5, themeBackground);
+}
+
+function isBlockShadeCodePoint(code: number) {
+  return Number.isInteger(code) && code >= BLOCK_SHADE_CODEPOINT_MIN && code <= BLOCK_SHADE_CODEPOINT_MAX;
+}
+
+function buildBlockBackground(code: number, fg: string, bg: string, themeBackground: string) {
+  switch (code) {
+    case 0x2580:
+      return `linear-gradient(${fg} 50%,${bg} 50%)`;
+    case 0x2581:
+      return `linear-gradient(${bg} 87.5%,${fg} 87.5%)`;
+    case 0x2582:
+      return `linear-gradient(${bg} 75%,${fg} 75%)`;
+    case 0x2583:
+      return `linear-gradient(${bg} 62.5%,${fg} 62.5%)`;
+    case 0x2584:
+      return `linear-gradient(${bg} 50%,${fg} 50%)`;
+    case 0x2585:
+      return `linear-gradient(${bg} 37.5%,${fg} 37.5%)`;
+    case 0x2586:
+      return `linear-gradient(${bg} 25%,${fg} 25%)`;
+    case 0x2587:
+      return `linear-gradient(${bg} 12.5%,${fg} 12.5%)`;
+    case 0x2588:
+      return fg;
+    case 0x2589:
+      return `linear-gradient(to right,${fg} 87.5%,${bg} 87.5%)`;
+    case 0x258a:
+      return `linear-gradient(to right,${fg} 75%,${bg} 75%)`;
+    case 0x258b:
+      return `linear-gradient(to right,${fg} 62.5%,${bg} 62.5%)`;
+    case 0x258c:
+      return `linear-gradient(to right,${fg} 50%,${bg} 50%)`;
+    case 0x258d:
+      return `linear-gradient(to right,${fg} 37.5%,${bg} 37.5%)`;
+    case 0x258e:
+      return `linear-gradient(to right,${fg} 25%,${bg} 25%)`;
+    case 0x258f:
+      return `linear-gradient(to right,${fg} 12.5%,${bg} 12.5%)`;
+    case 0x2590:
+      return `linear-gradient(to right,${bg} 50%,${fg} 50%)`;
+    case 0x2591:
+      return mixCssColors(fg, bg, 0.25, themeBackground);
+    case 0x2592:
+      return mixCssColors(fg, bg, 0.5, themeBackground);
+    case 0x2593:
+      return mixCssColors(fg, bg, 0.75, themeBackground);
+    case 0x2594:
+      return `linear-gradient(${fg} 12.5%,${bg} 12.5%)`;
+    case 0x2595:
+      return `linear-gradient(to right,${bg} 87.5%,${fg} 87.5%)`;
+    default: {
+      const quadrants: Record<number, [boolean, boolean, boolean, boolean]> = {
+        0x2596: [false, false, true, false],
+        0x2597: [false, false, false, true],
+        0x2598: [true, false, false, false],
+        0x2599: [true, false, true, true],
+        0x259a: [true, false, false, true],
+        0x259b: [true, true, true, false],
+        0x259c: [true, true, false, true],
+        0x259d: [false, true, false, false],
+        0x259e: [false, true, true, false],
+        0x259f: [false, true, true, true],
+      };
+      const quadrantFill = quadrants[code];
+      if (!quadrantFill) {
+        return fg;
+      }
+      const [topLeft, topRight, bottomLeft, bottomRight] = quadrantFill;
+      if (topLeft && topRight && bottomLeft && bottomRight) {
+        return fg;
+      }
+      const layers: string[] = [];
+      const positions = ['0 0', '100% 0', '0 100%', '100% 100%'];
+      quadrantFill.forEach((filled, index) => {
+        if (!filled) {
+          return;
+        }
+        layers.push(`linear-gradient(${fg},${fg}) ${positions[index]}/50% 50% no-repeat`);
+      });
+      layers.push(bg);
+      return layers.join(',');
+    }
+  }
+}
+
+function isSolidBlockBackground(background: string) {
+  return !background.includes('gradient(');
+}
+
 function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalThemePreset) {
   const cell = normalizeCell(inputCell);
   const colors = resolveColors(cell, theme);
+  const renderedForeground = (cell.flags & FLAG_DIM)
+    ? resolveDimmedForeground(colors.fg, colors.bg, theme.background)
+    : colors.fg;
   const style: Record<string, string> = {
     display: 'inline-block',
     height: rowHeight,
@@ -159,11 +301,17 @@ function cellStyle(inputCell: TerminalCell, rowHeight: string, theme: TerminalTh
     return style;
   }
 
-  style.color = colors.fg;
-  style.background = colors.bg;
-  style.backgroundColor = colors.bg;
+  if (isBlockShadeCodePoint(cell.char)) {
+    const blockBackground = buildBlockBackground(cell.char, colors.fg, colors.bg, theme.background);
+    style.background = blockBackground;
+    style.backgroundColor = isSolidBlockBackground(blockBackground) ? blockBackground : colors.bg;
+    style.color = 'transparent';
+  } else {
+    style.color = renderedForeground;
+    style.background = colors.bg;
+    style.backgroundColor = colors.bg;
+  }
   if (cell.flags & FLAG_BOLD) style.fontWeight = '700';
-  if (cell.flags & FLAG_DIM) style.opacity = '0.5';
   if (cell.flags & FLAG_ITALIC) style.fontStyle = 'italic';
   if (cell.flags & FLAG_INVISIBLE) style.visibility = 'hidden';
 

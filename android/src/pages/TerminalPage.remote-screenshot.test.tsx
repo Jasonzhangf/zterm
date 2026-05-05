@@ -112,6 +112,8 @@ describe('TerminalPage remote screenshot preview', () => {
       createObjectURL: vi.fn(() => 'blob:remote-shot'),
       revokeObjectURL: vi.fn(),
     });
+    vi.mocked(Filesystem.mkdir).mockClear();
+    vi.mocked(Filesystem.writeFile).mockClear();
   });
 
   afterEach(() => {
@@ -203,6 +205,9 @@ describe('TerminalPage remote screenshot preview', () => {
       expect(screen.getByTestId('remote-screenshot-preview-image')).toBeTruthy();
     });
 
+    vi.mocked(Filesystem.mkdir).mockClear();
+    vi.mocked(Filesystem.writeFile).mockClear();
+
     fireEvent.click(screen.getByText('保存到下载'));
 
     await waitFor(() => {
@@ -273,6 +278,113 @@ describe('TerminalPage remote screenshot preview', () => {
     fireEvent.click(screen.getByText('关闭'));
     await waitFor(() => {
       expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
+    });
+  });
+
+  it('does not reopen the sheet after user closes a failed request and a stale callback settles later', async () => {
+    const session = makeSession('s1');
+    let emitLateProgress: ((progress: any) => void) | null = null;
+    let rejectRequest: ((error: Error) => void) | null = null;
+    const onRequestRemoteScreenshot = vi.fn((_sessionId: string, onProgress?: (progress: any) => void): Promise<RemoteScreenshotCapture> => {
+      onProgress?.({ requestId: 'rs-1', phase: 'capturing', fileName: 'remote-shot.png' });
+      emitLateProgress = onProgress || null;
+      return new Promise<RemoteScreenshotCapture>((_resolve, reject) => {
+        rejectRequest = reject;
+      });
+    });
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('request-remote-screenshot'));
+
+    await waitFor(() => {
+      expect(screen.getByText('远端正在截图')).toBeTruthy();
+    });
+
+    const settleRejected = rejectRequest as null | ((error: Error) => void);
+    settleRejected?.(new Error('late remote screenshot failure'));
+
+    await waitFor(() => {
+      expect(screen.getByText('截图失败')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText('关闭'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
+    });
+
+    const replayLateProgress = emitLateProgress as null | ((progress: any) => void);
+    replayLateProgress?.({ requestId: 'rs-1', phase: 'transferring', fileName: 'remote-shot.png', receivedChunks: 1, totalChunks: 2, totalBytes: 6 });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-screenshot-status')).toBe('idle');
+    });
+  });
+
+  it('surfaces mkdir failure explicitly instead of silently continuing save', async () => {
+    vi.mocked(Filesystem.mkdir).mockRejectedValueOnce(new Error('permission denied'));
+    const session = makeSession('s1');
+    const onRequestRemoteScreenshot = vi.fn(async (): Promise<RemoteScreenshotCapture> => ({
+      fileName: 'remote-shot.png',
+      mimeType: 'image/png',
+      dataBase64: 'Zm9vYmFy',
+      totalBytes: 6,
+    }));
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('request-remote-screenshot'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-screenshot-preview-image')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText('保存到下载'));
+
+    await waitFor(() => {
+      expect(Filesystem.writeFile).not.toHaveBeenCalled();
+      expect(alert).toHaveBeenCalledWith(expect.stringContaining('创建截图保存目录失败'));
+      expect(screen.getByTestId('remote-screenshot-sheet')).toBeTruthy();
     });
   });
 });

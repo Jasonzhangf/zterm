@@ -32,5 +32,5 @@ export const resolvePersistedPageStateTruth = (
   if (pageState.kind !== 'terminal') {
     return pageState;
   }
-  return openTerminalPage(pageState.focusSessionId || activeSessionId || undefined);
+  return openTerminalPage(pageState.focusSessionId || undefined);
 };

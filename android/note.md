@@ -431,3 +431,105 @@ All green locally. Next focus stays on remaining real-world slowness after app r
   - `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx`
   - 新增回归：`rewrites all restored persisted tab session ids when cold restore remaps stale ids, not only the active tab`
   - 结果：`42 tests passed`
+
+[2026-05-04] P1 第十刀（进行中）
+- 目标：继续缩 `TerminalView.tsx`，收口 DOM input pipeline；保持协议/行为不变，只把 composition / flush / beforeinput / keydown 动作名字化，effect 只保留 listener mount/unmount。
+- 原因：当前 input effect 同时混合 composing 状态、flush 定时器、特键映射、focus 回贴，属于 renderer 内剩余最厚的重复语义块之一。
+- 成功标准：`TerminalView` 输入链路只有单一 helper 入口；现有 terminal 定向回归保持全绿。
+
+[2026-05-05] P1 下一刀（进行中）
+- 目标：继续缩 `TerminalView.tsx`，收口 follow scroll sync；把 target 计算、programmatic scroll mark、settled state commit 从 `syncScrollHostToRenderBottom` 中拆出，保持行为不变。
+- 成功标准：follow scroll sync 只有单一 orchestration；现有 terminal 定向回归保持全绿。
+
+[2026-05-05] P1 再下一刀（进行中）
+- 目标：继续缩 `TerminalView.tsx`，收口 `handleFollowModeScrollGuards`；把 layout-change / pending-follow / ignored-programmatic-scroll 三类 guard 动作名字化，保持行为不变。
+- 成功标准：follow scroll guard 只剩 orchestration；现有 terminal 定向回归保持全绿。
+
+[2026-05-05] P1 再下一刀（进行中）
+- 目标：继续缩 `TerminalView.tsx`，收口 `alignRenderBottomToFollow` 周边 trigger；把 follow reset / viewport refresh 的判定逻辑从 component effect 中下沉成独立 helper，保持行为不变。
+- 成功标准：follow trigger effect 只做 trigger bridge；现有 terminal 定向回归保持全绿。
+
+[2026-05-05] P1 再下一刀（进行中）
+- 目标：继续缩 `TerminalView.tsx`，收口 session switch init/reset effect；把 session 切换时的 reading/follow/renderBottom/reset-reported-viewport 重置动作下沉成单一 helper，保持行为不变。
+- 成功标准：session switch effect 只做 trigger bridge；现有 terminal 定向回归保持全绿。
+
+[2026-05-05] 架构违规 closeout 第一刀
+- 已确认并收口两处明确违规：
+  1. `remote-screenshot-runtime.ts` 的 chunk decode 失败不再允许“caller can still use concatenated base64”式 fallback；现在直接显式抛错。
+  2. `TerminalPage.tsx -> persistRemoteScreenshotCapture()` 的 `Filesystem.mkdir(...)` 不再空吞；仅对“目录已存在”类错误放行，其余显式失败。
+- 验证：
+  - `src/lib/remote-screenshot-runtime.test.ts`
+  - `src/pages/TerminalPage.remote-screenshot.test.tsx`
+  - `tsc --noEmit`
+  全部转绿。
+
+[2026-05-05] 颜色链路新证据
+- 直接用 `WasmBridge` 验证：
+  - `48;5;22` / `48;5;52` 背景色解析正常
+  - `48:5:22` / `48:5:52` 原样喂给 parser 时背景色丢失（退回 256 sentinel）
+- 当前 `mirror-line-canonicalizer.ts` 只针对 colon-style `38/48/58` + `mode=2|5` 做了分隔符归一化，但现场仍需继续确认 tmux capture 实际串是否落在这条 normalize 漏网边界。
+- 下一步：补红测锁定 colon-style 256 background capture 串的规范化边界，再修 parser normalize。
+
+[2026-05-05] 架构违规 closeout 第二刀：客户端 terminal-buffer 第二真源已物理收口
+- 已确认客户端之前同时存在两份 terminal buffer / compact decode 真源：
+  1. `android/src/lib/terminal-buffer.ts`
+  2. `packages/shared/src/connection/terminal-buffer.ts`
+- 违规点：Android 本地实现还直接从 `../server/buffer-sync-contract` 拿 compact decode，导致 client buffer 链路与 shared 真源分叉，颜色/compact wire 问题无法保证唯一实现。
+- 收口：
+  - `android/src/lib/terminal-buffer.ts` 改为纯 re-export thin wrapper，全部转发到 `@zterm/shared/terminal-buffer`
+  - `android/src/lib/terminal-buffer-replay.ts` 同样改为纯 re-export
+- 验证：
+  - `src/lib/terminal-buffer.test.ts`
+  - `src/contexts/session-context-buffer-runtime.test.ts`
+  - `src/contexts/SessionContext.ws-refresh.test.tsx`
+  - `src/components/TerminalView.dynamic-refresh.test.tsx`
+  - `tsc --noEmit`
+  全绿。
+
+## 2026-05-05 open-tab 真源排查
+- 现象：关闭 tab 后仍会恢复，且会出现重复 tab。
+- 初判：`upsertOpenTabIntentSession()` 只按 sessionId 去重，未按 persisted reuseKey 语义替换旧 tab，违背 open-tab 唯一真源。
+- 计划：先补红测锁定 reuseKey duplicate / close-reopen 场景，再只改纯函数层，最后跑最小回归。
+
+- 新证据：Android/WebView 下 `color-mix(...)` 是 block/shade 背景发灰的重要风险点；已改为 JS 直接混色并输出固定 `rgb(...)`，避免浏览器 CSS 特性差异。
+
+
+[2026-05-05] App active-tab 正文真源收口
+- 现象：tab strip / ACTIVE_SESSION 已指向新 tab，但正文仍可能继续显示 runtime 旧 active session 的 buffer，导致“active tab 和正文串线”。
+- 根因：`App.tsx` 之前把 persisted open-tab active 永久放在 runtime active 前面，能修恢复期串线，但会打坏运行期 active 切换；同时 `deriveRuntimeOpenTabSyncDecision()` 在 restore 之后仍会持续把 runtime active 反向改回 persisted active。
+- 收口：
+  1. `App.tsx` 新增 `pendingTerminalActiveSwitch`，只在 restore / 显式切 tab / draft 触发切 tab 的短窗口里允许正文临时优先 pending target。
+  2. runtime `state.activeSessionId` 一旦追平，或 runtime 已经切到别的 tab，立即清掉 pending gate，运行期正文重新只跟 runtime active。
+  3. `open-tab-intent.ts` 新冻结：`restoredTabsHandled=true` 后，不再产出 `switch` 强推 persisted active；若 runtime active 已变化且仍在 OPEN_TABS 内，则把 persisted active merge 改写到 runtime active。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/open-tab-intent.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx --reporter verbose`
+  - 关键门禁：
+    - `follows state activeSession switch even when stale getter still points to previous session`
+    - `renders the persisted open-tab active session as terminal body truth even when runtime active session still points to another tab`
+    - `keeps the normalized persisted active tab truth and rewrites runtime active session to match it when runtime sessions already exist`
+
+[2026-05-05] TerminalView block/shade dim 背景灰化根因
+- 现象：tmux 里红/绿块状背景在 Android 上仍可能发灰，尤其是 block/shade glyph + dim 场景。
+- 根因：`TerminalView.cellStyle()` 在 block/shade glyph 路径里把 `renderedForeground`（dim 后前景）传给 `buildBlockBackground()`；这会把本应保持原始红/绿 truth 的填充背景一起洗灰。
+- 修复：block/shade glyph 的背景填充改回使用 `colors.fg` 原始前景真相；dim 只作用于普通文本前景，不再改写 block/shade 背景 truth。shared `packages/shared/src/react/terminal-view.tsx` 同步收口，避免第二实现。
+- 验证：
+  - `pnpm --dir android exec vitest run src/components/TerminalView.theme.test.tsx src/server/mirror-line-canonicalizer.test.ts src/lib/open-tab-intent.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx --reporter verbose`
+  - 新增门禁：`keeps dimmed block and shade glyph backgrounds on the original red/green truth instead of mixing them to gray`
+
+[2026-05-05] TerminalView blank-until-touch closeout:
+- 现象：refresh / relayout / tail refresh 后偶发进入空白帧，用户 touch/scroll 一次才恢复。
+- 真因：renderer follow 链路已更新 render rows，但 DOM scrollTop 偶发停在超过真实 DOM bottom 的 overscrolled blank frame；原恢复链路部分依赖后续 scroll/touch 事件触发 guard。
+- 修复：`TerminalView.tsx` 新增 layout-phase follow 自修复；在 follow 态提交后若检测到 `scrollTop > scrollHeight - clientHeight` 或仍有 `pendingFollowViewportRealign`，立即 `syncScrollHostToRenderBottom(...)`，不再等待用户交互。
+- 新 gate：`repairs an overscrolled follow frame on refresh without waiting for a user touch event`。
+
+
+[2026-05-05] Mac remote screenshot sign/TCC reality check
+- Android remote-screenshot UI/runtime race 已收口；TerminalView follow/reading 空白花屏相关门禁已绿。
+- Mac helper 已从 daemon 直截屏收口为 GUI helper 唯一执行主体，并进一步把 helper 截图真相改为 `screencapture`，不再依赖 `desktopCapturer` 作为截图执行路径。
+- 实测结论：
+  1. `/Applications/ZTerm.app` 在 electron-builder 未拿到正式可用 identity 时只能生成 adhoc 包；
+  2. 手工 `codesign --force --deep --sign - /Applications/ZTerm.app` 后可恢复 `Identifier=com.zterm.mac` 的干净 adhoc 包；
+  3. TCC reset 后 `kTCCServiceScreenCapture/com.zterm.mac` 记录可被清空；
+  4. 但无论 LaunchAgent 还是 direct helper，helper 内执行 `/usr/sbin/screencapture -x ...` 都返回 `could not create image from display`；
+  5. 本地自造 code-sign cert 虽能 import，但 `security find-identity -p codesigning` 仍是 0 valid identities，说明当前机器不存在可用于稳定签名/TCC 闭环的有效 code-sign identity。
+- 冻结结论：当前 Mac 截图剩余 blocker 是 **安装态签名/TCC 身份链**，不是 daemon/helper 业务逻辑；继续改业务代码不能闭环。

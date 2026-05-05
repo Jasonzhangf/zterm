@@ -692,6 +692,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
                   sessionId={session.id}
                   sessionBufferStore={sessionBufferStore}
                   active={sessionIsActive}
+                  live={visiblePaneSessionIds.includes(session.id)}
                   inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
                   followResetEpoch={sessionIsActive ? followResetEpoch : 0}
                   allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
@@ -781,8 +782,12 @@ async function persistRemoteScreenshotCapture(fileName: string, dataBase64: stri
       directory: Directory.ExternalStorage,
       recursive: true,
     });
-  } catch {
-    // directory may already exist
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const alreadyExists = /exist/i.test(message) || /EEXIST/i.test(message);
+    if (!alreadyExists) {
+      throw new Error(`创建截图保存目录失败: ${message}`);
+    }
   }
 
   const savedPath = `${downloadDir}/${fileName}`;
@@ -995,6 +1000,7 @@ function TerminalPageComponent({
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
   const terminalFocusRetryTimeoutsRef = useRef<number[]>([]);
   const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
+  const remoteScreenshotRequestEpochRef = useRef(0);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
@@ -1423,6 +1429,7 @@ function TerminalPageComponent({
   }, []);
 
   const closeRemoteScreenshotPreview = useCallback(() => {
+    remoteScreenshotRequestEpochRef.current += 1;
     revokeRemoteScreenshotPreviewUrl();
     setRemoteScreenshotPreview(null);
   }, [revokeRemoteScreenshotPreviewUrl]);
@@ -1438,6 +1445,8 @@ function TerminalPageComponent({
       return;
     }
 
+    const requestEpoch = remoteScreenshotRequestEpochRef.current + 1;
+    remoteScreenshotRequestEpochRef.current = requestEpoch;
     revokeRemoteScreenshotPreviewUrl();
     setRemoteScreenshotPreview({
       phase: 'request-sent',
@@ -1448,6 +1457,9 @@ function TerminalPageComponent({
 
     try {
       const capture = await onRequestRemoteScreenshot(targetSessionId, (progress) => {
+        if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+          return;
+        }
         setRemoteScreenshotPreview((current) => ({
           phase: progress.phase,
           fileName: progress.fileName || current?.fileName || `remote-screenshot-${Date.now()}.png`,
@@ -1459,6 +1471,9 @@ function TerminalPageComponent({
         }));
       });
 
+      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+        return;
+      }
       setRemoteScreenshotPreview((current) => current ? {
         ...current,
         phase: 'transfer-complete',
@@ -1470,6 +1485,10 @@ function TerminalPageComponent({
         ?? Uint8Array.from(atob(capture.dataBase64), (char) => char.charCodeAt(0));
       const blob = new Blob([binary.buffer as ArrayBuffer], { type: capture.mimeType || 'image/png' });
       const previewUrl = URL.createObjectURL(blob);
+      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+        URL.revokeObjectURL(previewUrl);
+        return;
+      }
       remoteScreenshotPreviewUrlRef.current = previewUrl;
       setRemoteScreenshotPreview({
         phase: 'preview-ready',
@@ -1481,6 +1500,9 @@ function TerminalPageComponent({
         totalBytes: capture.totalBytes,
       });
     } catch (error) {
+      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+        return;
+      }
       setRemoteScreenshotPreview((current) => ({
         phase: 'failed',
         fileName: current?.fileName || `remote-screenshot-${Date.now()}.png`,

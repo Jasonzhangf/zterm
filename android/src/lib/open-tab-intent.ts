@@ -3,12 +3,45 @@ import {
   buildPersistedOpenTabFromSession,
   buildPersistedOpenTabReuseKey,
   buildPersistedOpenTabReuseKeyFromSession,
-  dedupePersistedOpenTabs,
 } from './open-tab-persistence';
 
 export interface OpenTabIntentState {
   tabs: PersistedOpenTab[];
   activeSessionId: string | null;
+}
+
+export interface CloseOpenTabIntentResult {
+  nextState: OpenTabIntentState;
+  closedReuseKey: string | null;
+}
+
+export interface RuntimeOpenTabSyncDecision {
+  kind: 'noop' | 'bootstrap' | 'merge' | 'switch';
+  state?: OpenTabIntentState;
+  activeSessionId?: string | null;
+}
+
+export interface PersistedOpenTabRestorePlan {
+  kind: 'empty' | 'restore';
+  tabs: PersistedOpenTab[];
+  activeSessionId: string | null;
+}
+
+export function dedupePersistedOpenTabs(tabs: PersistedOpenTab[]) {
+  const byKey = new Map<string, PersistedOpenTab>();
+  for (const tab of tabs) {
+    const key = buildPersistedOpenTabReuseKey(tab);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, tab);
+      continue;
+    }
+    const preferred =
+      (existing.customName?.trim() ? existing : tab.customName?.trim() ? tab : null)
+      || (existing.createdAt >= tab.createdAt ? existing : tab);
+    byKey.set(key, preferred);
+  }
+  return Array.from(byKey.values());
 }
 
 export function openTabIntentStatesEqual(
@@ -66,6 +99,87 @@ export function buildBootstrapOpenTabIntentStateFromSessions(
 ): OpenTabIntentState {
   const tabs = sessions.map((session) => buildPersistedOpenTabFromSession(session));
   return normalizeOpenTabIntentState(tabs, runtimeActiveSessionId);
+}
+
+export function deriveRuntimeOpenTabSyncDecision(options: {
+  currentState: OpenTabIntentState;
+  runtimeSessions: Array<Pick<
+    Session,
+    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+  >>;
+  runtimeActiveSessionId: string | null;
+  restoredTabsHandled: boolean;
+  hasPersistedOpenTabsTruth: boolean;
+  closedSessionIds: ReadonlySet<string>;
+  closedReuseKeys?: ReadonlySet<string>;
+}): RuntimeOpenTabSyncDecision {
+  if (options.runtimeSessions.length === 0) {
+    return { kind: 'noop' };
+  }
+
+  const shouldBootstrapFromRuntime =
+    !options.restoredTabsHandled
+    && options.currentState.tabs.length === 0
+    && !options.hasPersistedOpenTabsTruth;
+  if (shouldBootstrapFromRuntime) {
+    return {
+      kind: 'bootstrap',
+      state: buildBootstrapOpenTabIntentStateFromSessions(
+        options.runtimeSessions,
+        options.runtimeActiveSessionId,
+      ),
+    };
+  }
+
+  if (options.currentState.tabs.length === 0 && options.hasPersistedOpenTabsTruth) {
+    return { kind: 'noop' };
+  }
+
+  const runtimeMergedState = mergeRuntimeSessionsIntoOpenTabIntentState(
+    options.currentState,
+    options.runtimeSessions,
+    options.closedSessionIds,
+    options.closedReuseKeys,
+  );
+  if (runtimeMergedState !== options.currentState) {
+    return {
+      kind: 'merge',
+      state: runtimeMergedState,
+    };
+  }
+
+  if (options.restoredTabsHandled) {
+    const runtimeActiveSessionId = options.runtimeActiveSessionId;
+    if (
+      runtimeActiveSessionId
+      && runtimeActiveSessionId !== options.currentState.activeSessionId
+      && options.currentState.tabs.some((tab) => tab.sessionId === runtimeActiveSessionId)
+    ) {
+      return {
+        kind: 'merge',
+        state: normalizeOpenTabIntentState(
+          options.currentState.tabs,
+          runtimeActiveSessionId,
+        ),
+      };
+    }
+    return { kind: 'noop' };
+  }
+
+  const requestedActiveSessionId = options.currentState.activeSessionId;
+  const runtimeSessionIds = new Set(options.runtimeSessions.map((session) => session.id));
+  if (
+    requestedActiveSessionId
+    && runtimeSessionIds.has(requestedActiveSessionId)
+    && options.runtimeActiveSessionId !== requestedActiveSessionId
+  ) {
+    return {
+      kind: 'switch',
+      activeSessionId: requestedActiveSessionId,
+    };
+  }
+
+  return { kind: 'noop' };
 }
 
 export function mergeRuntimeSessionsIntoOpenTabIntentState(
@@ -151,9 +265,47 @@ export function upsertOpenTabIntentSession(
     fallbackActiveSessionId?: string | null;
   },
 ): OpenTabIntentState {
+  const targetReuseKey = buildPersistedOpenTabReuseKey(tab);
+  const semanticDuplicate = currentState.tabs.find((item) => (
+    buildPersistedOpenTabReuseKey(item) === targetReuseKey
+  )) || null;
+  const nextTab = semanticDuplicate
+    ? {
+        ...tab,
+        customName: semanticDuplicate.customName?.trim() || tab.customName,
+        createdAt: semanticDuplicate.createdAt || tab.createdAt,
+      }
+    : tab;
+  const shouldRewriteActiveSessionId = currentState.tabs.some((item) => (
+    item.sessionId === currentState.activeSessionId
+    && (
+      item.sessionId === tab.sessionId
+      || buildPersistedOpenTabReuseKey(item) === targetReuseKey
+    )
+  ));
+  const requestedActiveSessionId = options?.activate
+    ? nextTab.sessionId
+    : (
+      shouldRewriteActiveSessionId
+        ? nextTab.sessionId
+        : (currentState.activeSessionId || options?.fallbackActiveSessionId || null)
+    );
+  let inserted = false;
   return normalizeOpenTabIntentState(
-    [...currentState.tabs.filter((item) => item.sessionId !== tab.sessionId), tab],
-    options?.activate ? tab.sessionId : (currentState.activeSessionId || options?.fallbackActiveSessionId || null),
+    currentState.tabs.flatMap((item) => {
+      const matchesSemanticTarget =
+        item.sessionId === tab.sessionId
+        || buildPersistedOpenTabReuseKey(item) === targetReuseKey;
+      if (!matchesSemanticTarget) {
+        return [item];
+      }
+      if (inserted) {
+        return [];
+      }
+      inserted = true;
+      return [nextTab];
+    }).concat(inserted ? [] : [nextTab]),
+    requestedActiveSessionId,
   );
 }
 
@@ -231,6 +383,81 @@ export function closeOpenTabIntentSession(
       );
 
   return normalizeOpenTabIntentState(nextTabs, requestedActiveSessionId);
+}
+
+export function deriveCloseOpenTabIntent(
+  currentState: OpenTabIntentState,
+  sessionId: string,
+  options?: {
+    runtimeActiveSessionId?: string | null;
+    fallbackSessionIds?: string[];
+    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>>;
+  },
+): CloseOpenTabIntentResult {
+  const targetSession = options?.runtimeSessions?.find((session) => session.id === sessionId) || null;
+  const targetTab = currentState.tabs.find((tab) => tab.sessionId === sessionId) || null;
+  const closedReuseKeySource = targetTab || targetSession;
+  return {
+    nextState: closeOpenTabIntentSession(currentState, sessionId, options),
+    closedReuseKey: closedReuseKeySource
+      ? buildPersistedOpenTabReuseKey({
+          bridgeHost: closedReuseKeySource.bridgeHost,
+          bridgePort: closedReuseKeySource.bridgePort,
+          sessionName: closedReuseKeySource.sessionName,
+          authToken: closedReuseKeySource.authToken,
+        })
+      : null,
+  };
+}
+
+export function resolveRestoredOpenTabIntentState(
+  currentState: OpenTabIntentState,
+  restoredSessionIdRemap: ReadonlyMap<string, string>,
+): OpenTabIntentState {
+  if (restoredSessionIdRemap.size === 0) {
+    return currentState;
+  }
+  const resolvedTabs = currentState.tabs.map((tab) => {
+    const remappedSessionId = restoredSessionIdRemap.get(tab.sessionId);
+    return remappedSessionId
+      ? { ...tab, sessionId: remappedSessionId }
+      : tab;
+  });
+  const resolvedActiveSessionId = currentState.activeSessionId
+    ? (restoredSessionIdRemap.get(currentState.activeSessionId) || currentState.activeSessionId)
+    : null;
+  return normalizeOpenTabIntentState(resolvedTabs, resolvedActiveSessionId);
+}
+
+export function derivePersistedOpenTabRestorePlan(
+  currentState: OpenTabIntentState,
+): PersistedOpenTabRestorePlan {
+  if (currentState.tabs.length === 0) {
+    return {
+      kind: 'empty',
+      tabs: [],
+      activeSessionId: null,
+    };
+  }
+
+  return {
+    kind: 'restore',
+    tabs: currentState.tabs,
+    activeSessionId: currentState.activeSessionId && currentState.tabs.some((tab) => tab.sessionId === currentState.activeSessionId)
+      ? currentState.activeSessionId
+      : currentState.tabs[0]?.sessionId || null,
+  };
+}
+
+export function resolveSavedOpenTabsImportPlan(
+  tabs: PersistedOpenTab[],
+  requestedActiveSessionId?: string,
+) {
+  const dedupedTabs = dedupePersistedOpenTabs(tabs);
+  return {
+    tabs: dedupedTabs,
+    focusSessionId: resolveRequestedOpenTabFocusSessionId(dedupedTabs, requestedActiveSessionId),
+  };
 }
 
 export function resolveRequestedOpenTabFocusSessionId(

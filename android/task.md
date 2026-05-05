@@ -238,6 +238,7 @@
     - 本机证据：launchd service restart 后继续拿到 `capturing -> transferring -> file-download-complete`
     - 剩余只是不做 fallback 的产品化启动方式（例如 helper 安装/显式启动入口），不是主链正确性问题
 - [ ] mobile-15.45a remote screenshot helper productized startup closeout：helper 需要独立安装/自启动/状态入口
+  - 2026-05-05 当前证据：Android 侧 race 回归 12 tests passed；Mac helper 已 productized `start/stop/restart/status`；本机 Unix socket probe 仍稳定返回 `screen capture permission denied`，已把 helper 实现改为 `desktopCapturer` 唯一路径并 fail-fast 打开系统设置入口；当前 blocker 仍是 `com.zterm.mac` 未获系统 Screen Recording 授权，待用户授权后做真实 `capture-completed` 闭环复测。
   - 第一版冻结：
     1. `mac/scripts/zterm-screenshot-helper.sh` 提供 `install-service/start/stop/restart/status/uninstall-service`
     2. helper LaunchAgent 拉起 Electron `--screenshot-helper`
@@ -482,3 +483,9 @@
     - `timeout 60 pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` -> `93 passed`
     - `timeout 25 pnpm exec vitest run src/App.dynamic-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx --reporter dot` -> `33 passed`
     - `timeout 40 pnpm exec tsc -p tsconfig.json --noEmit --pretty false` 仍被既有 `src/lib/buffer/BufferSyncEngine.ts` / `src/lib/session/SessionConnector.ts` 半成品阻塞，非本刀新增
+
+
+- [~] mobile-15.36 remote screenshot preview closeout
+  - Android 客户端 race/fail-fast 已收口；Mac helper 已改成 GUI helper + `screencapture` 唯一路径。
+  - 当前剩余 blocker：macOS 安装态签名/TCC 身份链未闭环；现机器无 valid code-sign identity，helper 在 direct / launch-agent 两种模式下都 `could not create image from display`。
+  - 下一步不是继续改业务逻辑，而是补正式签名身份/稳定 app code requirement 后重跑 TCC 授权链。

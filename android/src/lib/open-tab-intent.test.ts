@@ -6,10 +6,15 @@ import {
   activateOpenTabIntentSession,
   buildBootstrapOpenTabIntentStateFromSessions,
   closeOpenTabIntentSession,
+  deriveCloseOpenTabIntent,
+  derivePersistedOpenTabRestorePlan,
+  deriveRuntimeOpenTabSyncDecision,
   mergeRuntimeSessionsIntoOpenTabIntentState,
   moveOpenTabIntentSession,
   normalizeOpenTabIntentState,
   renameOpenTabIntentSession,
+  resolveRestoredOpenTabIntentState,
+  resolveSavedOpenTabsImportPlan,
   resolveRequestedOpenTabFocusSessionId,
   upsertOpenTabIntentSession,
 } from './open-tab-intent';
@@ -87,6 +92,82 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('derives runtime bootstrap decision with a single pure rule', () => {
+    const decision = deriveRuntimeOpenTabSyncDecision({
+      currentState: normalizeOpenTabIntentState([], null),
+      runtimeSessions: [makeSession('s1'), makeSession('s2', { createdAt: 2 })],
+      runtimeActiveSessionId: 's2',
+      restoredTabsHandled: false,
+      hasPersistedOpenTabsTruth: false,
+      closedSessionIds: new Set<string>(),
+    });
+
+    expect(decision.kind).toBe('bootstrap');
+    expect(decision.state?.activeSessionId).toBe('s2');
+    expect(decision.state?.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
+  });
+
+  it('derives runtime merge decision when semantic duplicate ids need rewriting', () => {
+    const decision = deriveRuntimeOpenTabSyncDecision({
+      currentState: normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          customName: 'Keep Me',
+        }),
+      ], 'persisted-old'),
+      runtimeSessions: [
+        makeSession('runtime-new', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+        }),
+      ],
+      runtimeActiveSessionId: 'runtime-new',
+      restoredTabsHandled: true,
+      hasPersistedOpenTabsTruth: true,
+      closedSessionIds: new Set<string>(),
+    });
+
+    expect(decision.kind).toBe('merge');
+    expect(decision.state?.tabs[0]?.sessionId).toBe('runtime-new');
+    expect(decision.state?.activeSessionId).toBe('runtime-new');
+  });
+
+  it('derives runtime switch decision when persisted active truth differs from runtime active session', () => {
+    const decision = deriveRuntimeOpenTabSyncDecision({
+      currentState: normalizeOpenTabIntentState([makeTab('s1'), makeTab('s2')], 's1'),
+      runtimeSessions: [makeSession('s1'), makeSession('s2')],
+      runtimeActiveSessionId: 's2',
+      restoredTabsHandled: false,
+      hasPersistedOpenTabsTruth: true,
+      closedSessionIds: new Set<string>(),
+    });
+
+    expect(decision).toEqual({
+      kind: 'switch',
+      activeSessionId: 's1',
+    });
+  });
+
+  it('rewrites persisted active truth to the runtime active tab after restore has already settled', () => {
+    const decision = deriveRuntimeOpenTabSyncDecision({
+      currentState: normalizeOpenTabIntentState([makeTab('s1'), makeTab('s2')], 's1'),
+      runtimeSessions: [makeSession('s1'), makeSession('s2')],
+      runtimeActiveSessionId: 's2',
+      restoredTabsHandled: true,
+      hasPersistedOpenTabsTruth: true,
+      closedSessionIds: new Set<string>(),
+    });
+
+    expect(decision).toEqual({
+      kind: 'merge',
+      state: {
+        tabs: [makeTab('s1'), makeTab('s2')],
+        activeSessionId: 's2',
+      },
+    });
   });
 
   it('does not append runtime-only sessions when OPEN_TABS already exists as explicit client truth', () => {
@@ -176,6 +257,68 @@ describe('open-tab intent truth', () => {
     expect(activated.activeSessionId).toBe('s1');
   });
 
+  it('upserts by semantic reuse key and rewrites the tab session id instead of keeping duplicates', () => {
+    const state = upsertOpenTabIntentSession(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          customName: 'Keep Me',
+          createdAt: 1,
+        }),
+        makeTab('s2', { createdAt: 2 }),
+      ], 'persisted-old'),
+      makeTab('runtime-new', {
+        sessionName: 'tmux-shared',
+        authToken: 'shared-token',
+        createdAt: 3,
+      }),
+      { activate: true },
+    );
+
+    expect(state.tabs).toEqual([
+      expect.objectContaining({
+        sessionId: 'runtime-new',
+        sessionName: 'tmux-shared',
+        authToken: 'shared-token',
+        customName: 'Keep Me',
+        createdAt: 1,
+      }),
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+    expect(state.activeSessionId).toBe('runtime-new');
+  });
+
+  it('upserts by semantic reuse key without activation and preserves the existing active tab', () => {
+    const state = upsertOpenTabIntentSession(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+          customName: 'Keep Me',
+          createdAt: 1,
+        }),
+        makeTab('s2', { createdAt: 2 }),
+      ], 's2'),
+      makeTab('runtime-new', {
+        sessionName: 'tmux-shared',
+        authToken: 'shared-token',
+        createdAt: 3,
+      }),
+      { activate: false, fallbackActiveSessionId: 's2' },
+    );
+
+    expect(state.tabs).toEqual([
+      expect.objectContaining({
+        sessionId: 'runtime-new',
+        customName: 'Keep Me',
+        createdAt: 1,
+      }),
+      expect.objectContaining({ sessionId: 's2' }),
+    ]);
+    expect(state.activeSessionId).toBe('s2');
+  });
+
   it('closes active tab and falls through to next persisted/runtime candidate', () => {
     const state = closeOpenTabIntentSession(
       normalizeOpenTabIntentState([makeTab('s1'), makeTab('s2')], 's1'),
@@ -220,6 +363,92 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('derives close intent result with reuse-key truth in the same pure module', () => {
+    const result = deriveCloseOpenTabIntent(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-old', {
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'tmux-shared',
+          authToken: 'shared-token',
+        }),
+        makeTab('s2'),
+      ], 'persisted-old'),
+      'runtime-new',
+      {
+        runtimeActiveSessionId: 'runtime-new',
+        fallbackSessionIds: ['s2'],
+        runtimeSessions: [
+          makeSession('runtime-new', {
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            sessionName: 'tmux-shared',
+            authToken: 'shared-token',
+          }),
+          makeSession('s2'),
+        ],
+      },
+    );
+
+    expect(result.closedReuseKey).toBe('100.127.23.27::3333::tmux-shared::shared-token');
+    expect(result.nextState.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
+    expect(result.nextState.activeSessionId).toBe('s2');
+  });
+
+  it('resolves restored session-id remap with a single pure rule', () => {
+    const state = resolveRestoredOpenTabIntentState(
+      normalizeOpenTabIntentState([makeTab('saved-a'), makeTab('saved-b')], 'saved-b'),
+      new Map([
+        ['saved-a', 'saved-a-new'],
+        ['saved-b', 'saved-b-new'],
+      ]),
+    );
+
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a-new', 'saved-b-new']);
+    expect(state.activeSessionId).toBe('saved-b-new');
+  });
+
+  it('derives persisted restore plan with normalized active tab truth', () => {
+    expect(derivePersistedOpenTabRestorePlan(
+      normalizeOpenTabIntentState([makeTab('s1'), makeTab('s2')], 'missing'),
+    )).toEqual({
+      kind: 'restore',
+      tabs: [
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionId: 's2' }),
+      ],
+      activeSessionId: 's1',
+    });
+  });
+
+  it('resolves saved-tab import plan with dedupe plus requested focus in one pure module', () => {
+    const plan = resolveSavedOpenTabsImportPlan([
+      makeTab('saved-a', {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+      }),
+      makeTab('saved-b-stale', {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+      }),
+      makeTab('saved-b-new', {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'beta',
+        authToken: 'token-b',
+        createdAt: 2,
+        customName: 'Keep Me',
+      }),
+    ], 'saved-b-new');
+
+    expect(plan.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a', 'saved-b-new']);
+    expect(plan.focusSessionId).toBe('saved-b-new');
   });
 
   it('resolves requested focus session id from imported tabs with a single pure rule', () => {

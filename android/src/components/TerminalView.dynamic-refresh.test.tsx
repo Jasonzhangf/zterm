@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
+import type React from 'react';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TerminalView } from './TerminalView';
+import { TerminalView as BaseTerminalView } from './TerminalView';
 import { createSessionBufferState } from '../lib/terminal-buffer';
-import type { Session, TerminalCell } from '../lib/types';
+import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
 
 class ResizeObserverMock {
   static instances = new Set<ResizeObserverMock>();
@@ -105,6 +106,94 @@ function scrollFromBottomIntoReading(scroller: HTMLDivElement, bottomScrollTop =
   fireEvent.scroll(scroller);
   scroller.scrollTop = 0;
   fireEvent.scroll(scroller);
+}
+
+function toRenderBufferSnapshot(options: {
+  initialBufferLines?: TerminalCell[][];
+  bufferStartIndex?: number;
+  bufferEndIndex?: number;
+  bufferHeadStartIndex?: number;
+  bufferTailEndIndex?: number;
+  bufferGapRanges?: Array<{ startIndex: number; endIndex: number }>;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+  cursorKeysApp?: boolean;
+  cursor?: SessionRenderBufferSnapshot['cursor'];
+  revision?: number;
+}): SessionRenderBufferSnapshot {
+  const lines = options.initialBufferLines || [];
+  const startIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
+  const endIndex = typeof options.bufferEndIndex === 'number' && Number.isFinite(options.bufferEndIndex)
+    ? Math.max(startIndex, Math.floor(options.bufferEndIndex))
+    : startIndex + lines.length;
+  const bufferTailEndIndex = typeof options.bufferTailEndIndex === 'number' && Number.isFinite(options.bufferTailEndIndex)
+    ? Math.max(startIndex, Math.floor(options.bufferTailEndIndex))
+    : endIndex;
+  return {
+    lines,
+    gapRanges: options.bufferGapRanges || [],
+    startIndex,
+    endIndex,
+    bufferHeadStartIndex: typeof options.bufferHeadStartIndex === 'number' && Number.isFinite(options.bufferHeadStartIndex)
+      ? Math.max(0, Math.floor(options.bufferHeadStartIndex))
+      : startIndex,
+    bufferTailEndIndex,
+    daemonHeadRevision: Math.max(0, Math.floor(options.daemonHeadRevision || 0)),
+    daemonHeadEndIndex: typeof options.daemonHeadEndIndex === 'number' && Number.isFinite(options.daemonHeadEndIndex)
+      ? Math.max(startIndex, Math.floor(options.daemonHeadEndIndex))
+      : bufferTailEndIndex,
+    cols: 80,
+    rows: 24,
+    cursorKeysApp: Boolean(options.cursorKeysApp),
+    cursor: options.cursor || null,
+    revision: Math.max(0, Math.floor(options.revision || 0)),
+  };
+}
+
+type LegacyTerminalViewProps = React.ComponentProps<typeof BaseTerminalView> & {
+  initialBufferLines?: TerminalCell[][];
+  bufferStartIndex?: number;
+  bufferEndIndex?: number;
+  bufferHeadStartIndex?: number;
+  bufferTailEndIndex?: number;
+  bufferGapRanges?: Array<{ startIndex: number; endIndex: number }>;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+  cursorKeysApp?: boolean;
+  cursor?: SessionRenderBufferSnapshot['cursor'];
+};
+
+function TerminalView({
+  renderBufferSnapshot,
+  initialBufferLines,
+  bufferStartIndex,
+  bufferEndIndex,
+  bufferHeadStartIndex,
+  bufferTailEndIndex,
+  bufferGapRanges,
+  daemonHeadRevision,
+  daemonHeadEndIndex,
+  cursorKeysApp,
+  cursor,
+  ...props
+}: LegacyTerminalViewProps) {
+  return (
+    <BaseTerminalView
+      {...props}
+      renderBufferSnapshot={renderBufferSnapshot || toRenderBufferSnapshot({
+        initialBufferLines,
+        bufferStartIndex,
+        bufferEndIndex,
+        bufferHeadStartIndex,
+        bufferTailEndIndex,
+        bufferGapRanges,
+        daemonHeadRevision,
+        daemonHeadEndIndex,
+        cursorKeysApp,
+        cursor,
+      })}
+    />
+  );
 }
 
 describe('TerminalView minimal mirror render', () => {
@@ -2578,6 +2667,91 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('repairs an overscrolled follow frame on refresh without waiting for a user touch event', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let currentScrollTop = 0;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        },
+      });
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      scrollHeight = 1206;
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      expect(scroller.scrollTop).toBe(798);
+      expect(readRenderedRows(view.container)).toContain('row-081');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not auto-enter reading when a follow refresh temporarily leaves the DOM above bottom before realign', async () => {
     vi.useFakeTimers();
     try {
@@ -3189,6 +3363,93 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('does not auto-enter reading when follow refresh scroll events arrive without any recent user scroll intent', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(81),
+        bufferTailEndIndex: 81,
+      });
+      scrollHeight = 1377;
+
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      scroller.scrollTop = 760;
+      fireEvent.scroll(scroller);
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+      const rows = readRenderedRows(view.container);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows).toContain('row-081');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('realigns follow scroll immediately when input reset and live tail refresh land together', async () => {
     vi.useFakeTimers();
     try {
@@ -3365,7 +3626,7 @@ describe('TerminalView minimal mirror render', () => {
     expect(gapLineNumber.getAttribute('data-terminal-line-discontinuous')).toBe('true');
   });
 
-  it('does not emit viewport updates while inactive even if live=true', async () => {
+  it('emits viewport updates for live panes even when they are not the interactive active pane', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 3,
@@ -3396,11 +3657,13 @@ describe('TerminalView minimal mirror render', () => {
       </div>,
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(onViewportChange).toHaveBeenCalledTimes(0);
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenCalled();
+    });
+    expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'follow')).toBe(true);
   });
 
-  it('does not reconcile inactive pane render state on live buffer updates', async () => {
+  it('reconciles live pane render state on buffer updates even when the pane is not the interactive active pane', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 1,
@@ -3474,7 +3737,7 @@ describe('TerminalView minimal mirror render', () => {
     expect(readRenderedRows(view.container)).toContain('row-080');
     expect(readRenderedRows(view.container)).toContain('row-081');
     expect(scroller.scrollTop).toBe(952);
-    expect(onViewportChange).toHaveBeenCalledTimes(0);
+    expect(onViewportChange).toHaveBeenCalled();
   });
 
 
