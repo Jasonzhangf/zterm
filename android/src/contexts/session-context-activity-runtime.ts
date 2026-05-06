@@ -84,12 +84,15 @@ export function ensureActiveSessionFreshRuntime(options: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
+    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
   };
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number; startIndex: number; endIndex: number };
@@ -100,7 +103,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   ) => 'probed' | 'waiting' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  resolveTerminalRefreshCadence: () => { headTickMs: number };
+  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
   reconnectSession: (sessionId: string) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
@@ -114,6 +117,9 @@ export function ensureActiveSessionFreshRuntime(options: {
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
+  const pendingTransportOpenStale = pendingTransportOpen
+    ? options.isPendingSessionTransportOpenStale(options.refreshOptions.sessionId)
+    : false;
 
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
   const refreshPlan = buildActiveSessionRefreshPlan({
@@ -123,12 +129,34 @@ export function ensureActiveSessionFreshRuntime(options: {
     wsReadyState: ws?.readyState ?? null,
     reconnectInFlight,
     pendingTransportOpen,
+    pendingTransportOpenStale,
     allowReconnectIfUnavailable: options.refreshOptions.allowReconnectIfUnavailable,
     transportStale,
     source: options.refreshOptions.source,
   });
 
   if (refreshPlan.action === 'skip') {
+    if (refreshPlan.reason === 'tick-live-refresh-owned-by-daemon') {
+      const cadence = options.resolveTerminalRefreshCadence();
+      const now = Date.now();
+      const lastServerActivityAt = options.refs.lastServerActivityAtRef.current.get(options.refreshOptions.sessionId) || 0;
+      const lastHeadRequestAt = options.refs.lastHeadRequestAtRef.current.get(options.refreshOptions.sessionId) || 0;
+      const lastProgressAt = lastServerActivityAt;
+      const headSilenceMs = lastProgressAt > 0 ? Math.max(0, now - lastProgressAt) : Number.POSITIVE_INFINITY;
+      if (headSilenceMs >= cadence.headStalePingMs) {
+        options.runtimeDebug('session.transport.active-tick.head-probe', {
+          sessionId: options.refreshOptions.sessionId,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+          isActive,
+          isLive,
+          headSilenceMs,
+          lastServerActivityAt,
+          lastHeadRequestAt,
+          thresholdMs: cadence.headStalePingMs,
+        });
+        return options.requestSessionBufferHead(options.refreshOptions.sessionId, ws, { force: false });
+      }
+    }
     options.runtimeDebug(`session.transport.${options.refreshOptions.source}.skip`, {
       sessionId: options.refreshOptions.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -140,6 +168,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       wsReadyState: ws?.readyState ?? null,
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
+      pendingTransportOpenStale,
       reason: refreshPlan.reason,
     });
     return false;

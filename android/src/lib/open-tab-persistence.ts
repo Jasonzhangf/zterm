@@ -1,4 +1,9 @@
 import { findReusableManagedSession } from '../contexts/session-sync-helpers';
+import {
+  buildSessionSemanticReuseKey,
+  buildSessionSemanticReuseKeyVariants,
+  sessionSemanticReuseMatch,
+} from './session-semantic-identity';
 import { STORAGE_KEYS, type Host, type PersistedOpenTab, type Session } from './types';
 
 export function readPersistedActiveSessionId() {
@@ -43,6 +48,7 @@ export function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | nu
   const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
   const sessionName = typeof candidate.sessionName === 'string' ? candidate.sessionName.trim() : '';
   const connectionName = typeof candidate.connectionName === 'string' ? candidate.connectionName.trim() : '';
+  const daemonHostId = typeof candidate.daemonHostId === 'string' ? candidate.daemonHostId.trim() : '';
 
   if (!sessionId || !bridgeHost || !sessionName) {
     return null;
@@ -57,6 +63,7 @@ export function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | nu
       typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
         ? candidate.bridgePort
         : 3333,
+    daemonHostId: daemonHostId || undefined,
     sessionName,
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     autoCommand: typeof candidate.autoCommand === 'string' ? candidate.autoCommand : undefined,
@@ -70,42 +77,60 @@ export function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | nu
   };
 }
 
-export function buildPersistedOpenTabReuseKey(tab: Pick<PersistedOpenTab, 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>) {
-  return [
-    tab.bridgeHost.trim(),
-    String(tab.bridgePort),
-    tab.sessionName.trim(),
-    tab.authToken?.trim() || '',
-  ].join('::');
+export function buildPersistedOpenTabReuseKey(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>) {
+  return buildSessionSemanticReuseKey({
+    daemonHostId: tab.daemonHostId,
+    bridgeHost: tab.bridgeHost,
+    bridgePort: tab.bridgePort,
+    sessionName: tab.sessionName,
+  });
+}
+
+export function buildPersistedOpenTabReuseKeyVariants(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>) {
+  return buildSessionSemanticReuseKeyVariants({
+    daemonHostId: tab.daemonHostId,
+    bridgeHost: tab.bridgeHost,
+    bridgePort: tab.bridgePort,
+    sessionName: tab.sessionName,
+  });
 }
 
 export function buildPersistedOpenTabReuseKeyFromSession(session: Pick<
   Session,
-  'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'
+  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'
 >) {
   return buildPersistedOpenTabReuseKey({
+    daemonHostId: session.daemonHostId,
     bridgeHost: session.bridgeHost,
     bridgePort: session.bridgePort,
     sessionName: session.sessionName,
-    authToken: session.authToken,
   });
 }
 
-export function dedupePersistedOpenTabs(tabs: PersistedOpenTab[]) {
-  const byKey = new Map<string, PersistedOpenTab>();
-  for (const tab of tabs) {
-    const key = buildPersistedOpenTabReuseKey(tab);
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, tab);
-      continue;
-    }
-    const preferred =
-      (existing.customName?.trim() ? existing : tab.customName?.trim() ? tab : null)
-      || (existing.createdAt >= tab.createdAt ? existing : tab);
-    byKey.set(key, preferred);
-  }
-  return Array.from(byKey.values());
+export function buildPersistedOpenTabReuseKeyVariantsFromSession(session: Pick<
+  Session,
+  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'
+>) {
+  return buildPersistedOpenTabReuseKeyVariants({
+    daemonHostId: session.daemonHostId,
+    bridgeHost: session.bridgeHost,
+    bridgePort: session.bridgePort,
+    sessionName: session.sessionName,
+  });
+}
+
+export function persistedOpenTabsSemanticallyMatch(
+  left: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+  right: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+) {
+  return sessionSemanticReuseMatch(left, right);
+}
+
+export function persistedOpenTabMatchesSession(
+  tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+  session: Pick<Session, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+) {
+  return sessionSemanticReuseMatch(tab, session);
 }
 
 export function readPersistedOpenTabs() {
@@ -136,9 +161,9 @@ export function readPersistedOpenTabsState() {
       };
     }
     return {
-      tabs: dedupePersistedOpenTabs(parsed
+      tabs: parsed
         .map(normalizePersistedOpenTab)
-        .filter((item): item is PersistedOpenTab => item !== null)),
+        .filter((item): item is PersistedOpenTab => item !== null),
       hasStoredValue: true,
     };
   } catch (error) {
@@ -152,7 +177,7 @@ export function readPersistedOpenTabsState() {
 
 export function buildPersistedOpenTabFromSession(session: Pick<
   Session,
-  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
 >): PersistedOpenTab {
   return {
     sessionId: session.id,
@@ -160,6 +185,7 @@ export function buildPersistedOpenTabFromSession(session: Pick<
     connectionName: session.connectionName,
     bridgeHost: session.bridgeHost,
     bridgePort: session.bridgePort,
+    daemonHostId: session.daemonHostId,
     sessionName: session.sessionName,
     authToken: session.authToken,
     autoCommand: session.autoCommand,
@@ -170,7 +196,7 @@ export function buildPersistedOpenTabFromSession(session: Pick<
 
 export function buildPersistedOpenTabFromHostSession(options: {
   sessionId: string;
-  host: Pick<Host, 'id' | 'name' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand'>;
+  host: Pick<Host, 'id' | 'name' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'authToken' | 'autoCommand'>;
   customName?: string;
   createdAt: number;
 }) {
@@ -180,6 +206,7 @@ export function buildPersistedOpenTabFromHostSession(options: {
     connectionName: options.host.name,
     bridgeHost: options.host.bridgeHost,
     bridgePort: options.host.bridgePort,
+    daemonHostId: options.host.daemonHostId || options.host.relayHostId,
     sessionName: options.host.sessionName,
     authToken: options.host.authToken,
     autoCommand: options.host.autoCommand,
@@ -194,21 +221,53 @@ export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: 
   }
 
   try {
-    const dedupedTabs = dedupePersistedOpenTabs(tabs);
-    const normalizedActiveSessionId =
-      activeSessionId && dedupedTabs.some((tab) => tab.sessionId === activeSessionId)
-        ? activeSessionId
-        : dedupedTabs[0]?.sessionId || null;
-    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(dedupedTabs));
-    persistActiveSessionId(normalizedActiveSessionId);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
+    persistActiveSessionId(activeSessionId);
   } catch (error) {
     console.error('[open-tab-persistence] Failed to persist open tabs:', error);
   }
 }
 
+const CLOSED_TAB_REUSE_KEYS_STORAGE_KEY = 'zterm:closed-tab-reuse-keys';
+const CLOSED_TAB_REUSE_KEYS_MAX = 200;
+
+export function readPersistedClosedTabReuseKeys(): Set<string> {
+  if (typeof window === 'undefined') {
+    return new Set();
+  }
+  try {
+    const raw = localStorage.getItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+export function persistClosedTabReuseKeys(keys: Set<string>) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const arr = Array.from(keys);
+    const trimmed = arr.length > CLOSED_TAB_REUSE_KEYS_MAX
+      ? arr.slice(arr.length - CLOSED_TAB_REUSE_KEYS_MAX)
+      : arr;
+    localStorage.setItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (error) {
+    console.error('[open-tab-persistence] Failed to persist closed tab reuse keys:', error);
+  }
+}
+
 export function findReusableOpenTabSession(options: {
   sessions: Session[];
-  host: Pick<Host, 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>;
+  host: Pick<Host, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'authToken'>;
   activeSessionId: string | null;
 }) {
   return findReusableManagedSession({
@@ -219,6 +278,8 @@ export function findReusableOpenTabSession(options: {
       name: options.host.sessionName.trim() || options.host.bridgeHost.trim(),
       bridgeHost: options.host.bridgeHost,
       bridgePort: options.host.bridgePort,
+      daemonHostId: options.host.daemonHostId || options.host.relayHostId,
+      relayHostId: options.host.relayHostId || options.host.daemonHostId,
       sessionName: options.host.sessionName,
       authToken: options.host.authToken,
       authType: 'password',
@@ -245,6 +306,7 @@ export function resolveHostForPersistedOpenTab(options: {
       name: existingHost.name || tab.connectionName,
       bridgeHost: existingHost.bridgeHost || tab.bridgeHost,
       bridgePort: existingHost.bridgePort || tab.bridgePort,
+      daemonHostId: existingHost.daemonHostId || tab.daemonHostId || existingHost.relayHostId,
       sessionName: existingHost.sessionName || tab.sessionName,
       authToken: existingHost.authToken || tab.authToken,
       autoCommand: existingHost.autoCommand || tab.autoCommand,
@@ -257,6 +319,8 @@ export function resolveHostForPersistedOpenTab(options: {
     name: tab.connectionName,
     bridgeHost: tab.bridgeHost,
     bridgePort: tab.bridgePort,
+    daemonHostId: tab.daemonHostId,
+    relayHostId: tab.daemonHostId,
     sessionName: tab.sessionName,
     authToken: tab.authToken,
     autoCommand: tab.autoCommand,
