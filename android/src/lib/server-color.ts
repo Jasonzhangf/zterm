@@ -42,7 +42,7 @@ export function getServerColorTone(target: { bridgeHost: string; bridgePort: num
     accent,
     accentSoft: hsla(hue, 86, 64, 0.18),
     accentMuted: hsla(hue, 76, 60, 0.12),
-    tabActiveBackground: hsla(hue, 88, 62, 0.22),
+    tabActiveBackground: hsla(hue, 88, 68, 0.42),
     tabIdleBackground: hsla(hue, 72, 58, 0.14),
     previewBackground: `linear-gradient(135deg, ${hsla(hue, 85, 66, 0.22)} 0%, rgba(17, 20, 32, 0.96) 100%)`,
     previewText: hsl(hue, 92, 76),
