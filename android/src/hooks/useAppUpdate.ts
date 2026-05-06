@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { APP_PACKAGE_NAME, APP_VERSION_CODE } from '../lib/app-version';
 import {
   APP_UPDATE_STORAGE_KEY,
@@ -12,6 +13,17 @@ import {
 } from '../lib/app-update';
 import { AppUpdatePlugin, isNativeAppUpdateSupported } from '../plugins/AppUpdatePlugin';
 
+function parseRuntimeVersionCode(input: unknown) {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    return Math.max(0, Math.floor(input));
+  }
+  if (typeof input === 'string' && input.trim()) {
+    const parsed = Number.parseInt(input.trim(), 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+  }
+  return null;
+}
+
 export function useAppUpdate() {
   const [preferences, setPreferencesState] = useState<AppUpdatePreferences>(DEFAULT_APP_UPDATE_PREFERENCES);
   const [latestManifest, setLatestManifest] = useState<AppUpdateManifest | null>(null);
@@ -19,6 +31,7 @@ export function useAppUpdate() {
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [runtimeVersionCode, setRuntimeVersionCode] = useState(APP_VERSION_CODE);
   const didAutoCheckRef = useRef(false);
 
   useEffect(() => {
@@ -35,6 +48,31 @@ export function useAppUpdate() {
     } catch (error) {
       console.error('[useAppUpdate] Failed to restore preferences:', error);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRuntimeVersionCode = async () => {
+      try {
+        const appInfo = await CapacitorApp.getInfo();
+        if (cancelled) {
+          return;
+        }
+        const resolvedVersionCode = parseRuntimeVersionCode(appInfo.build);
+        if (resolvedVersionCode && resolvedVersionCode > 0) {
+          setRuntimeVersionCode(resolvedVersionCode);
+        }
+      } catch (error) {
+        console.warn('[useAppUpdate] Failed to resolve runtime app version info:', error);
+      }
+    };
+
+    void loadRuntimeVersionCode();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setPreferences = useCallback(
@@ -88,7 +126,7 @@ export function useAppUpdate() {
       };
 
       setLatestManifest(resolvedManifest);
-      const updateAvailable = resolvedManifest.versionCode > APP_VERSION_CODE;
+      const updateAvailable = resolvedManifest.versionCode > runtimeVersionCode;
       const suppressedReason = updateAvailable ? shouldSuppressUpdatePrompt(resolvedManifest, preferences, options) : 'none';
 
       setPreferences((current) => ({
@@ -120,7 +158,16 @@ export function useAppUpdate() {
     } finally {
       setChecking(false);
     }
-  }, [preferences, setPreferences]);
+  }, [preferences, runtimeVersionCode, setPreferences]);
+
+  useEffect(() => {
+    setAvailableManifest((current) => {
+      if (!current) {
+        return current;
+      }
+      return current.versionCode > runtimeVersionCode ? current : null;
+    });
+  }, [runtimeVersionCode]);
 
   const dismissAvailableManifest = useCallback(() => {
     setAvailableManifest(null);
@@ -212,6 +259,7 @@ export function useAppUpdate() {
 
   return {
     preferences,
+    runtimeVersionCode,
     latestManifest,
     availableManifest,
     checking,

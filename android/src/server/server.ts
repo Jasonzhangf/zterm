@@ -24,7 +24,7 @@ import {
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
 import { createTraversalRelayHostClient } from './relay-client';
 import { findChangedIndexedRanges } from './canonical-buffer';
-import { buildBufferHeadPayload } from './buffer-sync-contract';
+import { buildBufferHeadPayload, buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry } from './mirror-geometry';
 import { createTerminalMirrorCaptureRuntime } from './terminal-mirror-capture';
 import { dispatchScheduledJob } from './schedule-dispatch';
@@ -137,6 +137,7 @@ const terminalRuntime = createTerminalRuntime({
     terminalScheduleRuntime.sendScheduleStateToSession(session, sessionName),
   buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin),
   buildBufferHeadPayload: (sessionId, mirror) => buildBufferHeadPayload(sessionId, mirror),
+  buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
   sanitizeSessionName,
   getMirrorKey,
   normalizeTerminalCols,
@@ -245,6 +246,7 @@ const { scheduleEngine, sendScheduleStateToSession } = terminalScheduleRuntime;
 const terminalHttpRuntime = createTerminalHttpRuntime({
   host: HOST,
   port: PORT,
+  daemonHostId: DAEMON_CONFIG.daemonHostId,
   requiredAuthToken: REQUIRED_AUTH_TOKEN,
   updatesDir: UPDATES_DIR,
   appUpdateVersionCode: APP_UPDATE_VERSION_CODE,

@@ -19,6 +19,8 @@ const relayPort = 19091;
 const daemonPort = 4335;
 const relayUrl = `http://127.0.0.1:${relayPort}`;
 const relayHostId = `local-smoke-${Date.now()}`;
+const relayDeviceId = `device-${Date.now()}`;
+const relayDeviceName = 'local-smoke-daemon';
 const relayUsername = `smoke-${Date.now()}`;
 const relayPassword = 'smoke-pass-123';
 const tmuxSession = `zterm-relay-smoke-${Date.now()}`;
@@ -44,7 +46,14 @@ const daemonEnv = {
   ZTERM_TRAVERSAL_USERNAME: relayUsername,
   ZTERM_TRAVERSAL_PASSWORD: relayPassword,
   ZTERM_TRAVERSAL_HOST_ID: relayHostId,
+  ZTERM_TRAVERSAL_DEVICE_ID: relayDeviceId,
+  ZTERM_TRAVERSAL_DEVICE_NAME: relayDeviceName,
+  ZTERM_TRAVERSAL_PLATFORM: 'darwin',
+  ZTERM_TRAVERSAL_APP_VERSION: 'smoke',
+  ZTERM_TRAVERSAL_DAEMON_VERSION: 'smoke-daemon',
 };
+
+let globalAccessToken = '';
 
 function waitForExit(child: ReturnType<typeof spawn>) {
   return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -104,18 +113,97 @@ async function registerAndLogin() {
 async function waitForDaemonRelayRegistration(timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const health = await fetch(`http://127.0.0.1:${daemonPort}/health`)
-      .then((response) => response.json())
-      .catch((error) => {
-        console.warn('[traversal-relay-local-smoke] daemon health probe failed:', error);
-        return null;
-      });
-    if (health?.ok) {
-      return health;
+    const [health, devicesPayload] = await Promise.all([
+      fetch(`http://127.0.0.1:${daemonPort}/health`)
+        .then((response) => response.json())
+        .catch((error) => {
+          console.warn('[traversal-relay-local-smoke] daemon health probe failed:', error);
+          return null;
+        }),
+      fetch(`${relayUrl}/api/devices`, {
+        headers: {
+          authorization: `Bearer ${globalAccessToken}`,
+        },
+      })
+        .then((response) => response.json())
+        .catch((error) => {
+          console.warn('[traversal-relay-local-smoke] relay devices probe failed:', error);
+          return null;
+        }),
+    ]);
+    if (
+      health?.ok
+      && Array.isArray(devicesPayload?.devices)
+      && devicesPayload.devices.some((device: any) =>
+        device?.deviceId === relayDeviceId
+        && device?.daemon?.connected === true
+        && device?.daemon?.hostId === relayHostId)
+    ) {
+      return {
+        health,
+        devices: devicesPayload.devices,
+      };
     }
     await delay(250);
   }
-  throw new Error('daemon health timeout');
+  throw new Error('daemon relay registration timeout');
+}
+
+async function connectDeviceStream(accessToken: string) {
+  return await new Promise<{ socket: WebSocket; firstSnapshot: unknown[] }>((resolve, reject) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${relayPort}/ws/devices?token=${encodeURIComponent(accessToken)}&deviceId=${encodeURIComponent(relayDeviceId)}&deviceName=${encodeURIComponent('local-smoke-client')}&platform=smoke-client&appVersion=smoke`,
+    );
+    const timeout = setTimeout(() => {
+      reject(new Error('device stream timeout'));
+    }, 10_000);
+    timeout.unref?.();
+    let settled = false;
+
+    const finishResolve = (snapshot: unknown[]) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve({ socket, firstSnapshot: snapshot });
+    };
+
+    const finishReject = (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    };
+
+    socket.on('open', () => {
+      socket.send(JSON.stringify({
+        type: 'device-meta',
+        payload: {
+          deviceId: relayDeviceId,
+          deviceName: 'local-smoke-client',
+          platform: 'smoke-client',
+          appVersion: 'smoke',
+        },
+      }));
+    });
+
+    socket.on('message', (raw) => {
+      try {
+        const payload = JSON.parse(String(raw)) as { type?: string; payload?: { devices?: unknown[] } };
+        if (payload.type === 'devices-snapshot' && Array.isArray(payload.payload?.devices)) {
+          finishResolve(payload.payload.devices);
+        }
+      } catch (error) {
+        finishReject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+
+    socket.on('error', () => finishReject(new Error('device stream websocket error')));
+    socket.on('close', () => finishReject(new Error('device stream websocket closed before snapshot')));
+  });
 }
 
 async function rtcClientSmoke(accessToken: string) {
@@ -233,6 +321,8 @@ async function main() {
   try {
     await waitForHealth(`${relayUrl}/health`, 'relay');
     const accessToken = await registerAndLogin();
+    globalAccessToken = accessToken;
+    const deviceStream = await connectDeviceStream(accessToken);
 
     const tmuxCreate = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, 'printf "relay smoke ready\\n"; exec bash'], {
       encoding: 'utf-8',
@@ -241,15 +331,19 @@ async function main() {
       throw new Error(`tmux new-session failed: ${tmuxCreate.stderr || tmuxCreate.stdout}`);
     }
 
-    await waitForDaemonRelayRegistration();
+    const daemonRegistration = await waitForDaemonRelayRegistration();
     const rtcResult = await rtcClientSmoke(accessToken);
+    closeResource('device stream socket', () => deviceStream.socket.close());
 
     process.stdout.write(`${JSON.stringify({
       ok: true,
       relayUrl,
       relayHostId,
+      relayDeviceId,
       relayUsername,
       tmuxSession,
+      daemonRegistration,
+      deviceStreamSnapshot: deviceStream.firstSnapshot,
       rtcResult,
     }, null, 2)}\n`);
   } finally {

@@ -15,9 +15,29 @@ export interface BridgeServerPreset {
   targetHost: string;
   targetPort: number;
   authToken?: string;
+  relayHostId?: string;
+  relayDeviceId?: string;
+  relayDeviceName?: string;
 }
 
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
+
+export interface TraversalRelayClientSettings {
+  relayBaseUrl: string;
+  accessToken: string;
+  userId: string;
+  username: string;
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  wsDevicesUrl: string;
+  wsHostUrl: string;
+  wsClientUrl: string;
+  turnUrl: string;
+  turnUsername: string;
+  turnCredential: string;
+  updatedAt: number;
+}
 
 export interface BridgeSettings {
   targetHost: string;
@@ -34,6 +54,7 @@ export interface BridgeSettings {
   shortcutSmartSort: boolean;
   servers: BridgeServerPreset[];
   defaultServerId?: string;
+  traversalRelay?: TraversalRelayClientSettings;
 }
 
 const MIN_TERMINAL_CACHE_LINES = 200;
@@ -54,6 +75,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,
+  traversalRelay: undefined,
 };
 
 export function buildDaemonStartCommand(settings: BridgeSettings) {
@@ -84,8 +106,69 @@ export function buildServerPresetId(targetHost: string, targetPort: number) {
   });
 }
 
+export function resolveBridgePresetDaemonHostId(server?: Pick<BridgeServerPreset, 'relayHostId'> | null) {
+  return server?.relayHostId?.trim() || '';
+}
+
+export function buildBridgeServerPresetIdentityId(
+  targetHost: string,
+  targetPort: number,
+  relayHostId?: string | null,
+) {
+  const endpointKey = buildServerPresetId(targetHost, targetPort);
+  const daemonHostId = relayHostId?.trim() || '';
+  return daemonHostId ? `${endpointKey}::daemon:${daemonHostId}` : endpointKey;
+}
+
+export function describeBridgePresetIdentity(server: Pick<BridgeServerPreset, 'targetHost' | 'targetPort' | 'relayHostId'>) {
+  const daemonHostId = resolveBridgePresetDaemonHostId(server);
+  return {
+    daemonHostId,
+    bridgeLabel: `Bridge · ${server.targetHost}:${server.targetPort}`,
+    daemonLabel: daemonHostId ? `Daemon · ${daemonHostId}` : '',
+  };
+}
+
 function normalizeServerName(name: string, targetHost: string) {
   return name.trim() || targetHost.trim() || 'Server';
+}
+
+function asString(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function normalizeTraversalRelayClientSettings(input: unknown): TraversalRelayClientSettings | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const candidate = input as Partial<TraversalRelayClientSettings>;
+  const relayBaseUrl = asString(candidate.relayBaseUrl).trim();
+  const accessToken = asString(candidate.accessToken).trim();
+  const wsDevicesUrl = asString(candidate.wsDevicesUrl).trim();
+  const wsHostUrl = asString(candidate.wsHostUrl).trim();
+  const wsClientUrl = asString(candidate.wsClientUrl).trim();
+  if (!relayBaseUrl || !accessToken || !wsDevicesUrl || !wsHostUrl || !wsClientUrl) {
+    return undefined;
+  }
+  return {
+    relayBaseUrl,
+    accessToken,
+    userId: asString(candidate.userId).trim(),
+    username: asString(candidate.username).trim(),
+    deviceId: asString(candidate.deviceId).trim(),
+    deviceName: asString(candidate.deviceName).trim(),
+    platform: asString(candidate.platform).trim(),
+    wsDevicesUrl,
+    wsHostUrl,
+    wsClientUrl,
+    turnUrl: asString(candidate.turnUrl).trim(),
+    turnUsername: asString(candidate.turnUsername),
+    turnCredential: asString(candidate.turnCredential),
+    updatedAt:
+      typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
+        ? candidate.updatedAt
+        : Date.now(),
+  };
 }
 
 export function sortBridgeServers(servers: BridgeServerPreset[]) {
@@ -101,7 +184,15 @@ export function sortBridgeServers(servers: BridgeServerPreset[]) {
 
 export function upsertBridgeServer(
   settings: BridgeSettings,
-  input: { name?: string; targetHost: string; targetPort: number; authToken?: string },
+  input: {
+    name?: string;
+    targetHost: string;
+    targetPort: number;
+    authToken?: string;
+    relayHostId?: string;
+    relayDeviceId?: string;
+    relayDeviceName?: string;
+  },
 ): BridgeSettings {
   const rawTargetHost = input.targetHost.trim();
   const targetPort = resolveEffectiveBridgePort({
@@ -118,13 +209,17 @@ export function upsertBridgeServer(
     return settings;
   }
 
-  const id = buildServerPresetId(targetHost, targetPort);
+  const relayHostId = input.relayHostId?.trim() || undefined;
+  const id = buildBridgeServerPresetIdentityId(targetHost, targetPort, relayHostId);
   const preset: BridgeServerPreset = {
     id,
     name: normalizeServerName(input.name || '', targetHost),
     targetHost,
     targetPort,
     authToken,
+    relayHostId,
+    relayDeviceId: input.relayDeviceId?.trim() || undefined,
+    relayDeviceName: input.relayDeviceName?.trim() || undefined,
   };
 
   const existing = settings.servers.find((server) => server.id === id);
@@ -179,6 +274,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
 
       const server = item as Partial<BridgeServerPreset>;
       const rawTargetHost = typeof server.targetHost === 'string' ? server.targetHost.trim() : '';
+      const relayHostId = typeof server.relayHostId === 'string' ? server.relayHostId.trim() || undefined : undefined;
       const targetPort =
         typeof server.targetPort === 'number' && Number.isFinite(server.targetPort)
           ? resolveEffectiveBridgePort({
@@ -197,12 +293,19 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       servers.push({
         id:
           typeof server.id === 'string' && server.id.trim()
-            ? server.id
-            : buildServerPresetId(targetHost, targetPort),
+            ? (
+              server.id.trim() === buildServerPresetId(targetHost, targetPort)
+                ? buildBridgeServerPresetIdentityId(targetHost, targetPort, relayHostId)
+                : server.id.trim()
+            )
+            : buildBridgeServerPresetIdentityId(targetHost, targetPort, relayHostId),
         name: typeof server.name === 'string' && server.name.trim() ? server.name : targetHost,
         targetHost,
         targetPort,
         authToken: typeof server.authToken === 'string' ? server.authToken : undefined,
+        relayHostId,
+        relayDeviceId: typeof server.relayDeviceId === 'string' ? server.relayDeviceId.trim() || undefined : undefined,
+        relayDeviceName: typeof server.relayDeviceName === 'string' ? server.relayDeviceName.trim() || undefined : undefined,
       });
     }
   }
@@ -256,7 +359,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       ? sortBridgeServers([
           ...servers,
           {
-            id: buildServerPresetId(targetHost, targetPort),
+            id: buildBridgeServerPresetIdentityId(targetHost, targetPort),
             name: targetHost,
             targetHost,
             targetPort,
@@ -264,6 +367,20 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
           },
         ])
       : sortBridgeServers(servers);
+
+  const normalizedDefaultServerId =
+    typeof candidate.defaultServerId === 'string' && candidate.defaultServerId.trim()
+      ? (() => {
+          const rawDefaultServerId = candidate.defaultServerId.trim();
+          if (mergedServers.some((server) => server.id === rawDefaultServerId)) {
+            return rawDefaultServerId;
+          }
+          const matchingLegacyServers = mergedServers.filter((server) => (
+            buildServerPresetId(server.targetHost, server.targetPort) === rawDefaultServerId
+          ));
+          return matchingLegacyServers.length === 1 ? matchingLegacyServers[0]!.id : undefined;
+        })()
+      : undefined;
 
   return {
     targetHost,
@@ -280,8 +397,8 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     shortcutSmartSort: typeof (candidate as any).shortcutSmartSort === 'boolean' ? (candidate as any).shortcutSmartSort : DEFAULT_BRIDGE_SETTINGS.shortcutSmartSort,
     servers: mergedServers,
     defaultServerId:
-      typeof candidate.defaultServerId === 'string'
-        ? candidate.defaultServerId
-        : mergedServers.find((server) => server.targetHost === targetHost && server.targetPort === targetPort)?.id,
+      normalizedDefaultServerId
+      || mergedServers.find((server) => server.targetHost === targetHost && server.targetPort === targetPort)?.id,
+    traversalRelay: normalizeTraversalRelayClientSettings((candidate as { traversalRelay?: unknown }).traversalRelay),
   };
 }

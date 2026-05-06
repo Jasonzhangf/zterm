@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   TerminalView,
-  buildServerPresetId,
+  buildBridgeServerPresetIdentityId,
   formatBridgeEndpoint,
   formatBridgeSessionTarget,
   getResolvedSessionName,
@@ -733,7 +733,7 @@ export function ShellWorkspace({
           targetPort: hostData.bridgePort,
           authToken: hostData.authToken,
         });
-        const presetId = buildServerPresetId(hostData.bridgeHost, hostData.bridgePort);
+        const presetId = buildBridgeServerPresetIdentityId(hostData.bridgeHost, hostData.bridgePort);
         return nextSettings.defaultServerId ? nextSettings : setDefaultBridgeServer(nextSettings, presetId);
       });
     },

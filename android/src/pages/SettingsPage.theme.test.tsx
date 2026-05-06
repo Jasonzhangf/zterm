@@ -21,6 +21,7 @@ const baseSettings: BridgeSettings = {
   shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,
+  traversalRelay: undefined,
 };
 
 describe('SettingsPage terminal theme selection', () => {
@@ -67,6 +68,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByText('Night Owl')).toBeTruthy();
     expect(screen.getByText('Kanagawa Wave')).toBeTruthy();
     expect(screen.getByText('Rose Pine Moon')).toBeTruthy();
+    expect(screen.getByText('登录并同步控制面')).toBeTruthy();
   });
 
   it('persists terminal theme immediately when a theme card is selected', () => {

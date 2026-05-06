@@ -234,6 +234,7 @@ export type BridgeServerControlMessage =
       type: 'connected';
       payload: {
         sessionId: string;
+        daemonHostId?: string;
         appUpdate?: {
           versionCode: number;
           versionName: string;

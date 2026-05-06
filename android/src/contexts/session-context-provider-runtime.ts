@@ -8,6 +8,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
 import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
+import { runtimeDebug } from '../lib/runtime-debug';
 import type {
   PendingSessionTransportOpenIntent,
   SessionBufferHeadState,
@@ -54,6 +55,7 @@ export function useSessionProviderRuntime(options: {
     recordSessionRenderCommit: (sessionId: string) => {
       sessionDebugMetricsStoreRef.current.recordRenderCommit(sessionId);
     },
+    runtimeDebug,
   }));
   const pingIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
+import { buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 import { findChangedIndexedRanges } from './canonical-buffer';
 
@@ -52,6 +53,7 @@ function createRuntime() {
       availableEndIndex: 0,
       cursor: null,
     }),
+    buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
     sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
     getMirrorKey: (sessionName: string) => sessionName,
     normalizeTerminalCols: (cols?: number) => cols || 120,
@@ -122,7 +124,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
   });
 
-  it('does not keep recurring live sync when no request or input drives capture', async () => {
+  it('keeps recurring live sync after mirror boot so external tmux writes enter daemon mirror truth', async () => {
     vi.useFakeTimers();
     try {
       const {
@@ -144,16 +146,14 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(mirror?.lifecycle).toBe('ready');
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
 
-      session.transport = null;
-
       await vi.advanceTimersByTimeAsync(34);
-      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not start recurring live sync when a new attached session reuses an already-ready mirror', async () => {
+  it('does not duplicate recurring live sync when a new attached session reuses an already-ready mirror', async () => {
     vi.useFakeTimers();
     try {
       const {
@@ -175,8 +175,6 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(mirror?.lifecycle).toBe('ready');
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
 
-      firstSession.transport = null;
-
       const secondSession = createSession('session-2');
       secondSession.transportId = 'transport-2';
       sessions.set(secondSession.id, secondSession);
@@ -196,7 +194,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(secondSession.transport?.connectedSent).toBe(true);
 
       await vi.advanceTimersByTimeAsync(34);
-      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -243,8 +241,10 @@ describe('terminal mirror runtime lifecycle truth', () => {
         latestEndIndex: 0,
         availableStartIndex: 0,
         availableEndIndex: 0,
+        cursorKeysApp: false,
         cursor: null,
       }),
+      buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
@@ -286,3 +286,174 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror.revision).toBe(2);
   });
 });
+
+  it('broadcasts sparse mirror-diff buffer-sync to ready subscribers after canonical mirror content changes', async () => {
+    const { runtime, sessions, sendMessage } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.subscribers.add(session.id);
+    mirror.bufferStartIndex = 100;
+    mirror.bufferLines = [
+      [{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }],
+    ];
+
+    const capture = vi.fn(async (targetMirror: SessionMirror) => {
+      targetMirror.bufferStartIndex = 100;
+      targetMirror.bufferLines = [
+        [{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }],
+        [{ char: 98, fg: 256, bg: 256, flags: 0, width: 1 }],
+      ];
+      targetMirror.cursor = null;
+      targetMirror.cursorKeysApp = false;
+      return true;
+    });
+
+    const customRuntime = createTerminalMirrorRuntime({
+      defaultViewport: { cols: 120, rows: 40 },
+      sessions,
+      mirrors: new Map<string, SessionMirror>([['demo', mirror]]),
+      sendMessage,
+      sendScheduleStateToSession: vi.fn(),
+      buildConnectedPayload: (sessionId: string) => ({ sessionId }),
+      buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
+        sessionId,
+        revision: targetMirror.revision,
+        latestEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+        availableStartIndex: targetMirror.bufferStartIndex,
+        availableEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+        cursorKeysApp: targetMirror.cursorKeysApp,
+        cursor: targetMirror.cursor,
+      }),
+      buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
+      sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      getMirrorKey: (sessionName: string) => sessionName,
+      normalizeTerminalCols: (cols?: number) => cols || 120,
+      normalizeTerminalRows: (rows?: number) => rows || 40,
+      resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
+        requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
+      readTmuxPaneMetrics: () => ({ paneId: '%1', tmuxAvailableLineCountHint: 0, paneRows: 40, paneCols: 120, alternateOn: false }),
+      ensureTmuxSession: vi.fn(),
+      captureMirrorAuthoritativeBufferFromTmux: capture,
+      mirrorBufferChanged: (targetMirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
+        previousStartIndex,
+        previousLines,
+        nextStartIndex: targetMirror.bufferStartIndex,
+        nextLines: targetMirror.bufferLines,
+      }),
+      mirrorCursorEqual: () => true,
+      writeToLiveMirror: () => true,
+      writeToTmuxSession: vi.fn(),
+      autoCommandDelayMs: 0,
+      waitMs: async () => {},
+      logTimePrefix: () => '2026-05-06 00:00:00',
+      closeLogicalTerminalSession: vi.fn(),
+      getSessionMirror: () => mirror,
+    });
+
+    await customRuntime.syncMirrorCanonicalBuffer(mirror);
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'buffer-sync',
+        payload: expect.objectContaining({
+          revision: 1,
+          startIndex: 101,
+          endIndex: 102,
+        }),
+      }),
+    );
+  });
+
+  it('broadcasts buffer-head only when canonical mirror body is unchanged but cursor metadata changes', async () => {
+    const { runtime, sessions, sendMessage } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.subscribers.add(session.id);
+    mirror.bufferStartIndex = 100;
+    mirror.bufferLines = [
+      [{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }],
+    ];
+    mirror.cursor = { rowIndex: 100, col: 0, visible: true };
+    mirror.cursorKeysApp = false;
+
+    const capture = vi.fn(async (targetMirror: SessionMirror) => {
+      targetMirror.bufferStartIndex = 100;
+      targetMirror.bufferLines = [
+        [{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }],
+      ];
+      targetMirror.cursor = { rowIndex: 100, col: 1, visible: true };
+      targetMirror.cursorKeysApp = false;
+      return true;
+    });
+
+    const customRuntime = createTerminalMirrorRuntime({
+      defaultViewport: { cols: 120, rows: 40 },
+      sessions,
+      mirrors: new Map<string, SessionMirror>([['demo', mirror]]),
+      sendMessage,
+      sendScheduleStateToSession: vi.fn(),
+      buildConnectedPayload: (sessionId: string) => ({ sessionId }),
+      buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
+        sessionId,
+        revision: targetMirror.revision,
+        latestEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+        availableStartIndex: targetMirror.bufferStartIndex,
+        availableEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+        cursorKeysApp: targetMirror.cursorKeysApp,
+        cursor: targetMirror.cursor,
+      }),
+      buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
+      sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      getMirrorKey: (sessionName: string) => sessionName,
+      normalizeTerminalCols: (cols?: number) => cols || 120,
+      normalizeTerminalRows: (rows?: number) => rows || 40,
+      resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
+        requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
+      readTmuxPaneMetrics: () => ({ paneId: '%1', tmuxAvailableLineCountHint: 0, paneRows: 40, paneCols: 120, alternateOn: false }),
+      ensureTmuxSession: vi.fn(),
+      captureMirrorAuthoritativeBufferFromTmux: capture,
+      mirrorBufferChanged: (targetMirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
+        previousStartIndex,
+        previousLines,
+        nextStartIndex: targetMirror.bufferStartIndex,
+        nextLines: targetMirror.bufferLines,
+      }),
+      mirrorCursorEqual: (left, right) => (
+        (left?.rowIndex ?? null) === (right?.rowIndex ?? null)
+        && (left?.col ?? null) === (right?.col ?? null)
+        && (left?.visible ?? null) === (right?.visible ?? null)
+      ),
+      writeToLiveMirror: () => true,
+      writeToTmuxSession: vi.fn(),
+      autoCommandDelayMs: 0,
+      waitMs: async () => {},
+      logTimePrefix: () => '2026-05-06 00:00:00',
+      closeLogicalTerminalSession: vi.fn(),
+      getSessionMirror: () => mirror,
+    });
+
+    await customRuntime.syncMirrorCanonicalBuffer(mirror);
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'buffer-head',
+        payload: expect.objectContaining({
+          revision: 1,
+          latestEndIndex: 101,
+          cursor: { rowIndex: 100, col: 1, visible: true },
+        }),
+      }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'buffer-sync',
+      }),
+    );
+  });

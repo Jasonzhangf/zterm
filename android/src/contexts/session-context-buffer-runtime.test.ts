@@ -98,7 +98,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         lastHeadRequestAtRef,
         sessionRevisionResetRef: { current: new Map() },
         sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { setBuffer: vi.fn() } },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
         sessionHeadStoreRef: { current: { setHead } },
       },
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
@@ -239,10 +239,77 @@ describe('session-context-buffer-runtime inactive gating', () => {
       clearSessionPullState: vi.fn(),
       sendSocketPayload,
       runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
     });
 
     expect(requested).toBe(false);
     expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
+  it('expires stale in-flight tail refresh bookkeeping before re-requesting sync', () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = 'session-1';
+      const session = makeSession(sessionId);
+      const ws = { readyState: WebSocket.OPEN } as any;
+      const sendSocketPayload = vi.fn();
+      const clearSessionPullState = vi.fn();
+      const runtimeDebug = vi.fn();
+
+      vi.setSystemTime(new Date('2026-05-06T12:00:00.000Z'));
+
+      const requested = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'active-tick-refresh',
+          purpose: 'tail-refresh',
+        },
+        refs: {
+          stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+          sessionVisibleRangeRef: { current: new Map() },
+          sessionBufferHeadsRef: { current: new Map() },
+          sessionPullStateRef: {
+            current: new Map([
+              [sessionId, {
+                'tail-refresh': {
+                  purpose: 'tail-refresh',
+                  startedAt: Date.now() - 4000,
+                  targetHeadRevision: 1,
+                  targetStartIndex: 0,
+                  targetEndIndex: 72,
+                  requestKnownRevision: 1,
+                  requestLocalStartIndex: 0,
+                  requestLocalEndIndex: 1,
+                },
+              }],
+            ]),
+          },
+          pendingInputTailRefreshRef: { current: new Map() },
+          pendingConnectTailRefreshRef: { current: new Set() },
+          pendingResumeTailRefreshRef: { current: new Set() },
+        },
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState,
+        sendSocketPayload,
+        runtimeDebug,
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
+      });
+
+      expect(requested).toBe(true);
+      expect(clearSessionPullState).toHaveBeenCalledWith(sessionId, 'tail-refresh');
+      expect(runtimeDebug).toHaveBeenCalledWith(
+        'session.buffer.pull.stale-expire',
+        expect.objectContaining({
+          sessionId,
+          purpose: 'tail-refresh',
+          thresholdMs: 1500,
+        }),
+      );
+      expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not schedule a render commit when buffer-head repeats the same head and cursor truth', () => {
@@ -276,7 +343,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         lastHeadRequestAtRef: { current: new Map() },
         sessionRevisionResetRef: { current: new Map() },
         sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { setBuffer: vi.fn() } },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
         sessionHeadStoreRef: { current: { setHead } },
       },
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
@@ -289,6 +356,84 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
 
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(setHead).toHaveBeenCalledTimes(1);
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule a render commit when buffer-head only advances daemon head metadata', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const commitSessionBufferUpdate = vi.fn(() => false);
+    const scheduleSessionRenderCommit = vi.fn();
+    const setHead = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 2,
+      latestEndIndex: 32,
+      availableStartIndex: 0,
+      availableEndIndex: 32,
+      cursor: session.buffer.cursor,
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionBufferHeadsRef: { current: new Map() },
+        lastHeadRequestAtRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
+        sessionHeadStoreRef: { current: { setHead } },
+      },
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync: vi.fn(() => false),
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(setHead).toHaveBeenCalledTimes(1);
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule a render commit when buffer-head only updates cursor metadata', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const setHead = vi.fn(() => false);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 1,
+      latestEndIndex: 1,
+      availableStartIndex: 0,
+      availableEndIndex: 1,
+      cursor: {
+        rowIndex: 0,
+        col: 4,
+        visible: true,
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionBufferHeadsRef: { current: new Map() },
+        lastHeadRequestAtRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
+        sessionHeadStoreRef: { current: { setHead } },
+      },
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync: vi.fn(() => false),
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledTimes(1);
     expect(setHead).toHaveBeenCalledTimes(1);
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
   });

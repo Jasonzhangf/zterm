@@ -950,9 +950,6 @@ function TerminalViewComponent({
   const refreshActive = live ?? active;
   const swipeTabEnabled = widthMode !== 'mirror-fixed' && Boolean(onSwipeTab);
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore, sessionBufferStore ? sessionId : null);
-  const renderSnapshotRevision = sessionBufferStore && sessionId
-    ? sessionBufferSnapshot.revision
-    : (renderBufferSnapshot?.revision || 0);
   const renderBuffer = renderBufferSnapshot
     || (sessionBufferStore && sessionId ? sessionBufferSnapshot.buffer : EMPTY_RENDER_BUFFER);
   const bufferLines = renderBuffer.lines || [];
@@ -999,6 +996,7 @@ function TerminalViewComponent({
     rowHeightPx: number;
     clientHeightPx: number;
   } | null>(null);
+  const previousPrePaintFollowRealignKeyRef = useRef<string | null>(null);
   const userScrollIntentDeadlineRef = useRef(0);
   const touchGestureRef = useRef({
     active: false,
@@ -1083,6 +1081,17 @@ function TerminalViewComponent({
   const termGridPaddingBottomPx = renderRows.length > 0
     ? Math.max(0, totalRows - (renderRows[renderRows.length - 1]!.viewportOffset + 1)) * rowHeightPx
     : 0;
+  const renderGeometryRevision = [
+    renderBuffer.revision,
+    renderBuffer.startIndex,
+    effectiveBufferEndIndex,
+    followVisualBottomIndex,
+    viewportRows,
+    rowHeightPx,
+    renderRows.length,
+    termGridPaddingTopPx,
+    termGridPaddingBottomPx,
+  ].join(':');
 
   const focusTerminal = useCallback(() => {
     if (!allowDomFocus) {
@@ -1664,8 +1673,36 @@ function TerminalViewComponent({
     followDemandAnchorEndIndex,
     maxScrollTop,
     reconcileViewportAfterBufferShift,
-    renderSnapshotRevision,
+    renderGeometryRevision,
     sessionId,
+    viewportRows,
+  ]);
+
+  useLayoutEffect(() => {
+    const followRealignKey = [
+      sessionId || '',
+      renderGeometryRevision,
+    ].join(':');
+    const previousKey = previousPrePaintFollowRealignKeyRef.current;
+    previousPrePaintFollowRealignKeyRef.current = followRealignKey;
+
+    if (previousKey === null || previousKey === followRealignKey) {
+      return;
+    }
+    if (!active || !refreshActive || readingModeRef.current) {
+      return;
+    }
+    syncScrollHostToRenderBottom(followVisualBottomIndex);
+  }, [
+    active,
+    effectiveBufferEndIndex,
+    followVisualBottomIndex,
+    refreshActive,
+    renderBuffer.startIndex,
+    renderGeometryRevision,
+    rowHeightPx,
+    sessionId,
+    syncScrollHostToRenderBottom,
     viewportRows,
   ]);
 
@@ -1676,7 +1713,7 @@ function TerminalViewComponent({
     flushPendingFollowScrollSync,
     renderBuffer.revision,
     renderBuffer.startIndex,
-    renderSnapshotRevision,
+    renderGeometryRevision,
     rowHeightPx,
     viewportRows,
   ]);
@@ -1748,7 +1785,7 @@ function TerminalViewComponent({
     effectiveBufferEndIndex,
     emitRenderDemandSignalsForCurrentFrame,
     followDemandAnchorEndIndex,
-    renderSnapshotRevision,
+    renderGeometryRevision,
     viewportRows,
   ]);
 

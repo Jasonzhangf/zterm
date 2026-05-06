@@ -254,6 +254,20 @@ export function ensureControlTransportForSessionOpen(options: {
   }
 
   if (existingControlSocket && existingControlSocket.readyState === WebSocket.CONNECTING) {
+    options.clearSessionHandshakeTimeout(sessionId);
+    options.setSessionHandshakeTimeout(sessionId, () => {
+      const liveControlSocket = options.readSessionTargetControlSocket(sessionId);
+      if (!liveControlSocket || liveControlSocket.readyState !== WebSocket.CONNECTING) {
+        return;
+      }
+      options.runtimeDebug('session.control.connect-timeout-reopen', {
+        sessionId,
+        targetKey: options.readSessionTargetKey(sessionId),
+        reason: liveControlSocket.getDiagnostics().reason || 'control transport connect timeout',
+      });
+      options.cleanupControlSocket(sessionId, true);
+      ensureControlTransportForSessionOpen(options);
+    }, options.sessionHandshakeTimeoutMs);
     return;
   }
 

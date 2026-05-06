@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BufferSyncRequestPayload, TerminalCell } from '../lib/types';
 import {
   buildBufferHeadPayload,
+  buildChangedRangesBufferSyncPayload,
   buildRequestedRangeBufferPayload,
   expandCompactLine,
   type BufferSyncMirrorSnapshot,
@@ -65,8 +66,29 @@ describe('buildRequestedRangeBufferPayload', () => {
       latestEndIndex: 103,
       availableStartIndex: 100,
       availableEndIndex: 103,
+      cursorKeysApp: false,
       cursor: null,
     });
+  });
+
+  it('builds daemon-owned sparse diff payload from changed mirror ranges only', () => {
+    const payload = buildChangedRangesBufferSyncPayload(
+      createMirror(['row-100', 'row-101', 'row-102', 'row-103']),
+      [
+        { startIndex: 101, endIndex: 102 },
+        { startIndex: 103, endIndex: 104 },
+      ],
+    );
+
+    expect(payload).toMatchObject({
+      revision: 7,
+      startIndex: 101,
+      endIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+      cursorKeysApp: false,
+    });
+    expect(payload?.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 103]);
   });
 
   it('returns the requested range as buffer-sync payload', () => {

@@ -170,12 +170,12 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 决策：把 tab 激活也并入 `persistExplicitOpenTabs()`，让 App 层所有 open-tab/active-session 持久化都走同一 orchestration 写口；`open-tab-persistence.ts` 只保留底层存取 helper。
 - 额外审计：`persistSessionIntentState()` 当前无生产调用，属于历史残留 helper；本刀先不删，避免扩大写面，后续等 tab/session 收口结束后再清理。
 - 2026-05-03 当前继续收口：`android/src/lib/open-tab-persistence.ts` 中无生产调用的 `persistSessionIntentState()` 已删除，避免 tab/session intent 持久化 helper 再长出第二个半公开写口。
-- 2026-05-03 当前继续收口：`ACTIVE_PAGE.kind=terminal.focusSessionId` 只允许作为 terminal page 投影，不允许独立漂移成第二份 active 真相；新增 App effect，在 terminal 页下强制把 page focus 收敛到 `state.activeSessionId`。
+- 2026-05-03 当前继续收口：`ACTIVE_PAGE.kind=terminal` 只允许作为 terminal page 投影，不允许独立漂移成第二份 active 真相；terminal 页的 tab 焦点统一收敛到 `ACTIVE_SESSION`。
 
 ## 2026-05-03 active/page focus truth matrix closeout
-- 已补测试钉死：`ACTIVE_SESSION` 是 active tab 唯一真源，`ACTIVE_PAGE.kind=terminal.focusSessionId` 只是 terminal 页面投影。
-- 已验证 3 条关键链路都一致：saved-tabs import、下一次冷恢复 restore、foreground resume；三者都要求 `ACTIVE_PAGE.focusSessionId === ACTIVE_SESSION`。
-- 当前实现无需新增写口；App 层继续只允许通过 `persistExplicitOpenTabs(...)` / `persistAndSwitchExplicitOpenTabs(...)` 落盘 active/open-tabs，terminal page focus 仅随 `state.activeSessionId` 单向收敛。
+- 已补测试钉死：`ACTIVE_SESSION` 是 active tab 唯一真源，`ACTIVE_PAGE` 只表达 terminal 页面是否可见。
+- 已验证 3 条关键链路都一致：saved-tabs import、下一次冷恢复 restore、foreground resume；三者都只允许 `ACTIVE_SESSION` 驱动 tab 焦点。
+- 当前实现无需新增写口；App 层继续只允许通过 `persistExplicitOpenTabs(...)` / `persistAndSwitchExplicitOpenTabs(...)` 落盘 active/open-tabs，页面层只负责 terminal page 可见性。
 
 ## 2026-05-03 open-tabs explicit truth freeze
 - 已确认 reopen 根因：`mergeRuntimeSessionsIntoOpenTabIntentState()` 以前会把 persisted `OPEN_TABS` 里不存在、但 runtime 仍活着的 session 重新 append 回 tabs，导致“已关闭 tab 下次启动又自动打开”。
@@ -342,7 +342,7 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 已修改：
   - `App.tsx` route restore effect 删除 `switchSession(targetSessionId)`
   - active session restore 继续只由 open-tab/session restore 链负责
-  - route restore 只做 `ensureTerminalPageFocus(targetSessionId)`
+  - route restore 只做 `ensureTerminalPageVisible()`
 - 当前验证：
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
   - `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx --reporter dot`
@@ -537,3 +537,60 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 追加验证：已用临时 keychain + 本地自签 `ZTerm Local Code Signing` 成功给 `/Applications/ZTerm.app` 做完整 `codesign --force --deep`，并通过 `codesign --verify --deep --strict`。
 - 追加验证：helper 增加最小可见窗口后，仍然无法触发 `kTCCServiceScreenCapture/com.zterm.mac` 新记录；`tccutil reset ScreenCapture com.zterm.mac` 后数据库保持空，helper 内 `screencapture` 仍返回 `could not create image from display`。
 - 冻结结论更新：剩余 blocker 不仅是“业务代码/无签名”，而是 **当前机器上的自签 app identity 仍不足以进入 macOS Screen Recording 可授权链**；后续必须接正式可授权签名身份或采用系统级已授权宿主执行截图。
+- Jason 2026-05-05 tab restore 新审计:
+  - 长按 tab 当前仍带 double-tap rename / long-press menu 旧语义，owner 在 `TerminalHeader.tsx`；本轮收口为“tab 不再触发编辑/重命名菜单”，pane move 若保留只走 split pane menu。
+  - persisted tab 仍可能在 cold restore 时直接 `createSession(...)` 复活；缺少“restore 前确认远端 tmux session 仍存在”的唯一门禁。
+  - 修复方向: 1) `TerminalHeader` 删除 rename/edit 手势；2) 新增 restore 过滤 helper，按 bridge target 拉 tmux session 列表，过滤不存在 session 后再 restore，并把过滤结果回写 `OPEN_TABS/ACTIVE_SESSION`。
+
+[2026-05-05] build / shared import pollution / open-tab truth closeout
+- 已确认本轮 `build:android` 阻塞真因是 **Node close-loop 脚本被 shared 根入口的前端 export 污染**，不是 daemon 业务逻辑：
+  - `packages/shared/src/index.ts` 之前 re-export `./react/terminal-view`
+  - `react/terminal-view.tsx` 会 import `@jsonstudio/wtermmod-react/css`
+  - server/script 侧一旦 import `@zterm/shared` 根入口，`tsx` Node 环境会被 `.css` 直接打死
+- 本轮已收口：
+  1. `packages/shared/src/index.ts` 删除 `react/terminal-view` 根 re-export
+  2. `android/src/lib/types.ts` / `src/server/mirror-line-canonicalizer.ts` 改走 shared 子路径真源
+  3. `daemon-mirror-close-loop` 实跑通过，`build:android` 已重新打通
+- 当前 open-tab/session 持久化审计结论：
+  - `OPEN_TABS / ACTIVE_SESSION` 的生产写口已收口为：
+    - 底层：`persistOpenTabsState()`
+    - App 编排：`persistExplicitOpenTabs()` / `persistAndSwitchExplicitOpenTabs()`
+  - 生产代码没有第二处直接写 `OPEN_TABS / ACTIVE_SESSION`
+  - `ACTIVE_PAGE` 只表达页面，不是第二 active 真源
+- Header 交互进一步物理收口：
+  - `TerminalHeader` 上已删除废弃的 `onRenameSession` 第二入口
+  - header 现在只负责：`switch / close / split pane menu`
+  - tab rename 真源只剩 `TabManagerSheet`
+
+[2026-05-05] 局部重复/先错后正继续定位
+- 已排除 render gate 同步直刷；当前 gate 已变为 next-frame merge flush，不再是实时直刷。
+- Android TerminalView 当前按 absoluteIndex 做 row key，renderRows 直接来自 renderBuffer snapshot；若出现局部重复，更可能是 buffer snapshot 中间态已重复，或 follow/scroll pre-paint 对齐仍有单帧错位。
+- 下一步：先补 shared terminal-buffer + ws-refresh 链路的“局部重复中间态”回归，优先证伪/证实 merge 层；若测试无法复现，再回到 Android TerminalView 的 pre-paint scroll/padding 协调做单点实验。
+
+[2026-05-05] daemon mirror continuity 真源重做
+- 按 Jason 要求停止继续在 continuity overlap 上补条件，改为一次性收口：mirror absolute window 只认 tmux authoritative start/end。
+- 已物理删除 `resolveContinuousMirrorCaptureWindow()` 的内容重叠推断语义；当前改为 `resolveAuthoritativeMirrorCaptureWindow()`，直接使用 `computedStartIndex + canonicalized nextLines` 写 mirror store。
+- 新冻结：重复文本/overlap 只允许作为 debug 线索，不得参与 daemon mirror 写侧真相。否则会把旧 prefix 错绑到新的 absolute index，表现成局部重复/先错后正。
+
+[2026-05-05] daemon mirror stable publish freeze
+- 为解决“短暂错帧再恢复”，mirror writer 进一步收口为 **连续一致才发布**：
+  - 单次 tmux capture canonical snapshot 若与当前 mirror 已一致，可直接接受；
+  - 否则必须继续 capture，直到连续两次 canonical snapshot 一致，才允许写入 mirror store；
+  - 上限内始终不稳定则显式报错，禁止把半刷新帧直接发布给 client。
+- 本轮验证：
+  - `src/server/terminal-mirror-capture.test.ts` 新增 3 条稳定帧门禁
+  - `pnpm --dir android run daemon:mirror:close-loop` 继续全绿（codex/top/vim/重连/schedule）
+  - `TerminalView.dynamic-refresh` / `SessionContext.ws-refresh` / `test:terminal:contracts` 全绿
+- Jason 2026-05-06 新冻结: tab/session 语义身份必须只认 `daemon identity + tmux sessionName`；WS/RTC/Tailscale/TURN 只是 transport path，不得进入 tab/session 复用真源。连接页/新建 tab 流程改为 daemon-first：先选在线 daemon，再列该 daemon 下的 tmux sessions。
+- Jason 2026-05-06 新收口:
+  - `ACTIVE_PAGE` 不再承载任何 tab/session 焦点字段；页面只表达 page kind。
+  - saved-tab import / restore 里原 `focusSessionId` 语义也统一收口为 `activeSessionId`，避免页面焦点和 tab 焦点再长第二套语言。
+  - App 层新建/复活 tab 的 owner 也已审清：只允许 `useOpenTabRestoreRuntimeSync`（冷恢复）与 `useSessionOpenActions`（用户显式打开/导入 saved tab list）两处调用 `createSession(...)`；`sessionGroups / sessionHistory / ConnectionsPage` 仅提供候选视图，不得自动开 tab。
+- [2026-05-06] render gate 第三刀冻结：
+  - `buffer-head` / cursor metadata 只更新 metadata / planner 输入
+  - **正文 repaint 唯一触发源 = `buffer-sync apply`**
+  - client `handleBufferHeadRuntime()` 不得再因 `headChanged/cursorChanged` 直接 `scheduleSessionRenderCommit`
+  - 后续若 renderer 还需要实时消费 head/cursor，只能走 metadata truth，不能再借正文 render gate 偷跑
+
+- 2026-05-06 审计更正：`liveSessionIds` 并非未接线；`TerminalPage -> onLiveSessionIdsChange -> App.setLiveSessionIds -> SessionContext` 已存在生产链路。当前 refresh 主问题更像是 active/live refresh plan 与 head/pull 节流链路耦合错误，而不是 pane live ids 根本没设置。
+- 2026-05-06 当前主查方向：1) `buildActiveSessionRefreshPlan + ensureActiveSessionFreshRuntime` 是否让 OPEN 但无有效 buffer 进展的 session 长时间 skip；2) `lastHeadRequestAt / lastServerActivityAt` 是否把“已请求但未完成”误当成新鲜进展；3) open-tab 持久化是否还有 saved-tab/import/runtime merge 旁路把已关闭 tab 再写回。

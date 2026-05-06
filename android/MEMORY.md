@@ -161,3 +161,6 @@
 - Electron 打包壳与交互验证要分层：`.app` 负责验证 build/package/window 可执行；细粒度表单交互更适合走浏览器 dev server（同一 renderer 代码），再回到 `.app` 验证桌面壳仍可启动
 - [2026-05-03] 源码树污染冻结：`android/src/`、`packages/shared/src/`、`android/vite.config.js` 不允许出现由 TS/JSX 生成的 `.js` 产物；真源只允许 `.ts/.tsx`。已新增 `android/scripts/check-no-source-js-pollution.mjs` 并接入 `android/package.json -> type-check`。后续一旦再有 `.js` sibling 写回源码树，直接视为构建/工具链违规。
 - [2026-05-04] transport stale gate 要覆盖**写侧 request**，不只覆盖 `ws.onmessage/onclose/onerror/onopen`。`buffer-head-request` / `buffer-sync-request` 若接受外部 `ws` override，必须先校验它仍等于 `readSessionTransportSocket(sessionId)`；旧 superseded socket 即使只是晚到触发 request，也会把当前 session transport 真相重新污染。
+- [2026-05-06] traversal relay 产品化真源冻结：用户不应再手填 `signalUrl / turnServerUrl / turnUsername / turnCredential`。客户端唯一协议真源应是登录控制面后得到的 `relayBaseUrl + ws(devices/host/client) + turn + accessToken + device metadata`；UI 只暴露 relay 登录和 device list，不暴露协议细节。
+- [2026-05-06] relay 控制面接线若要真正走 RTC relay，client target 真源必须带 `relayHostId`；`ws/client` 不是普通 signal server，而是按 `hostId` 路由到在线 daemon host。只下发 `wsClientUrl` 不带 `hostId` 仍然无法连到指定 daemon。
+- [2026-05-06] transport 自动模式真源再次冻结：**只允许固定顺序** `Tailscale -> IPv6 -> IPv4 -> Relay`。这不是“fallback 系统”，只是单一连接策略；禁止再长出额外 transport 状态机、补偿分叉或第二顺序语义。

@@ -15,6 +15,7 @@ const baseSettings: BridgeSettings = {
   turnUsername: '',
   turnCredential: '',
   transportMode: 'auto',
+        traversalRelay: undefined,
   terminalCacheLines: 1000,
   terminalThemeId: 'classic-dark',
   terminalWidthMode: 'mirror-fixed',

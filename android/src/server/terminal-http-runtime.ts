@@ -7,6 +7,7 @@ import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 export interface TerminalHttpRuntimeDeps {
   host: string;
   port: number;
+  daemonHostId?: string;
   requiredAuthToken: string;
   updatesDir: string;
   appUpdateVersionCode: number;
@@ -24,6 +25,7 @@ export interface TerminalHttpRuntime {
   resolveRequestOrigin: (request: IncomingMessage) => string;
   buildConnectedPayload: (sessionId: string, requestOrigin?: string) => {
     sessionId: string;
+    daemonHostId?: string;
     appUpdate?: {
       versionCode: number;
       versionName: string;
@@ -62,6 +64,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     const manifestUrl = `${requestOrigin || `http://${deps.host}:${deps.port}`}/updates/latest.json`;
     return {
       sessionId,
+      daemonHostId: deps.daemonHostId?.trim() || undefined,
       appUpdate:
         latestManifest && Number.isFinite(latestManifest.versionCode) && latestManifest.versionCode! > 0 && latestManifest.versionName
           ? {

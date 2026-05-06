@@ -4,6 +4,7 @@ import {
   findPendingSessionTransportOpenIntentByRequestId,
   getPendingSessionTransportOpenIntent,
   hasPendingSessionTransportOpenIntent,
+  isPendingSessionTransportOpenIntentStale,
   setPendingSessionTransportOpenIntent,
   type PendingSessionTransportOpenIntentStore,
 } from './session-context-open-intent-store';
@@ -15,6 +16,7 @@ function createIntent(
   return {
     sessionId: 'session-1',
     openRequestId: 'session-1:open:1',
+    createdAt: 1000,
     host: {
       id: 'host-1',
       name: 'host',
@@ -66,5 +68,13 @@ describe('session-context-open-intent-store', () => {
 
     expect(deletePendingSessionTransportOpenIntent(store, 'session-1')).toBe(true);
     expect(hasPendingSessionTransportOpenIntent(store, 'session-1')).toBe(false);
+  });
+
+  it('marks a pending intent stale once its age exceeds the threshold', () => {
+    const store: PendingSessionTransportOpenIntentStore = new Map();
+    setPendingSessionTransportOpenIntent(store, createIntent({ createdAt: 1000 }));
+
+    expect(isPendingSessionTransportOpenIntentStale(store, 'session-1', 5999, 5000)).toBe(false);
+    expect(isPendingSessionTransportOpenIntentStale(store, 'session-1', 6000, 5000)).toBe(true);
   });
 });

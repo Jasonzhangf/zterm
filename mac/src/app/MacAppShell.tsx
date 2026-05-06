@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   TerminalView,
-  buildServerPresetId,
+  buildBridgeServerPresetIdentityId,
   formatBridgeEndpoint,
   formatBridgeSessionTarget,
   getResolvedSessionName,
@@ -117,7 +117,7 @@ export function MacAppShell({
         targetPort: target.bridgePort,
         authToken: target.authToken,
       });
-      return setDefaultBridgeServer(next, buildServerPresetId(target.bridgeHost, target.bridgePort));
+      return setDefaultBridgeServer(next, buildBridgeServerPresetIdentityId(target.bridgeHost, target.bridgePort));
     });
   };
 

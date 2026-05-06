@@ -1,4 +1,5 @@
-import type { BridgeServerPreset } from './bridge-settings';
+import { buildHostSemanticReuseKey } from '@zterm/shared';
+import { resolveBridgePresetDaemonHostId, type BridgeServerPreset } from './bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import { isLikelyTailscaleHost } from './network-target';
 import type { Host, Session } from './types';
@@ -6,7 +7,10 @@ import type { Host, Session } from './types';
 export interface BridgeTarget {
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   authToken?: string;
+  relayHostId?: string;
+  relayDeviceId?: string;
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
@@ -20,13 +24,52 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
   return {
     bridgeHost: target?.bridgeHost?.trim() || '',
     bridgePort: target?.bridgePort || DEFAULT_BRIDGE_PORT,
+    daemonHostId: target?.daemonHostId?.trim() || target?.relayHostId?.trim() || '',
     authToken: target?.authToken?.trim() || '',
+    relayHostId: target?.relayHostId?.trim() || '',
+    relayDeviceId: target?.relayDeviceId?.trim() || '',
     tailscaleHost: target?.tailscaleHost?.trim() || '',
     ipv6Host: target?.ipv6Host?.trim() || '',
     ipv4Host: target?.ipv4Host?.trim() || '',
     signalUrl: target?.signalUrl?.trim() || '',
     transportMode: target?.transportMode || 'auto',
   };
+}
+
+export function findBridgePresetForDaemonHostId(
+  presets: BridgeServerPreset[],
+  daemonHostId: string,
+): BridgeServerPreset | null {
+  const normalizedDaemonHostId = daemonHostId.trim();
+  if (!normalizedDaemonHostId) {
+    return null;
+  }
+  return presets.find((preset) => resolveBridgePresetDaemonHostId(preset) === normalizedDaemonHostId) || null;
+}
+
+export function buildDaemonMappedBridgeTarget(
+  presets: BridgeServerPreset[],
+  input: {
+    daemonHostId: string;
+    relayDeviceId?: string;
+  },
+): BridgeTarget | null {
+  const daemonHostId = input.daemonHostId.trim();
+  if (!daemonHostId) {
+    return null;
+  }
+  const preset = findBridgePresetForDaemonHostId(presets, daemonHostId);
+  if (!preset) {
+    return null;
+  }
+  return normalizeBridgeTarget({
+    bridgeHost: preset.targetHost,
+    bridgePort: preset.targetPort,
+    daemonHostId,
+    authToken: preset.authToken,
+    relayHostId: daemonHostId,
+    relayDeviceId: input.relayDeviceId?.trim() || '',
+  });
 }
 
 export function buildPreferredTarget(
@@ -76,11 +119,15 @@ export function sortHostsForPicker(hosts: Host[], target?: Partial<BridgeTarget>
 }
 
 export function findMatchingHost(hosts: Host[], target: BridgeTarget, sessionName: string) {
+  const targetReuseKey = buildHostSemanticReuseKey({
+    daemonHostId: target.daemonHostId || target.relayHostId,
+    relayHostId: target.relayHostId,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+    sessionName,
+  });
   return hosts.find(
-    (host) =>
-      host.bridgeHost === target.bridgeHost &&
-      host.bridgePort === target.bridgePort &&
-      host.sessionName.trim() === sessionName.trim(),
+    (host) => buildHostSemanticReuseKey(host) === targetReuseKey,
   );
 }
 
@@ -102,6 +149,9 @@ export function buildDraftFromTmuxSession(
       bridgePort: existing.bridgePort,
       sessionName: existing.sessionName,
       authToken: existing.authToken,
+      daemonHostId: existing.daemonHostId,
+      relayHostId: existing.relayHostId,
+      relayDeviceId: existing.relayDeviceId,
       tailscaleHost: existing.tailscaleHost,
       ipv6Host: existing.ipv6Host,
       ipv4Host: existing.ipv4Host,
@@ -124,8 +174,11 @@ export function buildDraftFromTmuxSession(
     name: `${serverLabel} · ${sessionName}`,
     bridgeHost: target.bridgeHost,
     bridgePort: target.bridgePort,
+    daemonHostId: target.daemonHostId || target.relayHostId || resolveBridgePresetDaemonHostId(preset) || '',
     sessionName,
     authToken: target.authToken || preset?.authToken || '',
+    relayHostId: target.relayHostId || resolveBridgePresetDaemonHostId(preset) || '',
+    relayDeviceId: target.relayDeviceId || preset?.relayDeviceId || '',
     tailscaleHost: target.tailscaleHost || '',
     ipv6Host: target.ipv6Host || '',
     ipv4Host: target.ipv4Host || '',
@@ -146,8 +199,11 @@ export function buildCleanDraft(target: BridgeTarget): HostDraft {
     name: '',
     bridgeHost: target.bridgeHost,
     bridgePort: target.bridgePort,
+    daemonHostId: target.daemonHostId || target.relayHostId || '',
     sessionName: '',
     authToken: target.authToken || '',
+    relayHostId: target.relayHostId || '',
+    relayDeviceId: target.relayDeviceId || '',
     tailscaleHost: target.tailscaleHost || '',
     ipv6Host: target.ipv6Host || '',
     ipv4Host: target.ipv4Host || '',

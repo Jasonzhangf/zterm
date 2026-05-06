@@ -1705,7 +1705,7 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
 
-  it('does not stack multiple active-tick loops across provider rerenders', async () => {
+  it('does not stack multiple active-tick probe loops across provider rerenders', async () => {
     vi.useFakeTimers();
     try {
       const view = render(
@@ -1735,7 +1735,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(40);
       });
-      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
 
       ws.sent.length = 0;
       view.rerender(
@@ -1758,7 +1758,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         await vi.advanceTimersByTimeAsync(40);
       });
 
-      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -1798,8 +1798,8 @@ describe('SessionContext websocket dynamic refresh', () => {
         await vi.advanceTimersByTimeAsync(40);
       });
 
-      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
-      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -1840,8 +1840,50 @@ describe('SessionContext websocket dynamic refresh', () => {
         await vi.advanceTimersByTimeAsync(40);
       });
 
-      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
-      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('active tick still refreshes the active session when pane live ids are temporarily empty', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+      fireEvent.click(screen.getByText('live-none'));
+      ws1.sent.length = 0;
+      ws2.sent.length = 0;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -1883,7 +1925,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
-      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -2604,7 +2646,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(false);
       const tailRefresh = sentMessages.find((item) => item.type === 'buffer-sync-request');
       expect(tailRefresh).toMatchObject({
         type: 'buffer-sync-request',
@@ -3895,7 +3937,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       type: 'buffer-head',
       payload: {
         sessionId: 'session-1',
-        revision: 2,
+        revision: 3,
         latestEndIndex: 3,
       },
     });
@@ -3909,7 +3951,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       type: 'buffer-head',
       payload: {
         sessionId: 'session-1',
-        revision: 3,
+        revision: 2,
         latestEndIndex: 3,
       },
     });
@@ -3919,6 +3961,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     const sentMessagesAfterRevisionAdvance = readSentMessages(ws);
     expect(sentMessagesAfterRevisionAdvance.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
   });
+
 
   it('reissues tail-refresh when the same local snapshot needs a wider follow window', async () => {
     render(
@@ -5326,6 +5369,41 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
       expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('issues a low-frequency head probe for an active open transport before stale reconnect threshold when live push stays silent', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+      fireEvent.click(screen.getByText('switch-second'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      ws2.sent.length = 0;
+
+      now = new Date('2026-04-27T00:00:00.250Z').getTime();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
       expect(MockWebSocket.instances).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();

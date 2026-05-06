@@ -80,14 +80,14 @@ function normalizeSignalUrl(raw: string, authToken?: string) {
 }
 
 function buildIceServers(settings: TraversalSettingsSource): TraversalIceServer[] {
-  const turnUrl = settings.turnServerUrl?.trim() || '';
+  const turnUrl = settings.traversalRelay?.turnUrl?.trim() || settings.turnServerUrl?.trim() || '';
   if (!turnUrl) {
     return [];
   }
   return [{
     urls: turnUrl,
-    username: settings.turnUsername?.trim() || undefined,
-    credential: settings.turnCredential || undefined,
+    username: settings.traversalRelay?.turnUsername?.trim() || settings.turnUsername?.trim() || undefined,
+    credential: settings.traversalRelay?.turnCredential || settings.turnCredential || undefined,
   }];
 }
 
@@ -160,17 +160,27 @@ export function buildTraversalPlan(
 
   const rtcCandidates: RtcTraversalCandidate[] = [];
   if (mode !== 'websocket') {
+    const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
+    const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
+    const relayHostId = target.relayHostId?.trim() || '';
     const iceServers = buildIceServers(settings);
     const signalUrl = normalizeSignalUrl(
-      target.signalUrl?.trim() || settings.signalUrl?.trim() || '',
-      target.authToken,
+      relaySignalUrl || target.signalUrl?.trim() || settings.signalUrl?.trim() || '',
+      relaySignalUrl ? relayAccessToken : target.authToken,
     );
-    if (iceServers.length > 0 && signalUrl) {
+    if (relaySignalUrl && mode === 'webrtc' && !relayHostId) {
+      throw new Error('WebRTC relay mode requires selecting an online relay daemon device');
+    }
+    if (iceServers.length > 0 && signalUrl && (!relaySignalUrl || relayHostId)) {
+      const parsedSignalUrl = new URL(signalUrl);
+      if (relaySignalUrl && relayHostId) {
+        parsedSignalUrl.searchParams.set('hostId', relayHostId);
+      }
       rtcCandidates.push({
         kind: 'rtc',
-        path: 'rtc-direct',
+        path: 'rtc-relay',
         endpoint: target.bridgeHost.trim() || target.ipv4Host?.trim() || target.ipv6Host?.trim() || target.tailscaleHost?.trim() || 'rtc',
-        signalUrl,
+        signalUrl: parsedSignalUrl.toString(),
         iceServers,
       });
     }
@@ -194,6 +204,7 @@ export function resolveTraversalConfigFromHost(
       bridgeHost: host.bridgeHost,
       bridgePort: host.bridgePort,
       authToken: host.authToken,
+      relayHostId: host.relayHostId,
       tailscaleHost: host.tailscaleHost,
       ipv6Host: host.ipv6Host,
       ipv4Host: host.ipv4Host,
@@ -206,6 +217,7 @@ export function resolveTraversalConfigFromHost(
       turnUsername: settings.turnUsername,
       turnCredential: settings.turnCredential,
       transportMode: settings.transportMode,
+      traversalRelay: settings.traversalRelay,
     } satisfies TraversalSettingsSource,
   };
 }

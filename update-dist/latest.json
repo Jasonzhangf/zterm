@@ -1,0 +1,15 @@
+{
+  "versionName": "0.1.1.1492",
+  "versionCode": 1011492,
+  "buildNumber": 1011492,
+  "apkUrl": "zterm-1492-debug.apk",
+  "apk": "zterm-latest-debug.apk",
+  "apkVersioned": "zterm-1492-debug.apk",
+  "sha256": "7aed702a5d1247c700282f5c910ab478458eea67fd21e880d01779026adb20fd",
+  "size": 5199638,
+  "notes": [],
+  "channel": "stable",
+  "sourceApk": "app-debug.apk",
+  "publishedAt": "2026-05-06T04:25:52.195Z",
+  "updatedAt": "2026-05-06T04:25:52.195Z"
+}

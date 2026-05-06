@@ -144,15 +144,23 @@ export function createSessionPublicFacadeRuntime(options: {
   };
 
   const updateSessionViewport = (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => {
+    const normalizedVisibleRange = 'mode' in visibleRange
+      ? {
+          startIndex: Math.max(0, Math.floor(visibleRange.viewportEndIndex - visibleRange.viewportRows)),
+          endIndex: Math.max(0, Math.floor(visibleRange.viewportEndIndex)),
+          viewportRows: Math.max(1, Math.floor(visibleRange.viewportRows)),
+        }
+      : visibleRange;
     updateSessionViewportRuntime({
       sessionId,
-      visibleRange,
+      visibleRange: normalizedVisibleRange,
       sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       isSessionTransportActive: options.isSessionTransportActive,
       sessions: options.stateRef.current.sessions,
       sessionBufferHeadsRef: options.sessionBufferHeadsRef,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferSync: options.requestSessionBufferSync,
+      triggerRepair: !('mode' in visibleRange) || visibleRange.mode !== 'follow',
     });
   };
 

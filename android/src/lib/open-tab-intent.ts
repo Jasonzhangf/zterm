@@ -2,7 +2,9 @@ import type { PersistedOpenTab, Session } from './types';
 import {
   buildPersistedOpenTabFromSession,
   buildPersistedOpenTabReuseKey,
-  buildPersistedOpenTabReuseKeyFromSession,
+  buildPersistedOpenTabReuseKeyVariantsFromSession,
+  persistedOpenTabMatchesSession,
+  persistedOpenTabsSemanticallyMatch,
 } from './open-tab-persistence';
 
 export interface OpenTabIntentState {
@@ -28,20 +30,20 @@ export interface PersistedOpenTabRestorePlan {
 }
 
 export function dedupePersistedOpenTabs(tabs: PersistedOpenTab[]) {
-  const byKey = new Map<string, PersistedOpenTab>();
+  const deduped: PersistedOpenTab[] = [];
   for (const tab of tabs) {
-    const key = buildPersistedOpenTabReuseKey(tab);
-    const existing = byKey.get(key);
+    const existingIndex = deduped.findIndex((item) => persistedOpenTabsSemanticallyMatch(item, tab));
+    const existing = existingIndex >= 0 ? deduped[existingIndex]! : null;
     if (!existing) {
-      byKey.set(key, tab);
+      deduped.push(tab);
       continue;
     }
     const preferred =
       (existing.customName?.trim() ? existing : tab.customName?.trim() ? tab : null)
       || (existing.createdAt >= tab.createdAt ? existing : tab);
-    byKey.set(key, preferred);
+    deduped[existingIndex] = preferred;
   }
-  return Array.from(byKey.values());
+  return deduped;
 }
 
 export function openTabIntentStatesEqual(
@@ -63,6 +65,7 @@ export function openTabIntentStatesEqual(
       || leftTab.connectionName !== rightTab.connectionName
       || leftTab.bridgeHost !== rightTab.bridgeHost
       || leftTab.bridgePort !== rightTab.bridgePort
+      || (leftTab.daemonHostId || '') !== (rightTab.daemonHostId || '')
       || leftTab.sessionName !== rightTab.sessionName
       || (leftTab.authToken || '') !== (rightTab.authToken || '')
       || (leftTab.autoCommand || '') !== (rightTab.autoCommand || '')
@@ -93,7 +96,7 @@ export function normalizeOpenTabIntentState(
 export function buildBootstrapOpenTabIntentStateFromSessions(
   sessions: Array<Pick<
     Session,
-    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
   >>,
   runtimeActiveSessionId: string | null,
 ): OpenTabIntentState {
@@ -105,7 +108,7 @@ export function deriveRuntimeOpenTabSyncDecision(options: {
   currentState: OpenTabIntentState;
   runtimeSessions: Array<Pick<
     Session,
-    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
   >>;
   runtimeActiveSessionId: string | null;
   restoredTabsHandled: boolean;
@@ -186,7 +189,7 @@ export function mergeRuntimeSessionsIntoOpenTabIntentState(
   currentState: OpenTabIntentState,
   sessions: Array<Pick<
     Session,
-    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+    'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
   >>,
   closedSessionIds: ReadonlySet<string>,
   closedReuseKeys?: ReadonlySet<string>,
@@ -201,13 +204,11 @@ export function mergeRuntimeSessionsIntoOpenTabIntentState(
     }
 
     const runtimeTab = buildPersistedOpenTabFromSession(session);
-    const runtimeReuseKey = buildPersistedOpenTabReuseKey(runtimeTab);
-    if (closedReuseKeys?.has(runtimeReuseKey)) {
+    const runtimeReuseKeys = buildPersistedOpenTabReuseKeyVariantsFromSession(session);
+    if (runtimeReuseKeys.some((key) => closedReuseKeys?.has(key))) {
       continue;
     }
-    const existingIndex = nextTabs.findIndex((tab) => (
-      buildPersistedOpenTabReuseKey(tab) === runtimeReuseKey
-    ));
+    const existingIndex = nextTabs.findIndex((tab) => persistedOpenTabMatchesSession(tab, session));
 
     if (existingIndex >= 0) {
       const existingTab = nextTabs[existingIndex]!;
@@ -265,9 +266,8 @@ export function upsertOpenTabIntentSession(
     fallbackActiveSessionId?: string | null;
   },
 ): OpenTabIntentState {
-  const targetReuseKey = buildPersistedOpenTabReuseKey(tab);
   const semanticDuplicate = currentState.tabs.find((item) => (
-    buildPersistedOpenTabReuseKey(item) === targetReuseKey
+    persistedOpenTabsSemanticallyMatch(item, tab)
   )) || null;
   const nextTab = semanticDuplicate
     ? {
@@ -280,7 +280,7 @@ export function upsertOpenTabIntentSession(
     item.sessionId === currentState.activeSessionId
     && (
       item.sessionId === tab.sessionId
-      || buildPersistedOpenTabReuseKey(item) === targetReuseKey
+      || persistedOpenTabsSemanticallyMatch(item, tab)
     )
   ));
   const requestedActiveSessionId = options?.activate
@@ -295,7 +295,7 @@ export function upsertOpenTabIntentSession(
     currentState.tabs.flatMap((item) => {
       const matchesSemanticTarget =
         item.sessionId === tab.sessionId
-        || buildPersistedOpenTabReuseKey(item) === targetReuseKey;
+        || persistedOpenTabsSemanticallyMatch(item, tab);
       if (!matchesSemanticTarget) {
         return [item];
       }
@@ -358,16 +358,13 @@ export function closeOpenTabIntentSession(
   options?: {
     runtimeActiveSessionId?: string | null;
     fallbackSessionIds?: string[];
-    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>>;
+    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
   },
 ): OpenTabIntentState {
   const targetSession = options?.runtimeSessions?.find((session) => session.id === sessionId) || null;
-  const targetReuseKey = targetSession
-    ? buildPersistedOpenTabReuseKeyFromSession(targetSession)
-    : null;
   const nextTabs = currentState.tabs.filter((tab) => (
     tab.sessionId !== sessionId
-    && (!targetReuseKey || buildPersistedOpenTabReuseKey(tab) !== targetReuseKey)
+    && (!targetSession || !persistedOpenTabMatchesSession(tab, targetSession))
   ));
   const requestedActiveSessionId =
     currentState.activeSessionId === sessionId
@@ -391,7 +388,7 @@ export function deriveCloseOpenTabIntent(
   options?: {
     runtimeActiveSessionId?: string | null;
     fallbackSessionIds?: string[];
-    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>>;
+    runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
   },
 ): CloseOpenTabIntentResult {
   const targetSession = options?.runtimeSessions?.find((session) => session.id === sessionId) || null;
@@ -401,10 +398,10 @@ export function deriveCloseOpenTabIntent(
     nextState: closeOpenTabIntentSession(currentState, sessionId, options),
     closedReuseKey: closedReuseKeySource
       ? buildPersistedOpenTabReuseKey({
+          daemonHostId: closedReuseKeySource.daemonHostId,
           bridgeHost: closedReuseKeySource.bridgeHost,
           bridgePort: closedReuseKeySource.bridgePort,
           sessionName: closedReuseKeySource.sessionName,
-          authToken: closedReuseKeySource.authToken,
         })
       : null,
   };
@@ -456,11 +453,11 @@ export function resolveSavedOpenTabsImportPlan(
   const dedupedTabs = dedupePersistedOpenTabs(tabs);
   return {
     tabs: dedupedTabs,
-    focusSessionId: resolveRequestedOpenTabFocusSessionId(dedupedTabs, requestedActiveSessionId),
+    activeSessionId: resolveRequestedOpenTabActiveSessionId(dedupedTabs, requestedActiveSessionId),
   };
 }
 
-export function resolveRequestedOpenTabFocusSessionId(
+export function resolveRequestedOpenTabActiveSessionId(
   tabs: Array<Pick<PersistedOpenTab, 'sessionId'>>,
   requestedActiveSessionId?: string,
 ) {

@@ -6,6 +6,10 @@ import { ConnectionsHeader } from '../components/connections/ConnectionsHeader';
 import { getResolvedSessionName } from '../lib/connection-target';
 import { mobileTheme } from '../lib/mobile-ui';
 import { getServerColorTone } from '../lib/server-color';
+import {
+  buildSessionSemanticOwnerKey,
+  sessionSemanticOwnersMatch,
+} from '../lib/session-semantic-identity';
 import type { Host, Session, SessionGroupHistory } from '../lib/types';
 
 interface ConnectionsPageProps {
@@ -13,14 +17,15 @@ interface ConnectionsPageProps {
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
   onResumeSession: (sessionId: string) => void;
-  onOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; authToken?: string }, sessionName: string) => void;
-  onEditServerGroup: (group: { bridgeHost: string; bridgePort: number; authToken?: string }, sessionNames: string[]) => void;
-  onSaveServerGroupSelection: (group: { bridgeHost: string; bridgePort: number; authToken?: string }, sessionNames: string[]) => void;
-  onDeleteServerGroup: (group: { bridgeHost: string; bridgePort: number }) => void;
+  onOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
+  onEditServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
+  onSaveServerGroupSelection: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
+  onDeleteServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
   onOpenServerGroups: (groups: Array<{
     name: string;
     bridgeHost: string;
     bridgePort: number;
+    daemonHostId?: string;
     authToken?: string;
     sessionNames: string[];
   }>) => void;
@@ -35,6 +40,7 @@ interface ServerGroupView {
   name: string;
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   authToken?: string;
   sessions: Array<{
     id: string;
@@ -48,6 +54,11 @@ interface ServerGroupView {
   lastOpenedAt: number;
   liveSessions: Session[];
   savedCount: number;
+  openableSessions: string[];
+}
+
+function getGroupDisplayName(group: Pick<ServerGroupView, 'daemonHostId' | 'bridgeHost'>) {
+  return group.daemonHostId?.trim() || group.bridgeHost;
 }
 
 function formatRelative(ts?: number) {
@@ -82,7 +93,11 @@ export function ConnectionsPage({
   const liveSessionMap = useMemo(() => {
     const map = new Map<string, Session>();
     for (const session of sessions) {
-      const key = `${session.bridgeHost}:${session.bridgePort}:${session.sessionName}`;
+      const key = `${buildSessionSemanticOwnerKey({
+        daemonHostId: session.daemonHostId,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+      })}::${session.sessionName}`;
       map.set(key, session);
     }
     return map;
@@ -96,6 +111,7 @@ export function ConnectionsPage({
         name: string;
         bridgeHost: string;
         bridgePort: number;
+        daemonHostId?: string;
         authToken?: string;
         sessionsByName: Map<
           string,
@@ -112,11 +128,24 @@ export function ConnectionsPage({
       }
     >();
 
-    const ensureGroup = (bridgeHost: string, bridgePort: number, authToken?: string) => {
-      const key = `${bridgeHost}:${bridgePort}`;
-      const current = grouped.get(key);
+    const ensureGroup = (bridgeHost: string, bridgePort: number, daemonHostId?: string, authToken?: string) => {
+      const key = buildSessionSemanticOwnerKey({
+        daemonHostId,
+        bridgeHost,
+        bridgePort,
+      });
+      const current = grouped.get(key)
+        || [...grouped.values()].find((entry) => sessionSemanticOwnersMatch(
+          entry,
+          { daemonHostId, bridgeHost, bridgePort },
+        ))
+        || null;
       if (current) {
         current.authToken = current.authToken || authToken;
+        current.daemonHostId = current.daemonHostId || daemonHostId;
+        current.bridgeHost = current.daemonHostId ? current.bridgeHost : bridgeHost;
+        current.bridgePort = current.daemonHostId ? current.bridgePort : bridgePort;
+        grouped.set(current.id, current);
         return current;
       }
 
@@ -125,6 +154,7 @@ export function ConnectionsPage({
         name: bridgeHost,
         bridgeHost,
         bridgePort,
+        daemonHostId,
         authToken,
         sessionsByName: new Map(),
         lastOpenedAt: 0,
@@ -144,7 +174,7 @@ export function ConnectionsPage({
     };
 
     for (const host of hosts) {
-      const group = ensureGroup(host.bridgeHost, host.bridgePort, host.authToken);
+      const group = ensureGroup(host.bridgeHost, host.bridgePort, host.daemonHostId || host.relayHostId, host.authToken);
       const sessionName = getResolvedSessionName(host);
       const current = group.sessionsByName.get(sessionName);
       const nextHost = pickPreferredHost(current?.host, host);
@@ -154,13 +184,13 @@ export function ConnectionsPage({
         host: nextHost,
         source: 'saved',
         lastOpenedAt: Math.max(current?.lastOpenedAt || 0, host.lastConnected || 0),
-        liveSession: liveSessionMap.get(`${group.bridgeHost}:${group.bridgePort}:${sessionName}`) || current?.liveSession || null,
+        liveSession: liveSessionMap.get(`${group.id}::${sessionName}`) || current?.liveSession || null,
       });
       group.lastOpenedAt = Math.max(group.lastOpenedAt, host.lastConnected || 0);
     }
 
     for (const groupHistory of sessionGroups) {
-      const group = ensureGroup(groupHistory.bridgeHost, groupHistory.bridgePort, groupHistory.authToken);
+      const group = ensureGroup(groupHistory.bridgeHost, groupHistory.bridgePort, groupHistory.daemonHostId, groupHistory.authToken);
       group.lastOpenedAt = Math.max(group.lastOpenedAt, groupHistory.lastOpenedAt);
 
       for (const sessionName of groupHistory.sessionNames) {
@@ -171,13 +201,13 @@ export function ConnectionsPage({
           host: current?.host,
           source: current?.source || 'history',
           lastOpenedAt: Math.max(current?.lastOpenedAt || 0, groupHistory.lastOpenedAt),
-          liveSession: liveSessionMap.get(`${group.bridgeHost}:${group.bridgePort}:${sessionName}`) || current?.liveSession || null,
+          liveSession: liveSessionMap.get(`${group.id}::${sessionName}`) || current?.liveSession || null,
         });
       }
     }
 
     for (const liveSession of sessions) {
-      const group = ensureGroup(liveSession.bridgeHost, liveSession.bridgePort, liveSession.authToken);
+      const group = ensureGroup(liveSession.bridgeHost, liveSession.bridgePort, liveSession.daemonHostId, liveSession.authToken);
       const current = group.sessionsByName.get(liveSession.sessionName);
       group.sessionsByName.set(liveSession.sessionName, {
         id: `${group.id}:${liveSession.sessionName}`,
@@ -209,18 +239,23 @@ export function ConnectionsPage({
           .map((entry) => entry.liveSession)
           .filter((entry): entry is Session => entry !== null);
         const savedSessions = groupSessions.filter((entry) => entry.source === 'saved').map((entry) => entry.sessionName);
+        const openableSessions = groupSessions
+          .filter((entry) => entry.liveSession || entry.source === 'saved')
+          .map((entry) => entry.sessionName);
 
         return {
           id: group.id,
           name: group.name,
           bridgeHost: group.bridgeHost,
           bridgePort: group.bridgePort,
+          daemonHostId: group.daemonHostId,
           authToken: group.authToken,
           sessions: groupSessions,
           defaultSessionNames: savedSessions.length > 0 ? savedSessions : groupSessions.map((entry) => entry.sessionName),
           lastOpenedAt: group.lastOpenedAt,
           liveSessions,
           savedCount: savedSessions.length,
+          openableSessions,
         };
       })
       .sort((a, b) => {
@@ -307,7 +342,7 @@ export function ConnectionsPage({
           gap: '22px',
         }}
       >
-        <ConnectionsHeader subtitle="Grouped by server IP. Tap to open, long-press to choose sessions." />
+        <ConnectionsHeader subtitle="Grouped by daemon first. Tap to open, long-press to choose sessions." />
 
         {serverGroups.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -318,13 +353,15 @@ export function ConnectionsPage({
               const hasExplicitSelection = Object.prototype.hasOwnProperty.call(selectedSessionsByGroup, group.id);
               const isOpen = group.liveSessions.length > 0;
               const isFullyOpen = group.liveSessions.length === group.sessions.length;
-              const actionSessionNames = hasExplicitSelection ? selectedSessions : group.defaultSessionNames;
+              const actionSessionNames = (hasExplicitSelection ? selectedSessions : group.defaultSessionNames)
+                .filter((sessionName) => group.openableSessions.includes(sessionName));
+              const canOpenGroup = actionSessionNames.length > 0;
               const tone = getServerColorTone(group);
               return (
                 <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <ConnectionCard
-                    title={`${group.bridgeHost} · ${group.sessions.length} tabs`}
-                    subtitle={`${group.bridgeHost}:${group.bridgePort}`}
+                    title={`${getGroupDisplayName(group)} · ${group.sessions.length} tabs`}
+                    subtitle={group.daemonHostId || `${group.bridgeHost}:${group.bridgePort}`}
                     preview={
                       isOpen
                         ? `Live now · ${group.liveSessions.length}/${group.sessions.length} sessions open`
@@ -334,19 +371,23 @@ export function ConnectionsPage({
                     }
                     accentLabel={
                       expanded
-                        ? `${hasExplicitSelection ? selectedSessions.length : group.defaultSessionNames.length} selected · ${isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore'}`
-                        : `${group.savedCount || group.sessions.length} default · ${isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore'}`
+                        ? `${actionSessionNames.length} selected · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`
+                        : `${group.savedCount || group.sessions.length} default · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`
                     }
                     icon="◫"
                     tone={tone}
                     actionLabel={isOpen ? 'Enter' : 'Open'}
                     secondaryLabel={expanded ? '−' : '+'}
                     onPrimaryAction={() => {
+                      if (!canOpenGroup) {
+                        return;
+                      }
                       onOpenServerGroups([
                         {
-                          name: `${group.bridgeHost} · ${actionSessionNames.length} tabs`,
+                          name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} tabs`,
                           bridgeHost: group.bridgeHost,
                           bridgePort: group.bridgePort,
+                          daemonHostId: group.daemonHostId,
                           authToken: group.authToken,
                           sessionNames: actionSessionNames,
                         },
@@ -419,30 +460,32 @@ export function ConnectionsPage({
                               </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                              <button
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  if (entry.liveSession) {
-                                    onResumeSession(entry.liveSession.id);
-                                    return;
-                                  }
-                                  onOpenGroupSession(group, entry.sessionName);
-                                }}
-                                style={{
-                                  border: 'none',
-                                  borderRadius: '999px',
-                                  padding: '6px 10px',
-                                  backgroundColor: entry.liveSession ? tone.accentSoft : 'rgba(16,18,24,0.06)',
-                                  color: entry.liveSession ? tone.accent : mobileTheme.colors.lightMuted,
-                                  fontSize: '11px',
-                                  fontWeight: 700,
-                                  flexShrink: 0,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                {entry.liveSession ? 'Enter' : 'Open'}
-                              </button>
+                              {(entry.liveSession || entry.source === 'saved') && (
+                                <button
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (entry.liveSession) {
+                                      onResumeSession(entry.liveSession.id);
+                                      return;
+                                    }
+                                    onOpenGroupSession(group, entry.sessionName);
+                                  }}
+                                  style={{
+                                    border: 'none',
+                                    borderRadius: '999px',
+                                    padding: '6px 10px',
+                                    backgroundColor: entry.liveSession ? tone.accentSoft : 'rgba(16,18,24,0.06)',
+                                    color: entry.liveSession ? tone.accent : mobileTheme.colors.lightMuted,
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {entry.liveSession ? 'Enter' : 'Open'}
+                                </button>
+                              )}
                               {entry.host && (
                                 <>
                                   <button
@@ -555,17 +598,21 @@ export function ConnectionsPage({
                           Clear
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={() => {
+                            if (!canOpenGroup) {
+                              return;
+                            }
                             onOpenServerGroups([
                               {
-                                name: `${group.bridgeHost} · ${actionSessionNames.length} tabs`,
+                                name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} tabs`,
                                 bridgeHost: group.bridgeHost,
                                 bridgePort: group.bridgePort,
+                                daemonHostId: group.daemonHostId,
                                 authToken: group.authToken,
                                 sessionNames: actionSessionNames,
                               },
-                            ])
-                          }
+                            ]);
+                          }}
                           style={{
                             border: 'none',
                             background: tone.accentSoft,
@@ -573,7 +620,8 @@ export function ConnectionsPage({
                             borderRadius: '12px',
                             padding: '10px 14px',
                             fontWeight: 800,
-                            cursor: 'pointer',
+                            cursor: canOpenGroup ? 'pointer' : 'not-allowed',
+                            opacity: canOpenGroup ? 1 : 0.45,
                           }}
                         >
                           Open checked
@@ -600,9 +648,10 @@ export function ConnectionsPage({
               onClick={() =>
                 onOpenServerGroups(
                   selectedServerGroups.map(({ group, sessionNames }) => ({
-                    name: `${group.bridgeHost} · ${sessionNames.length} tabs`,
+                    name: `${getGroupDisplayName(group)} · ${sessionNames.length} tabs`,
                     bridgeHost: group.bridgeHost,
                     bridgePort: group.bridgePort,
+                    daemonHostId: group.daemonHostId,
                     authToken: group.authToken,
                     sessionNames,
                   })),

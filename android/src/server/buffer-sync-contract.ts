@@ -24,6 +24,7 @@ export interface BufferHeadMirrorSnapshot {
   revision: number;
   bufferStartIndex: number;
   bufferLines: TerminalCell[][];
+  cursorKeysApp: boolean;
   cursor: TerminalCursorState | null;
 }
 
@@ -202,6 +203,7 @@ export function buildBufferHeadPayload(
     latestEndIndex: availableEndIndex,
     availableStartIndex,
     availableEndIndex,
+    cursorKeysApp: Boolean(mirror.cursorKeysApp),
     cursor: mirror.cursor,
   };
 }
@@ -243,6 +245,57 @@ function buildBufferSyncPayload(
     lines: lines.map((line) => compactLine(line.index, line.cells)),
   };
 }
+
+export function buildLiveTailBufferSyncPayload(
+  mirror: BufferSyncMirrorSnapshot,
+  options?: { viewportRows?: number },
+): TerminalBufferPayload {
+  const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
+  const availableEndIndex = Math.max(availableStartIndex, getMirrorAvailableEndIndex(mirror));
+  const viewportRows = Math.max(1, Math.floor(options?.viewportRows || mirror.rows || 24));
+  const requestEndIndex = availableEndIndex;
+  const requestStartIndex = Math.max(availableStartIndex, requestEndIndex - viewportRows * 3);
+  const indexedLines = sliceIndexedLines(
+    mirror.bufferStartIndex,
+    mirror.bufferLines,
+    requestStartIndex,
+    requestEndIndex,
+  );
+  return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
+}
+
+export function buildChangedRangesBufferSyncPayload(
+  mirror: BufferSyncMirrorSnapshot,
+  changedRanges: Array<{ startIndex: number; endIndex: number }>,
+): TerminalBufferPayload | null {
+  if (!Array.isArray(changedRanges) || changedRanges.length === 0) {
+    return null;
+  }
+  const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
+  const availableEndIndex = Math.max(availableStartIndex, getMirrorAvailableEndIndex(mirror));
+  const normalizedRanges = changedRanges
+    .map((range) => ({
+      startIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.startIndex || 0))),
+      endIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.endIndex || 0))),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+
+  if (normalizedRanges.length === 0) {
+    return null;
+  }
+
+  const requestStartIndex = normalizedRanges[0]!.startIndex;
+  const requestEndIndex = normalizedRanges[normalizedRanges.length - 1]!.endIndex;
+  const indexedLines = normalizedRanges.flatMap((range) => sliceIndexedLines(
+    mirror.bufferStartIndex,
+    mirror.bufferLines,
+    range.startIndex,
+    range.endIndex,
+  ));
+
+  return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
+}
+
 
 export function buildRequestedRangeBufferPayload(
   mirror: BufferSyncMirrorSnapshot,

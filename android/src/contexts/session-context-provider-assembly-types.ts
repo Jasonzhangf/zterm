@@ -46,6 +46,7 @@ export interface SessionProviderCoreAssembliesResult {
   setSessionTitleSync: (id: string, title: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   resolveSessionCacheLines: (rows?: number | null) => number;
   scheduleSessionRenderCommit: (sessionId: string) => void;
@@ -67,5 +68,5 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionBufferHead?: (sessionId: string) => any;
   requestSessionBufferSync: (sessionId: string, options?: any) => boolean;
   requestSessionBufferHead: (sessionId: string, ws?: any, options?: { force?: boolean }) => boolean;
-  resolveTerminalRefreshCadence: () => { headTickMs: number };
+  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
 }

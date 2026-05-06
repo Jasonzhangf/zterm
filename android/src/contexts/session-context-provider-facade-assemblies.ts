@@ -67,6 +67,7 @@ export function useSessionProviderFacadeAssemblies(
       sessionHeadStoreRef: options.refs.sessionHeadStoreRef,
       sessionDebugMetricsStoreRef,
       lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+      lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
       staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
     },
     runtimeDebug,
@@ -101,6 +102,7 @@ export function useSessionProviderFacadeAssemblies(
     isSessionTransportActivityStale: core.isSessionTransportActivityStale,
     isReconnectInFlight: core.isReconnectInFlight,
     hasPendingSessionTransportOpen: core.hasPendingSessionTransportOpen,
+    isPendingSessionTransportOpenStale: core.isPendingSessionTransportOpenStale,
     resetSessionTransportPullBookkeeping: core.resetSessionTransportPullBookkeeping,
   }), [
     core,

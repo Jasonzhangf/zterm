@@ -182,6 +182,12 @@
 - Guard: 不改协议语义；不加 fallback；先补/保回归，再改代码。
 - Success: daemon-related ownership 下沉后，type-check + ws-refresh/App.dynamic-refresh 回归继续绿。
 
+## 2026-05-06 loading/refreshing 卡死排查
+- 现象：debug overlay 容易卡在 `loading / refreshing`，且现场常见“cursor 在动，正文不刷”。
+- 代码审计主嫌疑：`requestSessionBufferSyncRuntime()` 遇到**同窗口同 local snapshot** 的 in-flight `tail-refresh` 时，当前会被 `doesSessionPullStateMatchExactLocalSnapshot(...)` 直接挡掉；但这个判定没有把 **newer head revision** 纳入真相。
+- 推论：若 daemon 连续推送 `buffer-head`，`latestEndIndex` 不变但 `revision` 前进，则 client 可能一直只吃到 cursor/head repaint，却不重发新的同窗 tail-refresh，于是正文停在旧 revision，overlay 长时间显示 refreshing。
+- 修法冻结：只改 client buffer manager 单点门禁——`tail-refresh` 若命中“同窗口同 local snapshot，但 targetHeadRevision 更新了”，必须 supersede 旧 in-flight pull 并立刻重发；同 head revision 仍禁止重复请求。
+
 ## 2026-05-02 terminal truth re-freeze before implementation
 - User hard constraint: **先闭环整个逻辑 -> 更新认知 -> 对齐 AGENTS / skills / docs -> 然后再开始落代码**
 - Re-frozen model:
@@ -426,3 +432,22 @@
 - 现象2：红绿背景变灰。TerminalView 本地 ANSI 0-15/256 映射看起来正确；WasmBridge 实测分号 truecolor / ANSI 41/42 能正确得到 bg=196/46/1/2。
 - 新发现：WasmBridge 对冒号格式 truecolor SGR（48:2::r:g:b / 38:2::...）完全不生效，返回 DEFAULT_COLOR=256；若 tmux capture 输出该格式，客户端会落回 theme 默认/透明，肉眼像灰。需查 tmux capture 实际输出格式。
 - 结论倾向：前后台问题先收口客户端唯一前后台真源；颜色问题高概率是 parser 不支持 colon-style SGR 或 capture 链输出格式问题，而非 TerminalView palette。
+
+## 2026-05-06 normal-push / reading-pull 最小修改冻结
+- 审计结论：当前主链仍是 `client active-tick/head-poll -> daemon capture -> client tail-refresh pull`，不符合最新真源；并且 `handleBufferHeadRuntime()` 会因 `cursor/head` 单独触发 render commit，导致 render 频率高于 body 更新频率。
+- 最小修改方案冻结：第一刀不大改 renderer，只把**正常正文刷新主链**替换为 `daemon mirror truth commit -> broadcast buffer-sync`；reading 模式继续保持 `renderer visible range -> client buffer-sync-request -> daemon range reply -> local patch`。
+- 执行顺序固定：1) 先更新 docs 真源；2) daemon 在 `syncMirrorCanonicalBuffer()` 成功且 mirror 变化后广播 authoritative tail `buffer-sync`；3) client 停止 `active-tick` 作为正常 head polling 主链，只保留 `active-reentry/active-resume/stale probe`；4) 再补定向回归。
+- 风险边界：第一刀保留 `buffer-head-request` 作为 probe/resume 健康检查，不再承担正常 live 刷新；`buffer-sync-request` 继续只服务 reading repair / explicit gap pull；不引入 fallback，不把 renderer/visible range 语义回灌 daemon。
+## 2026-05-06 render gate third cut freeze
+- Symptom: even after normal live path moved to `daemon push buffer-sync`, client still allowed `buffer-head` / cursor-only updates to schedule render commits, so body repaint frequency could exceed body update frequency.
+- Root cause: `handleBufferHeadRuntime()` scheduled render commit for both `cursorChanged` and `headChanged`, making metadata-only updates wake renderer body path.
+- Decision: freeze `body repaint` to a single source: **only `buffer-sync apply` may call render commit**. `buffer-head` may update head metadata / cursor metadata / pull planner inputs only.
+- Verification target: head-only update must not create render commit; cursor-only update must not create render commit; `buffer-sync apply` still commits render normally.
+
+## 2026-05-06 daemon live push split freeze
+- Requirement: daemon push latest head must split into `info-only` vs `body-diff`, instead of always pushing a tail window.
+- Decision:
+  - mirror body unchanged -> push `buffer-head/info`
+  - mirror body changed -> push `buffer-sync diff`
+  - diff is computed **only from daemon mirror previous vs current truth**
+- Guard: daemon must not look at any client local buffer / visible range / active state when building live push diff.

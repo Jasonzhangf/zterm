@@ -10,6 +10,7 @@ export interface SessionBufferStoreSnapshot {
 export interface SessionBufferStore {
   getSnapshot: (sessionId: string) => SessionBufferStoreSnapshot;
   subscribe: (sessionId: string, listener: () => void) => () => void;
+  commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
   setBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
   deleteSession: (sessionId: string) => void;
 }
@@ -88,6 +89,19 @@ export function createSessionBufferStore(): SessionBufferStore {
     }
   };
 
+  const commitBuffer = (sessionId: string, buffer: SessionBufferState) => {
+    const previous = snapshots.get(sessionId);
+    if (previous?.buffer === buffer) {
+      return false;
+    }
+    snapshots.set(sessionId, {
+      revision: (previous?.revision || 0) + 1,
+      buffer,
+    });
+    notify(sessionId);
+    return true;
+  };
+
   const setBuffer = (sessionId: string, buffer: SessionBufferState) => {
     const previous = snapshots.get(sessionId);
     if (previous && sessionBuffersEqual(previous.buffer, buffer)) {
@@ -110,6 +124,7 @@ export function createSessionBufferStore(): SessionBufferStore {
   return {
     getSnapshot,
     subscribe,
+    commitBuffer,
     setBuffer,
     deleteSession,
   };

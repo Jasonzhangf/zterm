@@ -21,10 +21,10 @@ export function commitSessionBufferUpdateRuntime(options: {
   sessionId: string;
   nextBuffer: SessionBufferState;
   sessionBufferStoreRef: MutableRefObject<{
-    setBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
+    commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
   }>;
 }) {
-  const changed = options.sessionBufferStoreRef.current.setBuffer(options.sessionId, options.nextBuffer);
+  const changed = options.sessionBufferStoreRef.current.commitBuffer(options.sessionId, options.nextBuffer);
   if (!changed) {
     return false;
   }
@@ -56,6 +56,7 @@ export function requestSessionBufferSyncOrchestrationRuntime(options: {
   clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, sendOptions?: any) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+  resolveTerminalRefreshCadence: () => { pullRequestStaleMs: number };
 }) {
   return requestSessionBufferSyncRuntime(options as Parameters<typeof requestSessionBufferSyncRuntime>[0]);
 }
@@ -83,13 +84,14 @@ export function handleBufferHeadOrchestrationRuntime(options: {
   availableStartIndex?: number;
   availableEndIndex?: number;
   cursor?: TerminalCursorState | null;
+  cursorKeysApp?: boolean;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, { revision: number; latestEndIndex: number; seenAt: number }>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, any>>;
-    sessionBufferStoreRef: MutableRefObject<{ setBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
+    sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -182,6 +184,7 @@ export function handleSocketServerMessageOrchestrationRuntime(options: {
   ) => void;
   setSessionTitleSync: (id: string, title: string) => void;
   fileTransferMessageRuntime: { dispatch: (msg: any) => unknown };
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
 }) {
   handleSocketServerMessageRuntime(options as Parameters<typeof handleSocketServerMessageRuntime>[0]);
 }

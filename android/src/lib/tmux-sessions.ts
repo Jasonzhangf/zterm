@@ -6,7 +6,10 @@ import type { TraversalTargetSource } from './traversal/types';
 export interface BridgeTarget {
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   authToken?: string;
+  relayHostId?: string;
+  relayDeviceId?: string;
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
@@ -16,7 +19,7 @@ export interface BridgeTarget {
 
 function sendTmuxRequest(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   message: ClientMessage,
   overrideUrl?: string,
 ) {
@@ -73,7 +76,7 @@ function sendTmuxRequest(
 
 export function fetchTmuxSessions(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   overrideUrl?: string,
 ) {
   return sendTmuxRequest(target, traversalSettings, { type: 'list-sessions' }, overrideUrl);
@@ -81,7 +84,7 @@ export function fetchTmuxSessions(
 
 export function createTmuxSession(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   sessionName: string,
   overrideUrl?: string,
 ) {
@@ -90,7 +93,7 @@ export function createTmuxSession(
 
 export function renameTmuxSession(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   sessionName: string,
   nextSessionName: string,
   overrideUrl?: string,
@@ -105,7 +108,7 @@ export function renameTmuxSession(
 
 export function killTmuxSession(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   sessionName: string,
   overrideUrl?: string,
 ) {

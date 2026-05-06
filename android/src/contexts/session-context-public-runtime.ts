@@ -7,7 +7,6 @@ import type {
   SessionBufferState,
   SessionDebugOverlayMetrics,
   SessionScheduleState,
-  TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
 import {
@@ -17,30 +16,6 @@ import {
   type SessionBufferHeadState,
   type SessionVisibleRangeState,
 } from './session-sync-helpers';
-
-type SessionViewportDemand = TerminalVisibleRange | TerminalViewportState;
-
-function normalizeSessionViewportDemand(demand: SessionViewportDemand): {
-  mode: 'follow' | 'reading' | null;
-  visibleRange: SessionVisibleRangeState;
-} {
-  if ('mode' in demand) {
-    const viewportRows = Math.max(1, Math.floor(demand.viewportRows || 1));
-    const endIndex = Math.max(0, Math.floor(demand.viewportEndIndex || 0));
-    return {
-      mode: demand.mode,
-      visibleRange: normalizeSessionVisibleRangeState({
-        startIndex: Math.max(0, endIndex - viewportRows),
-        endIndex,
-        viewportRows,
-      }),
-    };
-  }
-  return {
-    mode: null,
-    visibleRange: normalizeSessionVisibleRangeState(demand),
-  };
-}
 
 interface ScheduleStateSetter {
   (
@@ -159,7 +134,8 @@ export function runScheduleJobNowRuntime(options: {
 
 export function updateSessionViewportRuntime(options: {
   sessionId: string;
-  visibleRange: SessionViewportDemand;
+  visibleRange: TerminalVisibleRange;
+  triggerRepair?: boolean;
   sessionVisibleRangeRef: { current: Map<string, SessionVisibleRangeState> };
   isSessionTransportActive: (sessionId: string) => boolean;
   sessions: Session[];
@@ -175,8 +151,7 @@ export function updateSessionViewportRuntime(options: {
     },
   ) => boolean;
 }) {
-  const { mode, visibleRange } = normalizeSessionViewportDemand(options.visibleRange);
-  const normalized = visibleRange;
+  const normalized = normalizeSessionVisibleRangeState(options.visibleRange);
   const previous = options.sessionVisibleRangeRef.current.get(options.sessionId);
   if (visibleRangeStatesEqual(previous, normalized)) {
     return;
@@ -185,7 +160,7 @@ export function updateSessionViewportRuntime(options: {
   if (!options.isSessionTransportActive(options.sessionId)) {
     return;
   }
-  if (mode === 'follow') {
+  if (options.triggerRepair === false) {
     return;
   }
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;

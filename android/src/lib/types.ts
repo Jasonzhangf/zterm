@@ -7,14 +7,16 @@
 import type {
   BridgeClientMessage,
   BridgeServerMessage,
+} from '@zterm/shared/protocol';
+import type {
   SessionBufferState as SharedSessionBufferState,
   TerminalCursorState,
   TerminalGapRange,
-} from '@zterm/shared';
+} from '@zterm/shared/types';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
-export type { ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared';
+export type { ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared/schedule-types';
 
 // ============================================
 // Host 配置
@@ -26,8 +28,11 @@ export interface Host {
   name: string;
   bridgeHost: string;        // Bridge 主机地址（IP / Tailscale 域名 / ws URL）
   bridgePort: number;        // Bridge 端口，默认取统一配置
+  daemonHostId?: string;     // daemon 稳定身份；同一 tmux daemon 不因 transport path 改变
   sessionName: string;       // tmux session 名，留空时回退到 name
   authToken?: string;        // daemon / websocket bridge 鉴权 token
+  relayHostId?: string;      // traversal relay daemon host identity
+  relayDeviceId?: string;    // traversal relay bound device identity
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
@@ -54,7 +59,18 @@ export type SessionState =
   | 'error'       // 连接失败
   | 'closed';     // 已关闭
 
-export type { BufferHeadPayload, BufferSyncRequestPayload, CompactIndexedLine, HostConfigMessage, TerminalBufferPayload, TerminalCursorState, TerminalGapRange, WireIndexedLine } from '@zterm/shared';
+export type {
+  HostConfigMessage,
+} from '@zterm/shared/protocol';
+export type {
+  BufferHeadPayload,
+  BufferSyncRequestPayload,
+  CompactIndexedLine,
+  TerminalBufferPayload,
+  TerminalCursorState,
+  TerminalGapRange,
+  WireIndexedLine,
+} from '@zterm/shared/types';
 
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
@@ -126,12 +142,13 @@ export interface Session {
   connectionName: string;    // connection 配置名
   bridgeHost: string;        // 当前连接的 bridge server
   bridgePort: number;        // 当前连接的 bridge port
+  daemonHostId?: string;     // daemon 稳定身份；同一 tmux daemon 不因 transport path 改变
   sessionName: string;       // 当前 attach 的 tmux session
   authToken?: string;
   autoCommand?: string;
   title: string;             // 动态标题（来自 tmux / 远端 terminal）
   ws: WebSocket | null;
-  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay';
+  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedEndpoint?: string;
   lastConnectStage?: string;
   state: SessionState;
@@ -346,6 +363,30 @@ export interface RuntimeDebugLogEntry {
   payload?: string;
 }
 
+export interface TraversalRelayUser {
+  id: string;
+  username: string;
+  createdAt: string;
+}
+
+export interface TraversalRelayDeviceSnapshot {
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  appVersion: string;
+  updatedAt: string;
+  client: {
+    connected: boolean;
+    lastSeenAt: string;
+  };
+  daemon: {
+    connected: boolean;
+    lastSeenAt: string;
+    hostId: string;
+    version: string;
+  };
+}
+
 // ============================================
 // 快捷键配置
 // ============================================
@@ -384,6 +425,7 @@ export interface SessionHistoryEntry {
   connectionName: string;
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   sessionName: string;
   authToken?: string;
   lastOpenedAt: number;
@@ -394,6 +436,7 @@ export interface SessionGroupHistory {
   name: string;
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   authToken?: string;
   sessionNames: string[];
   lastOpenedAt: number;
@@ -405,6 +448,7 @@ export interface PersistedOpenTab {
   connectionName: string;
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   sessionName: string;
   authToken?: string;
   autoCommand?: string;

@@ -76,8 +76,38 @@ async function openScreenCaptureSettings() {
   }
 }
 
+async function ensureScreenCapturePermission() {
+  const electronModule = await import('electron');
+  const { desktopCapturer, systemPreferences } = electronModule;
+  const initialStatus = systemPreferences?.getMediaAccessStatus?.('screen') ?? 'unknown';
+  if (initialStatus === 'granted') {
+    return;
+  }
+
+  try {
+    await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1, height: 1 },
+      fetchWindowIcons: false,
+    });
+  } catch (error) {
+    const refreshedStatus = systemPreferences?.getMediaAccessStatus?.('screen') ?? initialStatus;
+    if (refreshedStatus !== 'granted') {
+      await openScreenCaptureSettings();
+      throw new Error(`screen capture permission ${refreshedStatus}: ${resolveCaptureErrorMessage(error)}`);
+    }
+  }
+
+  const finalStatus = systemPreferences?.getMediaAccessStatus?.('screen') ?? initialStatus;
+  if (finalStatus !== 'granted') {
+    await openScreenCaptureSettings();
+    throw new Error(`screen capture permission ${finalStatus}: desktopCapturer permission probe did not grant Screen Recording access`);
+  }
+}
+
 async function captureScreenToPng(outputPath: string) {
   const electronModule = await import('electron');
+  await ensureScreenCapturePermission();
   const initialStatus = electronModule.systemPreferences?.getMediaAccessStatus?.('screen') ?? 'unknown';
 
   mkdirSync(dirname(outputPath), { recursive: true });

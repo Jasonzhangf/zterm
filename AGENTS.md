@@ -15,6 +15,7 @@
 - `android/task.md`：当前任务板
 - `android/CACHE.md`：短期上下文
 - `android/MEMORY.md`：长期经验
+- `android/note.md`：**探索过程工作台**——调试/开发/调研中的发现、线索、假设、临时结论随手记入此处；任务结束时把已验证结论提炼到 `MEMORY.md`，`note.md` 可清理
 - `android/evidence/`：截图 / 命令输出 / APK / logcat
 
 ## Workspace Layout

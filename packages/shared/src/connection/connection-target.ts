@@ -12,6 +12,7 @@ interface LegacyStoredHost {
   name?: unknown;
   bridgeHost?: unknown;
   bridgePort?: unknown;
+  daemonHostId?: unknown;
   sessionName?: unknown;
   authToken?: unknown;
   tailscaleHost?: unknown;
@@ -66,6 +67,39 @@ export function formatBridgeSessionTarget(target: {
   return `${formatBridgeEndpoint(target)} · ${getResolvedSessionName(target)}`;
 }
 
+function asTrimmedString(value?: string | null) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildSessionSemanticOwnerKey(input: {
+  daemonHostId?: string;
+  relayHostId?: string;
+  bridgeHost: string;
+  bridgePort: number;
+}) {
+  const daemonHostId = asTrimmedString(input.daemonHostId) || asTrimmedString(input.relayHostId);
+  if (daemonHostId) {
+    return `daemon:${daemonHostId}`;
+  }
+  return `bridge:${asTrimmedString(input.bridgeHost)}::${Math.max(0, Math.floor(input.bridgePort || 0))}`;
+}
+
+export function buildHostSemanticReuseKey(target: {
+  daemonHostId?: string;
+  relayHostId?: string;
+  bridgeHost: string;
+  bridgePort: number;
+  sessionName?: string;
+  name?: string;
+}) {
+  return `${buildSessionSemanticOwnerKey({
+    daemonHostId: target.daemonHostId || target.relayHostId,
+    relayHostId: target.relayHostId,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+  })}::session:${getResolvedSessionName(target)}`;
+}
+
 export function normalizeHost(input: unknown): Host | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -93,8 +127,11 @@ export function normalizeHost(input: unknown): Host | null {
     name,
     bridgeHost,
     bridgePort,
+    daemonHostId: asString(candidate.daemonHostId).trim() || asString((candidate as { relayHostId?: unknown }).relayHostId).trim() || undefined,
     sessionName: asString(candidate.sessionName ?? candidate.username).trim(),
     authToken: asString(candidate.authToken).trim(),
+    relayHostId: asString((candidate as { relayHostId?: unknown }).relayHostId).trim() || undefined,
+    relayDeviceId: asString((candidate as { relayDeviceId?: unknown }).relayDeviceId).trim() || undefined,
     tailscaleHost: asString(candidate.tailscaleHost).trim() || undefined,
     ipv6Host: asString(candidate.ipv6Host).trim() || undefined,
     ipv4Host: asString(candidate.ipv4Host).trim() || undefined,
@@ -132,10 +169,13 @@ export function buildStoredHost(host: EditableHost): Host {
     ...host,
     bridgeHost,
     bridgePort,
+    daemonHostId: host.daemonHostId?.trim() || host.relayHostId?.trim() || undefined,
     tailscaleHost: host.tailscaleHost?.trim() || undefined,
     ipv6Host: host.ipv6Host?.trim() || undefined,
     ipv4Host: host.ipv4Host?.trim() || undefined,
     signalUrl: host.signalUrl?.trim() || undefined,
+    relayHostId: host.relayHostId?.trim() || undefined,
+    relayDeviceId: host.relayDeviceId?.trim() || undefined,
     transportMode: host.transportMode === 'websocket' || host.transportMode === 'webrtc' ? host.transportMode : 'auto',
     id: buildId(),
     createdAt: Date.now(),

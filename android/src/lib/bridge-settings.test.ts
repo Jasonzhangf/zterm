@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BRIDGE_PORT, DEFAULT_TERMINAL_CACHE_LINES, WTERM_CONFIG_DISPLAY_PATH } from './mobile-config';
-import { buildDaemonStartCommand, formatBridgeTarget, normalizeBridgeSettings, setDefaultBridgeServer, upsertBridgeServer } from './bridge-settings';
+import {
+  buildBridgeServerPresetIdentityId,
+  buildDaemonStartCommand,
+  describeBridgePresetIdentity,
+  formatBridgeTarget,
+  normalizeBridgeSettings,
+  removeBridgeServer,
+  setDefaultBridgeServer,
+  upsertBridgeServer,
+} from './bridge-settings';
 
 const baseSettings = {
   targetHost: '',
@@ -16,6 +25,7 @@ const baseSettings = {
   terminalWidthMode: 'mirror-fixed' as const,
   shortcutSmartSort: true,
   servers: [],
+  traversalRelay: undefined,
 };
 
 describe('bridge-settings helpers', () => {
@@ -72,6 +82,68 @@ describe('bridge-settings helpers', () => {
     expect(switched.defaultServerId).toBe(`192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
   });
 
+  it('keeps different daemonHostId presets separate even when bridge endpoint matches', () => {
+    const settings = upsertBridgeServer(
+      upsertBridgeServer(baseSettings, {
+        name: 'Daemon A',
+        targetHost: '100.127.23.27',
+        targetPort: 40807,
+        relayHostId: 'daemon-a',
+      }),
+      {
+        name: 'Daemon B',
+        targetHost: '100.127.23.27',
+        targetPort: 40807,
+        relayHostId: 'daemon-b',
+      },
+    );
+
+    expect(settings.servers).toHaveLength(2);
+    expect(settings.servers.map((server) => server.id).sort()).toEqual([
+      buildBridgeServerPresetIdentityId('100.127.23.27', 40807, 'daemon-a'),
+      buildBridgeServerPresetIdentityId('100.127.23.27', 40807, 'daemon-b'),
+    ]);
+  });
+
+  it('removing the default entry point re-points default to the next preset', () => {
+    const settings = upsertBridgeServer(
+      upsertBridgeServer(baseSettings, {
+        name: 'Tailscale',
+        targetHost: '100.66.1.82',
+        targetPort: DEFAULT_BRIDGE_PORT,
+        authToken: 'token-ts',
+      }),
+      {
+        name: 'LAN',
+        targetHost: '192.168.0.130',
+        targetPort: DEFAULT_BRIDGE_PORT,
+        authToken: 'token-lan',
+      },
+    );
+
+    const removed = removeBridgeServer(settings, `100.66.1.82:${DEFAULT_BRIDGE_PORT}`);
+
+    expect(removed.defaultServerId).toBe(`192.168.0.130:${DEFAULT_BRIDGE_PORT}`);
+    expect(removed.targetHost).toBe('192.168.0.130');
+    expect(removed.targetAuthToken).toBe('token-lan');
+  });
+
+  it('removing the last entry point clears the effective target instead of silently keeping stale values', () => {
+    const settings = upsertBridgeServer(baseSettings, {
+      name: 'Tailscale',
+      targetHost: '100.66.1.82',
+      targetPort: DEFAULT_BRIDGE_PORT,
+      authToken: 'token-ts',
+    });
+
+    const removed = removeBridgeServer(settings, `100.66.1.82:${DEFAULT_BRIDGE_PORT}`);
+
+    expect(removed.servers).toEqual([]);
+    expect(removed.defaultServerId).toBeUndefined();
+    expect(removed.targetHost).toBe('');
+    expect(removed.targetAuthToken).toBe('');
+  });
+
   it('normalizes terminal theme id and uses default for unknown values', () => {
     expect(normalizeBridgeSettings({
       ...baseSettings,
@@ -101,5 +173,41 @@ describe('bridge-settings helpers', () => {
       ...baseSettings,
       terminalWidthMode: 'unknown-mode',
     }).terminalWidthMode).toBe('mirror-fixed');
+  });
+
+  it('describes preset identity as bridge entrypoint plus optional daemon identity', () => {
+    expect(
+      describeBridgePresetIdentity({
+        targetHost: '100.127.23.27',
+        targetPort: 40807,
+        relayHostId: 'daemon-host-a',
+      }),
+    ).toEqual({
+      daemonHostId: 'daemon-host-a',
+      bridgeLabel: 'Bridge · 100.127.23.27:40807',
+      daemonLabel: 'Daemon · daemon-host-a',
+    });
+  });
+
+  it('migrates a legacy defaultServerId keyed only by endpoint to the unique daemon-aware preset id when unambiguous', () => {
+    const settings = normalizeBridgeSettings({
+      ...baseSettings,
+      targetHost: '100.127.23.27',
+      targetPort: 40807,
+      defaultServerId: '100.127.23.27:40807',
+      servers: [
+        {
+          id: '100.127.23.27:40807',
+          name: 'Daemon A',
+          targetHost: '100.127.23.27',
+          targetPort: 40807,
+          relayHostId: 'daemon-a',
+        },
+      ],
+    });
+
+    expect(settings.defaultServerId).toBe(
+      buildBridgeServerPresetIdentityId('100.127.23.27', 40807, 'daemon-a'),
+    );
   });
 });

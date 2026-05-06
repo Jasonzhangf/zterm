@@ -84,9 +84,11 @@ class WebRtcBackend implements Backend {
 
   private dataChannel: RTCDataChannel | null = null;
 
-  private currentResolvedPath: TraversalResolvedPath = 'rtc-direct';
+  private currentResolvedPath: TraversalResolvedPath;
 
-  public constructor(private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>) {}
+  public constructor(private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>) {
+    this.currentResolvedPath = candidate.path;
+  }
 
   public get readyState() {
     if (this.dataChannel?.readyState === 'open') {
@@ -99,6 +101,10 @@ class WebRtcBackend implements Backend {
   }
 
   private async detectResolvedPath() {
+    if (this.candidate.path === 'rtc-relay') {
+      this.currentResolvedPath = 'rtc-relay';
+      return this.currentResolvedPath;
+    }
     if (!this.peerConnection) {
       return this.currentResolvedPath;
     }
@@ -117,11 +123,9 @@ class WebRtcBackend implements Backend {
       const pair = selectedPair as RTCIceCandidatePairStats;
       const local = pair.localCandidateId ? stats.get(pair.localCandidateId) as IceCandidateStatsLike | undefined : undefined;
       const remote = pair.remoteCandidateId ? stats.get(pair.remoteCandidateId) as IceCandidateStatsLike | undefined : undefined;
-      if (local?.candidateType === 'relay' || remote?.candidateType === 'relay') {
-        this.currentResolvedPath = 'rtc-relay';
-      } else {
-        this.currentResolvedPath = 'rtc-direct';
-      }
+      this.currentResolvedPath = local?.candidateType === 'relay' || remote?.candidateType === 'relay'
+        ? 'rtc-relay'
+        : this.currentResolvedPath;
       return this.currentResolvedPath;
     } catch (error) {
       console.warn('[TraversalSocket] Failed to inspect RTC stats:', error);
@@ -142,7 +146,7 @@ class WebRtcBackend implements Backend {
         this.signalSocket = signalSocket;
         const peerConnection = new RTCPeerConnection({
           iceServers: this.candidate.iceServers,
-          iceTransportPolicy: 'all',
+          iceTransportPolicy: this.candidate.path === 'rtc-relay' ? 'relay' : 'all',
         });
         this.peerConnection = peerConnection;
         const channel = peerConnection.createDataChannel('zterm', {
@@ -391,7 +395,7 @@ export class TraversalSocket implements BridgeTransportSocket {
         this.markAttempt(candidate, 'open', true);
         this.diagnostics.stage = 'open';
         this.diagnostics.reason = undefined;
-        this.diagnostics.resolvedPath = candidate.kind === 'rtc' ? 'rtc-direct' : candidate.path;
+        this.diagnostics.resolvedPath = candidate.path;
         this.diagnostics.resolvedEndpoint = candidate.endpoint;
         this.onopen?.();
       },

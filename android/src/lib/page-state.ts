@@ -6,7 +6,7 @@ export type AppPageState =
   | { kind: 'connections' }
   | { kind: 'connection-properties'; hostId?: string; draft?: HostDraft }
   | { kind: 'settings' }
-  | { kind: 'terminal'; focusSessionId?: string };
+  | { kind: 'terminal' };
 
 export const openConnectionsPage = (): AppPageState => ({ kind: 'connections' });
 
@@ -20,17 +20,16 @@ export const openSettingsPage = (): AppPageState => ({
   kind: 'settings',
 });
 
-export const openTerminalPage = (focusSessionId?: string): AppPageState => ({
+export const openTerminalPage = (): AppPageState => ({
   kind: 'terminal',
-  focusSessionId,
 });
 
 export const resolvePersistedPageStateTruth = (
   pageState: AppPageState,
-  activeSessionId: string | null,
+  _activeSessionId: string | null,
 ): AppPageState => {
   if (pageState.kind !== 'terminal') {
     return pageState;
   }
-  return openTerminalPage(pageState.focusSessionId || undefined);
+  return openTerminalPage();
 };

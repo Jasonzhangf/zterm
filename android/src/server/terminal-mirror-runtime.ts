@@ -3,6 +3,8 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '../lib/types';
+import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
+import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import type {
   TerminalSession,
@@ -26,6 +28,10 @@ export interface TerminalMirrorRuntimeDeps {
     sessionId: string,
     mirror: SessionMirror,
   ) => Extract<ServerMessage, { type: 'buffer-head' }>['payload'];
+  buildChangedRangesBufferSyncPayload: (
+    mirror: SessionMirror,
+    changedRanges: Array<{ startIndex: number; endIndex: number }>,
+  ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
   getMirrorKey: (sessionName: string) => string;
   normalizeTerminalCols: (cols: number | undefined) => number;
@@ -74,6 +80,8 @@ export interface TerminalMirrorRuntime {
   handleInput: (session: TerminalSession, data: string) => void;
 }
 
+const MIRROR_LIVE_SYNC_INTERVAL_MS = 33;
+
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
@@ -103,6 +111,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastFlushCompletedAt: 0,
       flushInFlight: false,
       flushPromise: null,
+      pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       subscribers: new Set(),
     };
@@ -164,6 +173,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lastScrollbackCount = -1;
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
+    mirror.pendingStableCaptureSnapshot = null;
     stopMirrorLiveSync(mirror);
     mirrors.delete(mirror.key);
   }
@@ -189,6 +199,41 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         continue;
       }
       ensureSessionReady(session, mirror);
+    }
+  }
+
+  function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (!session || !session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      ensureSessionReady(session, mirror);
+      deps.sendMessage(session, {
+        type: 'buffer-head',
+        payload: deps.buildBufferHeadPayload(session.id, mirror),
+      });
+    }
+  }
+
+  function broadcastChangedRangesBufferSyncToSubscribers(
+    mirror: SessionMirror,
+    changedRanges: Array<{ startIndex: number; endIndex: number }>,
+  ) {
+    const payload = deps.buildChangedRangesBufferSyncPayload(mirror, changedRanges);
+    if (!payload) {
+      return;
+    }
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (!session || !session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      ensureSessionReady(session, mirror);
+      deps.sendMessage(session, {
+        type: 'buffer-sync',
+        payload,
+      });
     }
   }
 
@@ -245,6 +290,46 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged) {
           mirror.revision += 1;
         }
+        if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
+          const firstRange = changedRanges[0] || null;
+          const lastRange = changedRanges[changedRanges.length - 1] || null;
+          console.debug(`[${deps.logTimePrefix()}] mirror.flush.inspect`, {
+            sessionName: mirror.sessionName,
+            revision: mirror.revision,
+            previousStartIndex,
+            previousEndIndex: previousStartIndex + previousLines.length,
+            nextStartIndex: mirror.bufferStartIndex,
+            nextEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+            changedRangeCount: changedRanges.length,
+            firstChangedRange: firstRange,
+            lastChangedRange: lastRange,
+            cursorChanged,
+            cursorKeysAppChanged,
+            forceRevision,
+            changedLinePreview: firstRange
+              ? summarizeIndexedLinesForDebug(
+                  sliceIndexedLines(
+                    mirror.bufferStartIndex,
+                    mirror.bufferLines,
+                    firstRange.startIndex,
+                    Math.min(firstRange.endIndex, firstRange.startIndex + 6),
+                  ),
+                )
+              : [],
+          });
+        }
+        if (changedRanges.length > 0 || forceRevision) {
+          broadcastChangedRangesBufferSyncToSubscribers(
+            mirror,
+            forceRevision
+              ? [{ startIndex: mirror.bufferStartIndex, endIndex: mirror.bufferStartIndex + mirror.bufferLines.length }]
+              : changedRanges,
+          );
+          return true;
+        }
+        if (cursorChanged || cursorKeysAppChanged) {
+          broadcastBufferHeadToSubscribers(mirror);
+        }
         return true;
       })
       .catch((error) => {
@@ -265,7 +350,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return capturePromise;
   }
 
-  function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = 12) {
+  function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = MIRROR_LIVE_SYNC_INTERVAL_MS) {
     if (mirror.lifecycle !== 'ready') {
       return;
     }
@@ -275,7 +360,12 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       if (mirror.lifecycle !== 'ready') {
         return;
       }
-      void syncMirrorCanonicalBuffer(mirror);
+      void syncMirrorCanonicalBuffer(mirror).finally(() => {
+        if (mirror.lifecycle !== 'ready' || mirror.liveSyncTimer) {
+          return;
+        }
+        scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_INTERVAL_MS);
+      });
     }, Math.max(0, delayMs));
   }
 
@@ -324,6 +414,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         throw new Error('Failed to capture canonical tmux buffer during initial sync');
       }
       announceMirrorSubscribersReady(mirror);
+      scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_INTERVAL_MS);
     } catch (error) {
       mirror.lifecycle = 'failed';
       console.error(

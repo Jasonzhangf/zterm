@@ -70,12 +70,13 @@ vi.mock('./traversal/socket', () => ({
   TraversalSocket: traversalHarness.MockTraversalSocket,
 }));
 
-const bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'> = {
+const bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'> = {
   signalUrl: 'https://signal.example.com',
   turnServerUrl: 'turn:relay.example.com',
   turnUsername: 'turn-user',
   turnCredential: 'turn-pass',
   transportMode: 'auto',
+  traversalRelay: undefined,
 };
 
 const target = {

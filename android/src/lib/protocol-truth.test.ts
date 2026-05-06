@@ -10,7 +10,8 @@ describe('android lib protocol truth gate', () => {
   it('keeps wire protocol truth sourced from @zterm/shared instead of redefining it locally', () => {
     const source = readTypesSource();
 
-    expect(source).toContain("export type { BufferHeadPayload, BufferSyncRequestPayload, CompactIndexedLine, HostConfigMessage, TerminalBufferPayload, TerminalCursorState, TerminalGapRange, WireIndexedLine } from '@zterm/shared';");
+    expect(source).toContain("} from '@zterm/shared/protocol';");
+    expect(source).toContain("} from '@zterm/shared/types';");
     expect(source).toContain('export type ClientMessage = BridgeClientMessage;');
     expect(source).toContain('export type ServerMessage = BridgeServerMessage;');
 

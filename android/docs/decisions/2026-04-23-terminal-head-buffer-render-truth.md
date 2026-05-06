@@ -37,6 +37,68 @@ server 只做四件事：
 3. 处理 `buffer-sync-request`
 4. 处理 transport 级 `input / file / schedule / tmux manage`
 
+
+### 1.0 正常刷新主链冻结（2026-05-06）
+
+terminal 正常 live/follow 刷新主链固定为：
+
+```text
+tmux
+-> daemon mirror capture
+-> daemon mirror truth commit
+-> daemon broadcast buffer-sync
+-> client local sparse buffer merge
+-> renderer render
+```
+
+reading / gap repair 主链固定为：
+
+```text
+renderer visible range gap
+-> client buffer manager request buffer-sync-request
+-> daemon replies current mirror range
+-> client patch local sparse buffer
+-> renderer local range repaint
+```
+
+硬规则：
+
+- `buffer-head-request` 不再承担正常正文 live 刷新主链
+- `buffer-head-request` 只允许用于 `resume / reconnect / stale probe / health check`
+- daemon broadcast `buffer-sync` 时只允许基于 **mirror 当前真相** 广播，不得查看客户端 `active / follow / reading / visible range`
+- `buffer-sync-request` 继续只服务 reading repair / explicit gap pull
+- 正常 push 与 reading pull 必须互不干扰；reading 不得反向驱动 daemon live capture 策略
+
+### 1.0.1 消息语义冻结：正文 repaint 唯一触发源
+
+```text
+buffer-head
+  -> head metadata update only
+  -> cursor metadata update only
+  -> planner input update only
+  -> must NOT trigger body repaint
+
+buffer-sync apply
+  -> local sparse buffer truth update
+  -> may trigger body repaint
+```
+
+硬规则：
+
+- `buffer-head` 只允许更新：
+  - `daemonHeadRevision`
+  - `daemonHeadEndIndex`
+  - cursor metadata
+  - planner 所需 head truth
+- `buffer-head` 不得直接触发正文 body repaint
+- cursor metadata 不得直接触发正文 body repaint
+- renderer 若要读取 head/cursor metadata，必须把它们视为 metadata truth；正文 repaint 仍只允许跟随 `buffer-sync apply`
+- daemon live push 还必须再细分：
+  - **mirror body unchanged** -> push `buffer-head/info`
+  - **mirror body changed** -> push `buffer-sync diff`
+- 这个 diff 只能基于 **daemon mirror 前一版 vs 当前版** 计算
+- daemon **不得**基于任何客户端 local buffer / visible range / active 状态生成 live diff
+
 ### 1.1 server 响应规则
 
 - `buffer-head-request`：返回当前 head
@@ -91,6 +153,14 @@ single capture
   - 再本地拼接
 - 这类 split 会制造第二语义，也容易在短历史场景下把尾部内容重复拼进 mirror
 - daemon 可以读取 tmux 的 pane rows / cols / alternate-screen 这些**源事实**，但不能基于它们派生“显示策略”
+- daemon mirror absolute window 只能来自 tmux authoritative window（例如 `history_size + pane_height` / capture 行数归一后的结果）
+- 禁止根据 capture 内容本身的 overlap / repeated text 去推断新的 `startIndex`
+- 否则重复文本会把旧 prefix 错绑到新的 absolute index，表现为局部重复/先错后正
+- 若 tmux/TUI 正在半刷新，mirror writer 不得立刻发布“第一帧就算数”的中间态：
+  - 必须在 writer 内部做 **连续一致才发布** 的稳定化判定
+  - 允许 `capture -> canonicalize` 连续执行少量重采样
+  - 只有连续两次 canonical snapshot 一致，或与当前 mirror 已一致，才允许写入 mirror store
+  - 若在上限次数内始终不稳定，必须显式报错，禁止把半帧直接发布给 client
 
 ### 1.3 daemon transport / mirror 生命周期
 
@@ -157,6 +227,15 @@ buffer manager 是客户端唯一 buffer worker。
 - 决定这次该请求哪段 buffer
 - merge 到本地 sliding buffer
 - 在 head 变化或 gap repair 完成后产出 line/range patch 并通知 renderer
+
+补充冻结：
+
+- `buffer-head` 到达时，buffer manager 可以：
+  - 更新本地 head metadata
+  - 更新 cursor metadata
+  - 更新 pull planner 输入
+- 但 buffer manager 不得因为 `buffer-head` / cursor-only 变化直接触发正文 render commit
+- 正文 render commit 唯一来源仍是：`buffer-sync apply` 让本地 body truth 发生变化
 
 ### 2.2 本地 buffer 结构
 
@@ -273,6 +352,12 @@ renderer 只维护：
 - `mode`: `follow | reading`
 - `renderBottomIndex`
 - `visible range`
+
+renderer repaint 规则冻结：
+
+- body repaint：只响应 `buffer-sync apply` 后的 body truth 变化
+- head metadata / cursor metadata：可以被读取并参与尾部状态、光标显示、follow 计算
+- 但 head/cursor metadata 不得单独触发新的正文 body repaint
 
 派生：
 

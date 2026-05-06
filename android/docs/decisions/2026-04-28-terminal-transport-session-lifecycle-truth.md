@@ -42,6 +42,17 @@
 > - client 新逻辑必须优先按 `openRequestId` 匹配
 > - `clientSessionId` 仅允许作为旧安装态恢复连接的兼容回显，不得重新成为新协议主语义
 
+> 2026-05-06 第六刀补充冻结：  
+> `daemonHostId` 是 **daemon stable identity**，必须长期稳定存在：  
+> 1. relay 模式：使用 relay `hostId`  
+> 2. 非 relay 直连模式：daemon 必须提供本地持久化 stable id  
+> 3. client 的 tab/session 语义复用必须优先使用 `daemonHostId + sessionName`，不得再回退成 transport path 心智
+
+> 2026-05-06 第七刀补充冻结：  
+> client 持久化里，`ACTIVE_PAGE` 只允许表达 **当前页面 kind**；  
+> tab/session 焦点唯一真源只能是 `ACTIVE_SESSION`。  
+> `ACTIVE_PAGE.focusSessionId` 这类字段属于重复真源，已冻结为禁止新增/禁止恢复。
+
 ## 背景
 
 当前现场问题集中在：

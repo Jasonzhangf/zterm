@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { homedir, hostname } from 'os';
 import { join } from 'path';
+import { createHash, randomUUID } from 'crypto';
 import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
@@ -12,12 +13,18 @@ export const DEFAULT_DAEMON_TERMINAL_CACHE_LINES = 3000;
 export const WTERM_HOME_DIRNAME = '.wterm';
 export const WTERM_CONFIG_FILENAME = 'config.json';
 export const WTERM_UPDATES_DIRNAME = 'updates';
+export const WTERM_DAEMON_ID_FILENAME = 'daemon-id';
 
 interface WtermRelayConfig {
   relayUrl?: unknown;
   username?: unknown;
   password?: unknown;
   hostId?: unknown;
+  deviceId?: unknown;
+  deviceName?: unknown;
+  platform?: unknown;
+  appVersion?: unknown;
+  daemonVersion?: unknown;
 }
 
 interface WtermConfigFile {
@@ -50,6 +57,11 @@ export interface TraversalRelayRuntimeConfig {
   username: string;
   password: string;
   hostId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  appVersion: string;
+  daemonVersion: string;
 }
 
 export interface DaemonRuntimeConfig {
@@ -58,6 +70,7 @@ export interface DaemonRuntimeConfig {
   authToken: string;
   terminalCacheLines: number;
   sessionName: string;
+  daemonHostId: string;
   configPath: string;
   configFound: boolean;
   authSource: 'env' | 'config' | 'default';
@@ -93,6 +106,36 @@ export function getWtermHomeDir(homeDir: string = homedir()) {
 
 export function getWtermUpdatesDir(homeDir: string = homedir()) {
   return join(getWtermHomeDir(homeDir), WTERM_UPDATES_DIRNAME);
+}
+
+export function getWtermDaemonIdPath(homeDir: string = homedir()) {
+  return join(getWtermHomeDir(homeDir), WTERM_DAEMON_ID_FILENAME);
+}
+
+function sanitizeDaemonId(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9._:-]/g, '-').slice(0, 128);
+}
+
+function buildDefaultDaemonId() {
+  const host = hostname().trim() || 'zterm-daemon';
+  const entropy = randomUUID();
+  const digest = createHash('sha256').update(`${host}:${entropy}`).digest('hex').slice(0, 16);
+  return sanitizeDaemonId(`daemon-${host}-${digest}`);
+}
+
+export function resolveStableDaemonHostId(homeDir: string = homedir()) {
+  const daemonIdPath = getWtermDaemonIdPath(homeDir);
+  if (existsSync(daemonIdPath)) {
+    const stored = sanitizeDaemonId(readFileSync(daemonIdPath, 'utf-8'));
+    if (stored) {
+      return stored;
+    }
+  }
+
+  const nextDaemonId = buildDefaultDaemonId();
+  mkdirSync(getWtermHomeDir(homeDir), { recursive: true });
+  writeFileSync(daemonIdPath, `${nextDaemonId}\n`, 'utf-8');
+  return nextDaemonId;
 }
 
 export function readWtermConfigFile(homeDir: string = homedir()) {
@@ -170,14 +213,42 @@ export function resolveDaemonRuntimeConfig(options?: {
   const relayUsername = asString(env.ZTERM_TRAVERSAL_USERNAME) || asString(relayConfig.username);
   const relayPassword = asString(env.ZTERM_TRAVERSAL_PASSWORD) || asString(relayConfig.password);
   const relayHostId = asString(env.ZTERM_TRAVERSAL_HOST_ID) || asString(relayConfig.hostId);
+  const relayDefaultHostName = hostname().trim();
+  const relayDeviceId =
+    asString(env.ZTERM_TRAVERSAL_DEVICE_ID) ||
+    asString(relayConfig.deviceId) ||
+    relayDefaultHostName;
+  const relayDeviceName =
+    asString(env.ZTERM_TRAVERSAL_DEVICE_NAME) ||
+    asString(relayConfig.deviceName) ||
+    relayDefaultHostName;
+  const relayPlatform =
+    asString(env.ZTERM_TRAVERSAL_PLATFORM) ||
+    asString(relayConfig.platform) ||
+    process.platform;
+  const relayAppVersion =
+    asString(env.ZTERM_TRAVERSAL_APP_VERSION) ||
+    asString(env.ZTERM_APP_VERSION) ||
+    asString(relayConfig.appVersion);
+  const relayDaemonVersion =
+    asString(env.ZTERM_TRAVERSAL_DAEMON_VERSION) ||
+    asString(env.ZTERM_DAEMON_VERSION) ||
+    asString(relayConfig.daemonVersion) ||
+    relayAppVersion;
   const relay = relayUrl && relayUsername && relayPassword && relayHostId
     ? {
         relayUrl,
         username: relayUsername,
         password: relayPassword,
         hostId: relayHostId,
+        deviceId: relayDeviceId,
+        deviceName: relayDeviceName,
+        platform: relayPlatform,
+        appVersion: relayAppVersion,
+        daemonVersion: relayDaemonVersion,
       }
     : null;
+  const daemonHostId = relay?.hostId || resolveStableDaemonHostId(homeDir);
 
   return {
     host,
@@ -185,6 +256,7 @@ export function resolveDaemonRuntimeConfig(options?: {
     authToken,
     terminalCacheLines,
     sessionName,
+    daemonHostId,
     configPath: path,
     configFound: found,
     authSource,

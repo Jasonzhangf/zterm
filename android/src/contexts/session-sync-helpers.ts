@@ -14,6 +14,7 @@ import type {
   TerminalVisibleRange,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import { normalizeWireLines } from '../lib/terminal-buffer';
 
@@ -47,13 +48,14 @@ export interface ActiveSessionRefreshPlanOptions {
   wsReadyState: number | null;
   reconnectInFlight: boolean;
   pendingTransportOpen: boolean;
+  pendingTransportOpenStale?: boolean;
   allowReconnectIfUnavailable?: boolean;
   transportStale: boolean;
   source: ActiveRefreshSource;
 }
 
 export type ActiveSessionRefreshPlan =
-  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' }
+  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'tick-live-refresh-owned-by-daemon' }
   | { action: 'probe-stale-transport'; probeReason: 'active-tick' | 'active-reentry' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
   | { action: 'reconnect' };
@@ -99,6 +101,7 @@ export type ReconnectHandshakeFailurePlan =
 export interface PendingSessionTransportOpenIntent {
   sessionId: string;
   openRequestId: string;
+  createdAt: number;
   host: Host;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
@@ -145,6 +148,7 @@ export function createPendingSessionTransportOpenIntent(
   return {
     sessionId: options.sessionId,
     openRequestId: options.openRequestId || buildSessionOpenRequestId(options.sessionId),
+    createdAt: Date.now(),
     host: options.host,
     resolvedSessionName: options.resolvedSessionName,
     debugScope: options.debugScope,
@@ -232,7 +236,7 @@ export function buildReconnectHandshakeFailurePlan(options: {
 
 export type SessionConnectionFields = Pick<
   Session,
-  'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken' | 'autoCommand'
+  'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand'
 >;
 
 export interface SessionTransportPrimeState {
@@ -247,6 +251,7 @@ export function buildSessionConnectionFields(host: Host, resolvedSessionName: st
     connectionName: host.name,
     bridgeHost: host.bridgeHost,
     bridgePort: host.bridgePort,
+    daemonHostId: host.daemonHostId || host.relayHostId,
     sessionName: resolvedSessionName,
     authToken: host.authToken,
     autoCommand: host.autoCommand,
@@ -383,11 +388,15 @@ export function hasSessionLocalWindow(
   );
 }
 
-export function buildSessionConnectedUpdates(): Pick<Session, 'state' | 'reconnectAttempt' | 'lastError'> {
+export function buildSessionConnectedUpdates(
+  options?: { daemonHostId?: string | null },
+): Pick<Session, 'state' | 'reconnectAttempt' | 'lastError' | 'daemonHostId'> {
+  const normalizedDaemonHostId = options?.daemonHostId?.trim() || '';
   return {
     state: 'connected',
     reconnectAttempt: 0,
     lastError: undefined,
+    ...(normalizedDaemonHostId ? { daemonHostId: normalizedDaemonHostId } : {}),
   };
 }
 
@@ -439,6 +448,7 @@ export function shouldReconnectQueuedActiveInput(options: {
 }
 
 export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanOptions): ActiveSessionRefreshPlan {
+  const hasBlockingPendingTransportOpen = options.pendingTransportOpen && !options.pendingTransportOpenStale;
   if (!options.hasSession || !options.isRefreshTarget) {
     return { action: 'skip', reason: 'inactive-or-missing-session' };
   }
@@ -446,9 +456,12 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
   if (
     options.source === 'active-tick'
     && (
-      options.sessionState === 'reconnecting'
-      || options.reconnectInFlight
-      || options.pendingTransportOpen
+      options.reconnectInFlight
+      || hasBlockingPendingTransportOpen
+      || (
+        options.sessionState === 'reconnecting'
+        && options.wsReadyState !== WebSocket.OPEN
+      )
     )
   ) {
     return { action: 'skip', reason: 'tick-blocked-by-reconnect' };
@@ -464,9 +477,18 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
         probeReason: options.source === 'active-tick' ? 'active-tick' : 'active-reentry',
       };
     }
+    if (options.source === 'active-tick') {
+      if (options.sessionState === 'connecting') {
+        return {
+          action: 'request-head',
+          resetPullBookkeeping: false,
+        };
+      }
+      return { action: 'skip', reason: 'tick-live-refresh-owned-by-daemon' };
+    }
     return {
       action: 'request-head',
-      resetPullBookkeeping: options.source !== 'active-tick',
+      resetPullBookkeeping: true,
     };
   }
 
@@ -474,7 +496,7 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     return { action: 'skip', reason: 'transport-unavailable' };
   }
 
-  if (options.pendingTransportOpen) {
+  if (hasBlockingPendingTransportOpen) {
     return { action: 'skip', reason: 'transport-open-pending' };
   }
 
@@ -769,7 +791,19 @@ function buildTailRefreshBufferSyncRequestPayload(
 ): BufferSyncRequestPayload {
   const buffer = resolveSessionBufferView(session, options?.bufferOverride);
   const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
-  const viewportEndIndex = resolveTailTargetEndIndex(session, visibleRange, buffer);
+  const authoritativeAvailableEndIndex = resolveAuthoritativeAvailableEndIndex(
+    session,
+    options?.liveHead,
+    buffer,
+  );
+  const viewportEndIndex = (
+    authoritativeAvailableEndIndex === null
+      ? resolveTailTargetEndIndex(session, visibleRange, buffer)
+      : Math.min(
+          resolveTailTargetEndIndex(session, visibleRange, buffer),
+          authoritativeAvailableEndIndex,
+        )
+  );
   const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
   const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead, buffer);
   const authoritativeHeadStartIndex = availableStartIndex;
@@ -1035,17 +1069,19 @@ export function orderSessionsForReconnect(sessions: Session[], activeSessionId: 
 }
 
 export function buildManagedSessionReuseKey(input: {
+  daemonHostId?: string;
+  relayHostId?: string;
   bridgeHost: string;
   bridgePort: number;
   sessionName: string;
-  authToken?: string;
 }) {
-  return [
-    input.bridgeHost.trim(),
-    String(input.bridgePort),
-    input.sessionName.trim(),
-    input.authToken?.trim() || '',
-  ].join('::');
+  return buildSessionSemanticReuseKey({
+    daemonHostId: input.daemonHostId,
+    relayHostId: input.relayHostId,
+    bridgeHost: input.bridgeHost,
+    bridgePort: input.bridgePort,
+    sessionName: input.sessionName,
+  });
 }
 
 export function scoreReusableManagedSession(session: Session, activeSessionId: string | null) {
@@ -1063,17 +1099,18 @@ export function findReusableManagedSession(options: {
   activeSessionId: string | null;
 }) {
   const reuseKey = buildManagedSessionReuseKey({
+    daemonHostId: options.host.daemonHostId,
+    relayHostId: options.host.relayHostId,
     bridgeHost: options.host.bridgeHost,
     bridgePort: options.host.bridgePort,
     sessionName: options.resolvedSessionName,
-    authToken: options.host.authToken,
   });
   return options.sessions
     .filter((session) => buildManagedSessionReuseKey({
+      daemonHostId: session.daemonHostId,
       bridgeHost: session.bridgeHost,
       bridgePort: session.bridgePort,
       sessionName: session.sessionName,
-      authToken: session.authToken,
     }) === reuseKey)
     .sort((left, right) => (
       scoreReusableManagedSession(right, options.activeSessionId)

@@ -81,16 +81,18 @@ vi.mock('../components/TerminalView', () => ({
   TerminalView: ({
     sessionId,
     active,
+    live,
     onViewportChange,
     showAbsoluteLineNumbers,
   }: {
     sessionId: string;
     active?: boolean;
+    live?: boolean;
     onViewportChange?: (sessionId: string, viewState: { mode: 'follow' | 'reading'; viewportEndIndex: number; viewportRows: number }) => void;
     showAbsoluteLineNumbers?: boolean;
   }) => {
     useEffect(() => {
-      if (!active || !onViewportChange) {
+      if (!live || !onViewportChange) {
         return;
       }
       onViewportChange(sessionId, {
@@ -105,6 +107,7 @@ vi.mock('../components/TerminalView', () => ({
         data-testid={`terminal-view-${sessionId}`}
         data-session-id={sessionId}
         data-active={active ? 'true' : 'false'}
+        data-live={live ? 'true' : 'false'}
         data-show-line-numbers={showAbsoluteLineNumbers ? 'true' : 'false'}
       >
         renderer:{sessionId}
@@ -266,7 +269,9 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1, session2, session3], session1);
 
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-live')).toBe('true');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('false');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-live')).toBe('true');
     expect(screen.queryByTestId('terminal-view-s3')).toBeNull();
   });
 

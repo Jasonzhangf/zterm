@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import { sortBridgeServers, type BridgeServerPreset, type BridgeSettings } from '../../lib/bridge-settings';
+import {
+  describeBridgePresetIdentity,
+  resolveBridgePresetDaemonHostId,
+  sortBridgeServers,
+  type BridgeServerPreset,
+  type BridgeSettings,
+} from '../../lib/bridge-settings';
+import { RelayDevicePicker } from '../connection-form/RelayDevicePicker';
+import { useTraversalRelayDaemonDevices } from '../../hooks/useTraversalRelayDaemonDevices';
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
+import { buildDaemonMappedBridgeTarget } from '../../lib/session-picker';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
+import type { TraversalRelayDeviceSnapshot } from '../../lib/types';
 
 interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
   open: boolean;
   servers: BridgeServerPreset[];
-  bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode'>;
+  bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>;
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
   onClose: () => void;
@@ -25,7 +35,10 @@ function normalizeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
   return {
     bridgeHost: target?.bridgeHost?.trim() || '',
     bridgePort: target?.bridgePort || DEFAULT_BRIDGE_PORT,
+    daemonHostId: target?.daemonHostId?.trim() || target?.relayHostId?.trim() || '',
     authToken: target?.authToken?.trim() || '',
+    relayHostId: target?.relayHostId?.trim() || '',
+    relayDeviceId: target?.relayDeviceId?.trim() || '',
     tailscaleHost: target?.tailscaleHost?.trim() || '',
     ipv6Host: target?.ipv6Host?.trim() || '',
     ipv4Host: target?.ipv4Host?.trim() || '',
@@ -61,6 +74,22 @@ function formatRefreshClock(ts?: number | null) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function resolveRelayDeviceBridgeTarget(device: TraversalRelayDeviceSnapshot, servers: BridgeServerPreset[]) {
+  return (
+    buildDaemonMappedBridgeTarget(servers, {
+      daemonHostId: device.daemon.hostId,
+      relayDeviceId: device.deviceId,
+    }) || {
+      bridgeHost: '',
+      bridgePort: DEFAULT_BRIDGE_PORT,
+      daemonHostId: device.daemon.hostId.trim(),
+      relayHostId: device.daemon.hostId.trim(),
+      relayDeviceId: device.deviceId.trim(),
+      authToken: '',
+    }
+  );
+}
+
 export function TmuxSessionPickerSheet({
   mode,
   open,
@@ -83,6 +112,9 @@ export function TmuxSessionPickerSheet({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
+  const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
+    Boolean(bridgeSettings.traversalRelay?.accessToken) && open,
+  );
 
   useEffect(() => {
     if (!open) {
@@ -95,7 +127,8 @@ export function TmuxSessionPickerSheet({
     setDiscoveryState('idle');
     setErrorMessage('');
     setLastRefreshedAt(null);
-  }, [initialSelectedSessions, initialTarget, open]);
+    refreshRelayDevices();
+  }, [initialSelectedSessions, initialTarget, open, refreshRelayDevices]);
 
   useEffect(() => {
     if (!open) {
@@ -122,16 +155,28 @@ export function TmuxSessionPickerSheet({
     discoveryState === 'done' ? mobileTheme.colors.accent : discoveryState === 'error' ? mobileTheme.colors.danger : '#f2b94b';
   void clockTick;
   const isEditGroupMode = mode === 'edit-group';
+  const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
+  const daemonFirst = relayEnabled && relayDevices.length > 0;
 
   const handleRefreshNow = async () => {
     const bridgeHost = selectedTarget.bridgeHost.trim();
     const authToken = selectedTarget.authToken?.trim() || '';
+    const relayHostId = selectedTarget.relayHostId?.trim() || selectedTarget.daemonHostId?.trim() || '';
+
+    if (daemonFirst && !relayHostId) {
+      setAvailableSessions([]);
+      setSelectedSessions([]);
+      setDiscoveryState('idle');
+      setErrorMessage('先选择一个在线 daemon，再点击 Connect。');
+      setLastRefreshedAt(null);
+      return;
+    }
 
     if (!bridgeHost) {
       setAvailableSessions([]);
       setSelectedSessions([]);
       setDiscoveryState('idle');
-      setErrorMessage('先输入 Tailscale IP / bridge host，再点击 Connect。');
+      setErrorMessage(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先输入 Tailscale IP / bridge host，再点击 Connect。');
       setLastRefreshedAt(null);
       return;
     }
@@ -289,6 +334,43 @@ export function TmuxSessionPickerSheet({
           </button>
         </div>
 
+        {daemonFirst && (
+          <div
+            style={{
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <SectionTitle title="Daemon" subtitle="先选在线 daemon。tab/session 语义只认 daemon + tmux session，不认 WS/RTC/Tailscale/TURN 路径。" />
+            <RelayDevicePicker
+              relayEnabled
+              devices={relayDevices}
+              selectedRelayHostId={selectedTarget.relayHostId || selectedTarget.daemonHostId || ''}
+              selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
+              onSelect={(device) => {
+                const resolvedTarget = resolveRelayDeviceBridgeTarget(device, sortedServers);
+                setSelectedTarget((current) => ({
+                  ...current,
+                  ...resolvedTarget,
+                }));
+              }}
+              onClear={() =>
+                setSelectedTarget((current) => ({
+                  ...current,
+                  daemonHostId: '',
+                  relayHostId: '',
+                  relayDeviceId: '',
+                }))
+              }
+            />
+          </div>
+        )}
+
         <div
           style={{
             borderRadius: '22px',
@@ -300,11 +382,19 @@ export function TmuxSessionPickerSheet({
             gap: '12px',
           }}
         >
-          <SectionTitle title="Target" subtitle="支持手动输入 Tailscale IP/域名；填写完成后显式点击 Connect，才会测试连通并刷新 tmux sessions。" />
+          <SectionTitle
+            title="Target"
+            subtitle={
+              daemonFirst
+                ? 'bridge host/token 对用户不是一级心智；这里只展示当前 daemon 对应的桥接配置。需要更改时回连接配置页编辑。'
+                : '支持手动输入 Tailscale IP/域名；填写完成后显式点击 Connect，才会测试连通并刷新 tmux sessions。'
+            }
+          />
           <input
             value={selectedTarget.bridgeHost}
             onChange={(event) => setSelectedTarget((current) => ({ ...current, bridgeHost: event.target.value }))}
             placeholder="100.127.23.27 或 your-device.ts.net"
+            disabled={daemonFirst}
             style={{
               minHeight: '48px',
               borderRadius: '16px',
@@ -323,6 +413,7 @@ export function TmuxSessionPickerSheet({
                   bridgePort: Number.parseInt(event.target.value, 10) || DEFAULT_BRIDGE_PORT,
                 }))
               }
+              disabled={daemonFirst}
               style={{
                 width: '136px',
                 minHeight: '48px',
@@ -336,6 +427,7 @@ export function TmuxSessionPickerSheet({
               value={selectedTarget.authToken || ''}
               onChange={(event) => setSelectedTarget((current) => ({ ...current, authToken: event.target.value }))}
               placeholder="Bridge auth token"
+              disabled={daemonFirst}
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -422,9 +514,11 @@ export function TmuxSessionPickerSheet({
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+          {!daemonFirst && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
             {sortedServers.map((server) => {
               const active = server.targetHost === selectedTarget.bridgeHost && server.targetPort === selectedTarget.bridgePort;
+              const daemonHostId = resolveBridgePresetDaemonHostId(server);
+              const identity = describeBridgePresetIdentity(server);
               return (
                 <button
                   key={server.id}
@@ -432,7 +526,10 @@ export function TmuxSessionPickerSheet({
                     setSelectedTarget({
                       bridgeHost: server.targetHost,
                       bridgePort: server.targetPort,
+                      daemonHostId: daemonHostId || '',
                       authToken: server.authToken || '',
+                      relayHostId: daemonHostId || '',
+                      relayDeviceId: server.relayDeviceId || '',
                     })
                   }
                   style={{
@@ -446,13 +543,38 @@ export function TmuxSessionPickerSheet({
                   }}
                 >
                   <div style={{ fontWeight: 800 }}>{server.name}</div>
-                  <div style={{ fontSize: '11px', opacity: 0.78 }}>{server.targetHost}:{server.targetPort}</div>
+                  <div style={{ fontSize: '11px', opacity: 0.78 }}>{identity.bridgeLabel}</div>
+                  {daemonHostId ? (
+                    <div style={{ fontSize: '10px', opacity: 0.72 }}>{identity.daemonLabel}</div>
+                  ) : null}
                   <div style={{ fontSize: '10px', opacity: 0.72 }}>{formatTargetBadge(server.targetHost)} · {server.authToken ? 'Auth' : 'No auth'}</div>
                 </button>
               );
             })}
-          </div>
+          </div>}
         </div>
+
+        {!daemonFirst && <RelayDevicePicker
+          relayEnabled={relayEnabled}
+          devices={relayDevices}
+          selectedRelayHostId={selectedTarget.relayHostId || selectedTarget.daemonHostId || ''}
+          selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
+          onSelect={(device) => {
+            const resolvedTarget = resolveRelayDeviceBridgeTarget(device, sortedServers);
+            setSelectedTarget((current) => ({
+              ...current,
+              ...resolvedTarget,
+            }));
+          }}
+          onClear={() =>
+            setSelectedTarget((current) => ({
+              ...current,
+              daemonHostId: '',
+              relayHostId: '',
+              relayDeviceId: '',
+            }))
+          }
+        />}
 
         <div
           style={{

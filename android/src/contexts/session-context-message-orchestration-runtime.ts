@@ -29,7 +29,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, { revision: number; latestEndIndex: number; seenAt: number }>>;
-    sessionBufferStoreRef: MutableRefObject<{ setBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
+    sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
     sessionDebugMetricsStoreRef: MutableRefObject<{ recordRefreshRequest: (sessionId: string) => void }>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
@@ -39,7 +39,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, sendOptions?: any) => void;
-  resolveTerminalRefreshCadence: () => { headTickMs: number };
+  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
   resolveSessionCacheLines: (rows?: number | null) => number;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
@@ -91,6 +91,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       clearSessionPullState: options.clearSessionPullState,
       sendSocketPayload: options.sendSocketPayload,
       runtimeDebug: options.runtimeDebug,
+      resolveTerminalRefreshCadence: options.resolveTerminalRefreshCadence,
     });
   };
 
@@ -117,6 +118,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     availableStartIndex?: number,
     availableEndIndex?: number,
     cursor?: TerminalCursorState | null,
+    cursorKeysApp?: boolean,
   ) => {
     handleBufferHeadOrchestrationRuntime({
       sessionId,
@@ -125,6 +127,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       availableStartIndex,
       availableEndIndex,
       cursor,
+      cursorKeysApp,
       refs: {
         stateRef: options.refs.stateRef,
         sessionBufferHeadsRef: options.refs.sessionBufferHeadsRef,
@@ -194,6 +197,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       setScheduleStateForSession: options.setScheduleStateForSession,
       setSessionTitleSync: options.setSessionTitleSync,
       fileTransferMessageRuntime: options.fileTransferMessageRuntime,
+      updateSessionSync: options.updateSessionSync,
     });
   };
 

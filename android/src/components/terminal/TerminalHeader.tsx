@@ -6,15 +6,13 @@ import { getServerColorTone } from '../../lib/server-color';
 const TAB_LONG_PRESS_MS = 920;
 const PLUS_LONG_PRESS_MS = 680;
 const HEADER_TOUCH_SAFE_OFFSET_PX = 20;
-const DOUBLE_TAP_MS = 280;
-
 export interface TerminalHeaderSessionItem {
   id: string;
   bridgeHost: string;
   bridgePort: number;
   sessionName: string;
   customName?: string;
-  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay';
+  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 }
 
 interface TerminalHeaderProps {
@@ -25,7 +23,6 @@ interface TerminalHeaderProps {
   onOpenQuickTabPicker: () => void;
   onOpenTabManager: () => void;
   onSwitchSession: (id: string) => void;
-  onRenameSession: (id: string, name: string) => void;
   onCloseSession: (id: string, source?: string) => void;
   splitVisible?: boolean;
   sessionPaneAssignments?: Partial<Record<string, TerminalSplitPaneId>>;
@@ -41,10 +38,8 @@ function formatResolvedPath(path?: TerminalHeaderSessionItem['resolvedPath']) {
       return 'IPv6';
     case 'ipv4':
       return 'IPv4';
-    case 'rtc-direct':
-      return 'RTC';
     case 'rtc-relay':
-      return 'TURN';
+      return 'Relay';
     default:
       return null;
   }
@@ -58,7 +53,6 @@ function TerminalHeaderComponent({
   onOpenQuickTabPicker,
   onOpenTabManager,
   onSwitchSession,
-  onRenameSession,
   onCloseSession,
   splitVisible = false,
   sessionPaneAssignments,
@@ -66,7 +60,6 @@ function TerminalHeaderComponent({
   onMoveSessionToOtherPane,
 }: TerminalHeaderProps) {
   const tabsScrollerRef = useRef<HTMLDivElement | null>(null);
-  const tabTapRef = useRef<{ sessionId: string; timestamp: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const plusLongPressTimerRef = useRef<number | null>(null);
@@ -111,9 +104,7 @@ function TerminalHeaderComponent({
       longPressTriggeredRef.current = true;
       if (splitVisible) {
         setPaneMenuSessionId(sessionId);
-        return;
       }
-      onOpenTabManager();
     }, TAB_LONG_PRESS_MS);
   };
 
@@ -135,19 +126,8 @@ function TerminalHeaderComponent({
   };
 
   const handleTabTap = (session: TerminalHeaderSessionItem) => {
-    const now = Date.now();
-    const previousTap = tabTapRef.current;
     closePaneMenu();
     onSwitchSession(session.id);
-    if (previousTap && previousTap.sessionId === session.id && now - previousTap.timestamp <= DOUBLE_TAP_MS) {
-      tabTapRef.current = null;
-      const next = window.prompt('Rename tab', session.customName || session.sessionName);
-      if (next !== null) {
-        onRenameSession(session.id, next);
-      }
-      return;
-    }
-    tabTapRef.current = { sessionId: session.id, timestamp: now };
   };
 
   useEffect(() => {
@@ -285,13 +265,13 @@ function TerminalHeaderComponent({
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     WebkitTapHighlightColor: 'transparent',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                   }}
                   title={splitVisible
-                    ? 'Tap: switch · Double tap: rename · Long press tab: pane menu · Two-finger tap current tab: move menu'
-                    : 'Tap: switch · Double tap: rename · Long press tab: tab manager'}
+                    ? 'Tap: switch · Long press tab: pane menu · Two-finger tap current tab: move menu'
+                    : 'Tap: switch'}
                 >
                   {splitVisible ? (
                     <span

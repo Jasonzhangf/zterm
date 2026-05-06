@@ -45,18 +45,21 @@ describe('daemon mirror lab isolation gate', () => {
     expect(script).toContain("'external-input-tail settled payload'");
   });
 
-  it('does not skip direct daemon payload comparison for shell-return frames with sparse visible windows', () => {
+  it('uses replayed daemon diff history as the lab compare truth for sparse visible windows', () => {
     const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
     const buildStepBlock = script.slice(
       script.indexOf('function buildStepResult('),
       script.indexOf('function finalizeCase('),
     );
-    expect(buildStepBlock).toContain('const compare = compareTail(oracle, daemonPayload);');
+    expect(buildStepBlock).toContain('const compare = replayHistoryMirrorCompare(oracle, history.slice(0, historyLength));');
     expect(buildStepBlock).not.toContain('payloadCoversVisibleViewport');
   });
 
   it('waits for top/vim exit payloads to settle to tmux truth after alternate-screen returns to shell', () => {
     const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
+    expect(script).toContain("'top enter settled payload'");
+    expect(script).toContain("'top continued settled payload'");
+    expect(script).toContain("'top-enter-continued-refresh'");
     expect(script).toContain("'top exit settled payload'");
     expect(script).toContain("'vim exit settled payload'");
   });

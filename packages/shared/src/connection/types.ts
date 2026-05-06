@@ -6,8 +6,11 @@ export interface Host {
   name: string;
   bridgeHost: string;
   bridgePort: number;
+  daemonHostId?: string;
   sessionName: string;
   authToken?: string;
+  relayHostId?: string;
+  relayDeviceId?: string;
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
@@ -104,6 +107,7 @@ export interface BufferHeadPayload {
   latestEndIndex: number;
   availableStartIndex?: number;
   availableEndIndex?: number;
+  cursorKeysApp?: boolean;
   cursor?: TerminalCursorState | null;
 }
 
@@ -151,8 +155,11 @@ export const DEFAULT_HOST_DRAFT: EditableHost = {
   name: '',
   bridgeHost: '',
   bridgePort: DEFAULT_BRIDGE_PORT,
+  daemonHostId: '',
   sessionName: '',
   authToken: '',
+  relayHostId: '',
+  relayDeviceId: '',
   tailscaleHost: '',
   ipv6Host: '',
   ipv4Host: '',

@@ -12,14 +12,20 @@ let runtimeDebugSequence = 0;
 let droppedRuntimeDebugEntries = 0;
 const runtimeDebugQueue: RuntimeDebugLogEntry[] = [];
 const runtimeDebugLastSampleAt = new Map<string, number>();
+let runtimeDebugEnabledCache: boolean | null = null;
+let runtimeDebugConsoleEnabledCache: boolean | null = null;
 
 function safeReadStorageFlag() {
+  if (runtimeDebugEnabledCache !== null) {
+    return runtimeDebugEnabledCache;
+  }
   if (typeof window === 'undefined') {
     return false;
   }
 
   try {
-    return window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY) === '1';
+    runtimeDebugEnabledCache = window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY) === '1';
+    return runtimeDebugEnabledCache;
   } catch (error) {
     console.warn('[runtime-debug] Failed to read runtime debug flag:', error);
     return false;
@@ -31,12 +37,16 @@ export function isRuntimeDebugEnabled() {
 }
 
 function shouldMirrorRuntimeDebugToConsole() {
+  if (runtimeDebugConsoleEnabledCache !== null) {
+    return runtimeDebugConsoleEnabledCache;
+  }
   if (typeof window === 'undefined') {
     return false;
   }
 
   try {
-    return window.localStorage.getItem(RUNTIME_DEBUG_CONSOLE_STORAGE_KEY) === '1';
+    runtimeDebugConsoleEnabledCache = window.localStorage.getItem(RUNTIME_DEBUG_CONSOLE_STORAGE_KEY) === '1';
+    return runtimeDebugConsoleEnabledCache;
   } catch (error) {
     console.warn('[runtime-debug] Failed to read runtime debug console flag:', error);
     return false;
@@ -51,9 +61,11 @@ export function setRuntimeDebugEnabled(enabled: boolean) {
   try {
     if (enabled) {
       window.localStorage.setItem(RUNTIME_DEBUG_STORAGE_KEY, '1');
+      runtimeDebugEnabledCache = true;
       return;
     }
     window.localStorage.removeItem(RUNTIME_DEBUG_STORAGE_KEY);
+    runtimeDebugEnabledCache = false;
   } catch (error) {
     console.warn('[runtime-debug] Failed to update runtime debug flag:', error);
   }

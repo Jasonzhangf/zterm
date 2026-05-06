@@ -210,7 +210,7 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('refreshes mirror head on demand for buffer-head-request instead of relying on recurring live sync', async () => {
+  it('uses buffer-head-request as a pure head-read probe path', async () => {
     const mirror: SessionMirror = {
       key: 'demo',
       sessionName: 'demo',
@@ -241,7 +241,7 @@ describe('terminal message runtime explicit error truth', () => {
       payload: {},
     })));
 
-    expect(refreshMirrorHeadForSession).toHaveBeenCalledWith(session, mirror);
-    expect(sendBufferHeadToSession).not.toHaveBeenCalled();
+    expect(refreshMirrorHeadForSession).not.toHaveBeenCalled();
+    expect(sendBufferHeadToSession).toHaveBeenCalledWith(session, mirror);
   });
 });

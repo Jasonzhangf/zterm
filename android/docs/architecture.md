@@ -37,11 +37,14 @@
   - client 不得先清空已有本地 buffer 再重拉
   - buffer manager 不持有 `follow / reading / renderBottomIndex`
   - buffer manager 只吃 daemon head + renderer 声明的 visible range
+  - `buffer-head` / cursor metadata 只更新本地 metadata，不得直接驱动正文 repaint
+  - **只有 `buffer-sync apply` 可以驱动正文 repaint**
 - Client Render Window：唯一状态是 `follow / reading + renderBottomIndex`；`renderTopIndex` 只能由 `renderBottomIndex - viewportRows` 派生，不得成为第二真源
 - Client Render Window 不变量：
   - renderer 是 visible range 唯一真相
   - gap 先空白占位，不等待补齐
   - buffer patch 到达后只按行/区间重刷，不整屏重算
+  - head metadata / cursor metadata 可以被 renderer 读取，但不得成为正文 repaint 触发源
 - Client Render Width Mode：`adaptive-phone | mirror-fixed`
 - Client Render Width 不变量：
   - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
@@ -233,7 +236,9 @@ daemon server
 
 规则：
 
-- daemon 是 tmux mirror；只回答 head 和 range，不做策略
+- daemon 是 tmux mirror；normal/follow 正文刷新由 daemon mirror truth commit 后主动 broadcast `buffer-sync` 驱动；reading/gap repair 才由 client 发 `buffer-sync-request` 拉取；daemon 不做客户端策略
+- `buffer-head` 只允许更新 head metadata / cursor metadata / pull planner 输入；不允许作为正文 repaint 触发源
+- client render gate 只允许 `buffer-sync apply -> schedule render commit`
 - daemon 不得碰：
   - follow / reading
   - renderer

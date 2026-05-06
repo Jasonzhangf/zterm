@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../lib/types';
 import { TerminalHeader, type TerminalHeaderSessionItem } from './TerminalHeader';
@@ -78,7 +78,6 @@ describe('TerminalHeader', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenTabManager={vi.fn()}
         onSwitchSession={vi.fn()}
-        onRenameSession={vi.fn()}
         onCloseSession={vi.fn()}
       />,
     );
@@ -102,7 +101,6 @@ describe('TerminalHeader', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenTabManager={vi.fn()}
         onSwitchSession={onSwitchSession}
-        onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
       />,
     );
@@ -125,7 +123,6 @@ describe('TerminalHeader', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenTabManager={vi.fn()}
         onSwitchSession={vi.fn()}
-        onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
       />,
     );
@@ -156,7 +153,6 @@ describe('TerminalHeader', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenTabManager={vi.fn()}
         onSwitchSession={onSwitchSession}
-        onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
       />,
     );
@@ -173,12 +169,64 @@ describe('TerminalHeader', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenTabManager={vi.fn()}
         onSwitchSession={onSwitchSession}
-        onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
       />,
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     expect(onCloseSession).toHaveBeenCalledWith('session-2', 'terminal-header-close-button');
+  });
+
+  it('does not open the tab manager when long pressing a non-split tab', () => {
+    const session = makeSession();
+    const onOpenTabManager = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={onOpenTabManager}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByText('zterm'));
+    vi.advanceTimersByTime(1000);
+    fireEvent.mouseUp(screen.getByText('zterm'));
+
+    expect(onOpenTabManager).not.toHaveBeenCalled();
+  });
+
+  it('opens the pane menu on long press only when split is enabled', () => {
+    const session = makeSession();
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        onAssignSessionToPane={vi.fn()}
+      />,
+    );
+
+    const tabButton = screen.getByTitle('Tap: switch · Long press tab: pane menu · Two-finger tap current tab: move menu');
+    fireEvent.mouseDown(tabButton);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    fireEvent.mouseUp(tabButton);
+
+    expect(screen.getByText('归到左屏')).toBeTruthy();
+    expect(screen.getByText('归到右屏')).toBeTruthy();
   });
 });

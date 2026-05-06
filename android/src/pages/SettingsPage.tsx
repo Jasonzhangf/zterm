@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TERMINAL_THEME_OPTIONS, getTerminalThemePreset } from '@zterm/shared';
 import {
   getDefaultBridgeServer,
   removeBridgeServer,
-  setDefaultBridgeServer,
   sortBridgeServers,
   type BridgeSettings,
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-update';
 import { APP_VERSION_CODE } from '../lib/app-version';
+import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
-import { formatTargetBadge } from '../lib/network-target';
 import {
   TERMINAL_WIDTH_MODE_OPTIONS,
   updateBridgeSettingsTerminalWidthMode,
 } from '../lib/terminal-width-mode-manager';
+import { AppUpdateSection } from '../components/settings/AppUpdateSection';
+import { RememberedServersSection } from '../components/settings/RememberedServersSection';
+import { RelayControlSection } from '../components/settings/RelayControlSection';
+import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
+import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -31,31 +34,6 @@ interface SettingsPageProps {
   onResetUpdateIgnorePolicy: () => void;
   onTerminalThemeChange?: (themeId: BridgeSettings['terminalThemeId']) => void;
   onBack: () => void;
-}
-
-function inputStyle() {
-  return {
-    width: '100%',
-    minHeight: '56px',
-    borderRadius: '20px',
-    border: `1px solid ${mobileTheme.colors.lightBorder}`,
-    backgroundColor: '#ffffff',
-    color: mobileTheme.colors.lightText,
-    fontSize: '18px',
-    padding: '0 18px',
-  } as const;
-}
-
-function sectionStyle() {
-  return {
-    borderRadius: '28px',
-    padding: '24px',
-    backgroundColor: '#ffffff',
-    boxShadow: mobileTheme.shadow.soft,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px',
-  } as const;
 }
 
 function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
@@ -92,6 +70,16 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
+  const [relayBaseUrl, setRelayBaseUrl] = useState(settings.traversalRelay?.relayBaseUrl || '');
+  const [relayUsername, setRelayUsername] = useState('');
+  const [relayPassword, setRelayPassword] = useState('');
+  const {
+    account: relayAccount,
+    relayDevices,
+    relayStatus,
+    relayBusy,
+    syncRelay,
+  } = useTraversalRelayAccount(settings.traversalRelay);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const hasUpdateIgnorePolicy = updatePreferences.ignoreUntilManualCheck || Boolean(updatePreferences.skippedVersionCode);
   const hasNewVersion = Boolean(latestManifest && latestManifest.versionCode > APP_VERSION_CODE);
@@ -102,18 +90,47 @@ export function SettingsPage({
     ),
     [defaultServer?.targetHost, defaultServer?.targetPort, draft.targetHost, draft.targetPort],
   );
-  const selectedTerminalTheme = useMemo(
-    () => getTerminalThemePreset(draft.terminalThemeId),
-    [draft.terminalThemeId],
-  );
-
   useEffect(() => {
     setUpdateDraft(updatePreferences);
   }, [updatePreferences]);
 
   useEffect(() => {
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
+    setRelayBaseUrl(settings.traversalRelay?.relayBaseUrl || '');
   }, [settings]);
+
+  useEffect(() => {
+    if (!relayAccount) {
+      return;
+    }
+    setRelayUsername(relayAccount.username);
+    setRelayPassword(relayAccount.password);
+    setRelayBaseUrl(relayAccount.relayBaseUrl);
+  }, [relayAccount]);
+
+  const handleRelaySync = async (mode: 'login' | 'register' | 'refresh') => {
+    const relayResult = await syncRelay(
+      mode,
+      {
+        relayBaseUrl,
+        username: relayUsername,
+        password: relayPassword,
+      },
+      draft.traversalRelay,
+    );
+    if (!relayResult) {
+      return;
+    }
+    setDraft((current) => ({
+      ...current,
+      traversalRelay: {
+        ...relayResult.relaySettings,
+        deviceId: relayResult.account.deviceId,
+        deviceName: relayResult.account.deviceName,
+        platform: relayResult.account.platform,
+      },
+    }));
+  };
 
   return (
     <div
@@ -182,139 +199,23 @@ export function SettingsPage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>App Update</div>
+        <AppUpdateSection
+          updateDraft={updateDraft}
+          latestManifest={latestManifest}
+          updateChecking={updateChecking}
+          updateInstalling={updateInstalling}
+          updateError={updateError}
+          hasNewVersion={hasNewVersion}
+          hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
+          suggestedManifestUrl={suggestedManifestUrl}
+          onUpdateDraftChange={(updater) => setUpdateDraft((current) => updater(current))}
+          onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
+          onInstallUpdate={onInstallUpdate}
+          onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
+        />
 
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Manifest URL</div>
-            <input
-              type="url"
-              value={updateDraft.manifestUrl}
-              onChange={(event) =>
-                setUpdateDraft((current) => ({
-                  ...current,
-                  manifestUrl: event.target.value,
-                }))
-              }
-              placeholder="https://server.example.com/zterm/android/stable/latest.json"
-              style={inputStyle()}
-            />
-            {suggestedManifestUrl ? (
-              <div style={{ marginTop: '10px' }}>
-                <button
-                  onClick={() =>
-                    setUpdateDraft((current) => ({
-                      ...current,
-                      manifestUrl: suggestedManifestUrl,
-                    }))
-                  }
-                  style={{
-                    minHeight: '40px',
-                    padding: '0 14px',
-                    borderRadius: '14px',
-                    border: 'none',
-                    backgroundColor: '#eef2f8',
-                    color: mobileTheme.colors.lightText,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  使用当前 daemon 地址
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              fontSize: '15px',
-              fontWeight: 600,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={updateDraft.autoCheckOnLaunch}
-              onChange={(event) =>
-                setUpdateDraft((current) => ({
-                  ...current,
-                  autoCheckOnLaunch: event.target.checked,
-                }))
-              }
-            />
-            启动时自动检查更新
-          </label>
-
-          {latestManifest ? (
-            <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-              最新版本 {latestManifest.versionName} · versionCode {latestManifest.versionCode}
-              {latestManifest.publishedAt ? ` · ${latestManifest.publishedAt}` : ''}
-            </div>
-          ) : null}
-
-          {updateError ? (
-            <div style={{ color: mobileTheme.colors.danger, fontSize: '13px', lineHeight: 1.5 }}>{updateError}</div>
-          ) : null}
-
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => onCheckForUpdate(updateDraft)}
-              disabled={updateChecking}
-              style={{
-                minHeight: '44px',
-                padding: '0 16px',
-                borderRadius: '14px',
-                border: 'none',
-                backgroundColor: mobileTheme.colors.shell,
-                color: '#fff',
-                fontWeight: 800,
-                cursor: updateChecking ? 'wait' : 'pointer',
-                opacity: updateChecking ? 0.72 : 1,
-              }}
-            >
-              {updateChecking ? '检查中…' : '检查更新'}
-            </button>
-            <button
-              onClick={onInstallUpdate}
-              disabled={!hasNewVersion || updateInstalling}
-              style={{
-                minHeight: '44px',
-                padding: '0 16px',
-                borderRadius: '14px',
-                border: 'none',
-                backgroundColor: 'rgba(31,214,122,0.18)',
-                color: mobileTheme.colors.accent,
-                fontWeight: 800,
-                cursor: !hasNewVersion || updateInstalling ? 'not-allowed' : 'pointer',
-                opacity: !hasNewVersion || updateInstalling ? 0.55 : 1,
-              }}
-            >
-              {updateInstalling ? '准备安装…' : '下载并安装'}
-            </button>
-            {hasUpdateIgnorePolicy ? (
-              <button
-                onClick={onResetUpdateIgnorePolicy}
-                style={{
-                  minHeight: '44px',
-                  padding: '0 16px',
-                  borderRadius: '14px',
-                  border: 'none',
-                  backgroundColor: '#eef2f8',
-                  color: mobileTheme.colors.lightText,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                清除忽略
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Terminal Cache</div>
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>Terminal Cache</SettingsSectionTitle>
           <div>
             <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Terminal Cache Lines</div>
             <input
@@ -331,13 +232,13 @@ export function SettingsPage({
                   ),
                 }))
               }
-              style={inputStyle()}
+              style={settingsInputStyle()}
             />
           </div>
         </div>
 
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Terminal Width Mode</div>
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>Terminal Width Mode</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
             `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 只允许按手机屏宽调整 cols，不再改 rows。
           </div>
@@ -367,8 +268,8 @@ export function SettingsPage({
           </div>
         </div>
 
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>快捷键智能排序</div>
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>快捷键智能排序</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
             开启后，高频使用的快捷键会自动排到前面（历史使用占 80%，最近 10 分钟占 20%），减少滚动查找。
           </div>
@@ -395,229 +296,39 @@ export function SettingsPage({
           </button>
         </div>
 
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Remote Access</div>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
-            连接顺序固定为 Tailscale → IPv6 → IPv4 → TURN relay。这里配置 signaling/TURN 默认值，本地持久化保存。
-          </div>
+        <RelayControlSection
+          transportMode={draft.transportMode}
+          onTransportModeChange={(transportMode) => setDraft((current) => ({ ...current, transportMode }))}
+          relayBaseUrl={relayBaseUrl}
+          onRelayBaseUrlChange={setRelayBaseUrl}
+          relayUsername={relayUsername}
+          onRelayUsernameChange={setRelayUsername}
+          relayPassword={relayPassword}
+          onRelayPasswordChange={setRelayPassword}
+          relayBusy={relayBusy}
+          relayStatus={relayStatus}
+          relaySettings={draft.traversalRelay}
+          relayDevices={relayDevices}
+          onRegister={() => void handleRelaySync('register')}
+          onLogin={() => void handleRelaySync('login')}
+          onRefresh={() => void handleRelaySync('refresh')}
+        />
 
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Transport Mode</div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {(['auto', 'websocket', 'webrtc'] as const).map((mode) => {
-                const active = draft.transportMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setDraft((current) => ({ ...current, transportMode: mode }))}
-                    style={{
-                      flex: 1,
-                      minHeight: '48px',
-                      borderRadius: '16px',
-                      border: 'none',
-                      backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
-                      color: active ? '#ffffff' : mobileTheme.colors.lightText,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {mode === 'auto' ? 'Auto' : mode === 'websocket' ? 'WS Only' : 'RTC First'}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        <TerminalThemeSection
+          terminalThemeId={draft.terminalThemeId}
+          onSelectTheme={(themeId) => {
+            setDraft((current) => ({ ...current, terminalThemeId: themeId }));
+            onTerminalThemeChange?.(themeId);
+          }}
+        />
 
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Signal URL</div>
-            <input
-              type="url"
-              value={draft.signalUrl}
-              onChange={(event) => setDraft((current) => ({ ...current, signalUrl: event.target.value }))}
-              placeholder="wss://signal.example.com/signal"
-              style={inputStyle()}
-            />
-          </div>
-
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN URL</div>
-            <input
-              type="text"
-              value={draft.turnServerUrl}
-              onChange={(event) => setDraft((current) => ({ ...current, turnServerUrl: event.target.value }))}
-              placeholder="turn:example.com:3478?transport=udp"
-              style={inputStyle()}
-            />
-          </div>
-
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN Username</div>
-            <input
-              type="text"
-              value={draft.turnUsername}
-              onChange={(event) => setDraft((current) => ({ ...current, turnUsername: event.target.value }))}
-              placeholder="coturn username"
-              style={inputStyle()}
-            />
-          </div>
-
-          <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>TURN Credential</div>
-            <input
-              type="password"
-              value={draft.turnCredential}
-              onChange={(event) => setDraft((current) => ({ ...current, turnCredential: event.target.value }))}
-              placeholder="coturn password"
-              style={inputStyle()}
-            />
-          </div>
-        </div>
-
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Terminal Theme</div>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
-            这里会改终端 ANSI 16 色映射和默认前景/背景色。当前：{selectedTerminalTheme.name}。点主题卡会即时生效并持久化。
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-            {TERMINAL_THEME_OPTIONS.map((theme) => {
-              const active = draft.terminalThemeId === theme.id;
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  onClick={() => {
-                    setDraft((current) => ({ ...current, terminalThemeId: theme.id }));
-                    onTerminalThemeChange?.(theme.id);
-                  }}
-                  style={{
-                    borderRadius: '20px',
-                    border: active ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
-                    backgroundColor: '#ffffff',
-                    color: mobileTheme.colors.lightText,
-                    padding: '14px',
-                    cursor: 'pointer',
-                    boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,
-                    textAlign: 'left',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: '16px', fontWeight: 800 }}>{theme.name}</div>
-                      <div style={{ marginTop: '4px', fontSize: '11px', color: mobileTheme.colors.lightMuted }}>{theme.family}</div>
-                    </div>
-                    <div style={{ fontSize: '11px', color: active ? mobileTheme.colors.accent : mobileTheme.colors.lightMuted, fontWeight: 800 }}>
-                      {active ? 'ACTIVE' : 'USE'}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: '12px',
-                      borderRadius: '14px',
-                      overflow: 'hidden',
-                      border: `1px solid ${mobileTheme.colors.lightBorder}`,
-                      backgroundColor: theme.background,
-                    }}
-                  >
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))' }}>
-                      {theme.colors.map((color, index) => (
-                        <div
-                          key={`${theme.id}-${index}`}
-                          style={{
-                            height: '16px',
-                            backgroundColor: color,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <div
-                      style={{
-                        padding: '10px 12px',
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: theme.foreground,
-                        backgroundColor: theme.background,
-                      }}
-                    >
-                      <span style={{ color: theme.colors[2] }}>ls</span>
-                      <span> </span>
-                      <span style={{ color: theme.colors[4] }}>~/workspace</span>
-                      <span style={{ color: theme.colors[3] }}> $</span>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: '10px', fontSize: '12px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
-                    {theme.description}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={sectionStyle()}>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Remembered Servers</div>
-
-          {draft.servers.length === 0 ? (
-            <div style={{ color: mobileTheme.colors.lightMuted }}>No remembered server yet.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {sortBridgeServers(draft.servers).map((server) => {
-                const active = server.id === draft.defaultServerId;
-                return (
-                  <button
-                    key={server.id}
-                    onClick={() => setDraft((current) => setDefaultBridgeServer(current, server.id))}
-                    style={{
-                      border: 'none',
-                      borderRadius: '20px',
-                      padding: '14px 16px',
-                      textAlign: 'left',
-                      backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
-                      color: active ? '#ffffff' : mobileTheme.colors.lightText,
-                      boxShadow: mobileTheme.shadow.soft,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 800 }}>{server.name}</div>
-                      <div style={{ fontSize: '13px', opacity: 0.8 }}>
-                        {server.targetHost}:{server.targetPort}
-                      </div>
-                      <div style={{ marginTop: '4px', fontSize: '11px', opacity: 0.78 }}>
-                        {formatTargetBadge(server.targetHost)} · {server.authToken ? 'Auth on' : 'No token'}
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '12px', opacity: 0.8 }}>{active ? 'Default' : 'Use'}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {draft.servers.length > 0 ? (
-            <button
-              onClick={() => setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))}
-              style={{
-                height: '52px',
-                borderRadius: '18px',
-                border: 'none',
-                backgroundColor: 'rgba(255,124,146,0.16)',
-                color: mobileTheme.colors.danger,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              Remove Default Server
-            </button>
-          ) : null}
-        </div>
+        <RememberedServersSection
+          settings={draft}
+          onSettingsChange={(updater) => setDraft((current) => updater(current))}
+          onRemoveDefaultServer={() =>
+            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
+          }
+        />
       </div>
     </div>
   );

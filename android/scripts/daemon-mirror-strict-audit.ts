@@ -91,15 +91,20 @@ function auditCase(rootDir: string, summary: CaseSummary): AuditCaseResult {
     clientCompare: clientCompare.ok,
     stepsOk: steps.every((step) => step.ok),
   };
-  const firstBufferSyncEvent = events.find((entry) => (
+  const firstMaterializedBufferSyncEvent = events.find((entry) => (
     entry.direction === 'recv'
     && entry.type === 'buffer-sync'
+    && Boolean(
+      entry.payload
+      && typeof entry.payload === 'object'
+      && Math.max(0, Number((entry.payload as { lineCount?: number }).lineCount || 0)) > 0
+    )
   ));
   const firstBufferSyncWireKind = (
-    firstBufferSyncEvent?.payload
-    && typeof firstBufferSyncEvent.payload === 'object'
-    && 'wireKind' in firstBufferSyncEvent.payload
-      ? (firstBufferSyncEvent.payload as { wireKind?: string }).wireKind
+    firstMaterializedBufferSyncEvent?.payload
+    && typeof firstMaterializedBufferSyncEvent.payload === 'object'
+    && 'wireKind' in firstMaterializedBufferSyncEvent.payload
+      ? (firstMaterializedBufferSyncEvent.payload as { wireKind?: string }).wireKind
       : null
   );
   checks.compactWire = firstBufferSyncWireKind === 'compact';

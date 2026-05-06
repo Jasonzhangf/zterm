@@ -59,6 +59,19 @@ export interface SessionMirror {
   lastFlushCompletedAt: number;
   flushInFlight: boolean;
   flushPromise: Promise<boolean> | null;
+  pendingStableCaptureSnapshot?: {
+    rows: number;
+    cols: number;
+    cursorKeysApp: boolean;
+    lastScrollbackCount: number;
+    bufferStartIndex: number;
+    bufferLines: TerminalCell[][];
+    cursor: TerminalCursorState | null;
+    capturedLineCount: number;
+    canonicalLineCount: number;
+    totalAvailableLines: number;
+    visibleTopIndex: number;
+  } | null;
   liveSyncTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;
 }

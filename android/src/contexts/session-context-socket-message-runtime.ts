@@ -36,6 +36,10 @@ interface FileTransferDispatcher {
   }>) => unknown;
 }
 
+function isTerminalSessionMissingCode(code?: string) {
+  return code === 'tmux_session_unavailable' || code === 'tmux_session_killed';
+}
+
 export function handleSocketServerMessageRuntime(options: {
   params: {
     sessionId: string;
@@ -64,6 +68,7 @@ export function handleSocketServerMessageRuntime(options: {
     availableStartIndex?: number,
     availableEndIndex?: number,
     cursor?: TerminalCursorState | null,
+    cursorKeysApp?: boolean,
   ) => void;
   setScheduleStateForSession: (
     sessionId: string,
@@ -73,6 +78,7 @@ export function handleSocketServerMessageRuntime(options: {
   ) => void;
   setSessionTitleSync: (id: string, title: string) => void;
   fileTransferMessageRuntime: FileTransferDispatcher;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
 }) {
   const { params, msg } = options;
   const currentSession = options.refs.stateRef.current.sessions.find((item) => item.id === params.sessionId) || null;
@@ -83,13 +89,15 @@ export function handleSocketServerMessageRuntime(options: {
 
   switch (msg.type) {
     case 'connected':
+      options.updateSessionSync(params.sessionId, buildSessionConnectedUpdates({
+        daemonHostId: msg.payload.daemonHostId,
+      }));
       params.onConnected();
       break;
     case 'buffer-sync':
       if (shouldPromoteConnectedFromLiveBuffer) {
         params.onConnected();
       }
-      options.refs.lastHeadRequestAtRef.current.set(params.sessionId, Date.now());
       options.settleSessionPullState(params.sessionId, msg.payload);
       options.runtimeDebug(`session.ws.${params.debugScope}.buffer-sync`, {
         sessionId: params.sessionId,
@@ -109,6 +117,7 @@ export function handleSocketServerMessageRuntime(options: {
         Number.isFinite(msg.payload.availableStartIndex) ? Math.max(0, Math.floor(msg.payload.availableStartIndex || 0)) : undefined,
         Number.isFinite(msg.payload.availableEndIndex) ? Math.max(0, Math.floor(msg.payload.availableEndIndex || 0)) : undefined,
         normalizeTerminalCursorState(msg.payload.cursor),
+        typeof msg.payload.cursorKeysApp === 'boolean' ? msg.payload.cursorKeysApp : undefined,
       );
       break;
     case 'schedule-state':
@@ -155,6 +164,20 @@ export function handleSocketServerMessageRuntime(options: {
       }
       break;
     case 'error':
+      if (isTerminalSessionMissingCode(msg.payload.code)) {
+        options.runtimeDebug(`session.ws.${params.debugScope}.remote-session-missing`, {
+          sessionId: params.sessionId,
+          code: msg.payload.code,
+          message: msg.payload.message,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+        });
+        params.ws.onopen = null;
+        params.ws.onmessage = null;
+        params.ws.onerror = null;
+        params.ws.onclose = null;
+        params.onClosed(msg.payload.message || msg.payload.code);
+        break;
+      }
       params.onFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
       break;
     case 'closed':

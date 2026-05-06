@@ -3,14 +3,18 @@ import {
   createSessionRenderBufferStore,
   type SessionRenderBufferStore,
 } from './session-render-buffer-store';
+import { summarizeRenderBufferForDebug, summarizeSessionBufferForDebug } from './terminal-buffer-debug';
 import type { SessionBufferState, SessionRenderBufferSnapshot } from './types';
 import type { SessionHeadStore } from './session-head-store';
 
 interface RenderGateSessionRuntime {
-  scheduled: boolean;
   flushing: boolean;
   dirty: boolean;
-  handle: ReturnType<typeof setTimeout> | number | null;
+  scheduled: boolean;
+  frameTimerId: number | null;
+  fallbackTimerId: number | null;
+  lastLiveBuffer: SessionBufferState | null;
+  lastProjectedBuffer: SessionRenderBufferSnapshot | null;
 }
 
 export interface SessionRenderGate {
@@ -19,29 +23,12 @@ export interface SessionRenderGate {
   deleteSession: (sessionId: string) => void;
 }
 
-function cloneRenderLines(lines: SessionBufferState['lines']) {
-  return lines.map((row) => row.map((cell) => ({ ...cell })));
-}
-
-function cloneGapRanges(gapRanges: SessionBufferState['gapRanges']) {
-  return gapRanges.map((range) => ({ ...range }));
-}
-
-function cloneCursor(cursor: SessionBufferState['cursor']) {
-  if (!cursor) {
-    return null;
-  }
-  return {
-    rowIndex: cursor.rowIndex,
-    col: cursor.col,
-    visible: cursor.visible,
-  };
-}
-
 function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSnapshot {
   return {
-    lines: cloneRenderLines(buffer.lines),
-    gapRanges: cloneGapRanges(buffer.gapRanges),
+    // liveBufferStore already publishes cloned immutable snapshots.
+    // Reusing those references here avoids a second full deep-clone on every render commit.
+    lines: buffer.lines,
+    gapRanges: buffer.gapRanges,
     startIndex: buffer.startIndex,
     endIndex: buffer.endIndex,
     bufferHeadStartIndex: buffer.bufferHeadStartIndex,
@@ -51,33 +38,16 @@ function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSna
     cols: buffer.cols,
     rows: buffer.rows,
     cursorKeysApp: buffer.cursorKeysApp,
-    cursor: cloneCursor(buffer.cursor),
+    cursor: buffer.cursor,
     revision: buffer.revision,
   };
-}
-
-function scheduleFrame(callback: () => void) {
-  if (typeof globalThis.requestAnimationFrame === 'function') {
-    return globalThis.requestAnimationFrame(() => callback());
-  }
-  return globalThis.setTimeout(callback, 0);
-}
-
-function cancelFrame(handle: ReturnType<typeof setTimeout> | number | null) {
-  if (handle === null) {
-    return;
-  }
-  if (typeof handle === 'number' && typeof globalThis.cancelAnimationFrame === 'function') {
-    globalThis.cancelAnimationFrame(handle);
-    return;
-  }
-  globalThis.clearTimeout(handle);
 }
 
 export function createSessionRenderGate(options: {
   liveBufferStore: SessionBufferStore;
   liveHeadStore: SessionHeadStore;
   recordSessionRenderCommit: (sessionId: string) => void;
+  runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
 }): SessionRenderGate {
   const renderStore = createSessionRenderBufferStore();
   const runtimes = new Map<string, RenderGateSessionRuntime>();
@@ -88,19 +58,35 @@ export function createSessionRenderGate(options: {
       return current;
     }
     const next: RenderGateSessionRuntime = {
-      scheduled: false,
       flushing: false,
       dirty: false,
-      handle: null,
+      scheduled: false,
+      frameTimerId: null,
+      fallbackTimerId: null,
+      lastLiveBuffer: null,
+      lastProjectedBuffer: null,
     };
     runtimes.set(sessionId, next);
     return next;
   };
 
+  const clearScheduledTimer = (runtime: RenderGateSessionRuntime) => {
+    if (runtime.frameTimerId !== null) {
+      if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(runtime.frameTimerId);
+      } else {
+        clearTimeout(runtime.frameTimerId);
+      }
+      runtime.frameTimerId = null;
+    }
+    if (runtime.fallbackTimerId !== null) {
+      clearTimeout(runtime.fallbackTimerId);
+      runtime.fallbackTimerId = null;
+    }
+  };
+
   const flush = (sessionId: string) => {
     const runtime = ensureRuntime(sessionId);
-    runtime.handle = null;
-    runtime.scheduled = false;
     if (runtime.flushing) {
       runtime.dirty = true;
       return;
@@ -111,11 +97,32 @@ export function createSessionRenderGate(options: {
         runtime.dirty = false;
         const liveBuffer = options.liveBufferStore.getSnapshot(sessionId).buffer;
         const liveHead = options.liveHeadStore.getSnapshot(sessionId);
-        const changed = renderStore.setBuffer(sessionId, {
-          ...projectRenderBuffer(liveBuffer),
+        const projectedBuffer = (
+          runtime.lastLiveBuffer === liveBuffer
+          && runtime.lastProjectedBuffer
+        )
+          ? runtime.lastProjectedBuffer
+          : projectRenderBuffer(liveBuffer);
+        if (runtime.lastLiveBuffer !== liveBuffer || runtime.lastProjectedBuffer !== projectedBuffer) {
+          runtime.lastLiveBuffer = liveBuffer;
+          runtime.lastProjectedBuffer = projectedBuffer;
+        }
+        const projected = {
+          ...projectedBuffer,
           daemonHeadRevision: liveHead.daemonHeadRevision,
           daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
+        };
+        options.runtimeDebug?.('session.render-gate.flush.inspect', {
+          sessionId,
+          liveBuffer: summarizeSessionBufferForDebug(liveBuffer),
+          liveHead: {
+            revision: liveHead.revision,
+            daemonHeadRevision: liveHead.daemonHeadRevision,
+            daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
+          },
+          projected: summarizeRenderBufferForDebug(projected),
         });
+        const changed = renderStore.setBuffer(sessionId, projected);
         if (changed) {
           options.recordSessionRenderCommit(sessionId);
         }
@@ -125,20 +132,39 @@ export function createSessionRenderGate(options: {
     }
   };
 
-  const scheduleCommit = (sessionId: string) => {
+  const scheduleFlush = (sessionId: string) => {
     const runtime = ensureRuntime(sessionId);
-    runtime.dirty = true;
     if (runtime.scheduled) {
       return;
     }
     runtime.scheduled = true;
-    runtime.handle = scheduleFrame(() => flush(sessionId));
+    const runFlush = () => {
+      clearScheduledTimer(runtime);
+      runtime.scheduled = false;
+      flush(sessionId);
+      if (runtime.dirty && !runtime.scheduled) {
+        scheduleFlush(sessionId);
+      }
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      runtime.frameTimerId = window.requestAnimationFrame(() => runFlush());
+    }
+    runtime.fallbackTimerId = setTimeout(runFlush, 34) as unknown as number;
+  };
+
+  const scheduleCommit = (sessionId: string) => {
+    const runtime = ensureRuntime(sessionId);
+    runtime.dirty = true;
+    if (runtime.flushing) {
+      return;
+    }
+    scheduleFlush(sessionId);
   };
 
   const deleteSession = (sessionId: string) => {
     const runtime = runtimes.get(sessionId);
     if (runtime) {
-      cancelFrame(runtime.handle);
+      clearScheduledTimer(runtime);
       runtimes.delete(sessionId);
     }
     renderStore.deleteSession(sessionId);

@@ -23,9 +23,22 @@ export interface TerminalMirrorCaptureRuntime {
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
 }
 
-const MIN_MIRROR_CONTINUITY_MATCH_ROWS = 8;
-const MIN_MIRROR_CONTINUITY_MEANINGFUL_ROWS = 3;
 type MirrorCanonicalLines = TerminalCell[][];
+const MIRROR_CAPTURE_STABILIZE_MAX_ATTEMPTS = 4;
+
+interface ResolvedMirrorCaptureSnapshot {
+  rows: number;
+  cols: number;
+  cursorKeysApp: boolean;
+  lastScrollbackCount: number;
+  bufferStartIndex: number;
+  bufferLines: TerminalCell[][];
+  cursor: TerminalCursorState | null;
+  capturedLineCount: number;
+  canonicalLineCount: number;
+  totalAvailableLines: number;
+  visibleTopIndex: number;
+}
 
 function normalizeMirrorCursor(options: {
   bufferStartIndex: number;
@@ -55,111 +68,121 @@ function getMirrorAvailableEndIndex(mirror: SessionMirror) {
   return mirror.bufferStartIndex + mirror.bufferLines.length;
 }
 
-function isMeaningfulRow(row: TerminalCell[] | undefined) {
-  return Array.isArray(row) && row.length > 0;
-}
-
-function countAlignedMatches(
-  previous: MirrorCanonicalLines,
-  next: MirrorCanonicalLines,
-  previousOffset: number,
-  nextOffset: number,
-  length: number,
+function cursorStatesEqual(
+  left: TerminalCursorState | null | undefined,
+  right: TerminalCursorState | null | undefined,
 ) {
-  let meaningfulMatches = 0;
-  for (let index = 0; index < length; index += 1) {
-    if (!rowsEqual(previous[previousOffset + index] || [], next[nextOffset + index] || [])) {
-      return { ok: false as const, meaningfulMatches: 0 };
-    }
-    if (isMeaningfulRow(next[nextOffset + index])) {
-      meaningfulMatches += 1;
-    }
-  }
-  return { ok: true as const, meaningfulMatches };
-}
-
-function shouldAcceptContinuityMatch(length: number, meaningfulMatches: number) {
   return (
-    length >= Math.min(MIN_MIRROR_CONTINUITY_MATCH_ROWS, Math.max(1, length))
-    && meaningfulMatches >= Math.min(MIN_MIRROR_CONTINUITY_MEANINGFUL_ROWS, Math.max(1, meaningfulMatches))
+    (left?.rowIndex ?? null) === (right?.rowIndex ?? null)
+    && (left?.col ?? null) === (right?.col ?? null)
+    && (left?.visible ?? null) === (right?.visible ?? null)
   );
 }
 
-function resolveContinuousMirrorCaptureWindow(options: {
-  previousStartIndex: number;
-  previousLines: MirrorCanonicalLines;
+function mirrorCaptureSnapshotsEqual(
+  left: ResolvedMirrorCaptureSnapshot,
+  right: ResolvedMirrorCaptureSnapshot,
+) {
+  if (
+    left.rows !== right.rows
+    || left.cols !== right.cols
+    || left.cursorKeysApp !== right.cursorKeysApp
+    || left.lastScrollbackCount !== right.lastScrollbackCount
+    || left.bufferStartIndex !== right.bufferStartIndex
+    || !cursorStatesEqual(left.cursor, right.cursor)
+    || left.bufferLines.length !== right.bufferLines.length
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < left.bufferLines.length; index += 1) {
+    if (!rowsEqual(left.bufferLines[index], right.bufferLines[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function currentMirrorMatchesSnapshot(
+  mirror: SessionMirror,
+  snapshot: ResolvedMirrorCaptureSnapshot,
+) {
+  return mirrorCaptureSnapshotsEqual(
+    {
+      rows: mirror.rows,
+      cols: mirror.cols,
+      cursorKeysApp: mirror.cursorKeysApp,
+      lastScrollbackCount: mirror.lastScrollbackCount,
+      bufferStartIndex: mirror.bufferStartIndex,
+      bufferLines: mirror.bufferLines,
+      cursor: mirror.cursor,
+      capturedLineCount: mirror.bufferLines.length,
+      canonicalLineCount: mirror.bufferLines.length,
+      totalAvailableLines: getMirrorAvailableEndIndex(mirror),
+      visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - mirror.rows),
+    },
+    snapshot,
+  );
+}
+
+function applyMirrorCaptureSnapshot(
+  mirror: SessionMirror,
+  snapshot: ResolvedMirrorCaptureSnapshot,
+) {
+  mirror.rows = snapshot.rows;
+  mirror.cols = snapshot.cols;
+  mirror.cursorKeysApp = snapshot.cursorKeysApp;
+  mirror.lastScrollbackCount = snapshot.lastScrollbackCount;
+  mirror.bufferStartIndex = snapshot.bufferStartIndex;
+  mirror.bufferLines = snapshot.bufferLines;
+  mirror.cursor = snapshot.cursor;
+}
+
+export async function resolveStableMirrorCaptureSnapshot(options: {
+  readSnapshot: () => Promise<ResolvedMirrorCaptureSnapshot>;
+  currentMirror?: SessionMirror | null;
+  maxAttempts?: number;
+}) {
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts || MIRROR_CAPTURE_STABILIZE_MAX_ATTEMPTS));
+  const firstSnapshot = await options.readSnapshot();
+  if (options.currentMirror && currentMirrorMatchesSnapshot(options.currentMirror, firstSnapshot)) {
+    return {
+      snapshot: firstSnapshot,
+      attempts: 1,
+      stabilized: true,
+      stabilizedAgainst: 'current-mirror' as const,
+    };
+  }
+
+  let previousSnapshot = firstSnapshot;
+  for (let attempt = 2; attempt <= maxAttempts; attempt += 1) {
+    const nextSnapshot = await options.readSnapshot();
+    if (mirrorCaptureSnapshotsEqual(previousSnapshot, nextSnapshot)) {
+      return {
+        snapshot: nextSnapshot,
+        attempts: attempt,
+        stabilized: true,
+        stabilizedAgainst: 'consecutive-capture' as const,
+      };
+    }
+    previousSnapshot = nextSnapshot;
+  }
+
+  throw new Error(`tmux capture remained unstable after ${maxAttempts} attempts`);
+}
+
+export function resolveAuthoritativeMirrorCaptureWindow(options: {
   nextLines: MirrorCanonicalLines;
   computedStartIndex: number;
 }) {
-  const previousLines = options.previousLines;
   const nextLines = options.nextLines;
-  const previousLength = previousLines.length;
-  const nextLength = nextLines.length;
-  if (previousLength <= 0 || nextLength <= 0) {
-    return {
-      startIndex: Math.max(0, Math.floor(options.computedStartIndex || 0)),
-      lines: nextLines,
-      continuity: 'replace' as const,
-      matchedRows: 0,
-    };
-  }
-
-  const previousEndIndex = Math.max(0, Math.floor(options.previousStartIndex || 0)) + previousLength;
-
-  let best:
-    | {
-        startIndex: number;
-        previousPrefixLength: number;
-        matchedRows: number;
-        continuity: 'patch-tail-window' | 'append-tail-window';
-      }
-    | null = null;
-
-  if (previousLength >= nextLength) {
-    const previousOffset = previousLength - nextLength;
-    const sameTail = countAlignedMatches(previousLines, nextLines, previousOffset, 0, nextLength);
-    if (sameTail.ok && shouldAcceptContinuityMatch(nextLength, sameTail.meaningfulMatches)) {
-      best = {
-        startIndex: previousEndIndex - nextLength,
-        previousPrefixLength: previousOffset,
-        matchedRows: nextLength,
-        continuity: 'patch-tail-window',
-      };
-    }
-  }
-
-  const maxOverlap = Math.min(previousLength, nextLength);
-  for (let overlap = maxOverlap; overlap >= 1; overlap -= 1) {
-    const previousOffset = previousLength - overlap;
-    const overlapMatch = countAlignedMatches(previousLines, nextLines, previousOffset, 0, overlap);
-    if (!overlapMatch.ok || !shouldAcceptContinuityMatch(overlap, overlapMatch.meaningfulMatches)) {
-      continue;
-    }
-    if (!best || overlap > best.matchedRows) {
-      best = {
-        startIndex: previousEndIndex - overlap,
-        previousPrefixLength: previousOffset,
-        matchedRows: overlap,
-        continuity: 'append-tail-window',
-      };
-    }
-    break;
-  }
-
-  if (!best) {
-    return {
-      startIndex: Math.max(0, Math.floor(options.computedStartIndex || 0)),
-      lines: nextLines,
-      continuity: 'replace' as const,
-      matchedRows: 0,
-    };
-  }
-
+  const safeComputedStartIndex = Math.max(0, Math.floor(options.computedStartIndex || 0));
   return {
-    startIndex: best.startIndex,
-    lines: previousLines.slice(0, best.previousPrefixLength).concat(nextLines),
-    continuity: best.continuity,
-    matchedRows: best.matchedRows,
+    startIndex: safeComputedStartIndex,
+    lines: nextLines,
+    continuity: 'authoritative-replace' as const,
+    matchedRows: 0,
   };
 }
 
@@ -271,12 +294,10 @@ export function createTerminalMirrorCaptureRuntime(
     return normalizedLines.slice(-safeMaxLines);
   }
 
-  async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
+  async function captureTmuxMirrorSnapshot(mirror: SessionMirror): Promise<ResolvedMirrorCaptureSnapshot> {
     const metrics = readTmuxPaneMetrics(mirror.sessionName);
     const cursor = readTmuxCursorState(metrics.paneId);
     const maxLines = deps.resolveMirrorCacheLines(metrics.paneRows);
-    const previousBufferStartIndex = mirror.bufferStartIndex;
-    const previousBufferLines = mirror.bufferLines;
     const capturedLines = captureTmuxMirrorLines(metrics.paneId, {
       paneRows: metrics.paneRows,
       maxLines,
@@ -294,35 +315,57 @@ export function createTerminalMirrorCaptureRuntime(
       scratchLineCount: nextBufferLines.length,
     });
     const computedStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
-    const continuousWindow = resolveContinuousMirrorCaptureWindow({
-      previousStartIndex: previousBufferStartIndex,
-      previousLines: previousBufferLines,
+    const authoritativeWindow = resolveAuthoritativeMirrorCaptureWindow({
       nextLines: nextBufferLines,
       computedStartIndex,
     });
 
-    mirror.rows = metrics.paneRows;
-    mirror.cols = metrics.paneCols;
-    mirror.cursorKeysApp = cursor.cursorKeysApp;
-    mirror.lastScrollbackCount = Math.max(0, continuousWindow.lines.length - metrics.paneRows);
     const trimmed = trimCanonicalBufferWindow(
-      continuousWindow.startIndex,
-      continuousWindow.lines,
-      deps.resolveMirrorCacheLines(mirror.rows),
+      authoritativeWindow.startIndex,
+      authoritativeWindow.lines,
+      deps.resolveMirrorCacheLines(metrics.paneRows),
     );
-    mirror.bufferStartIndex = trimmed.startIndex;
-    mirror.bufferLines = trimmed.lines;
-    const availableEndIndex = getMirrorAvailableEndIndex(mirror);
-    mirror.cursor = normalizeMirrorCursor({
-      bufferStartIndex: mirror.bufferStartIndex,
+    const availableEndIndex = trimmed.startIndex + trimmed.lines.length;
+    const normalizedCursor = normalizeMirrorCursor({
+      bufferStartIndex: trimmed.startIndex,
       availableEndIndex,
-      paneRows: mirror.rows,
+      paneRows: metrics.paneRows,
       cursor,
     });
-    const visibleTopIndex = Math.max(mirror.bufferStartIndex, availableEndIndex - mirror.rows);
+    const visibleTopIndex = Math.max(trimmed.startIndex, availableEndIndex - metrics.paneRows);
+
+    return {
+      rows: metrics.paneRows,
+      cols: metrics.paneCols,
+      cursorKeysApp: cursor.cursorKeysApp,
+      lastScrollbackCount: Math.max(0, authoritativeWindow.lines.length - metrics.paneRows),
+      bufferStartIndex: trimmed.startIndex,
+      bufferLines: trimmed.lines,
+      cursor: normalizedCursor,
+      capturedLineCount: capturedLines.length,
+      canonicalLineCount: nextBufferLines.length,
+      totalAvailableLines,
+      visibleTopIndex,
+    };
+  }
+
+  async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
+    const snapshot = await captureTmuxMirrorSnapshot(mirror);
+    const currentMirrorMatched = currentMirrorMatchesSnapshot(mirror, snapshot);
+
+    if (currentMirrorMatched) {
+      mirror.pendingStableCaptureSnapshot = null;
+      console.log(
+        `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=1 stabilizeMode=current-mirror`,
+      );
+      return true;
+    }
+
+    applyMirrorCaptureSnapshot(mirror, snapshot);
+    mirror.pendingStableCaptureSnapshot = null;
 
     console.log(
-      `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${capturedLines.length} canonical=${nextBufferLines.length} continuity=${continuousWindow.continuity} matched=${continuousWindow.matchedRows} total=${totalAvailableLines} rows=${metrics.paneRows} cols=${metrics.paneCols} buffer=${mirror.bufferStartIndex}-${availableEndIndex} visible=${visibleTopIndex}-${availableEndIndex}`,
+      `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=1 stabilizeMode=single-capture-authoritative`,
     );
 
     return true;

@@ -19,4 +19,3 @@ export * from './terminal/color';
 export * from './schedule/types';
 export * from './schedule/next-fire';
 export * from './shortcuts/terminal-shortcut-composer';
-export * from './react/terminal-view';

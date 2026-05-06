@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { bindSessionTransportSocketLifecycle, handleControlTransportMessage } from './session-context-transport-runtime';
+import {
+  bindSessionTransportSocketLifecycle,
+  ensureControlTransportForSessionOpen,
+  handleControlTransportMessage,
+} from './session-context-transport-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
 import type { ServerMessage } from '../lib/types';
 
@@ -24,6 +28,7 @@ function makeIntent(
   return {
     sessionId,
     openRequestId,
+    createdAt: 1,
     host: makeHost(),
     resolvedSessionName: 'tmux-1',
     debugScope: 'connect',
@@ -150,5 +155,80 @@ describe('bindSessionTransportSocketLifecycle', () => {
     expect(recordSessionRx).not.toHaveBeenCalled();
     expect(handleSocketServerMessage).not.toHaveBeenCalled();
     expect(finalizeFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe('ensureControlTransportForSessionOpen', () => {
+  it('reopens a stale connecting control transport instead of leaving new session opens hanging forever', () => {
+    const intent = {
+      ...makeIntent('session-1', 'open-1'),
+      hostConfigPayload: {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        openRequestId: 'open-1',
+      },
+    };
+    const connectingSocket = {
+      readyState: WebSocket.CONNECTING,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      close: vi.fn(),
+      getDiagnostics: () => ({ reason: 'stuck connecting' }),
+    } as any;
+    const replacementSocket = {
+      readyState: WebSocket.CONNECTING,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      close: vi.fn(),
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+
+    let currentSocket: any = connectingSocket;
+    const setSessionHandshakeTimeout = vi.fn((_sessionId: string, callback: () => void) => {
+      callback();
+      return 1;
+    });
+    const buildTraversalSocketForHost = vi.fn(() => {
+      currentSocket = replacementSocket;
+      return replacementSocket;
+    });
+    const writeSessionTargetControlSocket = vi.fn((_sessionId: string, socket: any | null) => {
+      currentSocket = socket;
+    });
+
+    ensureControlTransportForSessionOpen({
+      intent: intent as any,
+      readSessionTargetControlSocket: () => currentSocket,
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      readSessionTargetKey: () => 'daemon:host-1',
+      pendingSessionTransportOpenIntentsRef: { current: new Map([['session-1', intent]]) },
+      sendSocketPayload: vi.fn(),
+      clearSessionHandshakeTimeout: vi.fn(),
+      setSessionHandshakeTimeout,
+      failPendingControlTargetIntents: vi.fn(),
+      buildTraversalSocketForHost,
+      writeSessionTargetControlSocket,
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      recordControlTransportRxBytes: vi.fn(),
+      handleControlTransportMessage: vi.fn(),
+      cleanupControlSocket: vi.fn((_sessionId: string, shouldClose?: boolean) => {
+        if (shouldClose) {
+          currentSocket?.close?.();
+        }
+        currentSocket = null;
+      }),
+      sessionHandshakeTimeoutMs: 10,
+    });
+
+    expect(setSessionHandshakeTimeout).toHaveBeenCalled();
+    expect(connectingSocket.close).toHaveBeenCalled();
+    expect(buildTraversalSocketForHost).toHaveBeenCalledTimes(1);
+    expect(writeSessionTargetControlSocket).toHaveBeenCalledWith('session-1', replacementSocket);
   });
 });

@@ -38,6 +38,9 @@ const EMPTY_SNAPSHOT: SessionRenderStoreSnapshot = {
 };
 
 function cursorEqual(left: TerminalCursorState | null, right: TerminalCursorState | null) {
+  if (left === right) {
+    return true;
+  }
   return (
     (left?.rowIndex ?? null) === (right?.rowIndex ?? null)
     && (left?.col ?? null) === (right?.col ?? null)
@@ -46,6 +49,9 @@ function cursorEqual(left: TerminalCursorState | null, right: TerminalCursorStat
 }
 
 function gapRangesEqual(left: TerminalGapRange[], right: TerminalGapRange[]) {
+  if (left === right) {
+    return true;
+  }
   if (left.length !== right.length) {
     return false;
   }
@@ -61,6 +67,9 @@ function gapRangesEqual(left: TerminalGapRange[], right: TerminalGapRange[]) {
 }
 
 function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
+  if (left === right) {
+    return true;
+  }
   if (left.length !== right.length) {
     return false;
   }
@@ -84,6 +93,9 @@ function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
 }
 
 function renderBuffersEqual(left: SessionRenderBufferSnapshot, right: SessionRenderBufferSnapshot) {
+  if (left === right) {
+    return true;
+  }
   if (
     left.revision !== right.revision
     || left.startIndex !== right.startIndex
@@ -172,12 +184,12 @@ export function createSessionRenderBufferStore(): SessionRenderBufferStore {
 }
 
 export function useSessionRenderBufferSnapshot(
-  store: SessionRenderBufferStore,
+  store: SessionRenderBufferStore | null | undefined,
   sessionId: string | null | undefined,
 ) {
   return useSyncExternalStore(
-    (listener) => (sessionId ? store.subscribe(sessionId, listener) : () => undefined),
-    () => (sessionId ? store.getSnapshot(sessionId) : EMPTY_SNAPSHOT),
+    (listener) => (sessionId && store ? store.subscribe(sessionId, listener) : () => undefined),
+    () => (sessionId && store ? store.getSnapshot(sessionId) : EMPTY_SNAPSHOT),
     () => EMPTY_SNAPSHOT,
   );
 }

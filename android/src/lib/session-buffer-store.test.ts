@@ -23,4 +23,19 @@ describe('session-buffer-store', () => {
     expect(String.fromCodePoint(committed.lines[0]?.[0]?.char || 32)).toBe('a');
     expect(committed.gapRanges).toEqual([]);
   });
+
+  it('commitBuffer reuses immutable authoritative buffer truth by reference', () => {
+    const store = createSessionBufferStore();
+    const buffer = createSessionBufferState({
+      lines: ['abc'],
+      cols: 80,
+      rows: 24,
+      cacheLines: 100,
+      revision: 1,
+    });
+
+    expect(store.commitBuffer('s1', buffer)).toBe(true);
+    expect(store.getSnapshot('s1').buffer).toBe(buffer);
+    expect(store.commitBuffer('s1', buffer)).toBe(false);
+  });
 });

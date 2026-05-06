@@ -766,6 +766,44 @@ describe('TerminalPage Android IME bridge', () => {
     });
   });
 
+  it('flushes a committed CJK result immediately without waiting for a later priming space', async () => {
+    const session = makeSession('s1');
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+    });
+
+    imeListeners.get('input')?.({ text: '你好' });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', '你好');
+    });
+
+    expect(onTerminalInput).toHaveBeenCalledTimes(1);
+    expect(onTerminalInput).not.toHaveBeenCalledWith('s1', ' ');
+  });
+
   it('keeps routing later native IME input after a buffer rerender that follows a voice-style commit', async () => {
     const session = makeSession('s1');
     const onTerminalInput = vi.fn();

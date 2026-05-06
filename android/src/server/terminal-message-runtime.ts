@@ -179,7 +179,7 @@ export function createTerminalMessageRuntime(
           sendSessionNotReadyError(session, 'buffer-head-request');
           break;
         }
-        await deps.refreshMirrorHeadForSession(session, mirror);
+        deps.sendBufferHeadToSession(session, mirror);
         break;
       }
       case 'paste-image-start':

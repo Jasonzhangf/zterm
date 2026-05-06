@@ -30,7 +30,7 @@ import {
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
 import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
-import { hasPendingSessionTransportOpenIntent } from './session-context-open-intent-store';
+import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
 export function applySessionActionRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -159,6 +159,20 @@ export function hasPendingSessionTransportOpenRuntime(options: {
   return hasPendingSessionTransportOpenIntent(
     options.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof hasPendingSessionTransportOpenIntent>[0],
     options.sessionId,
+  );
+}
+
+export function isPendingSessionTransportOpenStaleRuntime(options: {
+  sessionId: string;
+  pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
+  now?: number;
+  staleAfterMs?: number;
+}) {
+  return isPendingSessionTransportOpenIntentStale(
+    options.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof isPendingSessionTransportOpenIntentStale>[0],
+    options.sessionId,
+    options.now,
+    options.staleAfterMs,
   );
 }
 
@@ -377,6 +391,9 @@ export function clearTailRefreshRuntimeInfra(options: {
   sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
   sessionRevisionResetRef: { current: Map<string, { revision: number; latestEndIndex: number; seenAt: number }> };
   lastHeadRequestAtRef: { current: Map<string, number> };
+  pendingInputTailRefreshRef?: { current: Map<string, { requestedAt: number; localRevision: number }> };
+  pendingConnectTailRefreshRef?: { current: Set<string> };
+  pendingResumeTailRefreshRef?: { current: Set<string> };
 }) {
   clearTailRefreshRuntimeRuntime(options);
 }

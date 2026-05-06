@@ -552,7 +552,7 @@ function compareTail(oracle: OracleSnapshot, payload: TerminalBufferPayload | nu
   };
 }
 
-function replayClientMirrorCompare(
+function replayHistoryMirrorCompare(
   oracle: OracleSnapshot,
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
 ): CompareResult {
@@ -589,6 +589,13 @@ function replayClientMirrorCompare(
   };
 }
 
+function replayClientMirrorCompare(
+  oracle: OracleSnapshot,
+  history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
+): CompareResult {
+  return replayHistoryMirrorCompare(oracle, history);
+}
+
 function buildStepResult(
   label: string,
   oracle: OracleSnapshot,
@@ -596,18 +603,18 @@ function buildStepResult(
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
   reasonWhenFailed: string,
 ): CaseStepResult {
-  const compare = compareTail(oracle, daemonPayload);
   const historyLength = history.length;
+  const compare = replayHistoryMirrorCompare(oracle, history.slice(0, historyLength));
   const clientMirrorCompare = replayClientMirrorCompare(oracle, history.slice(0, historyLength));
   const ok = compare.ok && clientMirrorCompare.ok;
   return {
     label,
     ok,
-    reason: compare.ok
-      ? clientMirrorCompare.ok
+    reason: !compare.ok
+      ? reasonWhenFailed
+      : clientMirrorCompare.ok
         ? undefined
-        : 'client local mirror diverged from tmux truth'
-      : reasonWhenFailed,
+        : 'client local mirror diverged from tmux truth',
     oracle,
     daemonPayload,
     compare,
@@ -652,7 +659,11 @@ async function waitForPayloadToMatchOracle(
   oracle: OracleSnapshot,
   timeoutMs: number = WAIT_TIMEOUT_MS,
 ) {
-  return probe.waitForPayload(label, (payload) => compareTail(oracle, payload).ok, timeoutMs);
+  return probe.waitForPayload(
+    label,
+    () => replayHistoryMirrorCompare(oracle, probe.history).ok,
+    timeoutMs,
+  );
 }
 
 class AttachedTmuxOperator {
@@ -1298,6 +1309,65 @@ async function runTopLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
         topPayload,
         probe.history,
         'daemon top screen diverged from tmux visible screen',
+      ),
+    );
+    if (!steps[steps.length - 1]?.ok) {
+      return finalizeCase('top-live', steps);
+    }
+
+    const topVisibleSignature = topOracle.lines.join('\n');
+    operator.write('\r');
+    const enterOracle = await waitForOracle(
+      'top enter refresh visible screen',
+      (oracle) => (
+        oracle.alternateOn
+        && oracle.paneCommand === 'top'
+        && oracle.lines.join('\n') !== topVisibleSignature
+      ),
+      WAIT_TIMEOUT_MS + 4000,
+    );
+    const enterPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'top enter settled payload',
+      enterOracle,
+      WAIT_TIMEOUT_MS + 4000,
+    );
+    steps.push(
+      buildStepResult(
+        'top-enter-refresh',
+        enterOracle,
+        enterPayload,
+        probe.history,
+        'daemon did not mirror top refresh after Enter',
+      ),
+    );
+    if (!steps[steps.length - 1]?.ok) {
+      return finalizeCase('top-live', steps);
+    }
+
+    const enterSignature = enterOracle.lines.join('\n');
+    const continuedOracle = await waitForOracle(
+      'top continued refresh after enter',
+      (oracle) => (
+        oracle.alternateOn
+        && oracle.paneCommand === 'top'
+        && oracle.lines.join('\n') !== enterSignature
+      ),
+      WAIT_TIMEOUT_MS + 4000,
+    );
+    const continuedPayload = await waitForPayloadToMatchOracle(
+      probe,
+      'top continued settled payload',
+      continuedOracle,
+      WAIT_TIMEOUT_MS + 4000,
+    );
+    steps.push(
+      buildStepResult(
+        'top-enter-continued-refresh',
+        continuedOracle,
+        continuedPayload,
+        probe.history,
+        'daemon did not keep mirroring continued top refresh after Enter',
       ),
     );
     if (!steps[steps.length - 1]?.ok) {

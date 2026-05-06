@@ -6,6 +6,11 @@ interface TraversalRelayRuntimeConfig {
   username: string;
   password: string;
   hostId: string;
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  appVersion: string;
+  daemonVersion: string;
 }
 
 interface CreateTraversalRelayHostClientOptions {
@@ -106,6 +111,19 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       const wsUrl = buildWsUrl(config.relayUrl, 'ws/host');
       wsUrl.searchParams.set('token', accessToken);
       wsUrl.searchParams.set('hostId', config.hostId);
+      wsUrl.searchParams.set('deviceId', config.deviceId);
+      if (config.deviceName) {
+        wsUrl.searchParams.set('deviceName', config.deviceName);
+      }
+      if (config.platform) {
+        wsUrl.searchParams.set('platform', config.platform);
+      }
+      if (config.appVersion) {
+        wsUrl.searchParams.set('appVersion', config.appVersion);
+      }
+      if (config.daemonVersion) {
+        wsUrl.searchParams.set('daemonVersion', config.daemonVersion);
+      }
       const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
 

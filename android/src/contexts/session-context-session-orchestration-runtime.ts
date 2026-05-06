@@ -38,6 +38,7 @@ interface SessionLifecycleRuntimeOptions {
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
+      commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
       setBuffer: (sessionId: string, buffer: SessionBufferState) => void;
       deleteSession: (sessionId: string) => void;
     }>;
@@ -52,6 +53,7 @@ interface SessionLifecycleRuntimeOptions {
       clearSession: (sessionId: string) => void;
     }>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
   };
   runtimeDebug: RuntimeDebugFn;
@@ -92,11 +94,12 @@ interface SessionLifecycleRuntimeOptions {
   ) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number; startIndex: number; endIndex: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  resolveTerminalRefreshCadence: () => { headTickMs: number };
+  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
   isSessionTransportActive: (sessionId: string) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
 }
 
@@ -251,12 +254,15 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         stateRef: options.refs.stateRef,
         pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
+        lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+        lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
       readSessionTransportSocket: options.readSessionTransportSocket,
       isReconnectInFlight: options.isReconnectInFlight,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
+      isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       isSessionTransportActivityStale: options.isSessionTransportActivityStale,
       runtimeDebug: options.runtimeDebug,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,

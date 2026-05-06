@@ -44,8 +44,10 @@ export function buildRemoteScreenshotCapture(
       }
       binaryParts.push(bytes);
       totalBinaryLength += bytes.length;
-    } catch {
-      // noop: caller can still use concatenated base64
+    } catch (error) {
+      throw new Error(
+        `Remote screenshot chunk ${index} decode failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -55,8 +57,7 @@ export function buildRemoteScreenshotCapture(
     dataBase64: ordered.join(''),
     totalBytes,
   };
-
-  if (binaryParts.length === chunks.size && totalBinaryLength > 0) {
+  if (totalBinaryLength > 0) {
     const combined = new Uint8Array(totalBinaryLength);
     let offset = 0;
     for (const part of binaryParts) {

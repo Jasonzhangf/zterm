@@ -150,6 +150,9 @@ function TerminalQuickBarComponent({
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [floatingBubblePosition, setFloatingBubblePosition] = useState<{ x: number | null; y: number | null }>(() => readStoredBubblePosition());
   const [repeatingActionId, setRepeatingActionId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const doubleTapRef = useRef<{ id: string; timer: number } | null>(null);
   const suppressKeyboardClickRef = useRef(false);
   const suppressBubbleClickRef = useRef(false);
   const suppressActionClickRef = useRef<string | null>(null);
@@ -266,10 +269,6 @@ function TerminalQuickBarComponent({
     }
   }, [activeSessionId, sessionDraft]);
 
-  const appendToDraft = (value: string) => {
-    persistQuickInputValue(`${quickInputValueRef.current || ''}${value}`);
-  };
-
   const sendSessionDraft = () => {
     const payload = normalizeSequenceForImmediateSend(quickInputValueRef.current);
     if (!payload) {
@@ -282,13 +281,57 @@ function TerminalQuickBarComponent({
     onSessionDraftSend?.(payload);
   };
 
-  const sendQuickActionNow = (value: string) => {
-    const payload = normalizeSequenceForImmediateSend(value);
-    if (!payload) {
-      return;
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
     }
-    onSendSequence?.(payload);
-  };
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastMessage(null);
+    }, 1500);
+  }, []);
+
+  const handleQuickActionDoubleTap = useCallback((actionId: string, sequence: string) => {
+    const now = Date.now();
+    const prev = doubleTapRef.current;
+    if (prev && prev.id === actionId && now - prev.timer < 400) {
+      doubleTapRef.current = null;
+      const payload = normalizeSequenceForImmediateSend(sequence);
+      if (payload) {
+        onSendSequence?.(payload);
+        showToast('已发送');
+      }
+    } else {
+      doubleTapRef.current = { id: actionId, timer: now };
+      window.setTimeout(() => {
+        if (doubleTapRef.current?.id === actionId) {
+          doubleTapRef.current = null;
+        }
+      }, 420);
+    }
+  }, [onSendSequence, showToast]);
+
+  const handleClipboardDoubleTap = useCallback((entry: string, index: number) => {
+    const key = `clip-${index}`;
+    const now = Date.now();
+    const prev = doubleTapRef.current;
+    if (prev && prev.id === key && now - prev.timer < 400) {
+      doubleTapRef.current = null;
+      const payload = normalizeSequenceForImmediateSend(entry);
+      if (payload) {
+        onSendSequence?.(payload);
+        showToast('已发送');
+      }
+    } else {
+      doubleTapRef.current = { id: key, timer: now };
+      window.setTimeout(() => {
+        if (doubleTapRef.current?.id === key) {
+          doubleTapRef.current = null;
+        }
+      }, 420);
+    }
+  }, [onSendSequence, showToast]);
 
   const clearRepeatLongPressTimer = useCallback(() => {
     if (repeatLongPressTimerRef.current !== null) {
@@ -2233,7 +2276,7 @@ function TerminalQuickBarComponent({
                       >
                         <button
                           onClick={() => {
-                            sendQuickActionNow(action.sequence);
+                            handleQuickActionDoubleTap(action.id, action.sequence);
                           }}
                           style={{
                             flex: 1,
@@ -2307,7 +2350,7 @@ function TerminalQuickBarComponent({
                     clipboardHistory.map((entry, index) => (
                       <button
                         key={`${index}-${entry.slice(0, 12)}`}
-                        onClick={() => appendToDraft(entry)}
+                        onClick={() => handleClipboardDoubleTap(entry, index)}
                         style={{
                           width: '100%',
                           minHeight: '46px',
@@ -2570,6 +2613,27 @@ function TerminalQuickBarComponent({
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '40%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 200,
+            backgroundColor: 'rgba(23, 27, 45, 0.92)',
+            color: '#fff',
+            padding: '12px 24px',
+            borderRadius: '16px',
+            fontSize: '15px',
+            fontWeight: 700,
+            pointerEvents: 'none',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.32)',
+          }}
+        >
+          {toastMessage}
         </div>
       )}
     </div>

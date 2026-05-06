@@ -489,7 +489,10 @@ public class ImeAnchorPlugin extends Plugin {
                         } finally {
                             plugin.suppressFrameworkEditableDispatch = false;
                         }
-                        plugin.dispatchEditableSnapshot("commitText");
+                        plugin.dispatchInputLogicEvents(
+                            plugin.inputLogic.onCommitText(text == null ? "" : text.toString()),
+                            "commitText"
+                        );
                         return handled;
                     }
                     return super.commitText(text, newCursorPosition);
@@ -505,7 +508,11 @@ public class ImeAnchorPlugin extends Plugin {
                         } finally {
                             plugin.suppressFrameworkEditableDispatch = false;
                         }
-                        plugin.dispatchEditableSnapshot("finishComposingText");
+                        Editable editable = getText();
+                        plugin.dispatchInputLogicEvents(
+                            plugin.inputLogic.onFinishComposingText(editable == null ? "" : editable.toString()),
+                            "finishComposingText"
+                        );
                         return handled;
                     }
                     return super.finishComposingText();

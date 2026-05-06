@@ -118,7 +118,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - terminal 持久化缓存不允许只拼 raw output chunk；应从本地 **absolute-index sliding buffer state** 按行持久化
 - daemon 的初次 canonical capture 不能静默失败；capture 出错必须显式报错/记证据，但 daemon 仍只保留 `head + range` 读接口，不补第二份语义
 - daemon 的 buffer 真源必须按 **tmux session mirror** 维护：一个 websocket/tab 只是客户端，不得拥有自己的 authoritative buffer；客户端 detach/reattach 不能重建 session 镜像
-- 2026-04-23 新冻结：daemon 对外职责收敛为 **只回答 `buffer-head-request` / `buffer-sync-request`**；client 自己 33ms tick 问 head，daemon 不主动替 client 做消费策略
+- 2026-05-06 新冻结：daemon 正常模式负责 **持续 mirror capture + live push**；mirror body unchanged 发 `buffer-head/info`，mirror body changed 发 `buffer-sync diff`。client 正常模式被动吃 push；只有 `resume / reconnect / stale probe` 才主动 `buffer-head-request`，只有 `reading gap repair` 才主动 `buffer-sync-request`
 - 2026-04-23 新冻结：client buffer 必须是 **sparse absolute-index buffer**，允许不连续；worker 不为“完整性”主动补洞，只围绕当前工作集补缺：follow 维护尾部 3 屏热区，reading 只补当前窗口
 - 2026-04-23 新冻结：renderer 只按 latest bottom-relative window 消费 buffer；UI shell 只负责容器位置/裁切；IME/keyboard 不得进入 buffer/render truth 链
 - runtime 远程排障接口应收敛到 daemon HTTP：client 侧 runtime debug 只负责上送有界日志队列，daemon 侧统一缓存并通过 `/debug/runtime`、`/debug/runtime/logs` 暴露现场快照；接口复用 daemon auth token，便于服务器端直接拉取现场证据
@@ -665,6 +665,11 @@ android/
 - **解决方案**: 检查 Tailscale 状态，重连逻辑自动触发
 - **边界条件**: 最多重试 3 次（可配置）
 
+### 模式: transport 自动连接顺序必须固定
+- **真源**: 自动模式只允许 `Tailscale -> IPv6 -> IPv4 -> Relay`
+- **动作**: 先试 Tailscale，再试 IPv6，再试 IPv4，最后才进 Relay；不要再额外发明 “fallback/补偿/第二套 transport 顺序”
+- **边界**: Relay 是最后一段显式路径，不是伪 direct，不允许再把 relay 阶段标回别的 resolvedPath
+
 ### 问题: Android APK 能打开但连不上本地 tmux bridge
 - **触发信号**: terminal 一直停在 idle / connecting，bridge 是 `ws://`，Capacitor WebView 运行在 `https`
 - **真源**: `androidScheme=https` 会把移动端带到 secure context，`ws://` bridge 会被 mixed-content / cleartext 规则卡住
@@ -790,10 +795,10 @@ android/
 - **动作**: `sendInput()` 只发送 input，不本地改 buffer；同时给 active session 标记 `input-tail-refresh` demand，由 client 本地 30fps head cadence 在 `minTailRefreshGapMs` 门限下主动发 follow `buffer-sync-request + ping`
 - **反模式**: 1) 为了“更快”做本地假回显 2) 完全被动等下一次 server head 才刷新 3) 每个输入字符都直接打一条 range request，退化成请求风暴
 
-### 模式: head 检查频率固定，真正拉取频率按网络分级
-- **适用场景**: 用户要求“本地 30fps 刷新 head”，同时又要控制带宽/请求频率
-- **动作**: active session 本地固定 `33ms` tick 只做 head freshness / demand 判定；真正的 tail range 拉取由 `resolveTerminalRefreshCadence()` 根据 `navigator.connection` / `saveData` 决定 `minTailRefreshGapMs` 与 reading delay
-- **反模式**: 把“30fps 检查”误做成“30fps 必拉 range”，会直接把带宽和抖动重新打爆
+### 模式: daemon live push，client 只做显式补洞
+- **适用场景**: 用户要求正常模式 daemon push、client 被动收最新正文；只有 reading/gap 才主动取数
+- **动作**: daemon ready mirror 维持固定 cadence live capture；body 变更发 `buffer-sync diff`，纯 metadata 变更发 `buffer-head/info`。client 正常模式不再高频主动问 head；只在 `resume / reconnect / stale probe` 发 `buffer-head-request`，只在 reading gap repair 发 `buffer-sync-request`
+- **反模式**: 1) client 常态 33ms 主动轮询 head 2) `buffer-head-request` 反向触发 daemon capture 3) 把 reading repair 和正常 live 主链混成一条
 
 ### 模式: 移动端发热先看 CPU/IO 真源
 - **触发信号**: 手机明显发热，但网络流量不大

@@ -21,6 +21,7 @@ describe('connection-target helpers', () => {
       name: 'Mac',
       bridgeHost: '100.127.23.27',
       bridgePort: 37283,
+      daemonHostId: undefined,
       sessionName: 'main',
       authToken: '',
       tailscaleHost: undefined,
@@ -58,6 +59,7 @@ describe('connection-target helpers', () => {
       name: 'Mac',
       bridgeHost: '100.127.23.27:40807',
       bridgePort: 3333,
+      daemonHostId: 'daemon-host-1',
       sessionName: 'main',
       authToken: '',
       tailscaleHost: undefined,
@@ -76,5 +78,6 @@ describe('connection-target helpers', () => {
 
     expect(host.bridgeHost).toBe('100.127.23.27');
     expect(host.bridgePort).toBe(40807);
+    expect(host.daemonHostId).toBe('daemon-host-1');
   });
 });

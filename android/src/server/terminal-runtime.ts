@@ -26,6 +26,10 @@ interface TerminalRuntimeDeps {
     sessionId: string,
     mirror: SessionMirror,
   ) => Extract<ServerMessage, { type: 'buffer-head' }>['payload'];
+  buildChangedRangesBufferSyncPayload: (
+    mirror: SessionMirror,
+    changedRanges: Array<{ startIndex: number; endIndex: number }>,
+  ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
   getMirrorKey: (sessionName: string) => string;
   normalizeTerminalCols: (cols: number | undefined) => number;
@@ -219,6 +223,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     sendScheduleStateToSession: deps.sendScheduleStateToSession,
     buildConnectedPayload: deps.buildConnectedPayload,
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
+    buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,
     sanitizeSessionName: deps.sanitizeSessionName,
     getMirrorKey: deps.getMirrorKey,
     normalizeTerminalCols: deps.normalizeTerminalCols,

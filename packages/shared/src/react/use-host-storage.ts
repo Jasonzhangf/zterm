@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  buildHostSemanticReuseKey,
   buildStoredHost,
-  getResolvedSessionName,
   normalizeHost,
 } from '../connection/connection-target';
 import { STORAGE_KEYS, type EditableHost, type Host } from '../connection/types';
@@ -103,12 +103,8 @@ export function useHostStorage() {
     (host: EditableHost) => {
       let nextHost!: Host;
       saveHosts((current) => {
-        const targetSessionName = getResolvedSessionName(host);
         const existing = current.find(
-          (item) =>
-            item.bridgeHost === host.bridgeHost &&
-            item.bridgePort === host.bridgePort &&
-            getResolvedSessionName(item) === targetSessionName,
+          (item) => buildHostSemanticReuseKey(item) === buildHostSemanticReuseKey(host),
         );
 
         if (existing) {

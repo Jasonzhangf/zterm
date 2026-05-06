@@ -320,20 +320,15 @@ interface ScheduleComposerSeed {
 
 interface TerminalTabChromeItem {
   id: string;
-  hostId: string;
-  connectionName: string;
   bridgeHost: string;
   bridgePort: number;
   sessionName: string;
-  title: string;
   customName?: string;
-  createdAt: number;
   resolvedPath?: Session['resolvedPath'];
 }
 
-function terminalPageSessionUiKey(
+function terminalPageRenderedSessionUiKey(
   session: Session | null | undefined,
-  options?: { includeRuntimeStatus?: boolean },
 ) {
   if (!session) {
     return '';
@@ -345,19 +340,46 @@ function terminalPageSessionUiKey(
     session.bridgeHost,
     String(session.bridgePort),
     session.sessionName,
-    session.title,
     session.customName || '',
-    String(session.createdAt),
     session.resolvedPath || '',
-    session.authToken || '',
-    session.autoCommand || '',
-    options?.includeRuntimeStatus ? session.state : '',
-    options?.includeRuntimeStatus ? (session.lastError || '') : '',
   ].join('::');
 }
 
-function terminalPageSessionsUiKey(sessions: Session[]) {
-  return sessions.map((session) => terminalPageSessionUiKey(session)).join('||');
+function terminalPageRenderedSessionsUiKey(sessions: Session[]) {
+  return sessions.map((session) => terminalPageRenderedSessionUiKey(session)).join('||');
+}
+
+function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {
+  if (!session) {
+    return '';
+  }
+  return [
+    session.id,
+    session.bridgeHost,
+    String(session.bridgePort),
+    session.sessionName,
+    session.customName || '',
+    session.resolvedPath || '',
+  ].join('::');
+}
+
+function terminalPageHeaderSessionsUiKey(sessions: Session[]) {
+  return sessions.map((session) => terminalPageHeaderSessionUiKey(session)).join('||');
+}
+
+function terminalPageActiveRuntimeStatusKey(session: Session | null | undefined) {
+  if (!session) {
+    return '';
+  }
+  return [
+    session.id,
+    session.state,
+    session.lastError || '',
+  ].join('::');
+}
+
+function terminalPageSessionIdsKey(sessions: Session[]) {
+  return sessions.map((session) => session.id).join('||');
 }
 
 function resolveSessionInputEpoch(
@@ -382,14 +404,10 @@ function resolveRenderedSessionsInputEpochKey(
 function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
   return {
     id: session.id,
-    hostId: session.hostId,
-    connectionName: session.connectionName,
     bridgeHost: session.bridgeHost,
     bridgePort: session.bridgePort,
     sessionName: session.sessionName,
-    title: session.title,
     customName: session.customName,
-    createdAt: session.createdAt,
     resolvedPath: session.resolvedPath,
   };
 }
@@ -733,8 +751,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     </div>
   );
 }, (prev, next) => (
-  terminalPageSessionUiKey(prev.activeSession) === terminalPageSessionUiKey(next.activeSession)
-  && terminalPageSessionsUiKey(prev.renderedPaneSessions) === terminalPageSessionsUiKey(next.renderedPaneSessions)
+  terminalPageRenderedSessionUiKey(prev.activeSession) === terminalPageRenderedSessionUiKey(next.activeSession)
+  && terminalPageRenderedSessionsUiKey(prev.renderedPaneSessions) === terminalPageRenderedSessionsUiKey(next.renderedPaneSessions)
   && prev.sessionBufferStore === next.sessionBufferStore
   && prev.splitVisible === next.splitVisible
   && prev.terminalChromeBottomPx === next.terminalChromeBottomPx
@@ -1122,6 +1140,7 @@ function TerminalPageComponent({
         .map((sessionId) => sessions.find((session) => session.id === sessionId) || null)
         .filter((session): session is Session => Boolean(session))
     : (activeSession ? [activeSession] : []);
+  const sessionIdsKey = useMemo(() => terminalPageSessionIdsKey(sessions), [sessions]);
   const livePaneSessionIds = useMemo(
     () => renderedPaneSessions.map((session) => session.id),
     [renderedPaneSessions],
@@ -1130,8 +1149,8 @@ function TerminalPageComponent({
     () => livePaneSessionIds.join('||'),
     [livePaneSessionIds],
   );
-  const headerSessionsUiKey = useMemo(() => terminalPageSessionsUiKey(sessions), [sessions]);
-  const activeHeaderSessionUiKey = useMemo(() => terminalPageSessionUiKey(activeSession), [activeSession]);
+  const headerSessionsUiKey = useMemo(() => terminalPageHeaderSessionsUiKey(sessions), [sessions]);
+  const activeHeaderSessionUiKey = useMemo(() => terminalPageHeaderSessionUiKey(activeSession), [activeSession]);
   const chromeSessions = useMemo(() => sessions.map(toTerminalTabChromeItem), [headerSessionsUiKey]);
   const activeChromeSession = useMemo(() => (
     activeSession ? toTerminalTabChromeItem(activeSession) : null
@@ -1147,6 +1166,14 @@ function TerminalPageComponent({
   const passivePaneIdRef = useRef<TerminalSplitPaneId>(passivePaneId);
   const secondarySessionIdRef = useRef<string | null>(secondarySession?.id || null);
   const previousLivePaneSessionIdsKeyRef = useRef<string>('');
+  activeSessionRef.current = activeSession;
+  sessionsRef.current = sessions;
+  splitPaneAssignmentsRef.current = splitPaneAssignments;
+  splitEnabledRef.current = splitEnabled;
+  splitVisibleRef.current = splitVisible;
+  activePaneIdRef.current = activePaneId;
+  passivePaneIdRef.current = passivePaneId;
+  secondarySessionIdRef.current = secondarySession?.id || null;
 
   useLayoutEffect(() => {
     if (!onLiveSessionIdsChange) {
@@ -1166,26 +1193,6 @@ function TerminalPageComponent({
       onLiveSessionIdsChange?.([]);
     };
   }, [onLiveSessionIdsChange]);
-
-  useEffect(() => {
-    activeSessionRef.current = activeSession;
-    sessionsRef.current = sessions;
-    splitPaneAssignmentsRef.current = splitPaneAssignments;
-    splitEnabledRef.current = splitEnabled;
-    splitVisibleRef.current = splitVisible;
-    activePaneIdRef.current = activePaneId;
-    passivePaneIdRef.current = passivePaneId;
-    secondarySessionIdRef.current = secondarySession?.id || null;
-  }, [
-    activePaneId,
-    activeSession,
-    passivePaneId,
-    secondarySession?.id,
-    sessions,
-    splitEnabled,
-    splitPaneAssignments,
-    splitVisible,
-  ]);
 
   useEffect(() => {
     setSplitPaneAssignments((current) => {
@@ -1221,7 +1228,7 @@ function TerminalPageComponent({
       }
       return next;
     });
-  }, [activeSession?.id, sessions]);
+  }, [activeSession?.id, sessionIdsKey]);
 
   useEffect(() => {
     if (!splitAvailable) {
@@ -1237,7 +1244,7 @@ function TerminalPageComponent({
       && resolvePaneId(splitPaneAssignments, session.id) === 'secondary'
     )) || sessions.find((session) => session.id !== activeSession?.id) || null;
     setSplitSecondarySessionId(nextSecondary?.id || null);
-  }, [activeSession?.id, sessions, splitAvailable, splitPaneAssignments, splitSecondarySessionId]);
+  }, [activeSession?.id, sessionIdsKey, splitAvailable, splitPaneAssignments, splitSecondarySessionId]);
 
   useEffect(() => {
     if (!splitEnabled || !splitAvailable || !activeSession) {
@@ -1262,7 +1269,7 @@ function TerminalPageComponent({
         [candidate.id]: oppositePane,
       };
     });
-  }, [activeSession, splitAvailable, splitEnabled, sessions]);
+  }, [activeSession?.id, sessionIdsKey, splitAvailable, splitEnabled]);
 
   useEffect(() => {
     const sessionIds = new Set(sessions.map((session) => session.id));
@@ -1278,7 +1285,7 @@ function TerminalPageComponent({
           : null,
       splitPaneAssignments: persistedAssignments,
     });
-  }, [activeSession, sessions, splitEnabled, splitPaneAssignments, splitSecondarySessionId]);
+  }, [activeSession?.id, sessionIdsKey, splitEnabled, splitPaneAssignments, splitSecondarySessionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2181,7 +2188,6 @@ function TerminalPageComponent({
           onOpenQuickTabPicker={onOpenQuickTabPicker}
           onOpenTabManager={() => setTabManagerOpen(true)}
           onSwitchSession={onSwitchSession}
-          onRenameSession={onRenameSession}
           onCloseSession={onCloseSession}
           splitVisible={splitVisible}
           sessionPaneAssignments={splitPaneAssignments}
@@ -2306,9 +2312,9 @@ function terminalPagePropsEqual(
   next: Readonly<TerminalPageProps>,
 ) {
   return (
-    terminalPageSessionsUiKey(prev.sessions) === terminalPageSessionsUiKey(next.sessions)
-    && terminalPageSessionUiKey(prev.activeSession, { includeRuntimeStatus: true })
-      === terminalPageSessionUiKey(next.activeSession, { includeRuntimeStatus: true })
+    terminalPageHeaderSessionsUiKey(prev.sessions) === terminalPageHeaderSessionsUiKey(next.sessions)
+    && terminalPageActiveRuntimeStatusKey(prev.activeSession)
+      === terminalPageActiveRuntimeStatusKey(next.activeSession)
     && prev.getSessionDebugMetrics === next.getSessionDebugMetrics
     && prev.sessionBufferStore === next.sessionBufferStore
     && resolveSessionInputEpoch(prev.inputResetEpochBySession, prev.activeSession?.id)

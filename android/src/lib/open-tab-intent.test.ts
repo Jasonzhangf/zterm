@@ -15,7 +15,7 @@ import {
   renameOpenTabIntentSession,
   resolveRestoredOpenTabIntentState,
   resolveSavedOpenTabsImportPlan,
-  resolveRequestedOpenTabFocusSessionId,
+  resolveRequestedOpenTabActiveSessionId,
   upsertOpenTabIntentSession,
 } from './open-tab-intent';
 
@@ -82,6 +82,26 @@ describe('open-tab intent truth', () => {
       ],
       activeSessionId: 'new',
     });
+  });
+
+  it('does not dedupe tabs from different daemonHostId even when sessionName matches', () => {
+    const state = normalizeOpenTabIntentState([
+      makeTab('daemon-a', {
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'shared',
+      }),
+      makeTab('daemon-b', {
+        daemonHostId: 'daemon-b',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'shared',
+      }),
+    ], 'daemon-b');
+
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['daemon-a', 'daemon-b']);
+    expect(state.activeSessionId).toBe('daemon-b');
   });
 
   it('builds bootstrap state directly from runtime sessions', () => {
@@ -202,11 +222,46 @@ describe('open-tab intent truth', () => {
         makeSession('s2', { createdAt: 2 }),
       ],
       new Set<string>(),
-      new Set<string>(['100.127.23.27::3333::tmux-shared::shared-token']),
+      new Set<string>(['bridge:100.127.23.27::3333::session:tmux-shared']),
     );
 
     expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['persisted-old', 's2']);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('rewrites an old bridge-only persisted tab to the new daemon-owned runtime tab instead of keeping duplicates', () => {
+    const state = mergeRuntimeSessionsIntoOpenTabIntentState(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-bridge', {
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionName: 'zterm',
+          authToken: 'token-z',
+          createdAt: 1,
+        }),
+      ], 'persisted-bridge'),
+      [
+        makeSession('runtime-daemon', {
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-Macstudio.local-128564413166185f',
+          sessionName: 'zterm',
+          authToken: 'token-z',
+          createdAt: 2,
+        }),
+      ],
+      new Set<string>(),
+    );
+
+    expect(state.tabs).toEqual([
+      expect.objectContaining({
+        sessionId: 'runtime-daemon',
+        daemonHostId: 'daemon-Macstudio.local-128564413166185f',
+        bridgeHost: '100.66.1.82',
+        sessionName: 'zterm',
+      }),
+    ]);
+    expect(state.activeSessionId).toBe('runtime-daemon');
   });
 
   it('replaces a semantic duplicate persisted tab with the live runtime session id instead of appending a duplicate tab', () => {
@@ -392,7 +447,7 @@ describe('open-tab intent truth', () => {
       },
     );
 
-    expect(result.closedReuseKey).toBe('100.127.23.27::3333::tmux-shared::shared-token');
+    expect(result.closedReuseKey).toBe('bridge:100.127.23.27::3333::session:tmux-shared');
     expect(result.nextState.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
     expect(result.nextState.activeSessionId).toBe('s2');
   });
@@ -448,16 +503,16 @@ describe('open-tab intent truth', () => {
     ], 'saved-b-new');
 
     expect(plan.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a', 'saved-b-new']);
-    expect(plan.focusSessionId).toBe('saved-b-new');
+    expect(plan.activeSessionId).toBe('saved-b-new');
   });
 
   it('resolves requested focus session id from imported tabs with a single pure rule', () => {
-    expect(resolveRequestedOpenTabFocusSessionId([
+    expect(resolveRequestedOpenTabActiveSessionId([
       makeTab('saved-a'),
       makeTab('saved-b'),
     ], 'saved-b')).toBe('saved-b');
 
-    expect(resolveRequestedOpenTabFocusSessionId([
+    expect(resolveRequestedOpenTabActiveSessionId([
       makeTab('saved-a'),
       makeTab('saved-b'),
     ], 'missing')).toBe('saved-a');

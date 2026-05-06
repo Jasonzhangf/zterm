@@ -46,6 +46,19 @@ public class ImeAnchorInputLogicTest {
     }
 
     @Test
+    public void commitTextStillEmitsCommittedTextEvenIfFrameworkSnapshotWouldStillLookComposing() {
+        ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
+
+        logic.onEditableChanged("语音识别", true);
+        List<ImeAnchorInputLogic.Event> events = logic.onCommitText("语音识别结果");
+
+        assertEquals(2, events.size());
+        assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, events.get(0).type);
+        assertEquals("语音识别结果", events.get(0).text);
+        assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
+    }
+
+    @Test
     public void frameworkCommittedEditableSnapshotEmitsOnceWhenComposingEnds() {
         ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
 

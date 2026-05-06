@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { STORAGE_KEYS } from './types';
 import type { Session } from './types';
 import {
   buildPersistedOpenTabFromHostSession,
-  dedupePersistedOpenTabs,
   findReusableOpenTabSession,
+  persistOpenTabsState,
+  readPersistedActiveSessionId,
+  readPersistedOpenTabsState,
   resolveHostForPersistedOpenTab,
 } from './open-tab-persistence';
+import { dedupePersistedOpenTabs } from './open-tab-intent';
 
 function makeSession(overrides?: Partial<Session>): Session {
   return {
@@ -16,6 +20,7 @@ function makeSession(overrides?: Partial<Session>): Session {
     connectionName: 'conn-1',
     bridgeHost: '100.127.23.27',
     bridgePort: 3333,
+    daemonHostId: 'daemon-host-1',
     sessionName: 'tmux-1',
     title: 'tab-1',
     ws: null,
@@ -43,6 +48,70 @@ function makeSession(overrides?: Partial<Session>): Session {
 }
 
 describe('open-tab persistence truth', () => {
+  beforeEach(() => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+        clear: () => {
+          storage.clear();
+        },
+      },
+    });
+  });
+
+  it('reads persisted tabs as raw storage truth without policy dedupe', () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'old',
+        hostId: 'host-z',
+        connectionName: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'new',
+        hostId: 'host-z',
+        connectionName: 'Conn Z',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-z',
+        createdAt: 2,
+      },
+    ]));
+
+    expect(readPersistedOpenTabsState().tabs.map((tab) => tab.sessionId)).toEqual(['old', 'new']);
+  });
+
+  it('persists exactly the provided tabs and active id without second normalization', () => {
+    persistOpenTabsState([
+      {
+        sessionId: 's1',
+        hostId: 'host-1',
+        connectionName: 'Conn 1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        authToken: 'token-1',
+        createdAt: 1,
+      },
+    ], 'missing-active');
+
+    expect(readPersistedOpenTabsState().tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(readPersistedActiveSessionId()).toBe('missing-active');
+  });
+
   it('deduplicates persisted tabs by bridge target + tmux session while keeping preferred metadata', () => {
     expect(dedupePersistedOpenTabs([
       {
@@ -99,6 +168,32 @@ describe('open-tab persistence truth', () => {
       host: {
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
+        daemonHostId: 'daemon-host-1',
+        sessionName: 'zterm',
+        authToken: 'token-z',
+      },
+      activeSessionId: 'active',
+    })?.id).toBe('active');
+  });
+
+  it('reuses by daemonHostId + sessionName even if bridge endpoint changed', () => {
+    const active = makeSession({
+      id: 'active',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-1',
+      sessionName: 'zterm',
+      authToken: 'token-z',
+      createdAt: 2,
+      state: 'connected',
+    });
+
+    expect(findReusableOpenTabSession({
+      sessions: [active],
+      host: {
+        bridgeHost: '100.64.0.10',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-host-1',
         sessionName: 'zterm',
         authToken: 'token-z',
       },

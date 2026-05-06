@@ -45,8 +45,20 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - mirror 写侧也不得再拆第二语义：
   - 不允许 `history capture + visible capture + concat`
   - 只允许 **single-capture -> canonicalize -> mirror store**
+  - 若 tmux 正在中间刷新，writer 必须执行 **连续一致才发布**：只有连续两次 canonical snapshot 一致，或已与当前 mirror 一致，才允许写 mirror；不稳定必须显式报错
+  - 不允许基于 **内容 overlap / repeated text** 推断新的 absolute anchor
+  - mirror absolute window 只能来自 tmux authoritative available window；内容相似性最多用于 debug，不得进入写侧真相
 - `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
 - **请求不得触发 tmux capture / canonical rebuild / planner**
+- 正常 live 主链只允许：
+  - `tmux -> daemon mirror truth commit -> daemon push buffer-sync -> client buffer apply -> renderer body repaint`
+- daemon live push 语义必须再冻结：
+  - `mirror body unchanged -> push buffer-head/info`
+  - `mirror body changed -> push buffer-sync diff`
+  - diff 只允许基于 daemon mirror 前后版本计算
+  - **不得**基于客户端状态算 diff
+- `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
+- **只有 `buffer-sync apply` 可以触发正文 body repaint**
 - daemon **不得改写 buffer cells 本身**
   - 包括但不限于：cursor paint、reverse 注入、样式补丁、局部重写
   - 若需要传 cursor truth，必须走**独立元数据**，不能写回 `lines[].cells[].flags`
@@ -110,6 +122,11 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 4. 接收 renderer 声明的 visible range
 5. 自己决定请求哪段 buffer
 6. head 变了或 gap 补齐了，就通知 renderer 对应 line/range patch
+
+补充冻结：
+- `buffer-head` 到达时，buffer manager 只更新 metadata / planner 输入
+- `cursor` 变化也只更新 metadata
+- **buffer manager 不得因为 head/cursor-only 更新直接触发正文 repaint**
 
 ### 2.1 本地 buffer 真相
 - 本地维护一个 sliding buffer，客户端默认/最大保留 **1000 行**
@@ -184,6 +201,16 @@ renderer 只看两件事：
 1. `buffer head`：内容池最新底部
 2. `renderBottomIndex`：当前要显示窗口的底部
 3. `visible range`：当前要画的 absolute rows
+
+额外门禁：
+- renderer body repaint 只允许来自 `buffer-sync apply`
+- head metadata / cursor metadata 可以被 renderer 读取
+- 但 head/cursor metadata 不得作为正文 repaint 触发源
+
+### 3.1 block/shade glyph 真相
+- `U+2580..U+259F`（block / shade / quadrant）不能按普通文本 glyph 渲染；这类字符在 TUI/tmux 里经常承担“背景块/色块”语义。
+- renderer 必须按 `fg/bg` 生成 fill/gradient/pattern；若直接渲成普通字形，现场会表现成“红绿背景变灰”。
+- Android/WebView 不应依赖 `color-mix(...)` 渲染 `░▒▓`；应在 JS 侧直接算出最终 RGB，否则现场可能退成灰/透明。
 
 它不关心：
 - transport

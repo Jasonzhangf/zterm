@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTraversalPlan } from './config';
 
 describe('buildTraversalPlan', () => {
-  it('orders direct paths as tailscale -> ipv6 -> ipv4 -> rtc', () => {
+  it('orders auto paths as tailscale -> ipv6 -> ipv4 -> relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -20,6 +20,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: 'alice',
         turnCredential: 'secret',
         transportMode: 'auto',
+        traversalRelay: undefined,
       },
     );
 
@@ -27,7 +28,7 @@ describe('buildTraversalPlan', () => {
       'tailscale',
       'ipv6',
       'ipv4',
-      'rtc-direct',
+      'rtc-relay',
     ]);
   });
 
@@ -44,6 +45,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: 'alice',
         turnCredential: 'secret',
         transportMode: 'auto',
+        traversalRelay: undefined,
       },
       'ws://127.0.0.1:3333/ws',
     );
@@ -68,6 +70,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: 'alice',
         turnCredential: 'secret',
         transportMode: 'websocket',
+        traversalRelay: undefined,
       },
     );
 
@@ -88,6 +91,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'websocket',
+        traversalRelay: undefined,
       },
     );
 
@@ -113,7 +117,88 @@ describe('buildTraversalPlan', () => {
           turnUsername: 'alice',
           turnCredential: 'secret',
           transportMode: 'webrtc',
+          traversalRelay: undefined,
         },
       )).toThrow('WebRTC mode requires explicit signalUrl and TURN configuration');
+  });
+
+  it('prefers relay control-plane ws client url and injects hostId for rtc relay mode', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        authToken: 'token-a',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'webrtc',
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'webrtc',
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      kind: 'rtc',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      iceServers: [{
+        urls: 'turn:claw.codewhisper.cc:3479?transport=udp',
+        username: 'ztermturn',
+        credential: 'turn-pass',
+      }],
+    }));
+  });
+
+  it('fails fast in webrtc relay mode when no relay daemon device is selected', () => {
+    expect(() =>
+      buildTraversalPlan(
+        {
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          authToken: 'token-a',
+          transportMode: 'webrtc',
+        },
+        {
+          signalUrl: '',
+          turnServerUrl: '',
+          turnUsername: '',
+          turnCredential: '',
+          transportMode: 'webrtc',
+          traversalRelay: {
+            relayBaseUrl: 'http://159.75.134.56/relay/',
+            accessToken: 'access-1',
+            userId: 'user-1',
+            username: 'jason',
+            deviceId: 'tablet-1',
+            deviceName: 'Jason Tablet',
+            platform: 'android',
+            wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+            wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+            wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+            turnUrl: 'turn:154.40.36.9:3479?transport=udp',
+            turnUsername: 'ztermturn',
+            turnCredential: 'turn-pass',
+            updatedAt: 1,
+          },
+        },
+      )).toThrow('WebRTC relay mode requires selecting an online relay daemon device');
   });
 });

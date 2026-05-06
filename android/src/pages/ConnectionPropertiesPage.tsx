@@ -5,14 +5,17 @@ import { AuthSection } from '../components/connection-form/AuthSection';
 import { ConnectionSection } from '../components/connection-form/ConnectionSection';
 import { ConnectionSectionFields } from '../components/connection-form/ConnectionSectionFields';
 import { GeneralSection } from '../components/connection-form/GeneralSection';
+import { RelayDevicePicker } from '../components/connection-form/RelayDevicePicker';
 import { RemoteAccessSection } from '../components/connection-form/RemoteAccessSection';
 import { TerminalSection } from '../components/connection-form/TerminalSection';
+import { useTraversalRelayDaemonDevices } from '../hooks/useTraversalRelayDaemonDevices';
 import type { BridgeSettings } from '../lib/bridge-settings';
-import { getDefaultBridgeServer } from '../lib/bridge-settings';
+import { describeBridgePresetIdentity, getDefaultBridgeServer, resolveBridgePresetDaemonHostId } from '../lib/bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
+import { buildDaemonMappedBridgeTarget, findBridgePresetForDaemonHostId } from '../lib/session-picker';
 import { fetchTmuxSessions } from '../lib/tmux-sessions';
-import type { Host } from '../lib/types';
+import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
 
 interface ConnectionPropertiesPageProps {
   host?: Host;
@@ -31,12 +34,14 @@ function buildInitialState(
     name: host?.name || draft?.name || '',
     bridgeHost: host?.bridgeHost || draft?.bridgeHost || bridgeSettings.targetHost || '',
     bridgePort: host?.bridgePort || draft?.bridgePort || bridgeSettings.targetPort || DEFAULT_BRIDGE_PORT,
+    daemonHostId: host?.daemonHostId || draft?.daemonHostId || host?.relayHostId || draft?.relayHostId || '',
     sessionName: host?.sessionName || draft?.sessionName || '',
     authToken: host?.authToken || draft?.authToken || bridgeSettings.targetAuthToken || '',
+    relayHostId: host?.relayHostId || draft?.relayHostId || '',
+    relayDeviceId: host?.relayDeviceId || draft?.relayDeviceId || '',
     tailscaleHost: host?.tailscaleHost || draft?.tailscaleHost || '',
     ipv6Host: host?.ipv6Host || draft?.ipv6Host || '',
     ipv4Host: host?.ipv4Host || draft?.ipv4Host || '',
-    signalUrl: host?.signalUrl || draft?.signalUrl || bridgeSettings.signalUrl || '',
     transportMode: (host?.transportMode || draft?.transportMode || bridgeSettings.transportMode || 'auto') as 'auto' | 'websocket' | 'webrtc',
     authType: (host?.authType || draft?.authType || 'password') as 'password' | 'key',
     password: host?.password || draft?.password || '',
@@ -53,6 +58,10 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [sessionDiscoveryState, setSessionDiscoveryState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [sessionDiscoveryError, setSessionDiscoveryError] = useState('');
+  const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
+    Boolean(bridgeSettings.traversalRelay?.accessToken),
+  );
+  const daemonFirst = Boolean(bridgeSettings.traversalRelay?.accessToken) && relayDevices.length > 0;
 
   useEffect(() => {
     setForm(buildInitialState(host, draft, bridgeSettings));
@@ -60,16 +69,50 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     setAvailableSessions([]);
     setSessionDiscoveryState('idle');
     setSessionDiscoveryError('');
-  }, [host, draft, bridgeSettings]);
+    refreshRelayDevices();
+  }, [host, draft, bridgeSettings, refreshRelayDevices]);
 
   useEffect(() => {
     setAvailableSessions([]);
     setSessionDiscoveryState('idle');
     setSessionDiscoveryError('');
-  }, [form.bridgeHost, form.bridgePort, form.authToken]);
+  }, [form.bridgeHost, form.bridgePort, form.authToken, form.daemonHostId, form.relayHostId, form.relayDeviceId]);
 
   const pageTitle = useMemo(() => (host ? 'Edit Connection' : 'New Connection'), [host]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
+  const selectedDaemonHostId = (form.daemonHostId || form.relayHostId).trim();
+  const daemonBoundServer = useMemo(
+    () => findBridgePresetForDaemonHostId(bridgeSettings.servers, selectedDaemonHostId),
+    [bridgeSettings.servers, selectedDaemonHostId],
+  );
+
+  const applyDaemonSelection = (device: TraversalRelayDeviceSnapshot) => {
+    const mappedTarget = buildDaemonMappedBridgeTarget(bridgeSettings.servers, {
+      daemonHostId: device.daemon.hostId,
+      relayDeviceId: device.deviceId,
+    });
+    setForm((current) => ({
+      ...current,
+      daemonHostId: device.daemon.hostId.trim(),
+      relayHostId: device.daemon.hostId.trim(),
+      relayDeviceId: device.deviceId.trim(),
+      bridgeHost: mappedTarget?.bridgeHost || '',
+      bridgePort: mappedTarget?.bridgePort || DEFAULT_BRIDGE_PORT,
+      authToken: mappedTarget?.authToken || '',
+    }));
+  };
+
+  const clearDaemonSelection = () => {
+    setForm((current) => ({
+      ...current,
+      daemonHostId: '',
+      relayHostId: '',
+      relayDeviceId: '',
+      bridgeHost: '',
+      bridgePort: DEFAULT_BRIDGE_PORT,
+      authToken: '',
+    }));
+  };
 
   const handleAddTag = () => {
     const nextTag = tagInput.trim();
@@ -93,8 +136,31 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   };
 
   const handleSave = () => {
-    if (!form.name.trim() || !form.bridgeHost.trim()) {
-      alert('请填写必填字段：名称、bridge 主机地址');
+    if (!form.name.trim()) {
+      alert('请填写必填字段：名称');
+      return;
+    }
+
+    if (daemonFirst) {
+      if (!selectedDaemonHostId) {
+        alert('请先选择一个在线 daemon 设备');
+        return;
+      }
+      if (!daemonBoundServer || !form.bridgeHost.trim() || !form.authToken.trim()) {
+        alert('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
+        return;
+      }
+    } else if (!form.bridgeHost.trim()) {
+      alert('请填写必填字段：bridge 主机地址');
+      return;
+    }
+
+    if (
+      form.transportMode === 'webrtc'
+      && bridgeSettings.traversalRelay?.accessToken
+      && !form.relayHostId.trim()
+    ) {
+      alert('RTC First 模式下请先选择一个在线的 Relay Daemon 设备');
       return;
     }
 
@@ -108,12 +174,14 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
         bridgeHost: form.bridgeHost.trim(),
         bridgePort: form.bridgePort,
       }),
+      daemonHostId: form.daemonHostId.trim() || form.relayHostId.trim(),
       sessionName: form.sessionName.trim(),
       authToken: form.authToken.trim(),
+      relayHostId: form.relayHostId.trim(),
+      relayDeviceId: form.relayDeviceId.trim(),
       tailscaleHost: form.tailscaleHost.trim(),
       ipv6Host: form.ipv6Host.trim(),
       ipv4Host: form.ipv4Host.trim(),
-      signalUrl: form.signalUrl.trim(),
       transportMode: form.transportMode,
       authType: form.authType,
       password: form.authType === 'password' ? form.password : undefined,
@@ -126,20 +194,45 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   };
 
   const handleDiscoverSessions = async () => {
+    if (daemonFirst && !selectedDaemonHostId) {
+      setAvailableSessions([]);
+      setSessionDiscoveryState('idle');
+      setSessionDiscoveryError('先选择一个在线 daemon，再点击 Connect。');
+      return;
+    }
+
+    if (daemonFirst && (!daemonBoundServer || !form.bridgeHost.trim() || !form.authToken.trim())) {
+      setAvailableSessions([]);
+      setSessionDiscoveryState('idle');
+      setSessionDiscoveryError('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
+      return;
+    }
+
     const bridgeHost = form.bridgeHost.trim();
     const authToken = form.authToken.trim();
 
     if (!bridgeHost) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError('先填写 bridge host，再点击 Connect。');
+      setSessionDiscoveryError(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先填写 bridge host，再点击 Connect。');
       return;
     }
 
     if (!authToken) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError('先填写 auth token，再点击 Connect。');
+      setSessionDiscoveryError(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先填写 auth token，再点击 Connect。');
+      return;
+    }
+
+    if (
+      form.transportMode === 'webrtc'
+      && bridgeSettings.traversalRelay?.accessToken
+      && !form.relayHostId.trim()
+    ) {
+      setAvailableSessions([]);
+      setSessionDiscoveryState('idle');
+      setSessionDiscoveryError('RTC First 模式下请先在 Relay Daemon 区选择一个在线设备。');
       return;
     }
 
@@ -150,11 +243,13 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
         {
           bridgeHost,
           bridgePort: form.bridgePort,
+          daemonHostId: form.daemonHostId,
           authToken: form.authToken,
+          relayHostId: form.relayHostId,
+          relayDeviceId: form.relayDeviceId,
           tailscaleHost: form.tailscaleHost,
           ipv6Host: form.ipv6Host,
           ipv4Host: form.ipv4Host,
-          signalUrl: form.signalUrl,
           transportMode: form.transportMode,
         },
         bridgeSettings,
@@ -255,18 +350,20 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           onSessionNameChange={(sessionName) => setForm((current) => ({ ...current, sessionName }))}
         />
 
-        {bridgeSettings.servers.length > 0 && (
+        {!daemonFirst && bridgeSettings.servers.length > 0 && (
           <ConnectionSection
             title="Remembered Servers"
             description={
               defaultServer
-                ? `Saved server list. Default server: ${defaultServer.name} (${defaultServer.targetHost}:${defaultServer.targetPort}).`
-                : 'Saved server list. Tap one to fill bridge host and port.'
+                ? `Saved bridge entrypoints. Default: ${defaultServer.name}${resolveBridgePresetDaemonHostId(defaultServer) ? ` · daemon ${resolveBridgePresetDaemonHostId(defaultServer)}` : ''} (${defaultServer.targetHost}:${defaultServer.targetPort}).`
+                : 'Saved bridge entrypoints. Tap one to fill bridge host and port.'
             }
           >
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
               {bridgeSettings.servers.map((server) => {
                 const active = server.targetHost === form.bridgeHost && server.targetPort === form.bridgePort;
+                const daemonHostId = resolveBridgePresetDaemonHostId(server);
+                const identity = describeBridgePresetIdentity(server);
                 return (
                   <button
                     key={server.id}
@@ -275,7 +372,10 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
                         ...current,
                         bridgeHost: server.targetHost,
                         bridgePort: server.targetPort,
+                        daemonHostId: daemonHostId || current.daemonHostId,
                         authToken: server.authToken || current.authToken,
+                        relayHostId: daemonHostId || current.relayHostId,
+                        relayDeviceId: server.relayDeviceId || current.relayDeviceId,
                       }))
                     }
                     style={{
@@ -289,7 +389,10 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
                     }}
                   >
                     <div style={{ fontWeight: 800 }}>{server.name}</div>
-                    <div style={{ fontSize: '12px', opacity: 0.8 }}>{server.targetHost}:{server.targetPort}</div>
+                    <div style={{ fontSize: '12px', opacity: 0.8 }}>{identity.bridgeLabel}</div>
+                    {daemonHostId ? (
+                      <div style={{ fontSize: '11px', opacity: 0.74 }}>{identity.daemonLabel}</div>
+                    ) : null}
                   </button>
                 );
               })}
@@ -297,32 +400,79 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           </ConnectionSection>
         )}
 
-        <ConnectionSectionFields
-          bridgeHost={form.bridgeHost}
-          onBridgeHostChange={handleBridgeHostChange}
-          bridgePort={form.bridgePort}
-          onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
-          authToken={form.authToken}
-          onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
-        />
+        {!daemonFirst ? (
+          <ConnectionSectionFields
+            bridgeHost={form.bridgeHost}
+            onBridgeHostChange={handleBridgeHostChange}
+            bridgePort={form.bridgePort}
+            onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
+            authToken={form.authToken}
+            onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
+          />
+        ) : (
+          <ConnectionSection
+            title="Daemon Bridge Binding"
+            description="relay 已登录时，连接配置以 daemon 为一级真相。bridge/ws/turn/signal 对用户透明，这里只展示当前 daemon 绑定到的 bridge preset。"
+          >
+            {selectedDaemonHostId ? (
+              daemonBoundServer ? (
+                <div
+                  style={{
+                    borderRadius: '18px',
+                    backgroundColor: '#ffffff',
+                    padding: '14px 16px',
+                    display: 'grid',
+                    gap: '6px',
+                    boxShadow: mobileTheme.shadow.soft,
+                    fontSize: '12px',
+                    color: mobileTheme.colors.lightMuted,
+                  }}
+                >
+                  <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
+                    当前绑定：{daemonBoundServer.name}
+                  </div>
+                  <div>daemonHostId: {selectedDaemonHostId}</div>
+                  <div>bridgeHost: {daemonBoundServer.targetHost}</div>
+                  <div>bridgePort: {daemonBoundServer.targetPort}</div>
+                  <div>authToken: {daemonBoundServer.authToken?.trim() ? '已绑定' : '未绑定'}</div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '13px', color: mobileTheme.colors.danger, lineHeight: 1.6 }}>
+                  当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。
+                </div>
+              )
+            ) : (
+              <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
+                先在下方选择一个在线 daemon，随后这里会自动显示它绑定的 bridge preset。
+              </div>
+            )}
+          </ConnectionSection>
+        )}
 
         <RemoteAccessSection
           transportMode={form.transportMode}
           onTransportModeChange={(transportMode) => setForm((current) => ({ ...current, transportMode }))}
+          relayBound={Boolean(bridgeSettings.traversalRelay?.accessToken)}
           tailscaleHost={form.tailscaleHost}
           onTailscaleHostChange={(tailscaleHost) => setForm((current) => ({ ...current, tailscaleHost }))}
           ipv6Host={form.ipv6Host}
           onIpv6HostChange={(ipv6Host) => setForm((current) => ({ ...current, ipv6Host }))}
           ipv4Host={form.ipv4Host}
           onIpv4HostChange={(ipv4Host) => setForm((current) => ({ ...current, ipv4Host }))}
-          signalUrl={form.signalUrl}
-          onSignalUrlChange={(signalUrl) => setForm((current) => ({ ...current, signalUrl }))}
-          defaults={bridgeSettings}
+        />
+
+        <RelayDevicePicker
+          relayEnabled={Boolean(bridgeSettings.traversalRelay?.accessToken)}
+          devices={relayDevices}
+          selectedRelayHostId={form.relayHostId}
+          selectedRelayDeviceId={form.relayDeviceId}
+          onSelect={applyDaemonSelection}
+          onClear={clearDaemonSelection}
         />
 
         <ConnectionSection
           title="Detected Tmux Sessions"
-          description="填写好 host + token 后，显式点 Connect / Refresh 才会拉 tmux session。"
+          description={daemonFirst ? '先选 daemon，再显式 Connect / Refresh 拉这个 daemon 下的 tmux session。' : '填写好 host + token 后，显式点 Connect / Refresh 才会拉 tmux session。'}
         >
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
             <button
@@ -343,7 +493,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
             </button>
           </div>
           <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
-            {sessionDiscoveryState === 'idle' && (sessionDiscoveryError || 'Fill bridge host + token, then tap Connect.')}
+            {sessionDiscoveryState === 'idle' && (sessionDiscoveryError || (daemonFirst ? 'Select daemon, then tap Connect.' : 'Fill bridge host + token, then tap Connect.'))}
             {sessionDiscoveryState === 'loading' && 'Loading tmux sessions...'}
             {sessionDiscoveryState === 'error' && `Failed to load tmux sessions: ${sessionDiscoveryError}`}
             {sessionDiscoveryState === 'done' && availableSessions.length === 0 && 'No existing tmux session on this server yet.'}

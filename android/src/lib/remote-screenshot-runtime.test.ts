@@ -137,6 +137,37 @@ describe('remote screenshot runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
+  it('fails explicitly when any screenshot chunk cannot be base64-decoded', async () => {
+    const runtime = createRemoteScreenshotRuntime({
+      now: () => 321,
+    });
+    const sent: any[] = [];
+
+    const promise = runtime.request('session-1', {
+      ws: createMockSocket(),
+      sendSocketPayload: (_sessionId, _ws, data) => {
+        sent.push(JSON.parse(String(data)));
+      },
+    });
+
+    const requestId = sent[0]?.payload?.requestId;
+    runtime.handleChunk({
+      requestId,
+      chunkIndex: 0,
+      totalChunks: 1,
+      fileName: 'broken-shot.png',
+      dataBase64: '***not-base64***',
+    } satisfies FileDownloadChunkPayload);
+    runtime.handleComplete({
+      requestId,
+      fileName: 'broken-shot.png',
+      totalBytes: 3,
+    } satisfies FileDownloadCompletePayload);
+
+    await expect(promise).rejects.toThrow('Remote screenshot chunk 0 decode failed');
+    expect(runtime.getPendingCount()).toBe(0);
+  });
+
   it('cleans pending request immediately when sendSocketPayload throws', async () => {
     const clearTimeoutFn = vi.fn();
     const runtime = createRemoteScreenshotRuntime({

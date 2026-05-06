@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
+import { encodePackedTruecolorColor } from '@zterm/shared/terminal/color';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 
 function rowGlyphText(cells: { char: number; width: number }[]) {
@@ -73,7 +74,7 @@ describe('canonicalizeCapturedMirrorLines', () => {
     ]);
   });
 
-  it('normalizes colon-style extended background colors before parser canonicalization', async () => {
+  it('preserves colon-style extended truecolor backgrounds as packed rgb truth before parser canonicalization', async () => {
     const bridge = await WasmBridge.load();
     const rows = await canonicalizeCapturedMirrorLines(
       [
@@ -85,16 +86,89 @@ describe('canonicalizeCapturedMirrorLines', () => {
     );
 
     expect(rows[0]?.slice(0, 3)).toEqual([
-      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
-      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
-      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: 196, width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(255, 0, 0), width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(255, 0, 0), width: 1 }),
+      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(255, 0, 0), width: 1 }),
     ]);
     expect(rows[1]?.slice(0, 5)).toEqual([
-      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
-      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
-      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
-      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
-      expect.objectContaining({ char: 'N'.codePointAt(0), fg: 256, bg: 46, width: 1 }),
+      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(0, 255, 0), width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(0, 255, 0), width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(0, 255, 0), width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(0, 255, 0), width: 1 }),
+      expect.objectContaining({ char: 'N'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(0, 255, 0), width: 1 }),
+    ]);
+  });
+
+  it('preserves semicolon-style truecolor backgrounds as packed rgb truth instead of collapsing them to grayscale indices', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48;2;120;80;80mDR\u001b[0m',
+        '\u001b[48;2;80;120;80mDG\u001b[0m',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 2)).toEqual([
+      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(120, 80, 80), width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(120, 80, 80), width: 1 }),
+    ]);
+    expect(rows[1]?.slice(0, 2)).toEqual([
+      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(80, 120, 80), width: 1 }),
+      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(80, 120, 80), width: 1 }),
+    ]);
+  });
+
+  it('preserves colon-style truecolor backgrounds as packed rgb truth instead of collapsing them to grayscale indices', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48:2::120:80:80mCR\u001b[0m',
+        '\u001b[48:2::80:120:80mCG\u001b[0m',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 2)).toEqual([
+      expect.objectContaining({ char: 'C'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(120, 80, 80), width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(120, 80, 80), width: 1 }),
+    ]);
+    expect(rows[1]?.slice(0, 2)).toEqual([
+      expect.objectContaining({ char: 'C'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(80, 120, 80), width: 1 }),
+      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: encodePackedTruecolorColor(80, 120, 80), width: 1 }),
+    ]);
+  });
+
+  it('normalizes colon-style 256-color background tokens without dropping bg indices to default sentinel', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48:5:22mGREEN256\u001b[0m',
+        '\u001b[48:5:52mRED256\u001b[0m',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 8)).toEqual([
+      expect.objectContaining({ char: 'G'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: 'N'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: '2'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: '5'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+      expect.objectContaining({ char: '6'.codePointAt(0), fg: 256, bg: 22, width: 1 }),
+    ]);
+    expect(rows[1]?.slice(0, 6)).toEqual([
+      expect.objectContaining({ char: 'R'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
+      expect.objectContaining({ char: 'E'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
+      expect.objectContaining({ char: 'D'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
+      expect.objectContaining({ char: '2'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
+      expect.objectContaining({ char: '5'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
+      expect.objectContaining({ char: '6'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
     ]);
   });
 });

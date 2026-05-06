@@ -23,6 +23,7 @@ export interface TerminalRefreshCadence {
   headTickMs: number;
   minTailRefreshGapMs: number;
   headStalePingMs: number;
+  pullRequestStaleMs: number;
   readingSyncDelayMs: number;
 }
 
@@ -58,6 +59,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
       headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
       minTailRefreshGapMs: 120,
       headStalePingMs: 520,
+      pullRequestStaleMs: 2200,
       readingSyncDelayMs: 72,
     };
   }
@@ -67,6 +69,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
       headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
       minTailRefreshGapMs: 66,
       headStalePingMs: 320,
+      pullRequestStaleMs: 1800,
       readingSyncDelayMs: 48,
     };
   }
@@ -75,6 +78,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
     headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
     minTailRefreshGapMs: ACTIVE_HEAD_REFRESH_TICK_MS,
     headStalePingMs: 200,
+    pullRequestStaleMs: 1500,
     readingSyncDelayMs: 24,
   };
 }

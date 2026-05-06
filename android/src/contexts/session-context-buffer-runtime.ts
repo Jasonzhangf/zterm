@@ -3,6 +3,7 @@ import {
   createSessionBufferState,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
+import { summarizeSessionBufferForDebug } from '../lib/terminal-buffer-debug';
 import type {
   ClientMessage,
   Session,
@@ -52,13 +53,14 @@ export function handleBufferHeadRuntime(options: {
   availableStartIndex?: number;
   availableEndIndex?: number;
   cursor?: TerminalCursorState | null;
+  cursorKeysApp?: boolean;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
-    sessionBufferStoreRef: MutableRefObject<{ setBuffer: (sessionId: string, buffer: SessionBufferState) => void }>;
+    sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -118,19 +120,23 @@ export function handleBufferHeadRuntime(options: {
 
   const normalizedCursor = normalizeTerminalCursorState(options.cursor);
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
+  const normalizedCursorKeysApp = typeof options.cursorKeysApp === 'boolean'
+    ? options.cursorKeysApp
+    : localBuffer.cursorKeysApp;
   const cursorChanged = (
     (localBuffer.cursor?.rowIndex ?? null) !== (normalizedCursor?.rowIndex ?? null)
     || (localBuffer.cursor?.col ?? null) !== (normalizedCursor?.col ?? null)
     || (localBuffer.cursor?.visible ?? null) !== (normalizedCursor?.visible ?? null)
   );
-  if (cursorChanged) {
+  const cursorKeysAppChanged = localBuffer.cursorKeysApp !== normalizedCursorKeysApp;
+  if (cursorChanged || cursorKeysAppChanged) {
     const nextBuffer = {
       ...localBuffer,
+      cursorKeysApp: normalizedCursorKeysApp,
       cursor: normalizedCursor,
     };
     const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
     if (changed) {
-      options.scheduleSessionRenderCommit(options.sessionId);
       session = {
         ...session,
         buffer: nextBuffer,
@@ -138,18 +144,16 @@ export function handleBufferHeadRuntime(options: {
     }
   }
 
-  const headChanged = options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
+  options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
     daemonHeadRevision: options.latestRevision,
     daemonHeadEndIndex: options.latestEndIndex,
   });
-  if (headChanged) {
-    options.scheduleSessionRenderCommit(options.sessionId);
-  }
   const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
 
   const plannerBuffer = cursorChanged
     ? {
         ...localBuffer,
+        cursorKeysApp: normalizedCursorKeysApp,
         cursor: normalizedCursor,
       }
     : localBuffer;
@@ -183,6 +187,7 @@ export function handleBufferHeadRuntime(options: {
     availableStartIndex: liveHead?.availableStartIndex ?? null,
     availableEndIndex: liveHead?.availableEndIndex ?? null,
     cursor: normalizedCursor,
+    cursorKeysApp: normalizedCursorKeysApp,
     localRevision,
     localEndIndex,
     localWindowInvalid,
@@ -279,6 +284,7 @@ export function requestSessionBufferSyncRuntime(options: {
     },
   ) => void;
   runtimeDebug: RuntimeDebugFn;
+  resolveTerminalRefreshCadence: () => { pullRequestStaleMs: number };
 }) {
   const session = options.requestOptions?.sessionOverride
     || options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId)
@@ -320,6 +326,20 @@ export function requestSessionBufferSyncRuntime(options: {
   );
   const inFlightPull = (options.refs.sessionPullStateRef.current.get(options.sessionId) || null)?.[requestPurpose] || null;
   if (inFlightPull) {
+    const cadence = options.resolveTerminalRefreshCadence();
+    const pullAgeMs = Math.max(0, Date.now() - Math.max(0, Math.floor(inFlightPull.startedAt || 0)));
+    if (pullAgeMs >= cadence.pullRequestStaleMs) {
+      options.runtimeDebug('session.buffer.pull.stale-expire', {
+        sessionId: options.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        reason: options.requestOptions?.reason || null,
+        purpose: requestPurpose,
+        pullAgeMs,
+        thresholdMs: cadence.pullRequestStaleMs,
+        stalePull: inFlightPull,
+      });
+      options.clearSessionPullState(options.sessionId, requestPurpose);
+    } else {
     const authoritativeHeadKnown = Boolean(
       (options.requestOptions?.liveHead && Number.isFinite(options.requestOptions.liveHead.latestEndIndex))
       || Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)) > 0
@@ -353,6 +373,7 @@ export function requestSessionBufferSyncRuntime(options: {
       },
     });
     options.clearSessionPullState(options.sessionId, requestPurpose);
+    }
   }
 
   options.runtimeDebug('session.buffer.request', {
@@ -520,6 +541,14 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.payload,
     options.resolveSessionCacheLines(options.payload.rows || nextBuffer.rows),
   );
+
+  options.runtimeDebug('session.buffer.apply.inspect', {
+    sessionId: options.sessionId,
+    activeSessionId: options.refs.stateRef.current.activeSessionId,
+    incoming: options.summarizeBufferPayload(options.payload),
+    localBuffer: summarizeSessionBufferForDebug(localBuffer),
+    nextBuffer: summarizeSessionBufferForDebug(nextBuffer),
+  });
 
   if (revisionResetExpectation && nextBuffer.revision >= 0) {
     options.refs.sessionRevisionResetRef.current.delete(options.sessionId);

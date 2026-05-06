@@ -103,6 +103,7 @@ export function createSessionRuntime(options: {
     stateRef: MutableRefObject<SessionLikeState>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
+      commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
       setBuffer: (sessionId: string, buffer: SessionBufferState) => void;
     }>;
     sessionHeadStoreRef: MutableRefObject<{
@@ -190,6 +191,7 @@ export function createSessionRuntime(options: {
     connectionName: options.host.name,
     bridgeHost: options.host.bridgeHost,
     bridgePort: options.host.bridgePort,
+    daemonHostId: options.host.daemonHostId || options.host.relayHostId,
     sessionName: resolvedSessionName,
     authToken: options.host.authToken,
     autoCommand: options.host.autoCommand,
@@ -210,7 +212,7 @@ export function createSessionRuntime(options: {
     createdAt: options.createOptions?.createdAt || Date.now(),
   };
 
-  options.refs.sessionBufferStoreRef.current.setBuffer(sessionId, session.buffer);
+  options.refs.sessionBufferStoreRef.current.commitBuffer(sessionId, session.buffer);
   options.refs.sessionHeadStoreRef.current.setHead(sessionId, {
     daemonHeadRevision: session.daemonHeadRevision || 0,
     daemonHeadEndIndex: session.daemonHeadEndIndex || 0,

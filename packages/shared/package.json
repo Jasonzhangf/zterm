@@ -10,6 +10,8 @@
     "./protocol": "./src/connection/protocol.ts",
     "./mobile-config": "./src/connection/mobile-config.ts",
     "./schedule-types": "./src/schedule/types.ts",
+    "./terminal/color": "./src/terminal/color.ts",
+    "./terminal/theme": "./src/terminal/theme.ts",
     "./react/terminal-view": "./src/react/terminal-view.tsx"
   },
   "peerDependencies": {

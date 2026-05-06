@@ -54,10 +54,16 @@ export function clearTailRefreshRuntime(options: {
   sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
   sessionRevisionResetRef: MutableRefObject<Map<string, { revision: number; latestEndIndex: number; seenAt: number }>>;
   lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+  pendingInputTailRefreshRef?: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
+  pendingConnectTailRefreshRef?: MutableRefObject<Set<string>>;
+  pendingResumeTailRefreshRef?: MutableRefObject<Set<string>>;
 }) {
   options.sessionBufferHeadsRef.current.delete(options.sessionId);
   options.sessionRevisionResetRef.current.delete(options.sessionId);
   options.lastHeadRequestAtRef.current.delete(options.sessionId);
+  options.pendingInputTailRefreshRef?.current.delete(options.sessionId);
+  options.pendingConnectTailRefreshRef?.current.delete(options.sessionId);
+  options.pendingResumeTailRefreshRef?.current.delete(options.sessionId);
 }
 
 export function startSocketHeartbeat(options: {

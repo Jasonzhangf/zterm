@@ -6,6 +6,8 @@ import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
 
+const fetchTmuxSessionsMock = vi.fn();
+
 class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -279,6 +281,10 @@ vi.mock('./hooks/useAppUpdate', () => ({
   }),
 }));
 
+vi.mock('./lib/tmux-sessions', () => ({
+  fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+}));
+
 vi.mock('./components/tmux/TmuxSessionPickerSheet', () => ({
   TmuxSessionPickerSheet: () => null,
 }));
@@ -345,6 +351,8 @@ describe('App Android IME input closed loop', () => {
     MockWebSocket.reset();
     ResizeObserverMock.reset();
     imeListeners.clear();
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValue(['zterm_mirror_lab']);
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
     globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
@@ -405,7 +413,7 @@ describe('App Android IME input closed loop', () => {
       },
     ]));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
     const view = render(<App />);
 
@@ -508,7 +516,7 @@ describe('App Android IME input closed loop', () => {
       },
     ]));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
     const view = render(<App />);
 

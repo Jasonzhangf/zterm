@@ -4,7 +4,7 @@ import type { BridgeTarget } from './tmux-sessions';
 
 export interface BridgeConnectionHandlers {
   onOpen?: () => void;
-  onConnected?: (payload: { sessionId: string }) => void;
+  onConnected?: (payload: { sessionId: string; daemonHostId?: string }) => void;
   onError?: (message: string, code?: string) => void;
   onTitle?: (title: string) => void;
   onClosed?: (reason: string) => void;

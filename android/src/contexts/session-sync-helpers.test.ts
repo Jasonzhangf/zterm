@@ -134,7 +134,24 @@ describe('session sync helper refresh planner', () => {
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
   });
 
-  it('requests head for a live non-focused pane target', () => {
+  it('lets daemon own normal live refresh when active tick sees an already-open transport', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'reconnecting',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'skip',
+      reason: 'tick-live-refresh-owned-by-daemon',
+    });
+  });
+
+  it('does not request head for a live non-focused pane target during active tick once daemon owns live refresh', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -146,9 +163,59 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
+      action: 'skip',
+      reason: 'tick-live-refresh-owned-by-daemon',
+    });
+  });
+
+
+  it('still requests head during active tick while the session is connecting', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
       action: 'request-head',
       resetPullBookkeeping: false,
     });
+  });
+
+  it('keeps active tick on daemon-owned live refresh path so caller can inject low-frequency head probe', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'skip',
+      reason: 'tick-live-refresh-owned-by-daemon',
+    });
+  });
+
+  it('does not let a stale pending transport-open intent block reconnect forever', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: null,
+      reconnectInFlight: false,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-reentry',
+    })).toEqual({ action: 'reconnect' });
   });
 });
 
@@ -333,6 +400,16 @@ describe('session sync helper session connection config truth', () => {
       state: 'connected',
       reconnectAttempt: 0,
       lastError: undefined,
+    });
+  });
+
+  it('preserves existing daemon identity by not emitting daemonHostId when connected payload omits it', () => {
+    expect(buildSessionConnectedUpdates()).not.toHaveProperty('daemonHostId');
+    expect(buildSessionConnectedUpdates({ daemonHostId: 'daemon-host-1' })).toEqual({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+      daemonHostId: 'daemon-host-1',
     });
   });
 
@@ -674,6 +751,40 @@ describe('session sync helper visible-range truth', () => {
     });
   });
 
+  it('clamps tail-refresh request window to daemon authoritative head end', () => {
+    const session = makeSession({
+      daemonHeadRevision: 13822,
+      daemonHeadEndIndex: 136539,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 135484,
+        endIndex: 136484,
+        revision: 13822,
+        rows: 30,
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      { startIndex: 136454, endIndex: 136539, viewportRows: 30 },
+      {
+        purpose: 'tail-refresh',
+        liveHead: {
+          revision: 13822,
+          latestEndIndex: 136484,
+          availableStartIndex: 133484,
+          availableEndIndex: 136484,
+          seenAt: 1,
+        },
+      },
+    )).toMatchObject({
+      knownRevision: 13822,
+      localStartIndex: 135484,
+      localEndIndex: 136484,
+      requestStartIndex: 136484,
+      requestEndIndex: 136484,
+    });
+  });
+
   it('compares visible ranges by absolute range instead of renderer mode', () => {
     expect(visibleRangeStatesEqual(
       { startIndex: 56, endIndex: 80, viewportRows: 24 },
@@ -692,8 +803,7 @@ describe('session sync helper managed session reuse truth', () => {
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
       sessionName: 'tmux-a',
-      authToken: 'token-1',
-    })).toBe('100.127.23.27::3333::tmux-a::token-1');
+    })).toBe('bridge:100.127.23.27::3333::session:tmux-a');
   });
 
   it('prefers active/connected managed session when multiple candidates match', () => {

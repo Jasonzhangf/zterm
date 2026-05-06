@@ -20,6 +20,7 @@ import {
   getSessionRenderBufferSnapshotRuntime,
   hasPendingSessionTransportOpenRuntime,
   incrementConnectedSyncRuntime,
+  isPendingSessionTransportOpenStaleRuntime,
   isReconnectInFlightRuntime,
   isSessionTransportActiveRuntime,
   isSessionTransportActivityStaleInfraRuntime,
@@ -59,6 +60,8 @@ export function createSessionInfraFacadeRuntime(options: {
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
   reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
   pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
+  pendingConnectTailRefreshRef: { current: Set<string> };
+  pendingResumeTailRefreshRef: { current: Set<string> };
   sessionPullStateRef: { current: Map<string, unknown> };
   lastServerActivityAtRef: { current: Map<string, number> };
   staleTransportProbeAtRef: { current: Map<string, number> };
@@ -176,6 +179,13 @@ export function createSessionInfraFacadeRuntime(options: {
 
   const hasPendingSessionTransportOpen = (sessionId: string) => {
     return hasPendingSessionTransportOpenRuntime({
+      sessionId,
+      pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
+    });
+  };
+
+  const isPendingSessionTransportOpenStale = (sessionId: string) => {
+    return isPendingSessionTransportOpenStaleRuntime({
       sessionId,
       pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
     });
@@ -371,6 +381,9 @@ export function createSessionInfraFacadeRuntime(options: {
       sessionBufferHeadsRef: options.sessionBufferHeadsRef,
       sessionRevisionResetRef: options.sessionRevisionResetRef,
       lastHeadRequestAtRef: options.lastHeadRequestAtRef,
+      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
+      pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
+      pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
     });
   };
 
@@ -407,6 +420,7 @@ export function createSessionInfraFacadeRuntime(options: {
     writeSessionTransportToken,
     isSessionTransportActive,
     hasPendingSessionTransportOpen,
+    isPendingSessionTransportOpenStale,
     isReconnectInFlight,
     resolveSessionCacheLines,
     getSessionRenderBufferSnapshot,

@@ -336,6 +336,58 @@ describe('TerminalPage render isolation', () => {
     expect(readRenderCount('terminal-header')).toBe(headerRenderCountBefore);
   });
 
+  it('does not rerender terminal shell when only an inactive tab non-chrome metadata changes', () => {
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const props = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+      onLoadSavedTabList: vi.fn(),
+    };
+    const view = render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    const terminalRenderCountBefore = readRenderCount('terminal-view-s1');
+    const quickBarRenderCountBefore = readRenderCount('terminal-quickbar');
+    const headerRenderCountBefore = readRenderCount('terminal-header');
+
+    const nextInactiveSession = {
+      ...session2,
+      title: 'renamed-hidden-tab',
+      connectionName: 'updated-conn-name',
+      createdAt: 999,
+      authToken: 'new-token',
+      autoCommand: 'echo hidden',
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1, nextInactiveSession]}
+        activeSession={session1}
+        {...props}
+      />
+    );
+
+    expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
+    expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
+    expect(readRenderCount('terminal-header')).toBe(headerRenderCountBefore);
+  });
+
   it('does not rerender terminal shell when only the active tab runtime status changes', () => {
     const session1 = makeSession('s1');
     const props = {

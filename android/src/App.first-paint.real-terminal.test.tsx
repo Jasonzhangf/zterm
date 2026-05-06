@@ -6,6 +6,8 @@ import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
 
+const fetchTmuxSessionsMock = vi.fn();
+
 class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -282,6 +284,10 @@ vi.mock('./hooks/useAppUpdate', () => ({
   }),
 }));
 
+vi.mock('./lib/tmux-sessions', () => ({
+  fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+}));
+
 vi.mock('./components/tmux/TmuxSessionPickerSheet', () => ({
   TmuxSessionPickerSheet: () => null,
 }));
@@ -358,6 +364,13 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     MockWebSocket.reset();
     ResizeObserverMock.reset();
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockImplementation(async (target: { bridgeHost?: string; bridgePort?: number }) => {
+      if (target?.bridgeHost === '127.0.0.1' && target?.bridgePort === 3333) {
+        return ['zterm_mirror_lab', 'zterm_mirror_lab_2'];
+      }
+      return [];
+    });
     globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
@@ -449,7 +462,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
       },
     ]));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
     const view = render(<App />);
 
@@ -514,7 +527,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
       },
     ]));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
     const view = render(<App />);
 
@@ -576,7 +589,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
       },
     ]));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', focusSessionId: 'session-1' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
     const view = render(<App />);
 

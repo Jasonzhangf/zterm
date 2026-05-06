@@ -54,9 +54,27 @@ export function useSessionContextLifecycle(options: {
 }) {
   const ensureActiveSessionFreshRef = useRef(options.ensureActiveSessionFresh);
   const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
+  const previousForegroundActiveRef = useRef(options.appForegroundActive !== false);
 
   useEffect(() => {
-    options.refs.foregroundActiveRef.current = options.appForegroundActive !== false;
+    const nextForegroundActive = options.appForegroundActive !== false;
+    const previousForegroundActive = previousForegroundActiveRef.current;
+    options.refs.foregroundActiveRef.current = nextForegroundActive;
+    previousForegroundActiveRef.current = nextForegroundActive;
+    if (!nextForegroundActive || previousForegroundActive) {
+      return;
+    }
+    const activeSessionId = options.refs.stateRef.current.activeSessionId;
+    if (!activeSessionId) {
+      return;
+    }
+    ensureActiveSessionFreshRef.current({
+      sessionId: activeSessionId,
+      source: 'active-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
+    });
   }, [options.appForegroundActive]);
 
   useEffect(() => {
@@ -137,12 +155,19 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const liveSessionIds = options.refs.stateRef.current.liveSessionIds;
-        if (!Array.isArray(liveSessionIds) || liveSessionIds.length === 0) {
+        const activeSessionId = options.refs.stateRef.current.activeSessionId;
+        const liveSessionIds = Array.isArray(options.refs.stateRef.current.liveSessionIds)
+          ? options.refs.stateRef.current.liveSessionIds
+          : [];
+        const refreshTargets = Array.from(new Set([
+          ...(activeSessionId ? [activeSessionId] : []),
+          ...liveSessionIds,
+        ]));
+        if (refreshTargets.length === 0) {
           scheduleNext();
           return;
         }
-        liveSessionIds.forEach((sessionId) => {
+        refreshTargets.forEach((sessionId) => {
           ensureActiveSessionFreshRef.current({
             sessionId,
             source: 'active-tick',

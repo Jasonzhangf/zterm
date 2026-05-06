@@ -1,37 +1,32 @@
-import type { BridgeSettings } from '../../lib/bridge-settings';
 import { ConnectionSection, FieldLabel, inputStyle, segmentedButtonStyle } from './ConnectionSection';
 
 interface RemoteAccessSectionProps {
   transportMode: 'auto' | 'websocket' | 'webrtc';
   onTransportModeChange: (value: 'auto' | 'websocket' | 'webrtc') => void;
+  relayBound: boolean;
   tailscaleHost: string;
   onTailscaleHostChange: (value: string) => void;
   ipv6Host: string;
   onIpv6HostChange: (value: string) => void;
   ipv4Host: string;
   onIpv4HostChange: (value: string) => void;
-  signalUrl: string;
-  onSignalUrlChange: (value: string) => void;
-  defaults: Pick<BridgeSettings, 'signalUrl'>;
 }
 
 export function RemoteAccessSection({
   transportMode,
   onTransportModeChange,
+  relayBound,
   tailscaleHost,
   onTailscaleHostChange,
   ipv6Host,
   onIpv6HostChange,
   ipv4Host,
   onIpv4HostChange,
-  signalUrl,
-  onSignalUrlChange,
-  defaults,
 }: RemoteAccessSectionProps) {
   return (
     <ConnectionSection
       title="Remote Access"
-      description="直连优先顺序固定为 Tailscale → IPv6 → IPv4；TURN / signaling 只在最后 RTC 链路使用。"
+      description="自动连接顺序固定为 Tailscale → IPv6 → IPv4 → Relay；若已登录 relay，则协议信息自动从控制面下发，对用户透明。"
     >
       <div style={{ display: 'flex', gap: '10px' }}>
         <button type="button" onClick={() => onTransportModeChange('auto')} style={segmentedButtonStyle(transportMode === 'auto')}>
@@ -83,14 +78,10 @@ export function RemoteAccessSection({
         />
       </div>
 
-      <div>
-        <FieldLabel>Signal URL Override</FieldLabel>
-        <input
-          value={signalUrl}
-          onChange={(event) => onSignalUrlChange(event.target.value)}
-          placeholder={defaults.signalUrl || 'wss://signal.example.com/signal'}
-          style={inputStyle()}
-        />
+      <div style={{ marginTop: '-2px', fontSize: '12px', color: '#6b7688', lineHeight: 1.5 }}>
+        {relayBound
+          ? '当前已启用 relay 控制面；signal / TURN / ws 地址自动注入。具体连接哪个 daemon，请在下方 Relay Daemon 区域点选设备。'
+          : '当前未登录 relay；仅使用直连路径。若要使用 TURN 穿透，请先在设置中登录 relay。'}
       </div>
     </ConnectionSection>
   );

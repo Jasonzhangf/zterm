@@ -2,7 +2,7 @@ import type { BridgeSettings } from '../bridge-settings';
 import type { Host } from '../types';
 
 export type TraversalTransportMode = 'auto' | 'websocket' | 'webrtc';
-export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay';
+export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 
 export interface TraversalIceServer {
   urls: string | string[];
@@ -34,12 +34,14 @@ export interface TraversalSettingsSource {
   turnUsername?: BridgeSettings['turnUsername'];
   turnCredential?: BridgeSettings['turnCredential'];
   transportMode?: BridgeSettings['transportMode'];
+  traversalRelay?: BridgeSettings['traversalRelay'];
 }
 
 export interface TraversalTargetSource {
   bridgeHost: Host['bridgeHost'];
   bridgePort: Host['bridgePort'];
   authToken?: Host['authToken'];
+  relayHostId?: Host['relayHostId'];
   tailscaleHost?: Host['tailscaleHost'];
   ipv6Host?: Host['ipv6Host'];
   ipv4Host?: Host['ipv4Host'];
@@ -59,7 +61,7 @@ export interface WebSocketTraversalCandidate extends TraversalPlanCandidateBase 
 
 export interface RtcTraversalCandidate extends TraversalPlanCandidateBase {
   kind: 'rtc';
-  path: 'rtc-direct';
+  path: 'rtc-relay';
   signalUrl: string;
   iceServers: TraversalIceServer[];
 }

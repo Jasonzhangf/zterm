@@ -3,7 +3,13 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_BRIDGE_PORT, DEFAULT_DAEMON_HOST } from '../lib/mobile-config';
-import { DEFAULT_DAEMON_TERMINAL_CACHE_LINES, getWtermConfigPath, resolveDaemonRuntimeConfig } from './daemon-config';
+import {
+  DEFAULT_DAEMON_TERMINAL_CACHE_LINES,
+  getWtermConfigPath,
+  getWtermDaemonIdPath,
+  resolveDaemonRuntimeConfig,
+  resolveStableDaemonHostId,
+} from './daemon-config';
 
 const tempDirs: string[] = [];
 
@@ -83,6 +89,42 @@ describe('daemon config', () => {
     expect(config.authSource).toBe('env');
   });
 
+  it('resolves traversal relay device binding metadata', () => {
+    const homeDir = createTempHome();
+    writeConfig(homeDir, {
+      zterm: {
+        android: {
+          relay: {
+            relayUrl: 'https://relay.example.com/relay/',
+            username: 'jason',
+            password: 'secret',
+            hostId: 'daemon-host',
+            deviceId: 'daemon-device',
+            deviceName: 'Jason iPad daemon',
+            platform: 'android',
+            appVersion: '0.1.1',
+            daemonVersion: '0.1.1-daemon',
+          },
+        },
+      },
+    });
+
+    const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
+    expect(config.relay).not.toBeNull();
+    expect(config.relay).toMatchObject({
+      relayUrl: 'https://relay.example.com/relay/',
+      username: 'jason',
+      password: 'secret',
+      hostId: 'daemon-host',
+      deviceId: 'daemon-device',
+      deviceName: 'Jason iPad daemon',
+      platform: 'android',
+      appVersion: '0.1.1',
+      daemonVersion: '0.1.1-daemon',
+    });
+    expect(config.daemonHostId).toBe('daemon-host');
+  });
+
   it('uses defaults when ~/.wterm/config.json is absent', () => {
     const homeDir = createTempHome();
     const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
@@ -93,5 +135,39 @@ describe('daemon config', () => {
     expect(config.authSource).toBe('default');
     expect(config.terminalCacheLines).toBe(DEFAULT_DAEMON_TERMINAL_CACHE_LINES);
     expect(config.configFound).toBe(false);
+    expect(config.daemonHostId).toMatch(/^daemon-/);
+  });
+
+  it('persists a stable daemonHostId for non-relay direct mode', () => {
+    const homeDir = createTempHome();
+
+    const daemonHostId1 = resolveStableDaemonHostId(homeDir);
+    const daemonHostId2 = resolveStableDaemonHostId(homeDir);
+    const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
+
+    expect(daemonHostId1).toBe(daemonHostId2);
+    expect(config.daemonHostId).toBe(daemonHostId1);
+    expect(getWtermDaemonIdPath(homeDir)).toContain('.wterm/daemon-id');
+  });
+
+  it('prefers relay hostId over local daemon-id when relay is configured', () => {
+    const homeDir = createTempHome();
+    const localDaemonHostId = resolveStableDaemonHostId(homeDir);
+    writeConfig(homeDir, {
+      zterm: {
+        android: {
+          relay: {
+            relayUrl: 'https://relay.example.com/relay/',
+            username: 'jason',
+            password: 'secret',
+            hostId: 'relay-daemon-host',
+          },
+        },
+      },
+    });
+
+    const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
+    expect(localDaemonHostId).not.toBe('relay-daemon-host');
+    expect(config.daemonHostId).toBe('relay-daemon-host');
   });
 });
