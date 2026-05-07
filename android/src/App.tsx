@@ -125,6 +125,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleRenameSession,
     handleCloseSession,
     handleResumeSession,
+    auditOpenTabsAgainstRemoteSessions,
   } = useOpenTabRuntime({
     bridgeSettings,
     hosts,
@@ -184,6 +185,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleSaveServerGroupSelection,
     handleDeleteServerGroup,
     handleSelectCleanSession,
+    handleRemoteSessionsRefreshed,
     closePicker,
   } = useSessionOpenActions({
     bridgeSettings,
@@ -200,6 +202,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     ensureTerminalPageVisible,
     persistOpenTabIntentState,
     setPageState,
+    auditOpenTabsAgainstRemoteSessions,
   });
 
 
@@ -344,6 +347,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         onSaveGroupSelection={(target, sessionNames) => {
           handleSaveServerGroupSelection(target, sessionNames);
           closePicker();
+        }}
+        onRemoteSessionsRefreshed={() => {
+          handleRemoteSessionsRefreshed();
         }}
       />
 

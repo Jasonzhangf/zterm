@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import type { OpenTabAuditReason } from './useOpenTabLifecycleEffects';
 import { upsertBridgeServer, type BridgeSettings } from '../lib/bridge-settings';
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -74,6 +75,7 @@ interface UseSessionOpenActionsOptions {
     options?: { fallbackActiveSessionId?: string | null },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   setPageState: Dispatch<SetStateAction<AppPageState>>;
+  auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
 
 export interface SessionOpenActionsResult {
@@ -113,6 +115,7 @@ export interface SessionOpenActionsResult {
     daemonHostId?: string;
   }) => void;
   handleSelectCleanSession: (target: BridgeTarget) => void;
+  handleRemoteSessionsRefreshed: () => void;
   closePicker: () => void;
 }
 
@@ -132,6 +135,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     ensureTerminalPageVisible,
     persistOpenTabIntentState,
     setPageState,
+    auditOpenTabsAgainstRemoteSessions,
   } = options;
 
   const {
@@ -503,6 +507,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
   }, [bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, persistAndSwitchExplicitOpenTabsRef, renameSessionRef]);
 
+  const handleRemoteSessionsRefreshed = useCallback(() => {
+    void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
+      console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
+    });
+  }, [auditOpenTabsAgainstRemoteSessions]);
+
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
     const draft = buildCleanDraft(target);
@@ -548,6 +558,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleSaveServerGroupSelection,
     handleDeleteServerGroup,
     handleSelectCleanSession,
+    handleRemoteSessionsRefreshed,
     closePicker,
   };
 }

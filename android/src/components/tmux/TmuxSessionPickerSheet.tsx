@@ -27,6 +27,7 @@ interface TmuxSessionPickerSheetProps {
   onOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   onSelectCleanSession: (target: BridgeTarget) => void;
   onSaveGroupSelection?: (target: BridgeTarget, sessionNames: string[]) => void;
+  onRemoteSessionsRefreshed?: (target: BridgeTarget, sessionNames: string[]) => void;
 }
 
 type DiscoveryState = 'idle' | 'loading' | 'done' | 'error';
@@ -102,6 +103,7 @@ export function TmuxSessionPickerSheet({
   onOpenMultipleTmuxSessions,
   onSelectCleanSession,
   onSaveGroupSelection,
+  onRemoteSessionsRefreshed,
 }: TmuxSessionPickerSheetProps) {
   const [selectedTarget, setSelectedTarget] = useState<BridgeTarget>(() => normalizeTarget(initialTarget));
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
@@ -199,6 +201,7 @@ export function TmuxSessionPickerSheet({
       setDiscoveryState('done');
       setErrorMessage('');
       setLastRefreshedAt(Date.now());
+      onRemoteSessionsRefreshed?.(selectedTarget, sessions);
     } catch (error) {
       setAvailableSessions([]);
       setSelectedSessions([]);

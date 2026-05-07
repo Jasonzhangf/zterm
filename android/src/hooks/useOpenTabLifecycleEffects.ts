@@ -8,7 +8,9 @@ import type { Session } from '../lib/types';
 export type OpenTabAuditReason =
   | 'visibilitychange'
   | 'resume'
-  | 'appStateChange';
+  | 'appStateChange'
+  | 'connect'
+  | 'session-picker-refresh';
 
 interface OpenTabLifecycleCloseOptions {
   runtimeActiveSessionId?: string | null;

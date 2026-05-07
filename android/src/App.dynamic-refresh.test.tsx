@@ -439,6 +439,21 @@ vi.mock('./hooks/useSessionHistoryStorage', () => ({
 const openTerminalPageSpy = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
 
+const tmuxPickerHarness = vi.hoisted(() => {
+  let latestProps: any = null;
+  return {
+    setProps(next: any) {
+      latestProps = next;
+    },
+    readProps() {
+      return latestProps;
+    },
+    reset() {
+      latestProps = null;
+    },
+  };
+});
+
 vi.mock('./lib/page-state', async () => {
   const actual = await vi.importActual<typeof import('./lib/page-state')>('./lib/page-state');
   return {
@@ -451,7 +466,10 @@ vi.mock('./lib/page-state', async () => {
 });
 
 vi.mock('./components/tmux/TmuxSessionPickerSheet', () => ({
-  TmuxSessionPickerSheet: () => null,
+  TmuxSessionPickerSheet: (props: any) => {
+    tmuxPickerHarness.setProps(props);
+    return null;
+  },
 }));
 
 vi.mock('./pages/ConnectionsPage', () => ({
@@ -2981,6 +2999,132 @@ describe('App dynamic refresh matrix', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
     ]);
+  });
+
+  it('prunes open tabs immediately when a newly connected runtime session triggers remote audit and tmux truth no longer contains it', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 's1',
+        hostId: 'host-s1',
+        connectionName: 'conn-s1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s1',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's2');
+
+    sessionHarness.update(
+      {
+        sessions: [
+          makeSession('s1', 1),
+          { ...makeSession('s2', 2), state: 'connecting' },
+        ],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['session-s1', 'session-s2'])
+      .mockResolvedValueOnce(['session-s1']);
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
+    sessionHarness.closeSession.mockClear();
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+          activeSessionId: 's2',
+          connectedCount: 2,
+        } as any,
+        makeSession('s2', 2),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
+  });
+
+  it('prunes open tabs after tmux session picker refresh when remote tmux truth drops a session', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 's1',
+        hostId: 'host-s1',
+        connectionName: 'conn-s1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s1',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's2');
+
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's2',
+        connectedCount: 2,
+      } as any,
+      makeSession('s2', 2),
+    );
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['session-s1', 'session-s2'])
+      .mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
+    sessionHarness.closeSession.mockClear();
+
+    const pickerProps = tmuxPickerHarness.readProps();
+    expect(typeof pickerProps?.onRemoteSessionsRefreshed).toBe('function');
+
+    await act(async () => {
+      await pickerProps.onRemoteSessionsRefreshed({ bridgeHost: '127.0.0.1', bridgePort: 3333 }, ['session-s1']);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
   });
 
   it('does not rewrite OPEN_TABS or reswitch tabs on non-structural runtime title/state churn', async () => {

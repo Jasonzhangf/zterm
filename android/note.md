@@ -598,3 +598,5 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 先完成文档/skill/代码边界核对；确认本轮改动集中在 client cadence + render gate + daemon mirror live sync，未引入新的 fallback 运行路径。
 - 已跑变更相关自动测试：mobile-config / session-render-gate / terminal-mirror-runtime / terminal-runtime.detached-session / terminal-mirror-capture / terminal-message-runtime，共 32 tests passed。
 - 下一步：重启单服务 `com.zterm.android.zterm-daemon`，验证 /health 与 /debug/runtime，确认 staging runtime 已切到最新代码。
+
+- 2026-05-07 当前任务: 收口 remote session truth audit。目标: connect 成功 / picker refresh / foreground resume 三个入口都走 useOpenTabRuntime.auditOpenTabsAgainstRemoteSessions 单一 owner；session 列表 refresh 与 open-tab prune 共线，避免已关闭/不存在 session 被重新打开。

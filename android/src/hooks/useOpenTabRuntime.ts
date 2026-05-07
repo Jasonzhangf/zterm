@@ -17,7 +17,7 @@ import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { Host, PersistedOpenTab, Session } from '../lib/types';
-import { useOpenTabLifecycleEffects } from './useOpenTabLifecycleEffects';
+import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTabLifecycleEffects';
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 
@@ -108,6 +108,7 @@ export interface OpenTabRuntimeResult {
   handleRenameSession: (sessionId: string, name: string) => void;
   handleCloseSession: (sessionId: string, source?: string) => void;
   handleResumeSession: (sessionId: string) => void;
+  auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
 
 export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRuntimeResult {
@@ -160,6 +161,11 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   }) | null>(null);
   const renameSessionRef = useRef(renameSession);
   const remoteOpenTabAuditTokenRef = useRef(0);
+  const connectedSessionIdsRef = useRef<Set<string>>(new Set(
+    sessions
+      .filter((session) => session.state === 'connected')
+      .map((session) => session.id),
+  ));
   const [followResetEpoch, setFollowResetEpoch] = useState(0);
 
   const sessionStructureSignature = useMemo(
@@ -330,7 +336,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     return nextOpenTabState;
   }, [clearSessionDraft, closeSession, persistOpenTabIntentState, setPageState]);
 
-  const auditOpenTabsAgainstRemoteSessions = useCallback(async (reason: 'visibilitychange' | 'resume' | 'appStateChange') => {
+  const auditOpenTabsAgainstRemoteSessions = useCallback(async (reason: OpenTabAuditReason) => {
     const currentTabs = openTabStateRef.current.tabs;
     if (currentTabs.length === 0) {
       return;
@@ -394,6 +400,22 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     sessions,
     terminalActiveSession,
   ]);
+
+  useEffect(() => {
+    const nextConnectedSessionIds = new Set(
+      sessions
+        .filter((session) => session.state === 'connected')
+        .map((session) => session.id),
+    );
+    const hasNewConnectedSession = [...nextConnectedSessionIds].some((sessionId) => !connectedSessionIdsRef.current.has(sessionId));
+    connectedSessionIdsRef.current = nextConnectedSessionIds;
+    if (!hasNewConnectedSession) {
+      return;
+    }
+    void auditOpenTabsAgainstRemoteSessions('connect').catch((error) => {
+      console.error('[App] Failed to audit remote session truth on connect:', error);
+    });
+  }, [auditOpenTabsAgainstRemoteSessions, sessions]);
 
   useEffect(() => {
     const pendingSwitch = pendingTerminalActiveSwitchRef.current;
@@ -520,5 +542,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     handleRenameSession,
     handleCloseSession,
     handleResumeSession,
+    auditOpenTabsAgainstRemoteSessions,
   };
 }
