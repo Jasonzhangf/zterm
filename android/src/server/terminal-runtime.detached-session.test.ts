@@ -106,6 +106,7 @@ describe('terminal runtime detached transport cleanup', () => {
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
+      consecutiveFailures: 0,
       subscribers: new Set([session.id]),
     };
 

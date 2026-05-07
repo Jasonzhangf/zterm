@@ -36801,3 +36801,8078 @@ sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
 model: gpt-5.4
 provider: openai-responses
 -->
+
+### User · 2026/05/07 05:03:43
+
+<subagent_notification>
+{"agent_path":"019dfef6-c338-7b80-81f8-b645c7ddb552","status":"shutdown"}
+</subagent_notification>
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T050342087-166136-1547
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 05:09:11
+
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences
+- What remains to be done (clear next steps)
+- Any critical data, examples, or references needed to continue
+
+Be concise, structured, and focused on helping the next LLM seamlessly continue the work.
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T050909757-166145-1556
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 05:09:59
+
+Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:
+Jason，继续从 v0.1.1.1515 干净状态推进。当前已确认 daemon → wire → client buffer 端的颜色值（bg=1, bg=2）在往返中完整保留，渲染器 `colorToCSS` 也对 index<16 使用 `theme.colors[index]`。问题可能出在 `themeId` 传递或者终端实际使用的主题。
+
+先查当前 `TerminalPage` 中 `themeId` 的实际来源：
+
+<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="exec_command">
+<｜｜DSML｜｜parameter name="cmd" string="true">cd /Volumes/extension/code/zterm && grep -n "terminalThemeId\|themeId\|theme" android/src/pages/TerminalPage.tsx | head -30</｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="max_output_tokens" string="true">3000</｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="workdir" string="true">/Volumes/extension/code/zterm</｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+<｜｜DSML｜｜invoke name="exec_command">
+<｜｜DSML｜｜parameter name="cmd" string="true">cd /Volumes/extension/code/zterm && grep -rn "themeId\|terminalTheme" android/src/components/TerminalView.tsx | head -20</｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="max_output_tokens" string="true">2000</｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="workdir" string="true">/Volumes/extension/code/zterm</｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+</｜｜DSML｜｜tool_calls>
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T050959081-166146-1557
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 07:59:01
+
+检查下现状，现在 1515 版本连接就很困难，一直在 reconnecting 或者 refreshing，然后 timeout，你看看日志，并
+  且 R 一直为 0，其余 P 能很高频
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T075901637-166205-1616
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:06:17
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080616835-166231-1642
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:06:51
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080651469-166233-1644
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:07:04
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080703398-166235-1646
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:07:06
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080706440-166237-1648
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:07:14
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080713820-166238-1649
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:07:46
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080746501-166239-1650
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:08:19
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080819128-166241-1652
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:08:30
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080830223-166243-1654
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:08:51
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080851525-166247-1658
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:09:18
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080918394-166249-1660
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:09:54
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080954204-166253-1664
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:09:59
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T080959380-166255-1666
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:10:31
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081030703-166258-1669
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:10:59
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081059424-166262-1673
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:11:29
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081129158-166264-1675
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:11:36
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081136152-166265-1676
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:12:26
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081225687-166271-1682
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:12:49
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081248876-166278-1689
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:13:00
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081300151-166282-1693
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:13:53
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081353141-166287-1698
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:14:11
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081353141-166287-1698
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:14:56
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081455658-166289-1700
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:16:20
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081619747-166295-1706
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:17:18
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081619747-166295-1706
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:17:58
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081758120-166302-1713
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:18:52
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081852303-166305-1716
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:19:39
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081939126-166309-1720
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:20:10
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T081939126-166309-1720
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:20:36
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082036294-166311-1722
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:21:37
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082137099-166313-1724
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:21:56
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082153638-166314-1725
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:22:52
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082251646-166321-1732
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:23:43
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082342862-166326-1737
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:23:54
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082353669-166329-1740
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:24:02
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082401924-166330-1741
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:24:05
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082401924-166330-1741
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:24:14
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082413872-166334-1745
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:24:33
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082433352-166338-1749
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:25:07
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082506497-166343-1754
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:25:48
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082547945-166348-1759
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:26:39
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082638647-166352-1763
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:10
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082709817-166357-1768
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:27
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082726776-166361-1772
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:34
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082734224-166364-1775
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:41
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082741067-166366-1777
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:48
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082747745-166367-1778
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:27:58
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082758383-166369-1780
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:28:29
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082829242-166373-1784
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:29:27
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082926713-166376-1787
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:29:39
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082938549-166378-1789
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:29:45
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082945124-166380-1791
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:29:53
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T082953154-166381-1792
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:00
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083000320-166383-1794
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:08
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083008110-166385-1796
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:23
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083022504-166388-1799
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:33
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083033010-166392-1803
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:41
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083041404-166395-1806
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
+
+### User · 2026/05/07 08:30:55
+
+1515 现在主要不是客户端网络先坏，而是 daemon 端 mirror 调度已经失控。
+  所以你看到的是：
+
+  - 一直 refreshing / reconnecting
+  - 最后 timeout
+  - P 高频
+  - R = 0
+
+  这和日志是对上的。
+
+  ———
+
+  ## 我查到的现场证据
+
+  ### 1) 你设备上跑的确实是 1515
+
+  设备包信息：
+
+  - versionName=0.1.1.1515
+  - versionCode=1011515
+
+  ———
+
+  ### 2) daemon 当前负载和状态已经不正常
+
+  /health 返回：
+
+  - sessions.total = 3
+  - mirrors.total = 14
+  - mirrors.subscribers = 3
+  - rss = 969900032，接近 970MB
+  - heapUsed = 290064272
+
+  这说明：
+
+  - 真实活跃连接只有 3 个
+  - 但 daemon 维护了 14 个 mirror
+  - 而且这些 mirror 还在跑 live sync
+
+  ———
+
+  ### 3) daemon 正在对所有 mirror 做 33ms 高频 capture
+
+  代码里真的是：
+
+  - MIRROR_LIVE_SYNC_INTERVAL_MS = 33
+
+  也就是 每个 mirror 大约 30fps 在抓 tmux。
+
+  而当前日志显示它在不停刷这些 session：
+
+  - zterm
+  - rcc
+  - rcc-routecodex-2
+  - shimy
+  - rcc-fin
+  - 等等很多个
+
+  ———
+
+  ### 4) 有坏 session 在持续失败，直接拖垮主链路
+
+  #### A. rcc 明确是坏 session
+
+  tmux 直接探针：
+
+  tmux display-message -p -t rcc
+  '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{session_name}\t#{window_na
+  me}'
+
+  返回是：
+
+  \t\t\t\t\t\t
+
+  也就是 pane metrics 全空。
+
+  daemon stderr 里反复报：
+
+  - canonical mirror refresh failed for rcc: tmux returned invalid pane metrics for rcc: rows= cols=
+
+  这不是客户端问题，是 daemon 对一个已坏/无效的 tmux target 还在死循环刷新。
+
+  ———
+
+  #### B. zterm 这个 session 也在频繁失败
+
+  daemon stderr 反复报：
+
+  - canonical mirror refresh failed for zterm: tmux capture remained unstable after 4 attempts
+
+  说明 zterm 的 canonical capture 经常 4 次都稳定不下来。
+  这会导致：
+
+  - body diff 发不出去
+  - buffer-sync 主链断掉
+  - 客户端只能继续 head/probe/planner 打转
+
+  这正好对应你看到的：
+
+  - P 很高
+  - R=0
+
+  因为按当前架构，只有 buffer-sync 才会推进正文刷新。
+
+  ———
+
+  ## 为什么会表现成 P 高频但 R=0
+
+  按你现在这套链路，现象可以这样解释：
+
+  1. client 还活着，还在发/收控制层动作
+     所以 P 高频
+  2. 但 daemon 的 mirror body capture 经常失败
+     尤其是：
+      - rcc invalid pane metrics
+      - zterm capture unstable
+  3. capture 失败后，没有稳定的 body diff
+     所以发不出有效 buffer-sync
+  4. client 就一直：
+      - refreshing
+      - reconnecting
+      - 等待 timeout
+  5. 最终表现就是：
+      - R 不增长
+      - 输入/正文不刷新
+      - 看起来像网络卡死，但根因在 daemon mirror 主链
+
+  ———... [truncated]
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T083055114-166397-1808
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->

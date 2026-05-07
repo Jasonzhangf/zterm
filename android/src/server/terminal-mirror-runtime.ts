@@ -80,7 +80,7 @@ export interface TerminalMirrorRuntime {
   handleInput: (session: TerminalSession, data: string) => void;
 }
 
-const MIRROR_LIVE_SYNC_INTERVAL_MS = 33;
+const MIRROR_LIVE_SYNC_INTERVAL_MS = 150;
 
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
@@ -113,6 +113,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
+      consecutiveFailures: 0,
       subscribers: new Set(),
     };
     mirrors.set(sessionName, mirror);
@@ -284,6 +285,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (!captured) {
           throw new Error('tmux capture returned no canonical buffer');
         }
+        mirror.consecutiveFailures = 0;
         const changedRanges = deps.mirrorBufferChanged(mirror, previousStartIndex, previousLines);
         const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
         const cursorKeysAppChanged = previousCursorKeysApp !== mirror.cursorKeysApp;
@@ -333,11 +335,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         return true;
       })
       .catch((error) => {
-        console.error(
-          `[${deps.logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        mirror.consecutiveFailures += 1;
+        const isInvalidTarget = (error instanceof Error ? error.message : String(error)).includes('invalid pane metrics');
+        const failureMsg = `[${deps.logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName} (streak=${mirror.consecutiveFailures}): ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        if (mirror.consecutiveFailures >= 10 || isInvalidTarget) {
+          mirror.lifecycle = 'failed';
+          stopMirrorLiveSync(mirror);
+          console.error(`${failureMsg} -> mirror isolated (lifecycle=failed)`);
+        } else {
+          console.error(failureMsg);
+        }
         return false;
       })
       .finally(() => {
@@ -354,10 +363,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.lifecycle !== 'ready') {
       return;
     }
+    if (mirror.subscribers.size === 0) {
+      stopMirrorLiveSync(mirror);
+      return;
+    }
+    const backoffMultiplier = Math.min(mirror.consecutiveFailures, 10);
+    const effectiveDelay = backoffMultiplier > 0
+      ? Math.max(delayMs, MIRROR_LIVE_SYNC_INTERVAL_MS * (1 + backoffMultiplier))
+      : delayMs;
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
-      if (mirror.lifecycle !== 'ready') {
+      if (mirror.lifecycle !== 'ready' || mirror.subscribers.size === 0) {
         return;
       }
       void syncMirrorCanonicalBuffer(mirror).finally(() => {
@@ -366,7 +383,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         }
         scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_INTERVAL_MS);
       });
-    }, Math.max(0, delayMs));
+    }, Math.max(0, effectiveDelay));
   }
 
   async function startMirror(
@@ -519,7 +536,16 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function handleInput(session: TerminalSession, data: string) {
     const mirror = deps.getSessionMirror(session);
-    if (mirror?.lifecycle === 'ready') {
+    if (!mirror) {
+      return;
+    }
+    if (mirror.lifecycle === 'failed') {
+      mirror.lifecycle = 'ready';
+      mirror.consecutiveFailures = 0;
+      console.log(`[${deps.logTimePrefix()}] mirror ${mirror.sessionName} recovered from failed by input`);
+    }
+    if (mirror.lifecycle === 'ready') {
+      mirror.consecutiveFailures = 0;
       deps.writeToLiveMirror(mirror.sessionName, data, false);
       scheduleMirrorLiveSync(mirror, 0);
     }

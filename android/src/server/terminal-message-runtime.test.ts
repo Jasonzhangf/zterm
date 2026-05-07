@@ -186,6 +186,7 @@ describe('terminal message runtime explicit error truth', () => {
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
+      consecutiveFailures: 0,
       subscribers: new Set(),
     };
     const { runtime, sessions, sendMessage } = createRuntime({ mirror });
@@ -229,6 +230,7 @@ describe('terminal message runtime explicit error truth', () => {
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
+      consecutiveFailures: 0,
       subscribers: new Set(),
     };
     const { runtime, sessions, refreshMirrorHeadForSession, sendBufferHeadToSession } = createRuntime({ mirror });

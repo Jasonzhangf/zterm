@@ -49,6 +49,7 @@ export interface SessionMirror {
   lifecycle: 'idle' | 'booting' | 'ready' | 'failed' | 'destroyed';
   cols: number;
   rows: number;
+  consecutiveFailures: number;
   cursorKeysApp: boolean;
   revision: number;
   lastScrollbackCount: number;
