@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSessionRenderBufferSnapshot, type SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import { DEFAULT_TERMINAL_COLOR, getTerminalThemePreset, packedTruecolorToCss, type TerminalThemePreset } from '@zterm/shared';
+import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import type {
   SessionRenderBufferSnapshot,
   TerminalCell,
@@ -529,7 +530,7 @@ function createTerminalDomInputController({
     if (composing || !input.value) {
       return;
     }
-    sendTerminalInput(input.value.replace(/\n/g, '\r'));
+    sendTerminalInput(normalizeTerminalCommittedText(input.value).replace(/\n/g, '\r'));
     resetDomInput();
     focusTerminal();
   };

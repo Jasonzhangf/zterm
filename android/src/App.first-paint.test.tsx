@@ -197,10 +197,9 @@ vi.mock('./hooks/useSessionDraftStorage', () => ({
 vi.mock('./hooks/useSessionHistoryStorage', () => ({
   useSessionHistoryStorage: () => ({
     sessionGroups: [],
-    recordSessionOpen: vi.fn(),
-    recordSessionGroupOpen: vi.fn(),
     setSessionGroupSelection: vi.fn(),
     deleteSessionGroup: vi.fn(),
+    pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
   }),
 }));
 

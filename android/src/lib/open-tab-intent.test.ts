@@ -448,8 +448,72 @@ describe('open-tab intent truth', () => {
     );
 
     expect(result.closedReuseKey).toBe('bridge:100.127.23.27::3333::session:tmux-shared');
+    expect(result.closedReuseKeyVariants).toEqual(['bridge:100.127.23.27::3333::session:tmux-shared']);
     expect(result.nextState.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
     expect(result.nextState.activeSessionId).toBe('s2');
+  });
+
+  it('derives close intent reuse-key variants for daemon-owned tabs so reopen can clear every semantic tombstone shape', () => {
+    const result = deriveCloseOpenTabIntent(
+      normalizeOpenTabIntentState([
+        makeTab('daemon-live', {
+          daemonHostId: 'daemon-a',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'tmux-shared',
+        }),
+      ], 'daemon-live'),
+      'daemon-live',
+      {
+        runtimeActiveSessionId: 'daemon-live',
+        fallbackSessionIds: [],
+        runtimeSessions: [
+          makeSession('daemon-live', {
+            daemonHostId: 'daemon-a',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            sessionName: 'tmux-shared',
+          }),
+        ],
+      },
+    );
+
+    expect(result.closedReuseKey).toBe('daemon:daemon-a::session:tmux-shared');
+    expect(result.closedReuseKeyVariants).toEqual([
+      'daemon:daemon-a::session:tmux-shared',
+      'bridge:100.127.23.27::3333::session:tmux-shared',
+    ]);
+  });
+
+  it('unions persisted-tab and runtime-session reuse-key variants when close hits a bridge-persisted tab already reused by a daemon-owned runtime session', () => {
+    const result = deriveCloseOpenTabIntent(
+      normalizeOpenTabIntentState([
+        makeTab('persisted-bridge', {
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'tmux-shared',
+        }),
+      ], 'persisted-bridge'),
+      'runtime-daemon',
+      {
+        runtimeActiveSessionId: 'runtime-daemon',
+        fallbackSessionIds: [],
+        runtimeSessions: [
+          makeSession('runtime-daemon', {
+            daemonHostId: 'daemon-a',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            sessionName: 'tmux-shared',
+          }),
+        ],
+      },
+    );
+
+    expect(result.closedReuseKey).toBe('daemon:daemon-a::session:tmux-shared');
+    expect(new Set(result.closedReuseKeyVariants)).toEqual(new Set([
+      'bridge:100.127.23.27::3333::session:tmux-shared',
+      'daemon:daemon-a::session:tmux-shared',
+    ]));
   });
 
   it('resolves restored session-id remap with a single pure rule', () => {

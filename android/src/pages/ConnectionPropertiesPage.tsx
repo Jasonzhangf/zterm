@@ -10,11 +10,13 @@ import { RemoteAccessSection } from '../components/connection-form/RemoteAccessS
 import { TerminalSection } from '../components/connection-form/TerminalSection';
 import { useTraversalRelayDaemonDevices } from '../hooks/useTraversalRelayDaemonDevices';
 import type { BridgeSettings } from '../lib/bridge-settings';
-import { describeBridgePresetIdentity, getDefaultBridgeServer, resolveBridgePresetDaemonHostId } from '../lib/bridge-settings';
+import { getDefaultBridgeServer, resolveBridgePresetDaemonHostId } from '../lib/bridge-settings';
+import { buildBridgeServerPresetViews } from '../lib/bridge-server-presets-view';
 import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
 import { mobileTheme } from '../lib/mobile-ui';
-import { buildDaemonMappedBridgeTarget, findBridgePresetForDaemonHostId } from '../lib/session-picker';
+import { findBridgePresetForDaemonHostId, resolveRelayDeviceBridgeTarget } from '../lib/session-picker';
 import { fetchTmuxSessions } from '../lib/tmux-sessions';
+import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
 
 interface ConnectionPropertiesPageProps {
@@ -80,6 +82,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
 
   const pageTitle = useMemo(() => (host ? 'Edit Connection' : 'New Connection'), [host]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
+  const rememberedServerViews = useMemo(() => buildBridgeServerPresetViews(bridgeSettings.servers), [bridgeSettings.servers]);
   const selectedDaemonHostId = (form.daemonHostId || form.relayHostId).trim();
   const daemonBoundServer = useMemo(
     () => findBridgePresetForDaemonHostId(bridgeSettings.servers, selectedDaemonHostId),
@@ -87,10 +90,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   );
 
   const applyDaemonSelection = (device: TraversalRelayDeviceSnapshot) => {
-    const mappedTarget = buildDaemonMappedBridgeTarget(bridgeSettings.servers, {
-      daemonHostId: device.daemon.hostId,
-      relayDeviceId: device.deviceId,
-    });
+    const mappedTarget = resolveRelayDeviceBridgeTarget(bridgeSettings.servers, device);
     setForm((current) => ({
       ...current,
       daemonHostId: device.daemon.hostId.trim(),
@@ -239,7 +239,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     setSessionDiscoveryState('loading');
     setSessionDiscoveryError('');
     try {
-      const sessions = await fetchTmuxSessions(
+      const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(
         {
           bridgeHost,
           bridgePort: form.bridgePort,
@@ -253,7 +253,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           transportMode: form.transportMode,
         },
         bridgeSettings,
-      );
+      ));
       setAvailableSessions(sessions);
       setSessionDiscoveryState('done');
       if (!form.sessionName.trim() && sessions.length === 1) {
@@ -350,7 +350,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           onSessionNameChange={(sessionName) => setForm((current) => ({ ...current, sessionName }))}
         />
 
-        {!daemonFirst && bridgeSettings.servers.length > 0 && (
+        {!daemonFirst && rememberedServerViews.length > 0 && (
           <ConnectionSection
             title="Remembered Servers"
             description={
@@ -360,10 +360,8 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
             }
           >
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              {bridgeSettings.servers.map((server) => {
+              {rememberedServerViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel }) => {
                 const active = server.targetHost === form.bridgeHost && server.targetPort === form.bridgePort;
-                const daemonHostId = resolveBridgePresetDaemonHostId(server);
-                const identity = describeBridgePresetIdentity(server);
                 return (
                   <button
                     key={server.id}
@@ -389,9 +387,9 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
                     }}
                   >
                     <div style={{ fontWeight: 800 }}>{server.name}</div>
-                    <div style={{ fontSize: '12px', opacity: 0.8 }}>{identity.bridgeLabel}</div>
+                    <div style={{ fontSize: '12px', opacity: 0.8 }}>{bridgeLabel}</div>
                     {daemonHostId ? (
-                      <div style={{ fontSize: '11px', opacity: 0.74 }}>{identity.daemonLabel}</div>
+                      <div style={{ fontSize: '11px', opacity: 0.74 }}>{daemonLabel}</div>
                     ) : null}
                   </button>
                 );

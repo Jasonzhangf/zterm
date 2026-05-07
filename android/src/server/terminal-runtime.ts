@@ -56,6 +56,7 @@ interface TerminalRuntimeDeps {
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
+  runTmux: (args: string[]) => { ok: true; stdout: string };
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   logTimePrefix: () => string;
 }
@@ -84,6 +85,7 @@ export interface TerminalRuntime {
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: TerminalSession, data: string) => void;
+  handleResize: (session: TerminalSession, payload: { cols: number; rows: number; widthMode?: import('./terminal-runtime-types').TerminalWidthMode }) => void;
 }
 
 export {
@@ -110,6 +112,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       closeTransport: connection.closeTransport,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
+      widthMode: 'mirror-fixed',
       pendingPasteImage: null,
       pendingAttachFile: null,
     };
@@ -175,6 +178,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
+      mirror.adaptiveCols.delete(session.id);
+      mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
       mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
     }
     session.mirrorKey = null;
@@ -190,6 +195,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
+      mirror.adaptiveCols.delete(session.id);
+      mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
       mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
     }
 
@@ -241,6 +248,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     autoCommandDelayMs: deps.autoCommandDelayMs,
     waitMs: deps.waitMs,
     logTimePrefix: deps.logTimePrefix,
+    runTmux: deps.runTmux,
     closeLogicalTerminalSession: closeSession,
     getSessionMirror,
   });
@@ -265,5 +273,6 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     startMirror: mirrorRuntime.startMirror,
     attachTmux: mirrorRuntime.attachTmux,
     handleInput: mirrorRuntime.handleInput,
+    handleResize: mirrorRuntime.handleResize,
   };
 }

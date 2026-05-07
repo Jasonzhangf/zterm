@@ -420,17 +420,6 @@ export interface WebDAVConfig {
   syncInterval: number;      // 同步间隔（毫秒），默认 30分钟
 }
 
-export interface SessionHistoryEntry {
-  id: string;
-  connectionName: string;
-  bridgeHost: string;
-  bridgePort: number;
-  daemonHostId?: string;
-  sessionName: string;
-  authToken?: string;
-  lastOpenedAt: number;
-}
-
 export interface SessionGroupHistory {
   id: string;
   name: string;
@@ -527,7 +516,6 @@ export interface AppState {
 export const STORAGE_KEYS = {
   HOSTS: 'zterm:hosts',
   BRIDGE_SETTINGS: 'zterm:bridge-settings',
-  SESSION_HISTORY: 'zterm:session-history',
   SESSION_GROUPS: 'zterm:session-groups',
   OPEN_TABS: 'zterm:open-tabs',
   SAVED_TAB_LISTS: 'zterm:saved-tab-lists',

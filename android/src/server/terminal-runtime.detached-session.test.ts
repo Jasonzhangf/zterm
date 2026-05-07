@@ -77,6 +77,7 @@ function createDeps() {
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       daemonRuntimeDebug: vi.fn(),
       logTimePrefix: () => '2026-05-03 00:00:00',
     }),
@@ -107,6 +108,7 @@ describe('terminal runtime detached transport cleanup', () => {
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set([session.id]),
     };
 

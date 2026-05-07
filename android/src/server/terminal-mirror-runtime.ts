@@ -12,6 +12,7 @@ import type {
   TerminalAttachPayload,
   TerminalGeometry,
   TmuxPaneMetrics,
+  TerminalWidthMode,
 } from './terminal-runtime-types';
 
 export interface TerminalMirrorRuntimeDeps {
@@ -59,6 +60,7 @@ export interface TerminalMirrorRuntimeDeps {
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
+  runTmux: (args: string[]) => { ok: true; stdout: string };
   closeLogicalTerminalSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
@@ -78,6 +80,8 @@ export interface TerminalMirrorRuntime {
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: TerminalSession, data: string) => void;
+  handleResize: (session: TerminalSession, payload: { cols: number; rows: number; widthMode?: TerminalWidthMode }) => void;
+  reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
@@ -126,6 +130,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     mirrors.set(sessionName, mirror);
@@ -203,6 +208,26 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     });
     deps.sendScheduleStateToSession(session, mirror.sessionName);
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
+  }
+  function reconcileMirrorAdaptiveWidth(mirror: SessionMirror) {
+    let minCols = 0;
+    for (const entry of mirror.adaptiveCols.values()) {
+      if (entry.widthMode === 'adaptive-phone' && entry.cols > 0) {
+        if (minCols === 0 || entry.cols < minCols) {
+          minCols = entry.cols;
+        }
+      }
+    }
+    if (minCols > 0 && minCols !== mirror.cols) {
+      const targetRows = deps.normalizeTerminalRows(mirror.rows);
+      try {
+        deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(minCols), '-y', String(targetRows)]);
+        mirror.cols = minCols;
+        mirror.rows = targetRows;
+      } catch (error) {
+        console.warn(`[${deps.logTimePrefix()}] failed to resize tmux window for ${mirror.sessionName}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   function announceMirrorSubscribersReady(mirror: SessionMirror) {
@@ -534,6 +559,12 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       mirror = createMirror(nextSessionName);
     }
     mirror.subscribers.add(session.id);
+    const clientWidthMode = payload.widthMode || 'mirror-fixed';
+    session.widthMode = clientWidthMode;
+    if (clientWidthMode === 'adaptive-phone' && requestedCols > 0) {
+      mirror.adaptiveCols.set(session.id, { cols: requestedCols, widthMode: clientWidthMode });
+      reconcileMirrorAdaptiveWidth(mirror);
+    }
     if (mirror.lifecycle !== 'ready') {
       mirror.cols = requestedCols;
       mirror.rows = requestedRows;
@@ -547,6 +578,23 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
 
     await startMirror(mirror, { cols: requestedCols, rows: requestedRows, autoCommand: payload.autoCommand });
+  }
+
+  function handleResize(session: TerminalSession, payload: { cols: number; rows: number; widthMode?: TerminalWidthMode }) {
+    const mirror = deps.getSessionMirror(session);
+    if (!mirror || mirror.lifecycle !== 'ready') {
+      return;
+    }
+    const widthMode: TerminalWidthMode = payload.widthMode || session.widthMode || 'mirror-fixed';
+    session.widthMode = widthMode;
+    const normalizedCols = deps.normalizeTerminalCols(payload.cols);
+    if (widthMode === 'adaptive-phone' && normalizedCols > 0) {
+      mirror.adaptiveCols.set(session.id, { cols: normalizedCols, widthMode });
+      reconcileMirrorAdaptiveWidth(mirror);
+    } else {
+      mirror.adaptiveCols.delete(session.id);
+      reconcileMirrorAdaptiveWidth(mirror);
+    }
   }
 
   function handleInput(session: TerminalSession, data: string) {
@@ -577,5 +625,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     startMirror,
     attachTmux,
     handleInput,
+    handleResize,
+    reconcileMirrorAdaptiveWidth,
   };
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_BRIDGE_PORT, STORAGE_KEYS, type SessionGroupHistory, type SessionHistoryEntry } from '../lib/types';
+import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
+import { DEFAULT_BRIDGE_PORT, STORAGE_KEYS, type SessionGroupHistory } from '../lib/types';
 import {
   buildSessionSemanticOwnerKey,
   sessionSemanticOwnersMatch,
 } from '../lib/session-semantic-identity';
 
-const MAX_HISTORY_ENTRIES = 24;
 const MAX_GROUP_ENTRIES = 12;
 
 function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
@@ -14,43 +14,6 @@ function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bri
     bridgeHost: entry.bridgeHost,
     bridgePort: entry.bridgePort,
   });
-}
-
-function normalizeHistoryEntry(input: unknown): SessionHistoryEntry | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const candidate = input as Partial<SessionHistoryEntry>;
-  const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
-  const sessionName = typeof candidate.sessionName === 'string' ? candidate.sessionName.trim() : '';
-  const connectionName = typeof candidate.connectionName === 'string' ? candidate.connectionName.trim() : '';
-
-  if (!bridgeHost || !sessionName) {
-    return null;
-  }
-
-  return {
-    id:
-      typeof candidate.id === 'string' && candidate.id.trim()
-        ? candidate.id
-        : `${bridgeHost}:${candidate.bridgePort || DEFAULT_BRIDGE_PORT}:${sessionName}`,
-    connectionName: connectionName || sessionName,
-    bridgeHost,
-    bridgePort:
-      typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
-        ? candidate.bridgePort
-        : DEFAULT_BRIDGE_PORT,
-    daemonHostId: typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
-      ? candidate.daemonHostId.trim()
-      : undefined,
-    sessionName,
-    authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
-    lastOpenedAt:
-      typeof candidate.lastOpenedAt === 'number' && Number.isFinite(candidate.lastOpenedAt)
-        ? candidate.lastOpenedAt
-        : Date.now(),
-  };
 }
 
 function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
@@ -83,7 +46,7 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
           bridgeHost,
           bridgePort,
         }),
-    name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name : `${bridgeHost} · ${sortedSessionNames.length} tabs`,
+    name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name : `${bridgeHost} · ${sortedSessionNames.length} sessions`,
     bridgeHost,
     bridgePort,
     daemonHostId: typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
@@ -126,7 +89,6 @@ function collapseServerGroups(entries: SessionGroupHistory[]) {
 }
 
 export function useSessionHistoryStorage() {
-  const [sessionHistory, setSessionHistory] = useState<SessionHistoryEntry[]>([]);
   const [sessionGroups, setSessionGroups] = useState<SessionGroupHistory[]>([]);
 
   useEffect(() => {
@@ -135,17 +97,6 @@ export function useSessionHistoryStorage() {
     }
 
     try {
-      const rawHistory = localStorage.getItem(STORAGE_KEYS.SESSION_HISTORY);
-      if (rawHistory) {
-        const normalized = (JSON.parse(rawHistory) as unknown[])
-          .map(normalizeHistoryEntry)
-          .filter((item): item is SessionHistoryEntry => item !== null)
-          .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
-          .slice(0, MAX_HISTORY_ENTRIES);
-        setSessionHistory(normalized);
-        saveJson(STORAGE_KEYS.SESSION_HISTORY, normalized);
-      }
-
       const rawGroups = localStorage.getItem(STORAGE_KEYS.SESSION_GROUPS);
       if (rawGroups) {
         const normalized = collapseServerGroups((JSON.parse(rawGroups) as unknown[])
@@ -158,58 +109,6 @@ export function useSessionHistoryStorage() {
     } catch (error) {
       console.error('[useSessionHistoryStorage] Failed to load history:', error);
     }
-  }, []);
-
-  const recordSessionOpen = useCallback((entry: Omit<SessionHistoryEntry, 'id' | 'lastOpenedAt'>) => {
-    setSessionHistory((current) => {
-      const normalized = normalizeHistoryEntry({
-        ...entry,
-        id: `${entry.bridgeHost}:${entry.bridgePort}:${entry.sessionName}`,
-        lastOpenedAt: Date.now(),
-      });
-      if (!normalized) {
-        return current;
-      }
-
-      const next = [
-        normalized,
-        ...current.filter(
-          (item) =>
-            !(
-              item.bridgeHost === normalized.bridgeHost &&
-              item.bridgePort === normalized.bridgePort &&
-              sessionSemanticOwnersMatch(item, normalized) &&
-              item.sessionName === normalized.sessionName
-            ),
-        ),
-      ].slice(0, MAX_HISTORY_ENTRIES);
-
-      saveJson(STORAGE_KEYS.SESSION_HISTORY, next);
-      return next;
-    });
-  }, []);
-
-  const recordSessionGroupOpen = useCallback((group: Omit<SessionGroupHistory, 'id' | 'lastOpenedAt'>) => {
-    setSessionGroups((current) => {
-      const normalized = normalizeGroupEntry({
-        ...group,
-        id: toServerGroupKey(group),
-        lastOpenedAt: Date.now(),
-      });
-      if (!normalized) {
-        return current;
-      }
-
-      const next = collapseServerGroups([
-        normalized,
-        ...current.filter(
-          (item) => !sessionSemanticOwnersMatch(item, normalized),
-        ),
-      ]);
-
-      saveJson(STORAGE_KEYS.SESSION_GROUPS, next);
-      return next;
-    });
   }, []);
 
   const setSessionGroupSelection = useCallback((group: Omit<SessionGroupHistory, 'id' | 'lastOpenedAt'>) => {
@@ -240,12 +139,43 @@ export function useSessionHistoryStorage() {
     });
   }, []);
 
+  const pruneSessionGroupSelectionToRemoteTruth = useCallback((
+    target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>,
+    remoteSessionNames: string[],
+  ) => {
+    const normalizedRemoteSessionNames = new Set(normalizeRemoteTmuxSessionNames(remoteSessionNames));
+    setSessionGroups((current) => {
+      let changed = false;
+      const next = current.flatMap((item) => {
+        if (!sessionSemanticOwnersMatch(item, target)) {
+          return [item];
+        }
+        const nextSessionNames = item.sessionNames.filter((sessionName) => normalizedRemoteSessionNames.has(sessionName));
+        if (nextSessionNames.length === item.sessionNames.length) {
+          return [item];
+        }
+        changed = true;
+        if (nextSessionNames.length === 0) {
+          return [];
+        }
+        return [{
+          ...item,
+          sessionNames: nextSessionNames,
+        }];
+      });
+      if (!changed) {
+        return current;
+      }
+      const collapsed = collapseServerGroups(next);
+      saveJson(STORAGE_KEYS.SESSION_GROUPS, collapsed);
+      return collapsed;
+    });
+  }, []);
+
   return {
-    sessionHistory,
     sessionGroups,
-    recordSessionOpen,
-    recordSessionGroupOpen,
     setSessionGroupSelection,
     deleteSessionGroup,
+    pruneSessionGroupSelectionToRemoteTruth,
   };
 }

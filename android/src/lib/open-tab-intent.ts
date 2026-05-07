@@ -2,6 +2,7 @@ import type { PersistedOpenTab, Session } from './types';
 import {
   buildPersistedOpenTabFromSession,
   buildPersistedOpenTabReuseKey,
+  buildPersistedOpenTabReuseKeyVariants,
   buildPersistedOpenTabReuseKeyVariantsFromSession,
   persistedOpenTabMatchesSession,
   persistedOpenTabsSemanticallyMatch,
@@ -15,6 +16,7 @@ export interface OpenTabIntentState {
 export interface CloseOpenTabIntentResult {
   nextState: OpenTabIntentState;
   closedReuseKey: string | null;
+  closedReuseKeyVariants: string[];
 }
 
 export interface RuntimeOpenTabSyncDecision {
@@ -394,6 +396,24 @@ export function deriveCloseOpenTabIntent(
   const targetSession = options?.runtimeSessions?.find((session) => session.id === sessionId) || null;
   const targetTab = currentState.tabs.find((tab) => tab.sessionId === sessionId) || null;
   const closedReuseKeySource = targetTab || targetSession;
+  const closedReuseKeyVariants = [...new Set([
+    ...(targetTab
+      ? buildPersistedOpenTabReuseKeyVariants({
+          daemonHostId: targetTab.daemonHostId,
+          bridgeHost: targetTab.bridgeHost,
+          bridgePort: targetTab.bridgePort,
+          sessionName: targetTab.sessionName,
+        })
+      : []),
+    ...(targetSession
+      ? buildPersistedOpenTabReuseKeyVariants({
+          daemonHostId: targetSession.daemonHostId,
+          bridgeHost: targetSession.bridgeHost,
+          bridgePort: targetSession.bridgePort,
+          sessionName: targetSession.sessionName,
+        })
+      : []),
+  ])];
   return {
     nextState: closeOpenTabIntentSession(currentState, sessionId, options),
     closedReuseKey: closedReuseKeySource
@@ -404,6 +424,7 @@ export function deriveCloseOpenTabIntent(
           sessionName: closedReuseKeySource.sessionName,
         })
       : null,
+    closedReuseKeyVariants,
   };
 }
 

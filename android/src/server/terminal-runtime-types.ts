@@ -38,6 +38,7 @@ export interface TerminalSession {
   closeTransport?: (reason: string) => void;
   sessionName: string;
   mirrorKey: string | null;
+  widthMode: TerminalWidthMode;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
 }
@@ -50,6 +51,7 @@ export interface SessionMirror {
   cols: number;
   rows: number;
   consecutiveFailures: number;
+  adaptiveCols: Map<string, { cols: number; widthMode: TerminalWidthMode }>;
   cursorKeysApp: boolean;
   revision: number;
   lastScrollbackCount: number;
@@ -82,11 +84,14 @@ export interface TerminalGeometry {
   rows: number;
 }
 
+export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
+
 export interface TerminalAttachPayload {
   sessionName: string;
   cols?: number;
   rows?: number;
   autoCommand?: string;
+  widthMode?: TerminalWidthMode;
 }
 
 export interface TmuxPaneMetrics {

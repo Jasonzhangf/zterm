@@ -1,15 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionCard } from '../components/connections/ConnectionCard';
 import { ConnectionFab } from '../components/connections/ConnectionFab';
 import { ConnectionsBottomNav } from '../components/connections/ConnectionsBottomNav';
 import { ConnectionsHeader } from '../components/connections/ConnectionsHeader';
-import { getResolvedSessionName } from '../lib/connection-target';
+import { buildConnectionsServerGroups, type ServerGroupView } from '../lib/connections-server-groups';
 import { mobileTheme } from '../lib/mobile-ui';
 import { getServerColorTone } from '../lib/server-color';
-import {
-  buildSessionSemanticOwnerKey,
-  sessionSemanticOwnersMatch,
-} from '../lib/session-semantic-identity';
+import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
 import type { Host, Session, SessionGroupHistory } from '../lib/types';
 
 interface ConnectionsPageProps {
@@ -33,28 +30,6 @@ interface ConnectionsPageProps {
   onDelete: (host: Host) => void;
   onAddNew: () => void;
   onOpenSettings: () => void;
-}
-
-interface ServerGroupView {
-  id: string;
-  name: string;
-  bridgeHost: string;
-  bridgePort: number;
-  daemonHostId?: string;
-  authToken?: string;
-  sessions: Array<{
-    id: string;
-    sessionName: string;
-    host?: Host;
-    source: 'saved' | 'history' | 'live';
-    lastOpenedAt: number;
-    liveSession: Session | null;
-  }>;
-  defaultSessionNames: string[];
-  lastOpenedAt: number;
-  liveSessions: Session[];
-  savedCount: number;
-  openableSessions: string[];
 }
 
 function getGroupDisplayName(group: Pick<ServerGroupView, 'daemonHostId' | 'bridgeHost'>) {
@@ -89,182 +64,62 @@ export function ConnectionsPage({
 }: ConnectionsPageProps) {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [selectedSessionsByGroup, setSelectedSessionsByGroup] = useState<Record<string, string[]>>({});
+  const serverGroups = useMemo(() => buildConnectionsServerGroups({
+    hosts,
+    sessions,
+    sessionGroups,
+  }), [hosts, sessionGroups, sessions]);
+  const previousServerGroupsRef = useRef<ServerGroupView[]>(serverGroups);
 
-  const liveSessionMap = useMemo(() => {
-    const map = new Map<string, Session>();
-    for (const session of sessions) {
-      const key = `${buildSessionSemanticOwnerKey({
-        daemonHostId: session.daemonHostId,
-        bridgeHost: session.bridgeHost,
-        bridgePort: session.bridgePort,
-      })}::${session.sessionName}`;
-      map.set(key, session);
+  useEffect(() => {
+    const previousGroups = previousServerGroupsRef.current;
+    previousServerGroupsRef.current = serverGroups;
+    if (previousGroups === serverGroups || previousGroups.length === 0 || serverGroups.length === 0) {
+      return;
     }
-    return map;
-  }, [sessions]);
 
-  const serverGroups = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        bridgeHost: string;
-        bridgePort: number;
-        daemonHostId?: string;
-        authToken?: string;
-        sessionsByName: Map<
-          string,
-          {
-            id: string;
-            sessionName: string;
-            host?: Host;
-            source: 'saved' | 'history' | 'live';
-            lastOpenedAt: number;
-            liveSession: Session | null;
-          }
-        >;
-        lastOpenedAt: number;
+    const remapGroupId = (groupId: string) => {
+      const nextBySameId = serverGroups.find((group) => group.id === groupId);
+      if (nextBySameId) {
+        return nextBySameId.id;
       }
-    >();
-
-    const ensureGroup = (bridgeHost: string, bridgePort: number, daemonHostId?: string, authToken?: string) => {
-      const key = buildSessionSemanticOwnerKey({
-        daemonHostId,
-        bridgeHost,
-        bridgePort,
-      });
-      const current = grouped.get(key)
-        || [...grouped.values()].find((entry) => sessionSemanticOwnersMatch(
-          entry,
-          { daemonHostId, bridgeHost, bridgePort },
-        ))
-        || null;
-      if (current) {
-        current.authToken = current.authToken || authToken;
-        current.daemonHostId = current.daemonHostId || daemonHostId;
-        current.bridgeHost = current.daemonHostId ? current.bridgeHost : bridgeHost;
-        current.bridgePort = current.daemonHostId ? current.bridgePort : bridgePort;
-        grouped.set(current.id, current);
-        return current;
+      const previousGroup = previousGroups.find((group) => group.id === groupId);
+      if (!previousGroup) {
+        return null;
       }
-
-      const created = {
-        id: key,
-        name: bridgeHost,
-        bridgeHost,
-        bridgePort,
-        daemonHostId,
-        authToken,
-        sessionsByName: new Map(),
-        lastOpenedAt: 0,
-      };
-      grouped.set(key, created);
-      return created;
+      const semanticMatch = serverGroups.find((group) => sessionSemanticOwnersMatch(group, previousGroup));
+      return semanticMatch?.id || null;
     };
 
-    const pickPreferredHost = (current: Host | undefined, candidate: Host) => {
-      if (!current) {
-        return candidate;
-      }
-      if (candidate.pinned !== current.pinned) {
-        return candidate.pinned ? candidate : current;
-      }
-      return (candidate.lastConnected || 0) >= (current.lastConnected || 0) ? candidate : current;
-    };
+    setExpandedGroupIds((current) => {
+      const remapped = current
+        .map(remapGroupId)
+        .filter((groupId): groupId is string => typeof groupId === 'string' && groupId.length > 0);
+      return remapped.length === current.length
+        && remapped.every((groupId, index) => groupId === current[index])
+        ? current
+        : [...new Set(remapped)];
+    });
 
-    for (const host of hosts) {
-      const group = ensureGroup(host.bridgeHost, host.bridgePort, host.daemonHostId || host.relayHostId, host.authToken);
-      const sessionName = getResolvedSessionName(host);
-      const current = group.sessionsByName.get(sessionName);
-      const nextHost = pickPreferredHost(current?.host, host);
-      group.sessionsByName.set(sessionName, {
-        id: `${group.id}:${sessionName}`,
-        sessionName,
-        host: nextHost,
-        source: 'saved',
-        lastOpenedAt: Math.max(current?.lastOpenedAt || 0, host.lastConnected || 0),
-        liveSession: liveSessionMap.get(`${group.id}::${sessionName}`) || current?.liveSession || null,
-      });
-      group.lastOpenedAt = Math.max(group.lastOpenedAt, host.lastConnected || 0);
-    }
-
-    for (const groupHistory of sessionGroups) {
-      const group = ensureGroup(groupHistory.bridgeHost, groupHistory.bridgePort, groupHistory.daemonHostId, groupHistory.authToken);
-      group.lastOpenedAt = Math.max(group.lastOpenedAt, groupHistory.lastOpenedAt);
-
-      for (const sessionName of groupHistory.sessionNames) {
-        const current = group.sessionsByName.get(sessionName);
-        group.sessionsByName.set(sessionName, {
-          id: `${group.id}:${sessionName}`,
-          sessionName,
-          host: current?.host,
-          source: current?.source || 'history',
-          lastOpenedAt: Math.max(current?.lastOpenedAt || 0, groupHistory.lastOpenedAt),
-          liveSession: liveSessionMap.get(`${group.id}::${sessionName}`) || current?.liveSession || null,
-        });
-      }
-    }
-
-    for (const liveSession of sessions) {
-      const group = ensureGroup(liveSession.bridgeHost, liveSession.bridgePort, liveSession.daemonHostId, liveSession.authToken);
-      const current = group.sessionsByName.get(liveSession.sessionName);
-      group.sessionsByName.set(liveSession.sessionName, {
-        id: `${group.id}:${liveSession.sessionName}`,
-        sessionName: liveSession.sessionName,
-        host: current?.host,
-        source: current?.source || 'live',
-        lastOpenedAt: Math.max(current?.lastOpenedAt || 0, liveSession.createdAt),
-        liveSession,
-      });
-      group.lastOpenedAt = Math.max(group.lastOpenedAt, liveSession.createdAt);
-    }
-
-    return [...grouped.values()]
-      .map((group) => {
-        const groupSessions = [...group.sessionsByName.values()].sort((a, b) => {
-          const aSaved = a.source === 'saved' ? 1 : 0;
-          const bSaved = b.source === 'saved' ? 1 : 0;
-          if (aSaved !== bSaved) {
-            return bSaved - aSaved;
-          }
-          const aLive = a.liveSession ? 1 : 0;
-          const bLive = b.liveSession ? 1 : 0;
-          if (aLive !== bLive) {
-            return bLive - aLive;
-          }
-          return b.lastOpenedAt - a.lastOpenedAt || a.sessionName.localeCompare(b.sessionName);
-        });
-        const liveSessions = groupSessions
-          .map((entry) => entry.liveSession)
-          .filter((entry): entry is Session => entry !== null);
-        const savedSessions = groupSessions.filter((entry) => entry.source === 'saved').map((entry) => entry.sessionName);
-        const openableSessions = groupSessions
-          .filter((entry) => entry.liveSession || entry.source === 'saved')
-          .map((entry) => entry.sessionName);
-
-        return {
-          id: group.id,
-          name: group.name,
-          bridgeHost: group.bridgeHost,
-          bridgePort: group.bridgePort,
-          daemonHostId: group.daemonHostId,
-          authToken: group.authToken,
-          sessions: groupSessions,
-          defaultSessionNames: savedSessions.length > 0 ? savedSessions : groupSessions.map((entry) => entry.sessionName),
-          lastOpenedAt: group.lastOpenedAt,
-          liveSessions,
-          savedCount: savedSessions.length,
-          openableSessions,
-        };
-      })
-      .sort((a, b) => {
-        if (a.liveSessions.length !== b.liveSessions.length) {
-          return b.liveSessions.length - a.liveSessions.length;
+    setSelectedSessionsByGroup((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      Object.entries(current).forEach(([groupId, sessionNames]) => {
+        const nextGroupId = remapGroupId(groupId);
+        if (!nextGroupId) {
+          changed = true;
+          return;
         }
-        return b.lastOpenedAt - a.lastOpenedAt;
+        if (nextGroupId !== groupId || next[nextGroupId]) {
+          changed = true;
+        }
+        next[nextGroupId] = next[nextGroupId]
+          ? [...new Set([...next[nextGroupId]!, ...sessionNames])]
+          : [...sessionNames];
       });
-  }, [hosts, liveSessionMap, sessionGroups, sessions]);
+      return changed ? next : current;
+    });
+  }, [serverGroups]);
 
   const toggleGroupExpanded = (groupId: string) => {
     setExpandedGroupIds((current) =>
@@ -360,7 +215,7 @@ export function ConnectionsPage({
               return (
                 <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <ConnectionCard
-                    title={`${getGroupDisplayName(group)} · ${group.sessions.length} tabs`}
+                    title={`${getGroupDisplayName(group)} · ${group.sessions.length} sessions`}
                     subtitle={group.daemonHostId || `${group.bridgeHost}:${group.bridgePort}`}
                     preview={
                       isOpen
@@ -384,7 +239,7 @@ export function ConnectionsPage({
                       }
                       onOpenServerGroups([
                         {
-                          name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} tabs`,
+                          name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} sessions`,
                           bridgeHost: group.bridgeHost,
                           bridgePort: group.bridgePort,
                           daemonHostId: group.daemonHostId,
@@ -604,7 +459,7 @@ export function ConnectionsPage({
                             }
                             onOpenServerGroups([
                               {
-                                name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} tabs`,
+                                name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} sessions`,
                                 bridgeHost: group.bridgeHost,
                                 bridgePort: group.bridgePort,
                                 daemonHostId: group.daemonHostId,
@@ -648,7 +503,7 @@ export function ConnectionsPage({
               onClick={() =>
                 onOpenServerGroups(
                   selectedServerGroups.map(({ group, sessionNames }) => ({
-                    name: `${getGroupDisplayName(group)} · ${sessionNames.length} tabs`,
+                    name: `${getGroupDisplayName(group)} · ${sessionNames.length} sessions`,
                     bridgeHost: group.bridgeHost,
                     bridgePort: group.bridgePort,
                     daemonHostId: group.daemonHostId,
@@ -673,7 +528,7 @@ export function ConnectionsPage({
             >
               <span style={{ fontWeight: 800 }}>Open selected groups</span>
               <span style={{ color: mobileTheme.colors.accent, fontWeight: 800 }}>
-                {selectedGroupCount} groups · {selectedSessionCount} tabs
+                {selectedGroupCount} groups · {selectedSessionCount} sessions
               </span>
             </button>
           </div>

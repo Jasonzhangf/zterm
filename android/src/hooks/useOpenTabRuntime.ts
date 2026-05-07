@@ -6,7 +6,7 @@ import {
   readPersistedClosedTabReuseKeys,
   persistClosedTabReuseKeys,
 } from '../lib/open-tab-persistence';
-import { resolveRemoteRestorableOpenTabState } from '../lib/open-tab-restore';
+import { fetchRemoteTmuxSessionNamesByOwner, filterRestorableOpenTabsByRemoteSessionNames } from '../lib/open-tab-restore';
 import {
   deriveCloseOpenTabIntent,
   normalizeOpenTabIntentState,
@@ -16,7 +16,7 @@ import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
 import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib/page-state';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { BridgeSettings } from '../lib/bridge-settings';
-import type { Host, PersistedOpenTab, Session } from '../lib/types';
+import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from '../lib/types';
 import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTabLifecycleEffects';
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
@@ -47,6 +47,7 @@ interface UseOpenTabRuntimeOptions {
   hosts: Host[];
   hostsLoaded: boolean;
   sessions: Session[];
+  sessionGroups: SessionGroupHistory[];
   runtimeActiveSessionId: string | null;
   createSession: (
     host: Host,
@@ -66,6 +67,7 @@ interface UseOpenTabRuntimeOptions {
   clearSessionDraft: (sessionId: string) => void;
   ensureTerminalPageVisible: () => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
+  pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   onForegroundActiveChange?: (active: boolean) => void;
 }
 
@@ -117,6 +119,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     hosts,
     hostsLoaded,
     sessions,
+    sessionGroups,
     runtimeActiveSessionId,
     createSession,
     closeSession,
@@ -127,6 +130,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
+    pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
   } = options;
 
@@ -307,8 +311,10 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       fallbackSessionIds: closeOptions?.fallbackSessionIds ?? runtimeSessions.map((session) => session.id),
       runtimeSessions,
     });
-    if (closeResult.closedReuseKey) {
-      closedOpenTabReuseKeysRef.current.add(closeResult.closedReuseKey);
+    if (closeResult.closedReuseKeyVariants.length > 0) {
+      closeResult.closedReuseKeyVariants.forEach((key) => {
+        closedOpenTabReuseKeysRef.current.add(key);
+      });
       persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
     }
     const nextOpenTabState = closeResult.nextState;
@@ -338,17 +344,56 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   const auditOpenTabsAgainstRemoteSessions = useCallback(async (reason: OpenTabAuditReason) => {
     const currentTabs = openTabStateRef.current.tabs;
-    if (currentTabs.length === 0) {
+    const auditTargets = [
+      ...currentTabs,
+      ...sessionGroups,
+    ];
+    if (auditTargets.length === 0) {
       return;
     }
 
     const auditToken = remoteOpenTabAuditTokenRef.current + 1;
     remoteOpenTabAuditTokenRef.current = auditToken;
-    const remoteState = await resolveRemoteRestorableOpenTabState({
-      tabs: currentTabs,
-      activeSessionId: openTabStateRef.current.activeSessionId,
+    const sessionNamesByTarget = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: auditTargets,
       bridgeSettings: bridgeSettingsRef.current,
+      hosts: hostsRef.current,
     });
+    if (remoteOpenTabAuditTokenRef.current !== auditToken) {
+      return;
+    }
+
+    const prunedOwnerKeys = new Set<string>();
+    for (const target of auditTargets) {
+      const ownerKey = `${target.daemonHostId?.trim() ? `daemon:${target.daemonHostId.trim()}` : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`}`;
+      if (prunedOwnerKeys.has(ownerKey)) {
+        continue;
+      }
+      prunedOwnerKeys.add(ownerKey);
+      const remoteSessionNames = sessionNamesByTarget.get(ownerKey);
+      if (!remoteSessionNames) {
+        continue;
+      }
+      pruneSessionGroupSelectionToRemoteTruth({
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId,
+      }, remoteSessionNames);
+    }
+
+    const remoteAvailability = filterRestorableOpenTabsByRemoteSessionNames({
+      tabs: currentTabs,
+      sessionNamesByTarget,
+    });
+    const normalizedRemoteState = normalizeOpenTabIntentState(
+      remoteAvailability.restorableTabs,
+      openTabStateRef.current.activeSessionId,
+    );
+    const remoteState = {
+      tabs: normalizedRemoteState.tabs,
+      activeSessionId: normalizedRemoteState.activeSessionId,
+      droppedTabs: remoteAvailability.droppedTabs,
+    };
     if (remoteOpenTabAuditTokenRef.current !== auditToken) {
       return;
     }
@@ -383,7 +428,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
         source: `remote-session-audit:${reason}`,
       });
     }
-  }, [applyClosedOpenTabIntent]);
+  }, [applyClosedOpenTabIntent, pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -416,6 +461,23 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       console.error('[App] Failed to audit remote session truth on connect:', error);
     });
   }, [auditOpenTabsAgainstRemoteSessions, sessions]);
+
+  const initialRemoteSessionAuditDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialRemoteSessionAuditDoneRef.current) {
+      return;
+    }
+    if (openTabState.tabs.length > 0 || sessions.length > 0) {
+      return;
+    }
+    if (sessionGroups.length === 0) {
+      return;
+    }
+    initialRemoteSessionAuditDoneRef.current = true;
+    void auditOpenTabsAgainstRemoteSessions('connect').catch((error) => {
+      console.error('[App] Failed to audit remote session truth on cold-start session-group restore:', error);
+    });
+  }, [auditOpenTabsAgainstRemoteSessions, openTabState.tabs.length, sessionGroups, sessions.length]);
 
   useEffect(() => {
     const pendingSwitch = pendingTerminalActiveSwitchRef.current;

@@ -185,6 +185,7 @@ describe('terminal mirror capture runtime', () => {
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const readSnapshot = vi.fn().mockResolvedValue(stableSnapshot);
@@ -240,6 +241,7 @@ describe('terminal mirror capture runtime', () => {
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
 

@@ -19,6 +19,7 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: null,
+      widthMode: 'mirror-fixed',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -76,6 +77,7 @@ function createRuntime() {
     autoCommandDelayMs: 0,
     waitMs: async () => {},
     logTimePrefix: () => '2026-05-01 00:00:00',
+    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     closeLogicalTerminalSession: vi.fn(),
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
@@ -322,6 +324,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-03 00:00:00',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       closeLogicalTerminalSession: vi.fn(),
       getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
     });
@@ -398,6 +401,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       closeLogicalTerminalSession: vi.fn(),
       getSessionMirror: () => mirror,
     });
@@ -483,6 +487,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       closeLogicalTerminalSession: vi.fn(),
       getSessionMirror: () => mirror,
     });

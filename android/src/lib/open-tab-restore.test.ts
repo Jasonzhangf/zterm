@@ -231,6 +231,55 @@ describe('open-tab restore truth', () => {
     );
   });
 
+  it('upgrades a daemon-owned remote tmux truth query to the freshest saved host target for that owner', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['shared']);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [
+        {
+          bridgeHost: '127.0.0.1',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-stale',
+        },
+      ],
+      hosts: [
+        {
+          daemonHostId: 'daemon-a',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 4444,
+          authToken: 'token-fresh',
+          pinned: false,
+          lastConnected: 99,
+          createdAt: 1,
+        },
+      ],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual(['shared']);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        authToken: 'token-fresh',
+        relayHostId: 'daemon-a',
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('resolves remote-restorable tab state with normalized active truth in one helper', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
 

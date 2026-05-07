@@ -16,6 +16,7 @@ import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { resolveLayoutProfile, type LayoutProfile } from '../../../packages/shared/src/layout/profile';
+import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import {
   STORAGE_KEYS,
   type PersistedOpenTab,
@@ -1774,7 +1775,7 @@ function TerminalPageComponent({
     const attachListeners = async () => {
       try {
         inputListener = await ImeAnchor.addListener('input', (event) => {
-          emitToActiveSession((event.text || '').replace(/\n/g, '\r'));
+          emitToActiveSession(normalizeTerminalCommittedText(event.text || '').replace(/\n/g, '\r'));
         });
         if (disposed) {
           void inputListener.remove().catch((error) => {

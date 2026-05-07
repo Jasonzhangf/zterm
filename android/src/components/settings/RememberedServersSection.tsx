@@ -1,12 +1,9 @@
 import {
-  describeBridgePresetIdentity,
-  resolveBridgePresetDaemonHostId,
   setDefaultBridgeServer,
-  sortBridgeServers,
   type BridgeSettings,
 } from '../../lib/bridge-settings';
+import { buildBridgeServerPresetViews } from '../../lib/bridge-server-presets-view';
 import { mobileTheme } from '../../lib/mobile-ui';
-import { formatTargetBadge } from '../../lib/network-target';
 import { SettingsSectionTitle, settingsSectionStyle } from './SettingsSection';
 
 interface RememberedServersSectionProps {
@@ -20,18 +17,17 @@ export function RememberedServersSection({
   onSettingsChange,
   onRemoveDefaultServer,
 }: RememberedServersSectionProps) {
+  const serverViews = buildBridgeServerPresetViews(settings.servers);
   return (
     <div style={settingsSectionStyle()}>
       <SettingsSectionTitle>Remembered Bridge Entry Points</SettingsSectionTitle>
 
-      {settings.servers.length === 0 ? (
+      {serverViews.length === 0 ? (
         <div style={{ color: mobileTheme.colors.lightMuted }}>No remembered server yet.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {sortBridgeServers(settings.servers).map((server) => {
+          {serverViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel, targetBadge, authLabel }) => {
             const active = server.id === settings.defaultServerId;
-            const daemonHostId = resolveBridgePresetDaemonHostId(server);
-            const identity = describeBridgePresetIdentity(server);
             return (
               <button
                 key={server.id}
@@ -54,15 +50,15 @@ export function RememberedServersSection({
                 <div>
                   <div style={{ fontWeight: 800 }}>{server.name}</div>
                   <div style={{ fontSize: '13px', opacity: 0.8 }}>
-                    {identity.bridgeLabel}
+                    {bridgeLabel}
                   </div>
                   {daemonHostId ? (
                     <div style={{ marginTop: '4px', fontSize: '11px', opacity: 0.78 }}>
-                      {identity.daemonLabel}
+                      {daemonLabel}
                     </div>
                   ) : null}
                   <div style={{ marginTop: '4px', fontSize: '11px', opacity: 0.78 }}>
-                    {formatTargetBadge(server.targetHost)} · {server.authToken ? 'Auth on' : 'No token'}
+                    {targetBadge} · {authLabel}
                   </div>
                 </div>
                 <span style={{ fontSize: '12px', opacity: 0.8 }}>{active ? 'Default' : 'Use'}</span>
@@ -72,7 +68,7 @@ export function RememberedServersSection({
         </div>
       )}
 
-      {settings.servers.length > 0 ? (
+      {serverViews.length > 0 ? (
         <button
           onClick={onRemoveDefaultServer}
           style={{

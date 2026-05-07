@@ -75,12 +75,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
-  const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
+  const { hosts, isLoaded: hostsLoaded, addHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
-  const { sessionGroups, recordSessionOpen, recordSessionGroupOpen, setSessionGroupSelection, deleteSessionGroup } = useSessionHistoryStorage();
+  const { sessionGroups, setSessionGroupSelection, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage();
   const sessions = state.sessions;
 
   const ensureTerminalPageVisible = useCallback(() => {
@@ -131,6 +131,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     hosts,
     hostsLoaded,
     sessions,
+    sessionGroups,
     runtimeActiveSessionId: state.activeSessionId,
     createSession,
     closeSession,
@@ -141,8 +142,16 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
+    pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
   });
+
+  const handleOpenConnectionsPageWithAudit = useCallback(() => {
+    handleOpenConnectionsPage();
+    void auditOpenTabsAgainstRemoteSessions('connections-page-open').catch((error) => {
+      console.error('[App] Failed to audit remote session truth on connections page open:', error);
+    });
+  }, [auditOpenTabsAgainstRemoteSessions, handleOpenConnectionsPage]);
 
 
   const {
@@ -173,7 +182,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pickerMode,
     pickerTarget,
     pickerInitialSessions,
-    sortedHosts,
     handleLoadSavedTabList,
     handleAddNew,
     handleOpenQuickTabPicker,
@@ -191,10 +199,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     setBridgeSettings,
     hosts,
-    upsertHost,
     deleteSessionGroup,
-    recordSessionOpen,
-    recordSessionGroupOpen,
+    pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
     createSession,
     runtimeActiveSessionId: state.activeSessionId,
@@ -221,8 +227,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
-            hosts={sortedHosts}
-            sessions={sessions}
+            hosts={hosts}
+            sessions={terminalSessions}
             sessionGroups={sessionGroups}
             onResumeSession={handleResumeSession}
             onOpenGroupSession={handleOpenGroupSession}
@@ -264,7 +270,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
                 turnCredential: '',
                 terminalWidthMode: updateBridgeSettingsTerminalWidthMode(current, next.terminalWidthMode).terminalWidthMode,
               }));
-              handleOpenConnectionsPage();
+              handleOpenConnectionsPageWithAudit();
             }}
             onUpdatePreferencesChange={setAppUpdatePreferences}
             onCheckForUpdate={(nextPreferences) => {
@@ -281,7 +287,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
                 terminalThemeId: themeId,
               }));
             }}
-            onBack={handleOpenConnectionsPage}
+            onBack={handleOpenConnectionsPageWithAudit}
           />
         )}
 
@@ -295,7 +301,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onMoveSession={handleMoveSession}
             onRenameSession={handleRenameSession}
             onCloseSession={handleCloseSession}
-            onOpenConnections={handleOpenConnectionsPage}
+            onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
             onResize={undefined}
             onTerminalInput={handleTerminalInput}
@@ -338,9 +344,20 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         open={pickerMode !== null}
         servers={bridgeSettings.servers}
         bridgeSettings={bridgeSettings}
+        openTabs={terminalSessions.map((session) => ({
+          id: session.id,
+          sessionName: session.sessionName,
+          customName: session.customName,
+          bridgeHost: session.bridgeHost,
+          bridgePort: session.bridgePort,
+        }))}
+        activeTabId={terminalActiveSession?.id || null}
         initialTarget={pickerTarget}
         initialSelectedSessions={pickerInitialSessions}
         onClose={closePicker}
+        onSwitchOpenTab={handleSwitchSession}
+        onRenameOpenTab={handleRenameSession}
+        onCloseOpenTab={handleCloseSession}
         onOpenTmuxSession={handleOpenSingleTmuxSession}
         onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
         onSelectCleanSession={handleSelectCleanSession}
@@ -348,8 +365,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
           handleSaveServerGroupSelection(target, sessionNames);
           closePicker();
         }}
-        onRemoteSessionsRefreshed={() => {
-          handleRemoteSessionsRefreshed();
+        onRemoteSessionsRefreshed={(target, sessionNames) => {
+          handleRemoteSessionsRefreshed(target, sessionNames);
         }}
       />
 

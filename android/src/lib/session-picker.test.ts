@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildCleanDraft, buildDraftFromTmuxSession, normalizeBridgeTarget, type BridgeTarget } from './session-picker';
+import { buildCleanDraft, buildDraftFromTmuxSession, normalizeBridgeTarget, resolveRelayDeviceBridgeTarget, type BridgeTarget } from './session-picker';
 import type { BridgeServerPreset } from './bridge-settings';
-import type { Host } from './types';
+import type { Host, TraversalRelayDeviceSnapshot } from './types';
 
 const presets: BridgeServerPreset[] = [
   {
@@ -54,7 +54,7 @@ describe('session-picker relay truth', () => {
     );
   });
 
-  it('reuses persisted host relay binding when existing host already matches target/session', () => {
+  it('uses the current picker target transport truth when an existing host matches the same daemon/session', () => {
     const existingHost: Host = {
       id: 'host-1',
       createdAt: 1,
@@ -82,11 +82,12 @@ describe('session-picker relay truth', () => {
 
     expect(draft).toEqual(
       expect.objectContaining({
-        bridgeHost: '100.127.23.27',
-        bridgePort: 4444,
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        authToken: 'token-a',
         daemonHostId: 'daemon-host-a',
         relayHostId: 'daemon-host-a',
-        relayDeviceId: 'daemon-device-old',
+        relayDeviceId: 'daemon-device-new',
       }),
     );
   });
@@ -141,6 +142,68 @@ describe('session-picker relay truth', () => {
       expect.objectContaining({
         relayHostId: 'daemon-host-claw',
         relayDeviceId: 'daemon-device-1',
+      }),
+    );
+  });
+
+  it('resolves relay device to mapped bridge target when preset exists', () => {
+    const device: TraversalRelayDeviceSnapshot = {
+      deviceId: 'daemon-device-a',
+      deviceName: 'MacStudio Daemon',
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      client: {
+        connected: true,
+        lastSeenAt: '2026-05-07T00:00:00.000Z',
+      },
+      daemon: {
+        hostId: 'daemon-host-a',
+        connected: true,
+        lastSeenAt: '2026-05-07T00:00:00.000Z',
+        version: '0.1.0',
+      },
+      updatedAt: '2026-05-07T00:00:00.000Z',
+    };
+
+    expect(resolveRelayDeviceBridgeTarget(presets, device)).toEqual(
+      expect.objectContaining({
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        relayDeviceId: 'daemon-device-a',
+        authToken: 'token-a',
+      }),
+    );
+  });
+
+  it('falls back to daemon identity when relay device has no mapped bridge preset yet', () => {
+    const device: TraversalRelayDeviceSnapshot = {
+      deviceId: 'daemon-device-b',
+      deviceName: 'Unmapped Daemon',
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      client: {
+        connected: true,
+        lastSeenAt: '2026-05-07T00:00:00.000Z',
+      },
+      daemon: {
+        hostId: 'daemon-host-b',
+        connected: true,
+        lastSeenAt: '2026-05-07T00:00:00.000Z',
+        version: '0.1.0',
+      },
+      updatedAt: '2026-05-07T00:00:00.000Z',
+    };
+
+    expect(resolveRelayDeviceBridgeTarget(presets, device)).toEqual(
+      expect.objectContaining({
+        bridgeHost: '',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-b',
+        relayHostId: 'daemon-host-b',
+        relayDeviceId: 'daemon-device-b',
+        authToken: '',
       }),
     );
   });

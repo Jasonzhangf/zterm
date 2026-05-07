@@ -28,7 +28,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Daemon A / main',
         bridgeHost: '100.64.0.10',
         bridgePort: 3333,
@@ -39,7 +39,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     });
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Daemon A / logs',
         bridgeHost: '100.127.23.27',
         bridgePort: 4444,
@@ -64,7 +64,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Daemon A',
         bridgeHost: '100.64.0.10',
         bridgePort: 3333,
@@ -75,7 +75,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     });
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Daemon B',
         bridgeHost: '100.64.0.10',
         bridgePort: 3333,
@@ -96,7 +96,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Bridge only',
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,
@@ -106,7 +106,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     });
 
     act(() => {
-      result.current.recordSessionGroupOpen({
+      result.current.setSessionGroupSelection({
         name: 'Daemon owned',
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,
@@ -123,5 +123,72 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
         daemonHostId: 'daemon-Macstudio.local-128564413166185f',
       }),
     );
+  });
+
+  it('prunes stored session names against remote tmux truth for the matching server only', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        sessionNames: ['main', 'logs', 'stale'],
+      });
+      result.current.setSessionGroupSelection({
+        name: 'Daemon B',
+        bridgeHost: '100.64.0.11',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-b',
+        authToken: 'token-b',
+        sessionNames: ['other'],
+      });
+    });
+
+    act(() => {
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        {
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+        },
+        ['logs', 'main', 'logs'],
+      );
+    });
+
+    expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ daemonHostId: 'daemon-host-a', sessionNames: ['logs', 'main'] }),
+      expect.objectContaining({ daemonHostId: 'daemon-host-b', sessionNames: ['other'] }),
+    ]));
+  });
+
+  it('deletes a stored server group when remote tmux truth no longer contains any selected session', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        sessionNames: ['stale'],
+      });
+    });
+
+    act(() => {
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        {
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+        },
+        [],
+      );
+    });
+
+    expect(result.current.sessionGroups).toEqual([]);
   });
 });

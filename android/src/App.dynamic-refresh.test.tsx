@@ -281,21 +281,19 @@ const sessionDraftHarness = vi.hoisted(() => {
 
 const sessionHistoryHarness = vi.hoisted(() => {
   const sessionGroups: any[] = [];
-  const recordSessionOpen = vi.fn();
-  const recordSessionGroupOpen = vi.fn();
   const setSessionGroupSelection = vi.fn();
   const deleteSessionGroup = vi.fn();
+  const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   return {
     sessionGroups,
-    recordSessionOpen,
-    recordSessionGroupOpen,
     setSessionGroupSelection,
     deleteSessionGroup,
+    pruneSessionGroupSelectionToRemoteTruth,
     reset() {
-      recordSessionOpen.mockReset();
-      recordSessionGroupOpen.mockReset();
       setSessionGroupSelection.mockReset();
       deleteSessionGroup.mockReset();
+      pruneSessionGroupSelectionToRemoteTruth.mockReset();
+      sessionGroups.splice(0, sessionGroups.length);
     },
   };
 });
@@ -429,10 +427,9 @@ vi.mock('./hooks/useSessionDraftStorage', () => ({
 vi.mock('./hooks/useSessionHistoryStorage', () => ({
   useSessionHistoryStorage: () => ({
     sessionGroups: sessionHistoryHarness.sessionGroups,
-    recordSessionOpen: sessionHistoryHarness.recordSessionOpen,
-    recordSessionGroupOpen: sessionHistoryHarness.recordSessionGroupOpen,
     setSessionGroupSelection: sessionHistoryHarness.setSessionGroupSelection,
     deleteSessionGroup: sessionHistoryHarness.deleteSessionGroup,
+    pruneSessionGroupSelectionToRemoteTruth: sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth,
   }),
 }));
 
@@ -440,6 +437,21 @@ const openTerminalPageSpy = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
 
 const tmuxPickerHarness = vi.hoisted(() => {
+  let latestProps: any = null;
+  return {
+    setProps(next: any) {
+      latestProps = next;
+    },
+    readProps() {
+      return latestProps;
+    },
+    reset() {
+      latestProps = null;
+    },
+  };
+});
+
+const connectionsPageHarness = vi.hoisted(() => {
   let latestProps: any = null;
   return {
     setProps(next: any) {
@@ -473,7 +485,10 @@ vi.mock('./components/tmux/TmuxSessionPickerSheet', () => ({
 }));
 
 vi.mock('./pages/ConnectionsPage', () => ({
-  ConnectionsPage: () => null,
+  ConnectionsPage: (props: any) => {
+    connectionsPageHarness.setProps(props);
+    return null;
+  },
 }));
 
 vi.mock('./pages/ConnectionPropertiesPage', () => ({
@@ -494,6 +509,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onSwitchSession,
     onMoveSession,
     onCloseSession,
+    onOpenConnections,
     onTerminalInput,
     onSessionDraftSend,
     onLoadSavedTabList,
@@ -505,6 +521,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onSwitchSession: (sessionId: string) => void;
     onMoveSession: (sessionId: string, toIndex: number) => void;
     onCloseSession: (sessionId: string) => void;
+    onOpenConnections: () => void;
     onTerminalInput?: (sessionId: string, data: string) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
     onLoadSavedTabList?: (tabs: Array<any>, activeSessionId?: string) => void;
@@ -567,6 +584,15 @@ vi.mock('./pages/TerminalPage', () => ({
           }}
         >
           send-active-input
+        </button>
+        <button
+          type="button"
+          data-testid="open-connections"
+          onClick={() => {
+            onOpenConnections();
+          }}
+        >
+          open-connections
         </button>
         <button
           type="button"
@@ -695,6 +721,7 @@ describe('App dynamic refresh matrix', () => {
     openTerminalPageSpy.mockClear();
     terminalPageRenderSpy.mockClear();
     fetchTmuxSessionsMock.mockReset();
+    connectionsPageHarness.reset();
     fetchTmuxSessionsMock.mockImplementation(async (target: { bridgeHost?: string; bridgePort?: number }) => {
       if (target?.bridgeHost === '100.127.23.27' && target?.bridgePort === 3333) {
         return ['alpha', 'beta', 'zterm', 'session-s1', 'session-s2', 'session-shared'];
@@ -1289,6 +1316,48 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
 
+  it('restores persisted open tabs without requiring a matching HOSTS entry', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha']);
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([]);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-a',
+        hostId: 'host-missing',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-a');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'host-missing',
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: true, connect: true }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
+  });
+
   it('drops persisted tabs whose remote tmux session no longer exists and persists the pruned truth before restore', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
     sessionHarness.update({
@@ -1510,7 +1579,9 @@ describe('App dynamic refresh matrix', () => {
     );
 
     fetchTmuxSessionsMock.mockReset();
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['session-s1'])
+      .mockResolvedValueOnce(['session-s1']);
 
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
@@ -1772,6 +1843,80 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('session-live-z');
   });
 
+  it('switches to a reused bridge-only live session id when cold restore starts from a daemon-owned persisted tab', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-shared',
+        createdAt: 1,
+        name: 'Conn Shared',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => {
+      if (options?.sessionId === 'tab-daemon-stale') {
+        return 'session-live-bridge';
+      }
+      return options?.sessionId || 'unknown';
+    });
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-daemon-stale',
+        hostId: 'host-shared',
+        connectionName: 'Conn Shared',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-daemon-stale');
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['shared']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'host-shared',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      }),
+      expect.objectContaining({
+        sessionId: 'tab-daemon-stale',
+        activate: true,
+        connect: true,
+      }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('session-live-bridge');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-live-bridge',
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      }),
+    ]);
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('session-live-bridge');
+  });
+
   it('rewrites all restored persisted tab session ids when cold restore remaps stale ids, not only the active tab', async () => {
     sessionHarness.update({
       sessions: [],
@@ -1845,6 +1990,102 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 'tab-b-stable', sessionName: 'beta' }),
     ]);
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('tab-b-stable');
+  });
+
+
+  it('keeps the remapped live tab truth when runtime sessions connect right after cold restore', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-shared',
+        createdAt: 1,
+        name: 'Conn Shared',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => {
+      if (options?.sessionId === 'tab-daemon-stale') {
+        return 'session-live-bridge';
+      }
+      return options?.sessionId || 'unknown';
+    });
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-daemon-stale',
+        hostId: 'host-shared',
+        connectionName: 'Conn Shared',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-daemon-stale');
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValue(['shared']);
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.switchSession).toHaveBeenCalledWith('session-live-bridge'));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('session-live-bridge');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-live-bridge',
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      }),
+    ]);
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [
+            {
+              ...makeSession('session-live-bridge', 3),
+              bridgeHost: '100.127.23.27',
+              bridgePort: 3333,
+              sessionName: 'shared',
+            },
+          ],
+          activeSessionId: 'tab-daemon-stale',
+          connectedCount: 1,
+        } as any,
+        {
+          ...makeSession('session-live-bridge', 3),
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'shared',
+        } as any,
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('session-live-bridge'));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('session-live-bridge');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-live-bridge',
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      }),
+    ]);
+    expect(sessionHarness.switchSession).not.toHaveBeenCalledWith('tab-daemon-stale');
   });
 
   it('does not let a stale terminal page focus id override the restored latest active tab truth', async () => {
@@ -2593,6 +2834,92 @@ describe('App dynamic refresh matrix', () => {
     ]);
   });
 
+  it('persists closed semantic reuse tombstones so a closed duplicate tab still stays dead after cold launch', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'persisted-old',
+        hostId: 'host-persisted-old',
+        connectionName: 'conn-shared',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-shared',
+        authToken: 'shared-token',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        authToken: 'token-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'persisted-old');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    sessionHarness.update(
+      {
+        sessions: [
+          {
+            ...makeSession('runtime-new', 1),
+            bridgeHost: '127.0.0.1',
+            bridgePort: 3333,
+            sessionName: 'session-shared',
+            authToken: 'shared-token',
+          },
+          makeSession('s2', 2),
+        ],
+        activeSessionId: 'runtime-new',
+        connectedCount: 2,
+      } as any,
+      makeSession('runtime-new', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    await waitFor(() => expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toContain('bridge:127.0.0.1::3333::session:session-shared'));
+
+    view.unmount();
+    sessionHarness.reset();
+    sessionHarness.update({
+      sessions: [
+        {
+          ...makeSession('runtime-new', 3),
+          bridgeHost: '127.0.0.1',
+          bridgePort: 3333,
+          sessionName: 'session-shared',
+          authToken: 'shared-token',
+        },
+        makeSession('s2', 4),
+      ],
+      activeSessionId: 's2',
+      connectedCount: 2,
+    } as any, makeSession('s2', 4));
+    sessionHarness.createSession.mockClear();
+    sessionHarness.switchSession.mockClear();
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s2'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2', sessionName: 'session-s2' }),
+    ]);
+    expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionName: 'session-shared' }),
+      expect.anything(),
+    );
+  });
+
 
   it('keeps persisted OPEN_TABS unchanged when a runtime session temporarily disappears from state', async () => {
     sessionHarness.update(
@@ -2701,6 +3028,62 @@ describe('App dynamic refresh matrix', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
     ]);
+  });
+
+  it('uses explicit open-tab truth for the connections page after a tab is closed', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's2' }),
+    ]));
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+
+    await waitFor(() => {
+      const props = connectionsPageHarness.readProps();
+      expect(props?.sessions?.map((session: { id: string }) => session.id)).toEqual(['s2']);
+    });
+  });
+
+  it('updates quick-tab current-tabs truth immediately after a tab is closed', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
+    await waitFor(() => {
+      const pickerProps = tmuxPickerHarness.readProps();
+      expect(pickerProps?.openTabs?.map((tab: { id: string }) => tab.id)).toEqual(['s1', 's2']);
+    });
+
+    fireEvent.click(screen.getByTestId('close-active-tab'));
+
+    await waitFor(() => {
+      const pickerProps = tmuxPickerHarness.readProps();
+      expect(pickerProps?.openTabs?.map((tab: { id: string }) => tab.id)).toEqual(['s2']);
+    });
   });
 
   it('auto-closes tabs from remote session status events and persists the close intent', async () => {
@@ -2826,6 +3209,273 @@ describe('App dynamic refresh matrix', () => {
     );
   });
 
+
+  it('prunes stored session groups on foreground resume even when there are no open tabs', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    sessionHistoryHarness.sessionGroups.splice(0, sessionHistoryHarness.sessionGroups.length, {
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['session-s1', 'session-s2'],
+      lastOpenedAt: 1,
+    });
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+    sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth.mockReset();
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+
+    act(() => {
+      document.dispatchEvent(new Event('resume'));
+    });
+
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('audits a daemon-owned stored session group against the fresh host endpoint instead of its stale historical endpoint', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+
+    hostHarness.setHosts([
+      {
+        id: 'host-fresh',
+        createdAt: 1,
+        name: 'Fresh Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-a',
+        sessionName: 'session-s1',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        authToken: 'token-fresh',
+        transportMode: 'auto',
+        lastConnected: 99,
+      },
+    ]);
+
+    sessionHistoryHarness.sessionGroups.splice(0, sessionHistoryHarness.sessionGroups.length, {
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-stale',
+      sessionNames: ['session-s1', 'session-s2'],
+      lastOpenedAt: 1,
+    });
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        authToken: 'token-fresh',
+      }),
+      expect.anything(),
+    );
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+  });
+
+  it('re-audits stored history when returning to the connections page so history-only stale sessions do not linger there', async () => {
+    const daemonOwnedSession = {
+      ...makeSession('s1', 1),
+      daemonHostId: 'daemon-a',
+      authToken: 'token-live',
+    };
+    sessionHarness.update(
+      {
+        sessions: [daemonOwnedSession],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      daemonOwnedSession as any,
+    );
+
+    hostHarness.setHosts([
+      {
+        id: 'host-fresh',
+        createdAt: 1,
+        name: 'Fresh Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-a',
+        sessionName: 'session-s1',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        authToken: 'token-fresh',
+        transportMode: 'auto',
+        lastConnected: 99,
+      },
+    ]);
+
+    sessionHistoryHarness.sessionGroups.splice(0, sessionHistoryHarness.sessionGroups.length, {
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-stale',
+      sessionNames: ['session-s1', 'session-stale'],
+      lastOpenedAt: 1,
+    });
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+    sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth.mockReset();
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+  });
+
+  it('prunes stored session groups on cold launch even when there are no open tabs or runtime sessions', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    sessionHistoryHarness.sessionGroups.splice(0, sessionHistoryHarness.sessionGroups.length, {
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['session-s1', 'session-s2'],
+      lastOpenedAt: 1,
+    });
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('still prunes stored session groups after cold-start restore clears stale OPEN_TABS first', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    sessionHistoryHarness.sessionGroups.splice(0, sessionHistoryHarness.sessionGroups.length, {
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['session-s1', 'session-s2'],
+      lastOpenedAt: 1,
+    });
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'stale-tab',
+        hostId: 'host-stale',
+        connectionName: 'Conn stale',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'session-stale',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'stale-tab');
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['session-s1']);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([]));
+    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['session-s1'],
+    ));
+  });
+
   it('prunes tabs on foreground resume when remote tmux session truth no longer contains them', async () => {
     sessionHarness.update(
       {
@@ -2880,7 +3530,9 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
 
     fetchTmuxSessionsMock.mockReset();
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s1']);
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['session-s1'])
+      .mockResolvedValueOnce(['session-s1']);
 
     act(() => {
       document.dispatchEvent(new Event('resume'));
@@ -2901,6 +3553,79 @@ describe('App dynamic refresh matrix', () => {
               bridgeHost: '127.0.0.1',
               bridgePort: 3333,
               sessionName: 'session-s2',
+            },
+          ],
+          activeSessionId: 's1',
+          connectedCount: 2,
+        } as any,
+        makeSession('s1', 3),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('3'));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+  });
+
+  it('keeps a daemon-owned remote-audit-pruned tab hidden even if a bridge-only semantic duplicate later reappears', async () => {
+    sessionHarness.update(
+      {
+        sessions: [
+          makeSession('s1', 1),
+          {
+            ...makeSession('daemon-live', 2),
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-a',
+            sessionName: 'shared',
+          },
+        ],
+        activeSessionId: 'daemon-live',
+        connectedCount: 2,
+      } as any,
+      {
+        ...makeSession('daemon-live', 2),
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      } as any,
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,daemon-live'));
+
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['session-s1'])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['session-s1']);
+
+    act(() => {
+      document.dispatchEvent(new Event('resume'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [
+            makeSession('s1', 3),
+            {
+              ...makeSession('runtime-bridge', 4),
+              bridgeHost: '100.127.23.27',
+              bridgePort: 3333,
+              sessionName: 'shared',
             },
           ],
           activeSessionId: 's1',
@@ -3506,6 +4231,98 @@ describe('App dynamic refresh matrix', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     });
+  });
+
+  it('clears closed semantic tombstones during saved-tab import so the imported tab still restores on the next cold launch', async () => {
+    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify([
+      'daemon:daemon-a::session:shared',
+    ]));
+    sessionHarness.update(
+      {
+        sessions: [makeSession('current-live', 1)],
+        activeSessionId: 'current-live',
+        connectedCount: 1,
+      } as any,
+      makeSession('current-live', 1),
+    );
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['shared'])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['shared']);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    const firstMount = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('load-daemon-owned-saved-tab-list'));
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'saved-daemon-a', daemonHostId: 'daemon-a', sessionName: 'shared' }),
+    ]));
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+
+    firstMount.unmount();
+    sessionHarness.reset();
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    sessionHarness.createSession.mockImplementation((_host: any, options?: any) => options?.sessionId || 'unknown');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+      }),
+      expect.objectContaining({
+        sessionId: 'saved-daemon-a',
+        activate: true,
+        connect: true,
+      }),
+    );
   });
 
   it('keeps ACTIVE_PAGE terminal focus aligned with ACTIVE_SESSION across foreground resume after tab switch', async () => {

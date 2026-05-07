@@ -600,3 +600,218 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 下一步：重启单服务 `com.zterm.android.zterm-daemon`，验证 /health 与 /debug/runtime，确认 staging runtime 已切到最新代码。
 
 - 2026-05-07 当前任务: 收口 remote session truth audit。目标: connect 成功 / picker refresh / foreground resume 三个入口都走 useOpenTabRuntime.auditOpenTabsAgainstRemoteSessions 单一 owner；session 列表 refresh 与 open-tab prune 共线，避免已关闭/不存在 session 被重新打开。
+
+- 2026-05-07 继续审计: 目标是物理确认 open-tab/session 持久化与恢复的所有写口/恢复口，找出为何仍可能复活已关闭或不存在 session。重点检查 OPEN_TABS/ACTIVE_SESSION 写口、restore/bootstrap/runtime-merge、session group/saved tab 导入、远端 session list refresh。
+
+[session-list-audit] pending fix: ConnectionsPage session row source should be history when sessionGroup row has no host; hosts must not create rows directly.
+
+[session-list-audit] next: inspect SESSION_GROUPS / OPEN_TABS / host save-update / runtime merge for ghost session resurrection and duplicate server rows.
+
+[session-list-audit] finding: sessionGroups are only pruned on picker refresh; foreground/connections-page truth can still resurrect stale saved sessions via local group history.
+
+[session-list-audit] next: trace stale tab/session resurrection from recordSessionGroupOpen / recordSessionOpen / upsertHost / restore / runtime merge writeback.
+
+[session-list-audit] next focus: audit recordSessionGroupOpen / recordSessionOpen / upsertHost persistence timing; distinguish explicit save vs temporary open.
+
+[session-list-audit] next focus: audit HOSTS persistence truth; distinguish explicit saved connection vs temporary runtime-open host.
+[2026-05-07] session-list-audit HOSTS truth closeout
+- 已确认最后一条明显污染链：`useSessionOpenActions.openDraftAsSession()` 之前会无条件 `upsertHost(buildTransientHostFromDraft(...))`，导致“临时开 tab / restore saved tab / open group”都会永久写入 `HOSTS`。
+- 本轮已物理切断：`openDraftAsSession()` 改为只构造 transient `sessionHost` 供 runtime session + OPEN_TABS 使用，不再写 `HOSTS`。
+- 冻结语义：
+  1. `HOSTS` 只允许由连接管理页显式保存/编辑 owner 写入；
+  2. `SESSION_GROUPS` 只允许用户显式保存 selection；
+  3. `OPEN_TABS` 只允许显式打开/restore/runtime merge 写入；
+  4. 远端 tmux truth 继续作为 `OPEN_TABS + SESSION_GROUPS` prune 单一依据。
+- 已跑回归：`useSessionOpenActions/useSessionHistoryStorage/ConnectionsPage/App.dynamic-refresh` 共 76 tests passed。
+[2026-05-07] open-tab persistence audit closeout (current checkpoint)
+- 生产代码中 `OPEN_TABS / ACTIVE_SESSION` 的物理真源目前已收口为一套：
+  - 读取：`readPersistedOpenTabsState()` / `readPersistedActiveSessionId()`
+  - 写入：`persistOpenTabsState()`，唯一由 `useOpenTabRuntime.persistExplicitOpenTabs()` 驱动
+- 生产侧 session 创建也已确认只剩两处：
+  1. `useSessionOpenActions.openDraftAsSession()` —— 用户显式打开
+  2. `useOpenTabRestoreRuntimeSync()` —— persisted tab restore
+- 已补回归：persisted tab restore **不依赖 HOSTS**；即使 `HOSTS` 不存在对应连接，只要 `OPEN_TABS` 有 truth，仍可正常恢复。
+- 当前剩余重点不再是多处写口，而是继续盯 `restore/bootstrap/runtime-merge` 判定边界，确认没有 case 把已显式关闭 tab 重新并回 `OPEN_TABS`。
+[2026-05-07] cold-start session-group prune closeout
+- 新发现边界：此前 `SESSION_GROUPS` 的远端 truth prune 只会在 connect / foreground resume / picker refresh 触发；若冷启动进入 Connections 页且没有 open tabs/runtime sessions，stale group 仍可能先被看见。
+- 本轮已收口到同一条 audit：`useOpenTabRuntime` mount 后若 `tabs=0 && sessions=0 && sessionGroups>0`，直接走已有 `auditOpenTabsAgainstRemoteSessions('connect')`；没有新开第二套 prune 逻辑。
+- 已补回归：cold launch + sessionGroups only 会立刻按远端 tmux truth prune；foreground resume case 同时保持成立。
+[2026-05-07] cold-start stale OPEN_TABS + SESSION_GROUPS boundary
+- 又补到一层边界：若冷启动时本地同时残留 stale `OPEN_TABS` 与 stale `SESSION_GROUPS`，restore 可能先把 `OPEN_TABS` 清空；cold-start group audit 必须继续在清空后补跑，不能因为初始 boot 时 `openTabStateRef.current.tabs.length > 0` 而永久错过。
+- 已修正：cold-start group audit 的门禁改看实时 `openTabState.tabs.length`，而不是初始 ref 快照；这样 remote restore 清空 stale tabs 后，同一 effect 仍会继续对残留 groups 做远端 truth prune。
+- 已补回归：`stale OPEN_TABS -> restore clears -> stale SESSION_GROUPS still pruned`。
+
+[2026-05-07] session-list audit continue
+- tombstone 冷启动回归已转绿：`persists closed semantic reuse tombstones so a closed duplicate tab still stays dead after cold launch`。
+- 下一步继续审 `restore / bootstrap / runtime-merge / session list` 是否仍有复活旧 tab/session/server 的旁路写口，重点检查 OPEN_TABS / ACTIVE_SESSION / SESSION_GROUPS / HOSTS 的单一 owner 是否被绕开。
+
+[2026-05-07] connections projection owner next slice
+- 发现 `ConnectionsPage` 仍在页面层直接混合 `hosts + sessionGroups + liveSessions` 组装 `serverGroups`，这使页面层继续承担 session/server 列表投影 owner。
+- 下一步：抽成独立 projection helper（唯一列表投影真源），页面只消费投影；不改持久化语义，只收口 owner。
+
+[2026-05-07] sessionHistory dead-truth audit
+- 现状只读确认中：`sessionHistory / recordSessionOpen / SESSION_HISTORY` 看起来已无任何生产消费方，只剩 open 时写入。
+- 若确认生产侧没有读取 owner，将物理删除这套死语义，避免继续保留第二真源和无用持久化。
+
+[2026-05-07] sessionHistory physical removal closeout
+- 已确认 `sessionHistory / recordSessionOpen / SESSION_HISTORY` 是只写不读的死语义。
+- 本轮已物理删除生产实现、类型与测试 mock；`useSessionHistoryStorage` 现在只承载 `SESSION_GROUPS`。
+- 回归：`session-history/open-actions/connections/app-first-paint/dynamic-refresh/android-ime` 共 90 tests passed。
+
+[2026-05-07] picker target truth audit
+- 确认存在重复 owner：`TmuxSessionPickerSheet` 本地 `normalizeTarget / resolveRelayDeviceBridgeTarget` 与 `session-picker.ts` / `ConnectionPropertiesPage` 的 daemon-first target 映射语义重复。
+- 下一步：把 target normalize + relay-device -> bridge target 映射统一抽回 `session-picker.ts`，picker / connection-properties 共用，消除第二实现。
+
+[2026-05-07] picker target truth closeout
+- 已把 `relay-device -> bridge target` 映射统一收口到 `session-picker.ts -> resolveRelayDeviceBridgeTarget()`。
+- `TmuxSessionPickerSheet` 删除本地重复实现；`ConnectionPropertiesPage` 改为共用同一 helper。
+- 回归：`session-picker / connection-properties / open-actions / connections` 共 26 tests passed。
+
+[2026-05-07] remembered-server display projection closeout
+- 已把 bridge preset 的排序 + daemon/bridge/target/auth 展示投影统一抽到 `bridge-server-presets-view.ts`。
+- `RememberedServersSection / TmuxSessionPickerSheet / ConnectionPropertiesPage` 改为共用，不再三处各自拼装显示语义。
+- 回归：`bridge-server-presets-view / bridge-settings / session-picker / connection-properties / connections` 共 35 tests passed。
+
+[2026-05-07] sortedHosts leakage closeout
+- 已确认 `sortedHosts` 原先从 `useSessionOpenActions` 泄漏到 `ConnectionsPage`，把 picker target 排序状态错误带入了连接页。
+- 本轮已切断：`ConnectionsPage` 改回消费原始 `hosts` 真相；`sortedHosts` 只保留在 picker 私有范围。
+- 回归：`connections / open-actions / dynamic-refresh / connection-properties` 共 82 tests passed。
+
+[2026-05-07] resurrect-risk final sweep
+- 当前继续审 `close -> tombstone -> restore remap -> runtime merge` 的未覆盖分支，目标是找出仍可能让已关闭/已不存在 tab 复活的极端边界。
+- 优先策略：先查单测空洞，再补红测，再只在唯一 owner 处修。
+[2026-05-07] resurrect-risk audit continue
+- 已复核 `OPEN_TABS/ACTIVE_SESSION` 生产写口：仍只见 `useOpenTabRuntime.persistExplicitOpenTabs() -> persistOpenTabsState()`；页面层/Connections/picker 没发现新的直接写口。
+- 已复核 close owner：`handleCloseSession` / `SESSION_STATUS_EVENT(closed)` / remote audit prune 三条入口最终都收口到 `applyClosedOpenTabIntent()`。
+- 当前继续怀疑的边界不是“多处写口”，而是 `close -> tombstone -> 用户显式 reopen / restore remap / runtime merge` 的顺序交错；尤其要确认显式 reopen 时是否会清掉旧的 closed session id / reuse key，避免 reopen 后仍被 runtime merge 或 cold restore 异常压制/改写。
+- 下一步：直接补红测覆盖 explicit reopen after close / same sessionId reopen / semantic duplicate reopen；若红，再只改唯一 owner（优先 `useSessionOpenActions` / `useOpenTabRuntime`）。
+[2026-05-07] resurrect-risk fix #1 confirmed
+- 真实问题确认：`useSessionOpenActions.openDraftAsSession()` 在显式 reopen 时只从内存删除 `closedOpenTabReuseKeysRef`，但没有把 tombstone 删除结果持久化回 `zterm:closed-tab-reuse-keys`。
+- 后果：当前会话里 reopen 看起来正常，但冷启动后 storage 里旧 tombstone 还在，runtime merge / cold launch 仍会把这个语义 tab 当成“已关闭”，形成 reopen 后再次被压死的边界。
+- 修复：在唯一 reopen owner `openDraftAsSession()` 内，当显式 reopen 删除 reuse key 成功时，立即 `persistClosedTabReuseKeys(...)` 回写。
+- 验证：
+  - `useSessionOpenActions.test.tsx` 新增 `persists reopened semantic tab tombstone removal so cold launch no longer keeps it dead`
+  - 回归 1：`open-tab-intent/open-tab-restore/useSessionOpenActions/App.dynamic-refresh` => 95 passed
+  - 回归 2：`open-tab-persistence/App.first-paint/App.first-paint.real-terminal/ConnectionsPage` => 22 passed
+[2026-05-07] resurrect-risk fix #2 confirmed
+- 继续沿同一 reopen 语义补到 saved-tab import 链：saved-tab import 本质上也是显式 reopen，必须共用 `openDraftAsSession()` 去清内存 + 持久化 tombstone。
+- 已补验证：
+  1. `useSessionOpenActions.test.tsx`：saved tab import 显式 reopen 同样会清掉 `zterm:closed-tab-reuse-keys`
+  2. `App.dynamic-refresh.test.tsx`：daemon-owned saved tab import 清 tombstone 后，下一次 cold launch 仍能正常 restore，不会再次被“已关闭”压死
+- 回归：`App.dynamic-refresh + useSessionOpenActions` => 71 passed。
+- 当前阶段未再发现新的生产写口；下一步继续只读扫 `restore remap / runtime merge / remote prune later reappear` 是否还有未覆盖交错。
+[2026-05-07] resurrect-risk next suspect
+- 当前新怀疑点：close / reopen 的 tombstone 只处理单个 reuse key，但语义 identity 本身支持 daemon owner + bridge owner 两种 variant。若关闭时只落 daemon key，后续 bridge-only runtime / restore 仍可能绕过；反之亦然。
+- 计划：把 close / reopen 两侧都改成 variants 全收口，并补纯函数 + hook 回归，仍只改唯一 owner。
+[2026-05-07] resurrect-risk fix #3 confirmed
+- 真问题确认：之前 close / reopen 只处理单个 reuse key，但 session 语义 owner 实际支持 daemon-owned 与 bridge-owned variants。若只写/删单 key，另一种 shape 仍可能漏掉，导致 close 后 later reappear 或 reopen 后 cold restore 被另一条 variant 干扰。
+- 本轮收口：
+  1. `deriveCloseOpenTabIntent()` 现在同时产出 `closedReuseKeyVariants`
+  2. `useOpenTabRuntime.applyClosedOpenTabIntent()` 关闭时把全部 variants 一次写入 tombstone storage
+  3. `useSessionOpenActions.openDraftAsSession()` reopen 时删除全部 variants，再持久化回写
+- 新回归：
+  - `open-tab-intent.test.ts` 新增 daemon-owned close variants 断言
+  - `useSessionOpenActions.test.tsx` 新增 reopen clears all semantic reuse-key variants
+- 回归：`open-tab-intent / open-tab-restore / useSessionOpenActions / App.dynamic-refresh` => 99 passed。
+[2026-05-07] resurrect-risk daemon->bridge prune regression covered
+- 新补集成回归：daemon-owned tab 被 remote audit prune 后，bridge-only semantic duplicate later reappear 也必须保持 hidden。
+- 结果已绿：说明上一轮 tombstone variants 收口不只是纸面正确，确实覆盖 daemon->bridge cross-shape later reappear。
+- 下一步继续只读审 restore remap 是否还有 cross-shape / remap 顺序空洞。
+[2026-05-07] resurrect-risk likely real bug
+- `deriveCloseOpenTabIntent()` 当前 `closedReuseKeySource = targetTab || targetSession`，意味着若 persisted tab 还是 bridge-only，但当前 runtime reused session 已经带 daemonHostId，则 close variants 可能只来自旧 tab，漏掉 daemon variant。
+- 后果：关闭这种“bridge persisted -> daemon runtime”语义 tab 后，daemon-owned later reappear 仍可能绕过 tombstone。
+- 处理策略：只改 pure owner `deriveCloseOpenTabIntent()`，把 targetTab + targetSession 的 reuse-key variants 做 union；再补单测。
+[2026-05-07] restore-remap cross-shape checkpoint
+- 新补集成回归：daemon-owned persisted tab 在 cold restore 时，如果 `createSession(sessionId=stale)` 最终复用成 bridge-only live session id，也必须正确 remap OPEN_TABS/ACTIVE_SESSION 并 switch 到新 id。
+- 结果已绿：说明当前 `resolveHostForPersistedOpenTab + createSession remap + resolveRestoredOpenTabIntentState` 这一段至少对 daemon->bridge reused-live-id 场景没有空洞。
+- 当前剩余重点继续压缩到更细的顺序交错：restore remap 后若同轮又进 runtime merge / connect audit，是否还有 race 会把 remap 后的 truth 改回旧值。
+[2026-05-07] restore-remap -> runtime-connect race checkpoint
+- 新补集成回归：cold restore 把 daemon-owned stale tab remap 到 live bridge session id 后，若下一拍 runtime session 立刻以 `connected` 进入，且 runtime active 仍短暂挂着旧 stale id，也不能把 `OPEN_TABS / ACTIVE_SESSION` 改回旧值。
+- 结果已绿：`useOpenTabRestoreRuntimeSync` 当前 remap 持久化 + 后续 `deriveRuntimeOpenTabSyncDecision` / connect audit 的顺序，在这条最危险交错上没有发现回魂旧 id 的问题。
+- 下一步继续只读查是否还有别的生产入口直接按旧 `sessionId` 落盘/切 active；若没有，这块可以暂时从“修代码”降级为“继续补边界回归”。
+
+
+[2026-05-07] open-tab/session truth audit checkpoint #2
+- 已全仓复核 `OPEN_TABS / ACTIVE_SESSION` 物理写口：生产代码仍只看到 `useOpenTabRuntime.persistExplicitOpenTabs() -> persistOpenTabsState()` 一条；`persistActiveSessionId()` 没有新的旁路调用。
+- 已全仓复核 client 侧 direct session owner：`createSession` 只剩 `useSessionOpenActions.openDraftAsSession()` 与 `useOpenTabRestoreRuntimeSync()`；`switchSession` 只剩 `requestRuntimeActiveSessionSwitch()` 这条 open-tab 编排出口；`closeSession` 只剩 `applyClosedOpenTabIntent(... closeRuntimeSession=true)` 收口。
+- 新确认：`handleLoadSavedTabList()` 虽然内部逐个 `openDraftAsSession()`，但最终仍由 `persistAndSwitchExplicitOpenTabs(openedTabs, activeSessionId)` 用 batch truth 覆盖收口；当前未发现新的 saved-tab import 第二写口。
+- 当前更像剩余风险的不是 OPEN_TABS/ACTIVE_SESSION 第二写口，而是 `SESSION_GROUPS` 的远端 prune 触发时机与 remote fetch 失败/漏触发窗口：它不会直接写 OPEN_TABS，但可能造成“Connections 页面里旧 group/server 又出现”的感知问题。
+- 下一步：继续把“用户感知的旧 tab/session/server 回来”拆成两个维度分别钉死：
+  1. terminal open tabs/active truth（当前基本收口）
+  2. connections page server/session-group projection truth（继续查 prune 触发边界）
+[2026-05-07] connections projection stale-endpoint fix
+- 新打到纯函数红测：同一 `daemonHostId` 下，若 `hosts` 里残留旧 bridge endpoint，而较新的 `SESSION_GROUPS`/live truth 已经切到新 endpoint，`buildConnectionsServerGroups()` 之前会继续保留旧 `bridgeHost/bridgePort`，导致 Connections 卡片点开仍走旧地址，用户感知成“旧 server 又回来了”。
+- 已只在投影 owner `connections-server-groups.ts` 修复：daemon-owned group 在 merge 后必须允许较新的 daemon endpoint 覆盖旧 host endpoint；不改 OPEN_TABS/ACTIVE_SESSION 持久化语义。
+- 新回归：
+  1. `connections-server-groups.test.ts`：daemon owner 优先新 session-group endpoint
+  2. `ConnectionsPage.test.tsx`：点击 Open 时实际传给 `onOpenServerGroups` 的 target 必须是新 endpoint，不是旧 host endpoint
+[2026-05-07] connections projection stale-auth fix
+- 继续打到同类真 bug：即使 daemon-owned card 已经改成新 endpoint，`authToken` 之前仍会沿用 stale host token，导致点开同一张 server card 实际还拿旧 token 连接。
+- 已继续只在同一投影 owner `connections-server-groups.ts` 修复：daemon-owned merge 时，`authToken` 与 `bridgeHost/bridgePort` 一样，必须允许更新鲜的 daemon truth 覆盖 stale host truth。
+- 新回归：
+  1. `connections-server-groups.test.ts`：daemon owner 优先新 auth token
+  2. `ConnectionsPage.test.tsx`：点击 Open 时传出的 `authToken` 必须是新 token，不是旧 host token
+[2026-05-07] connections projection daemon-id upgrade fix
+- 又打到一条更根的真 bug：bridge-only group 一旦后来被 daemon truth 合并，`buildConnectionsServerGroups()` 之前虽然会补上 `daemonHostId`，但 `group.id` 仍停留在旧 bridge key，导致 daemon-first owner 没完全升级。
+- 风险：后续 expanded state / selectedSessionsByGroup / 事件路由 仍可能挂在旧 bridge id 上，给 UI 层留下“同一张卡其实还是旧对象”的隐患。
+- 已只在同一投影 owner 修复：当 daemon truth 到来且命中已有 bridge group 时，立即把 `group.id` 升级成 daemon key，并同步重写该 group 下所有 `session entry.id`。
+- 新回归：`connections-server-groups.test.ts` 钉死 bridge->daemon 合并后 group id 必须升级成 daemon key。
+[2026-05-07] connections projection row-host target match fix
+- 继续打到 row 级真 bug：同一 daemon owner + 同一 sessionName 下，如果 `hosts` 里同时残留 stale/fresh 两个 saved host，旧实现只按 `pinned/lastConnected` 选 `entry.host`，不看当前 group 已经收口后的 daemon target，结果会把 stale host 留给行级 `Edit/Del` 与名称展示。
+- 已只在 `connections-server-groups.ts` 收口：saved host 候选优先级现在先看“是否匹配当前 group 的 daemonHostId + bridgeHost/bridgePort + authToken 真相”，匹配者优先；只有同样匹配/同样不匹配时才退回 pinned/lastConnected。
+- 新回归：
+  1. `connections-server-groups.test.ts`：row host 必须选 fresh matching host
+  2. `ConnectionsPage.test.tsx`：行级 Edit 必须拿到 fresh host，而不是 stale host
+[2026-05-07] connections projection row-host order invariance fix
+- 又打到一条顺序型真 bug：即使 row-host 选择规则已经知道要优先匹配当前 group 真相，但若 `hosts` 列表里 fresh host 先出现、stale host 后出现，早期 `hostsBySessionName` 仍可能先被 stale winner 污染；后续 group target 修正后，row entry 继续抱着 stale host。
+- 最终收口方式：不要依赖中间 `hostsBySessionName` winner 作为唯一依据；在 `buildConnectionsServerGroups()` finalize 阶段，按最终 group 真相对每个 session row 从全部 `hosts` 重新筛选并选优一次，确保结果对 host 输入顺序不敏感。
+- 新回归：`connections-server-groups.test.ts` 钉死“fresh host 先、stale host 后”时 row-host 仍必须稳定选择 fresh host。
+[2026-05-07] connections page group-id remap fix
+- 页面状态层又打到真 bug：当同一张 server card 从 bridge key 升级成 daemon key 后，`ConnectionsPage` 里的 `expandedGroupIds` / `selectedSessionsByGroup` 仍挂在旧 bridge id，导致已展开状态和已选 session 直接丢失。
+- 本轮只在页面状态层修：基于 `sessionSemanticOwnersMatch()` 对上一帧与当前帧 `serverGroups` 做 owner 级 remap，把 expanded ids 与 selectedSessionsByGroup 从旧 bridge key 迁到新 daemon key；不改 projection owner，也不改持久化层。
+- 新回归：`ConnectionsPage.test.tsx` 钉死 bridge->daemon 升级 rerender 后，展开态与 selection 不得丢失。
+
+[2026-05-07] quick-tab first-open + Android halfwidth audit
+- 现场目标：1) + 菜单首开 session 首次 connecting/RP=0；2) Android 输入默认半角英文标点
+- 初步定位：
+  1. quick-tab buildPreferredTarget 已带 active session auth/daemon truth，但 buildDraftFromTmuxSession 若命中 existing host，会直接复用 existing host 全量字段（含旧 transportMode / 旧 relay binding / 旧 endpoint），可能导致第一次 open 用的是 stale host truth，而 picker 当前 target truth 只用于 list-sessions，不用于 open。
+  2. Android 实机主输入链可能并不走 TerminalView DOM textarea，而走 TerminalPage Android IME bridge；因此半角问题 owner 很可能在 Android IME payload 归一化，而不是 DOM textarea attrs。
+- 下一步：继续读 Android IME bridge/runtime，补红测后只改唯一 owner。
+
+[2026-05-07] close-tab stale current-tabs audit start
+- Current Tabs 真源已确认: App.tsx openTabs <- terminalSessions <- openTabState.tabs。
+- 当前怀疑不在 close pure function，而在 UI 关闭后 picker/current list 未按最新 openTabState 重投影，或 reopen/restore 路径把旧项补回。
+- 下一步: 补 quick-tab UI 红测，直接点 Current Tabs 的 ×，断言 UI 列表与 OPEN_TABS 同步减少且冷启动不恢复。
+
+[2026-05-07] close-tab stale list root cause confirmed
+- 真 bug 不在 close pure function；Current Tabs(openTabState->terminalSessions) 本身关闭后是对的。
+- 真正的“关闭后列表还是旧的”第二真源在 App->ConnectionsPage：之前传的是全量 runtime sessions，而不是 explicit open-tab truth。
+- 结果：OPEN_TABS 已删，但退出到 connections 页时仍可按 runtime sessions 看到旧 tab，形成“关不掉/又回来”的用户感知。
+- 本轮只改唯一 owner：App.tsx 传给 ConnectionsPage 的 sessions 改为 terminalSessions；补集成回归钉死 close 后 connections 只看显式 open tabs。
+
+[2026-05-07] close-tab list follow-up
+- 已补双回归：1) close 后 connections 只看 explicit open tabs；2) quick-tab Current Tabs 关闭后立即减少。
+- 目前 sessionGroups 语义确认是 server/session selection history，不是 current tabs truth；若用户继续把 connections 页里的 history 感知成旧 tab，需要下一步收 UI 文案或交互边界。
+
+[2026-05-07] connections/history wording split
+- 继续收口用户感知边界：ConnectionsPage / session history 层展示 server/session 历史，不是 current tabs。
+- 本轮不改逻辑，只把该层所有用户可见文案里的 tab/tabs 改成 session/sessions，避免与 explicit open-tab truth 混淆。
+
+[2026-05-07] remote history audit stale-target root cause confirmed
+- 红测已确认：daemon-owned sessionGroup remote audit 之前直接使用 history 内旧 bridgeHost/bridgePort/authToken 去 fetch tmux sessions。
+- 后果：同一 daemon 的 endpoint/token 更新后，history prune 仍打到旧 target，旧 session history 可能长期残留。
+- 收口方向：只在 open-tab-restore 远端 owner target 解析层升级为 host-aware，按 ownerKey 选择 fresh host truth；useOpenTabRuntime 只透传 hostsRef.current。
+
+[2026-05-07] history prune timing audit
+- 现状审计：remote audit 触发点只有 connect / cold-start(no tabs, only groups) / foreground resume / picker refresh。
+- 缺口怀疑：用户关闭 tab 回到 ConnectionsPage 时，本身不会触发 history audit；因此 history-only stale sessions 可能继续停留直到下次 resume/connect。
+- 已补场景测试：return-to-connections 是否应立即 re-audit history。
+
+[2026-05-07] history prune timing fixed
+- 红测确认：return-to-connections 之前不会触发 history audit。
+- 本轮只在 App page navigation owner 增加 handleOpenConnectionsPageWithAudit()：进入 ConnectionsPage 即显式触发 auditOpenTabsAgainstRemoteSessions(connections-page-open)。
+- 不改 transport/session/runtime ownership，不新增 fallback。
+[2026-05-07] connections-page-open history audit verification
+- 已复跑新增场景：进入 ConnectionsPage 会显式触发 `auditOpenTabsAgainstRemoteSessions('connections-page-open')`，history-only stale sessions 不再等到 resume/connect 才 prune。
+- 中途红测并非生产 bug：`App.dynamic-refresh` 该场景的 live runtime session fixture 漏了 `daemonHostId`，导致第一次 prune 来自 bridge-only current tab，第二次才是 daemon-owned history group；已只修测试夹具，不改生产 owner。
+- 回归结果：`App.dynamic-refresh + ConnectionsPage + useSessionHistoryStorage + open-tab-restore` 共 93 绿。

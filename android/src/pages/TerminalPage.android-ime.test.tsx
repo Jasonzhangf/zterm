@@ -766,6 +766,41 @@ describe('TerminalPage Android IME bridge', () => {
     });
   });
 
+  it('normalizes Android IME full-width latin, digits, punctuation, and space to half-width before sending to terminal', async () => {
+    const session = makeSession('s1');
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+    });
+
+    imeListeners.get('input')?.({ text: 'ＡＢＣ１２３，．！　中文' });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith('s1', 'ABC123,.! 中文');
+    });
+  });
+
   it('flushes a committed CJK result immediately without waiting for a later priming space', async () => {
     const session = makeSession('s1');
     const onTerminalInput = vi.fn();

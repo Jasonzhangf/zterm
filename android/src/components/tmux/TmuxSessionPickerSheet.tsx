@@ -1,28 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  describeBridgePresetIdentity,
-  resolveBridgePresetDaemonHostId,
-  sortBridgeServers,
   type BridgeServerPreset,
   type BridgeSettings,
 } from '../../lib/bridge-settings';
+import { buildBridgeServerPresetViews } from '../../lib/bridge-server-presets-view';
 import { RelayDevicePicker } from '../connection-form/RelayDevicePicker';
 import { useTraversalRelayDaemonDevices } from '../../hooks/useTraversalRelayDaemonDevices';
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
-import { buildDaemonMappedBridgeTarget } from '../../lib/session-picker';
+import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
+import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
-import type { TraversalRelayDeviceSnapshot } from '../../lib/types';
 
 interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
   open: boolean;
   servers: BridgeServerPreset[];
   bridgeSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>;
+  openTabs?: Array<{
+    id: string;
+    sessionName: string;
+    customName?: string;
+    bridgeHost: string;
+    bridgePort: number;
+  }>;
+  activeTabId?: string | null;
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
   onClose: () => void;
+  onSwitchOpenTab?: (sessionId: string) => void;
+  onRenameOpenTab?: (sessionId: string, nextName: string) => void;
+  onCloseOpenTab?: (sessionId: string, source?: string) => void;
   onOpenTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   onOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   onSelectCleanSession: (target: BridgeTarget) => void;
@@ -31,22 +40,6 @@ interface TmuxSessionPickerSheetProps {
 }
 
 type DiscoveryState = 'idle' | 'loading' | 'done' | 'error';
-
-function normalizeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
-  return {
-    bridgeHost: target?.bridgeHost?.trim() || '',
-    bridgePort: target?.bridgePort || DEFAULT_BRIDGE_PORT,
-    daemonHostId: target?.daemonHostId?.trim() || target?.relayHostId?.trim() || '',
-    authToken: target?.authToken?.trim() || '',
-    relayHostId: target?.relayHostId?.trim() || '',
-    relayDeviceId: target?.relayDeviceId?.trim() || '',
-    tailscaleHost: target?.tailscaleHost?.trim() || '',
-    ipv6Host: target?.ipv6Host?.trim() || '',
-    ipv4Host: target?.ipv4Host?.trim() || '',
-    signalUrl: target?.signalUrl?.trim() || '',
-    transportMode: target?.transportMode || 'auto',
-  };
-}
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -75,37 +68,26 @@ function formatRefreshClock(ts?: number | null) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function resolveRelayDeviceBridgeTarget(device: TraversalRelayDeviceSnapshot, servers: BridgeServerPreset[]) {
-  return (
-    buildDaemonMappedBridgeTarget(servers, {
-      daemonHostId: device.daemon.hostId,
-      relayDeviceId: device.deviceId,
-    }) || {
-      bridgeHost: '',
-      bridgePort: DEFAULT_BRIDGE_PORT,
-      daemonHostId: device.daemon.hostId.trim(),
-      relayHostId: device.daemon.hostId.trim(),
-      relayDeviceId: device.deviceId.trim(),
-      authToken: '',
-    }
-  );
-}
-
 export function TmuxSessionPickerSheet({
   mode,
   open,
   servers,
   bridgeSettings,
+  openTabs = [],
+  activeTabId = null,
   initialTarget,
   initialSelectedSessions = [],
   onClose,
+  onSwitchOpenTab,
+  onRenameOpenTab,
+  onCloseOpenTab,
   onOpenTmuxSession,
   onOpenMultipleTmuxSessions,
   onSelectCleanSession,
   onSaveGroupSelection,
   onRemoteSessionsRefreshed,
 }: TmuxSessionPickerSheetProps) {
-  const [selectedTarget, setSelectedTarget] = useState<BridgeTarget>(() => normalizeTarget(initialTarget));
+  const [selectedTarget, setSelectedTarget] = useState<BridgeTarget>(() => normalizeBridgeTarget(initialTarget));
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [discoveryState, setDiscoveryState] = useState<DiscoveryState>('idle');
@@ -122,7 +104,7 @@ export function TmuxSessionPickerSheet({
     if (!open) {
       return;
     }
-    setSelectedTarget(normalizeTarget(initialTarget));
+    setSelectedTarget(normalizeBridgeTarget(initialTarget));
     setSelectedSessions(initialSelectedSessions);
     setNewSessionName('');
     setAvailableSessions([]);
@@ -151,7 +133,8 @@ export function TmuxSessionPickerSheet({
     setLastRefreshedAt(null);
   }, [open, selectedTarget.authToken, selectedTarget.bridgeHost, selectedTarget.bridgePort]);
 
-  const sortedServers = useMemo(() => sortBridgeServers(servers), [servers]);
+  const serverViews = useMemo(() => buildBridgeServerPresetViews(servers), [servers]);
+  const sortedServers = useMemo(() => serverViews.map((entry) => entry.server), [serverViews]);
   const selectedCount = selectedSessions.length;
   const statusTone =
     discoveryState === 'done' ? mobileTheme.colors.accent : discoveryState === 'error' ? mobileTheme.colors.danger : '#f2b94b';
@@ -195,7 +178,7 @@ export function TmuxSessionPickerSheet({
     setDiscoveryState('loading');
     setErrorMessage('');
     try {
-      const sessions = await fetchTmuxSessions(selectedTarget, bridgeSettings);
+      const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(selectedTarget, bridgeSettings));
       setAvailableSessions(sessions);
       setSelectedSessions((current) => current.filter((item) => sessions.includes(item)));
       setDiscoveryState('done');
@@ -274,6 +257,14 @@ export function TmuxSessionPickerSheet({
     setSelectedSessions((current) =>
       current.includes(sessionName) ? current.filter((item) => item !== sessionName) : [...current, sessionName],
     );
+  };
+
+  const handleRenameOpenTab = (sessionId: string, currentName: string) => {
+    const nextName = window.prompt('Rename tab', currentName)?.trim();
+    if (!nextName || nextName === currentName) {
+      return;
+    }
+    onRenameOpenTab?.(sessionId, nextName);
   };
 
   if (!open) {
@@ -356,7 +347,7 @@ export function TmuxSessionPickerSheet({
               selectedRelayHostId={selectedTarget.relayHostId || selectedTarget.daemonHostId || ''}
               selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
               onSelect={(device) => {
-                const resolvedTarget = resolveRelayDeviceBridgeTarget(device, sortedServers);
+                const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
                 setSelectedTarget((current) => ({
                   ...current,
                   ...resolvedTarget,
@@ -441,10 +432,90 @@ export function TmuxSessionPickerSheet({
                 fontSize: '15px',
               }}
             />
-          </div>
+        </div>
 
+        {mode === 'quick-tab' && openTabs.length > 0 ? (
           <div
             style={{
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <SectionTitle title="Current Tabs" subtitle="这里管理已经打开的本地 tabs；切换、改名、关闭都在这里，不需要再去别处。" />
+            {openTabs.map((tab) => {
+              const active = tab.id === activeTabId;
+              const displayName = tab.customName || tab.sessionName;
+              return (
+                <div
+                  key={tab.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      onSwitchOpenTab?.(tab.id);
+                      onClose();
+                    }}
+                    style={{
+                      flex: 1,
+                      border: 'none',
+                      borderRadius: '18px',
+                      padding: '12px 14px',
+                      backgroundColor: active ? 'rgba(113, 164, 255, 0.16)' : '#f6f8fb',
+                      color: mobileTheme.colors.lightText,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{displayName}</div>
+                    <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                      {tab.bridgeHost}:{tab.bridgePort} · {tab.sessionName}
+                      {active ? ' · Active' : ''}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleRenameOpenTab(tab.id, displayName)}
+                    disabled={!onRenameOpenTab}
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      border: 'none',
+                      borderRadius: '14px',
+                      backgroundColor: mobileTheme.colors.shellMuted,
+                      color: '#ffffff',
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    onClick={() => onCloseOpenTab?.(tab.id, 'quick-tab-picker-close-button')}
+                    disabled={!onCloseOpenTab}
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      border: 'none',
+                      borderRadius: '14px',
+                      backgroundColor: 'rgba(255,124,146,0.16)',
+                      color: mobileTheme.colors.danger,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div
+          style={{
               borderRadius: '16px',
               padding: '12px 14px',
               backgroundColor: '#f6f8fb',
@@ -518,10 +589,8 @@ export function TmuxSessionPickerSheet({
           </div>
 
           {!daemonFirst && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-            {sortedServers.map((server) => {
+            {serverViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel, targetBadge }) => {
               const active = server.targetHost === selectedTarget.bridgeHost && server.targetPort === selectedTarget.bridgePort;
-              const daemonHostId = resolveBridgePresetDaemonHostId(server);
-              const identity = describeBridgePresetIdentity(server);
               return (
                 <button
                   key={server.id}
@@ -546,11 +615,11 @@ export function TmuxSessionPickerSheet({
                   }}
                 >
                   <div style={{ fontWeight: 800 }}>{server.name}</div>
-                  <div style={{ fontSize: '11px', opacity: 0.78 }}>{identity.bridgeLabel}</div>
+                  <div style={{ fontSize: '11px', opacity: 0.78 }}>{bridgeLabel}</div>
                   {daemonHostId ? (
-                    <div style={{ fontSize: '10px', opacity: 0.72 }}>{identity.daemonLabel}</div>
+                    <div style={{ fontSize: '10px', opacity: 0.72 }}>{daemonLabel}</div>
                   ) : null}
-                  <div style={{ fontSize: '10px', opacity: 0.72 }}>{formatTargetBadge(server.targetHost)} · {server.authToken ? 'Auth' : 'No auth'}</div>
+                  <div style={{ fontSize: '10px', opacity: 0.72 }}>{targetBadge} · {server.authToken ? 'Auth' : 'No auth'}</div>
                 </button>
               );
             })}
@@ -563,7 +632,7 @@ export function TmuxSessionPickerSheet({
           selectedRelayHostId={selectedTarget.relayHostId || selectedTarget.daemonHostId || ''}
           selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
           onSelect={(device) => {
-            const resolvedTarget = resolveRelayDeviceBridgeTarget(device, sortedServers);
+            const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
             setSelectedTarget((current) => ({
               ...current,
               ...resolvedTarget,

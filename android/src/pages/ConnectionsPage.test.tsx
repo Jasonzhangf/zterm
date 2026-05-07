@@ -164,7 +164,7 @@ describe('ConnectionsPage', () => {
       <ConnectionsPage
         hosts={[]}
         sessions={[]}
-        sessionGroups={[]}
+        sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
@@ -185,6 +185,32 @@ describe('ConnectionsPage', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+
+  it('does not render host-only groups when there is no sessionGroup or live runtime session truth', () => {
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({ id: 'host-stale', bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-1', sessionName: 'stale' }),
+        ]}
+        sessions={[]}
+        sessionGroups={[]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/daemon-host-1 · 0 sessions$/)).toBeNull();
+    expect(screen.getByText('No connections yet')).toBeTruthy();
+  });
+
   it('groups hosts by daemonHostId first even when bridge endpoint differs', () => {
     const onOpenServerGroups = vi.fn();
 
@@ -195,7 +221,7 @@ describe('ConnectionsPage', () => {
           makeHost({ id: 'host-logs', bridgeHost: '100.127.23.27', bridgePort: 4444, daemonHostId: 'daemon-host-1', sessionName: 'logs' }),
         ]}
         sessions={[]}
-        sessionGroups={[]}
+        sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
@@ -209,15 +235,115 @@ describe('ConnectionsPage', () => {
       />,
     );
 
-    expect(screen.getByText('daemon-host-1 · 2 tabs')).toBeTruthy();
+    expect(screen.getByText('daemon-host-1 · 2 sessions')).toBeTruthy();
     expect(screen.getByText('daemon-host-1')).toBeTruthy();
 
     fireEvent.click(screen.getAllByText('Open')[0]);
     expect(onOpenServerGroups).toHaveBeenCalledWith([
       expect.objectContaining({
-        name: 'daemon-host-1 · 2 tabs',
+        name: 'daemon-host-1 · 2 sessions',
         daemonHostId: 'daemon-host-1',
         sessionNames: expect.arrayContaining(['main', 'logs']),
+      }),
+    ]);
+  });
+
+
+  it('opens the newer daemon endpoint instead of a stale saved host endpoint for the same server card', () => {
+    const onOpenServerGroups = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-stale',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-host-1',
+            sessionName: 'main',
+            lastConnected: 1,
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            daemonHostId: 'daemon-host-1',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 4444,
+            sessionNames: ['main'],
+            lastOpenedAt: 99,
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={onOpenServerGroups}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Open'));
+    expect(onOpenServerGroups).toHaveBeenCalledWith([
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        sessionNames: ['main'],
+      }),
+    ]);
+  });
+
+
+  it('opens with the newer daemon auth token instead of a stale saved host token for the same server card', () => {
+    const onOpenServerGroups = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-stale',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-host-1',
+            authToken: 'token-stale',
+            sessionName: 'main',
+            lastConnected: 1,
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            daemonHostId: 'daemon-host-1',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 4444,
+            authToken: 'token-fresh',
+            sessionNames: ['main'],
+            lastOpenedAt: 99,
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={onOpenServerGroups}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Open'));
+    expect(onOpenServerGroups).toHaveBeenCalledWith([
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-1',
+        authToken: 'token-fresh',
       }),
     ]);
   });
@@ -232,7 +358,7 @@ describe('ConnectionsPage', () => {
           makeHost({ id: 'host-logs', bridgeHost: '100.127.23.27', bridgePort: 4444, daemonHostId: 'daemon-host-1', sessionName: 'logs' }),
         ]}
         sessions={[]}
-        sessionGroups={[]}
+        sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
@@ -251,7 +377,7 @@ describe('ConnectionsPage', () => {
 
     expect(onOpenServerGroups).toHaveBeenLastCalledWith([
       expect.objectContaining({
-        name: 'daemon-host-1 · 2 tabs',
+        name: 'daemon-host-1 · 2 sessions',
         daemonHostId: 'daemon-host-1',
         sessionNames: expect.arrayContaining(['main', 'logs']),
       }),
@@ -281,7 +407,7 @@ describe('ConnectionsPage', () => {
         sessionGroups={[
           makeGroup({
             id: 'bridge:100.66.1.82::3333',
-            name: '100.66.1.82 · 1 tabs',
+            name: '100.66.1.82 · 1 sessions',
             bridgeHost: '100.66.1.82',
             bridgePort: 3333,
             sessionNames: ['zterm'],
@@ -300,8 +426,160 @@ describe('ConnectionsPage', () => {
       />,
     );
 
-    expect(screen.getAllByText(/· 1 tabs$/)).toHaveLength(1);
-    expect(screen.getByText('daemon-Macstudio.local-128564413166185f · 1 tabs')).toBeTruthy();
+    expect(screen.getAllByText(/· 1 sessions$/)).toHaveLength(1);
+    expect(screen.getByText('daemon-Macstudio.local-128564413166185f · 1 sessions')).toBeTruthy();
+  });
+
+
+  it('uses the fresh matching saved host for row Edit when stale and fresh candidates exist for the same daemon session', () => {
+    const onEdit = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-stale',
+            name: 'Old Main Host',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-host-1',
+            authToken: 'token-stale',
+            sessionName: 'main',
+            lastConnected: 200,
+          }),
+          makeHost({
+            id: 'host-fresh',
+            name: 'Fresh Main Host',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 4444,
+            daemonHostId: 'daemon-host-1',
+            authToken: 'token-fresh',
+            sessionName: 'main',
+            lastConnected: 100,
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            daemonHostId: 'daemon-host-1',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 4444,
+            authToken: 'token-fresh',
+            sessionNames: ['main'],
+            lastOpenedAt: 99,
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={onEdit}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByText('+')[0]);
+    fireEvent.click(screen.getByText('Edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'host-fresh',
+      name: 'Fresh Main Host',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 4444,
+      authToken: 'token-fresh',
+    }));
+  });
+
+
+  it('preserves expanded selection state when a server card upgrades from bridge id to daemon id across rerender', () => {
+    const onSaveServerGroupSelection = vi.fn();
+    const view = render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-main',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            sessionName: 'zterm',
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            id: 'bridge:100.66.1.82::3333',
+            name: '100.66.1.82 · 1 sessions',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            sessionNames: ['zterm'],
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={onSaveServerGroupSelection}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByText('+')[0]);
+    fireEvent.click(screen.getByText('None'));
+    expect(onSaveServerGroupSelection).toHaveBeenLastCalledWith(
+      expect.objectContaining({ bridgeHost: '100.66.1.82', bridgePort: 3333 }),
+      [],
+    );
+    expect(screen.getByText('0 selected · history-only')).toBeTruthy();
+
+    view.rerender(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-main',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            sessionName: 'zterm',
+          }),
+        ]}
+        sessions={[
+          makeSession({
+            id: 'live-zterm',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-Macstudio.local-128564413166185f',
+            sessionName: 'zterm',
+          }),
+        ]}
+        sessionGroups={[
+          makeGroup({
+            id: 'bridge:100.66.1.82::3333',
+            name: '100.66.1.82 · 1 sessions',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            sessionNames: ['zterm'],
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={onSaveServerGroupSelection}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('0 selected · history-only')).toBeTruthy();
+    expect(screen.queryByText('1 default · ready')).toBeNull();
   });
 
   it('does not offer open actions for history-only sessions that no longer have a saved host or live runtime session', () => {

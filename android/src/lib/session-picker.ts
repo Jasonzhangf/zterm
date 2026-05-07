@@ -2,7 +2,7 @@ import { buildHostSemanticReuseKey } from '@zterm/shared';
 import { resolveBridgePresetDaemonHostId, type BridgeServerPreset } from './bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import { isLikelyTailscaleHost } from './network-target';
-import type { Host, Session } from './types';
+import type { Host, Session, TraversalRelayDeviceSnapshot } from './types';
 
 export interface BridgeTarget {
   bridgeHost: string;
@@ -72,10 +72,29 @@ export function buildDaemonMappedBridgeTarget(
   });
 }
 
+export function resolveRelayDeviceBridgeTarget(
+  presets: BridgeServerPreset[],
+  device: TraversalRelayDeviceSnapshot,
+): BridgeTarget {
+  return (
+    buildDaemonMappedBridgeTarget(presets, {
+      daemonHostId: device.daemon.hostId,
+      relayDeviceId: device.deviceId,
+    }) || {
+      bridgeHost: '',
+      bridgePort: DEFAULT_BRIDGE_PORT,
+      daemonHostId: device.daemon.hostId.trim(),
+      relayHostId: device.daemon.hostId.trim(),
+      relayDeviceId: device.deviceId.trim(),
+      authToken: '',
+    }
+  );
+}
+
 export function buildPreferredTarget(
   presets: BridgeServerPreset[],
   initialTarget?: Partial<BridgeTarget> | null,
-  activeSession?: Pick<Session, 'bridgeHost' | 'bridgePort'> | null,
+  activeSession?: Pick<Session, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'authToken'> | null,
 ): BridgeTarget {
   if (activeSession?.bridgeHost?.trim()) {
     return normalizeBridgeTarget(activeSession);
@@ -143,20 +162,22 @@ export function buildDraftFromTmuxSession(
 ): HostDraft {
   const existing = findMatchingHost(hosts, target, sessionName);
   if (existing) {
+    const normalizedTarget = normalizeBridgeTarget(target);
+    const daemonHostId = normalizedTarget.daemonHostId || normalizedTarget.relayHostId || existing.daemonHostId || existing.relayHostId || '';
     return {
       name: existing.name,
-      bridgeHost: existing.bridgeHost,
-      bridgePort: existing.bridgePort,
-      sessionName: existing.sessionName,
-      authToken: existing.authToken,
-      daemonHostId: existing.daemonHostId,
-      relayHostId: existing.relayHostId,
-      relayDeviceId: existing.relayDeviceId,
-      tailscaleHost: existing.tailscaleHost,
-      ipv6Host: existing.ipv6Host,
-      ipv4Host: existing.ipv4Host,
-      signalUrl: existing.signalUrl,
-      transportMode: existing.transportMode,
+      bridgeHost: normalizedTarget.bridgeHost || existing.bridgeHost,
+      bridgePort: normalizedTarget.bridgePort || existing.bridgePort,
+      sessionName: sessionName.trim() || existing.sessionName,
+      authToken: normalizedTarget.authToken || existing.authToken || '',
+      daemonHostId,
+      relayHostId: normalizedTarget.relayHostId || normalizedTarget.daemonHostId || existing.relayHostId || existing.daemonHostId || '',
+      relayDeviceId: normalizedTarget.relayDeviceId || existing.relayDeviceId,
+      tailscaleHost: normalizedTarget.tailscaleHost || existing.tailscaleHost,
+      ipv6Host: normalizedTarget.ipv6Host || existing.ipv6Host,
+      ipv4Host: normalizedTarget.ipv4Host || existing.ipv4Host,
+      signalUrl: normalizedTarget.signalUrl || existing.signalUrl,
+      transportMode: normalizedTarget.transportMode || existing.transportMode,
       authType: existing.authType,
       password: existing.password,
       privateKey: existing.privateKey,

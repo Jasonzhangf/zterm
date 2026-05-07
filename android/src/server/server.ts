@@ -171,6 +171,7 @@ const terminalRuntime = createTerminalRuntime({
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+  runTmux: (args) => terminalControlRuntime.runTmux(args),
   daemonRuntimeDebug,
   logTimePrefix,
 });

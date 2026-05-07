@@ -4,7 +4,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSessionOpenActions } from './useSessionOpenActions';
 import { normalizeOpenTabIntentState } from '../lib/open-tab-intent';
-import { buildPersistedOpenTabReuseKey } from '../lib/open-tab-persistence';
+import { buildPersistedOpenTabReuseKey, buildPersistedOpenTabReuseKeyVariants } from '../lib/open-tab-persistence';
 
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 
@@ -21,18 +21,12 @@ function createOptions(overrides: Partial<any> = {}) {
   const closedOpenTabSessionIdsRef = createRef(new Set<string>());
   const closedOpenTabReuseKeysRef = createRef(new Set<string>());
   const setBridgeSettings = vi.fn();
-  const upsertHost = vi.fn((host: any) => ({
-    id: host.id || `persisted:${host.bridgeHost}:${host.bridgePort}:${host.sessionName}`,
-    createdAt: host.createdAt || Date.now(),
-    ...host,
-  }));
   const createSession = vi.fn((host: any, options?: any) => (
     options?.sessionId || `runtime:${host.daemonHostId || host.relayHostId || host.bridgeHost}:${host.sessionName}`
   ));
-  const recordSessionOpen = vi.fn();
-  const recordSessionGroupOpen = vi.fn();
   const setSessionGroupSelection = vi.fn();
   const deleteSessionGroup = vi.fn();
+  const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
   const setPageState = vi.fn();
   const persistOpenTabIntentState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null }) => {
@@ -83,10 +77,8 @@ function createOptions(overrides: Partial<any> = {}) {
     },
     setBridgeSettings,
     hosts: overrides.hosts || [],
-    upsertHost,
     deleteSessionGroup,
-    recordSessionOpen,
-    recordSessionGroupOpen,
+    pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
     createSession,
     runtimeActiveSessionId: overrides.runtimeActiveSessionId ?? null,
@@ -105,12 +97,10 @@ function createOptions(overrides: Partial<any> = {}) {
     },
     spies: {
       setBridgeSettings,
-      upsertHost,
       createSession,
-      recordSessionOpen,
-      recordSessionGroupOpen,
       setSessionGroupSelection,
       deleteSessionGroup,
+      pruneSessionGroupSelectionToRemoteTruth,
       ensureTerminalPageVisible,
       persistOpenTabIntentState,
       setPageState,
@@ -120,7 +110,24 @@ function createOptions(overrides: Partial<any> = {}) {
 
 describe('useSessionOpenActions explicit-open truth', () => {
   beforeEach(() => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+        clear: () => {
+          storage.clear();
+        },
+      },
+    });
     vi.restoreAllMocks();
+    localStorage.clear();
     resolveRemoteRestorableOpenTabStateMock.mockReset();
     resolveRemoteRestorableOpenTabStateMock.mockImplementation(async ({ tabs, activeSessionId }: any) => ({
       tabs,
@@ -169,10 +176,118 @@ describe('useSessionOpenActions explicit-open truth', () => {
       ],
       activeSessionId: runtimeSessionId,
     });
-    expect(harness.spies.recordSessionOpen).toHaveBeenCalledWith(
+  });
+
+  it('persists reopened semantic tab tombstone removal so cold launch no longer keeps it dead', () => {
+    const target = {
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    };
+    const runtimeSessionId = 'runtime:daemon-a:shared';
+    const reuseKey = buildPersistedOpenTabReuseKey({
+      daemonHostId: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'shared',
+    });
+    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify([reuseKey]));
+    const harness = createOptions();
+    harness.refs.closedOpenTabReuseKeysRef.current = new Set([reuseKey]);
+    harness.spies.createSession.mockReturnValue(runtimeSessionId);
+
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      runtimeRefs: {
+        ...harness.options.runtimeRefs,
+        closedOpenTabReuseKeysRef: harness.refs.closedOpenTabReuseKeysRef,
+      },
+    }));
+
+    act(() => {
+      result.current.handleOpenSingleTmuxSession(target as any, 'shared');
+    });
+
+    expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(false);
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+  });
+
+  it('clears all semantic reuse-key variants when explicitly reopening a daemon-owned tab', () => {
+    const target = {
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    };
+    const runtimeSessionId = 'runtime:daemon-a:shared';
+    const reuseKeyVariants = buildPersistedOpenTabReuseKeyVariants({
+      daemonHostId: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'shared',
+    });
+    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify(reuseKeyVariants));
+    const harness = createOptions();
+    harness.refs.closedOpenTabReuseKeysRef.current = new Set(reuseKeyVariants);
+    harness.spies.createSession.mockReturnValue(runtimeSessionId);
+
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      runtimeRefs: {
+        ...harness.options.runtimeRefs,
+        closedOpenTabReuseKeysRef: harness.refs.closedOpenTabReuseKeysRef,
+      },
+    }));
+
+    act(() => {
+      result.current.handleOpenSingleTmuxSession(target as any, 'shared');
+    });
+
+    expect(Array.from(harness.refs.closedOpenTabReuseKeysRef.current)).toEqual([]);
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+  });
+
+  it('uses active runtime session auth truth as the preferred quick-tab picker target', () => {
+    const harness = createOptions({
+      runtimeActiveSessionId: 'session-live',
+      sessions: [{
+        id: 'session-live',
+        bridgeHost: '100.64.0.88',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-live',
+        authToken: 'token-live',
+      }],
+      bridgeSettings: {
+        servers: [{
+          id: 'preset-1',
+          name: 'Preset A',
+          targetHost: '100.127.23.27',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'daemon-a',
+        }],
+        targetHost: '100.127.23.27',
+        targetPort: 3333,
+        targetAuthToken: 'token-a',
+      },
+    });
+
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenQuickTabPicker();
+    });
+
+    expect(result.current.pickerMode).toBe('quick-tab');
+    expect(result.current.pickerTarget).toEqual(
       expect.objectContaining({
-        daemonHostId: 'daemon-a',
-        sessionName: 'shared',
+        bridgeHost: '100.64.0.88',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-live',
+        authToken: 'token-live',
       }),
     );
   });
@@ -200,12 +315,107 @@ describe('useSessionOpenActions explicit-open truth', () => {
       expect.objectContaining({ sessionId: 'runtime:daemon-a:beta', sessionName: 'beta' }),
     ]);
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('runtime:daemon-a:alpha');
-    expect(harness.spies.recordSessionGroupOpen).toHaveBeenCalledWith(
+  });
+
+  it('does not persist transient host storage when explicitly opening a tmux session', () => {
+    const target = {
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    };
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenSingleTmuxSession(target as any, 'alpha');
+    });
+
+    expect(harness.refs.openTabStateRef.current.tabs).toEqual([
       expect.objectContaining({
-        daemonHostId: 'daemon-a',
-        sessionNames: ['alpha', 'beta'],
+        sessionId: 'runtime:daemon-a:alpha',
+        sessionName: 'alpha',
       }),
+    ]);
+  });
+
+  it('opens a tmux session with the current picker target transport truth instead of a stale remembered host endpoint', () => {
+    const harness = createOptions({
+      hosts: [{
+        id: 'host-stale',
+        createdAt: 1,
+        name: 'Main',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        relayDeviceId: 'daemon-device-old',
+        sessionName: 'main',
+        authToken: 'token-stale',
+        transportMode: 'websocket',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenSingleTmuxSession({
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        relayDeviceId: 'daemon-device-new',
+        authToken: 'token-fresh',
+        transportMode: 'auto',
+      } as any, 'main');
+    });
+
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        relayDeviceId: 'daemon-device-new',
+        authToken: 'token-fresh',
+        transportMode: 'auto',
+        sessionName: 'main',
+      }),
+      expect.anything(),
     );
+  });
+
+
+
+  it('prunes stored server-group session names against remote refresh truth before auditing open tabs', async () => {
+    const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      auditOpenTabsAgainstRemoteSessions,
+    }));
+
+    await act(async () => {
+      result.current.handleRemoteSessionsRefreshed({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+      } as any, ['beta', 'alpha', 'beta']);
+    });
+
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['alpha', 'beta'],
+    );
+    expect(auditOpenTabsAgainstRemoteSessions).toHaveBeenCalledWith('session-picker-refresh');
   });
 
   it('loads saved tab list through the unified remote-restorable helper before opening tabs', async () => {
@@ -298,5 +508,85 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.createSession).toHaveBeenCalledTimes(1);
     expect(harness.refs.openTabStateRef.current.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a']);
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('saved-a');
+  });
+
+  it('clears persisted reuse tombstones when a saved tab import explicitly reopens that semantic tab', async () => {
+    const reuseKey = buildPersistedOpenTabReuseKey({
+      daemonHostId: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'alpha',
+    });
+    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify([reuseKey]));
+    const harness = createOptions({
+      hosts: [
+        {
+          id: 'host-a',
+          createdAt: 1,
+          name: 'Conn A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          relayHostId: 'daemon-a',
+          sessionName: 'alpha',
+          authToken: 'token-a',
+          authType: 'password',
+          tags: [],
+          pinned: false,
+        },
+      ],
+    });
+    harness.refs.closedOpenTabReuseKeysRef.current = new Set([reuseKey]);
+    resolveRemoteRestorableOpenTabStateMock.mockResolvedValueOnce({
+      tabs: [
+        {
+          sessionId: 'saved-a',
+          hostId: 'host-a',
+          connectionName: 'Conn A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'alpha',
+          authToken: 'token-a',
+          createdAt: 1,
+        },
+      ],
+      activeSessionId: 'saved-a',
+      droppedTabs: [],
+    });
+
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      runtimeRefs: {
+        ...harness.options.runtimeRefs,
+        closedOpenTabReuseKeysRef: harness.refs.closedOpenTabReuseKeysRef,
+      },
+    }));
+
+    await act(async () => {
+      await result.current.handleLoadSavedTabList([
+        {
+          sessionId: 'saved-a',
+          hostId: 'host-a',
+          connectionName: 'Conn A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'alpha',
+          authToken: 'token-a',
+          createdAt: 1,
+        },
+      ], 'saved-a');
+    });
+
+    expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(false);
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+    expect(harness.refs.openTabStateRef.current.tabs).toEqual([
+      expect.objectContaining({
+        sessionId: 'saved-a',
+        daemonHostId: 'daemon-a',
+        sessionName: 'alpha',
+      }),
+    ]);
   });
 });

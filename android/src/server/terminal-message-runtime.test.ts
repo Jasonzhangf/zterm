@@ -39,6 +39,7 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: 'demo',
+    widthMode: 'mirror-fixed',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -187,6 +188,7 @@ describe('terminal message runtime explicit error truth', () => {
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const { runtime, sessions, sendMessage } = createRuntime({ mirror });
@@ -231,6 +233,7 @@ describe('terminal message runtime explicit error truth', () => {
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
+      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const { runtime, sessions, refreshMirrorHeadForSession, sendBufferHeadToSession } = createRuntime({ mirror });

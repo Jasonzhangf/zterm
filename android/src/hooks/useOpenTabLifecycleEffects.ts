@@ -10,7 +10,10 @@ export type OpenTabAuditReason =
   | 'resume'
   | 'appStateChange'
   | 'connect'
-  | 'session-picker-refresh';
+  | 'session-picker-refresh'
+  | 'connections-page-open';
+
+type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange'>;
 
 interface OpenTabLifecycleCloseOptions {
   runtimeActiveSessionId?: string | null;
@@ -45,7 +48,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   } = options;
 
   useEffect(() => {
-    const notifyResume = (reason: Exclude<OpenTabAuditReason, 'foreground-poll'>) => {
+    const notifyResume = (reason: ForegroundResumeReason) => {
       bumpFollowResetEpoch();
       performForegroundRefresh({
         reason,
