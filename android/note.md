@@ -884,3 +884,21 @@ All green locally. Next focus stays on remaining real-world slowness after app r
   1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` 通过
   2. `vitest run src/hooks/useSessionOpenActions.test.tsx src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx` = 198/198 绿
 - 剩余不足：SessionContext 内部仍有 `setActiveSessionSync` 作为 runtime 真相推进，这本来就是 runtime owner；当前收口重点是外层业务层不再混用 runtime active 与 tab active，已完成第一轮。
+[2026-05-07] zterm-1.4 render commit single-entry closeout
+- 已物理删除 `session-context-pull-runtime.ts` 中残留 `recordSessionRenderCommit()` helper；render commit 现在只允许从 `session-render-gate` flush 链进入 provider debug metrics 注入。
+- 验证：`tsc --noEmit` 通过；`vitest run src/lib/session-render-gate.test.ts src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx` 绿。
+- 结论：pull/runtime 不再保留第二接线口，render commit 来源收口到 gate 主链。
+
+[2026-05-07] zterm-1.5 silent failure cleanup first pass
+- 已先清主链/近主链裸吞错：
+  1. `open-tab-persistence.readPersistedClosedTabReuseKeys()` 从裸 `catch {}` 改为显式 `console.error`
+  2. `useTraversalRelayAccount` 卸载时关闭 relay devices stream 失败不再静默吞，改为显式日志
+  3. `traversal-relay-client` 基础 URL 归一化失败不再静默；已导出统一 `normalizeTraversalRelayBaseUrl()` 并显式日志
+  4. `terminal-file-transfer-list-runtime` 中 `stat` 失败、remote screenshot 临时文件清理失败都改为显式日志，不再 silently skip/ignore cleanup
+- 已补回归：
+  - `open-tab-persistence.test.ts`
+  - `traversal-relay-client.test.ts`
+  - `useTraversalRelayAccount.test.tsx`
+  - `server.file-transfer-truth.test.ts`
+- 本轮验证：`tsc --noEmit` 通过；上述 4 组 vitest = 18/18 绿。
+- 剩余热点：transport/infra runtime 内仍有少量“探测式 parse / URL 组装”catch，需要继续区分“合法分支探测”与“真吞错”后再收口，避免误伤 plain-text input / pong fast-path。

@@ -82,7 +82,9 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
       cancelled = true;
       try {
         socket?.close(1000, 'settings disposed');
-      } catch {}
+      } catch (error) {
+        console.error('[useTraversalRelayAccount] Failed to close relay device stream:', error);
+      }
     };
   }, [account]);
 

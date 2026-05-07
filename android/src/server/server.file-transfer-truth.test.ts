@@ -71,6 +71,7 @@ describe('server file-transfer truth gates', () => {
     expect(listBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName)');
     expect(mkdirBlock).toContain('resolveFileTransferListPath');
     expect(mkdirBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName)');
+    expect(listBlock).toContain("logFileTransferRuntimeError('stat entry failed'");
   });
 
   it('keeps binary handlers fail-fast and never falls back to raw terminal input', () => {
@@ -95,5 +96,6 @@ describe('server file-transfer truth gates', () => {
     expect(block).toContain("phase: 'transferring'");
     expect(block).toContain('requestRemoteScreenshotViaHelper');
     expect(block).toContain("type: 'file-download-error'");
+    expect(block).toContain("logFileTransferRuntimeError('remote screenshot cleanup failed'");
   });
 });

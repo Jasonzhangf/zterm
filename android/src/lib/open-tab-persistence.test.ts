@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEYS } from './types';
 import type { Session } from './types';
 import {
   buildPersistedOpenTabFromHostSession,
   findReusableOpenTabSession,
   persistOpenTabsState,
+  persistClosedTabReuseKeys,
   readPersistedActiveSessionId,
+  readPersistedClosedTabReuseKeys,
   readPersistedOpenTabsState,
   resolveHostForPersistedOpenTab,
 } from './open-tab-persistence';
@@ -293,5 +295,24 @@ describe('open-tab persistence truth', () => {
       autoCommand: 'pwd',
       customName: 'Keep Me',
     }));
+  });
+
+  it('logs and returns empty closed-tab reuse keys when storage payload is invalid', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem('zterm:closed-tab-reuse-keys', '{bad-json');
+
+    expect(Array.from(readPersistedClosedTabReuseKeys())).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[open-tab-persistence] Failed to restore closed tab reuse keys:',
+      expect.any(SyntaxError),
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  it('persists and restores closed-tab reuse keys through one storage truth', () => {
+    persistClosedTabReuseKeys(new Set(['daemon:a:main', 'daemon:b:logs']));
+
+    expect(Array.from(readPersistedClosedTabReuseKeys())).toEqual(['daemon:a:main', 'daemon:b:logs']);
   });
 });

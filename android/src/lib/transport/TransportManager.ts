@@ -44,6 +44,10 @@ export interface ReconnectOptions {
   onReconnectFailure?: (error: Error) => void;
 }
 
+function logTransportManagerWarning(scope: string, error: unknown): void {
+  console.warn(`[TransportManager] ${scope}`, error);
+}
+
 // ============================================================================
 // WebSocketTransport: raw WebSocket wrapper
 // ============================================================================
@@ -219,7 +223,7 @@ export class HeartbeatTransport implements Transport {
           try {
             this.inner.close();
           } catch (e) {
-            // ignore
+            logTransportManagerWarning('heartbeat timeout close failed', e);
           }
         }
       }
@@ -310,7 +314,7 @@ export class ReconnectTransport implements Transport {
       try {
         this.inner.close();
       } catch (e) {
-        // ignore
+        logTransportManagerWarning('reconnect pre-close failed', e);
       }
     }
 

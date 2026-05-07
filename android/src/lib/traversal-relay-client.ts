@@ -49,7 +49,7 @@ function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
 }
 
-function normalizeBaseUrl(input: string) {
+export function normalizeTraversalRelayBaseUrl(input: string) {
   const raw = input.trim();
   if (!raw) {
     return '';
@@ -69,13 +69,14 @@ function normalizeBaseUrl(input: string) {
     parsed.search = '';
     parsed.hash = '';
     return parsed.toString();
-  } catch {
+  } catch (error) {
+    console.error('[traversal-relay-client] Failed to normalize relay base url:', error);
     return '';
   }
 }
 
 function buildHttpUrl(baseUrl: string, path: string) {
-  return new URL(path.replace(/^\//, ''), normalizeBaseUrl(baseUrl)).toString();
+  return new URL(path.replace(/^\//, ''), normalizeTraversalRelayBaseUrl(baseUrl)).toString();
 }
 
 function resolvePlatform() {
@@ -131,7 +132,7 @@ function normalizeStoredState(input: unknown): TraversalRelayAccountState | null
     return null;
   }
   const candidate = input as Partial<TraversalRelayAccountState>;
-  const relayBaseUrl = normalizeBaseUrl(asString(candidate.relayBaseUrl));
+  const relayBaseUrl = normalizeTraversalRelayBaseUrl(asString(candidate.relayBaseUrl));
   if (!relayBaseUrl) {
     return null;
   }
@@ -223,7 +224,7 @@ export function deriveTraversalRelayClientSettings(
   payload: TraversalRelayAuthPayload,
   deviceMetaInput?: Partial<TraversalRelayDeviceMeta> | null,
 ): TraversalRelayClientSettings | undefined {
-  const relayBaseUrl = normalizeBaseUrl(asString(payload.relayBaseUrl));
+  const relayBaseUrl = normalizeTraversalRelayBaseUrl(asString(payload.relayBaseUrl));
   const accessToken = asString(payload.accessToken).trim();
   const userId = asString(payload.user?.id).trim();
   const username = asString(payload.user?.username).trim();
@@ -302,7 +303,7 @@ export async function traversalRelayLogin(options: {
   const nextState: TraversalRelayAccountState = {
     username: options.username.trim(),
     password: options.password,
-    relayBaseUrl: normalizeBaseUrl(options.relayBaseUrl),
+    relayBaseUrl: normalizeTraversalRelayBaseUrl(options.relayBaseUrl),
     accessToken: asString(payload.accessToken).trim(),
     user: payload.user || null,
     deviceId: deviceMeta.deviceId,

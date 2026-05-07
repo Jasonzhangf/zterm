@@ -245,7 +245,8 @@ export function readPersistedClosedTabReuseKeys(): Set<string> {
       return new Set();
     }
     return new Set(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0));
-  } catch {
+  } catch (error) {
+    console.error('[open-tab-persistence] Failed to restore closed tab reuse keys:', error);
     return new Set();
   }
 }

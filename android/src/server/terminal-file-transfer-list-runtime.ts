@@ -23,6 +23,13 @@ import {
   type TerminalFileTransferRuntimeDeps,
 } from './terminal-file-transfer-types';
 
+function logFileTransferRuntimeError(scope: string, error: unknown, context?: Record<string, unknown>) {
+  console.error(`[terminal-file-transfer-list-runtime] ${scope}`, {
+    error: error instanceof Error ? error.message : String(error),
+    ...context,
+  });
+}
+
 export interface TerminalFileTransferListRuntime {
   handleFileListRequest: (session: TerminalSession, payload: FileListRequestPayload) => void;
   handleFileCreateDirectoryRequest: (session: TerminalSession, payload: FileCreateDirectoryRequestPayload) => void;
@@ -95,8 +102,12 @@ export function createTerminalFileTransferListRuntime(
             size: entry.isDirectory() ? 0 : stats.size,
             modified: stats.mtimeMs,
           });
-        } catch {
-          // Skip entries we can't stat
+        } catch (error) {
+          logFileTransferRuntimeError('stat entry failed', error, {
+            sessionName: session.sessionName,
+            path: resolvedPath,
+            entryName: entry.name,
+          });
         }
       }
 
@@ -230,8 +241,11 @@ export function createTerminalFileTransferListRuntime(
         if (existsSync(tempPath)) {
           unlinkSync(tempPath);
         }
-      } catch {
-        // ignore cleanup failure
+      } catch (error) {
+        logFileTransferRuntimeError('remote screenshot cleanup failed', error, {
+          sessionName: session.sessionName,
+          path: tempPath,
+        });
       }
     }
   }
