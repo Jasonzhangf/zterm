@@ -48289,3 +48289,46 @@ sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
 model: gpt-5.4
 provider: openai-responses
 -->
+
+### Assistant · 2026/05/07 19:20:30
+
+Jason，当前状态汇总：
+
+**已完成的提交：**
+1. `18d0146` - `feat(daemon): adaptive multi-client width support` — 客户端 adaptive 模式发送本机宽度，daemon 取最小宽度调整 tmux
+2. `38542b6` - `fix(client): performance + stale session fixes` — inactive tab 预解析 drop、输入不刷屏修复、stale session 修复
+3. `04f91d7` - `refactor(android): unify open tab state management` — 合并 `persistOpenTabIntentState` + `persistAndSwitchExplicitOpenTabs` 为单一 `applyOpenTabState`
+4. `c5fd237` - `fix(android): add error logging` — 补全 silent catch blocks 的 error logging
+
+**APK 1529 已安装到平板（100.127.23.27:1234）**
+
+**自适应宽度多客户端逻辑：**
+- ✅ `attachTmux` 时客户端发送 `widthMode` + `requestedCols`，daemon 记录到 `mirror.adaptiveCols`
+- ✅ `reconcileMirrorAdaptiveWidth()` 取所有 adaptive 客户端最小宽度，`resize-window` 调整 tmux
+- ✅ `handleResize` 时更新/删除 `adaptiveCols` 并重算
+- ✅ `detachSessionTransportOnly` + `closeSession` 断开时清理 `adaptiveCols` 并重算
+- ✅ `mirror-fixed` 客户端不发宽度，不影响 tmux 宽度
+
+**已知遗留问题：**
+- 后台切前台不刷新（需要输入才刷新）— 链路已追踪到 `performForegroundRefresh` → `resumeActiveSessionTransport` → `ensureActiveSessionFresh` → `buildActiveSessionRefreshPlan`，当 transport open + session connected 时走 `request-head`，理论正确，需要真机 debug 确认是否实际执行
+
+你现在可以测试新版本，我继续排查后台切前台不刷新的问题。
+
+<!-- cache-meta
+requestId: openai-responses-mimo.key1-mimo-v2.5-pro-20260507T192012098-168305-974
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: mimo-v2.5-pro
+provider: anthropic-messages
+finishReason: stop
+-->
+
+### User · 2026/05/07 19:22:01
+
+继续
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260507T192200512-168314-983
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->
