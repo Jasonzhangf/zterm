@@ -25,6 +25,7 @@ export interface TerminalRefreshCadence {
   headStalePingMs: number;
   pullRequestStaleMs: number;
   readingSyncDelayMs: number;
+  renderCommitMs: number;
 }
 
 function readEffectiveNetworkProfile() {
@@ -56,21 +57,23 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
 
   if (network.saveData || network.effectiveType === 'slow-2g' || network.effectiveType === '2g') {
     return {
-      headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+      headTickMs: 120,
       minTailRefreshGapMs: 120,
       headStalePingMs: 520,
       pullRequestStaleMs: 2200,
       readingSyncDelayMs: 72,
+      renderCommitMs: 120,
     };
   }
 
   if (network.effectiveType === '3g') {
     return {
-      headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+      headTickMs: 66,
       minTailRefreshGapMs: 66,
       headStalePingMs: 320,
       pullRequestStaleMs: 1800,
       readingSyncDelayMs: 48,
+      renderCommitMs: 66,
     };
   }
 
@@ -80,6 +83,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
     headStalePingMs: 200,
     pullRequestStaleMs: 1500,
     readingSyncDelayMs: 24,
+    renderCommitMs: ACTIVE_HEAD_REFRESH_TICK_MS,
   };
 }
 

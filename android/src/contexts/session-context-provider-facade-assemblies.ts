@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import {
-  ACTIVE_HEAD_REFRESH_TICK_MS,
+  resolveTerminalRefreshCadence,
 } from '../lib/mobile-config';
 import { CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS } from '../lib/runtime-debug-flush';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -235,7 +235,7 @@ export function useSessionProviderFacadeAssemblies(
     flushRuntimeDebugLogs: core.flushRuntimeDebugLogs,
     clientRuntimeDebugFlushIntervalMs: CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS,
     ensureActiveSessionFresh,
-    activeHeadRefreshTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+    resolveActiveHeadRefreshTickMs: () => resolveTerminalRefreshCadence().headTickMs,
     clearSessionHandshakeTimeout: core.clearSessionHandshakeTimeout,
     cleanupSocket: core.cleanupSocket,
     cleanupControlSocket: core.cleanupControlSocket,

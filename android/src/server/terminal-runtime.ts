@@ -175,6 +175,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
+      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
     }
     session.mirrorKey = null;
     sessions.delete(session.id);
@@ -189,6 +190,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
+      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
     }
 
     if (notifyClient) {

@@ -153,7 +153,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('does not duplicate recurring live sync when a new attached session reuses an already-ready mirror', async () => {
+  it('reuses an already-ready mirror with one immediate sync and without duplicating recurring live sync loops', async () => {
     vi.useFakeTimers();
     try {
       const {
@@ -185,15 +185,65 @@ describe('terminal mirror runtime lifecycle truth', () => {
         rows: 40,
       });
 
-      vi.advanceTimersByTime(1);
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
 
-      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
       expect(secondSession.mirrorKey).toBe('demo');
       expect(secondSession.transport?.connectedSent).toBe(true);
 
       await vi.advanceTimersByTimeAsync(34);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops recurring live sync once the last subscriber detaches, then resumes on reattach', async () => {
+    vi.useFakeTimers();
+    try {
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime();
+      const firstSession = createSession('session-1');
+      sessions.set(firstSession.id, firstSession);
+
+      await runtime.attachTmux(firstSession, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      const mirror = mirrors.get('demo');
+      expect(mirror?.lifecycle).toBe('ready');
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      sessions.delete(firstSession.id);
+      if (mirror) {
+        mirror.subscribers.delete(firstSession.id);
+        runtime.scheduleMirrorLiveSync(mirror, 0);
+      }
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      const secondSession = createSession('session-2');
+      secondSession.transportId = 'transport-2';
+      sessions.set(secondSession.id, secondSession);
+
+      await runtime.attachTmux(secondSession, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(secondSession.mirrorKey).toBe('demo');
+      expect(secondSession.transport?.connectedSent).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();

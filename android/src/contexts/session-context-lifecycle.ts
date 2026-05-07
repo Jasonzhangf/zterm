@@ -47,7 +47,7 @@ export function useSessionContextLifecycle(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
-  activeHeadRefreshTickMs: number;
+  resolveActiveHeadRefreshTickMs: () => number;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
@@ -175,7 +175,7 @@ export function useSessionContextLifecycle(options: {
           });
         });
         scheduleNext();
-      }, options.activeHeadRefreshTickMs);
+      }, Math.max(16, options.resolveActiveHeadRefreshTickMs()));
     };
 
     scheduleNext();
@@ -186,7 +186,7 @@ export function useSessionContextLifecycle(options: {
         window.clearTimeout(timer);
       }
     };
-  }, [options.activeHeadRefreshTickMs]);
+  }, [options.resolveActiveHeadRefreshTickMs]);
 
   useEffect(() => () => {
     options.refs.remoteScreenshotRuntimeRef.current.dispose(

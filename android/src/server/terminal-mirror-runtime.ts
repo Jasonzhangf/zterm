@@ -80,7 +80,8 @@ export interface TerminalMirrorRuntime {
   handleInput: (session: TerminalSession, data: string) => void;
 }
 
-const MIRROR_LIVE_SYNC_INTERVAL_MS = 150;
+const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
+const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
@@ -91,6 +92,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       clearTimeout(mirror.liveSyncTimer);
       mirror.liveSyncTimer = null;
     }
+  }
+
+  function resolveMirrorLiveSyncDelay(mirror: SessionMirror, requestedDelayMs?: number) {
+    const now = Date.now();
+    const lastProgressAt = Math.max(mirror.lastFlushStartedAt, mirror.lastFlushCompletedAt);
+    const recentlyActive = lastProgressAt > 0 && (now - lastProgressAt) <= 1500;
+    const baseDelay = recentlyActive ? MIRROR_LIVE_SYNC_ACTIVE_MS : MIRROR_LIVE_SYNC_IDLE_MS;
+    const requestedDelay = typeof requestedDelayMs === 'number' && Number.isFinite(requestedDelayMs)
+      ? Math.max(0, Math.floor(requestedDelayMs))
+      : baseDelay;
+    return Math.min(requestedDelay, baseDelay);
   }
 
   function createMirror(sessionName: string): SessionMirror {
@@ -359,7 +371,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return capturePromise;
   }
 
-  function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = MIRROR_LIVE_SYNC_INTERVAL_MS) {
+  function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = MIRROR_LIVE_SYNC_ACTIVE_MS) {
     if (mirror.lifecycle !== 'ready') {
       return;
     }
@@ -368,9 +380,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       return;
     }
     const backoffMultiplier = Math.min(mirror.consecutiveFailures, 10);
+    const dynamicDelay = resolveMirrorLiveSyncDelay(mirror, delayMs);
     const effectiveDelay = backoffMultiplier > 0
-      ? Math.max(delayMs, MIRROR_LIVE_SYNC_INTERVAL_MS * (1 + backoffMultiplier))
-      : delayMs;
+      ? Math.max(dynamicDelay, MIRROR_LIVE_SYNC_IDLE_MS * (1 + backoffMultiplier))
+      : dynamicDelay;
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
@@ -381,7 +394,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (mirror.lifecycle !== 'ready' || mirror.liveSyncTimer) {
           return;
         }
-        scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_INTERVAL_MS);
+        scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
       });
     }, Math.max(0, effectiveDelay));
   }
@@ -431,7 +444,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         throw new Error('Failed to capture canonical tmux buffer during initial sync');
       }
       announceMirrorSubscribersReady(mirror);
-      scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_INTERVAL_MS);
+      scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
     } catch (error) {
       mirror.lifecycle = 'failed';
       console.error(
@@ -507,6 +520,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (previousMirror) {
       const detachResult = detachMirrorSubscriber(previousMirror.subscribers, session.id);
       previousMirror.subscribers = detachResult.nextSubscribers;
+      scheduleMirrorLiveSync(previousMirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
     }
 
     session.sessionName = nextSessionName;
@@ -528,6 +542,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     if (mirror.lifecycle === 'ready') {
       ensureSessionReady(session, mirror);
+      scheduleMirrorLiveSync(mirror, 0);
       return;
     }
 

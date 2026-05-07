@@ -12,7 +12,6 @@ interface RenderGateSessionRuntime {
   dirty: boolean;
   scheduled: boolean;
   frameTimerId: number | null;
-  fallbackTimerId: number | null;
   lastLiveBuffer: SessionBufferState | null;
   lastProjectedBuffer: SessionRenderBufferSnapshot | null;
 }
@@ -48,6 +47,7 @@ export function createSessionRenderGate(options: {
   liveHeadStore: SessionHeadStore;
   recordSessionRenderCommit: (sessionId: string) => void;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
+  resolveRenderCommitMs?: () => number;
 }): SessionRenderGate {
   const renderStore = createSessionRenderBufferStore();
   const runtimes = new Map<string, RenderGateSessionRuntime>();
@@ -62,7 +62,6 @@ export function createSessionRenderGate(options: {
       dirty: false,
       scheduled: false,
       frameTimerId: null,
-      fallbackTimerId: null,
       lastLiveBuffer: null,
       lastProjectedBuffer: null,
     };
@@ -78,10 +77,6 @@ export function createSessionRenderGate(options: {
         clearTimeout(runtime.frameTimerId);
       }
       runtime.frameTimerId = null;
-    }
-    if (runtime.fallbackTimerId !== null) {
-      clearTimeout(runtime.fallbackTimerId);
-      runtime.fallbackTimerId = null;
     }
   };
 
@@ -148,8 +143,10 @@ export function createSessionRenderGate(options: {
     };
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       runtime.frameTimerId = window.requestAnimationFrame(() => runFlush());
+      return;
     }
-    runtime.fallbackTimerId = setTimeout(runFlush, 34) as unknown as number;
+    const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.() || 33));
+    runtime.frameTimerId = setTimeout(runFlush, renderCommitMs) as unknown as number;
   };
 
   const scheduleCommit = (sessionId: string) => {

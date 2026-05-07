@@ -594,3 +594,7 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 
 - 2026-05-06 审计更正：`liveSessionIds` 并非未接线；`TerminalPage -> onLiveSessionIdsChange -> App.setLiveSessionIds -> SessionContext` 已存在生产链路。当前 refresh 主问题更像是 active/live refresh plan 与 head/pull 节流链路耦合错误，而不是 pane live ids 根本没设置。
 - 2026-05-06 当前主查方向：1) `buildActiveSessionRefreshPlan + ensureActiveSessionFreshRuntime` 是否让 OPEN 但无有效 buffer 进展的 session 长时间 skip；2) `lastHeadRequestAt / lastServerActivityAt` 是否把“已请求但未完成”误当成新鲜进展；3) open-tab 持久化是否还有 saved-tab/import/runtime merge 旁路把已关闭 tab 再写回。
+[2026-05-07] dynamic cadence + daemon mirror live sync 部署验证
+- 先完成文档/skill/代码边界核对；确认本轮改动集中在 client cadence + render gate + daemon mirror live sync，未引入新的 fallback 运行路径。
+- 已跑变更相关自动测试：mobile-config / session-render-gate / terminal-mirror-runtime / terminal-runtime.detached-session / terminal-mirror-capture / terminal-message-runtime，共 32 tests passed。
+- 下一步：重启单服务 `com.zterm.android.zterm-daemon`，验证 /health 与 /debug/runtime，确认 staging runtime 已切到最新代码。

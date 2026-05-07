@@ -9,6 +9,7 @@ import { createSessionBufferStore } from '../lib/session-buffer-store';
 import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
 import { runtimeDebug } from '../lib/runtime-debug';
+import { resolveTerminalRefreshCadence } from '../lib/mobile-config';
 import type {
   PendingSessionTransportOpenIntent,
   SessionBufferHeadState,
@@ -56,6 +57,7 @@ export function useSessionProviderRuntime(options: {
       sessionDebugMetricsStoreRef.current.recordRenderCommit(sessionId);
     },
     runtimeDebug,
+    resolveRenderCommitMs: () => resolveTerminalRefreshCadence().renderCommitMs,
   }));
   const pingIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
