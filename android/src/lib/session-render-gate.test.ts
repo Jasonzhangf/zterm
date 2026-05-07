@@ -199,44 +199,40 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('does not arm a second timer path when requestAnimationFrame exists', async () => {
+  it('uses the single timer scheduler even when requestAnimationFrame exists', async () => {
     vi.useFakeTimers();
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     try {
-      let nextFrameId = 0;
-      const pendingFrames = new Map<number, FrameRequestCallback>();
-      window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
-        nextFrameId += 1;
-        pendingFrames.set(nextFrameId, callback);
-        return nextFrameId;
-      });
-      window.cancelAnimationFrame = vi.fn((id: number) => {
-        pendingFrames.delete(id);
-      });
+      const rafSpy = vi.fn((_callback: FrameRequestCallback) => 1);
+      const cafSpy = vi.fn();
+      window.requestAnimationFrame = rafSpy;
+      window.cancelAnimationFrame = cafSpy;
 
       const liveBufferStore = createSessionBufferStore();
       const liveHeadStore = createSessionHeadStore();
       const recordSessionRenderCommit = vi.fn();
-      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+      const gate = createSessionRenderGate({
+        liveBufferStore,
+        liveHeadStore,
+        recordSessionRenderCommit,
+        resolveRenderCommitMs: () => 33,
+      });
       const renderStore = gate.getRenderStore();
 
       liveBufferStore.setBuffer('session-1', makeBuffer(['alpha'], 1));
       liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
       gate.scheduleCommit('session-1');
 
-      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
+      expect(rafSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(32);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
-      expect(pendingFrames.size).toBe(1);
+      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
 
-      const callback = pendingFrames.get(1);
-      expect(callback).toBeTypeOf('function');
-      callback?.(16.6);
-      await vi.runAllTimersAsync();
-
-      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
+      await vi.advanceTimersByTimeAsync(1);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
-      expect(pendingFrames.size).toBe(0);
+      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
+      expect(cafSpy).not.toHaveBeenCalled();
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -244,7 +240,7 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses timer scheduling only when requestAnimationFrame is unavailable', async () => {
+  it('uses timer scheduling when requestAnimationFrame is unavailable', async () => {
     vi.useFakeTimers();
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;

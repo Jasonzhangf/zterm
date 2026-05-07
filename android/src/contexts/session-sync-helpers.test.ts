@@ -376,9 +376,9 @@ describe('session sync helper session connection config truth', () => {
     expect(hasSessionLocalWindow(null)).toBe(false);
   });
 
-  it('does not treat a newer head revision as blocked by an older same-window in-flight tail refresh', () => {
-    expect(doesSessionPullStateMatchExactLocalSnapshot({
-      purpose: 'tail-refresh',
+  it('treats an in-flight same-window tail refresh as exact only for the same daemon head revision', () => {
+    const pullState = {
+      purpose: 'tail-refresh' as const,
       startedAt: 1,
       targetHeadRevision: 6,
       targetStartIndex: 96,
@@ -386,13 +386,17 @@ describe('session sync helper session connection config truth', () => {
       requestKnownRevision: 5,
       requestLocalStartIndex: 0,
       requestLocalEndIndex: 120,
-    }, {
+    };
+    const payload = {
       knownRevision: 5,
       localStartIndex: 0,
       localEndIndex: 120,
       requestStartIndex: 96,
       requestEndIndex: 120,
-    })).toBe(true);
+    };
+
+    expect(doesSessionPullStateMatchExactLocalSnapshot(pullState, payload, 6)).toBe(true);
+    expect(doesSessionPullStateMatchExactLocalSnapshot(pullState, payload, 7)).toBe(false);
   });
 
   it('builds connected updates as single truth', () => {

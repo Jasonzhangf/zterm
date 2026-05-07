@@ -109,6 +109,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -165,6 +166,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -223,6 +225,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -270,6 +273,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -285,5 +289,78 @@ describe('session-context-socket-message-runtime connected truth', () => {
     expect(ws.onmessage).toBeNull();
     expect(ws.onerror).toBeNull();
     expect(ws.onclose).toBeNull();
+  });
+});
+
+describe('session-context-socket-message-runtime inactive live buffer gate', () => {
+  it('drops inactive buffer-sync before payload summarization/apply so hidden tabs do not parse live frames', () => {
+    const summarizeBufferPayload = vi.fn(() => ({}));
+    const applyIncomingBufferSync = vi.fn();
+    const settleSessionPullState = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'buffer-sync',
+        payload: {
+          revision: 7,
+          startIndex: 120,
+          endIndex: 180,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          lines: Array.from({ length: 60 }, (_, index) => ({
+            i: 120 + index,
+            t: `row-${120 + index}`,
+          })),
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              ...makeSession(),
+              state: 'connected',
+            }],
+            activeSessionId: 'session-2',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState,
+      runtimeDebug,
+      isSessionTransportActive: vi.fn(() => false),
+      summarizeBufferPayload,
+      applyIncomingBufferSync,
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(settleSessionPullState).not.toHaveBeenCalled();
+    expect(summarizeBufferPayload).not.toHaveBeenCalled();
+    expect(applyIncomingBufferSync).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.ws.connect.buffer-sync.inactive-drop',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        activeSessionId: 'session-2',
+        lineCount: 60,
+        revision: 7,
+      }),
+    );
   });
 });

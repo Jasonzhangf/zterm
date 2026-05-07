@@ -504,6 +504,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       ],
       activeSessionId: 'saved-gone',
       bridgeSettings: harness.options.runtimeRefs.bridgeSettingsRef.current,
+      hosts: harness.options.runtimeRefs.hostsRef.current,
     });
     expect(harness.spies.createSession).toHaveBeenCalledTimes(1);
     expect(harness.refs.openTabStateRef.current.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a']);

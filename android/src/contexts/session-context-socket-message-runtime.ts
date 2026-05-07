@@ -59,6 +59,7 @@ export function handleSocketServerMessageRuntime(options: {
   };
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   runtimeDebug: RuntimeDebugFn;
+  isSessionTransportActive: (sessionId: string) => boolean;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   applyIncomingBufferSync: (sessionId: string, payload: TerminalBufferPayload) => void;
   handleBufferHead: (
@@ -86,6 +87,7 @@ export function handleSocketServerMessageRuntime(options: {
     Boolean(currentSession)
     && currentSession!.state !== 'connected'
     && (msg.type === 'buffer-sync' || msg.type === 'buffer-head');
+  const shouldAcceptLiveBufferPayload = options.isSessionTransportActive(params.sessionId);
 
   switch (msg.type) {
     case 'connected':
@@ -95,6 +97,17 @@ export function handleSocketServerMessageRuntime(options: {
       params.onConnected();
       break;
     case 'buffer-sync':
+      if (!shouldAcceptLiveBufferPayload) {
+        options.runtimeDebug(`session.ws.${params.debugScope}.buffer-sync.inactive-drop`, {
+          sessionId: params.sessionId,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+          lineCount: Array.isArray(msg.payload.lines) ? msg.payload.lines.length : 0,
+          revision: msg.payload.revision,
+          startIndex: msg.payload.startIndex,
+          endIndex: msg.payload.endIndex,
+        });
+        break;
+      }
       if (shouldPromoteConnectedFromLiveBuffer) {
         params.onConnected();
       }

@@ -132,6 +132,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
+  isSessionTransportActive?: (sessionId: string) => boolean;
   handleSocketServerMessage: (params: {
     sessionId: string;
     host: Host;

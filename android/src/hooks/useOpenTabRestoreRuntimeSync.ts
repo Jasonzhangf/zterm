@@ -94,6 +94,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             tabs: initialRestorePlan.tabs,
             activeSessionId: initialRestorePlan.activeSessionId,
             bridgeSettings,
+            hosts,
           });
           if (cancelled) {
             return;
@@ -169,6 +170,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             tabs: restorePlan.tabs,
             activeSessionId: restorePlan.activeSessionId,
             bridgeSettings,
+            hosts,
           });
           if (cancelled) {
             return currentOpenTabState;

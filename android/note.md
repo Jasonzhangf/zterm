@@ -815,3 +815,39 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - 已复跑新增场景：进入 ConnectionsPage 会显式触发 `auditOpenTabsAgainstRemoteSessions('connections-page-open')`，history-only stale sessions 不再等到 resume/connect 才 prune。
 - 中途红测并非生产 bug：`App.dynamic-refresh` 该场景的 live runtime session fixture 漏了 `daemonHostId`，导致第一次 prune 来自 bridge-only current tab，第二次才是 daemon-owned history group；已只修测试夹具，不改生产 owner。
 - 回归结果：`App.dynamic-refresh + ConnectionsPage + useSessionHistoryStorage + open-tab-restore` 共 93 绿。
+[2026-05-07] connections stale bridge-history duplicate card fix
+- 继续审计“已关闭/不存在的旧 session/server 又回来”时，新打到一条真 bug：`buildConnectionsServerGroups()` 会把 bridge-only stale history group 独立保留成一张卡，即使同 session 已存在 daemon-owned saved host truth；结果用户看到第二张旧 server 卡，误感知为“旧 tab/session 又回来了”。
+- 本轮只在投影 owner `connections-server-groups.ts` 修复：bridge-only history group 入场前，若可唯一命中已有 daemon-owned host group 且其已覆盖该组全部 sessionNames，则直接并入该 daemon group，不再新建 bridge stale group。
+- 新回归：
+  1. `connections-server-groups.test.ts`：stale bridge-only history 不得生成第二张卡
+  2. `ConnectionsPage.test.tsx`：页面只显示 daemon card，不显示 stale bridge card
+  3. `useSessionHistoryStorage.test.ts`：显式 delete group 持久化删除继续保绿，确认问题不在 SESSION_GROUPS 删除本身
+- 相关总回归：`connections-server-groups + ConnectionsPage + useSessionHistoryStorage + App.dynamic-refresh` 共 99 绿。
+[2026-05-07] persisted-tab restore stale host-id fallback fix
+- 继续审计“旧 session/server 又回来、saved tab 首次打开连旧地址”的链路时，新打到真 bug：`resolveHostForPersistedOpenTab()` 只先按 `hostId` 命中；一旦旧 host id 已被替换/删除，就直接退回 persisted tab 自身旧 endpoint/token，不会按 daemon/session 语义匹配当前 fresh host truth。
+- 后果：saved tab restore / saved tab import / cold restore 可能继续连 stale bridge endpoint 或 stale auth token，用户感知为旧 session/server 又回来，或第一次打开连不上。
+- 本轮只在 owner `open-tab-persistence.ts` 修复：`host.id` 未命中时，继续按 `persistedOpenTabsSemanticallyMatch(host, tab)` 选当前 semantic host truth，再回退到 tab 自身字段。
+- 新回归：`open-tab-persistence.test.ts` 钉死 hostId 丢失但 daemon/session 语义仍相同的场景必须命中新 host，而不是退回旧 persisted endpoint。
+- 相关回归：`open-tab-persistence + session-picker + useSessionOpenActions + App.dynamic-refresh` 共 88 绿。
+
+[2026-05-07] bottom prompt not repainting during live output root cause fixed
+- 现场现象“上面继续刷新、下面输入行不刷，补一个空格才恢复”这轮确认不在 quick-input 浮层，也不在 daemon diff；唯一真 bug 在 client pull-state 去重判定。
+- 根因：`requestSessionBufferSyncRuntime()` 对 in-flight `tail-refresh` 的“完全重复请求”判定只比较了 `knownRevision/local window/request window`，没把 `targetHeadRevision` 纳入；结果同一 local snapshot + 同一 follow window 下，只要 daemon head revision 继续增长，新的 same-window tail refresh 会被误判为重复并吞掉。
+- 后果：输入已发出、`buffer-head` 也到了，但客户端不再补发新的 same-window `buffer-sync-request`，因此正文底部 prompt 行更新会卡住，直到后续别的输入/事件把 local snapshot 改掉才恢复。
+- 本轮只在唯一 owner 收口：`doesSessionPullStateMatchExactLocalSnapshot()` 新增 `targetHeadRevision` 比较，`requestSessionBufferSyncRuntime()` 传入当前 authoritative daemon head revision；老 revision 的 in-flight pull 不再阻塞新 revision 的 same-window tail refresh。
+- 已补/复跑回归：
+  1. `session-sync-helpers.test.ts`：same-window exact match 只对同一 daemon head revision 成立
+  2. `session-context-buffer-runtime.test.ts`：daemon head revision 前进时必须重发 same-window tail refresh
+  3. `SessionContext.ws-refresh.test.tsx`：same-end/same-window follow 刷新链继续保绿
+  4. `App.android-ime-input-loop.test.tsx`：Android IME 输入闭环保绿
+[2026-05-07] tab-switch queued input not flushing on first connect root cause fixed
+- 现场现象：切到另一个 tab 后，如果该 session 的 transport 还没完成首次 handshake，用户先输入，后面即使该 tab 变成 connected，也容易出现“无法输入/输入没反应”。
+- 真 bug 不在 daemon，也不在 tab active 真相；唯一 owner 在 client transport-open connected effects。
+- 根因：`buildTransportOpenConnectedEffectPlan()` 之前只对 `debugScope='reconnect'` 返回 `flushPendingInputQueue=true`，而首次 `connect` 返回 false。
+- 后果：tab switch 后对尚未首连完成的 session 产生的 queued input，会在首次 connected 时漏 flush；只有后续再次输入/重连才可能恢复。
+- 修复：只改 `session-sync-helpers.ts` 的 connected-effect plan，让首次 `connect` 与 `reconnect` 一样在 connected 后 flush pending input queue；不改 daemon，不加 fallback。
+- 新回归：`SessionContext.ws-refresh.test.tsx` 新增“tab switch input before first connect completes -> connected 后必须 flush queued input + force head request”。
+- 相关回归：`SessionContext.ws-refresh + App.android-ime-input-loop + TerminalPage.android-ime` 共 134 绿；`tsc --noEmit` 通过。
+
+[NOTE] 2026-05-07 多session输入延迟/首刷慢初查：确认 client 在 socket onmessage 层仍会对 inactive tab 的 live buffer-sync 做完整 JSON.parse + summarize + normalize/apply 入口调用，真正 drop 发生在更下游 applyIncomingBufferSyncRuntime。已将 inactive gate 前移到 handleSocketServerMessageRuntime 的 buffer-sync case，在 inactive 时直接跳过 summarize/settle/apply，避免 hidden tabs 线性吃 live payload 解析成本；补 socket-message runtime 红测。
+[NOTE] 2026-05-07 进一步收口：仅在 socket-message 层 drop inactive buffer-sync 仍会先发生 JSON.parse，hidden tab 多时仍吃大 payload parse 成本。已把 inactive live buffer gate 再前移到 session transport onmessage：先用轻量正则提取 type，若为 buffer-sync 且 session 非 active/live，则直接 pre-parse drop；保留 recordRxBytes 与其余消息正常解析。split pane 继续通过 active || liveSessionIds 判定放行。

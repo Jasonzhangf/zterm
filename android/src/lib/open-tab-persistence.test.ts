@@ -228,6 +228,48 @@ describe('open-tab persistence truth', () => {
     }));
   });
 
+  it('prefers the current semantic host truth when the persisted host id is gone but the same daemon/session was re-saved under a new host id', () => {
+    expect(resolveHostForPersistedOpenTab({
+      tab: {
+        sessionId: 'saved-main',
+        hostId: 'host-stale',
+        connectionName: 'Conn stale',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'main',
+        authToken: 'token-stale',
+        createdAt: 1,
+      },
+      hosts: [{
+        id: 'host-fresh',
+        createdAt: 2,
+        name: 'Conn fresh',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        sessionName: 'main',
+        authToken: 'token-fresh',
+        authType: 'password',
+        tags: [],
+        pinned: true,
+        lastConnected: 99,
+      }],
+      fallbackIdPrefix: 'saved',
+      fallbackLastConnected: 9,
+    })).toEqual(expect.objectContaining({
+      id: 'host-fresh',
+      name: 'Conn fresh',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 4444,
+      daemonHostId: 'daemon-a',
+      sessionName: 'main',
+      authToken: 'token-fresh',
+      lastConnected: 99,
+    }));
+  });
+
   it('builds a persisted open tab from imported host/session truth with one mapping rule', () => {
     expect(buildPersistedOpenTabFromHostSession({
       sessionId: 'saved-b-new',

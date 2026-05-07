@@ -111,15 +111,12 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     hosts: options.hosts,
   });
 
-  for (const target of resolvedTargets) {
+  const fetchResults = await Promise.all(resolvedTargets.map(async (target) => {
     const targetKey = buildSessionSemanticOwnerKey({
       daemonHostId: target.daemonHostId,
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
     });
-    if (sessionNamesByTarget.has(targetKey)) {
-      continue;
-    }
     const sessionNames = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(
       {
         bridgeHost: target.bridgeHost,
@@ -130,7 +127,13 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       },
       traversalSettings,
     ));
-    sessionNamesByTarget.set(targetKey, sessionNames);
+    return [targetKey, sessionNames] as const;
+  }));
+
+  for (const [targetKey, sessionNames] of fetchResults) {
+    if (!sessionNamesByTarget.has(targetKey)) {
+      sessionNamesByTarget.set(targetKey, sessionNames);
+    }
   }
 
   return sessionNamesByTarget;
@@ -189,6 +192,7 @@ export function filterRestorableOpenTabsByRemoteSessionNames(options: {
 export async function filterRestorableOpenTabsByRemoteTmuxSessions(options: {
   tabs: PersistedOpenTab[];
   bridgeSettings: TraversalSettings;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
 }): Promise<RestoreTabAvailabilityResult> {
   if (options.tabs.length === 0) {
     return {
@@ -200,6 +204,7 @@ export async function filterRestorableOpenTabsByRemoteTmuxSessions(options: {
   const sessionNamesByTarget = await fetchRemoteTmuxSessionNamesByOwner({
     targets: options.tabs,
     bridgeSettings: options.bridgeSettings,
+    hosts: options.hosts,
   });
 
   return filterRestorableOpenTabsByRemoteSessionNames({
@@ -212,10 +217,12 @@ export async function resolveRemoteRestorableOpenTabState(options: {
   tabs: PersistedOpenTab[];
   activeSessionId: string | null;
   bridgeSettings: TraversalSettings;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
 }): Promise<RemoteRestorableOpenTabState> {
   const availability = await filterRestorableOpenTabsByRemoteTmuxSessions({
     tabs: options.tabs,
     bridgeSettings: options.bridgeSettings,
+    hosts: options.hosts,
   });
   const normalizedState = normalizeOpenTabIntentState(
     availability.restorableTabs,

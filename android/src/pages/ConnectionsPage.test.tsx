@@ -624,4 +624,48 @@ describe('ConnectionsPage', () => {
     expect(onOpenServerGroups).not.toHaveBeenCalled();
     expect(onOpenGroupSession).not.toHaveBeenCalled();
   });
+
+  it('does not render a second stale bridge-only server card when daemon-owned saved host truth already exists for the same session', () => {
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-main',
+            name: 'Fresh Main Host',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 4444,
+            daemonHostId: 'daemon-host-1',
+            authToken: 'token-fresh',
+            sessionName: 'main',
+            lastConnected: 100,
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            id: 'bridge:100.64.0.10::3333',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            authToken: 'token-stale',
+            sessionNames: ['main'],
+            lastOpenedAt: 99,
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('Open')).toHaveLength(1);
+    expect(screen.getByText('daemon-host-1 · 1 sessions')).toBeTruthy();
+    expect(screen.queryByText('100.64.0.10 · 1 sessions')).toBeNull();
+  });
 });

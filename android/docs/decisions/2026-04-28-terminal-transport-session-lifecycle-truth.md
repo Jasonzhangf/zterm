@@ -124,6 +124,13 @@ Android / daemon 后续规则：
 ## 1. 角色边界
 
 ### 1.1 daemon
+### 1.1a tmux session existence freeze (2026-05-07)
+
+- daemon `connect/attach` **不得**隐式创建远端 tmux session
+- 远端 tmux session 不存在时，daemon 只能显式返回 `tmux_session_unavailable`
+- 显式创建 tmux session 的唯一入口只能是控制语义 `tmux-create-session`
+- client restore / saved tabs / open existing session 也必须先基于远端 `list-sessions` 真相过滤；不存在则不打开，并持久化移除
+
 
 daemon 只负责：
 

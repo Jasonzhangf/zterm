@@ -69,7 +69,7 @@ function createDeps() {
         paneCols: 120,
         alternateOn: false,
       }),
-      ensureTmuxSession: vi.fn(),
+      assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => true),
       mirrorBufferChanged: vi.fn(() => []),
       mirrorCursorEqual: vi.fn(() => true),

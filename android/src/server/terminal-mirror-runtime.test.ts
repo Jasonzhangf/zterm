@@ -28,7 +28,7 @@ function createSession(id = 'session-1'): TerminalSession {
 function createRuntime() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
-  const ensureTmuxSession = vi.fn();
+  const assertTmuxSessionExists = vi.fn();
   const captureMirrorAuthoritativeBufferFromTmux = vi.fn(async (mirror: SessionMirror) => {
     mirror.bufferLines = [];
     mirror.bufferStartIndex = 0;
@@ -68,7 +68,7 @@ function createRuntime() {
       paneCols: 120,
       alternateOn: false,
     }),
-    ensureTmuxSession,
+    assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     mirrorBufferChanged: () => [],
     mirrorCursorEqual: () => true,
@@ -86,7 +86,7 @@ function createRuntime() {
     runtime,
     sessions,
     mirrors,
-    ensureTmuxSession,
+    assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     sendMessage,
     sendScheduleStateToSession,
@@ -102,7 +102,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('attachTmux boots a newly created mirror and marks session ready', async () => {
-    const { runtime, sessions, mirrors, ensureTmuxSession, captureMirrorAuthoritativeBufferFromTmux, sendMessage, sendScheduleStateToSession } = createRuntime();
+    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, sendMessage, sendScheduleStateToSession } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);
 
@@ -115,7 +115,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     const mirror = mirrors.get('demo');
     expect(mirror).toBeTruthy();
     expect(mirror?.lifecycle).toBe('ready');
-    expect(ensureTmuxSession).toHaveBeenCalledTimes(1);
+    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
     expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
     expect(session.mirrorKey).toBe('demo');
     expect(session.transport?.connectedSent).toBe(true);
@@ -124,6 +124,40 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect.objectContaining({ type: 'connected' }),
     );
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
+  });
+
+  it('does not implicitly create a missing tmux session during attach and reports tmux_session_unavailable instead', async () => {
+    const { runtime, sessions, mirrors, assertTmuxSessionExists, sendMessage, captureMirrorAuthoritativeBufferFromTmux } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    assertTmuxSessionExists.mockImplementation(() => {
+      throw new Error('can not find session: missing-demo');
+    });
+
+    await runtime.attachTmux(session, {
+      sessionName: 'missing-demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('missing-demo');
+    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
+    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
+    expect(mirror?.lifecycle).toBe('failed');
+    expect(session.transport?.connectedSent).toBe(false);
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'error',
+        payload: expect.objectContaining({
+          code: 'tmux_session_unavailable',
+        }),
+      }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'connected' }),
+    );
   });
 
   it('keeps recurring live sync after mirror boot so external tmux writes enter daemon mirror truth', async () => {
@@ -310,7 +344,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
         paneCols: 120,
         alternateOn: false,
       }),
-      ensureTmuxSession: vi.fn(),
+      assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux,
       mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
         previousStartIndex,
@@ -387,7 +421,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
         requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
       readTmuxPaneMetrics: () => ({ paneId: '%1', tmuxAvailableLineCountHint: 0, paneRows: 40, paneCols: 120, alternateOn: false }),
-      ensureTmuxSession: vi.fn(),
+      assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: capture,
       mirrorBufferChanged: (targetMirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
         previousStartIndex,
@@ -469,7 +503,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
         requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
       readTmuxPaneMetrics: () => ({ paneId: '%1', tmuxAvailableLineCountHint: 0, paneRows: 40, paneCols: 120, alternateOn: false }),
-      ensureTmuxSession: vi.fn(),
+      assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: capture,
       mirrorBufferChanged: (targetMirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
         previousStartIndex,

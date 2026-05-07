@@ -240,6 +240,52 @@ describe('buildConnectionsServerGroups', () => {
     expect(groups[0]?.id).toBe('daemon:daemon-Macstudio.local-128564413166185f');
   });
 
+  it('merges a stale bridge-only history group into an existing daemon-owned host group for the same saved session instead of showing a second stale card', () => {
+    const groups = buildConnectionsServerGroups({
+      hosts: [
+        makeHost({
+          id: 'host-main',
+          name: 'Fresh Main Host',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 4444,
+          daemonHostId: 'daemon-host-1',
+          authToken: 'token-fresh',
+          sessionName: 'main',
+          lastConnected: 100,
+        }),
+      ],
+      sessions: [],
+      sessionGroups: [
+        makeGroup({
+          id: 'bridge:100.64.0.10::3333',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          authToken: 'token-stale',
+          sessionNames: ['main'],
+          lastOpenedAt: 99,
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      id: 'daemon:daemon-host-1',
+      daemonHostId: 'daemon-host-1',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 4444,
+    });
+    expect(groups[0]?.sessions).toHaveLength(1);
+    expect(groups[0]?.sessions[0]).toMatchObject({
+      sessionName: 'main',
+      source: 'saved',
+      host: expect.objectContaining({
+        id: 'host-main',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
+      }),
+    });
+  });
+
 
   it('prefers the saved host candidate that matches the current daemon target for the same session row', () => {
     const groups = buildConnectionsServerGroups({

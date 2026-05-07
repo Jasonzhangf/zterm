@@ -312,6 +312,80 @@ describe('session-context-buffer-runtime inactive gating', () => {
     }
   });
 
+
+  it('reissues a same-window tail refresh when daemon head revision advanced beyond the in-flight pull target', () => {
+    const sessionId = 'session-1';
+    const session = {
+      ...makeSession(sessionId),
+      daemonHeadRevision: 7,
+      daemonHeadEndIndex: 120,
+      buffer: createSessionBufferState({
+        lines: Array.from({ length: 120 }, (_, index) => `row-${index}`),
+        startIndex: 0,
+        endIndex: 120,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 120,
+        cols: 80,
+        rows: 24,
+        revision: 5,
+        cacheLines: 1000,
+      }),
+    };
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: {
+        reason: 'buffer-head-update',
+        purpose: 'tail-refresh',
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map() },
+        sessionPullStateRef: {
+          current: new Map([
+            [sessionId, {
+              'tail-refresh': {
+                purpose: 'tail-refresh',
+                startedAt: 1,
+                targetHeadRevision: 6,
+                targetStartIndex: 48,
+                targetEndIndex: 120,
+                requestKnownRevision: 5,
+                requestLocalStartIndex: 0,
+                requestLocalEndIndex: 120,
+              },
+            }],
+          ]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
+    });
+
+    expect(requested).toBe(true);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'buffer-sync-request',
+      payload: expect.objectContaining({
+        knownRevision: 5,
+        localStartIndex: 0,
+        localEndIndex: 120,
+        requestStartIndex: 48,
+        requestEndIndex: 120,
+      }),
+    });
+  });
+
   it('does not schedule a render commit when buffer-head repeats the same head and cursor truth', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);

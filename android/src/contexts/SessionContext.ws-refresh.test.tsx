@@ -356,6 +356,7 @@ function MultiSessionHarness() {
   const {
     state,
     createSession,
+    sendInput,
     switchSession,
     setLiveSessionIds,
     reconnectAllSessions,
@@ -427,6 +428,14 @@ function MultiSessionHarness() {
       </button>
       <button type="button" onClick={() => switchSession('session-2')}>
         switch-second
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          sendInput('session-2', 'typed-on-second\r');
+        }}
+      >
+        send-second-input
       </button>
       <button type="button" onClick={() => reconnectAllSessions()}>
         reconnect-all
@@ -2524,6 +2533,50 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       const sentMessages = readSentMessages(ws2);
       expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+  });
+
+  it('flushes queued input after first connect when tab switch input happens before that session handshake completes', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+
+    ws1.triggerOpen();
+    ws1.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+    fireEvent.click(screen.getByText('switch-second'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    fireEvent.click(screen.getByText('send-second-input'));
+    expect(readSentMessages(ws2).some((item) => item.type === 'input')).toBe(false);
+
+    ws2.triggerOpen();
+    ws2.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-2',
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws2);
+      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
   });

@@ -191,6 +191,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       },
       settleSessionPullState: options.settleSessionPullState,
       runtimeDebug: options.runtimeDebug,
+      isSessionTransportActive: options.isSessionTransportActive,
       summarizeBufferPayload: options.summarizeBufferPayload,
       applyIncomingBufferSync,
       handleBufferHead,

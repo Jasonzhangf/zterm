@@ -205,7 +205,7 @@ export function buildTransportOpenConnectedEffectPlan(
   return {
     debugEvent: 'session.ws.connected',
     clearSupersededSockets: false,
-    flushPendingInputQueue: false,
+    flushPendingInputQueue: true,
   };
 }
 
@@ -1271,6 +1271,7 @@ export function doesSessionPullStateCoverRequest(
 export function doesSessionPullStateMatchExactLocalSnapshot(
   pullState: SessionPullState,
   payload: BufferSyncRequestPayload,
+  targetHeadRevision?: number | null,
 ) {
   return (
     pullState.requestKnownRevision === Math.max(0, Math.floor(payload.knownRevision || 0))
@@ -1278,6 +1279,11 @@ export function doesSessionPullStateMatchExactLocalSnapshot(
     && pullState.requestLocalEndIndex === Math.max(0, Math.floor(payload.localEndIndex || 0))
     && pullState.targetStartIndex === Math.max(0, Math.floor(payload.requestStartIndex || 0))
     && pullState.targetEndIndex === Math.max(0, Math.floor(payload.requestEndIndex || 0))
+    && (
+      targetHeadRevision === undefined
+      || targetHeadRevision === null
+      || pullState.targetHeadRevision === Math.max(0, Math.floor(targetHeadRevision || 0))
+    )
   );
 }
 

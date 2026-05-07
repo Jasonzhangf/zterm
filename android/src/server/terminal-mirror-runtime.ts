@@ -44,7 +44,7 @@ export interface TerminalMirrorRuntimeDeps {
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
   readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
-  ensureTmuxSession: (sessionName: string, cols: number, rows: number) => void;
+  assertTmuxSessionExists: (sessionName: string) => void;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
     mirror: SessionMirror,
@@ -443,7 +443,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.rows = targetRows;
 
     try {
-      deps.ensureTmuxSession(mirror.sessionName, targetCols, targetRows);
+      deps.assertTmuxSessionExists(mirror.sessionName);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       mirror.lifecycle = 'failed';
@@ -454,7 +454,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         }
         deps.sendMessage(session, {
           type: 'error',
-          payload: { message: `Failed to start tmux session: ${message}`, code: 'tmux_start_failed' },
+          payload: { message: `Tmux session unavailable: ${message}`, code: 'tmux_session_unavailable' },
         });
       }
       return;

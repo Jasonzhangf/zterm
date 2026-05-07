@@ -212,4 +212,19 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(controlRuntimeSource).toContain("runTmux(['send-keys'");
     expect(controlRuntimeSource).not.toContain("runTmux(['resize-window'");
   });
+
+  it('never implicitly creates a missing tmux session during attach; explicit creation stays on tmux-create-session only', () => {
+    const source = readServerSource();
+    const mirrorRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-mirror-runtime.ts'), 'utf8');
+    const controlRuntimeSource = readMessageControlRuntimeSource();
+    const startMirrorBlock = extractBlock(mirrorRuntimeSource, 'async function startMirror(', 1200);
+    const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':", 420);
+
+    expect(source).toContain('assertTmuxSessionExists: (sessionName) => {');
+    expect(source).toContain("terminalControlRuntime.runTmux(['has-session', '-t', sessionName])");
+    expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
+    expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName);');
+    expect(startMirrorBlock).not.toContain('new-session');
+    expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName)');
+  });
 });

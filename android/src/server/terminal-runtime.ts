@@ -41,7 +41,7 @@ interface TerminalRuntimeDeps {
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
   readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
-  ensureTmuxSession: (sessionName: string, cols: number, rows: number) => void;
+  assertTmuxSessionExists: (sessionName: string) => void;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
     mirror: SessionMirror,
@@ -239,7 +239,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     normalizeTerminalRows: deps.normalizeTerminalRows,
     resolveAttachGeometry: deps.resolveAttachGeometry,
     readTmuxPaneMetrics: deps.readTmuxPaneMetrics,
-    ensureTmuxSession: deps.ensureTmuxSession,
+    assertTmuxSessionExists: deps.assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux: deps.captureMirrorAuthoritativeBufferFromTmux,
     mirrorBufferChanged: deps.mirrorBufferChanged,
     mirrorCursorEqual: deps.mirrorCursorEqual,

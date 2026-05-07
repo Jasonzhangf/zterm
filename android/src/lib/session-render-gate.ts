@@ -24,8 +24,6 @@ export interface SessionRenderGate {
 
 function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSnapshot {
   return {
-    // liveBufferStore already publishes cloned immutable snapshots.
-    // Reusing those references here avoids a second full deep-clone on every render commit.
     lines: buffer.lines,
     gapRanges: buffer.gapRanges,
     startIndex: buffer.startIndex,
@@ -71,11 +69,7 @@ export function createSessionRenderGate(options: {
 
   const clearScheduledTimer = (runtime: RenderGateSessionRuntime) => {
     if (runtime.frameTimerId !== null) {
-      if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(runtime.frameTimerId);
-      } else {
-        clearTimeout(runtime.frameTimerId);
-      }
+      clearTimeout(runtime.frameTimerId);
       runtime.frameTimerId = null;
     }
   };
@@ -141,10 +135,6 @@ export function createSessionRenderGate(options: {
         scheduleFlush(sessionId);
       }
     };
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      runtime.frameTimerId = window.requestAnimationFrame(() => runFlush());
-      return;
-    }
     const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.() || 33));
     runtime.frameTimerId = setTimeout(runFlush, renderCommitMs) as unknown as number;
   };

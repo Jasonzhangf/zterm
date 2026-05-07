@@ -466,7 +466,7 @@ describe('TerminalQuickBar', () => {
     });
   });
 
-  it('sends floating quick action immediately with trailing enter', async () => {
+  it('sends floating quick action on double tap with trailing enter', async () => {
     const onSendSequence = vi.fn();
     renderQuickBar({
       quickActions: [
@@ -484,6 +484,8 @@ describe('TerminalQuickBar', () => {
     const actionLabel = screen.getByText('ls');
     const actionButton = actionLabel.closest('button');
     expect(actionButton).not.toBeNull();
+    fireEvent.click(actionButton as HTMLButtonElement);
+    expect(onSendSequence).not.toHaveBeenCalled();
     fireEvent.click(actionButton as HTMLButtonElement);
 
     await waitFor(() => {

@@ -51,6 +51,14 @@ interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
 
+function resolveIncomingMessageTypeFast(data: string): string | null {
+  const match = /"type"\s*:\s*"([^"]+)"/.exec(data);
+  if (!match || typeof match[1] !== 'string') {
+    return null;
+  }
+  return match[1];
+}
+
 export function createSessionContextTransportAccessors(
   storeRef: SessionTransportRuntimeStoreRef,
 ): SessionContextTransportAccessors {
@@ -385,6 +393,7 @@ export function bindSessionTransportSocketLifecycle(options: {
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
+  isSessionTransportActive?: (sessionId: string) => boolean;
   handleSocketServerMessage: (params: {
     sessionId: string;
     host: Host;
@@ -437,6 +446,13 @@ export function bindSessionTransportSocketLifecycle(options: {
     try {
       options.recordSessionRx(sessionId, event.data);
       if (typeof event.data !== 'string') {
+        return;
+      }
+      const fastMessageType = resolveIncomingMessageTypeFast(event.data);
+      if (fastMessageType === 'buffer-sync' && options.isSessionTransportActive && !options.isSessionTransportActive(sessionId)) {
+        options.runtimeDebug?.(`session.ws.${debugScope}.buffer-sync.preparse-inactive-drop`, {
+          sessionId,
+        });
         return;
       }
       const msg: ServerMessage = JSON.parse(event.data);

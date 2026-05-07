@@ -44,7 +44,7 @@ interface MutableRefObject<T> {
 }
 
 export function createSessionTransportOrchestrationRuntime(options: {
-  stateRef: MutableRefObject<{ activeSessionId: string | null }>;
+  stateRef: MutableRefObject<{ activeSessionId: string | null; liveSessionIds?: string[] }>;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
   refs: {
@@ -216,6 +216,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
         }
         options.recordSessionRx(sessionId, data);
       },
+      isSessionTransportActive: (sessionId: string) => (
+        options.stateRef.current.activeSessionId === sessionId
+        || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
+      ),
       handleSocketServerMessage: (params, msg) => {
         options.refs.handleSocketServerMessageRef.current?.(params, msg);
       },

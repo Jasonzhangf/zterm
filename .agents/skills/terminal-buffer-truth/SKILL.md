@@ -79,6 +79,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - ws/rtc transport 是 daemon 可持有的物理连接真相
   - mirror 是 daemon 可持有的 terminal 真相
   - tmux session / file transfer / schedule 是 daemon 可持有的业务真相
+- daemon attach/connect **不得**隐式 `new-session`；远端 tmux session 不存在时只能显式报 `tmux_session_unavailable`，显式创建唯一走 `tmux-create-session`。
   - transport 断开只影响该 transport 自身，不允许推导客户端 active/inactive/foreground/background 语义
   - 多客户端只表示“多个 transport/订阅者读同一 mirror”，不是 daemon 维护一份客户端状态机
 - daemon 不允许保留 client 风格状态机：

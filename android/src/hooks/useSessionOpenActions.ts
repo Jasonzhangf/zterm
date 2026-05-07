@@ -411,6 +411,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       tabs,
       activeSessionId: requestedActiveSessionId?.trim() || null,
       bridgeSettings: bridgeSettingsRef.current,
+      hosts: hostsRef.current,
     });
     if (importPlan.droppedTabs.length > 0) {
       runtimeDebug('app.saved-tab-list.drop-missing-remote-sessions', {

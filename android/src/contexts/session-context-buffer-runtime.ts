@@ -345,7 +345,11 @@ export function requestSessionBufferSyncRuntime(options: {
       || Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)) > 0
       || Math.max(0, Math.floor(effectiveSession.daemonHeadEndIndex || 0)) > 0
     );
-    if (doesSessionPullStateMatchExactLocalSnapshot(inFlightPull, payload)) {
+    if (doesSessionPullStateMatchExactLocalSnapshot(
+      inFlightPull,
+      payload,
+      Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
+    )) {
       return false;
     }
     if (

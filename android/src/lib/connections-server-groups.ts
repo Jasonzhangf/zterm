@@ -88,6 +88,29 @@ function pickPreferredHost(
   return (candidate.lastConnected || 0) >= (current.lastConnected || 0) ? candidate : current;
 }
 
+function findDaemonGroupForBridgeOnlyHistory(
+  grouped: Map<string, MutableServerGroup>,
+  sessionNames: string[],
+) {
+  const normalizedSessionNames = [...new Set(sessionNames.map((item) => item.trim()).filter(Boolean))];
+  if (normalizedSessionNames.length === 0) {
+    return null;
+  }
+
+  const candidates = [...grouped.values()].filter((group) => {
+    if (!group.daemonHostId?.trim()) {
+      return false;
+    }
+    return normalizedSessionNames.every((sessionName) => group.hostsBySessionName.has(sessionName));
+  });
+
+  if (candidates.length === 1) {
+    return candidates[0]!;
+  }
+
+  return null;
+}
+
 function ensureGroup(
   grouped: Map<string, MutableServerGroup>,
   bridgeHost: string,
@@ -173,7 +196,10 @@ export function buildConnectionsServerGroups(options: {
   }
 
   for (const groupHistory of sessionGroups) {
-    const group = ensureGroup(
+    const adoptedDaemonGroup = !groupHistory.daemonHostId
+      ? findDaemonGroupForBridgeOnlyHistory(grouped, groupHistory.sessionNames)
+      : null;
+    const group = adoptedDaemonGroup || ensureGroup(
       grouped,
       groupHistory.bridgeHost,
       groupHistory.bridgePort,

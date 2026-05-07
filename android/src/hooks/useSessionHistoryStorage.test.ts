@@ -191,4 +191,48 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
 
     expect(result.current.sessionGroups).toEqual([]);
   });
+
+  it('deletes a stored server group explicitly and persists the removal', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        sessionNames: ['main', 'logs'],
+      });
+      result.current.setSessionGroupSelection({
+        name: 'Daemon B',
+        bridgeHost: '100.64.0.11',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-b',
+        authToken: 'token-b',
+        sessionNames: ['other'],
+      });
+    });
+
+    act(() => {
+      result.current.deleteSessionGroup({
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+      });
+    });
+
+    expect(result.current.sessionGroups).toEqual([
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-b',
+        sessionNames: ['other'],
+      }),
+    ]);
+    expect(JSON.parse(window.localStorage.getItem('zterm:session-groups') || '[]')).toEqual([
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-b',
+        sessionNames: ['other'],
+      }),
+    ]);
+  });
 });

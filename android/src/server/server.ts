@@ -144,17 +144,8 @@ const terminalRuntime = createTerminalRuntime({
   normalizeTerminalRows,
   resolveAttachGeometry,
   readTmuxPaneMetrics: (sessionName) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName),
-  ensureTmuxSession: (sessionName, cols, rows) => {
-    const requestedTmuxRows = terminalMirrorCapture.resolveRequestedTmuxRows(rows);
-    let sessionExists = true;
-    try {
-      terminalControlRuntime.runTmux(['has-session', '-t', sessionName]);
-    } catch {
-      sessionExists = false;
-    }
-    if (!sessionExists) {
-      terminalControlRuntime.runTmux(['new-session', '-d', '-s', sessionName, '-x', String(cols), '-y', String(requestedTmuxRows)]);
-    }
+  assertTmuxSessionExists: (sessionName) => {
+    terminalControlRuntime.runTmux(['has-session', '-t', sessionName]);
     terminalControlRuntime.ensureTmuxSessionAlternateScreenDisabled(sessionName);
   },
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,

@@ -299,7 +299,9 @@ export function resolveHostForPersistedOpenTab(options: {
   fallbackIdPrefix?: string;
 }) {
   const { tab, hosts } = options;
-  const existingHost = hosts.find((host) => host.id === tab.hostId) || null;
+  const existingHost = hosts.find((host) => host.id === tab.hostId)
+    || hosts.find((host) => persistedOpenTabsSemanticallyMatch(host, tab))
+    || null;
   if (existingHost) {
     return {
       ...existingHost,

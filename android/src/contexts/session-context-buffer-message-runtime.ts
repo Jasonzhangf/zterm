@@ -168,6 +168,7 @@ export function handleSocketServerMessageOrchestrationRuntime(options: {
   };
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+  isSessionTransportActive: (sessionId: string) => boolean;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   applyIncomingBufferSync: (sessionId: string, payload: TerminalBufferPayload) => void;
   handleBufferHead: (
