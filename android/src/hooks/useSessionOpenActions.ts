@@ -56,9 +56,9 @@ interface UseSessionOpenActionsOptions {
   runtimeActiveSessionId: string | null;
   runtimeRefs: OpenTabRuntimeRefs;
   ensureTerminalPageVisible: () => void;
-  persistOpenTabIntentState: (
+  applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   setPageState: Dispatch<SetStateAction<AppPageState>>;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
@@ -116,7 +116,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     runtimeActiveSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   } = options;
@@ -226,7 +226,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         fallbackActiveSessionId: runtimeActiveSessionId,
       },
     );
-    persistOpenTabIntentState(nextOpenTabState);
+    applyOpenTabState(nextOpenTabState);
     if (options?.navigate !== false) {
       ensureTerminalPageVisible();
     }
@@ -237,7 +237,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     createSession,
     ensureTerminalPageVisible,
     openTabStateRef,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     rememberBridgeTarget,
     runtimeActiveSessionId,
   ]);
@@ -420,7 +420,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       });
     }
     if (importPlan.tabs.length === 0) {
-      persistOpenTabIntentState({
+      applyOpenTabState({
         tabs: [],
         activeSessionId: null,
       });

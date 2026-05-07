@@ -29,7 +29,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
   const setPageState = vi.fn();
-  const persistOpenTabIntentState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null }) => {
+  const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
       nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null,
@@ -40,6 +40,7 @@ function createOptions(overrides: Partial<any> = {}) {
 
   const runtimeRefs = {
     activeSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
+    runtimeActiveSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
     sessionsRef: createRef<any[]>(overrides.sessions ?? []),
     hostsRef: createRef<any[]>(overrides.hosts ?? []),
     bridgeSettingsRef: createRef(overrides.bridgeSettings || {
@@ -84,7 +85,7 @@ function createOptions(overrides: Partial<any> = {}) {
     runtimeActiveSessionId: overrides.runtimeActiveSessionId ?? null,
     runtimeRefs,
     ensureTerminalPageVisible,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     setPageState,
   };
 
@@ -102,7 +103,7 @@ function createOptions(overrides: Partial<any> = {}) {
       deleteSessionGroup,
       pruneSessionGroupSelectionToRemoteTruth,
       ensureTerminalPageVisible,
-      persistOpenTabIntentState,
+      applyOpenTabState,
       setPageState,
     },
   };

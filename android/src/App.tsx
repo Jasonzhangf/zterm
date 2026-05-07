@@ -119,7 +119,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     sessionIds,
     followResetEpoch,
     runtimeRefs,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     handleSwitchSession,
     handleMoveSession,
     handleRenameSession,
@@ -206,7 +206,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });

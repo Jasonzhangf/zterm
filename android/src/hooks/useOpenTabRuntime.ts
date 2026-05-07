@@ -73,6 +73,7 @@ interface UseOpenTabRuntimeOptions {
 
 export interface OpenTabRuntimeRefs {
   activeSessionIdRef: MutableRefObject<string | null>;
+  runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
   hostsRef: MutableRefObject<Host[]>;
   bridgeSettingsRef: MutableRefObject<BridgeSettings>;
@@ -101,9 +102,9 @@ export interface OpenTabRuntimeResult {
   sessionIds: string[];
   followResetEpoch: number;
   runtimeRefs: OpenTabRuntimeRefs;
-  persistOpenTabIntentState: (
+  applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   handleSwitchSession: (sessionId: string) => void;
   handleMoveSession: (sessionId: string, toIndex: number) => void;
@@ -154,7 +155,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(sessions);
-  const activeSessionIdRef = useRef<string | null>(runtimeActiveSessionId);
+  const activeSessionIdRef = useRef<string | null>(openTabState.activeSessionId);
+  const runtimeActiveSessionIdRef = useRef<string | null>(runtimeActiveSessionId);
   const bridgeSettingsRef = useRef(bridgeSettings);
   const resumeActiveSessionTransportRef = useRef(resumeActiveSessionTransport);
   const hostsRef = useRef(hosts);
@@ -210,8 +212,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     return (shouldPreferPendingTerminalTarget
       ? runtimeSessionsById.get(pendingTargetSessionId)
       : null)
-      || runtimeSessionsById.get(runtimeActiveSessionId || '')
       || runtimeSessionsById.get(openTabState.activeSessionId || '')
+      || runtimeSessionsById.get(runtimeActiveSessionId || '')
       || terminalSessions[0]
       || null;
   }, [openTabState.activeSessionId, pendingTerminalActiveSwitch, runtimeActiveSessionId, terminalSessions]);
@@ -229,17 +231,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     return nextState;
   }, []);
 
-  const persistOpenTabIntentState = useCallback((nextState: {
-    tabs: PersistedOpenTab[];
-    activeSessionId: string | null;
-  }, persistOptions?: {
-    fallbackActiveSessionId?: string | null;
-  }) => {
-    return persistExplicitOpenTabs(
-      nextState.tabs,
-      nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null,
-    );
-  }, [persistExplicitOpenTabs]);
+
+
 
   const beginPendingTerminalActiveSwitch = useCallback((targetSessionId: string | null, sourceRuntimeActiveSessionId: string | null) => {
     const normalizedTargetSessionId = typeof targetSessionId === 'string' ? targetSessionId.trim() : '';
@@ -278,8 +271,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       clearPendingTerminalActiveSwitch();
       return;
     }
-    if (nextActiveSessionId !== activeSessionIdRef.current) {
-      beginPendingTerminalActiveSwitch(nextActiveSessionId, activeSessionIdRef.current);
+    if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
+      beginPendingTerminalActiveSwitch(nextActiveSessionId, runtimeActiveSessionIdRef.current);
     } else {
       clearPendingTerminalActiveSwitch();
     }
@@ -291,6 +284,20 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     requestRuntimeActiveSessionSwitch(nextState.activeSessionId);
     return nextState;
   }, [persistExplicitOpenTabs, requestRuntimeActiveSessionSwitch]);
+
+  const applyOpenTabState = useCallback((nextState: {
+    tabs: PersistedOpenTab[];
+    activeSessionId: string | null;
+  }, persistOptions?: {
+    fallbackActiveSessionId?: string | null;
+    switchRuntime?: boolean;
+  }) => {
+    const normalizedActiveSessionId = nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null;
+    if (persistOptions?.switchRuntime) {
+      return persistAndSwitchExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId);
+    }
+    return persistExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId);
+  }, [persistAndSwitchExplicitOpenTabs, persistExplicitOpenTabs]);
 
   const applyClosedOpenTabIntent = useCallback((sessionId: string, closeOptions?: {
     runtimeActiveSessionId?: string | null;
@@ -307,7 +314,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
     const runtimeSessions = closeOptions?.runtimeSessions || sessionsRef.current;
     const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, normalizedSessionId, {
-      runtimeActiveSessionId: closeOptions?.runtimeActiveSessionId ?? activeSessionIdRef.current,
+      runtimeActiveSessionId: closeOptions?.runtimeActiveSessionId ?? runtimeActiveSessionIdRef.current,
       fallbackSessionIds: closeOptions?.fallbackSessionIds ?? runtimeSessions.map((session) => session.id),
       runtimeSessions,
     });
@@ -320,7 +327,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     const nextOpenTabState = closeResult.nextState;
 
     closedOpenTabSessionIdsRef.current.add(normalizedSessionId);
-    persistOpenTabIntentState(nextOpenTabState);
+    applyOpenTabState(nextOpenTabState);
 
     if (closeOptions?.clearDraft) {
       clearSessionDraft(normalizedSessionId);
@@ -340,7 +347,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     });
 
     return nextOpenTabState;
-  }, [clearSessionDraft, closeSession, persistOpenTabIntentState, setPageState]);
+  }, [applyOpenTabState, clearSessionDraft, closeSession, setPageState]);
 
   const auditOpenTabsAgainstRemoteSessions = useCallback(async (reason: OpenTabAuditReason) => {
     const currentTabs = openTabStateRef.current.tabs;
@@ -419,7 +426,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       }
       applyClosedOpenTabIntent(tab.sessionId, {
         runtimeSessions,
-        runtimeActiveSessionId: activeSessionIdRef.current,
+        runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
         fallbackSessionIds: runtimeSessions
           .filter((session) => session.id !== tab.sessionId)
           .map((session) => session.id),
@@ -432,7 +439,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   useEffect(() => {
     sessionsRef.current = sessions;
-    activeSessionIdRef.current = runtimeActiveSessionId;
+    activeSessionIdRef.current = openTabState.activeSessionId;
+    runtimeActiveSessionIdRef.current = runtimeActiveSessionId;
     bridgeSettingsRef.current = bridgeSettings;
     hostsRef.current = hosts;
     terminalActiveSessionIdRef.current = terminalActiveSession?.id || null;
@@ -440,6 +448,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   }, [
     bridgeSettings,
     hosts,
+    openTabState.activeSessionId,
     resumeActiveSessionTransport,
     runtimeActiveSessionId,
     sessions,
@@ -531,8 +540,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     hasPersistedOpenTabsTruthRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
-    persistOpenTabIntentState,
-    persistAndSwitchExplicitOpenTabs,
+    applyOpenTabState,
     requestRuntimeActiveSessionSwitch,
     createSession,
   });
@@ -551,6 +559,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   useOpenTabLifecycleEffects({
     sessionsRef,
     activeSessionIdRef,
+    runtimeActiveSessionIdRef,
     resumeActiveSessionTransportRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
@@ -569,7 +578,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     openTabStateRef,
     sessionsRef,
     activeSessionIdRef,
-    persistOpenTabIntentState,
+    runtimeActiveSessionIdRef,
+    applyOpenTabState,
     requestRuntimeActiveSessionSwitch,
     ensureTerminalPageVisible,
     moveSession,
@@ -579,6 +589,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   const runtimeRefs = useMemo<OpenTabRuntimeRefs>(() => ({
     activeSessionIdRef,
+    runtimeActiveSessionIdRef,
     sessionsRef,
     hostsRef,
     bridgeSettingsRef,
@@ -598,7 +609,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     sessionIds,
     followResetEpoch,
     runtimeRefs,
-    persistOpenTabIntentState,
+    applyOpenTabState,
     handleSwitchSession,
     handleMoveSession,
     handleRenameSession,

@@ -77,12 +77,6 @@ export function recordSessionRx(options: {
   options.refs.staleTransportProbeAtRef.current.delete(options.sessionId);
 }
 
-export function recordSessionRenderCommit(options: {
-  sessionId: string;
-  sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
-}) {
-  options.sessionDebugMetricsStoreRef.current.recordRenderCommit(options.sessionId);
-}
 
 export function markPendingInputTailRefresh(options: {
   sessionId: string;

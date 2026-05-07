@@ -27,6 +27,7 @@ interface OpenTabLifecycleCloseOptions {
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
   activeSessionIdRef: MutableRefObject<string | null>;
+  runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   resumeActiveSessionTransportRef: MutableRefObject<(sessionId: string) => boolean>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
@@ -39,6 +40,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   const {
     sessionsRef,
     activeSessionIdRef,
+    runtimeActiveSessionIdRef,
     resumeActiveSessionTransportRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
@@ -157,7 +159,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       if (detail?.type === 'closed') {
         applyClosedOpenTabIntent(sessionId, {
           runtimeSessions: sessionsRef.current,
-          runtimeActiveSessionId: activeSessionIdRef.current,
+          runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
           fallbackSessionIds: sessionsRef.current
             .filter((session) => session.id !== sessionId)
             .map((session) => session.id),
@@ -172,5 +174,5 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     return () => {
       window.removeEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
     };
-  }, [activeSessionIdRef, applyClosedOpenTabIntent, sessionsRef]);
+  }, [applyClosedOpenTabIntent, runtimeActiveSessionIdRef, sessionsRef]);
 }

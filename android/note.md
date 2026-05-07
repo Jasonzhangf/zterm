@@ -851,3 +851,36 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 
 [NOTE] 2026-05-07 多session输入延迟/首刷慢初查：确认 client 在 socket onmessage 层仍会对 inactive tab 的 live buffer-sync 做完整 JSON.parse + summarize + normalize/apply 入口调用，真正 drop 发生在更下游 applyIncomingBufferSyncRuntime。已将 inactive gate 前移到 handleSocketServerMessageRuntime 的 buffer-sync case，在 inactive 时直接跳过 summarize/settle/apply，避免 hidden tabs 线性吃 live payload 解析成本；补 socket-message runtime 红测。
 [NOTE] 2026-05-07 进一步收口：仅在 socket-message 层 drop inactive buffer-sync 仍会先发生 JSON.parse，hidden tab 多时仍吃大 payload parse 成本。已把 inactive live buffer gate 再前移到 session transport onmessage：先用轻量正则提取 type，若为 buffer-sync 且 session 非 active/live，则直接 pre-parse drop；保留 recordRxBytes 与其余消息正常解析。split pane 继续通过 active || liveSessionIds 判定放行。
+[2026-05-07] architecture audit: non-single-truth checkpoint
+- 已确认最明确的架构违规 #1：daemon 仍持有客户端 width 语义。证据：`terminal-runtime-types.ts` 中 `TerminalSession.widthMode`、`SessionMirror.adaptiveCols`；`terminal-mirror-runtime.ts` 在 `attachTmux/handleResize/reconcileMirrorAdaptiveWidth` 内长期存储并依据 `adaptive-phone` 改写 tmux window 宽度。这违反“daemon 不持有客户端 widthMode / viewport 心智”的硬规则。
+- 已确认最明确的架构违规 #2：open-tab 状态写入口仍然分散。物理持久化最终主要收口到 `useOpenTabRuntime.persistExplicitOpenTabs()`，但业务状态变更决策散落在 `useOpenTabSessionActions`、`useSessionOpenActions`、`useOpenTabRestoreRuntimeSync`，这些 hook 直接调用 `persistOpenTabIntentState()` / `persistAndSwitchExplicitOpenTabs()`；当前仍不是单一 operation owner。
+- 已确认高风险重复 owner：active session 语义同时存在于 `SessionContext.state.activeSessionId` 与 open-tab runtime (`openTabState.activeSessionId + pendingTerminalActiveSwitch`) 两层。证据：open-tab runtime `requestRuntimeActiveSessionSwitch()` 最终调用 `switchSession()`；session runtime/orchestration 多处 `setActiveSessionSync()`；restore/switch/close 路径都会同时碰 active tab 与 runtime active。
+- 已确认中风险残留：render commit helper 仍有二义性入口。真实 wiring 由 `session-render-gate -> provider-runtime(recordRenderCommit)` 驱动，但 `session-context-pull-runtime.ts` 仍暴露 `recordSessionRenderCommit()` helper，属于残留第二接线口，后续容易再被误接。
+- 已确认 connections/history 与 current tabs 已基本分层：`useSessionHistoryStorage` 是 `SESSION_GROUPS` 唯一持久化 owner；`connections-server-groups.ts` 是投影 owner；`App.tsx` 传给 ConnectionsPage 的 `sessions` 已改为 explicit `terminalSessions`。当前“旧 server/session 又回来”的剩余风险更偏向 history 投影时机/远端 prune 边界，而不是 current tabs 持久化第二真源。
+- 已确认 close tab/session 已部分收口但仍多 source：用户关闭、SESSION_STATUS_EVENT(closed)、remote audit prune 都会进入 `applyClosedOpenTabIntent()`；这比以前好，但 close orchestration 仍和 runtime close/page switch/draft clear 混在一起，建议下一步提升成单一 close operation owner。
+- 已确认多处 silent failure 仍违反规范：`open-tab-persistence.ts` 存在裸 `catch {}`；`traversal-relay/server.ts`、`zterm-rtc-remote-verify.ts`、`useTraversalRelayAccount.ts` 等仍有 `catch {}` 或 ignore-cleanup 型吞错；主链 UI/runtime 还存在大量 warn-only cleanup。需按主链优先级逐步物理消灭。
+[2026-05-07] zterm-1.1 daemon width semantics de-cliented
+- 已物理移除 daemon terminal core 内的客户端 width 语义 owner：`TerminalSession.widthMode`、`SessionMirror.adaptiveCols`、`terminal-mirror-runtime.reconcileMirrorAdaptiveWidth()`、`handleResize()` 全部删除。
+- 当前 daemon attach 只消费物理 `cols/rows`：`attachTmux()` 在 mirror boot 前只写 mirror 初始几何；后续不再按 subscriber/client width mode 聚合并改写 tmux window。
+- `rg -n "widthMode|adaptiveCols|TerminalWidthMode|reconcileMirrorAdaptiveWidth|handleResize\\(" android/src/server` 已为空；说明 server 侧该 owner 链已物理消灭。
+- 回归证据：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` 通过
+  2. `vitest run src/server/terminal-mirror-runtime.test.ts src/server/terminal-runtime.detached-session.test.ts src/server/terminal-message-runtime.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/terminal-mirror-capture.test.ts` = 39/39 绿
+- 下一步：更新 architecture/decision/skill 文档，把“daemon 只认 cols/rows、width mode 只属于 client”冻结为书面真源，然后推进 zterm-1.2 open-tab 单一 owner 收口。
+[2026-05-07] zterm-1.2 open-tab write-surface narrowed to runtime owner API
+- 已完成第一轮收口：外部 hook / App 不再直接持有通用 `persistOpenTabIntentState`；`useOpenTabRuntime` 对外改为 `applyOpenTabState(nextState, {fallbackActiveSessionId?, switchRuntime?})`，由 runtime owner 决定仅持久化还是持久化+runtime active switch。
+- `useOpenTabSessionActions`、`useOpenTabRestoreRuntimeSync`、`useSessionOpenActions` 已改为只调 `applyOpenTabState` 或 `requestRuntimeActiveSessionSwitch`，不再直接调用通用 persist 写口。
+- 当前剩余 grep 命中 `persistAndSwitchExplicitOpenTabs` 只在 `useOpenTabRuntime` 内部（owner 自身）作为实现细节存在；外部模块 direct write 口已收掉。
+- 验证：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` 通过
+  2. `vitest run src/hooks/useSessionOpenActions.test.tsx src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx` = 192/192 绿
+- 剩余不足：这还是“runtime owner API 收口”，尚未把 open-tab operation/event/reducer 彻底模块化；但已经先物理消除了外部多处直接写 persisted truth 的问题。
+[2026-05-07] zterm-1.3 active session owner narrowed
+- 已完成第一轮 active truth 收口：`OpenTabRuntimeRefs.activeSessionIdRef` 现在代表 **open-tab active truth**；新增 `runtimeActiveSessionIdRef` 仅代表 SessionContext runtime active truth。
+- `terminalActiveSession` 选择顺序已改为：pending target -> openTabState.activeSessionId -> runtimeActiveSessionId -> fallback first terminal tab；避免 runtime active 反向覆盖 tab owner。
+- `requestRuntimeActiveSessionSwitch()` 的 pending switch 比较已改为基于 `runtimeActiveSessionIdRef`，不再错误读取 tab active ref。
+- `useOpenTabLifecycleEffects` / `useOpenTabSessionActions` 的 close path 现在显式使用 `runtimeActiveSessionIdRef` 作为 runtime close/fallback 依据；`useTerminalShellActions` 继续使用 `activeSessionIdRef`（tab owner）判断“发送前是否需要切 tab”，语义已分离。
+- 验证：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` 通过
+  2. `vitest run src/hooks/useSessionOpenActions.test.tsx src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx` = 198/198 绿
+- 剩余不足：SessionContext 内部仍有 `setActiveSessionSync` 作为 runtime 真相推进，这本来就是 runtime owner；当前收口重点是外层业务层不再混用 runtime active 与 tab active，已完成第一轮。
