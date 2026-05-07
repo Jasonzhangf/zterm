@@ -131,6 +131,94 @@ operation -> event -> projection
 - Schedule/Automation 只定义规则、nextFireAt 计算与执行结果，不直接承载 UI 展示
 - Server 负责本地 tmux 真源，以及定时发送的唯一执行真源
 
+## Connections / history / current tabs 真源冻结
+
+### 1. current tabs（当前打开 tabs）
+
+- 唯一持久化真源：
+  - `STORAGE_KEYS.OPEN_TABS`
+  - `STORAGE_KEYS.ACTIVE_SESSION`
+- 唯一读写 owner：
+  - `src/lib/open-tab-persistence.ts`
+- 唯一业务 owner：
+  - `src/hooks/useOpenTabRuntime.ts`
+  - 其纯规则模块：`src/lib/open-tab-intent.ts`
+
+硬规则：
+
+- `OPEN_TABS` 一旦存在，就是 **explicit client truth**
+- runtime sessions 只能：
+  - rewrite semantic duplicate tab
+  - sync active id
+  - close/prune already-open tabs
+- runtime sessions **不得 append runtime-only tabs 回 OPEN_TABS**
+- 关闭 tab、remote prune、session status closed 都必须统一走 open-tab close owner，再由它持久化
+- `SessionContext` 不得持久化 current tabs
+- `ConnectionsPage` 不得写 `OPEN_TABS`
+
+### 2. session history（历史 server/session 选择）
+
+- 唯一持久化真源：
+  - `STORAGE_KEYS.SESSION_GROUPS`
+- 唯一读写 owner：
+  - `src/hooks/useSessionHistoryStorage.ts`
+
+硬规则：
+
+- `SESSION_GROUPS` 只代表：
+  - 某个 server owner 下，用户保存/选择过哪些 tmux session names
+- `SESSION_GROUPS` 不是 current tabs
+- `SESSION_GROUPS` 不是 live sessions
+- `SESSION_GROUPS` 不得反向生成 current tabs
+- 远端 tmux truth 变化时，history 只能被 prune，不得自动 reopen tab
+
+### 3. connections projection（连接页投影）
+
+- 唯一 projection owner：
+  - `src/lib/connections-server-groups.ts`
+
+输入只允许来自：
+
+- `hosts`
+- `sessionGroups`
+- `runtime sessions`
+
+硬规则：
+
+- projection 只负责组装 UI server cards
+- projection 不得写任何 storage
+- projection 不得创建 / 关闭 session
+- projection 不得决定 current tabs
+
+### 4. SessionContext 与 current tabs 的边界
+
+- `SessionContext` 的真相仅限：
+  - runtime sessions
+  - active runtime session
+  - live session ids
+  - transport / buffer / renderer runtime
+
+硬规则：
+
+- `SessionContext` 不得持久化 current tabs
+- `SessionContext` 不得持久化 session history
+- `SessionContext` 不得在 cold start 自动从 runtime sessions bootstrap 已显式关闭的 tabs
+- current tabs 是否存在，只能由 open-tab owner 决定
+
+### 5. createSession 调用边界
+
+- 自动 reopen / cold restore 的唯一 app-layer owner：
+  - `src/hooks/useOpenTabRestoreRuntimeSync.ts`
+- 用户显式打开 session / group / saved tabs 的唯一 app-layer owner：
+  - `src/hooks/useSessionOpenActions.ts`
+
+硬规则：
+
+- 除上述两个 owner 外，其余 App / page / projection / history 模块不得直接调用 `createSession`
+- `ConnectionsPage` 只发用户操作 intent，不得直接 reopen session
+- `useOpenTabRuntime` 负责 current tabs truth，但不得直接批量 cold restore runtime session
+- `SessionContext` 内部的 `createSession` 仅是 runtime primitive，不得自行推导“该不该 reopen 某个 tab”
+
 ## 图片传送链路
 
 ```text

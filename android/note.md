@@ -902,3 +902,16 @@ All green locally. Next focus stays on remaining real-world slowness after app r
   - `server.file-transfer-truth.test.ts`
 - 本轮验证：`tsc --noEmit` 通过；上述 4 组 vitest = 18/18 绿。
 - 剩余热点：transport/infra runtime 内仍有少量“探测式 parse / URL 组装”catch，需要继续区分“合法分支探测”与“真吞错”后再收口，避免误伤 plain-text input / pong fast-path。
+[2026-05-07] zterm-1.6 owner boundary freeze: current tabs vs history vs connections projection
+- 已重新审计三层 owner：
+  1. current tabs = `OPEN_TABS + ACTIVE_SESSION`，唯一 storage owner 为 `open-tab-persistence.ts`，唯一业务 owner 为 `useOpenTabRuntime + open-tab-intent`
+  2. session history = `SESSION_GROUPS`，唯一 storage owner 为 `useSessionHistoryStorage.ts`
+  3. connections projection = `connections-server-groups.ts`，只读组装 server cards，不得写 storage / runtime
+- 同时确认 `SessionContext` 只持有 runtime sessions / active runtime / transport-buffer-render runtime；不持有 current tabs/history storage truth。
+- 已补 source-gate：`src/lib/open-tab-history-truth.test.ts`，钉死 storage owner 与 projection read-only 边界，防止以后再把旧 session/tab 逻辑串回多处实现。
+[2026-05-07] zterm-1.6 reopen chain audit
+- 继续追“旧 tab / 旧 session 自动回来”的真实 reopen 链，代码层已确认 app-layer 生产 `createSession(...)` 入口只剩两条：
+  1. `useOpenTabRestoreRuntimeSync.ts`：cold restore / auto restore persisted OPEN_TABS
+  2. `useSessionOpenActions.ts`：用户显式打开单个 session/group/saved-tab-list
+- 其余模块（`useOpenTabRuntime` / `useSessionHistoryStorage` / `ConnectionsPage` / `connections-server-groups`）不应直接 createSession；已补 source gate 钉死该边界。
+- 结论：后续若仍出现“旧 tab 自动回来”，重点不再是 createSession 多入口，而是 restore/audit 时机或 persisted truth 本身是否被错误保留。
