@@ -9,6 +9,7 @@ import {
   requestSessionBufferHeadRuntime,
   requestSessionBufferSyncRuntime,
 } from './session-context-buffer-runtime';
+import { buildDefaultSessionVisibleRange } from './session-visible-range-helpers';
 
 function makeSession(sessionId: string): Session {
   return {
@@ -185,6 +186,149 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localStartIndex: 0,
         localEndIndex: 1,
       }),
+    );
+  });
+
+  it('accepts buffer-head for visible non-active pane when shouldAcceptSessionLiveBuffer returns true', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const setHead = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 5,
+      latestEndIndex: 20,
+      availableStartIndex: 0,
+      availableEndIndex: 20,
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
+        sessionBufferHeadsRef: { current: new Map() },
+        lastHeadRequestAtRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
+        sessionHeadStoreRef: { current: { setHead } },
+      },
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(setHead).toHaveBeenCalledWith(sessionId, {
+      daemonHeadRevision: 5,
+      daemonHeadEndIndex: 20,
+    });
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.buffer.head.inactive-drop',
+      expect.anything(),
+    );
+  });
+
+  it('requests tail refresh after head arrives when an active tab has no local window yet', () => {
+    const sessionId = 'session-2';
+    const baseSession = makeSession(sessionId);
+    const session: Session = {
+      ...baseSession,
+      buffer: createSessionBufferState({
+        lines: [],
+        startIndex: 0,
+        endIndex: 0,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 0,
+        cols: 80,
+        rows: 24,
+        revision: 0,
+        cacheLines: 1000,
+      }),
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
+    };
+    const requestSessionBufferSync = vi.fn(() => true);
+    const setHead = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 6,
+      latestEndIndex: 3,
+      availableStartIndex: 0,
+      availableEndIndex: 3,
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionBufferHeadsRef: { current: new Map() },
+        lastHeadRequestAtRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]]),
+        },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
+        sessionHeadStoreRef: { current: { setHead } },
+      },
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(setHead).toHaveBeenCalledWith(sessionId, {
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 3,
+    });
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      reason: 'buffer-head-update',
+      purpose: 'tail-refresh',
+    }));
+  });
+
+  it('accepts buffer-sync for visible non-active pane when shouldAcceptSessionLiveBuffer returns true', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: makePayload(2),
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        sessionVisibleRangeRef: { current: new Map() },
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.buffer.sync.inactive-drop',
+      expect.anything(),
     );
   });
 

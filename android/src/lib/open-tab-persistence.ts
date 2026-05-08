@@ -1,4 +1,4 @@
-import { findReusableManagedSession } from '../contexts/session-sync-helpers';
+import { findReusableManagedSession } from '../contexts/session-reconnect-helpers';
 import {
   buildSessionSemanticReuseKey,
   buildSessionSemanticReuseKeyVariants,

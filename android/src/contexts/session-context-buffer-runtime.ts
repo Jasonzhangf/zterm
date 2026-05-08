@@ -16,18 +16,22 @@ import type {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import {
   buildDefaultSessionVisibleRange,
+} from './session-visible-range-helpers';
+import {
   buildSessionBufferSyncRequestPayload,
-  doesSessionPullStateCoverRequest,
-  doesSessionPullStateMatchExactLocalSnapshot,
+  hasImpossibleLocalWindow,
   shouldCatchUpFollowTailAfterBufferApply,
   shouldPullFollowBuffer,
   shouldPullVisibleRangeBuffer,
-  hasImpossibleLocalWindow,
-  normalizeTerminalCursorState,
   type SessionBufferHeadState,
+} from './session-buffer-planner-helpers';
+import {
+  doesSessionPullStateCoverRequest,
+  doesSessionPullStateMatchExactLocalSnapshot,
   type SessionPullPurpose,
   type SessionPullStates,
-} from './session-sync-helpers';
+} from './session-pull-state-helpers';
+import { normalizeTerminalCursorState } from './session-wire-helpers';
 
 interface MutableRefObject<T> {
   current: T;
@@ -69,6 +73,7 @@ export function handleBufferHeadRuntime(options: {
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
   requestSessionBufferSync: (
     sessionId: string,
@@ -107,7 +112,9 @@ export function handleBufferHeadRuntime(options: {
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
 
   const activeTransport = options.isSessionTransportActive(options.sessionId);
-  if (!activeTransport) {
+  const shouldAcceptLiveBuffer = activeTransport
+    || Boolean(options.shouldAcceptSessionLiveBuffer?.(options.sessionId));
+  if (!shouldAcceptLiveBuffer) {
     options.runtimeDebug('session.buffer.head.inactive-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -487,6 +494,7 @@ export function applyIncomingBufferSyncRuntime(options: {
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   requestSessionBufferSync: (
     sessionId: string,
     requestOptions?: {
@@ -505,7 +513,9 @@ export function applyIncomingBufferSyncRuntime(options: {
   }
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
   const activeTransport = options.isSessionTransportActive(options.sessionId);
-  if (!activeTransport) {
+  const shouldAcceptLiveBuffer = activeTransport
+    || Boolean(options.shouldAcceptSessionLiveBuffer?.(options.sessionId));
+  if (!shouldAcceptLiveBuffer) {
     options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
     options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
     options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);

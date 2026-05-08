@@ -107,6 +107,54 @@ describe('session-context-activity-runtime', () => {
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
   });
 
+  it('requests head for a visible live pane during active tick even when it is not the interactive active session', () => {
+    const requestSessionBufferHead = vi.fn(() => true);
+
+    const refreshed = ensureActiveSessionFreshRuntime({
+      refreshOptions: {
+        sessionId: 'session-2',
+        source: 'active-tick',
+        allowReconnectIfUnavailable: false,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [buildSession('session-1'), buildSession('session-2')],
+            activeSessionId: 'session-1',
+            liveSessionIds: ['session-2'],
+          },
+        },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        lastActiveReentryAtRef: { current: new Map<string, number>() },
+        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+        connectedBaselineBurstGuardRef: { current: new Set<string>() },
+        lastServerActivityAtRef: { current: new Map<string, number>() },
+        lastHeadRequestAtRef: { current: new Map<string, number>() },
+      },
+      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
+      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
+      isReconnectInFlight: () => false,
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      isSessionTransportActivityStale: () => false,
+      runtimeDebug: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
+      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
+      resetSessionTransportPullBookkeeping: vi.fn(),
+      requestSessionBufferHead,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      reconnectSession: vi.fn(),
+    });
+
+    expect(refreshed).toBe(true);
+    expect(requestSessionBufferHead).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({ readyState: WebSocket.OPEN }),
+      expect.objectContaining({ force: undefined }),
+    );
+  });
+
   it('skips duplicate forced resume head immediately after connected baseline head', () => {
     const requestSessionBufferHead = vi.fn(() => true);
     const refs = {

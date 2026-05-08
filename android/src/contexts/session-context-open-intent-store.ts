@@ -1,4 +1,4 @@
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 
 export type PendingSessionTransportOpenIntentStore = Map<string, PendingSessionTransportOpenIntent>;
 const DEFAULT_PENDING_OPEN_INTENT_STALE_MS = 5000;

@@ -226,7 +226,7 @@ function SessionHarness() {
   const [remoteScreenshotPhase, setRemoteScreenshotPhase] = useState('idle');
 
   useEffect(() => {
-    createSession(host, { sessionId: 'session-1', activate: true });
+    createSession(host, { sessionId: 'session-1' });
   }, [createSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
@@ -368,8 +368,8 @@ function MultiSessionHarness() {
   } = useSession();
 
   useEffect(() => {
-    createSession(host, { sessionId: 'session-1', activate: true });
-    createSession(host2, { sessionId: 'session-2', activate: false });
+    createSession(host, { sessionId: 'session-1' });
+    createSession(host2, { sessionId: 'session-2', connect: false });
   }, []);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
@@ -495,8 +495,7 @@ function StaleFollowHarness() {
   useEffect(() => {
     createSession(host, {
       sessionId: 'stale-session',
-      activate: true,
-      buffer: createSessionBufferState({
+            buffer: createSessionBufferState({
         lines: Array.from({ length: 1033 }, (_, offset) => `line-${63661 + offset}`),
         startIndex: 63661,
         endIndex: 64694,
@@ -550,8 +549,7 @@ function StaleFollowVisibleTruthHarness() {
   useEffect(() => {
     createSession(host, {
       sessionId: 'stale-visible-session',
-      activate: true,
-      buffer: createSessionBufferState({
+            buffer: createSessionBufferState({
         lines: Array.from({ length: 1033 }, (_, offset) => `line-${63661 + offset}`),
         startIndex: 63661,
         endIndex: 64694,
@@ -609,8 +607,7 @@ function FarBehindFollowHarness() {
   useEffect(() => {
     createSession(host, {
       sessionId: 'far-behind-session',
-      activate: true,
-      buffer: createSessionBufferState({
+            buffer: createSessionBufferState({
         lines: Array.from({ length: 120 }, (_, offset) => `line-${offset}`),
         startIndex: 0,
         endIndex: 120,
@@ -664,8 +661,7 @@ function NearHeadFollowHarness() {
   useEffect(() => {
     createSession(host, {
       sessionId: 'near-head-session',
-      activate: true,
-      buffer: createSessionBufferState({
+            buffer: createSessionBufferState({
         lines: Array.from({ length: 52 }, (_, offset) => `line-${428 + offset}`),
         startIndex: 428,
         endIndex: 480,
@@ -733,8 +729,7 @@ function NearHeadGapFollowHarness() {
 
     createSession(host, {
       sessionId: 'near-head-gap-session',
-      activate: true,
-      buffer: sparseBuffer,
+            buffer: sparseBuffer,
     });
   }, [createSession]);
 
@@ -778,8 +773,7 @@ function CompactFollowImmediateApplyHarness() {
   useEffect(() => {
     createSession(host, {
       sessionId: 'compact-follow-session',
-      activate: true,
-      buffer: createSessionBufferState({
+            buffer: createSessionBufferState({
         lines: [],
         startIndex: 171108,
         endIndex: 171108,
@@ -3659,7 +3653,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('drops inactive buffer-sync until the tab becomes active and rebuilds local truth via head-first refresh', async () => {
+  it('accepts bootstrap buffer-sync for an empty inactive tab and switches back without forcing a redundant head-first rebuild', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -3681,7 +3675,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('active-session').textContent).toBe('session-1');
-      expect(screen.getByTestId('session-2-revision').textContent).toBe('0');
+      expect(screen.getByTestId('session-2-revision').textContent).toBe('6');
     });
 
     ws2.sent.length = 0;
@@ -3692,27 +3686,6 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(screen.getByTestId('active-session').textContent).toBe('session-2');
       expect(sent2.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(false);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-2',
-        revision: 6,
-        latestEndIndex: 3,
-        availableStartIndex: 0,
-        availableEndIndex: 3,
-      },
-    });
-
-    await waitFor(() => {
-      const sent2 = readSentMessages(ws2);
-      expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-sync',
-      payload: linesToPayload(['active-tail-001', 'active-tail-002', 'active-tail-003'], 3, 6),
     });
 
     await waitFor(() => expect(screen.getByTestId('session-2-revision').textContent).toBe('6'));
@@ -6024,8 +5997,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       const { state, createSession } = useSession();
 
       useEffect(() => {
-        createSession(host, { sessionId: 'session-1', activate: true });
-        createSession({ ...host, id: 'host-dup' }, { sessionId: 'session-dup', activate: true });
+        createSession(host, { sessionId: 'session-1' });
+        createSession({ ...host, id: 'host-dup' }, { sessionId: 'session-dup' });
       }, [createSession]);
 
       return (
@@ -6113,7 +6086,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       } = useSession();
 
       useEffect(() => {
-        createSession(host, { sessionId: 'session-1', activate: true });
+        createSession(host, { sessionId: 'session-1' });
       }, [createSession]);
 
       useEffect(() => {

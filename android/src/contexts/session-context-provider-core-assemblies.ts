@@ -179,6 +179,7 @@ export function useSessionProviderCoreAssemblies(
     cleanupSocket,
     scheduleReconnect,
     queueConnectTransportOpenIntent,
+    sendTerminalResize,
   } = useMemo(() => createSessionTransportOrchestrationRuntime({
     stateRef: options.stateRef,
     readSessionBufferSnapshot,
@@ -220,6 +221,9 @@ export function useSessionProviderCoreAssemblies(
     flushRuntimeDebugLogs,
     startSocketHeartbeat,
     setScheduleStateForSession,
+    readRequestedTerminalGeometry: () => ({
+      widthMode: options.bridgeSettings.terminalWidthMode,
+    }),
   }), [
     applyTransportDiagnostics,
     buildTraversalSocketForHost,
@@ -353,6 +357,7 @@ export function useSessionProviderCoreAssemblies(
     cleanupControlSocket,
     cleanupSocket,
     queueConnectTransportOpenIntent,
+    sendTerminalResize,
     readSessionTransportSocket,
     readSessionTransportHost,
     readSessionTransportRuntime,
@@ -383,6 +388,7 @@ export function useSessionProviderCoreAssemblies(
     markPendingInputTailRefresh,
     moveSessionSync,
     queueConnectTransportOpenIntent,
+    sendTerminalResize,
     readSessionBufferSnapshot,
     readSessionTargetKey,
     readSessionTargetRuntime,

@@ -85,7 +85,6 @@ export interface TerminalRuntime {
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: TerminalSession, data: string) => void;
-  handleResize: (session: TerminalSession, payload: { cols: number; rows: number; widthMode?: import('./terminal-runtime-types').TerminalWidthMode }) => void;
 }
 
 export {
@@ -273,6 +272,5 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     startMirror: mirrorRuntime.startMirror,
     attachTmux: mirrorRuntime.attachTmux,
     handleInput: mirrorRuntime.handleInput,
-    handleResize: mirrorRuntime.handleResize,
   };
 }

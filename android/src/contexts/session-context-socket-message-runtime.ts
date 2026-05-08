@@ -1,5 +1,10 @@
-import { buildSessionConnectedUpdates, buildSessionScheduleListLoadingState, normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './session-sync-helpers';
-import { buildConnectedHeadRefreshPlan, hasSessionLocalWindow } from './session-sync-helpers';
+import {
+  buildConnectedHeadRefreshPlan,
+  buildSessionConnectedUpdates,
+  buildSessionScheduleListLoadingState,
+} from './session-transport-open-helpers';
+import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
+import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './session-wire-helpers';
 import { setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
 import type {

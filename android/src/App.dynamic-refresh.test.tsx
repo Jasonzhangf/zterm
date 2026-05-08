@@ -1007,8 +1007,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1037,8 +1036,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1056,8 +1054,7 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1151,7 +1148,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
   });
 
@@ -1187,7 +1184,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1206,7 +1203,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1316,7 +1313,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
-      expect.objectContaining({ sessionId: 'tab-b', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: true }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
@@ -1358,7 +1355,7 @@ describe('App dynamic refresh matrix', () => {
         sessionName: 'alpha',
         authToken: 'token-a',
       }),
-      expect.objectContaining({ sessionId: 'tab-a', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: true }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
   });
@@ -1428,7 +1425,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
-      expect.objectContaining({ sessionId: 'tab-b', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: true }),
     );
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 'tab-b', sessionName: 'beta' }),
@@ -1715,7 +1712,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-z', sessionName: 'zterm' }),
-      expect.objectContaining({ sessionId: 'tab-z-new', activate: true, connect: true, customName: 'Keep Me' }),
+      expect.objectContaining({ sessionId: 'tab-z-new', activate: false, connect: true, customName: 'Keep Me' }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-z-new');
   });
@@ -1784,7 +1781,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ id: 'host-a', sessionName: 'alpha' }),
-      expect.objectContaining({ sessionId: 'tab-a', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: true }),
     );
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       2,
@@ -1907,7 +1904,7 @@ describe('App dynamic refresh matrix', () => {
       }),
       expect.objectContaining({
         sessionId: 'tab-daemon-stale',
-        activate: true,
+        activate: false,
         connect: true,
       }),
     );
@@ -2527,7 +2524,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
     );
   });
 
@@ -2828,7 +2825,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
     );
     expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-shared' }),
@@ -3245,7 +3242,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: true, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
     );
     expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-shared' }),
@@ -4268,7 +4265,7 @@ describe('App dynamic refresh matrix', () => {
         bridgePort: 3333,
         authToken: 'token-b',
       }),
-      expect.objectContaining({ sessionId: 'saved-b-new', activate: true, connect: true, customName: 'Keep Me' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', activate: false, connect: true, customName: 'Keep Me' }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
@@ -4363,7 +4360,7 @@ describe('App dynamic refresh matrix', () => {
       }),
       expect.objectContaining({
         sessionId: 'saved-daemon-a',
-        activate: true,
+        activate: false,
         connect: true,
       }),
     );
@@ -4394,7 +4391,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
@@ -4416,7 +4413,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',

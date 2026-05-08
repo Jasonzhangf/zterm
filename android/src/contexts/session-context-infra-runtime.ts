@@ -29,7 +29,8 @@ import {
   createSessionContextTransportAccessors,
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import { hasSessionLocalWindow, type SessionBufferHeadState, type SessionPullPurpose } from './session-sync-helpers';
+import { hasSessionLocalWindow, type SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
 export function applySessionActionRuntime(options: {
@@ -82,10 +83,9 @@ export function setLiveSessionsSyncRuntime(options: {
 
 export function createSessionSyncRuntime(options: {
   session: Session;
-  activate: boolean;
   applySessionAction: (action: SessionAction) => void;
 }) {
-  options.applySessionAction({ type: 'CREATE_SESSION', session: options.session, activate: options.activate });
+  options.applySessionAction({ type: 'CREATE_SESSION', session: options.session });
 }
 
 export function deleteSessionSyncRuntime(options: {

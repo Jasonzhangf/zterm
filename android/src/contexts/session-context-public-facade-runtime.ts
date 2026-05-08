@@ -33,7 +33,7 @@ import {
   upsertScheduleJobRuntime,
 } from './session-context-public-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionBufferHeadState } from './session-sync-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 
 export function createSessionPublicFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -66,6 +66,7 @@ export function createSessionPublicFacadeRuntime(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
+  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   setLiveSessionIdsSync: (ids: string[]) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   sessionDebugMetricsStoreRef: {
@@ -143,6 +144,10 @@ export function createSessionPublicFacadeRuntime(options: {
     });
   };
 
+  const sendTerminalResize = (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => {
+    return options.sendTerminalResize(sessionId, cols, rows, widthMode);
+  };
+
   const updateSessionViewport = (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => {
     const normalizedVisibleRange = 'mode' in visibleRange
       ? {
@@ -218,6 +223,7 @@ export function createSessionPublicFacadeRuntime(options: {
     runScheduleJobNow,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     updateSessionViewport,
     getActiveSession,
     getSession,
@@ -240,6 +246,7 @@ export function buildSessionContextValueRuntime(options: {
   reconnectAllSessions: () => void;
   setLiveSessionIds: (ids: string[]) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
+  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (sessionId: string, file: File) => Promise<void>;
@@ -277,6 +284,7 @@ export function buildSessionContextValueRuntime(options: {
     reconnectAllSessions: options.reconnectAllSessions,
     setLiveSessionIds: options.setLiveSessionIds,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,
+    sendTerminalResize: options.sendTerminalResize,
     sendMessage: options.sendMessage,
     sendInput: options.sendInput,
     sendImagePaste: options.sendImagePaste,

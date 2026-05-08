@@ -1,4 +1,4 @@
-import type { SessionBufferHeadState } from './session-sync-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 
 interface MutableRefObject<T> {

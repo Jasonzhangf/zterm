@@ -87,18 +87,6 @@ function syncWorkspaceWithSessions(
     };
   }
 
-  const knownTabSessionIds = new Set(next.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId)));
-  const missingSessions = sessions.filter((session) => !knownTabSessionIds.has(session.id));
-  if (missingSessions.length > 0) {
-    const activePane = resolveActivePane(next) || next.panes[0];
-    const paneIndex = next.panes.findIndex((pane) => pane.id === activePane.id);
-    const newTabs = missingSessions.map((session) => sessionToWorkspaceTab(session.id));
-    next.panes[paneIndex] = {
-      ...next.panes[paneIndex],
-      tabs: [...next.panes[paneIndex].tabs, ...newTabs],
-    };
-  }
-
   next.panes = next.panes.map((pane) => {
     const hasActive = pane.tabs.some((tab) => tab.id === pane.activeTabId);
     return hasActive ? pane : { ...pane, activeTabId: pane.tabs[0].id };
@@ -108,7 +96,7 @@ function syncWorkspaceWithSessions(
     next.activePaneId = next.panes[0].id;
   }
 
-  if (activeSessionId) {
+  if (activeSessionId && next.panes.length === 1) {
     const activeTabId = `tab-${activeSessionId}`;
     const activePaneIndex = next.panes.findIndex((pane) => pane.tabs.some((tab) => tab.id === activeTabId));
     if (activePaneIndex >= 0) {

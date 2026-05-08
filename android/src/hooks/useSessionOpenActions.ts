@@ -132,7 +132,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     closedOpenTabReuseKeysRef,
     terminalActiveSessionIdRef,
     ensureTerminalPageVisibleRef,
-    persistAndSwitchExplicitOpenTabsRef,
     renameSessionRef,
   } = runtimeRefs;
 
@@ -181,7 +180,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     });
 
     const sessionId = createSession(sessionHost, {
-      activate: shouldActivate,
+      activate: false,
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
     });
     closedOpenTabSessionIdsRef.current.delete(sessionId);
@@ -214,7 +213,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         fallbackActiveSessionId: runtimeActiveSessionId,
       },
     );
-    applyOpenTabState(nextOpenTabState);
+    applyOpenTabState(nextOpenTabState, shouldActivate ? {
+      switchRuntime: true,
+    } : undefined);
     if (options?.navigate !== false) {
       ensureTerminalPageVisible();
     }
@@ -470,14 +471,15 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       : null;
 
     if (activeSessionId) {
-      const persistAndSwitch = persistAndSwitchExplicitOpenTabsRef.current;
-      if (!persistAndSwitch) {
-        throw new Error('persistAndSwitchExplicitOpenTabs ref unavailable while loading saved tab list');
-      }
-      persistAndSwitch(openedTabs, activeSessionId);
+      applyOpenTabState({
+        tabs: openedTabs,
+        activeSessionId,
+      }, {
+        switchRuntime: true,
+      });
       ensureTerminalPageVisibleRef.current();
     }
-  }, [bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, persistAndSwitchExplicitOpenTabsRef, renameSessionRef]);
+  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, renameSessionRef]);
 
   const handleRemoteSessionsRefreshed = useCallback((target: BridgeTarget, sessionNames: string[]) => {
     pruneSessionGroupSelectionToRemoteTruth({

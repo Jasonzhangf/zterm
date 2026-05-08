@@ -8,7 +8,7 @@ import {
   setPendingSessionTransportOpenIntent,
   type PendingSessionTransportOpenIntentStore,
 } from './session-context-open-intent-store';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 
 function createIntent(
   overrides?: Partial<PendingSessionTransportOpenIntent>,

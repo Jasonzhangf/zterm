@@ -18,7 +18,7 @@ import {
 } from './session-context-public-facade-runtime';
 import {
   shouldReconnectQueuedActiveInput,
-} from './session-sync-helpers';
+} from './session-transport-open-helpers';
 import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
@@ -148,6 +148,7 @@ export function useSessionProviderFacadeAssemblies(
     readSessionBufferSnapshot: core.readSessionBufferSnapshot,
     requestSessionBufferSync: core.requestSessionBufferSync,
     ensureActiveSessionFresh,
+    sendTerminalResize: core.sendTerminalResize,
     setLiveSessionIdsSync: core.setLiveSessionIdsSync,
     isSessionTransportActive: core.isSessionTransportActive,
     sessionDebugMetricsStoreRef,
@@ -170,6 +171,7 @@ export function useSessionProviderFacadeAssemblies(
     runScheduleJobNow,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     updateSessionViewport,
     getActiveSession,
     getSession,
@@ -252,6 +254,7 @@ export function useSessionProviderFacadeAssemblies(
     reconnectAllSessions,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     sendMessage,
     sendInput,
     sendImagePaste,

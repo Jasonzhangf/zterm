@@ -26,10 +26,8 @@ interface UseOpenTabSessionActionsOptions {
     activeSessionId: string | null;
   }>;
   sessionsRef: MutableRefObject<Session[]>;
-  activeSessionIdRef: MutableRefObject<string | null>;
   runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   applyOpenTabState: ApplyOpenTabStateFn;
-  requestRuntimeActiveSessionSwitch: (nextActiveSessionId: string | null) => void;
   ensureTerminalPageVisible: () => void;
   moveSession: (sessionId: string, toIndex: number) => void;
   renameSession: (sessionId: string, name: string) => void;
@@ -47,10 +45,8 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   const {
     openTabStateRef,
     sessionsRef,
-    activeSessionIdRef,
     runtimeActiveSessionIdRef,
     applyOpenTabState,
-    requestRuntimeActiveSessionSwitch,
     ensureTerminalPageVisible,
     moveSession,
     renameSession,
@@ -59,24 +55,23 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
 
   const handleSwitchSession = useCallback((sessionId: string) => {
     const nextOpenTabState = activateOpenTabIntentSession(openTabStateRef.current, sessionId);
-    applyOpenTabState(nextOpenTabState);
-    requestRuntimeActiveSessionSwitch(nextOpenTabState.activeSessionId);
+    applyOpenTabState(nextOpenTabState, {
+      switchRuntime: true,
+    });
     ensureTerminalPageVisible();
   }, [
     applyOpenTabState,
     ensureTerminalPageVisible,
     openTabStateRef,
-    requestRuntimeActiveSessionSwitch,
   ]);
 
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
     const nextOpenTabState = moveOpenTabIntentSession(openTabStateRef.current, sessionId, toIndex);
     applyOpenTabState(nextOpenTabState, {
-      fallbackActiveSessionId: activeSessionIdRef.current,
+      fallbackActiveSessionId: openTabStateRef.current.activeSessionId,
     });
     moveSession(sessionId, toIndex);
   }, [
-    activeSessionIdRef,
     applyOpenTabState,
     moveSession,
     openTabStateRef,
@@ -85,11 +80,10 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
     const nextOpenTabState = renameOpenTabIntentSession(openTabStateRef.current, sessionId, name);
     applyOpenTabState(nextOpenTabState, {
-      fallbackActiveSessionId: activeSessionIdRef.current,
+      fallbackActiveSessionId: openTabStateRef.current.activeSessionId,
     });
     renameSession(sessionId, name);
   }, [
-    activeSessionIdRef,
     applyOpenTabState,
     openTabStateRef,
     renameSession,

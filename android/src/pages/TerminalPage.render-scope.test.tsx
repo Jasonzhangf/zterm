@@ -41,9 +41,9 @@ function readRenderCount(key: string) {
 }
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: () => {
+  TerminalHeader: ({ showBackButton }: { showBackButton?: boolean }) => {
     bumpRenderCount('terminal-header');
-    return <div data-testid="terminal-header" />;
+    return <div data-testid="terminal-header" data-show-back-button={showBackButton ? 'true' : 'false'} />;
   },
 }));
 
@@ -318,6 +318,7 @@ describe('TerminalPage renderer scope', () => {
     const session2 = makeSession('s2');
     const view = renderTerminalPage([session1, session2], session1);
 
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
     expect(screen.getByText('渲染')).not.toBeNull();
     expect(screen.getByText('follow')).not.toBeNull();
     expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('1');
@@ -353,23 +354,17 @@ describe('TerminalPage renderer scope', () => {
     const session1 = makeSession('s1');
     renderTerminalPage([session1], session1);
 
+    expect(screen.queryByText('渲染')).toBeNull();
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+
     expect(screen.getByText('渲染')).not.toBeNull();
-    expect(screen.getByText('IH')).not.toBeNull();
-    expect(screen.getByText('CH')).not.toBeNull();
-    expect(screen.getByText('VVH')).not.toBeNull();
-    expect(screen.getByText('Lift')).not.toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
     expect(screen.queryByText('渲染')).toBeNull();
-    expect(screen.queryByText('IH')).toBeNull();
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
-
-    fireEvent.click(screen.getByRole('button', { name: '状态' }));
-
-    expect(screen.getByText('渲染')).not.toBeNull();
-    expect(screen.getByText('IH')).not.toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
   });
 
@@ -377,12 +372,12 @@ describe('TerminalPage renderer scope', () => {
     const session1 = makeSession('s1');
     renderTerminalPage([session1], session1);
 
-    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.queryByText('渲染')).toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '行号' }));
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('true');
-    expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.queryByText('渲染')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '行号' }));
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
@@ -540,7 +535,7 @@ describe('TerminalPage renderer scope', () => {
     expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith([]);
   });
 
-  it('hides the back button when split mode is visible so pane header and shell stay aligned', () => {
+  it('keeps the back button visible when split mode is enabled so users can still return to Connections', () => {
     localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
       panes: [
         { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
@@ -553,6 +548,6 @@ describe('TerminalPage renderer scope', () => {
 
     renderTerminalPage([session1, session2], session1);
 
-    expect(document.body.textContent || '').not.toContain('‹');
+    expect(screen.getByTestId('terminal-header').getAttribute('data-show-back-button')).toBe('true');
   });
 });

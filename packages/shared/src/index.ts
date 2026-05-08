@@ -16,6 +16,7 @@ export * from './react/use-bridge-settings-storage';
 export * from './connection/terminal-buffer';
 export * from './terminal/theme';
 export * from './terminal/color';
+export * from './terminal/cell-render';
 export * from './schedule/types';
 export * from './schedule/next-fire';
 export * from './shortcuts/terminal-shortcut-composer';

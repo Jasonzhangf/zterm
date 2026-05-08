@@ -72,7 +72,6 @@ interface UseOpenTabRuntimeOptions {
 }
 
 export interface OpenTabRuntimeRefs {
-  activeSessionIdRef: MutableRefObject<string | null>;
   runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
   hostsRef: MutableRefObject<Host[]>;
@@ -85,10 +84,6 @@ export interface OpenTabRuntimeRefs {
   closedOpenTabReuseKeysRef: MutableRefObject<Set<string>>;
   terminalActiveSessionIdRef: MutableRefObject<string | null>;
   ensureTerminalPageVisibleRef: MutableRefObject<() => void>;
-  persistAndSwitchExplicitOpenTabsRef: MutableRefObject<((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
-    tabs: PersistedOpenTab[];
-    activeSessionId: string | null;
-  }) | null>;
   renameSessionRef: MutableRefObject<(sessionId: string, name: string) => void>;
 }
 
@@ -104,7 +99,7 @@ export interface OpenTabRuntimeResult {
   runtimeRefs: OpenTabRuntimeRefs;
   applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean; markExplicitTruth?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   handleSwitchSession: (sessionId: string) => void;
   handleMoveSession: (sessionId: string, toIndex: number) => void;
@@ -127,7 +122,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     switchSession,
     moveSession,
     renameSession,
-    resumeActiveSessionTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
@@ -144,27 +138,13 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   const hasPersistedOpenTabsTruthRef = useRef(persistedOpenTabsBootstrapRef.current.hasStoredValue);
   const closedOpenTabSessionIdsRef = useRef(new Set<string>());
   const closedOpenTabReuseKeysRef = useRef(readPersistedClosedTabReuseKeys());
-  const [pendingTerminalActiveSwitch, setPendingTerminalActiveSwitch] = useState<{
-    targetSessionId: string;
-    sourceRuntimeActiveSessionId: string | null;
-  } | null>(null);
-  const pendingTerminalActiveSwitchRef = useRef<{
-    targetSessionId: string;
-    sourceRuntimeActiveSessionId: string | null;
-  } | null>(null);
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(sessions);
-  const activeSessionIdRef = useRef<string | null>(openTabState.activeSessionId);
   const runtimeActiveSessionIdRef = useRef<string | null>(runtimeActiveSessionId);
   const bridgeSettingsRef = useRef(bridgeSettings);
-  const resumeActiveSessionTransportRef = useRef(resumeActiveSessionTransport);
   const hostsRef = useRef(hosts);
   const ensureTerminalPageVisibleRef = useRef<() => void>(() => undefined);
-  const persistAndSwitchExplicitOpenTabsRef = useRef<((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
-    tabs: PersistedOpenTab[];
-    activeSessionId: string | null;
-  }) | null>(null);
   const renameSessionRef = useRef(renameSession);
   const remoteOpenTabAuditTokenRef = useRef(0);
   const connectedSessionIdsRef = useRef<Set<string>>(new Set(
@@ -202,82 +182,44 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       return null;
     }
     const runtimeSessionsById = new Map(terminalSessions.map((session) => [session.id, session]));
-    const pendingTargetSessionId = pendingTerminalActiveSwitch?.targetSessionId || '';
-    const shouldPreferPendingTerminalTarget =
-      !!pendingTargetSessionId
-      && openTabState.activeSessionId === pendingTargetSessionId
-      && runtimeSessionsById.has(pendingTargetSessionId)
-      && runtimeActiveSessionId === pendingTerminalActiveSwitch?.sourceRuntimeActiveSessionId
-      && runtimeActiveSessionId !== pendingTargetSessionId;
-    return (shouldPreferPendingTerminalTarget
-      ? runtimeSessionsById.get(pendingTargetSessionId)
-      : null)
-      || runtimeSessionsById.get(openTabState.activeSessionId || '')
+    const explicitActiveSessionId = hasPersistedOpenTabsTruthRef.current
+      ? openTabState.activeSessionId
+      : null;
+    return runtimeSessionsById.get(explicitActiveSessionId || '')
       || runtimeSessionsById.get(runtimeActiveSessionId || '')
+      || runtimeSessionsById.get(openTabState.activeSessionId || '')
       || terminalSessions[0]
       || null;
-  }, [openTabState.activeSessionId, pendingTerminalActiveSwitch, runtimeActiveSessionId, terminalSessions]);
+  }, [openTabState.activeSessionId, runtimeActiveSessionId, terminalSessions]);
 
   const terminalActiveSessionIdRef = useRef<string | null>(terminalActiveSession?.id || null);
 
-  const persistExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
+  const persistExplicitOpenTabs = useCallback((
+    tabs: PersistedOpenTab[],
+    activeSessionId: string | null,
+    persistOptions?: { markExplicitTruth?: boolean },
+  ) => {
     const nextState = normalizeOpenTabIntentState(tabs, activeSessionId);
     if (!openTabIntentStatesEqual(openTabStateRef.current, nextState)) {
       setOpenTabState(nextState);
     }
     openTabStateRef.current = nextState;
-    hasPersistedOpenTabsTruthRef.current = true;
+    if (persistOptions?.markExplicitTruth !== false) {
+      hasPersistedOpenTabsTruthRef.current = true;
+    }
     persistOpenTabsState(nextState.tabs, nextState.activeSessionId);
     return nextState;
   }, []);
 
-
-
-
-  const beginPendingTerminalActiveSwitch = useCallback((targetSessionId: string | null, sourceRuntimeActiveSessionId: string | null) => {
-    const normalizedTargetSessionId = typeof targetSessionId === 'string' ? targetSessionId.trim() : '';
-    if (!normalizedTargetSessionId) {
-      pendingTerminalActiveSwitchRef.current = null;
-      setPendingTerminalActiveSwitch(null);
-      return;
-    }
-    const nextPendingSwitch = {
-      targetSessionId: normalizedTargetSessionId,
-      sourceRuntimeActiveSessionId: typeof sourceRuntimeActiveSessionId === 'string' && sourceRuntimeActiveSessionId.trim()
-        ? sourceRuntimeActiveSessionId.trim()
-        : null,
-    };
-    const currentPendingSwitch = pendingTerminalActiveSwitchRef.current;
-    if (
-      currentPendingSwitch?.targetSessionId === nextPendingSwitch.targetSessionId
-      && currentPendingSwitch?.sourceRuntimeActiveSessionId === nextPendingSwitch.sourceRuntimeActiveSessionId
-    ) {
-      return;
-    }
-    pendingTerminalActiveSwitchRef.current = nextPendingSwitch;
-    setPendingTerminalActiveSwitch(nextPendingSwitch);
-  }, []);
-
-  const clearPendingTerminalActiveSwitch = useCallback(() => {
-    if (!pendingTerminalActiveSwitchRef.current) {
-      return;
-    }
-    pendingTerminalActiveSwitchRef.current = null;
-    setPendingTerminalActiveSwitch(null);
-  }, []);
-
   const requestRuntimeActiveSessionSwitch = useCallback((nextActiveSessionId: string | null) => {
     if (!nextActiveSessionId) {
-      clearPendingTerminalActiveSwitch();
       return;
     }
-    if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
-      beginPendingTerminalActiveSwitch(nextActiveSessionId, runtimeActiveSessionIdRef.current);
-    } else {
-      clearPendingTerminalActiveSwitch();
+    if (nextActiveSessionId === runtimeActiveSessionIdRef.current) {
+      return;
     }
     switchSession(nextActiveSessionId);
-  }, [beginPendingTerminalActiveSwitch, clearPendingTerminalActiveSwitch, switchSession]);
+  }, [switchSession]);
 
   const persistAndSwitchExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
     const nextState = persistExplicitOpenTabs(tabs, activeSessionId);
@@ -291,12 +233,15 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   }, persistOptions?: {
     fallbackActiveSessionId?: string | null;
     switchRuntime?: boolean;
+    markExplicitTruth?: boolean;
   }) => {
     const normalizedActiveSessionId = nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null;
     if (persistOptions?.switchRuntime) {
       return persistAndSwitchExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId);
     }
-    return persistExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId);
+    return persistExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId, {
+      markExplicitTruth: persistOptions?.markExplicitTruth,
+    });
   }, [persistAndSwitchExplicitOpenTabs, persistExplicitOpenTabs]);
 
   const applyClosedOpenTabIntent = useCallback((sessionId: string, closeOptions?: {
@@ -439,17 +384,14 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   useEffect(() => {
     sessionsRef.current = sessions;
-    activeSessionIdRef.current = openTabState.activeSessionId;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;
     bridgeSettingsRef.current = bridgeSettings;
     hostsRef.current = hosts;
     terminalActiveSessionIdRef.current = terminalActiveSession?.id || null;
-    resumeActiveSessionTransportRef.current = resumeActiveSessionTransport;
   }, [
     bridgeSettings,
     hosts,
     openTabState.activeSessionId,
-    resumeActiveSessionTransport,
     runtimeActiveSessionId,
     sessions,
     terminalActiveSession,
@@ -489,27 +431,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   }, [auditOpenTabsAgainstRemoteSessions, openTabState.tabs.length, sessionGroups, sessions.length]);
 
   useEffect(() => {
-    const pendingSwitch = pendingTerminalActiveSwitchRef.current;
-    if (!pendingSwitch) {
-      return;
-    }
-    const hasPendingTargetRuntimeSession = sessions.some((session) => session.id === pendingSwitch.targetSessionId);
-    const pendingTargetStillRequested = openTabState.activeSessionId === pendingSwitch.targetSessionId;
-    const runtimeActiveSettled =
-      runtimeActiveSessionId === pendingSwitch.targetSessionId
-      || runtimeActiveSessionId !== pendingSwitch.sourceRuntimeActiveSessionId;
-    if (!hasPendingTargetRuntimeSession || !pendingTargetStillRequested || runtimeActiveSettled) {
-      clearPendingTerminalActiveSwitch();
-    }
-  }, [clearPendingTerminalActiveSwitch, openTabState.activeSessionId, sessions, runtimeActiveSessionId]);
-
-  useEffect(() => {
     ensureTerminalPageVisibleRef.current = ensureTerminalPageVisible;
   }, [ensureTerminalPageVisible]);
-
-  useEffect(() => {
-    persistAndSwitchExplicitOpenTabsRef.current = persistAndSwitchExplicitOpenTabs;
-  }, [persistAndSwitchExplicitOpenTabs]);
 
   useEffect(() => {
     renameSessionRef.current = renameSession;
@@ -541,7 +464,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
     applyOpenTabState,
-    requestRuntimeActiveSessionSwitch,
     createSession,
   });
 
@@ -558,9 +480,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   useOpenTabLifecycleEffects({
     sessionsRef,
-    activeSessionIdRef,
+    openTabStateRef,
     runtimeActiveSessionIdRef,
-    resumeActiveSessionTransportRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
@@ -577,10 +498,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   } = useOpenTabSessionActions({
     openTabStateRef,
     sessionsRef,
-    activeSessionIdRef,
     runtimeActiveSessionIdRef,
     applyOpenTabState,
-    requestRuntimeActiveSessionSwitch,
     ensureTerminalPageVisible,
     moveSession,
     renameSession,
@@ -588,7 +507,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   });
 
   const runtimeRefs = useMemo<OpenTabRuntimeRefs>(() => ({
-    activeSessionIdRef,
     runtimeActiveSessionIdRef,
     sessionsRef,
     hostsRef,
@@ -598,7 +516,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     closedOpenTabReuseKeysRef,
     terminalActiveSessionIdRef,
     ensureTerminalPageVisibleRef,
-    persistAndSwitchExplicitOpenTabsRef,
     renameSessionRef,
   }), []);
 

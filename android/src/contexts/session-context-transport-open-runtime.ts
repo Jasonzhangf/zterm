@@ -17,7 +17,7 @@ import {
   buildTransportOpenLiveFailureEffectPlan,
   createPendingSessionTransportOpenIntent,
   type PendingSessionTransportOpenIntent,
-} from './session-sync-helpers';
+} from './session-transport-open-helpers';
 import {
   deletePendingSessionTransportOpenIntent,
   setPendingSessionTransportOpenIntent,

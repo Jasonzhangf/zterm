@@ -489,12 +489,12 @@ function resolveDesiredLocalWindow(options: {
   let desiredStartIndex = current.startIndex;
   let desiredEndIndex = current.endIndex;
 
-  if (options.sparseWindow.startIndex < current.startIndex) {
-    desiredStartIndex = options.sparseWindow.startIndex;
-    desiredEndIndex = desiredStartIndex + safeCacheLines;
-  } else if (options.sparseWindow.endIndex > current.endIndex) {
+  if (options.sparseWindow.endIndex > current.endIndex) {
     desiredEndIndex = options.sparseWindow.endIndex;
     desiredStartIndex = desiredEndIndex - safeCacheLines;
+  } else if (options.sparseWindow.startIndex < current.startIndex) {
+    desiredStartIndex = options.sparseWindow.startIndex;
+    desiredEndIndex = desiredStartIndex + safeCacheLines;
   }
 
   return clampWindowToBounds({

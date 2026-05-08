@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { SessionDebugOverlayMetrics, SessionScheduleState, SessionState } from '../lib/types';
 import type { SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-sync-helpers';
+import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-pull-state-helpers';
 
 interface SessionDebugMetricsStoreLike {
   refresh: (

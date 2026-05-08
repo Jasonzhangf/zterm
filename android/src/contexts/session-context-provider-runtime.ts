@@ -10,12 +10,10 @@ import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
 import { runtimeDebug } from '../lib/runtime-debug';
 import { resolveTerminalRefreshCadence } from '../lib/mobile-config';
-import type {
-  PendingSessionTransportOpenIntent,
-  SessionBufferHeadState,
-  SessionPullStates,
-  SessionVisibleRangeState,
-} from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { SessionVisibleRangeState } from './session-visible-range-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionPullStates } from './session-pull-state-helpers';
 import type {
   RevisionResetExpectation,
   SessionReconnectRuntime,

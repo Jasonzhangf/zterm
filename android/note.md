@@ -1172,3 +1172,665 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 - [2026-05-08] New signal from Jason: devices with wrong IME lift also cannot left/right swipe tabs, while devices with correct IME lift can. Suspect shared root in viewport/gesture path (pointer capture / resize / overlay hit area / axis lock), not just wrong bottom inset.
 - [2026-05-08] Screenshot proof from same problematic device: no-IME state reports stable IH/CH/VVH/SH=615; IME-open state collapses IH/CH/VVH/SH to 328 while K/TI=303. Confirms root cause is WebView/layout viewport itself shrinking on IME, not wrong keyboard height. Fix: freeze Android shellHeight to last stable pre-IME layout height while keyboard is active.
 - [2026-05-08] Jason reports latest multi-pane tablet build still broken: input latency rises for all panes, back button hidden in split mode, refresh slow and stale/wrong buffer in visible panes. Need audit visible-pane live set -> SessionContext refresh/pull gating -> renderer, and remove splitVisible coupling from back button truth.
+
+## 2026-05-08 multi-pane refresh / render owner audit
+- 已确认本轮未提交改动只涉及两块：1) split 下 back button 永远显示；2) foreground resume owner 从 App 层 `resumeActiveSessionTransport` 收回 SessionContext lifecycle。
+- `TerminalPage` 当前多 pane 真源：`visiblePaneEntries -> renderedPaneSessions -> onLiveSessionIdsChange(livePaneSessionIds)`；理论上 visible pane 都会进入 SessionContext live refresh target。
+- `TerminalView` 当前 refresh gate = `live ?? active`，所以 visible non-interactive pane 理论上也会触发 viewport demand / render commit，不是天然只刷 P1。
+- 继续重点审：`renderTerminal(session, active)` 的传参与 `allowDomFocus/onActivateInput/focusNonce` 是否把 active-pane 语义和 visible-pane render 语义混在一起；以及 pane/session 映射切换时是否出现旧 activeSession 回调短暂污染新 pane。
+- 新怀疑方向：`TerminalPage` / `TerminalHeader` / `workspace persistence` 之间仍有 pane-local owner 不完整，尤其是 pane 激活、tab manager 打开目标 pane、以及 focus/query active input 仍偏向全局 activeSession，可能导致多 pane 首帧/输入/刷新节奏串位。
+
+[2026-05-08] multi-pane 白屏 / 只刷 P1 真因收敛（本轮）
+- 继续审计后确认一个明确的 client-only 架构漏洞：`scheduleReconnectRuntime()` 的 auto-reconnect owner 仍只看 `sessionId === activeSessionId`，完全忽略 `liveSessionIds`。
+- 结果：split / visible non-active pane 一旦 transport 出错或被动 close，会被判成 inactive 而停止重连；因为 visible pane 本身又仍在 live 集合里，UI 继续把它当作应显示 pane，于是真机现场表现就是“P1 正常，其余 pane 白屏/不刷新，点到 active 才可能恢复”。
+- 唯一正确 owner：client refresh / reconnect 真相必须是 `activeSessionId ∪ liveSessionIds`。daemon 不参与；非 visible tab 才允许停取数/停重连，visible pane 不是二等公民。
+- 下一刀：把 reconnect gate 从 `active-only` 收口为 `active-or-live`，补单测与 ws refresh 回归。
+
+[2026-05-08] visible pane stale tick owner 继续收口（本轮）
+- 继续追 `P1 正常、P2-P4 极慢/白屏` 时，又确认一条旧真源残留：`buildActiveSessionRefreshPlan()` 在 `source=active-tick && ws=OPEN` 时默认判成 `tick-live-refresh-owned-by-daemon`，直接 skip。
+- 这已经与当前真源冲突：现在 daemon 不管理客户端可见 pane；visible pane 的 stale refresh owner 必须留在 client lifecycle。上层 lifecycle 明明已经按 `activeSessionId ∪ liveSessionIds` 选中 refresh target，但 plan 层又把 open transport 的 live pane head probe 吞掉，于是 visible non-active pane 在“连接还开着但长时间没有新 activity”时不会主动恢复。
+- 本轮修复：删掉 `tick-live-refresh-owned-by-daemon` 分支；active-tick 对 open transport 一律走 `request-head(resetPullBookkeeping=false)`。由于 lifecycle 外层本来就只在 stale 条件满足时才调 `ensureActiveSessionFresh`，所以不会变成高频乱拉，只是把 stale visible pane 拉回 client 唯一 owner。
+
+[2026-05-08] TerminalView 错帧先闪后恢复 尝试一刀失败（已回退）
+- 尝试把 `reconcileViewportAfterBufferShift()` 从 `useEffect` 前移到 `useLayoutEffect`，想避免“先错一帧再恢复”的 paint 时序。
+- 回归结果不成立：`TerminalView.dynamic-refresh.test.tsx` 直接炸 18 个 case，典型现象是初始 follow scroll 无法对齐到底部（大量期望 `scrollTop=952` 实际变成 `0`）。说明这条 reconcile 不能简单整体前移，否则会破坏 TerminalView 现有的初始 follow / reading scroll owner。
+- 已物理回退。下一步继续查更窄的错误 owner，不再把整条 buffer-shift reconcile 粗暴前移。
+
+[2026-05-08] visible non-active pane 首屏/首批 live buffer 被错误丢弃真因（本轮）
+- 继续沿 visible pane -> transport/message -> buffer apply 审计后，确认一条真实链路漏传：
+  - `createSessionMessageOrchestrationRuntime()` 调 `handleSocketServerMessageOrchestrationRuntime()` 时，漏传了 `shouldAcceptSessionLiveBuffer`
+  - 结果运行时 `handleSocketServerMessageRuntime()` 会退回 `isSessionTransportActive(sessionId)` 判定
+  - 对于 split 场景里“pane 已可见，但 liveSessionIds 还没完成 settle”的短窗口，visible non-active pane 的 bootstrap `buffer-sync` 会被当成 inactive-drop 丢掉
+- 现场后果：P1 正常，P2-P4 在首屏/切 pane 后更容易白屏、慢首帧，必须等后续 head/tick/reconnect 才可能补回来。
+- 本轮修复：把 `shouldAcceptSessionLiveBuffer` 从 message orchestration 明确透传到 socket-message runtime，恢复唯一 gate = `shouldAcceptSessionLiveBufferRuntime()`。
+- 回归证据：
+  - `pnpm --dir android exec vitest run src/contexts/session-context-message-orchestration-runtime.test.ts src/contexts/session-context-socket-message-runtime.test.ts src/contexts/session-context-transport-runtime.test.ts src/contexts/session-sync-helpers.test.ts src/contexts/session-context-activity-runtime.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx --reporter dot`
+  - 7 files / 78 tests 全绿
+- 新增红灯：`session-context-message-orchestration-runtime.test.ts`
+  - 锁定“visible non-active pane 在 live ids 未 settle 前，message orchestration 不得把 shouldAccept gate 丢失”。
+
+[2026-05-08] debug overlay 收口（本轮）
+- Jason 要求：1) 去掉为 IME 抬高排查临时加的那批 debug 字段；2) debug 浮窗默认关闭。
+- 本轮收口：
+  - `TerminalDebugOverlay` 删除 viewport/IME 专项观测项：IH/CH/VVH/VVT/VVB/K/Lift/TI/QI/SH/Btm/WM/Req/QF/TA。
+  - overlay 保留最小状态观测：render mode / status / A / ↑ / ↓ / R / P / 版本。
+  - `debugOverlayVisible` 默认值改为 `false`。
+- 这样避免继续把一次性 IME 排障临时观测常驻到主界面真相里。
+
+## 2026-05-08 wrong-buffer-frame audit
+- user report: 大面积更新时偶发瞬间刷错 buffer，随后恢复；先收口 width-mode 中间态到可编译，再补复现测试追真源。
+
+- 继续闭环：补跑 first-paint / ws-refresh / real-terminal / daemon-mirror-close-loop，之后构建 APK。
+
+[2026-05-08] daemon resize truth decision（本轮）
+- 当前 build 唯一阻塞是 `server.transport-lifecycle-truth.test.ts` 与 daemon `case 'resize'` 冲突。
+- 结合 truth doc/skill 冻结后，决定收口为：**attach/connect geometry 是唯一上游 geometry ingress；runtime resize 不再进入 daemon。**
+- 这样可消除 daemon 对 client width mode / viewport 变化的长期心智；Android 运行期容器/IME/viewport 变化只属于 renderer/UI shell 本地裁切。
+- 下一步：先物理删除 daemon resize handler 与相关测试旧语义，再跑 contracts/build；client live resize 发包链随后一并剪断或置空，避免继续产生死语义。
+
+[2026-05-08] project减法审计结论（本轮）
+- 一级收口对象确定为 3 个：1) renderer 双实现（shared TerminalView vs android TerminalView）2) session-sync-helpers 巨型杂物间 3) open-tab 与 workspace owner 边界混写。
+- 这三刀优先级高于继续修零散 UI bug，因为它们分别对应：重复实现、纯函数污染、owner 错位，是当前复杂度和回归风险的主源头。
+- 下一步先建 beads epic + task board，后续按 renderer -> helpers -> open-tab/workspace 顺序逐刀物理删除错误实现。
+
+[2026-05-08] renderer 双实现第一刀收口（进行中）
+- 已确认 `packages/shared/src/react/terminal-view.tsx` 与 `android/src/components/TerminalView.tsx` 物理重复了一整套 terminal cell 颜色/块字符渲染语义：`normalizeCell / safeCodePointToString / colorToCSS / parseCssColorToRgb / mixCssColors / resolveColors / resolveDimmedForeground / isBlockShadeCodePoint / buildBlockBackground / isSolidBlockBackground`。
+- 这不是“相似实现”，而是 renderer 语义真源重复；已经导致 Android 侧修颜色后 shared/mac 仍可能继续漂移。
+- 第一刀唯一正确收口：把“terminal cell 视觉语义”下沉到 `packages/shared/src/terminal/*` 单一模块，Android 与 shared TerminalView 共同消费；保留各自 viewport/DOM/interaction 差异，删除重复的颜色/块字符逻辑实现。
+
+[2026-05-08] session-sync-helpers 第二刀大块拆分（进行中）
+- 已把原 `session-sync-helpers.ts` 中三块非 buffer/planner 真相物理拆出：
+  1. `session-transport-open-helpers.ts`：open-intent / connect-reconnect updates / active refresh plan
+  2. `session-wire-helpers.ts`：incoming buffer payload normalize / cursor normalize / host config wire
+  3. `session-reconnect-helpers.ts`：managed session reuse / reconnect target ordering / auto-reconnect gate
+- 当前 `session-sync-helpers.ts` 已从 1331 行降到 721 行，开始收回到 buffer/pull/visible-range/planner 域。
+- 这刀的唯一正确方向不是继续在巨型 helper 里加 region comments，而是先按真相域物理切文件，再把调用点切到对应 owner；否则 shared functions + block + orchestration 分层永远不成立。
+
+[2026-05-08] open-tab / workspace owner 第三刀（进行中）
+- 已确认唯一越权点在 `useTerminalWorkspace.ts -> syncWorkspaceWithSessions()`：它会根据 runtime `sessions` 自动补 `missingSessions` 到 pane tabs，这违反了 open-tab truth 冻结（workspace 只能决定 pane placement，不能决定 tab existence）。
+- 本轮已物理删除 `missingSessions -> append tabs` 路径，并新增 workspace 回归锁定“不复活 runtime-only session”。
+- 正确边界：
+  - open-tab owner 决定某个 session/tab 是否存在
+  - workspace owner 只允许 prune 不存在的 tab，并决定现存 tab 放在哪个 pane
+
+[2026-05-08] session-sync-helpers 第四刀完成（visible-range / buffer-planner / pull-state 真源分离）
+- 已将原 `session-sync-helpers.ts` 剩余 721 行继续物理拆成 3 个单一真源模块：
+  1. `session-visible-range-helpers.ts`：`SessionVisibleRangeState`、normalize/default/equality、viewportRows/endIndex 真相
+  2. `session-buffer-planner-helpers.ts`：`SessionBufferHeadState`、local-window 判定、available-bounds、follow/reading planner、buffer-sync request payload
+  3. `session-pull-state-helpers.ts`：`SessionPullPurpose/States`、pull settle / cover / exact-snapshot / clear
+- 生产调用点已切走：`session-context-public/buffer/infra/pull/activity/lifecycle/provider/*`、`BufferSyncEngine`、`open-tab-persistence` 不再直接依赖 `session-sync-helpers.ts` 作为杂物间真源；当前 `session-sync-helpers.ts` 只剩薄 re-export 兼容层，生产 rg 已无直接依赖，只保留测试聚合入口。
+- 这刀的唯一正确修改点是原 `session-sync-helpers.ts` 本身：问题不是个别 helper 内容错，而是 buffer planner / visible range / pull bookkeeping 三类真相被揉在同一文件里，导致 orchestrator 可以继续跨域偷用。只有把 owner 物理拆开并让调用点直连新模块，才能真正建立 shared function + block + orchestration 的边界。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-activity-runtime.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/session-context-transport-runtime.test.ts src/contexts/session-context-message-orchestration-runtime.test.ts --reporter dot` => `6 files / 81 tests passed`
+
+[2026-05-08] open-tab 第五刀收口（switch/persist orchestration 单入口）
+- 继续审计后确认剩余的 owner 泄漏不是 storage 第二写口，而是 child hooks 仍在拿 `requestRuntimeActiveSessionSwitch` / `persistAndSwitchExplicitOpenTabsRef` 这类半公开编排口，导致 tab switch / saved-tab import / cold restore 仍有多处“先持久化再切 runtime”的重复路径。
+- 本轮收口：
+  1. `useOpenTabSessionActions` 不再直接调 `requestRuntimeActiveSessionSwitch()`，统一改走 `applyOpenTabState(..., { switchRuntime: true })`
+  2. `useOpenTabRestoreRuntimeSync` 恢复 active tab 时不再单独调 runtime switch helper，统一改走 `applyOpenTabState(..., { switchRuntime: true })`
+  3. `useSessionOpenActions.handleLoadSavedTabList()` 删除对 `persistAndSwitchExplicitOpenTabsRef` 的依赖，saved-tab batch import 统一也走 `applyOpenTabState(..., { switchRuntime: true })`
+  4. `OpenTabRuntimeRefs` 物理删除 `persistAndSwitchExplicitOpenTabsRef`
+- 当前 open-tab 真相边界进一步冻结：
+  - storage owner：`persistOpenTabsState()`
+  - app/runtime orchestration owner：`applyOpenTabState()`
+  - child hooks 只声明 intent，不再持有额外 switch/persist 专用旁路。
+- 这刀的唯一正确修改点是 open-tab orchestration surface 本身，而不是再去补单个页面 case。因为真正问题是 child hook 拿到了不该拿的“编排捷径”，只改调用结果不改 surface，重复实现会继续长出来。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/hooks/useSessionOpenActions.test.tsx src/lib/open-tab-history-truth.test.ts src/App.dynamic-refresh.test.tsx -t 'saved tab|open-tab|runtime tab switching owned by applyOpenTabState|persists explicit empty OPEN_TABS|does not reappend runtime-only sessions|does not bootstrap runtime sessions into tabs|persists closed tabs immediately and does not restore them on next launch|quick-tab current-tabs' --reporter dot` => `3 files / 20 passed`
+
+[2026-05-08] session-sync-helpers 聚合层物理删除完成
+- 继续收口后，`rg session-sync-helpers android/src` 已只剩测试文件；本轮把 `session-sync-helpers.test.ts` 也切到 owner 模块，随后物理删除 `src/contexts/session-sync-helpers.ts`。
+- 结果：源码侧不再存在 `session-sync-helpers` 这个巨型聚合/兼容层，所有生产代码与测试都直接依赖各自 owner：
+  - transport-open
+  - reconnect
+  - wire
+  - visible-range
+  - buffer-planner
+  - pull-state
+- 这是唯一正确的最终收口，因为只要聚合层还留在源码树里，即使当前 rg=0，后续也极易被继续当成“方便导入点”重新长出跨域依赖。物理删除才真正满足“重复/错误设计必须删除，而不是闲置”。
+- 验证：
+  - `rg -n "session-sync-helpers" android/src -g'*.ts' -g'*.tsx'` => no matches
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-activity-runtime.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/session-context-transport-runtime.test.ts src/contexts/session-context-message-orchestration-runtime.test.ts src/hooks/useSessionOpenActions.test.tsx src/lib/open-tab-history-truth.test.ts --reporter dot` => `8 files / 99 tests passed`
+
+[2026-05-08] active truth 第六刀收口（移除 open-tab active ref / pending switch 中间态）
+- 继续审计后确认 `useOpenTabRuntime` 里还残留两份不必要的 active-side owner：
+  1. `activeSessionIdRef`：只是 `openTabState.activeSessionId` 的镜像 ref
+  2. `pendingTerminalActiveSwitch`：试图在 runtime active 未切到目标前临时覆盖 terminalActiveSession
+- 这两者都不是独立真相，只会制造“open-tab active / runtime active / pending target”三层并行心智。
+- 本轮收口：
+  - 物理删除 `OpenTabRuntimeRefs.activeSessionIdRef`
+  - 物理删除 `pendingTerminalActiveSwitch` state/ref 及其 begin/clear/settle effect
+  - `terminalActiveSession` 只允许按单一优先级求值：`openTabState.activeSessionId -> runtimeActiveSessionId -> first terminalSession`
+  - `useOpenTabSessionActions`、`useOpenTabLifecycleEffects`、`useTerminalShellActions` 改为直接读取 `openTabStateRef.current.activeSessionId`
+- 当前 active 边界进一步冻结：
+  - explicit tab focus truth = `openTabState.activeSessionId`
+  - runtime transport focus truth = `SessionContext.state.activeSessionId`
+  - renderer/UI shell 读取 explicit truth 决定当前 tab/pane；若 runtime 未同步，允许短暂显示旧 body，但不再引入第三份 pending 真相做补偿。
+- 为什么这是唯一正确修改点：问题不在某个切 tab case，而在于 open-tab runtime 自己又发明了 `pending target` 这份第三真相。只要它存在，active 对齐问题就会永远变成三方仲裁。正确做法只能是把 active 真相重新压回两层：explicit client truth 与 runtime truth；删除第三层。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/hooks/useSessionOpenActions.test.tsx src/lib/open-tab-history-truth.test.ts src/App.dynamic-refresh.test.tsx src/hooks/useTerminalWorkspace.test.tsx -t 'active|switch|saved tab|runtime tab switching owned by applyOpenTabState|restored latest active|foreground resume|quick-tab current-tabs|split pane owner as the single truth' --reporter dot` => `4 files / 37 passed`
+
+[2026-05-08] active truth 第七刀收口（禁止 runtime active 反向改写 explicit active）
+- 继续审计后确认还残留一条错误语义：`deriveRuntimeOpenTabSyncDecision()` 在 `restoredTabsHandled=true` 后，仍允许 `runtimeActiveSessionId` 反向 merge 改写 `openTabState.activeSessionId`。
+- 这违反当前冻结：explicit tab focus truth 属于 open-tab owner；runtime active 只表示 SessionContext transport/runtime 当前对齐到哪里，不能倒灌成 explicit truth。
+- 本轮收口：
+  1. 删除 `deriveRuntimeOpenTabSyncDecision()` 中 `restoredTabsHandled=true` 时的 `runtimeActiveSessionId -> merge activeSessionId` 分支
+  2. 删除已无调用的 `resolveRuntimeActiveSessionIdForOpenTabs()`
+  3. 回归测试改为钉死：restore settled 之后，runtime active 不得 backwrite explicit active
+- 当前 active 合法方向只剩：
+  - explicit active -> 若 runtime 未对齐，则产出 `switch` 决策去驱动 runtime
+  - runtime session metadata -> 允许 semantic remap/rewrite existing tab id
+  - runtime active 本身 **不得**反向覆盖 explicit active
+- 为什么这是唯一正确修改点：问题不在 restore 某一帧，而在 `deriveRuntimeOpenTabSyncDecision()` 这个 active 协调 owner 把读侧 projection（runtime active）误当成写侧真相。只改 UI 或只改 App 调用都只是掩盖；必须删掉 owner 层的反写分支，才能从根上禁止 runtime 倒灌 explicit truth。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/lib/open-tab-intent.test.ts src/App.dynamic-refresh.test.tsx src/lib/open-tab-history-truth.test.ts -t 'does not let runtime active session backwrite explicit open-tab active truth after restore settles|keeps the normalized persisted active tab truth and rewrites runtime active session to match it when runtime sessions already exist|renders the persisted open-tab active session as terminal body truth even when runtime active session still points to another tab|persists active tab switch immediately from terminal UI intent' --reporter dot` => `2 files passed / 4 tests`
+
+[2026-05-08] runtime active / session-context 审计（进行中）
+- 下一刀按已冻结 open-tab truth 继续查 `SessionContext` runtime 是否仍有越权 active 写入。
+- 重点文件：`session-context-session-runtime.ts`、`session-context-session-orchestration-runtime.ts`、`session-context-core.ts`、`session-context-infra-runtime.ts`。
+- 审计目标：runtime create/reuse/connect 只能维护 runtime transport truth，不能主动抢 explicit open-tab active focus；若必须切 runtime active，必须能指向唯一调用入口。
+
+[2026-05-08] open-tab -> runtime active bypass 审计结论（待收口）
+- 虽然 `useOpenTabRuntime` 已把 runtime switch 收口到 `applyOpenTabState(..., { switchRuntime: true })`，但生产侧还残留两条旁路：
+  1. `useSessionOpenActions.openDraftAsSession()` 通过 `createSession(..., { activate: true })` 直接让 SessionContext 抢 runtime active
+  2. `useOpenTabRestoreRuntimeSync` 恢复 persisted tabs 时，对 active tab 也直接 `createSession(..., { activate: true })`
+- 这两条路径的问题不是“效果错”，而是 active orchestration owner 错：它们把 runtime create 当成 tab focus switch。
+- 唯一正确收口：open-tab/open-restore 创建 runtime session 一律 `activate: false`；真正的焦点切换只允许通过 `applyOpenTabState(..., { switchRuntime: true })` 发生。
+
+## 2026-05-08 21:39 active truth audit补口
+- 现象：open-tab explicit/runtime active 双真源收口后，仍存在“inactive create 也会偷偷变 active”的第三入口，导致 restore/bootstrap 后 active 选择被 runtime create 默认首个 session 污染。
+- 真源定位：`src/contexts/session-context-core.ts` 的 `CREATE_SESSION` reducer 在 `activate=false` 且 `state.activeSessionId=null` 时仍执行 `state.activeSessionId || action.session.id`，把 runtime create 误升级为 active owner。
+- 为什么这是唯一修改点：active 污染不是 UI、restore plan、switch 编排问题，而是 runtime session state reducer 自身把“创建 session”错误实现成“声明 active”。只改 reducer 才能全局切断所有 create 调用路径的越权；若在调用方补丁，会留下新的旁路。
+- 处理：`CREATE_SESSION` 仅在 `activate=true` 时写 `activeSessionId`；inactive create 只追加 session，不得声明 active，也不得生成默认 live session。
+- 证据：`src/contexts/session-context-core.test.ts` 新增两条回归；`src/App.dynamic-refresh.test.tsx` 相关 persisted-open-tabs / stale-getter / empty-open-tabs 回归保持通过。
+
+# 2026-05-08 /goal 分析：owner map 审计 + P0 重构切片排序
+
+## 范围
+- 只读审计，不改代码。
+- 对齐真源：`android/docs/architecture.md`、`2026-04-23-terminal-head-buffer-render-truth.md`、`2026-04-28-terminal-transport-session-lifecycle-truth.md`、`android/task.md`、`android/CACHE.md`、`android/MEMORY.md`、`android/note.md`、`.agents/skills/terminal-buffer-truth/SKILL.md`。
+- 本轮目标：完成 owner map，明确重复写口 / 旁路 / 错误存活实现，给出 P0/P1/P2 排序；未进入设计/修改。
+
+## 1. owner map
+
+### 1.1 open-tab truth
+- 唯一业务 owner：`android/src/hooks/useOpenTabRuntime.ts`
+- 唯一持久化 owner：`android/src/lib/open-tab-persistence.ts`
+- 纯规则 owner：`android/src/lib/open-tab-intent.ts`
+- 编排入口：
+  - restore / runtime sync：`android/src/hooks/useOpenTabRestoreRuntimeSync.ts`
+  - 用户显式打开：`android/src/hooks/useSessionOpenActions.ts`
+  - tab 交互：`android/src/hooks/useOpenTabSessionActions.ts`
+
+结论：`OPEN_TABS / ACTIVE_SESSION` 的 explicit truth 基本收口到 open-tab runtime，其他入口应只是 orchestration，不应再长出第二 owner。
+
+### 1.2 active session truth
+- explicit active truth owner：`useOpenTabRuntime.ts` 的 `openTabState.activeSessionId`
+- runtime active truth owner：`SessionContext` reducer `android/src/contexts/session-context-core.ts`
+
+已确认风险：runtime primitive 仍然可能越权推进 active truth。
+- `connectSessionRuntime()` 内：`if (options.activate) options.setActiveSessionSync(options.sessionId);`
+- `createSessionRuntime()` 内：existing session reuse 分支在 `shouldActivate` 条件下仍会 `setActiveSessionSync(existingSession.id)`
+- `switchSession()` 目前已纯化，只剩 `setActiveSessionSync(sessionId)`，这条本身没问题；问题是 create/connect primitive 仍可能暗中抢 active。
+
+结论：这是当前最明确的 P0 双 owner 风险区。
+
+### 1.3 runtime session truth
+- 唯一 owner：`SessionContext` reducer + runtime family
+  - reducer 真源：`android/src/contexts/session-context-core.ts`
+  - create/connect/close/reconnect 编排：
+    - `android/src/contexts/session-context-session-runtime.ts`
+    - `android/src/contexts/session-context-session-orchestration-runtime.ts`
+
+结论：runtime session truth 相对清晰，但 orchestration 太厚，create/connect/close/reconnect/retry/schedule 混在一起，后续要 block 化。
+
+### 1.4 transport truth
+- 当前 owner：`SessionContext` transport runtime family + `createSessionTransportRuntimeStore()`
+  - runtime store：`android/src/lib/session-transport-runtime.ts`
+  - accessors/glue：`android/src/contexts/session-context-transport-runtime.ts`
+  - open intent / control-session transport 编排：
+    - `android/src/contexts/session-context-transport-open-runtime.ts`
+    - `android/src/contexts/session-context-transport-lifecycle-runtime.ts`
+    - `android/src/contexts/session-context-transport-orchestration-runtime.ts`
+- provider 装配 owner：`android/src/contexts/session-context-provider-core-assemblies.ts`
+
+已确认：transport truth 没有漂到 page/UI；但 transport 编排仍读取 `stateRef.current.activeSessionId` / `liveSessionIds` 决定 live buffer 接收与 preparse drop，这部分是 transport->buffer gate，不是 owner；后续需继续确认是否可以再薄化。
+
+兼容残留：
+- `handleControlTransportMessage()` 仍支持 legacy `clientSessionId` 匹配 `session-ticket`
+- `sessionTransportToken` 仍在 client runtime 中短期持有，当前看是 attach-only 兼容材料，不应上浮成业务真相
+
+结论：transport owner 基本单一，但模块边界不够薄，且兼容字段残留需继续物理清除。
+
+### 1.5 local sparse buffer truth
+- 唯一 owner：`android/src/contexts/session-context-buffer-runtime.ts`
+- shared/pure helpers：
+  - `android/src/lib/terminal-buffer/*`
+  - `session-buffer-planner-helpers.ts`
+  - `session-pull-state-helpers.ts`
+  - `session-visible-range-helpers.ts`
+- message glue：`android/src/contexts/session-context-buffer-message-runtime.ts`
+
+现状：buffer truth 基本正确地集中在 buffer runtime；但 `buffer-message-runtime` 多数只是 passthrough/wrapper，疑似可收口的薄中间层，需要在设计阶段判定是否冗余。
+
+### 1.6 renderer visible range truth
+- 当前 owner：`android/src/components/TerminalView.tsx`
+
+现状：owner 单一，但文件过厚，混了：
+- render body
+- viewport measure
+- visible range emit
+- follow/reading
+- cursor overlay
+- DOM/input/focus
+- swipe/tab/width mode
+
+结论：visible range truth 虽集中，但 renderer orchestration 明显过厚，是 P0 后续切片。
+
+### 1.7 pane/layout truth
+- 当前业务 owner：`android/src/hooks/useTerminalWorkspace.ts`
+- shared pure helpers：`@zterm/shared` workspace helpers
+- persistence：`android/src/lib/workspace-persistence.ts`
+- layout profile：`android/src/lib/terminal-layout-profile.ts`
+
+结论：这是当前最接近理想结构的一块。shared 已经承担纯规则，hook 作为 owner 也合理。问题主要在 `TerminalPage.tsx` 还承担过多 shell glue。
+
+### 1.8 quickbar truth
+- 当前 owner：`android/src/components/terminal/TerminalQuickBar.tsx`
+- 文件长度：2764 行
+
+现状：把 quick action / shortcut / clipboard / floating bubble / drag / editor / toast / keyboard toggle / file/image/screenshot / split controls / measured height 全混在一起。
+
+结论：不是单一职责 owner，而是巨型壳；应拆成多个 block + 薄 shell。
+
+### 1.9 relay auth/device truth
+- 持久化 / auth / device truth owner：`android/src/traversal-relay/store.ts`
+- debug truth：`android/src/traversal-relay/client-debug-store.ts`
+- transport/http glue：`android/src/traversal-relay/server.ts`
+
+结论：`store.ts` 相对干净；`server.ts` 混了 auth page / HTTP route / token extract / device presence / ws relay / debug API，是明确的 P1 block split 候选。
+
+## 2. 当前重复写口 / 旁路 / 错误存活实现
+
+### 2.1 active truth 双 owner 风险（最高优先级）
+证据：
+- `session-context-session-runtime.ts`:
+  - `connectSessionRuntime()` 在 `activate=true` 时直接 `setActiveSessionSync(sessionId)`
+  - `createSessionRuntime()` 在 existing session reuse 分支里也可能 `setActiveSessionSync(existingSession.id)`
+
+为什么危险：
+- explicit active truth 已在 open-tab runtime
+- runtime primitive 再持有 activate 语义，就会造成 create/connect 抢 active、restore/bootstrap 期间 active 被 runtime 反写
+
+### 2.2 open-tab 虽已收口，但仍有多个 orchestration 入口写 `applyOpenTabState`
+- `useSessionOpenActions.ts`
+- `useOpenTabRestoreRuntimeSync.ts`
+- `useOpenTabSessionActions.ts`
+
+这本身未必错误，但必须在设计中明确：它们只能发 intent / orchestration，不能变成新的 owner。
+
+### 2.3 `session-context-buffer-message-runtime.ts` 可能是冗余 facade
+- 当前大量函数只是包装转发到 buffer runtime
+- 若没有独立 assembly 价值，应在后续收口时物理删除，避免多一层含糊语义
+
+### 2.4 `TerminalView.tsx` / `TerminalPage.tsx` / `TerminalQuickBar.tsx` 都是厚 orchestration
+- `TerminalView.tsx`：renderer truth owner 过厚
+- `TerminalPage.tsx`：pane/shell/keyboard/quickbar/sheet glue 过厚
+- `TerminalQuickBar.tsx`：巨型壳，不符合 shared + blocks + thin orchestration
+
+### 2.5 transport 兼容残留仍在
+- legacy `clientSessionId` 匹配 `session-ticket`
+- `sessionTransportToken` 短期 runtime 持有
+
+这两者当前可视为兼容层材料，但后续应继续物理收口，避免再次向 daemon/client 真相扩散。
+
+## 3. shared / block / orchestration 归属建议
+
+### 3.1 应继续下沉到 shared 的 pure functions
+1. open-tab normalize / dedupe / active resolve
+2. session create/connect arbitration pure rules
+3. transport open-intent / wire payload normalize
+4. terminal viewport / pane geometry / IME offset 纯计算
+5. renderer row diff / segment / style / gap marker 纯计算
+6. quickbar action layout / shortcut normalization / double-tap rule
+7. relay URL / target / auth normalization
+
+### 3.2 应形成 block 的模块
+1. open-tab block
+2. active/runtime arbitration block
+3. session runtime block
+4. transport runtime block
+5. buffer sync block
+6. renderer viewport block
+7. quickbar block
+8. relay auth/device block
+
+### 3.3 orchestration 应保留的薄壳
+1. `SessionContext.tsx`：provider glue
+2. `TerminalPage.tsx`：page shell + pane composition
+3. `TerminalView.tsx`：DOM/input shell（拆薄后）
+4. relay `server.ts`：route/socket glue
+
+## 4. P0 / P1 / P2 切片排序
+
+### P0-1 active/open-tab/runtime arbitration 收口（第一刀）
+涉及：
+- `src/hooks/useOpenTabRuntime.ts`
+- `src/hooks/useOpenTabRestoreRuntimeSync.ts`
+- `src/hooks/useSessionOpenActions.ts`
+- `src/contexts/session-context-core.ts`
+- `src/contexts/session-context-session-runtime.ts`
+- `src/contexts/session-context-session-orchestration-runtime.ts`
+
+为什么是第一刀：
+- 这是当前最明确的双 owner 风险区
+- 直接影响：active 错乱、open-tab 复活、create/connect 抢焦点、输入/刷新感知错位
+- 不先收这条，后续 buffer/render 优化会继续被错误焦点语义污染
+
+### P0-2 buffer/runtime/message facade 收口
+涉及：
+- `src/contexts/session-context-buffer-runtime.ts`
+- `src/contexts/session-context-buffer-message-runtime.ts`
+- `src/contexts/session-context-public-runtime.ts`
+
+为什么第二刀：
+- buffer truth 已较清晰，但 message facade 可能是多余层
+- 不先理干净，renderer 很难继续变薄
+
+### P0-3 TerminalView renderer truth 变薄
+涉及：
+- `src/components/TerminalView.tsx`
+- shared render helpers
+
+为什么第三刀：
+- renderer visible truth 虽集中，但 orchestration 太厚
+- 直接影响刷新稳定性、错误帧、输入/渲染互斥与性能
+
+### P0-4 TerminalPage shell orchestration 变薄
+涉及：
+- `src/pages/TerminalPage.tsx`
+- `src/hooks/useTerminalWorkspace.ts`
+- quickbar/sheet shell glue
+
+为什么第四刀：
+- page 壳太厚，阻碍 pane/layout/keyboard/quickbar 的清晰边界
+- 但必须在 active/buffer/renderer 之后做，否则只是搬代码不收真相
+
+### P1
+1. `TerminalQuickBar.tsx` block 化
+2. `traversal-relay/server.ts` 拆成 auth/http + device presence + ws signaling + debug route
+
+### P2
+1. shared pure helpers 持续下沉
+2. UI shell 继续瘦身
+3. 大文件 ≤500 行清单逐轮清理
+
+## 5. 当前结论
+- owner map 已基本清晰。
+- 当前最危险的不是 relay，不是 quickbar，而是 **active/open-tab/runtime arbitration**。
+- 在这条链没收口前，不应该进入 buffer/render 大改。
+- 下一轮应进入**设计阶段**，只设计 P0-1：
+  - 明确 active truth 唯一 owner
+  - runtime primitive 只负责 session existence / transport open，不再抢 active
+  - old activate bypass 物理删除
+  - 补 reducer / runtime / open-tab 回归
+
+
+# 2026-05-08 /goal 设计阶段：P0-1 active/open-tab/runtime arbitration 收口方案
+
+## 设计目标
+本轮只设计一个主线真相：
+- **active/open-tab/runtime arbitration**
+
+成功标准：
+1. `open-tab active truth` 成为唯一业务 owner
+2. runtime primitive 不再拥有 `activate => 抢 active` 语义
+3. `SessionContext.create/connect` 只负责 session existence + transport open，不再承担 tab 焦点业务语义
+4. restore / explicit open / tab switch 统一由 open-tab orchestration 决定是否切 runtime active
+5. 不引入 fallback，不保留双路径补偿
+
+## 1. 现状链路（问题图）
+
+当前 active 语义至少有两条写链：
+
+### 链 A：显式 open-tab truth（正确方向）
+- `useSessionOpenActions.ts`
+  - 先 `createSession(... activate: false)`
+  - 再 `applyOpenTabState(..., { switchRuntime: true })`
+- `useOpenTabRuntime.ts`
+  - `persistExplicitOpenTabs(...)`
+  - `requestRuntimeActiveSessionSwitch(nextState.activeSessionId)`
+  - `switchSession(nextActiveSessionId)`
+
+这是正确链：
+```text
+user/restore intent
+-> open-tab state truth
+-> persist
+-> request runtime active switch
+-> SessionContext.switchSession()
+```
+
+### 链 B：runtime primitive 抢 active（错误方向）
+- `session-context-session-runtime.ts`
+  - `connectSessionRuntime()`：`activate=true` 时直接 `setActiveSessionSync(sessionId)`
+  - `createSessionRuntime()`：reuse existing session 时 `shouldActivate` 直接 `setActiveSessionSync(existingSession.id)`
+  - 新建 session 时 `createSessionSync(session, shouldActivate)`，最终 reducer `CREATE_SESSION` 也会写 active
+
+这是错误链：
+```text
+create/connect primitive
+-> runtime active mutation
+-> activeSessionId changed
+```
+
+两条链同时存在时，App 层 explicit truth 与 runtime truth 会互相抢写。
+
+## 2. 唯一 owner 设计
+
+### 2.1 owner 冻结
+
+#### open-tab active truth
+唯一业务 owner：
+- `useOpenTabRuntime.ts`
+
+唯一含义：
+- 当前 terminal 页显式打开了哪些 tabs
+- 当前显式激活的是哪个 tab/session
+
+#### runtime active truth
+唯一运行时投影 owner：
+- `SessionContext.activeSessionId`
+
+唯一含义：
+- 当前哪个 runtime session 正在被客户端 runtime 视为 active session
+
+#### 两者关系
+- `open-tab active truth` 是**业务真相**
+- `runtime active truth` 是**执行投影**
+- runtime active 只能由 open-tab orchestration 显式驱动同步
+- runtime primitive 不得反向决定 open-tab active
+
+换言之：
+```text
+open-tab truth -> runtime active projection
+```
+而不允许：
+```text
+runtime create/connect -> active truth owner
+```
+
+## 3. shared / block / orchestration 分层设计
+
+### 3.1 shared pure functions
+本刀新增/收口的 pure logic 应包括：
+1. `shouldRuntimeSwitchAfterOpenTabStateChange(prevState, nextState, runtimeActiveSessionId)`
+2. `resolveSessionCreateIntentActivation(...)`
+3. `resolveSessionReuseIntentActivation(...)`
+4. `resolveRestoreOpenTabRuntimeSwitch(...)`
+
+要求：
+- 不依赖 React
+- 不依赖 context/page
+- 只吃 plain data，输出 plain decision
+
+### 3.2 block 层
+本刀应形成两个稳定 block：
+1. **open-tab block**
+   - owner：explicit tabs + explicit active
+   - 输入：user intent / restore intent / runtime sync result
+   - 输出：persisted open-tab state + runtime switch request
+
+2. **session runtime block**
+   - owner：session existence / transport lifecycle
+   - 输入：create/connect/close/reconnect primitive
+   - 输出：runtime session state / transport intent
+   - 不输出 active business truth
+
+### 3.3 orchestration 层
+保留：
+- `useSessionOpenActions.ts`
+- `useOpenTabRestoreRuntimeSync.ts`
+- `useOpenTabRuntime.ts`
+- `SessionContext.switchSession()`
+
+不保留：
+- `createSessionRuntime/connectSessionRuntime` 中的 active owner 语义
+- `CREATE_SESSION` 把“业务激活”塞给 runtime primitive 的语义
+
+## 4. 旧逻辑物理删除方案
+
+### 4.1 删除 runtime primitive 的 active 抢写
+必须物理删除：
+1. `connectSessionRuntime()` 内 `if (activate) setActiveSessionSync(...)`
+2. `createSessionRuntime()` reuse 分支内 `if (shouldActivate) setActiveSessionSync(...)`
+3. `createSessionSync(session, shouldActivate)` 这种把业务 activate 直接下沉给 runtime reducer 的接口语义
+
+### 4.2 createSession / connectSession 接口语义改造
+把：
+- `activate: boolean`
+
+改成更窄的 runtime 语义，例如：
+- `openTransport: boolean`
+- 或 `connect: boolean`
+
+原则：
+- runtime primitive 只能知道“要不要连 transport”
+- 不得知道“这是不是业务 active tab”
+
+### 4.3 reducer 语义收口
+`CREATE_SESSION` 不再承担业务 active 决策。
+两种允许设计：
+
+#### 方案 A（更推荐）
+- `CREATE_SESSION` 永远不写 active
+- active 只能由 `SET_ACTIVE_SESSION` 改
+
+#### 方案 B
+- `CREATE_SESSION` 仅支持 runtime bootstrap 特例，App 层业务 create 一律传 `activate=false`
+
+本项目更适合 **方案 A**，因为最符合“单一 active 写口”。
+
+## 5. 具体调用链改造设计
+
+### 5.1 用户显式开 tab
+保持：
+- `useSessionOpenActions`：`createSession(... activate:false/connect:...)`
+- `applyOpenTabState(... switchRuntime:true)`
+
+最终链路：
+```text
+user open
+-> create runtime session (inactive business-wise)
+-> update explicit open-tab truth
+-> persist
+-> request runtime switch
+-> switchSession()
+```
+
+### 5.2 restore persisted tabs
+保持：
+- `useOpenTabRestoreRuntimeSync` 中 restore 创建 session 时 `activate:false`
+- restore 完成后，如存在 explicit active，则统一 `applyOpenTabState(... switchRuntime:true)`
+
+### 5.3 runtime reuse existing session
+改造后：
+- `createSessionRuntime()` 只返回 existing sessionId
+- 不得顺手 `setActiveSessionSync(existingSession.id)`
+- 若上层要激活，必须由 open-tab orchestration 在 `applyOpenTabState(... switchRuntime:true)` 后切换
+
+### 5.4 connect/reconnect
+改造后：
+- `connectSessionRuntime()` 只负责 transport prime/open
+- 不得再碰 `activeSessionId`
+- reconnect 也不得顺手抢 active
+
+## 6. 测试设计
+
+### 6.1 必补单测 / 定向回归
+
+#### open-tab / active truth
+1. `useSessionOpenActions`：显式打开 tab 后，active 切换只通过 `applyOpenTabState(...switchRuntime:true)` 发生
+2. `useOpenTabRestoreRuntimeSync`：restore 期间 runtime create 不得偷写 active；最终 active 只由 explicit active 决定
+3. `open-tab-intent`：runtime active 不得反写 explicit active
+
+#### SessionContext / runtime
+4. `createSessionRuntime` reuse existing session 时，不得再直接 `setActiveSessionSync`
+5. `connectSessionRuntime` connect 时，不得再直接 `setActiveSessionSync`
+6. `CREATE_SESSION` reducer 不得再承担业务激活语义（若采用方案 A，则直接钉死）
+7. `switchSession()` 仍是 runtime active 的唯一入口
+
+#### 回归防线
+8. 不存在“runtime-only session 反向复活 open-tab”
+9. 不存在“runtime create 偷偷抢 active”
+10. restore 后 active 焦点与 persisted `ACTIVE_SESSION` 一致
+
+### 6.2 本轮门禁
+至少要跑：
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+- `pnpm --dir android exec vitest run` 针对：
+  - `src/lib/open-tab-intent.test.ts`
+  - `src/hooks/useSessionOpenActions.test.tsx`
+  - `src/lib/open-tab-history-truth.test.ts`
+  - `src/contexts/session-context-core.test.ts`
+  - `src/contexts/session-context-session-runtime.test.ts`
+  - 必要时 `src/contexts/SessionContext.ws-refresh.test.tsx` 定向子集
+
+## 7. 为什么这是唯一正确修改点
+
+因为当前问题不是“切换太慢”本身，也不是“UI 逻辑太厚”本身，而是：
+- active 这个业务真相同时存在 App 层 explicit owner 和 runtime primitive owner
+- runtime primitive 越权写 active，会持续污染：
+  - open-tab restore
+  - create/reuse session
+  - connect/reconnect
+  - tab 焦点
+  - active refresh / input target
+
+如果不先删除这条越权写口：
+- 后续 buffer/render/page 优化只是在错误真相上修表象
+- 任何“修刷新/修输入/修切 tab”都会继续被错误 active 语义重新破坏
+
+所以本刀是唯一正确的第一刀。
+
+## 8. 下一轮修改切口（严格最小切口）
+下一轮只改：
+- `session-context-session-runtime.ts`
+- `session-context-session-orchestration-runtime.ts`
+- `session-context-core.ts`
+- 如有必要：`session-context-infra-facade-runtime.ts` 的签名
+- 以及最小配套测试
+
+明确不碰：
+- buffer manager
+- renderer
+- TerminalPage / TerminalView
+- relay
+- quickbar
+
+

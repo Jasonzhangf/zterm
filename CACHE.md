@@ -48469,3 +48469,16 @@ sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
 model: gpt-5.4
 provider: openai-responses
 -->
+
+### User · 2026/05/08 23:03:05
+
+<turn_aborted>
+The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.
+</turn_aborted>
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260508T230304886-171970-989
+sessionId: 019dd4b2-de61-7f71-8a5f-9e91b2d832f0
+model: gpt-5.4
+provider: openai-responses
+-->

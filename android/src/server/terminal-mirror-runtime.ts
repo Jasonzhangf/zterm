@@ -12,7 +12,6 @@ import type {
   TerminalAttachPayload,
   TerminalGeometry,
   TmuxPaneMetrics,
-  TerminalWidthMode,
 } from './terminal-runtime-types';
 
 export interface TerminalMirrorRuntimeDeps {
@@ -80,7 +79,6 @@ export interface TerminalMirrorRuntime {
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleInput: (session: TerminalSession, data: string) => void;
-  handleResize: (session: TerminalSession, payload: { cols: number; rows: number; widthMode?: TerminalWidthMode }) => void;
   reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
 }
 
@@ -580,23 +578,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     await startMirror(mirror, { cols: requestedCols, rows: requestedRows, autoCommand: payload.autoCommand });
   }
 
-  function handleResize(session: TerminalSession, payload: { cols: number; rows: number; widthMode?: TerminalWidthMode }) {
-    const mirror = deps.getSessionMirror(session);
-    if (!mirror || mirror.lifecycle !== 'ready') {
-      return;
-    }
-    const widthMode: TerminalWidthMode = payload.widthMode || session.widthMode || 'mirror-fixed';
-    session.widthMode = widthMode;
-    const normalizedCols = deps.normalizeTerminalCols(payload.cols);
-    if (widthMode === 'adaptive-phone' && normalizedCols > 0) {
-      mirror.adaptiveCols.set(session.id, { cols: normalizedCols, widthMode });
-      reconcileMirrorAdaptiveWidth(mirror);
-    } else {
-      mirror.adaptiveCols.delete(session.id);
-      reconcileMirrorAdaptiveWidth(mirror);
-    }
-  }
-
   function handleInput(session: TerminalSession, data: string) {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
@@ -625,7 +606,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     startMirror,
     attachTmux,
     handleInput,
-    handleResize,
     reconcileMirrorAdaptiveWidth,
   };
 }

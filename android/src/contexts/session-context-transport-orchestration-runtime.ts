@@ -1,4 +1,4 @@
-import type { Host, ServerMessage, Session, SessionScheduleState } from '../lib/types';
+import type { Host, ServerMessage, Session, SessionScheduleState, TerminalWidthMode } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
@@ -7,10 +7,11 @@ import type {
 } from './session-context-core';
 import type {
   PendingSessionTransportOpenIntent,
-} from './session-sync-helpers';
+} from './session-transport-open-helpers';
 import {
   bindSessionTransportSocketLifecycleOrchestrationRuntime,
   primeSessionTransportSocketRuntime,
+  sendTerminalResizeRuntime,
 } from './session-context-transport-lifecycle-runtime';
 import { createSessionControlTransportOrchestrationRuntime } from './session-context-transport-control-orchestration-runtime';
 import {
@@ -32,9 +33,11 @@ import {
   createSessionReconnectRuntime,
 } from './session-context-core';
 import {
-  shouldAutoReconnectSession,
   hasSessionLocalWindow,
-} from './session-sync-helpers';
+} from './session-buffer-planner-helpers';
+import {
+  shouldAutoReconnectSession,
+} from './session-reconnect-helpers';
 import {
   scheduleReconnectRuntime,
   startReconnectAttemptRuntime,
@@ -109,6 +112,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     sessionId: string,
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
   ) => void;
+  readRequestedTerminalGeometry: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {
   let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
   const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
@@ -242,6 +246,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       onConnected: bindOptions.onConnected,
       onClosed: bindOptions.onClosed,
       sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
+      readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
     });
   };
 
@@ -288,7 +293,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       refs: {
         manualCloseRef: options.refs.manualCloseRef,
         reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
-        stateRef: options.stateRef as MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>,
+        stateRef: options.stateRef as MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>,
       },
       readSessionTransportHost: options.readSessionTransportHost,
       shouldAutoReconnectSessionFn: shouldAutoReconnectSession,
@@ -429,6 +434,17 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   };
 
+  const sendTerminalResize = (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => {
+    return sendTerminalResizeRuntime({
+      sessionId,
+      ws: options.readSessionTransportSocket(sessionId),
+      sendSocketPayload: options.sendSocketPayload,
+      cols,
+      rows,
+      widthMode,
+    });
+  };
+
   return {
     cleanupControlSocket,
     primeSessionTransportSocket,
@@ -437,6 +453,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     cleanupSocket,
     scheduleReconnect,
     queueConnectTransportOpenIntent,
+    sendTerminalResize,
   };
 }
 

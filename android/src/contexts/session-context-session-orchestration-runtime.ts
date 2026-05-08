@@ -64,7 +64,7 @@ interface SessionLifecycleRuntimeOptions {
   };
   activeTransportProbeWaitMs: number;
   resolveSessionCacheLines: (rows?: number | null) => number;
-  createSessionSync: (session: Session, activate: boolean) => void;
+  createSessionSync: (session: Session) => void;
   setActiveSessionSync: (id: string) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
@@ -86,7 +86,7 @@ interface SessionLifecycleRuntimeOptions {
   readSessionTargetKey: (sessionId: string) => string | null;
   clearSessionTransportRuntime: (sessionId: string) => unknown;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate: boolean) => void;
+  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate?: boolean) => void;
   scheduleReconnect: (
     sessionId: string,
     message: string,
@@ -105,11 +105,10 @@ interface SessionLifecycleRuntimeOptions {
 }
 
 export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOptions) {
-  const connectSession = (sessionId: string, host: Host, activate: boolean) => {
+  const connectSession = (sessionId: string, host: Host) => {
     connectSessionRuntime({
       sessionId,
       host,
-      activate,
       refs: {
         manualCloseRef: options.refs.manualCloseRef,
       },
@@ -119,7 +118,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       writeSessionTransportToken: options.writeSessionTransportToken,
       updateSessionSync: options.updateSessionSync,
       setScheduleStateForSession: options.setScheduleStateForSession,
-      setActiveSessionSync: options.setActiveSessionSync,
       queueConnectTransportOpenIntent: options.queueConnectTransportOpenIntent,
     });
   };
@@ -137,7 +135,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       runtimeDebug: options.runtimeDebug,
       resolveSessionCacheLines: options.resolveSessionCacheLines,
       createSessionSync: options.createSessionSync,
-      setActiveSessionSync: options.setActiveSessionSync,
       updateSessionSync: options.updateSessionSync,
       readSessionTransportSocket: options.readSessionTransportSocket,
       connectSession,

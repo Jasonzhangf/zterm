@@ -1,6 +1,7 @@
 import type { Host, ServerMessage, Session, SessionBufferState, SessionScheduleState, TerminalBufferPayload, TerminalCursorState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
   applyIncomingBufferSyncRuntime,
   handleBufferHeadRuntime,
@@ -99,6 +100,7 @@ export function handleBufferHeadOrchestrationRuntime(options: {
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   requestSessionBufferSync: (
     sessionId: string,
@@ -133,6 +135,7 @@ export function applyIncomingBufferSyncOrchestrationRuntime(options: {
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   requestSessionBufferSync: (
     sessionId: string,
     requestOptions?: {

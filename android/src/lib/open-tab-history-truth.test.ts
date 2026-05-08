@@ -80,4 +80,16 @@ describe('open-tab / history / connections truth gates', () => {
     expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
     expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
   });
+
+  it('keeps runtime tab switching owned by applyOpenTabState instead of exposing extra switch/persist refs to child hooks', () => {
+    const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
+    const openTabSessionActionsSource = readSource('hooks/useOpenTabSessionActions.ts');
+    const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
+
+    expect(sessionOpenActionsSource).not.toContain('persistAndSwitchExplicitOpenTabsRef');
+    expect(openTabSessionActionsSource).not.toContain('requestRuntimeActiveSessionSwitch(');
+    expect(restoreRuntimeSource).not.toContain('requestRuntimeActiveSessionSwitch(');
+    expect(openTabSessionActionsSource).toContain('switchRuntime: true');
+    expect(restoreRuntimeSource).toContain('switchRuntime: true');
+  });
 });

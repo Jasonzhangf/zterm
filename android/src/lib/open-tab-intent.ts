@@ -154,20 +154,6 @@ export function deriveRuntimeOpenTabSyncDecision(options: {
   }
 
   if (options.restoredTabsHandled) {
-    const runtimeActiveSessionId = options.runtimeActiveSessionId;
-    if (
-      runtimeActiveSessionId
-      && runtimeActiveSessionId !== options.currentState.activeSessionId
-      && options.currentState.tabs.some((tab) => tab.sessionId === runtimeActiveSessionId)
-    ) {
-      return {
-        kind: 'merge',
-        state: normalizeOpenTabIntentState(
-          options.currentState.tabs,
-          runtimeActiveSessionId,
-        ),
-      };
-    }
     return { kind: 'noop' };
   }
 
@@ -244,20 +230,6 @@ export function mergeRuntimeSessionsIntoOpenTabIntentState(
   }
 
   return normalizeOpenTabIntentState(nextTabs, nextActiveSessionId);
-}
-
-export function resolveRuntimeActiveSessionIdForOpenTabs(
-  currentState: OpenTabIntentState,
-  sessions: Array<Pick<Session, 'id'>>,
-  runtimeActiveSessionId: string | null,
-): string | null {
-  if (
-    currentState.activeSessionId
-    && sessions.some((session) => session.id === currentState.activeSessionId)
-  ) {
-    return currentState.activeSessionId;
-  }
-  return runtimeActiveSessionId;
 }
 
 export function upsertOpenTabIntentSession(

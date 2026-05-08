@@ -25,7 +25,7 @@ import {
   type SessionProviderProps,
   sessionReducer,
 } from './session-context-core';
-export { shouldReconnectActivatedSession, shouldReconnectQueuedActiveInput } from './session-sync-helpers';
+export { shouldReconnectActivatedSession, shouldReconnectQueuedActiveInput } from './session-transport-open-helpers';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
 
@@ -96,6 +96,7 @@ export function SessionProvider({
     reconnectAllSessions,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     sendMessage,
     sendInput,
     sendImagePaste,
@@ -170,6 +171,7 @@ export function SessionProvider({
     reconnectAllSessions,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     sendMessage,
     sendInput,
     sendImagePaste,
@@ -202,6 +204,7 @@ export function SessionProvider({
     reconnectAllSessions,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     sendMessage,
     sendInput,
     sendImagePaste,
@@ -234,6 +237,9 @@ export function SessionProvider({
     reconnectAllSessions: () => contextRuntimeRef.current.reconnectAllSessions(),
     setLiveSessionIds: (ids: string[]) => contextRuntimeRef.current.setLiveSessionIds(ids),
     resumeActiveSessionTransport: (id: string) => contextRuntimeRef.current.resumeActiveSessionTransport(id),
+    sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => (
+      contextRuntimeRef.current.sendTerminalResize(sessionId, cols, rows, widthMode)
+    ),
     sendMessage: (sessionId: string, msg: Parameters<typeof sendMessage>[1]) => (
       contextRuntimeRef.current.sendMessage(sessionId, msg)
     ),

@@ -2,17 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
-import type { TerminalViewportState } from '../lib/types';
+import type { TerminalViewportState, TerminalWidthMode } from '../lib/types';
 
 interface UseTerminalShellActionsOptions {
   sendInput: (sessionId: string, data: string) => void;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalViewportState) => void;
+  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   getSessionRenderBufferStore: () => SessionRenderBufferStore;
   setSessionDraft: (sessionId: string, value: string) => void;
   clearSessionDraft: (sessionId: string) => void;
   pruneDrafts: (activeSessionIds: string[]) => void;
   sessionIds: string[];
-  runtimeRefs: Pick<OpenTabRuntimeRefs, 'activeSessionIdRef' | 'terminalActiveSessionIdRef'>;
+  runtimeRefs: Pick<OpenTabRuntimeRefs, 'openTabStateRef' | 'terminalActiveSessionIdRef'>;
   handleSwitchSession: (sessionId: string) => void;
   bridgeSettings: BridgeSettings;
   shortcutFrequencyStorage: {
@@ -25,6 +26,8 @@ export interface TerminalShellActionsResult {
   inputResetEpochBySession: Record<string, number>;
   handleTerminalInput: (sessionId: string, data: string) => void;
   handleTerminalViewportChange: (sessionId: string, visibleRange: TerminalViewportState) => void;
+  handleTerminalResize: (sessionId: string, cols: number, rows: number) => void;
+  handleTerminalWidthModeChange: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
   handleQuickActionInput: (sequence: string, sessionId?: string) => void;
   handleSessionDraftChange: (value: string, sessionId?: string) => void;
   handleSessionDraftSend: (value: string, sessionId?: string) => void;
@@ -37,6 +40,7 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
   const {
     sendInput,
     updateSessionViewport,
+    sendTerminalResize,
     getSessionRenderBufferStore,
     setSessionDraft,
     clearSessionDraft,
@@ -48,7 +52,7 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
     shortcutFrequencyStorage,
   } = options;
 
-  const { activeSessionIdRef, terminalActiveSessionIdRef } = runtimeRefs;
+  const { openTabStateRef, terminalActiveSessionIdRef } = runtimeRefs;
 
   const [inputResetEpochBySession, setInputResetEpochBySession] = useState<Record<string, number>>({});
 
@@ -76,18 +80,30 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
     updateSessionViewport(sessionId, viewportState);
   }, [updateSessionViewport]);
 
+  const handleTerminalResize = useCallback((sessionId: string, cols: number, rows: number) => {
+    sendTerminalResize(sessionId, cols, rows, bridgeSettings.terminalWidthMode);
+  }, [bridgeSettings.terminalWidthMode, sendTerminalResize]);
+
+  const handleTerminalWidthModeChange = useCallback((sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {
+    if (mode === 'adaptive-phone') {
+      sendTerminalResize(sessionId, cols, undefined, mode);
+      return;
+    }
+    sendTerminalResize(sessionId, undefined, undefined, mode);
+  }, [sendTerminalResize]);
+
   const handleSendSessionDraft = useCallback((sessionId: string, value: string) => {
     if (!value) {
       return;
     }
     const normalized = value.replace(/\r?\n/g, '\r');
     const payload = /[\r\n]$/.test(normalized) ? normalized : `${normalized}\r`;
-    if (activeSessionIdRef.current !== sessionId) {
+    if (openTabStateRef.current.activeSessionId !== sessionId) {
       handleSwitchSession(sessionId);
     }
     handleTerminalInput(sessionId, payload);
     clearSessionDraft(sessionId);
-  }, [activeSessionIdRef, clearSessionDraft, handleSwitchSession, handleTerminalInput]);
+  }, [clearSessionDraft, handleSwitchSession, handleTerminalInput, openTabStateRef]);
 
   const handleQuickActionInput = useCallback((sequence: string, sessionId?: string) => {
     const targetSessionId = sessionId || terminalActiveSessionIdRef.current;
@@ -126,6 +142,8 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
     inputResetEpochBySession,
     handleTerminalInput,
     handleTerminalViewportChange,
+    handleTerminalResize,
+    handleTerminalWidthModeChange,
     handleQuickActionInput,
     handleSessionDraftChange,
     handleSessionDraftSend,

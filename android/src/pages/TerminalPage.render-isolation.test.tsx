@@ -292,7 +292,7 @@ describe('TerminalPage render isolation', () => {
   });
 
   it('remounts the split pane renderer when the pane switches to a different session so stale buffer state cannot flash into P1', () => {
-    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+    const pane1S1Layout = {
       panes: [
         {
           id: 'pane-1',
@@ -311,7 +311,8 @@ describe('TerminalPage render isolation', () => {
         },
       ],
       activePaneId: 'pane-1',
-    }));
+    };
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(pane1S1Layout));
 
     const session1 = makeSession('s1');
     const session2 = makeSession('s2');
@@ -344,10 +345,34 @@ describe('TerminalPage render isolation', () => {
     expect(firstPaneInstanceBefore).toBeTruthy();
     expect(screen.getByTestId('terminal-view-s2')).toBeTruthy();
 
-    view.rerender(
+    view.unmount();
+
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      ...pane1S1Layout,
+      panes: [
+        {
+          id: 'pane-1',
+          size: 0.5,
+          activeTabId: 'tab-s3',
+          tabs: [
+            { id: 'tab-s1', sessionId: 's1' },
+            { id: 'tab-s3', sessionId: 's3' },
+          ],
+        },
+        {
+          id: 'pane-2',
+          size: 0.5,
+          activeTabId: 'tab-s2',
+          tabs: [{ id: 'tab-s2', sessionId: 's2' }],
+        },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    render(
       <TerminalPage
         sessions={[session1, session2, session3]}
-        activeSession={session3}
+        activeSession={session1}
         {...props}
       />,
     );

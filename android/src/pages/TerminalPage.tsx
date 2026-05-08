@@ -46,38 +46,11 @@ type VirtualKeyboardApi = {
   removeEventListener: (type: 'geometrychange', listener: EventListenerOrEventListenerObject) => void;
 };
 
-type TerminalDebugViewportMetrics = {
-  innerHeight: number;
-  clientHeight: number;
-  visualViewportHeight: number;
-  visualViewportOffsetTop: number;
-  visualViewportBottom: number;
-  layoutViewportHeight: number;
-};
-
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
-}
-
-function readTerminalDebugViewportMetrics(): TerminalDebugViewportMetrics {
-  const viewportMetrics = resolveTerminalViewportMetrics();
-  return {
-    innerHeight:
-      typeof window === 'undefined'
-        ? 0
-        : Math.max(0, Math.round(window.innerHeight || 0)),
-    clientHeight:
-      typeof document === 'undefined'
-        ? 0
-        : Math.max(0, Math.round(document.documentElement?.clientHeight || 0)),
-    visualViewportHeight: viewportMetrics.visualHeight,
-    visualViewportOffsetTop: viewportMetrics.visualOffsetTop,
-    visualViewportBottom: viewportMetrics.visualBottom,
-    layoutViewportHeight: viewportMetrics.layoutHeight,
-  };
 }
 
 const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
@@ -371,17 +344,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   session,
   sessionViewportModeStore,
   getSessionDebugMetrics,
-  viewportMetrics,
-  keyboardInset,
-  effectiveKeyboardLiftPx,
-  terminalImeLiftPx,
-  quickBarShellKeyboardLiftPx,
-  shellHeight,
-  terminalChromeBottomPx,
-  terminalKeyboardRequested,
-  quickBarEditorFocused,
-  terminalImeActive,
-  terminalWidthMode,
   debugOverlayPos,
   debugOverlayDragRef,
   onClose,
@@ -391,17 +353,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   session: Session | null;
   sessionViewportModeStore: SessionViewportModeStore;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
-  viewportMetrics: TerminalDebugViewportMetrics;
-  keyboardInset: number;
-  effectiveKeyboardLiftPx: number;
-  terminalImeLiftPx: number;
-  quickBarShellKeyboardLiftPx: number;
-  shellHeight: number;
-  terminalChromeBottomPx: number;
-  terminalKeyboardRequested: boolean;
-  quickBarEditorFocused: boolean;
-  terminalImeActive: boolean;
-  terminalWidthMode: TerminalWidthMode;
   debugOverlayPos: { x: number; y: number };
   debugOverlayDragRef: React.MutableRefObject<{
     startX: number;
@@ -545,74 +496,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>P</span>
         <span>{formatDebugHz(metrics?.pullHz || 0)}</span>
-      </div>
-      <div
-        style={{
-          marginTop: '2px',
-          paddingTop: '2px',
-          borderTop: '1px solid rgba(255,255,255,0.10)',
-          color: 'rgba(231, 238, 252, 0.78)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1px',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>IH</span>
-          <span>{viewportMetrics.innerHeight}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>CH</span>
-          <span>{viewportMetrics.clientHeight}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>VVH</span>
-          <span>{viewportMetrics.visualViewportHeight}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>VVT</span>
-          <span>{viewportMetrics.visualViewportOffsetTop}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>VVB</span>
-          <span>{viewportMetrics.visualViewportBottom}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>K</span>
-          <span>{keyboardInset}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>Lift</span>
-          <span>{effectiveKeyboardLiftPx}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>TI</span>
-          <span>{terminalImeLiftPx}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>QI</span>
-          <span>{quickBarShellKeyboardLiftPx}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>SH</span>
-          <span>{shellHeight}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>Btm</span>
-          <span>{terminalChromeBottomPx}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>WM</span>
-          <span>{terminalWidthMode === 'mirror-fixed' ? 'fix' : 'adp'}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>Req/QF</span>
-          <span>{terminalKeyboardRequested ? '1' : '0'}/{quickBarEditorFocused ? '1' : '0'}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-          <span>TA</span>
-          <span>{terminalImeActive ? '1' : '0'}</span>
-        </div>
       </div>
       <div
         style={{
@@ -1102,7 +985,7 @@ function TerminalPageComponent({
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const viewportMetricsFrameRef = useRef<number | null>(null);
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
-  const [debugOverlayVisible, setDebugOverlayVisible] = useState(true);
+  const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
@@ -1118,9 +1001,6 @@ function TerminalPageComponent({
   const remoteScreenshotRequestEpochRef = useRef(0);
   const stableLayoutViewportHeightRef = useRef(resolveLayoutViewportHeight());
 
-  useEffect(() => {
-    activeSessionIdRef.current = activeSession?.id || null;
-  }, [activeSession?.id]);
 
   const sendFileTransferMessage = useCallback((msg: any) => {
     const sessionId = activeSessionIdRef.current;
@@ -1280,6 +1160,8 @@ function TerminalPageComponent({
   const interactiveSession = interactiveSessionId
     ? sessions.find((session) => session.id === interactiveSessionId) || activeSession || null
     : activeSession || null;
+  const uiSession = interactiveSession || activeSession || null;
+  const uiSessionId = uiSession?.id || null;
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
     : (interactiveSession ? [interactiveSession] : []);
@@ -1308,6 +1190,10 @@ function TerminalPageComponent({
   sessionsRef.current = sessions;
   splitVisibleRef.current = splitVisible;
   activePaneIdRef.current = workspace.activePaneId;
+
+  useEffect(() => {
+    activeSessionIdRef.current = uiSessionId;
+  }, [uiSessionId]);
 
   useEffect(() => {
     if (!pendingPaneAttachIntent) {
@@ -1393,7 +1279,7 @@ function TerminalPageComponent({
   const focusTerminalInput = useCallback(() => {
     setFocusNonce((value) => value + 1);
 
-    const input = querySessionInput(activeSession?.id || null);
+    const input = querySessionInput(uiSessionId);
     if (!input) {
       return;
     }
@@ -1401,7 +1287,7 @@ function TerminalPageComponent({
     input.focus({ preventScroll: true });
     const end = input.value.length;
     input.setSelectionRange(end, end);
-  }, [activeSession?.id]);
+  }, [uiSessionId]);
 
   const clearPendingAndroidImeFocus = useCallback(() => {
     if (pendingAndroidImeFocusTimerRef.current === null) {
@@ -1507,7 +1393,7 @@ function TerminalPageComponent({
   }, [revokeRemoteScreenshotPreviewUrl]);
 
   const handleRequestRemoteScreenshot = useCallback(async () => {
-    const targetSessionId = activeSession?.id;
+    const targetSessionId = uiSessionId;
     if (!targetSessionId || !onRequestRemoteScreenshot) {
       alert('当前没有可用的目标 session');
       return;
@@ -1582,32 +1468,32 @@ function TerminalPageComponent({
         errorMessage: error instanceof Error ? error.message : '远程截图失败',
       }));
     }
-  }, [activeSession?.id, onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl]);
+  }, [onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl, uiSessionId]);
 
   const handleQuickBarMeasuredHeightChange = useCallback((height: number) => {
     setQuickBarHeight((current) => (current === height ? current : height));
   }, []);
 
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
-    onQuickActionInput?.(sequence, activeSession?.id);
+    onQuickActionInput?.(sequence, uiSessionId || undefined);
     if (terminalKeyboardRequested || keyboardInset > 0) {
       keepTerminalInputFocused();
     }
-  }, [activeSession?.id, keyboardInset, onQuickActionInput, terminalKeyboardRequested]);
+  }, [keyboardInset, keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarSessionDraftChange = useCallback((value: string) => {
-    onSessionDraftChange?.(value, activeSession?.id);
-  }, [activeSession?.id, onSessionDraftChange]);
+    onSessionDraftChange?.(value, uiSessionId || undefined);
+  }, [onSessionDraftChange, uiSessionId]);
 
   const handleQuickBarSessionDraftSend = useCallback((value: string) => {
-    onSessionDraftSend?.(value, activeSession?.id);
+    onSessionDraftSend?.(value, uiSessionId || undefined);
     if (terminalKeyboardRequested || keyboardInset > 0) {
       keepTerminalInputFocused();
     }
-  }, [activeSession?.id, keyboardInset, onSessionDraftSend, terminalKeyboardRequested]);
+  }, [keyboardInset, keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarOpenScheduleComposer = useCallback((text: string) => {
-    const targetSessionId = activeSession?.id;
+    const targetSessionId = uiSessionId;
     if (!targetSessionId) {
       return;
     }
@@ -1617,7 +1503,7 @@ function TerminalPageComponent({
       text,
     });
     setScheduleOpen(true);
-  }, [activeSession?.id, onRequestScheduleList]);
+  }, [onRequestScheduleList, uiSessionId]);
 
   const handleQuickBarOpenFileTransfer = useCallback(() => {
     setFileTransferOpen(true);
@@ -1709,7 +1595,7 @@ function TerminalPageComponent({
           console.warn('[TerminalPage] Keyboard.hide() failed:', error);
         }
       }
-      const input = querySessionInput(activeSession?.id || null);
+      const input = querySessionInput(uiSessionId);
       input?.blur();
       return;
     }
@@ -1727,7 +1613,7 @@ function TerminalPageComponent({
     }
 
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
-  }, [activeSession?.id, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, scheduleTerminalFocusRetries, terminalKeyboardRequested]);
+  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, scheduleTerminalFocusRetries, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarEditorDomFocusChange = useCallback((active: boolean) => {
     quickBarEditorFocusedRef.current = active;
@@ -1745,14 +1631,14 @@ function TerminalPageComponent({
   }, [clearTerminalFocusRetries, isAndroid, keyboardInset, requestAndroidImeFocus, setAndroidEditorActive, terminalKeyboardRequested]);
 
   useEffect(() => {
-    if (!isAndroid || quickBarEditorFocused || !activeSession?.id) {
+    if (!isAndroid || quickBarEditorFocused || !uiSessionId) {
       return;
     }
     if (!(terminalKeyboardRequested || keyboardInset > 0)) {
       return;
     }
     requestAndroidImeFocus();
-  }, [activeSession?.id, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested]);
+  }, [isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested, uiSessionId]);
 
   useEffect(() => {
     const syncOnlineState = () => {
@@ -1770,7 +1656,7 @@ function TerminalPageComponent({
   }, []);
 
   useEffect(() => {
-    const hasIssue = !networkOnline || activeSession?.state === 'reconnecting' || activeSession?.state === 'error';
+    const hasIssue = !networkOnline || uiSession?.state === 'reconnecting' || uiSession?.state === 'error';
 
     if (!hasIssue) {
       if (connectionIssueTimerRef.current !== null) {
@@ -1796,7 +1682,7 @@ function TerminalPageComponent({
         connectionIssueTimerRef.current = null;
       }
     };
-  }, [activeSession?.state, connectionIssueVisible, networkOnline]);
+  }, [connectionIssueVisible, networkOnline, uiSession?.state]);
 
 
   useEffect(() => {
@@ -1811,9 +1697,9 @@ function TerminalPageComponent({
       return;
     }
 
-    const input = querySessionInput(activeSession?.id || null);
+    const input = querySessionInput(uiSessionId);
     input?.blur();
-  }, [activeSession?.id, clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid]);
+  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, uiSessionId]);
 
   useEffect(() => {
     if (!isAndroid) {
@@ -1980,11 +1866,9 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  const debugViewportMetrics = readTerminalDebugViewportMetrics();
-
   useEffect(() => registerClientDebugSnapshotSource('terminal-page', () => ({
-    activeSessionId: activeSession?.id || null,
-    activeSessionState: activeSession?.state || null,
+    activeSessionId: uiSessionId,
+    activeSessionState: uiSession?.state || null,
     sessionCount: sessions.length,
     splitVisible,
     layoutProfile,
@@ -2005,8 +1889,8 @@ function TerminalPageComponent({
     isAndroid,
     widthMode: terminalWidthMode,
   })), [
-    activeSession?.id,
-    activeSession?.state,
+    uiSessionId,
+    uiSession?.state,
     connectionIssueVisible,
     effectiveKeyboardLiftPx,
     headerTopInsetPx,
@@ -2034,7 +1918,7 @@ function TerminalPageComponent({
       id: `tab-list-${now}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       tabs: currentPersistedTabs,
-      activeSessionId: activeSession?.id || undefined,
+      activeSessionId: uiSessionId || undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -2048,7 +1932,7 @@ function TerminalPageComponent({
   const exportCurrentTabList = () => JSON.stringify({
     name: `current-${new Date().toISOString()}`,
     tabs: currentPersistedTabs,
-    activeSessionId: activeSession?.id || undefined,
+    activeSessionId: uiSessionId || undefined,
     exportedAt: new Date().toISOString(),
   }, null, 2);
 
@@ -2174,7 +2058,7 @@ function TerminalPageComponent({
 
   const quickBarNode = useMemo(() => (
     <TerminalQuickBar
-      activeSessionId={activeSession?.id}
+      activeSessionId={uiSessionId}
       quickActions={quickActions}
       shortcutActions={shortcutActions}
       onMeasuredHeightChange={handleQuickBarMeasuredHeightChange}
@@ -2232,7 +2116,7 @@ function TerminalPageComponent({
   ), [
     absoluteLineNumbersVisible,
     activeDraft,
-    activeSession?.id,
+    uiSessionId,
     debugOverlayVisible,
     effectiveKeyboardLiftPx,
     handleSetSplitCount,
@@ -2289,7 +2173,7 @@ function TerminalPageComponent({
           sessions={chromeSessions}
           activeSession={activeChromeSession}
           topInsetPx={headerTopInsetPx}
-          showBackButton={!splitVisible}
+          showBackButton
           onBack={onOpenConnections}
           onOpenQuickTabPicker={handleOpenQuickTabPickerForPane}
           onOpenTabManager={handleOpenTabManager}
@@ -2306,8 +2190,8 @@ function TerminalPageComponent({
       <TerminalNetworkBanner
         connectionIssueVisible={connectionIssueVisible}
         networkOnline={networkOnline}
-        activeSessionState={activeSession?.state}
-        activeSessionLastError={activeSession?.lastError}
+        activeSessionState={uiSession?.state}
+        activeSessionLastError={uiSession?.lastError}
       />
       <div
         style={{
@@ -2349,17 +2233,6 @@ function TerminalPageComponent({
           session={interactiveSession}
           sessionViewportModeStore={sessionViewportModeStoreRef.current}
           getSessionDebugMetrics={getSessionDebugMetrics}
-          viewportMetrics={debugViewportMetrics}
-          keyboardInset={keyboardInset}
-          effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
-          terminalImeLiftPx={terminalImeLiftPx}
-          quickBarShellKeyboardLiftPx={quickBarShellKeyboardLiftPx}
-          shellHeight={shellHeight}
-          terminalChromeBottomPx={terminalChromeBottomPx}
-          terminalKeyboardRequested={terminalKeyboardRequested}
-          quickBarEditorFocused={quickBarEditorFocused}
-          terminalImeActive={terminalImeActive}
-          terminalWidthMode={terminalWidthMode}
           debugOverlayPos={debugOverlayPos}
           debugOverlayDragRef={debugOverlayDragRef}
           onClose={() => setDebugOverlayVisible(false)}

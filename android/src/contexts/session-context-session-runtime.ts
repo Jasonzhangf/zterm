@@ -10,11 +10,13 @@ import {
   buildSessionReconnectingFailureUpdates,
   buildSessionScheduleLoadingState,
   buildSessionTransportPrimeState,
+} from './session-transport-open-helpers';
+import {
   findReusableManagedSession,
   orderSessionsForReconnect,
   shouldAutoReconnectSession,
   shouldOpenManagedSessionTransport,
-} from './session-sync-helpers';
+} from './session-reconnect-helpers';
 import {
   deletePendingSessionTransportOpenIntent,
   hasPendingSessionTransportOpenIntent,
@@ -34,7 +36,6 @@ interface SessionLikeState {
 }
 
 interface CreateSessionOptions {
-  activate?: boolean;
   connect?: boolean;
   customName?: string;
   buffer?: SessionBufferState;
@@ -63,7 +64,6 @@ function clearReconnectRuntimeEntry(
 export function connectSessionRuntime(options: {
   sessionId: string;
   host: Host;
-  activate: boolean;
   refs: {
     manualCloseRef: MutableRefObject<Set<string>>;
   };
@@ -76,8 +76,7 @@ export function connectSessionRuntime(options: {
     sessionId: string,
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
   ) => void;
-  setActiveSessionSync: (id: string) => void;
-  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate: boolean) => void;
+  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate?: boolean) => void;
 }) {
   const primeState = buildSessionTransportPrimeState(options.host, 'connect');
   options.clearReconnectForSession(options.sessionId);
@@ -90,10 +89,7 @@ export function connectSessionRuntime(options: {
     options.sessionId,
     buildSessionScheduleLoadingState(primeState.resolvedSessionName),
   );
-  if (options.activate) {
-    options.setActiveSessionSync(options.sessionId);
-  }
-  options.queueConnectTransportOpenIntent(options.sessionId, options.host, options.activate);
+  options.queueConnectTransportOpenIntent(options.sessionId, options.host);
 }
 
 export function createSessionRuntime(options: {
@@ -112,11 +108,10 @@ export function createSessionRuntime(options: {
   };
   runtimeDebug: RuntimeDebugFn;
   resolveSessionCacheLines: (rows?: number | null) => number;
-  createSessionSync: (session: Session, activate: boolean) => void;
-  setActiveSessionSync: (id: string) => void;
+  createSessionSync: (session: Session) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   readSessionTransportSocket: (sessionId: string) => { readyState: number } | null;
-  connectSession: (sessionId: string, host: Host, activate: boolean) => void;
+  connectSession: (sessionId: string, host: Host) => void;
   defaultViewport: {
     cols: number;
     rows: number;
@@ -129,7 +124,6 @@ export function createSessionRuntime(options: {
     resolvedSessionName,
     activeSessionId: options.refs.stateRef.current.activeSessionId,
   });
-  const shouldActivate = options.createOptions?.activate !== false;
   const shouldConnect = options.createOptions?.connect !== false;
 
   if (existingSession) {
@@ -154,10 +148,6 @@ export function createSessionRuntime(options: {
       });
     }
 
-    if (shouldActivate && options.refs.stateRef.current.activeSessionId !== existingSession.id) {
-      options.setActiveSessionSync(existingSession.id);
-    }
-
     if (shouldConnect) {
       const currentTransport = options.readSessionTransportSocket(existingSession.id);
       const shouldReconnectExisting = shouldOpenManagedSessionTransport({
@@ -169,7 +159,7 @@ export function createSessionRuntime(options: {
         sessionState: existingSession.state,
       });
       if (shouldReconnectExisting) {
-        options.connectSession(existingSession.id, options.host, shouldActivate);
+        options.connectSession(existingSession.id, options.host);
       }
     }
 
@@ -223,13 +213,12 @@ export function createSessionRuntime(options: {
     bridgeHost: options.host.bridgeHost,
     bridgePort: options.host.bridgePort,
     sessionName: resolvedSessionName,
-    activate: shouldActivate,
-    connect: shouldConnect,
-    activeSessionId: options.refs.stateRef.current.activeSessionId,
-  });
-  options.createSessionSync(session, shouldActivate);
+      connect: shouldConnect,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+    });
+  options.createSessionSync(session);
   if (shouldConnect) {
-    options.connectSession(sessionId, options.host, shouldActivate);
+    options.connectSession(sessionId, options.host);
   }
   return sessionId;
 }
@@ -424,7 +413,7 @@ export function scheduleReconnectRuntime(options: {
   refs: {
     manualCloseRef: MutableRefObject<Set<string>>;
     reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
-    stateRef: MutableRefObject<SessionLikeState>;
+    stateRef: MutableRefObject<SessionLikeState & { liveSessionIds?: string[] }>;
   };
   readSessionTransportHost: (sessionId: string) => Host | null;
   shouldAutoReconnectSessionFn: typeof shouldAutoReconnectSession;
@@ -452,6 +441,7 @@ export function scheduleReconnectRuntime(options: {
   if (!options.shouldAutoReconnectSessionFn({
     sessionId: options.sessionId,
     activeSessionId: options.refs.stateRef.current.activeSessionId,
+    liveSessionIds: options.refs.stateRef.current.liveSessionIds,
     force: options.reconnectOptions?.force,
   })) {
     clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);

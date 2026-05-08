@@ -11,11 +11,13 @@ import type {
 } from '../lib/types';
 import {
   normalizeSessionVisibleRangeState,
-  shouldPullVisibleRangeBuffer,
-  visibleRangeStatesEqual,
-  type SessionBufferHeadState,
   type SessionVisibleRangeState,
-} from './session-sync-helpers';
+  visibleRangeStatesEqual,
+} from './session-visible-range-helpers';
+import {
+  shouldPullVisibleRangeBuffer,
+  type SessionBufferHeadState,
+} from './session-buffer-planner-helpers';
 
 interface ScheduleStateSetter {
   (

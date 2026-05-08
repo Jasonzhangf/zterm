@@ -4,7 +4,8 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import type { RevisionResetExpectation, SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
   applySessionActionRuntime,
   applyTransportDiagnosticsRuntime,
@@ -117,10 +118,9 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
-  const createSessionSync = (session: Session, activate: boolean) => {
+  const createSessionSync = (session: Session) => {
     createSessionSyncRuntime({
       session,
-      activate,
       applySessionAction,
     });
   };

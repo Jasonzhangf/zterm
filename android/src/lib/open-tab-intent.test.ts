@@ -171,7 +171,7 @@ describe('open-tab intent truth', () => {
     });
   });
 
-  it('rewrites persisted active truth to the runtime active tab after restore has already settled', () => {
+  it('does not let runtime active session backwrite explicit open-tab active truth after restore settles', () => {
     const decision = deriveRuntimeOpenTabSyncDecision({
       currentState: normalizeOpenTabIntentState([makeTab('s1'), makeTab('s2')], 's1'),
       runtimeSessions: [makeSession('s1'), makeSession('s2')],
@@ -181,13 +181,7 @@ describe('open-tab intent truth', () => {
       closedSessionIds: new Set<string>(),
     });
 
-    expect(decision).toEqual({
-      kind: 'merge',
-      state: {
-        tabs: [makeTab('s1'), makeTab('s2')],
-        activeSessionId: 's2',
-      },
-    });
+    expect(decision).toEqual({ kind: 'noop' });
   });
 
   it('does not append runtime-only sessions when OPEN_TABS already exists as explicit client truth', () => {

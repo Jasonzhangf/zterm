@@ -4,7 +4,7 @@ import {
   ensureControlTransportForSessionOpen,
   handleControlTransportMessage,
 } from './session-context-transport-runtime';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { ServerMessage } from '../lib/types';
 
 function makeHost() {
@@ -217,6 +217,69 @@ describe('bindSessionTransportSocketLifecycle', () => {
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.ws.connect.buffer-sync.preparse-inactive-drop',
       expect.objectContaining({ sessionId: 'session-1' }),
+    );
+  });
+
+  it('does not preparse-drop live visible pane buffer-sync when the pane is non-active but still visible', () => {
+    const ws = {
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const handleSocketServerMessage = vi.fn();
+    const recordSessionRx = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    bindSessionTransportSocketLifecycle({
+      sessionId: 'session-2',
+      host: makeHost(),
+      resolvedSessionName: 'tmux-2',
+      ws,
+      debugScope: 'connect',
+      readActiveSessionId: () => 'session-1',
+      readSessionTransportSocket: () => ws,
+      sendSocketPayload: vi.fn(),
+      connectMessagePayload: {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'tmux-2',
+      } as any,
+      runtimeDebug,
+      flushRuntimeDebugLogs: vi.fn(),
+      startSocketHeartbeat: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      clearSessionHandshakeTimeout: vi.fn(),
+      setSessionHandshakeTimeout: vi.fn(),
+      recordSessionRx,
+      isSessionTransportActive: vi.fn(() => false),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      handleSocketServerMessage,
+      finalizeFailure: vi.fn(),
+      onConnected: vi.fn(),
+      sessionHandshakeTimeoutMs: 5000,
+    });
+
+    const payload = JSON.stringify({
+      type: 'buffer-sync',
+      payload: {
+        revision: 9,
+        startIndex: 80,
+        endIndex: 104,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: Array.from({ length: 24 }, (_, i) => ({ i: i + 80, t: `line-${i + 80}` })),
+      },
+    });
+    ws.onmessage?.({ data: payload });
+
+    expect(recordSessionRx).toHaveBeenCalledWith('session-2', payload);
+    expect(handleSocketServerMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.ws.connect.buffer-sync.preparse-inactive-drop',
+      expect.anything(),
     );
   });
 });

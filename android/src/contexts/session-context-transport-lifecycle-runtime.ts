@@ -1,6 +1,6 @@
-import type { Host, ServerMessage } from '../lib/types';
+import type { Host, ServerMessage, TerminalWidthMode } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import { buildSessionConnectPayload, buildSessionOpenPayload } from './session-context-transport-wire-runtime';
+import { buildSessionConnectPayload, buildSessionOpenPayload, buildSessionResizePayload } from './session-context-transport-wire-runtime';
 import {
   bindSessionTransportSocketLifecycle as bindSessionTransportSocketLifecycleBaseRuntime,
   cleanupControlTransportSocket as cleanupControlTransportSocketBaseRuntime,
@@ -11,7 +11,7 @@ import {
   type SessionContextTransportAccessors,
   createSessionContextTransportAccessors,
 } from './session-context-transport-runtime';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { SessionTransportRuntimeStore } from '../lib/session-transport-runtime';
 
 interface MutableRefObject<T> {
@@ -82,6 +82,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
   handleControlTransportMessage: (options: { sessionId: string }, msg: ServerMessage) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   sessionHandshakeTimeoutMs: number;
+  readRequestedTerminalGeometry?: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {
   ensureControlTransportForSessionOpenBaseRuntime({
     ...options,
@@ -92,6 +93,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
         resolvedSessionName: options.intent.resolvedSessionName,
         sessionId: options.intent.sessionId,
         openRequestId: options.intent.openRequestId,
+        geometry: options.readRequestedTerminalGeometry?.() || null,
       }),
     },
   });
@@ -148,6 +150,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
   onConnected: () => void;
   onClosed?: (reason?: string) => void;
   sessionHandshakeTimeoutMs: number;
+  readRequestedTerminalGeometry?: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {
   bindSessionTransportSocketLifecycleBaseRuntime({
     ...options,
@@ -158,9 +161,32 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
       sessionId: options.sessionId,
       openRequestId: options.openRequestId,
       sessionTransportToken: options.readSessionTransportToken(options.sessionId),
+      geometry: options.readRequestedTerminalGeometry?.() || null,
     }),
     onClosed: options.onClosed,
   });
+}
+
+export function sendTerminalResizeRuntime(options: {
+  sessionId: string;
+  ws: BridgeTransportSocket | null;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  cols?: number | null;
+  rows?: number | null;
+  widthMode?: TerminalWidthMode;
+}) {
+  if (!options.ws || options.ws.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
+    type: 'resize',
+    payload: buildSessionResizePayload({
+      cols: options.cols,
+      rows: options.rows,
+      widthMode: options.widthMode,
+    }),
+  }));
+  return true;
 }
 
 export function openSocketConnectHandshakeOrchestrationRuntime(options: Parameters<typeof openSocketConnectHandshakeBaseRuntime>[0]) {

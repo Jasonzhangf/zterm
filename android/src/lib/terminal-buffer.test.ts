@@ -391,6 +391,117 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(next.gapRanges).toEqual([]);
   });
 
+  it('does not drag the local tail window backward when one sparse payload spans both older history and newer tail', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 100,
+        endIndex: 110,
+        availableStartIndex: 100,
+        availableEndIndex: 110,
+        viewportEndIndex: 110,
+        revision: 5,
+        rows: 4,
+        lines: Array.from({ length: 10 }, (_, offset) => [100 + offset, `line-${100 + offset}`]),
+      }),
+      10,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 95,
+        endIndex: 111,
+        availableStartIndex: 95,
+        availableEndIndex: 111,
+        viewportEndIndex: 111,
+        revision: 6,
+        rows: 4,
+        lines: [
+          [95, 'older-95'],
+          [110, 'tail-110'],
+        ],
+      }),
+      10,
+    );
+
+    expect(next.startIndex).toBe(101);
+    expect(next.endIndex).toBe(111);
+    expect(next.bufferTailEndIndex).toBe(111);
+    expect(next.lines.map(cellsToLine)).toEqual([
+      'line-101',
+      'line-102',
+      'line-103',
+      'line-104',
+      'line-105',
+      'line-106',
+      'line-107',
+      'line-108',
+      'line-109',
+      'tail-110',
+    ]);
+    expect(next.gapRanges).toEqual([]);
+  });
+
+  it('keeps the tail-anchored window stable across large same-revision sparse patches that touch old and new rows together', () => {
+    const current = applyBufferSyncToSessionBuffer(
+      undefined,
+      payload({
+        startIndex: 200,
+        endIndex: 220,
+        availableStartIndex: 200,
+        availableEndIndex: 220,
+        viewportEndIndex: 220,
+        revision: 9,
+        rows: 6,
+        lines: Array.from({ length: 20 }, (_, offset) => [200 + offset, `line-${200 + offset}`]),
+      }),
+      12,
+    );
+
+    const next = applyBufferSyncToSessionBuffer(
+      current,
+      payload({
+        startIndex: 194,
+        endIndex: 223,
+        availableStartIndex: 194,
+        availableEndIndex: 223,
+        viewportEndIndex: 223,
+        revision: 9,
+        rows: 6,
+        lines: [
+          [194, 'history-194'],
+          [195, 'history-195'],
+          [216, 'patched-216'],
+          [217, 'patched-217'],
+          [220, 'tail-220'],
+          [221, 'tail-221'],
+          [222, 'tail-222'],
+        ],
+      }),
+      12,
+    );
+
+    expect(next.startIndex).toBe(211);
+    expect(next.endIndex).toBe(223);
+    expect(next.bufferHeadStartIndex).toBe(194);
+    expect(next.bufferTailEndIndex).toBe(223);
+    expect(next.lines.map(cellsToLine)).toEqual([
+      'line-211',
+      'line-212',
+      'line-213',
+      'line-214',
+      'line-215',
+      'patched-216',
+      'patched-217',
+      'line-218',
+      'line-219',
+      'tail-220',
+      'tail-221',
+      'tail-222',
+    ]);
+  });
+
   it('keeps the local sliding history when a follow payload only carries the tail window diff', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,

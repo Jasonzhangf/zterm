@@ -92,29 +92,38 @@ vi.mock('../components/TerminalView', () => ({
     active,
     onInput,
     onResize,
+    onWidthModeChange,
     onViewportChange,
     onSwipeTab,
+    widthMode,
   }: {
     sessionId: string;
     active?: boolean;
     onInput?: (sessionId: string, data: string) => void;
     onResize?: TerminalResizeHandler;
+    onWidthModeChange?: (sessionId: string, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number | null) => void;
     onViewportChange?: TerminalViewportChangeHandler;
     onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
+    widthMode?: 'adaptive-phone' | 'mirror-fixed';
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-active={active ? 'true' : 'false'}
       data-has-oninput={onInput ? 'true' : 'false'}
       data-has-onresize={onResize ? 'true' : 'false'}
+      data-has-onwidthmodechange={onWidthModeChange ? 'true' : 'false'}
       data-has-onviewport={onViewportChange ? 'true' : 'false'}
       data-has-onswipetab={onSwipeTab ? 'true' : 'false'}
+      data-width-mode={widthMode || 'adaptive-phone'}
     >
       <button type="button" onClick={() => onInput?.(sessionId, `typed:${sessionId}`)}>
         input-{sessionId}
       </button>
       <button type="button" onClick={() => onResize?.(sessionId, 81, 25)}>
         resize-{sessionId}
+      </button>
+      <button type="button" onClick={() => onWidthModeChange?.(sessionId, widthMode || 'adaptive-phone', 81)}>
+        widthmode-{sessionId}
       </button>
       <button
         type="button"
@@ -287,6 +296,37 @@ describe('TerminalPage tab isolation', () => {
     });
   });
 
+  it('only wires width-mode callback for active pane session', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onTerminalWidthModeChange = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[1]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onTerminalWidthModeChange={onTerminalWidthModeChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="mirror-fixed"
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onwidthmodechange')).toBe('true');
+    screen.getByText('widthmode-s2').click();
+    expect(onTerminalWidthModeChange).toHaveBeenCalledWith('s2', 'mirror-fixed', 81);
+  });
+
   it('does not emit a second visible-range callback when viewport state already carries mode truth', async () => {
     const sessions = [makeSession('s1')];
     const onTerminalViewportChange = vi.fn();
@@ -412,6 +452,52 @@ describe('TerminalPage tab isolation', () => {
     const panes = Array.from(document.querySelectorAll('[data-testid="terminal-pane-shell"]'));
     const pane2 = panes.find((node) => node.getAttribute('data-pane-id') === 'pane-2') as HTMLElement | undefined;
     expect(pane2?.querySelector('[data-testid="terminal-view-s3"]')).toBeTruthy();
+  });
+
+  it('uses the active pane session as the single UI owner in split mode even before runtime active catches up', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onQuickActionInput = vi.fn();
+    const onSessionDraftChange = vi.fn();
+    const onSessionDraftSend = vi.fn();
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-2',
+    }));
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onQuickActionInput={onQuickActionInput}
+        onSessionDraftChange={onSessionDraftChange}
+        onSessionDraftSend={onSessionDraftSend}
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-active-session-id')).toBe('s2');
+    fireEvent.click(screen.getByText('send-quick'));
+    fireEvent.click(screen.getByText('change-draft'));
+    fireEvent.click(screen.getByText('send-draft'));
+
+    expect(onQuickActionInput).toHaveBeenCalledWith('quick-seq', 's2');
+    expect(onSessionDraftChange).toHaveBeenCalledWith('draft-next', 's2');
+    expect(onSessionDraftSend).toHaveBeenCalledWith('draft-send', 's2');
   });
 
   it('applies explicit pane-attach intent so a newly opened session lands in the requested pane without relying on P1 fallback', async () => {

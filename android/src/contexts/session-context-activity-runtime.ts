@@ -2,7 +2,7 @@ import type { Session } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import {
   buildActiveSessionRefreshPlan,
-} from './session-sync-helpers';
+} from './session-transport-open-helpers';
 
 interface MutableRefObject<T> {
   current: T;
@@ -139,27 +139,6 @@ export function ensureActiveSessionFreshRuntime(options: {
   });
 
   if (refreshPlan.action === 'skip') {
-    if (refreshPlan.reason === 'tick-live-refresh-owned-by-daemon') {
-      const cadence = options.resolveTerminalRefreshCadence();
-      const now = Date.now();
-      const lastServerActivityAt = options.refs.lastServerActivityAtRef.current.get(options.refreshOptions.sessionId) || 0;
-      const lastHeadRequestAt = options.refs.lastHeadRequestAtRef.current.get(options.refreshOptions.sessionId) || 0;
-      const lastProgressAt = lastServerActivityAt;
-      const headSilenceMs = lastProgressAt > 0 ? Math.max(0, now - lastProgressAt) : Number.POSITIVE_INFINITY;
-      if (headSilenceMs >= cadence.headStalePingMs) {
-        options.runtimeDebug('session.transport.active-tick.head-probe', {
-          sessionId: options.refreshOptions.sessionId,
-          activeSessionId: options.refs.stateRef.current.activeSessionId,
-          isActive,
-          isLive,
-          headSilenceMs,
-          lastServerActivityAt,
-          lastHeadRequestAt,
-          thresholdMs: cadence.headStalePingMs,
-        });
-        return options.requestSessionBufferHead(options.refreshOptions.sessionId, ws, { force: false });
-      }
-    }
     options.runtimeDebug(`session.transport.${options.refreshOptions.source}.skip`, {
       sessionId: options.refreshOptions.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,

@@ -1,6 +1,6 @@
 import type { Host, ServerMessage } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import {
   cleanupControlSocketOrchestrationRuntime,
   ensureControlTransportForSessionOpenOrchestrationRuntime,

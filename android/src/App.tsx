@@ -71,6 +71,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     renameSession,
     setLiveSessionIds,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     sendInput,
     sendImagePaste,
     sendFileAttach,
@@ -267,6 +268,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     inputResetEpochBySession,
     handleTerminalInput,
     handleTerminalViewportChange,
+    handleTerminalResize,
+    handleTerminalWidthModeChange,
     handleQuickActionInput,
     handleSessionDraftChange,
     handleSessionDraftSend,
@@ -276,6 +279,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   } = useTerminalShellActions({
     sendInput,
     updateSessionViewport,
+    sendTerminalResize,
     getSessionRenderBufferStore,
     setSessionDraft,
     clearSessionDraft,
@@ -440,9 +444,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
                   : current
               ));
             }}
-            onResize={undefined}
+            onResize={handleTerminalResize}
             onTerminalInput={handleTerminalInput}
             onTerminalViewportChange={handleTerminalViewportChange}
+            onTerminalWidthModeChange={handleTerminalWidthModeChange}
             onLiveSessionIdsChange={setLiveSessionIds}
             inputResetEpochBySession={inputResetEpochBySession}
             followResetEpoch={followResetEpoch}

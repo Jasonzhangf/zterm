@@ -4,6 +4,7 @@ import type {
   TerminalBufferPayload,
 } from './types';
 import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
+import type { TerminalWidthMode } from './bridge-settings';
 
 // ─── Remote screenshot / file transfer types ───
 
@@ -148,6 +149,7 @@ export interface HostConfigMessage {
   sessionName: string;
   cols?: number;
   rows?: number;
+  widthMode?: TerminalWidthMode;
   autoCommand?: string;
 }
 
@@ -174,6 +176,7 @@ export interface AttachFileStartPayload {
 export type BridgeClientMessage =
   | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
+  | { type: 'resize'; payload: { cols?: number; rows?: number; widthMode?: TerminalWidthMode } }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> } }

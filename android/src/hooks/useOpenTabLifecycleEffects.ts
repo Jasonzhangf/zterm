@@ -1,7 +1,7 @@
 import { useEffect, type MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
-import { createForegroundRefreshRuntime, markForegroundRuntimeHidden, performForegroundRefresh } from '../lib/app-foreground-refresh';
+import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { Session } from '../lib/types';
 
@@ -26,9 +26,11 @@ interface OpenTabLifecycleCloseOptions {
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
-  activeSessionIdRef: MutableRefObject<string | null>;
+  openTabStateRef: MutableRefObject<{
+    tabs: any[];
+    activeSessionId: string | null;
+  }>;
   runtimeActiveSessionIdRef: MutableRefObject<string | null>;
-  resumeActiveSessionTransportRef: MutableRefObject<(sessionId: string) => boolean>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
@@ -39,9 +41,8 @@ interface UseOpenTabLifecycleEffectsOptions {
 export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOptions) {
   const {
     sessionsRef,
-    activeSessionIdRef,
+    openTabStateRef,
     runtimeActiveSessionIdRef,
-    resumeActiveSessionTransportRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
@@ -52,16 +53,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   useEffect(() => {
     const notifyResume = (reason: ForegroundResumeReason) => {
       bumpFollowResetEpoch();
-      performForegroundRefresh({
-        reason,
-        sessions: sessionsRef.current.map((session) => ({ id: session.id, state: session.state })),
-        activeSessionId: activeSessionIdRef.current,
-        resumeActiveSessionTransport: resumeActiveSessionTransportRef.current,
-        runtime: foregroundRefreshRuntimeRef.current,
-        log: (entry) => {
-          console.debug('[App] foreground resume actions ->', entry);
-        },
-      });
       void auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
         console.error('[App] Failed to audit remote session truth on foreground resume:', error);
       });
@@ -125,12 +116,11 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       document.removeEventListener('pause', markHidden as EventListener);
     };
   }, [
-    activeSessionIdRef,
     auditOpenTabsAgainstRemoteSessions,
     bumpFollowResetEpoch,
     foregroundRefreshRuntimeRef,
+    openTabStateRef,
     onForegroundActiveChange,
-    resumeActiveSessionTransportRef,
     sessionsRef,
   ]);
 
@@ -149,7 +139,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         sessionId,
         type: detail?.type || 'unknown',
         message: detail?.message || null,
-        activeSessionId: activeSessionIdRef.current,
+        activeSessionId: openTabStateRef.current.activeSessionId,
         sessions: sessionsRef.current.map((session) => ({
           id: session.id,
           state: session.state,

@@ -5,7 +5,7 @@ import {
   settleSessionPullStatesWithBufferSync,
   type SessionPullPurpose,
   type SessionPullStates,
-} from './session-sync-helpers';
+} from './session-pull-state-helpers';
 
 interface MutableRefObject<T> {
   current: T;

@@ -12,12 +12,14 @@
 
 import {
   buildSessionBufferSyncRequestPayload,
+} from '../../contexts/session-buffer-planner-helpers';
+import {
   doesSessionPullStateCoverRequest,
   getPrimarySessionPullState,
   hasActiveSessionPullState,
   type SessionPullPurpose,
   type SessionPullStates,
-} from '../../contexts/session-sync-helpers';
+} from '../../contexts/session-pull-state-helpers';
 import type { TerminalBufferPayload, SessionVisibleRangeState } from '../../lib/types';
 
 export type BufferSyncTransport = {
@@ -36,7 +38,7 @@ export type BufferSyncCallbacks = {
 };
 
 /**
- * 请求状态，与 session-sync-helpers 中的 SessionPullStates 兼容。
+ * 请求状态，与 session-pull-state-helpers 中的 SessionPullStates 兼容。
  */
 type PullStateEntry = SessionPullStates[string] & {
   purpose: SessionPullPurpose;

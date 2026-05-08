@@ -18,7 +18,7 @@ interface ApplyOpenTabStateFn {
       tabs: PersistedOpenTab[];
       activeSessionId: string | null;
     },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean; markExplicitTruth?: boolean },
   ): {
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;
@@ -43,7 +43,6 @@ interface UseOpenTabRestoreRuntimeSyncOptions {
   closedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   closedOpenTabReuseKeysRef: MutableRefObject<Set<string>>;
   applyOpenTabState: ApplyOpenTabStateFn;
-  requestRuntimeActiveSessionSwitch: (nextActiveSessionId: string | null) => void;
   createSession: (
     host: Host,
     options?: {
@@ -69,7 +68,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
     applyOpenTabState,
-    requestRuntimeActiveSessionSwitch,
     createSession,
   } = options;
 
@@ -104,6 +102,8 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           currentOpenTabState = applyOpenTabState({
             tabs: initialRestoreState.tabs,
             activeSessionId: initialRestoreState.activeSessionId,
+          }, {
+            markExplicitTruth: initialRestorePlan.tabs.length > 0,
           });
           initialRemoteRestoreApplied = true;
         }
@@ -128,7 +128,9 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             activeSessionId: runtimeActiveSessionId,
             runtimeSessionIds: runtimeSessionStructure.map((session) => session.id),
           });
-          applyOpenTabState(runtimeSyncDecision.state);
+          applyOpenTabState(runtimeSyncDecision.state, {
+            markExplicitTruth: false,
+          });
           return;
         }
 
@@ -142,7 +144,9 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             afterSessionIds: runtimeSyncDecision.state.tabs.map((tab) => tab.sessionId),
             activeSessionId: runtimeSyncDecision.state.activeSessionId,
           });
-          applyOpenTabState(runtimeSyncDecision.state);
+          applyOpenTabState(runtimeSyncDecision.state, {
+            markExplicitTruth: hasPersistedOpenTabsTruthRef.current,
+          });
           return;
         }
 
@@ -190,7 +194,9 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
       if (cancelled) {
         return;
       }
-      applyOpenTabState(remoteRestoreState);
+      applyOpenTabState(remoteRestoreState, {
+        markExplicitTruth: restorePlan.tabs.length > 0,
+      });
 
       if (remoteRestoreState.tabs.length === 0) {
         return;
@@ -211,7 +217,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
         });
 
         const restoredSessionId = createSession(host, {
-          activate: tab.sessionId === nextActiveSessionId,
+          activate: false,
           connect: visibleSessionIds.has(tab.sessionId),
           customName: tab.customName,
           createdAt: tab.createdAt,
@@ -223,7 +229,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           bridgeHost: tab.bridgeHost,
           bridgePort: tab.bridgePort,
           sessionName: tab.sessionName,
-          activate: tab.sessionId === nextActiveSessionId,
+          activate: false,
         });
         if (restoredSessionId !== tab.sessionId) {
           restoredSessionIdRemap.set(tab.sessionId, restoredSessionId);
@@ -251,7 +257,12 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             });
           }
         } else if (restoredActiveSessionId) {
-          requestRuntimeActiveSessionSwitch(restoredActiveSessionId);
+          applyOpenTabState({
+            tabs: resolvedTabs,
+            activeSessionId: restoredActiveSessionId,
+          }, {
+            switchRuntime: true,
+          });
         }
       }
     };
@@ -270,7 +281,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     hosts,
     hostsLoaded,
     applyOpenTabState,
-    requestRuntimeActiveSessionSwitch,
     runtimeActiveSessionId,
     runtimeSessionStructure,
     openTabStateRef,

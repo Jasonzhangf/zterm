@@ -83,7 +83,7 @@ describe('useTerminalWorkspace explicit pane truth', () => {
       result.current.attachSessionToPane('s3', 'pane-missing');
     });
 
-    expect(result.current.findPaneForSession('s3')?.id).toBe('pane-1');
+    expect(result.current.findPaneForSession('s3')).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       '[useTerminalWorkspace] Refused to attach sessions to a missing pane.',
       expect.objectContaining({
@@ -92,5 +92,58 @@ describe('useTerminalWorkspace explicit pane truth', () => {
       }),
     );
     consoleErrorSpy.mockRestore();
+  });
+
+  it('does not resurrect a runtime session into workspace tabs when it was never in explicit open-tab truth', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-2',
+    }));
+
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [makeSession('s1'), makeSession('s2'), makeSession('s3')],
+      activeSessionId: 's1',
+      viewportWidth: 1200,
+      viewportHeight: 900,
+      maxSplitCount: 4,
+    }));
+
+    expect(result.current.findPaneForSession('s1')?.id).toBe('pane-1');
+    expect(result.current.findPaneForSession('s2')?.id).toBe('pane-2');
+    expect(result.current.findPaneForSession('s3')).toBeNull();
+    expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['s1', 's2']);
+  });
+
+  it('keeps split pane owner as the single truth instead of overriding it from runtime active session', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-2',
+    }));
+
+    const { result, rerender } = renderHook(({ activeSessionId }) => useTerminalWorkspace({
+      sessions: [makeSession('s1'), makeSession('s2')],
+      activeSessionId,
+      viewportWidth: 1200,
+      viewportHeight: 900,
+      maxSplitCount: 4,
+    }), {
+      initialProps: {
+        activeSessionId: 's1' as string | null,
+      },
+    });
+
+    expect(result.current.workspace.activePaneId).toBe('pane-2');
+    expect(result.current.activePaneSessionId).toBe('s2');
+
+    rerender({ activeSessionId: 's1' });
+
+    expect(result.current.workspace.activePaneId).toBe('pane-2');
+    expect(result.current.activePaneSessionId).toBe('s2');
   });
 });

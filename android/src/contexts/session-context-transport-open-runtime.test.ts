@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { queueSessionTransportOpenIntentRuntime } from './session-context-transport-open-runtime';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 
 function makeHost() {
   return {

@@ -39,7 +39,6 @@ function createOptions(overrides: Partial<any> = {}) {
   });
 
   const runtimeRefs = {
-    activeSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
     runtimeActiveSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
     sessionsRef: createRef<any[]>(overrides.sessions ?? []),
     hostsRef: createRef<any[]>(overrides.hosts ?? []),
@@ -54,11 +53,6 @@ function createOptions(overrides: Partial<any> = {}) {
     closedOpenTabReuseKeysRef,
     terminalActiveSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
     ensureTerminalPageVisibleRef: createRef(ensureTerminalPageVisible),
-    persistAndSwitchExplicitOpenTabsRef: createRef<((tabs: any[], activeSessionId: string | null) => any) | null>((tabs: any[], activeSessionId: string | null) => {
-      const normalized = normalizeOpenTabIntentState(tabs, activeSessionId);
-      openTabStateRef.current = normalized;
-      return normalized;
-    }),
     renameSessionRef: createRef(vi.fn()),
   };
 

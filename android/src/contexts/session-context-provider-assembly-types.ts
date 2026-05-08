@@ -39,7 +39,7 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionBufferSnapshot: (sessionId: string) => any;
   setActiveSessionSync: (id: string) => void;
   setLiveSessionIdsSync: (ids: string[]) => void;
-  createSessionSync: (session: any, activate: boolean) => void;
+  createSessionSync: (session: any) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
   updateSessionSync: (id: string, updates: any) => void;
@@ -60,6 +60,7 @@ export interface SessionProviderCoreAssembliesResult {
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   queueConnectTransportOpenIntent: (sessionId: string, host: any, activate: boolean) => void;
+  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   readSessionTransportSocket: (sessionId: string) => any;
   readSessionTransportHost: (sessionId: string) => any;
   readSessionTransportRuntime: (sessionId: string) => any;

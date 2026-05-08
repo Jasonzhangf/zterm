@@ -10,6 +10,7 @@ import type {
   SessionDebugOverlayMetrics,
   SessionScheduleState,
   SessionState,
+  TerminalWidthMode,
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
@@ -19,7 +20,7 @@ import type { SessionRenderBufferStore } from '../lib/session-render-buffer-stor
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type {
   QueueSessionTransportOpenIntentOptions as SessionTransportOpenIntentHelperOptions,
-} from './session-sync-helpers';
+} from './session-transport-open-helpers';
 
 const RECONNECT_BASE_DELAY_MS = 1200;
 const RECONNECT_MAX_DELAY_MS = 30000;
@@ -33,7 +34,7 @@ export interface SessionManagerState {
 }
 
 export type SessionAction =
-  | { type: 'CREATE_SESSION'; session: Session; activate: boolean }
+  | { type: 'CREATE_SESSION'; session: Session }
   | { type: 'UPDATE_SESSION'; id: string; updates: Partial<Session> }
   | { type: 'MOVE_SESSION'; id: string; toIndex: number }
   | { type: 'DELETE_SESSION'; id: string }
@@ -64,19 +65,9 @@ export function reduceSessionAction(state: SessionManagerState, action: SessionA
   switch (action.type) {
     case 'CREATE_SESSION': {
       const nextSessions = [...state.sessions.filter((session) => session.id !== action.session.id), action.session];
-      const nextActiveSessionId = action.activate ? action.session.id : state.activeSessionId || action.session.id;
-      const nextLiveSessionIds = state.liveSessionIdsExplicit
-        ? (
-          state.liveSessionIds.includes(action.session.id)
-            ? state.liveSessionIds
-            : state.liveSessionIds
-        )
-        : (nextActiveSessionId ? [nextActiveSessionId] : []);
       return {
         ...state,
         sessions: nextSessions,
-        activeSessionId: nextActiveSessionId,
-        liveSessionIds: nextLiveSessionIds,
       };
     }
     case 'UPDATE_SESSION': {
@@ -209,6 +200,7 @@ export interface SessionContextValue {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
+  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
@@ -235,7 +227,6 @@ export interface SessionProviderProps {
 }
 
 export interface CreateSessionOptions {
-  activate?: boolean;
   connect?: boolean;
   customName?: string;
   buffer?: SessionBufferState;

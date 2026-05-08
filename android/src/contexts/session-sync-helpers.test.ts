@@ -21,22 +21,31 @@ import {
   buildSessionScheduleErrorState,
   buildSessionScheduleLoadingState,
   buildSessionTransportPrimeState,
-  buildDefaultSessionVisibleRange,
-  hasSessionLocalWindow,
-  buildManagedSessionReuseKey,
-  buildSessionBufferSyncRequestPayload,
   createPendingSessionTransportOpenIntent,
+} from './session-transport-open-helpers';
+import {
+  buildManagedSessionReuseKey,
   findReusableManagedSession,
-  normalizeSessionVisibleRangeState,
   scoreReusableManagedSession,
-  shouldPullFollowBuffer,
+  shouldAutoReconnectSession,
   shouldOpenManagedSessionTransport,
-  shouldPullVisibleRangeBuffer,
+} from './session-reconnect-helpers';
+import {
+  buildDefaultSessionVisibleRange,
+  normalizeSessionVisibleRangeState,
   visibleRangeStatesEqual,
+} from './session-visible-range-helpers';
+import {
+  hasSessionLocalWindow,
+  buildSessionBufferSyncRequestPayload,
+  shouldPullFollowBuffer,
+  shouldPullVisibleRangeBuffer,
+} from './session-buffer-planner-helpers';
+import {
   doesSessionPullStateCoverRequest,
   doesSessionPullStateMatchExactLocalSnapshot,
   settleSessionPullStatesWithBufferSync,
-} from './session-sync-helpers';
+} from './session-pull-state-helpers';
 
 function makeSession(overrides?: Partial<Session>): Session {
   return {
@@ -134,7 +143,7 @@ describe('session sync helper refresh planner', () => {
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
   });
 
-  it('lets daemon own normal live refresh when active tick sees an already-open transport', () => {
+  it('requests head during active tick for an already-open transport', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -146,12 +155,12 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
-      action: 'skip',
-      reason: 'tick-live-refresh-owned-by-daemon',
+      action: 'request-head',
+      resetPullBookkeeping: false,
     });
   });
 
-  it('does not request head for a live non-focused pane target during active tick once daemon owns live refresh', () => {
+  it('requests head for a live non-focused pane target during active tick', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -163,8 +172,8 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
-      action: 'skip',
-      reason: 'tick-live-refresh-owned-by-daemon',
+      action: 'request-head',
+      resetPullBookkeeping: false,
     });
   });
 
@@ -186,7 +195,7 @@ describe('session sync helper refresh planner', () => {
     });
   });
 
-  it('keeps active tick on daemon-owned live refresh path so caller can inject low-frequency head probe', () => {
+  it('keeps active tick on the same client-owned head refresh path for connected panes', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -198,8 +207,8 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
-      action: 'skip',
-      reason: 'tick-live-refresh-owned-by-daemon',
+      action: 'request-head',
+      resetPullBookkeeping: false,
     });
   });
 
@@ -216,6 +225,41 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-reentry',
     })).toEqual({ action: 'reconnect' });
+  });
+});
+
+describe('session sync helper reconnect ownership', () => {
+  it('allows reconnect for the interactive active session', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-1',
+      activeSessionId: 'session-1',
+      liveSessionIds: [],
+    })).toBe(true);
+  });
+
+  it('allows reconnect for visible live panes even when they are not the interactive active session', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-2',
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-2', 'session-3'],
+    })).toBe(true);
+  });
+
+  it('blocks reconnect for sessions that are neither active nor visible live panes', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-4',
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-2', 'session-3'],
+    })).toBe(false);
+  });
+
+  it('still forces reconnect when explicitly requested', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-4',
+      activeSessionId: 'session-1',
+      liveSessionIds: [],
+      force: true,
+    })).toBe(true);
   });
 });
 

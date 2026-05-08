@@ -125,6 +125,8 @@ function createRuntime(options?: {
     refreshMirrorHeadForSession,
     handleClientDebugLog,
     handleClientDebugSnapshot,
+    handleInput,
+    closeSession,
   };
 }
 
@@ -278,5 +280,25 @@ describe('terminal message runtime explicit error truth', () => {
         }),
       }),
     );
+  });
+
+  it('ignores legacy resize frames so runtime geometry no longer becomes daemon truth', async () => {
+    const { runtime, sessions, sendTransportMessage, handleInput, closeSession } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'resize',
+      payload: {
+        cols: 72,
+        rows: 24,
+        widthMode: 'adaptive-phone',
+      },
+    })));
+
+    expect(sendTransportMessage).not.toHaveBeenCalled();
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(closeSession).not.toHaveBeenCalled();
   });
 });

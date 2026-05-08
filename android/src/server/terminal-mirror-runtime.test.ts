@@ -234,6 +234,61 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
+  it('uses min adaptive cols across concurrent adaptive-phone subscribers', async () => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const firstSession = createSession('session-1');
+    const secondSession = createSession('session-2');
+    secondSession.transportId = 'transport-2';
+    sessions.set(firstSession.id, firstSession);
+    sessions.set(secondSession.id, secondSession);
+
+    await runtime.attachTmux(firstSession, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    await runtime.attachTmux(secondSession, {
+      sessionName: 'demo',
+      cols: 80,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror?.adaptiveCols.get('session-1')?.cols).toBe(120);
+    expect(mirror?.adaptiveCols.get('session-2')?.cols).toBe(80);
+    expect(mirror?.cols).toBe(80);
+  });
+
+  it('keeps upstream width untouched for mirror-fixed subscriber attach', async () => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const adaptiveSession = createSession('session-1');
+    const fixedSession = createSession('session-2');
+    fixedSession.transportId = 'transport-2';
+    sessions.set(adaptiveSession.id, adaptiveSession);
+    sessions.set(fixedSession.id, fixedSession);
+
+    await runtime.attachTmux(adaptiveSession, {
+      sessionName: 'demo',
+      cols: 90,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    const mirror = mirrors.get('demo');
+    expect(mirror?.cols).toBe(90);
+
+    await runtime.attachTmux(fixedSession, {
+      sessionName: 'demo',
+      cols: 60,
+      rows: 40,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(mirror?.cols).toBe(90);
+    expect(mirror?.adaptiveCols.has('session-2')).toBe(false);
+  });
+
   it('stops recurring live sync once the last subscriber detaches, then resumes on reattach', async () => {
     vi.useFakeTimers();
     try {

@@ -1,6 +1,7 @@
 import type { Host, ServerMessage, Session, SessionBufferState, SessionScheduleState, TerminalBufferPayload, TerminalCursorState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
   applyIncomingBufferSyncOrchestrationRuntime,
   commitSessionBufferUpdateRuntime,
@@ -145,6 +146,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       commitSessionBufferUpdate,
       scheduleSessionRenderCommit: options.scheduleSessionRenderCommit,
       isSessionTransportActive: options.isSessionTransportActive,
+      shouldAcceptSessionLiveBuffer: options.shouldAcceptSessionLiveBuffer,
       runtimeDebug: options.runtimeDebug,
       requestSessionBufferSync,
     });
@@ -170,6 +172,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       commitSessionBufferUpdate,
       scheduleSessionRenderCommit: options.scheduleSessionRenderCommit,
       isSessionTransportActive: options.isSessionTransportActive,
+      shouldAcceptSessionLiveBuffer: options.shouldAcceptSessionLiveBuffer,
       requestSessionBufferSync,
     });
   };
@@ -195,6 +198,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
       settleSessionPullState: options.settleSessionPullState,
       runtimeDebug: options.runtimeDebug,
       isSessionTransportActive: options.isSessionTransportActive,
+      shouldAcceptSessionLiveBuffer: options.shouldAcceptSessionLiveBuffer,
       summarizeBufferPayload: options.summarizeBufferPayload,
       applyIncomingBufferSync,
       handleBufferHead,

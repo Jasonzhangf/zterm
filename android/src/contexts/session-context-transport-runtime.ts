@@ -16,7 +16,7 @@ import {
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { PendingSessionTransportOpenIntent } from './session-sync-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import {
   deletePendingSessionTransportOpenIntent,
   findPendingSessionTransportOpenIntentByRequestId,
