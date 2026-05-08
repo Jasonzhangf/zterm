@@ -112,6 +112,7 @@ const {
   daemonRuntimeDebug,
   summarizePayload,
   handleClientDebugLog,
+  handleClientDebugSnapshot,
 } = terminalDebugRuntime;
 const {
   resolveMirrorCacheLines,
@@ -264,6 +265,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   closeSession: terminalRuntime.closeSession,
   terminalFileTransferRuntime,
   handleClientDebugLog,
+  handleClientDebugSnapshot,
   controlRuntimeDeps: {
     sessions,
     mirrors,

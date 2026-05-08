@@ -1245,6 +1245,35 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
+  it('does not double-request head when connected baseline is immediately followed by explicit active resume', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+      fireEvent.click(screen.getByText('resume-active'));
+
+      await waitFor(() => {
+        const sentMessages = readSentMessages(ws);
+        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('forces a fresh head request when switching back to a connected tab inside the head throttle window', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
     try {
@@ -2497,7 +2526,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }, { timeout: 220 });
   });
 
-  it('flushes queued input with a forced head request as soon as the session reconnects', async () => {
+  it('does not replay prior explicit input after reconnect', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -2513,8 +2542,6 @@ describe('SessionContext websocket dynamic refresh', () => {
         sessionId: 'session-1',
       },
     });
-
-    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
 
     ws1.close();
     fireEvent.click(screen.getByText('send-input'));
@@ -2532,12 +2559,12 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'input')).toBe(false);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
   });
 
-  it('flushes queued input after first connect when tab switch input happens before that session handshake completes', async () => {
+  it('does not queue explicit input before first connect completes for a switched tab', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -2576,7 +2603,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(false);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
   });

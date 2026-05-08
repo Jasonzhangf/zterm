@@ -67,9 +67,10 @@ export function useSessionProviderRuntime(options: {
   const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
   const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
-  const pendingInputQueueRef = useRef<Map<string, string[]>>(new Map());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const lastActiveReentryAtRef = useRef<Map<string, number>>(new Map());
+  const lastConnectedBaselineAtRef = useRef<Map<string, number>>(new Map());
+  const connectedBaselineBurstGuardRef = useRef<Set<string>>(new Set());
   const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const pendingInputTailRefreshRef = useRef<Map<string, { requestedAt: number; localRevision: number }>>(new Map());
@@ -100,7 +101,6 @@ export function useSessionProviderRuntime(options: {
   const foregroundActiveRef = useRef(options.appForegroundActive !== false);
   const handleSocketConnectedBaselineRef = useRef<HandleSocketConnectedBaselineFn | null>(null);
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
-  const flushPendingInputQueueRef = useRef<((sessionId: string) => void) | null>(null);
   const handleSocketServerMessageRef = useRef<HandleSocketServerMessageFn | null>(null);
 
   return {
@@ -120,9 +120,10 @@ export function useSessionProviderRuntime(options: {
       staleTransportProbeAtRef,
       reconnectRuntimesRef,
       manualCloseRef,
-      pendingInputQueueRef,
       lastActivatedSessionIdRef,
       lastActiveReentryAtRef,
+      lastConnectedBaselineAtRef,
+      connectedBaselineBurstGuardRef,
       sessionBufferHeadsRef,
       sessionRevisionResetRef,
       pendingInputTailRefreshRef,
@@ -137,7 +138,6 @@ export function useSessionProviderRuntime(options: {
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,
       finalizeSocketFailureBaselineRef,
-      flushPendingInputQueueRef,
       handleSocketServerMessageRef,
     },
   };

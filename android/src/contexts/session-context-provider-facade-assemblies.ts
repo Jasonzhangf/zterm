@@ -39,12 +39,13 @@ export function useSessionProviderFacadeAssemblies(
     sessionDebugMetricsStoreRef,
     sessionVisibleRangeRef,
     sessionBufferHeadsRef,
-    pendingInputQueueRef,
     remoteScreenshotRuntimeRef,
     foregroundActiveRef,
     sessionPullStateRef,
     lastActivatedSessionIdRef,
     lastActiveReentryAtRef,
+    lastConnectedBaselineAtRef,
+    connectedBaselineBurstGuardRef,
     pingIntervalsRef,
     handshakeTimeoutsRef,
     reconnectRuntimesRef,
@@ -55,12 +56,13 @@ export function useSessionProviderFacadeAssemblies(
     refs: {
       stateRef: options.stateRef,
       manualCloseRef,
-      pendingInputQueueRef,
-      pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+        pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
         pendingInputTailRefreshRef: options.refs.pendingInputTailRefreshRef,
       pendingConnectTailRefreshRef: options.refs.pendingConnectTailRefreshRef,
       pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
       lastActiveReentryAtRef,
+      lastConnectedBaselineAtRef,
+      connectedBaselineBurstGuardRef,
       sessionVisibleRangeRef,
       sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
       sessionRenderGateRef: options.refs.sessionRenderGateRef,
@@ -119,7 +121,6 @@ export function useSessionProviderFacadeAssemblies(
     options.refs.transportRuntimeStoreRef,
     options.setScheduleStates,
     options.stateRef,
-    pendingInputQueueRef,
     sessionDebugMetricsStoreRef,
     sessionVisibleRangeRef,
   ]);
@@ -180,7 +181,6 @@ export function useSessionProviderFacadeAssemblies(
   const sessionInteractionRuntime = useMemo(() => createSessionInteractionRuntime({
     refs: {
       stateRef: options.stateRef,
-      pendingInputQueueRef,
       remoteScreenshotRuntimeRef,
     },
     imagePasteReadyTimeoutMs: IMAGE_PASTE_READY_TIMEOUT_MS,
@@ -199,20 +199,17 @@ export function useSessionProviderFacadeAssemblies(
   }), [
     core,
     options.stateRef,
-    pendingInputQueueRef,
     probeOrReconnectStaleSessionTransport,
     reconnectSession,
     remoteScreenshotRuntimeRef,
   ]);
 
   const {
-    flushPendingInputQueue,
     sendInput,
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
   } = sessionInteractionRuntime;
-  options.refs.flushPendingInputQueueRef.current = flushPendingInputQueue;
 
   useSessionContextLifecycle({
     appForegroundActive: options.appForegroundActive,
@@ -226,6 +223,8 @@ export function useSessionProviderFacadeAssemblies(
       sessionPullStateRef,
       lastActivatedSessionIdRef,
       lastActiveReentryAtRef,
+      lastConnectedBaselineAtRef,
+      lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
       remoteScreenshotRuntimeRef,
       pingIntervalsRef,
       handshakeTimeoutsRef,
@@ -236,6 +235,7 @@ export function useSessionProviderFacadeAssemblies(
     clientRuntimeDebugFlushIntervalMs: CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS,
     ensureActiveSessionFresh,
     resolveActiveHeadRefreshTickMs: () => resolveTerminalRefreshCadence().headTickMs,
+    resolveHeadStalePingMs: () => resolveTerminalRefreshCadence().headStalePingMs,
     clearSessionHandshakeTimeout: core.clearSessionHandshakeTimeout,
     cleanupSocket: core.cleanupSocket,
     cleanupControlSocket: core.cleanupControlSocket,

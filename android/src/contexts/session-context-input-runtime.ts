@@ -9,53 +9,12 @@ interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
 
-export function enqueuePendingInput(options: {
-  sessionId: string;
-  payload: string;
-  pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
-}) {
-  const current = options.pendingInputQueueRef.current.get(options.sessionId) || [];
-  options.pendingInputQueueRef.current.set(options.sessionId, [...current, options.payload]);
-}
-
-export function flushPendingInputQueue(options: {
-  sessionId: string;
-  refs: {
-    pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
-    sessionsRef: MutableRefObject<Session[]>;
-  };
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
-  readSessionBufferSnapshot: (sessionId: string) => { revision: number };
-  requestSessionBufferHead: (sessionId: string, ws: BridgeTransportSocket, options?: { force?: boolean }) => void;
-}) {
-  const ws = options.readSessionTransportSocket(options.sessionId);
-  const queued = options.refs.pendingInputQueueRef.current.get(options.sessionId);
-  if (!ws || ws.readyState !== WebSocket.OPEN || !queued || queued.length === 0) {
-    return;
-  }
-
-  const session = options.refs.sessionsRef.current.find((item) => item.id === options.sessionId) || null;
-  options.refs.pendingInputQueueRef.current.delete(options.sessionId);
-  for (const payload of queued) {
-    options.sendSocketPayload(options.sessionId, ws, JSON.stringify({ type: 'input', payload }));
-  }
-  if (session) {
-    options.markPendingInputTailRefresh(
-      options.sessionId,
-      options.readSessionBufferSnapshot(options.sessionId).revision,
-    );
-  }
-  options.requestSessionBufferHead(options.sessionId, ws, { force: true });
-}
-
 export function sendInputThroughSessionTransport(options: {
   sessionId: string;
   data: string;
   refs: {
-    sessionsRef: MutableRefObject<Session[]>;
-    stateRef: MutableRefObject<{ activeSessionId: string | null }>;
+    sessionsRef: { current: Array<{ id: string }> };
+    stateRef: { current: { activeSessionId: string | null } };
   };
   runtimeDebug: RuntimeDebugFn;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -64,9 +23,8 @@ export function sendInputThroughSessionTransport(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
-  requestSessionBufferHead: (sessionId: string, ws: BridgeTransportSocket, options?: { force?: boolean }) => void;
+  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   probeOrReconnectStaleSessionTransport: (sessionId: string, ws: BridgeTransportSocket, reason: 'input' | 'active-tick' | 'active-reentry') => void;
-  enqueuePendingInput: (sessionId: string, payload: string) => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   shouldReconnectQueuedActiveInput: (options: {
     isActiveTarget: boolean;
@@ -96,7 +54,9 @@ export function sendInputThroughSessionTransport(options: {
 
   const ws = options.readSessionTransportSocket(targetSessionId);
   const transportStale = options.isSessionTransportActivityStale(targetSessionId);
-  const isActiveTarget = options.refs.stateRef.current.activeSessionId === targetSessionId;
+  const runtimeActiveSessionId = options.refs.stateRef.current.activeSessionId;
+  const isActiveTarget = runtimeActiveSessionId === targetSessionId;
+  const isExplicitInputTarget = true;
   const reconnectInFlight = options.isReconnectInFlight(targetSessionId);
 
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -116,29 +76,30 @@ export function sendInputThroughSessionTransport(options: {
       JSON.stringify({ type: 'input', payload: options.data }),
     );
     options.requestSessionBufferHead(targetSessionId, ws, { force: true });
-    if (transportStale && isActiveTarget && !reconnectInFlight) {
+    if (transportStale && isExplicitInputTarget && !reconnectInFlight) {
       options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
     }
     return;
   }
 
-  options.runtimeDebug('session.input.queue', {
+  options.runtimeDebug('session.input.transport-unavailable', {
     sessionId: targetSessionId,
     why: transportStale ? 'stale-open-transport' : 'transport-unavailable',
     size: options.data.length,
     preview: options.data.slice(0, 32),
     isActiveTarget,
+    runtimeActiveSessionId,
+    explicitInputTarget: isExplicitInputTarget,
     reconnectInFlight,
     wsReadyState: ws?.readyState ?? null,
   });
-  options.enqueuePendingInput(targetSessionId, options.data);
   if (options.hasPendingSessionTransportOpen(targetSessionId)) {
     return;
   }
   const shouldForceReconnect = transportStale
-    ? isActiveTarget && !reconnectInFlight
+    ? isExplicitInputTarget && !reconnectInFlight
     : options.shouldReconnectQueuedActiveInput({
-        isActiveTarget,
+        isActiveTarget: isExplicitInputTarget,
         wsReadyState: ws?.readyState ?? null,
         reconnectInFlight,
       });

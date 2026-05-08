@@ -1,9 +1,10 @@
-import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { TerminalView } from '../components/TerminalView';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
+import type { SessionHeadStore } from '../lib/session-head-store';
 import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type SessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
@@ -15,10 +16,14 @@ import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
-import { resolveLayoutProfile, type LayoutProfile } from '../../../packages/shared/src/layout/profile';
+import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
+import { useTerminalWorkspace } from '../hooks/useTerminalWorkspace';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
+import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
+import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
 import {
   STORAGE_KEYS,
+  type AndroidWorkspacePane,
   type PersistedOpenTab,
   type QuickAction,
   type RemoteScreenshotCapture,
@@ -28,11 +33,8 @@ import {
   type SessionDebugOverlayMetrics,
   type SessionScheduleState,
   type ScheduleJobDraft,
-  type TerminalLayoutState,
   type TerminalResizeHandler,
-  type TerminalSplitPaneId,
   type TerminalShortcutAction,
-  type TerminalVisibleRangeChangeHandler,
   type TerminalViewportChangeHandler,
   type TerminalWidthMode,
 } from '../lib/types';
@@ -44,13 +46,38 @@ type VirtualKeyboardApi = {
   removeEventListener: (type: 'geometrychange', listener: EventListenerOrEventListenerObject) => void;
 };
 
+type TerminalDebugViewportMetrics = {
+  innerHeight: number;
+  clientHeight: number;
+  visualViewportHeight: number;
+  visualViewportOffsetTop: number;
+  visualViewportBottom: number;
+  layoutViewportHeight: number;
+};
+
 const NETWORK_BANNER_GRACE_MS = 3000;
 const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
-const TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX = 14;
-const SPLIT_AUTO_CLOSE_DROP_PX = 96;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
+}
+
+function readTerminalDebugViewportMetrics(): TerminalDebugViewportMetrics {
+  const viewportMetrics = resolveTerminalViewportMetrics();
+  return {
+    innerHeight:
+      typeof window === 'undefined'
+        ? 0
+        : Math.max(0, Math.round(window.innerHeight || 0)),
+    clientHeight:
+      typeof document === 'undefined'
+        ? 0
+        : Math.max(0, Math.round(document.documentElement?.clientHeight || 0)),
+    visualViewportHeight: viewportMetrics.visualHeight,
+    visualViewportOffsetTop: viewportMetrics.visualOffsetTop,
+    visualViewportBottom: viewportMetrics.visualBottom,
+    layoutViewportHeight: viewportMetrics.layoutHeight,
+  };
 }
 
 const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
@@ -142,7 +169,10 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   );
 });
 
-export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
+export function resolveKeyboardLiftPx(
+  reportedKeyboardInset: number,
+  layoutViewportHeightOverride?: number,
+) {
   const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
   if (safeReportedInset <= 0 || typeof window === 'undefined') {
     return 0;
@@ -153,18 +183,24 @@ export function resolveKeyboardLiftPx(reportedKeyboardInset: number) {
     return safeReportedInset;
   }
 
-  const layoutViewportHeight = Math.max(0, Math.round(window.innerHeight || 0));
-  const visibleViewportBottom = Math.max(
+  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
+  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
+  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
+  const layoutViewportHeight = Math.max(
     0,
-    Math.round((visualViewport.height || 0) + (visualViewport.offsetTop || 0)),
+    Math.round(layoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
   );
-  const occludedBottom = Math.max(0, layoutViewportHeight - visibleViewportBottom);
+  const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {
     return safeReportedInset;
   }
 
   return Math.min(safeReportedInset, occludedBottom);
+}
+
+export function resolveLayoutViewportHeight() {
+  return resolveTerminalViewportMetrics().layoutHeight;
 }
 
 export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
@@ -180,88 +216,7 @@ export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
 }
 
 function resolveWindowWidth() {
-  if (typeof window === 'undefined') {
-    return 0;
-  }
-  const visualWidth = Math.round(window.visualViewport?.width || 0);
-  return Math.max(visualWidth, Math.round(window.innerWidth || 0));
-}
-
-function resolvePaneId(
-  assignments: Partial<Record<string, TerminalSplitPaneId>>,
-  sessionId: string | null | undefined,
-): TerminalSplitPaneId {
-  if (!sessionId) {
-    return 'primary';
-  }
-  return assignments[sessionId] === 'secondary' ? 'secondary' : 'primary';
-}
-
-function findFirstSessionForPane(
-  sessions: Session[],
-  assignments: Partial<Record<string, TerminalSplitPaneId>>,
-  paneId: TerminalSplitPaneId,
-  excludeSessionId?: string | null,
-) {
-  return sessions.find((session) => (
-    session.id !== excludeSessionId
-    && resolvePaneId(assignments, session.id) === paneId
-  )) || null;
-}
-
-function normalizeTerminalLayoutState(input: unknown): TerminalLayoutState | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const candidate = input as Partial<TerminalLayoutState>;
-  const assignmentsInput = candidate.splitPaneAssignments;
-  const splitPaneAssignments: Partial<Record<string, TerminalSplitPaneId>> = {};
-  if (assignmentsInput && typeof assignmentsInput === 'object') {
-    for (const [sessionId, paneId] of Object.entries(assignmentsInput)) {
-      if (!sessionId.trim()) {
-        continue;
-      }
-      splitPaneAssignments[sessionId] = paneId === 'secondary' ? 'secondary' : 'primary';
-    }
-  }
-
-  return {
-    splitEnabled: Boolean(candidate.splitEnabled),
-    splitSecondarySessionId:
-      typeof candidate.splitSecondarySessionId === 'string' && candidate.splitSecondarySessionId.trim()
-        ? candidate.splitSecondarySessionId.trim()
-        : null,
-    splitPaneAssignments,
-  };
-}
-
-function readPersistedTerminalLayoutState(): TerminalLayoutState | null {
-  const storage = getBrowserStorage();
-  if (!storage) {
-    return null;
-  }
-
-  try {
-    const raw = storage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
-    return normalizeTerminalLayoutState(raw ? JSON.parse(raw) : null);
-  } catch (error) {
-    console.error('[TerminalPage] Failed to load terminal layout:', error);
-    return null;
-  }
-}
-
-function persistTerminalLayoutState(layout: TerminalLayoutState) {
-  const storage = getBrowserStorage();
-  if (!storage) {
-    return;
-  }
-
-  try {
-    storage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(layout));
-  } catch (error) {
-    console.error('[TerminalPage] Failed to persist terminal layout:', error);
-  }
+  return resolveTerminalViewportMetrics().layoutWidth;
 }
 
 interface TerminalPageProps {
@@ -269,6 +224,7 @@ interface TerminalPageProps {
   activeSession: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
+  sessionHeadStore?: SessionHeadStore | null;
   inputResetEpochBySession?: Record<string, number>;
   followResetEpoch?: number;
   onSwitchSession: (id: string) => void;
@@ -276,11 +232,12 @@ interface TerminalPageProps {
   onRenameSession: (id: string, name: string) => void;
   onCloseSession: (id: string, source?: string) => void;
   onOpenConnections: () => void;
-  onOpenQuickTabPicker: () => void;
+  onOpenQuickTabPicker: (paneId?: string) => void;
+  pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
+  onPaneAttachIntentApplied?: (intent: { sessionIds: string[]; paneId: string; nonce: number }) => void;
   onResize?: TerminalResizeHandler;
   onTerminalInput?: (sessionId: string, data: string) => void;
   onTerminalViewportChange?: TerminalViewportChangeHandler;
-  onTerminalVisibleRangeChange?: TerminalVisibleRangeChangeHandler;
   onLiveSessionIdsChange?: (ids: string[]) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
@@ -379,10 +336,6 @@ function terminalPageActiveRuntimeStatusKey(session: Session | null | undefined)
   ].join('::');
 }
 
-function terminalPageSessionIdsKey(sessions: Session[]) {
-  return sessions.map((session) => session.id).join('||');
-}
-
 function resolveSessionInputEpoch(
   inputResetEpochBySession: Record<string, number> | undefined,
   sessionId: string | null | undefined,
@@ -418,6 +371,17 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   session,
   sessionViewportModeStore,
   getSessionDebugMetrics,
+  viewportMetrics,
+  keyboardInset,
+  effectiveKeyboardLiftPx,
+  terminalImeLiftPx,
+  quickBarShellKeyboardLiftPx,
+  shellHeight,
+  terminalChromeBottomPx,
+  terminalKeyboardRequested,
+  quickBarEditorFocused,
+  terminalImeActive,
+  terminalWidthMode,
   debugOverlayPos,
   debugOverlayDragRef,
   onClose,
@@ -427,6 +391,17 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   session: Session | null;
   sessionViewportModeStore: SessionViewportModeStore;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
+  viewportMetrics: TerminalDebugViewportMetrics;
+  keyboardInset: number;
+  effectiveKeyboardLiftPx: number;
+  terminalImeLiftPx: number;
+  quickBarShellKeyboardLiftPx: number;
+  shellHeight: number;
+  terminalChromeBottomPx: number;
+  terminalKeyboardRequested: boolean;
+  quickBarEditorFocused: boolean;
+  terminalImeActive: boolean;
+  terminalWidthMode: TerminalWidthMode;
   debugOverlayPos: { x: number; y: number };
   debugOverlayDragRef: React.MutableRefObject<{
     startX: number;
@@ -576,6 +551,74 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
           marginTop: '2px',
           paddingTop: '2px',
           borderTop: '1px solid rgba(255,255,255,0.10)',
+          color: 'rgba(231, 238, 252, 0.78)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>IH</span>
+          <span>{viewportMetrics.innerHeight}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>CH</span>
+          <span>{viewportMetrics.clientHeight}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>VVH</span>
+          <span>{viewportMetrics.visualViewportHeight}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>VVT</span>
+          <span>{viewportMetrics.visualViewportOffsetTop}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>VVB</span>
+          <span>{viewportMetrics.visualViewportBottom}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>K</span>
+          <span>{keyboardInset}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>Lift</span>
+          <span>{effectiveKeyboardLiftPx}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>TI</span>
+          <span>{terminalImeLiftPx}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>QI</span>
+          <span>{quickBarShellKeyboardLiftPx}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>SH</span>
+          <span>{shellHeight}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>Btm</span>
+          <span>{terminalChromeBottomPx}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>WM</span>
+          <span>{terminalWidthMode === 'mirror-fixed' ? 'fix' : 'adp'}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>Req/QF</span>
+          <span>{terminalKeyboardRequested ? '1' : '0'}/{quickBarEditorFocused ? '1' : '0'}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+          <span>TA</span>
+          <span>{terminalImeActive ? '1' : '0'}</span>
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: '2px',
+          paddingTop: '2px',
+          borderTop: '1px solid rgba(255,255,255,0.10)',
           color: 'rgba(231, 238, 252, 0.65)',
           fontSize: '7px',
           lineHeight: 1.2,
@@ -589,11 +632,13 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
 });
 
 const TerminalStageShell = ReactMemo(function TerminalStageShell({
-  activeSession,
+  interactiveSession,
   sessionBufferStore,
+  sessionHeadStore,
   renderedPaneSessions,
-  visiblePaneSessionIds,
+  visiblePaneEntries,
   splitVisible,
+  activePaneId,
   terminalChromeBottomPx,
   terminalImeLiftPx,
   inputResetEpochBySession,
@@ -606,17 +651,20 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   handleTerminalViewportChange,
   handleSwipeTab,
   handleActiveTerminalActivateInput,
+  onActivatePane,
   focusNonce,
   terminalFontSize,
   terminalThemeId,
   terminalWidthMode,
   absoluteLineNumbersVisible,
 }: {
-  activeSession: Session | null;
+  interactiveSession: Session | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
+  sessionHeadStore?: SessionHeadStore | null;
   renderedPaneSessions: Session[];
-  visiblePaneSessionIds: string[];
+  visiblePaneEntries: { pane: AndroidWorkspacePane; paneIndex: number; session: Session }[];
   splitVisible: boolean;
+  activePaneId: string;
   terminalChromeBottomPx: number;
   terminalImeLiftPx: number;
   inputResetEpochBySession?: Record<string, number>;
@@ -629,43 +677,63 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   handleTerminalViewportChange: TerminalViewportChangeHandler;
   handleSwipeTab: (sessionId: string, direction: 'previous' | 'next') => void;
   handleActiveTerminalActivateInput: () => void;
+  onActivatePane?: (paneId: string) => void;
   focusNonce: number;
   terminalFontSize: number;
   terminalThemeId?: string;
   terminalWidthMode: TerminalWidthMode;
   absoluteLineNumbersVisible: boolean;
 }) {
-  const terminalPaneStyle = useCallback((paneSessionId: string): CSSProperties => {
-    if (!splitVisible) {
-      const isActivePaneSession = paneSessionId === activeSession?.id;
-      return {
-        position: 'absolute',
-        inset: 0,
-        visibility: isActivePaneSession ? 'visible' : 'hidden',
-        opacity: isActivePaneSession ? 1 : 0,
-        zIndex: isActivePaneSession ? 1 : 0,
-      };
-    }
-    const paneIndex = visiblePaneSessionIds.indexOf(paneSessionId);
-    if (paneIndex < 0) {
-      return {
-        position: 'absolute',
-        inset: 0,
-        visibility: 'hidden',
-        pointerEvents: 'none',
-      };
-    }
-    return {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: paneIndex === 0 ? 0 : '50%',
-      width: '50%',
-      paddingLeft: paneIndex === 0 ? 0 : '4px',
-      paddingRight: paneIndex === 0 ? '4px' : 0,
-      boxSizing: 'border-box',
-    };
-  }, [activeSession?.id, splitVisible, visiblePaneSessionIds]);
+  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible }), [splitVisible]);
+
+  const renderTerminal = useCallback((session: Session, sessionIsActive: boolean, renderInstanceKey?: string) => (
+    <TerminalView
+      key={renderInstanceKey || session.id}
+      sessionId={session.id}
+      sessionBufferStore={sessionBufferStore}
+      sessionHeadStore={sessionHeadStore}
+      active={sessionIsActive}
+      live
+      inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
+      followResetEpoch={sessionIsActive ? followResetEpoch : 0}
+      allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
+      domInputOffscreen={isAndroid}
+      onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
+      onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
+      onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
+      onInput={sessionIsActive ? onTerminalInput : undefined}
+      onViewportChange={handleTerminalViewportChange}
+      onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
+      focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
+      fontSize={terminalFontSize}
+      rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
+      themeId={terminalThemeId || 'default'}
+      widthMode={terminalWidthMode}
+      showAbsoluteLineNumbers={absoluteLineNumbersVisible}
+    />
+  ), [
+    absoluteLineNumbersVisible,
+    focusNonce,
+    followResetEpoch,
+    handleActiveTerminalActivateInput,
+    handleSwipeTab,
+    handleTerminalViewportChange,
+    inputResetEpochBySession,
+    isAndroid,
+    onResize,
+    onTerminalInput,
+    onTerminalWidthModeChange,
+    sessionBufferStore,
+    terminalFontSize,
+    terminalKeyboardRequested,
+    terminalThemeId,
+    terminalWidthMode,
+    layoutProfile.stage.containerRadius,
+    layoutProfile.stage.outerMargin,
+    layoutProfile.stage.paneGap,
+    layoutProfile.stage.paneRadius,
+    layoutProfile.stage.rowBottomPadding,
+  ]);
 
   return (
     <div
@@ -683,55 +751,86 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
         style={{
           flex: 1,
           minHeight: 0,
-          margin: '0 4px',
-          borderRadius: '14px',
-          backgroundColor: mobileTheme.colors.canvas,
+          margin: layoutProfile.stage.outerMargin,
+          borderRadius: layoutProfile.stage.containerRadius,
+          backgroundColor: splitVisible ? 'transparent' : mobileTheme.colors.canvas,
           overflow: 'hidden',
-          border: `1px solid ${mobileTheme.colors.cardBorder}`,
+          border: splitVisible ? 'none' : `1px solid ${mobileTheme.colors.cardBorder}`,
           position: 'relative',
           overscrollBehaviorY: 'contain',
         }}
       >
-        {activeSession ? (
-          renderedPaneSessions.map((session) => {
-            const sessionIsActive = session.id === activeSession?.id;
-            return (
+        {interactiveSession ? (
+          splitVisible ? (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                gap: layoutProfile.stage.paneGap,
+                padding: layoutProfile.stage.rowBottomPadding,
+              }}
+            >
+              {visiblePaneEntries.map(({ pane, session }) => {
+                const paneIsActive = pane.id === activePaneId;
+                const sessionIsActive = session.id === interactiveSession?.id;
+                return (
+                  <div
+                    key={pane.id}
+                    data-testid="terminal-pane-shell"
+                    data-pane-id={pane.id}
+                    onPointerDown={() => onActivatePane?.(pane.id)}
+                    style={{
+                      flex: `${Math.max(0.01, pane.size ?? 1)} 1 0%`,
+                      minWidth: 0,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      borderRadius: layoutProfile.stage.paneRadius,
+                      backgroundColor: mobileTheme.colors.canvas,
+                      overflow: 'hidden',
+                      border: `1px solid ${mobileTheme.colors.cardBorder}`,
+                      outline: paneIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
+                      outlineOffset: paneIsActive ? '-2px' : undefined,
+                      boxSizing: 'border-box',
+                      cursor: !paneIsActive ? 'pointer' : undefined,
+                    }}
+                  >
+                    <div
+                      style={{
+                        flex: 1,
+                        minHeight: 0,
+                        position: 'relative',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {renderTerminal(session, sessionIsActive, `${pane.id}:${session.id}`)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            renderedPaneSessions.map((session) => {
+              const sessionIsActive = session.id === interactiveSession?.id;
+              return (
               <div
                 key={session.id}
                 style={{
-                  ...terminalPaneStyle(session.id),
+                  position: 'absolute',
+                  inset: 0,
+                  visibility: sessionIsActive ? 'visible' : 'hidden',
+                  opacity: sessionIsActive ? 1 : 0,
+                  zIndex: sessionIsActive ? 1 : 0,
                   pointerEvents: sessionIsActive ? 'auto' : 'none',
-                  borderRadius: splitVisible ? '12px' : undefined,
-                  outline: splitVisible && sessionIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
-                  outlineOffset: splitVisible && sessionIsActive ? '-2px' : undefined,
                   overflow: 'hidden',
                 }}
               >
-                <TerminalView
-                  sessionId={session.id}
-                  sessionBufferStore={sessionBufferStore}
-                  active={sessionIsActive}
-                  live={visiblePaneSessionIds.includes(session.id)}
-                  inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
-                  followResetEpoch={sessionIsActive ? followResetEpoch : 0}
-                  allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
-                  domInputOffscreen={isAndroid}
-                  onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
-                  onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
-                  onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
-                  onInput={sessionIsActive ? onTerminalInput : undefined}
-                  onViewportChange={handleTerminalViewportChange}
-                  onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
-                  focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
-                  fontSize={terminalFontSize}
-                  rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
-                  themeId={terminalThemeId || 'default'}
-                  widthMode={terminalWidthMode}
-                  showAbsoluteLineNumbers={absoluteLineNumbersVisible}
-                />
+                {renderTerminal(session, sessionIsActive, session.id)}
               </div>
-            );
-          })
+              );
+            })
+          )
         ) : (
           <div
             style={{
@@ -752,10 +851,11 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     </div>
   );
 }, (prev, next) => (
-  terminalPageRenderedSessionUiKey(prev.activeSession) === terminalPageRenderedSessionUiKey(next.activeSession)
+  terminalPageRenderedSessionUiKey(prev.interactiveSession) === terminalPageRenderedSessionUiKey(next.interactiveSession)
   && terminalPageRenderedSessionsUiKey(prev.renderedPaneSessions) === terminalPageRenderedSessionsUiKey(next.renderedPaneSessions)
   && prev.sessionBufferStore === next.sessionBufferStore
   && prev.splitVisible === next.splitVisible
+  && prev.activePaneId === next.activePaneId
   && prev.terminalChromeBottomPx === next.terminalChromeBottomPx
   && prev.terminalImeLiftPx === next.terminalImeLiftPx
   && resolveRenderedSessionsInputEpochKey(prev.inputResetEpochBySession, prev.renderedPaneSessions)
@@ -774,7 +874,9 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   && prev.terminalThemeId === next.terminalThemeId
   && prev.terminalWidthMode === next.terminalWidthMode
   && prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible
-  && prev.visiblePaneSessionIds.join('||') === next.visiblePaneSessionIds.join('||')
+  && prev.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
+    === next.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
+  && prev.onActivatePane === next.onActivatePane
 ));
 
 
@@ -936,6 +1038,7 @@ function TerminalPageComponent({
   activeSession,
   getSessionDebugMetrics,
   sessionBufferStore = null,
+  sessionHeadStore = null,
   inputResetEpochBySession,
   followResetEpoch = 0,
   onSwitchSession,
@@ -944,10 +1047,11 @@ function TerminalPageComponent({
   onCloseSession,
   onOpenConnections,
   onOpenQuickTabPicker,
+  pendingPaneAttachIntent = null,
+  onPaneAttachIntentApplied,
   onResize,
   onTerminalInput,
   onTerminalViewportChange,
-  onTerminalVisibleRangeChange,
   onLiveSessionIdsChange,
   onImagePaste,
   onFileAttach,
@@ -978,7 +1082,6 @@ function TerminalPageComponent({
   onShortcutUse,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
-  const persistedLayoutRef = useRef<TerminalLayoutState | null>(readPersistedTerminalLayoutState());
   const [focusNonce, setFocusNonce] = useState(0);
   const terminalFontSize = 10;
   const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
@@ -990,16 +1093,10 @@ function TerminalPageComponent({
   const [quickBarHeight, setQuickBarHeight] = useState(TERMINAL_QUICK_BAR_RENDER_LIFT_PX);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
+  const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
-  const [splitEnabled, setSplitEnabled] = useState(() => persistedLayoutRef.current?.splitEnabled || false);
-  const [splitSecondarySessionId, setSplitSecondarySessionId] = useState<string | null>(
-    () => persistedLayoutRef.current?.splitSecondarySessionId || null,
-  );
-  const [splitPaneAssignments, setSplitPaneAssignments] = useState<Partial<Record<string, TerminalSplitPaneId>>>(
-    () => persistedLayoutRef.current?.splitPaneAssignments || {},
-  );
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [headerTopInsetPx, setHeaderTopInsetPx] = useState(() => resolveTerminalHeaderTopInsetPx(isAndroid));
   const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
@@ -1014,12 +1111,12 @@ function TerminalPageComponent({
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
-  const splitOpenWidthRef = useRef(0);
-  const splitOpenProfileRef = useRef<LayoutProfile>('phone-single');
+  const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
   const terminalFocusRetryTimeoutsRef = useRef<number[]>([]);
   const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
   const remoteScreenshotRequestEpochRef = useRef(0);
+  const stableLayoutViewportHeightRef = useRef(resolveLayoutViewportHeight());
 
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id || null;
@@ -1040,6 +1137,25 @@ function TerminalPageComponent({
   useEffect(() => {
     quickBarEditorFocusedRef.current = quickBarEditorFocused;
   }, [quickBarEditorFocused]);
+
+  const rawShellHeight = resolveLayoutViewportHeight();
+  const keyboardViewportFreezeActive = isAndroid && (terminalKeyboardRequested || keyboardInset > 0);
+  const shellHeight = keyboardViewportFreezeActive
+    ? Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
+    : rawShellHeight;
+
+  useEffect(() => {
+    if (!isAndroid) {
+      stableLayoutViewportHeightRef.current = rawShellHeight;
+      return;
+    }
+    if (keyboardViewportFreezeActive) {
+      return;
+    }
+    if (rawShellHeight > 0) {
+      stableLayoutViewportHeightRef.current = rawShellHeight;
+    }
+  }, [isAndroid, keyboardViewportFreezeActive, rawShellHeight]);
 
   const updateTerminalKeyboardRequested = useCallback((next: boolean) => {
     setTerminalKeyboardRequested((current) => (current === next ? current : next));
@@ -1113,35 +1229,60 @@ function TerminalPageComponent({
     ) as HTMLTextAreaElement | null;
   };
 
-  const splitAvailable = sessions.length > 1 && Boolean(activeSession);
-  const activePaneId = resolvePaneId(splitPaneAssignments, activeSession?.id);
-  const passivePaneId: TerminalSplitPaneId = activePaneId === 'primary' ? 'secondary' : 'primary';
-  const primaryPaneSession = activeSession && activePaneId === 'primary'
-    ? activeSession
-    : findFirstSessionForPane(sessions, splitPaneAssignments, 'primary', activeSession?.id);
-  const secondarySession = activeSession && activePaneId === 'secondary'
-    ? activeSession
-    : (
-      sessions.find((session) => (
-        session.id === splitSecondarySessionId
-        && session.id !== activeSession?.id
-        && resolvePaneId(splitPaneAssignments, session.id) === 'secondary'
-      ))
-        || findFirstSessionForPane(sessions, splitPaneAssignments, 'secondary', activeSession?.id)
-    );
-  const splitVisible = splitEnabled
-    && Boolean(primaryPaneSession && secondarySession && primaryPaneSession.id !== secondarySession.id);
-  const visiblePaneSessionIds = activeSession
-    ? splitVisible
-      ? [primaryPaneSession!.id, secondarySession!.id]
-      : [activeSession.id]
+  const {
+    workspace,
+    splitAvailable,
+    splitVisible,
+    activePaneSessionId,
+    currentMaxSplitCount,
+    findPaneForSession,
+    getPaneSessionIds,
+    setSplitCount,
+    assignSessionToPane,
+    attachSessionsToPane,
+    setActivePane,
+  } = useTerminalWorkspace({
+    sessions,
+    activeSessionId: activeSession?.id || null,
+    viewportWidth,
+    viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+    maxSplitCount: 4,
+  });
+  const workspacePanes = splitVisible ? workspace.panes : workspace.panes.slice(0, 1);
+  const paneGroups = workspacePanes.map((pane) => ({
+    paneId: pane.id,
+    size: pane.size,
+    sessions: pane.tabs
+      .map((tab) => sessions.find((session) => session.id === tab.sessionId) || null)
+      .filter((session): session is Session => Boolean(session))
+      .map(toTerminalTabChromeItem),
+    activeSessionId: pane.tabs.find((tab) => tab.id === pane.activeTabId)?.sessionId || null,
+    isActivePane: pane.id === workspace.activePaneId,
+  }));
+  const visiblePaneEntries = splitVisible
+    ? workspacePanes
+        .map((pane, paneIndex) => {
+          const sessionId = pane.tabs.find((tab) => tab.id === pane.activeTabId)?.sessionId || null;
+          if (!sessionId) {
+            return null;
+          }
+          const session = sessions.find((candidate) => candidate.id === sessionId) || null;
+          if (!session) {
+            return null;
+          }
+          return { pane, paneIndex, session };
+        })
+        .filter((entry): entry is { pane: AndroidWorkspacePane; paneIndex: number; session: Session } => Boolean(entry))
     : [];
+  const interactiveSessionId = splitVisible
+    ? (paneGroups.find((group) => group.paneId === workspace.activePaneId)?.activeSessionId || activePaneSessionId)
+    : (activeSession?.id || activePaneSessionId);
+  const interactiveSession = interactiveSessionId
+    ? sessions.find((session) => session.id === interactiveSessionId) || activeSession || null
+    : activeSession || null;
   const renderedPaneSessions = splitVisible
-    ? visiblePaneSessionIds
-        .map((sessionId) => sessions.find((session) => session.id === sessionId) || null)
-        .filter((session): session is Session => Boolean(session))
-    : (activeSession ? [activeSession] : []);
-  const sessionIdsKey = useMemo(() => terminalPageSessionIdsKey(sessions), [sessions]);
+    ? visiblePaneEntries.map((entry) => entry.session)
+    : (interactiveSession ? [interactiveSession] : []);
   const livePaneSessionIds = useMemo(
     () => renderedPaneSessions.map((session) => session.id),
     [renderedPaneSessions],
@@ -1154,27 +1295,55 @@ function TerminalPageComponent({
   const activeHeaderSessionUiKey = useMemo(() => terminalPageHeaderSessionUiKey(activeSession), [activeSession]);
   const chromeSessions = useMemo(() => sessions.map(toTerminalTabChromeItem), [headerSessionsUiKey]);
   const activeChromeSession = useMemo(() => (
-    activeSession ? toTerminalTabChromeItem(activeSession) : null
-  ), [activeHeaderSessionUiKey]);
+    interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
+  ), [activeHeaderSessionUiKey, interactiveSession]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const activeSessionRef = useRef(activeSession);
   const sessionsRef = useRef(sessions);
-  const splitPaneAssignmentsRef = useRef(splitPaneAssignments);
-  const splitEnabledRef = useRef(splitEnabled);
   const splitVisibleRef = useRef(splitVisible);
-  const activePaneIdRef = useRef<TerminalSplitPaneId>(activePaneId);
-  const passivePaneIdRef = useRef<TerminalSplitPaneId>(passivePaneId);
-  const secondarySessionIdRef = useRef<string | null>(secondarySession?.id || null);
+  const activePaneIdRef = useRef<string>(workspace.activePaneId);
   const previousLivePaneSessionIdsKeyRef = useRef<string>('');
   activeSessionRef.current = activeSession;
   sessionsRef.current = sessions;
-  splitPaneAssignmentsRef.current = splitPaneAssignments;
-  splitEnabledRef.current = splitEnabled;
   splitVisibleRef.current = splitVisible;
-  activePaneIdRef.current = activePaneId;
-  passivePaneIdRef.current = passivePaneId;
-  secondarySessionIdRef.current = secondarySession?.id || null;
+  activePaneIdRef.current = workspace.activePaneId;
+
+  useEffect(() => {
+    if (!pendingPaneAttachIntent) {
+      return;
+    }
+    if (appliedPaneAttachIntentNonceRef.current === pendingPaneAttachIntent.nonce) {
+      return;
+    }
+    const normalizedSessionIds = [...new Set(pendingPaneAttachIntent.sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))];
+    const normalizedPaneId = pendingPaneAttachIntent.paneId.trim();
+    if (normalizedSessionIds.length === 0 || !normalizedPaneId) {
+      console.error('[TerminalPage] Refused pane-attach intent without explicit sessionIds/paneId.', pendingPaneAttachIntent);
+      appliedPaneAttachIntentNonceRef.current = pendingPaneAttachIntent.nonce;
+      onPaneAttachIntentApplied?.(pendingPaneAttachIntent);
+      return;
+    }
+    const knownSessionIds = new Set(sessions.map((session) => session.id));
+    const allSessionsPresent = normalizedSessionIds.every((sessionId) => knownSessionIds.has(sessionId));
+    const paneExists = workspace.panes.some((pane) => pane.id === normalizedPaneId);
+    if (!paneExists) {
+      console.error('[TerminalPage] Refused pane-attach intent because target pane does not exist.', {
+        paneId: normalizedPaneId,
+        workspacePaneIds: workspace.panes.map((pane) => pane.id),
+        sessionIds: normalizedSessionIds,
+      });
+      appliedPaneAttachIntentNonceRef.current = pendingPaneAttachIntent.nonce;
+      onPaneAttachIntentApplied?.(pendingPaneAttachIntent);
+      return;
+    }
+    if (!allSessionsPresent) {
+      return;
+    }
+    appliedPaneAttachIntentNonceRef.current = pendingPaneAttachIntent.nonce;
+    attachSessionsToPane(normalizedSessionIds, normalizedPaneId);
+    onPaneAttachIntentApplied?.(pendingPaneAttachIntent);
+  }, [attachSessionsToPane, onPaneAttachIntentApplied, pendingPaneAttachIntent, sessions, workspace.panes]);
 
   useLayoutEffect(() => {
     if (!onLiveSessionIdsChange) {
@@ -1194,99 +1363,6 @@ function TerminalPageComponent({
       onLiveSessionIdsChange?.([]);
     };
   }, [onLiveSessionIdsChange]);
-
-  useEffect(() => {
-    setSplitPaneAssignments((current) => {
-      const next: Partial<Record<string, TerminalSplitPaneId>> = {};
-      let primaryCount = 0;
-      let secondaryCount = 0;
-
-      for (const session of sessions) {
-        const existing = current[session.id];
-        const paneId = existing
-          || (activeSession?.id === session.id
-            ? 'primary'
-            : secondaryCount === 0
-              ? 'secondary'
-              : primaryCount <= secondaryCount
-                ? 'primary'
-                : 'secondary');
-        next[session.id] = paneId;
-        if (paneId === 'secondary') {
-          secondaryCount += 1;
-        } else {
-          primaryCount += 1;
-        }
-      }
-
-      const currentKeys = Object.keys(current);
-      const nextKeys = Object.keys(next);
-      if (
-        currentKeys.length === nextKeys.length
-        && nextKeys.every((key) => current[key] === next[key])
-      ) {
-        return current;
-      }
-      return next;
-    });
-  }, [activeSession?.id, sessionIdsKey]);
-
-  useEffect(() => {
-    if (!splitAvailable) {
-      setSplitEnabled(false);
-      setSplitSecondarySessionId(null);
-      return;
-    }
-    if (splitSecondarySessionId && splitSecondarySessionId !== activeSession?.id) {
-      return;
-    }
-    const nextSecondary = sessions.find((session) => (
-      session.id !== activeSession?.id
-      && resolvePaneId(splitPaneAssignments, session.id) === 'secondary'
-    )) || sessions.find((session) => session.id !== activeSession?.id) || null;
-    setSplitSecondarySessionId(nextSecondary?.id || null);
-  }, [activeSession?.id, sessionIdsKey, splitAvailable, splitPaneAssignments, splitSecondarySessionId]);
-
-  useEffect(() => {
-    if (!splitEnabled || !splitAvailable || !activeSession) {
-      return;
-    }
-    setSplitPaneAssignments((current) => {
-      const activePane = resolvePaneId(current, activeSession.id);
-      const oppositePane: TerminalSplitPaneId = activePane === 'primary' ? 'secondary' : 'primary';
-      const hasOpposite = sessions.some((session) => (
-        session.id !== activeSession.id
-        && resolvePaneId(current, session.id) === oppositePane
-      ));
-      if (hasOpposite) {
-        return current;
-      }
-      const candidate = sessions.find((session) => session.id !== activeSession.id);
-      if (!candidate) {
-        return current;
-      }
-      return {
-        ...current,
-        [candidate.id]: oppositePane,
-      };
-    });
-  }, [activeSession?.id, sessionIdsKey, splitAvailable, splitEnabled]);
-
-  useEffect(() => {
-    const sessionIds = new Set(sessions.map((session) => session.id));
-    const persistedAssignments = Object.fromEntries(
-      Object.entries(splitPaneAssignments).filter(([sessionId]) => sessionIds.has(sessionId)),
-    ) as Partial<Record<string, TerminalSplitPaneId>>;
-
-    persistTerminalLayoutState({
-      splitEnabled: splitEnabled && sessions.length > 1 && Boolean(activeSession),
-      splitSecondarySessionId:
-        splitSecondarySessionId && sessionIds.has(splitSecondarySessionId)
-          ? splitSecondarySessionId
-          : null,
-      splitPaneAssignments: persistedAssignments,
-    });
-  }, [activeSession?.id, sessionIdsKey, splitEnabled, splitPaneAssignments, splitSecondarySessionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1313,22 +1389,6 @@ function TerminalPageComponent({
       }
     };
   }, [isAndroid, scheduleViewportMetricsSync, updateViewportMetrics]);
-
-  useEffect(() => {
-    if (!splitVisible) {
-      return;
-    }
-    if (splitOpenProfileRef.current === 'phone-single') {
-      return;
-    }
-    const currentProfile = resolveLayoutProfile({ width: viewportWidth }).profile;
-    if (
-      currentProfile === 'phone-single'
-      && viewportWidth + SPLIT_AUTO_CLOSE_DROP_PX < splitOpenWidthRef.current
-    ) {
-      setSplitEnabled(false);
-    }
-  }, [splitVisible, viewportWidth]);
 
   const focusTerminalInput = useCallback(() => {
     setFocusNonce((value) => value + 1);
@@ -1582,10 +1642,11 @@ function TerminalPageComponent({
   const handleSwipeTab = useCallback((sessionId: string, direction: 'previous' | 'next') => {
     const currentSplitVisible = splitVisibleRef.current;
     const currentSessions = sessionsRef.current;
-    const currentAssignments = splitPaneAssignmentsRef.current;
     const currentActivePaneId = activePaneIdRef.current;
     const paneScopedSessions = currentSplitVisible
-      ? currentSessions.filter((session) => resolvePaneId(currentAssignments, session.id) === currentActivePaneId)
+      ? getPaneSessionIds(currentActivePaneId)
+          .map((paneSessionId) => currentSessions.find((session) => session.id === paneSessionId) || null)
+          .filter((session): session is Session => Boolean(session))
       : currentSessions;
     const currentIndex = paneScopedSessions.findIndex((session) => session.id === sessionId);
     if (currentIndex < 0) {
@@ -1597,7 +1658,7 @@ function TerminalPageComponent({
       return;
     }
     onSwitchSession(targetSession.id);
-  }, [onSwitchSession]);
+  }, [getPaneSessionIds, onSwitchSession]);
 
   const handleSaveRemoteScreenshot = useCallback(async () => {
     if (
@@ -1913,12 +1974,58 @@ function TerminalPageComponent({
     };
   }, [updateKeyboardInset]);
 
-  const terminalChromeBottomPx = Math.max(0, quickBarHeight + TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX);
-  const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset);
+  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, topInsetPx: headerTopInsetPx }), [headerTopInsetPx, splitVisible]);
+  const terminalChromeBottomPx = Math.max(0, quickBarHeight + layoutProfile.quickBar.touchSafeOffsetPx);
+  const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset, shellHeight);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  const shellHeight = Math.max(0, typeof window !== 'undefined' ? window.innerHeight : 0);
+  const debugViewportMetrics = readTerminalDebugViewportMetrics();
+
+  useEffect(() => registerClientDebugSnapshotSource('terminal-page', () => ({
+    activeSessionId: activeSession?.id || null,
+    activeSessionState: activeSession?.state || null,
+    sessionCount: sessions.length,
+    splitVisible,
+    layoutProfile,
+    headerTopInsetPx,
+    quickBarHeight,
+    terminalChromeBottomPx,
+    shellHeight,
+    layoutViewportHeight: shellHeight,
+    keyboardInset,
+    effectiveKeyboardLiftPx,
+    terminalKeyboardRequested,
+    quickBarEditorFocused,
+    terminalImeActive,
+    terminalImeLiftPx,
+    quickBarShellKeyboardLiftPx,
+    networkOnline,
+    connectionIssueVisible,
+    isAndroid,
+    widthMode: terminalWidthMode,
+  })), [
+    activeSession?.id,
+    activeSession?.state,
+    connectionIssueVisible,
+    effectiveKeyboardLiftPx,
+    headerTopInsetPx,
+    isAndroid,
+    keyboardInset,
+    layoutProfile,
+    networkOnline,
+    quickBarEditorFocused,
+    quickBarHeight,
+    quickBarShellKeyboardLiftPx,
+    sessions.length,
+    shellHeight,
+    splitVisible,
+    terminalChromeBottomPx,
+    terminalImeActive,
+    terminalImeLiftPx,
+    terminalKeyboardRequested,
+    terminalWidthMode,
+  ]);
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
   const saveCurrentTabList = (name: string) => {
@@ -1987,101 +2094,83 @@ function TerminalPageComponent({
     }
   };
 
-  const cycleSecondaryPane = useCallback(() => {
-    const currentActiveSession = activeSessionRef.current;
-    const currentSessions = sessionsRef.current;
-    const currentAssignments = splitPaneAssignmentsRef.current;
-    const currentPassivePaneId = passivePaneIdRef.current;
-    const currentSecondarySessionId = secondarySessionIdRef.current;
-    if (!currentActiveSession) {
-      return;
-    }
-    const candidates = currentSessions.filter((session) => (
-      session.id !== currentActiveSession.id
-      && resolvePaneId(currentAssignments, session.id) === currentPassivePaneId
-    ));
-    if (candidates.length === 0) {
-      return;
-    }
-    const currentIndex = candidates.findIndex((session) => session.id === currentSecondarySessionId);
-    const nextSession = candidates[(currentIndex + 1) % candidates.length] || candidates[0];
-    setSplitSecondarySessionId(nextSession.id);
-  }, []);
-
-  const assignSessionToPane = useCallback((sessionId: string, paneId: TerminalSplitPaneId) => {
-    setSplitPaneAssignments((current) => {
-      if (current[sessionId] === paneId) {
-        return current;
-      }
-      const next = {
-        ...current,
-        [sessionId]: paneId,
-      };
-      const currentActiveSession = activeSessionRef.current;
-      const currentSessions = sessionsRef.current;
-      const currentSplitEnabled = splitEnabledRef.current;
-      if (currentSplitEnabled && currentActiveSession?.id === sessionId) {
-        const oppositePane: TerminalSplitPaneId = paneId === 'primary' ? 'secondary' : 'primary';
-        const hasOpposite = currentSessions.some((session) => (
-          session.id !== sessionId
-          && resolvePaneId(next, session.id) === oppositePane
-        ));
-        if (!hasOpposite) {
-          const candidate = currentSessions.find((session) => session.id !== sessionId);
-          if (candidate) {
-            next[candidate.id] = oppositePane;
-          }
-        }
-      }
-      return next;
-    });
-  }, []);
-
-  const moveSessionToOtherPane = useCallback((sessionId: string) => {
-    const currentPane = resolvePaneId(splitPaneAssignmentsRef.current, sessionId);
-    assignSessionToPane(sessionId, currentPane === 'primary' ? 'secondary' : 'primary');
-  }, [assignSessionToPane]);
+  const handleSetSplitCount = useCallback((count: number) => {
+    setSplitCount(count);
+  }, [setSplitCount]);
 
   const toggleSplitLayout = useCallback(() => {
-    const currentSplitVisible = splitVisibleRef.current;
-    const currentActiveSession = activeSessionRef.current;
-    const currentSessions = sessionsRef.current;
-    const currentAssignments = splitPaneAssignmentsRef.current;
-    if (!currentSplitVisible) {
-      const currentWidth = resolveWindowWidth();
-      splitOpenWidthRef.current = currentWidth;
-      splitOpenProfileRef.current = resolveLayoutProfile({ width: currentWidth }).profile;
-      if (currentActiveSession) {
-        const activePane = resolvePaneId(currentAssignments, currentActiveSession.id);
-        const oppositePane: TerminalSplitPaneId = activePane === 'primary' ? 'secondary' : 'primary';
-        const hasOpposite = currentSessions.some((session) => (
-          session.id !== currentActiveSession.id
-          && resolvePaneId(currentAssignments, session.id) === oppositePane
-        ));
-        if (!hasOpposite) {
-          const candidate = currentSessions.find((session) => session.id !== currentActiveSession.id);
-          if (candidate) {
-            assignSessionToPane(candidate.id, oppositePane);
-            setSplitSecondarySessionId(candidate.id);
-          }
-        }
-      }
-      setSplitEnabled(true);
+    setSplitCount(splitVisible ? 1 : 2);
+  }, [setSplitCount, splitVisible]);
+
+  const cycleSecondaryPane = useCallback(() => {
+    if (!splitVisible || workspace.panes.length < 2) {
       return;
     }
+    const activePaneId = workspace.activePaneId;
+    const passivePane = workspace.panes.find((pane) => pane.id !== activePaneId) || null;
+    if (!passivePane || passivePane.tabs.length <= 1) {
+      return;
+    }
+    const currentIndex = passivePane.tabs.findIndex((tab) => tab.id === passivePane.activeTabId);
+    const nextIndex = (currentIndex + 1) % passivePane.tabs.length;
+    const nextTab = passivePane.tabs[nextIndex];
+    if (!nextTab) {
+      return;
+    }
+    onSwitchSession(nextTab.sessionId);
+  }, [onSwitchSession, splitVisible, workspace.activePaneId, workspace.panes]);
 
-    setSplitEnabled(false);
-  }, [assignSessionToPane]);
+  const moveSessionToOtherPane = useCallback((sessionId: string) => {
+    const pane = findPaneForSession(sessionId);
+    if (!pane || workspace.panes.length < 2) {
+      return;
+    }
+    const targetPane = workspace.panes.find((candidate) => candidate.id !== pane.id);
+    if (!targetPane) {
+      return;
+    }
+    assignSessionToPane(sessionId, targetPane.id);
+  }, [assignSessionToPane, findPaneForSession, workspace.panes]);
+
+  const activatePaneAndSession = useCallback((paneId: string) => {
+    const normalizedPaneId = paneId.trim();
+    if (!normalizedPaneId) {
+      return;
+    }
+    const targetPane = workspace.panes.find((pane) => pane.id === normalizedPaneId) || null;
+    if (!targetPane) {
+      console.error('[TerminalPage] Refused to activate missing pane.', {
+        paneId: normalizedPaneId,
+        workspacePaneIds: workspace.panes.map((pane) => pane.id),
+      });
+      return;
+    }
+    const targetSessionId = targetPane.tabs.find((tab) => tab.id === targetPane.activeTabId)?.sessionId || null;
+    setActivePane(normalizedPaneId);
+    if (targetSessionId && targetSessionId !== activeSessionRef.current?.id) {
+      onSwitchSession(targetSessionId);
+    }
+  }, [onSwitchSession, setActivePane, workspace.panes]);
+
+  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string) => {
+    if (paneId) {
+      activatePaneAndSession(paneId);
+    }
+    onOpenQuickTabPicker(paneId);
+  }, [activatePaneAndSession, onOpenQuickTabPicker]);
+
+  const handleOpenTabManager = useCallback((paneId?: string) => {
+    setTabManagerScopePaneId(paneId || null);
+    if (paneId) {
+      activatePaneAndSession(paneId);
+    }
+    setTabManagerOpen(true);
+  }, [activatePaneAndSession]);
 
   const handleTerminalViewportChange = useCallback<TerminalViewportChangeHandler>((sessionId, viewState) => {
     sessionViewportModeStoreRef.current.setMode(sessionId, viewState.mode);
     onTerminalViewportChange?.(sessionId, viewState);
-    onTerminalVisibleRangeChange?.(sessionId, {
-      startIndex: Math.max(0, Math.floor(viewState.viewportEndIndex - viewState.viewportRows)),
-      endIndex: Math.max(0, Math.floor(viewState.viewportEndIndex)),
-      viewportRows: Math.max(1, Math.floor(viewState.viewportRows)),
-    });
-  }, [onTerminalViewportChange, onTerminalVisibleRangeChange]);
+  }, [onTerminalViewportChange]);
 
   const quickBarNode = useMemo(() => (
     <TerminalQuickBar
@@ -2103,6 +2192,13 @@ function TerminalPageComponent({
       onOpenScheduleComposer={handleQuickBarOpenScheduleComposer}
       splitAvailable={splitAvailable}
       splitVisible={splitVisible}
+      currentSplitCount={workspacePanes.length}
+      splitCountOptions={
+        splitAvailable
+          ? Array.from({ length: currentMaxSplitCount }, (_, index) => index + 1)
+          : []
+      }
+      onSetSplitCount={handleSetSplitCount}
       onToggleSplitLayout={toggleSplitLayout}
       onCycleSplitPane={cycleSecondaryPane}
       onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
@@ -2137,9 +2233,9 @@ function TerminalPageComponent({
     absoluteLineNumbersVisible,
     activeDraft,
     activeSession?.id,
-    cycleSecondaryPane,
     debugOverlayVisible,
     effectiveKeyboardLiftPx,
+    handleSetSplitCount,
     handleQuickBarMeasuredHeightChange,
     handleQuickBarOpenFileTransfer,
     handleQuickBarOpenScheduleComposer,
@@ -2165,8 +2261,16 @@ function TerminalPageComponent({
     shortcutSmartSort,
     splitAvailable,
     splitVisible,
+    currentMaxSplitCount,
+    cycleSecondaryPane,
     terminalImeActive,
     toggleSplitLayout,
+    workspacePanes.length,
+    layoutProfile.stage.containerRadius,
+    layoutProfile.stage.outerMargin,
+    layoutProfile.stage.paneGap,
+    layoutProfile.stage.paneRadius,
+    layoutProfile.stage.rowBottomPadding,
   ]);
 
   return (
@@ -2185,15 +2289,18 @@ function TerminalPageComponent({
           sessions={chromeSessions}
           activeSession={activeChromeSession}
           topInsetPx={headerTopInsetPx}
+          showBackButton={!splitVisible}
           onBack={onOpenConnections}
-          onOpenQuickTabPicker={onOpenQuickTabPicker}
-          onOpenTabManager={() => setTabManagerOpen(true)}
+          onOpenQuickTabPicker={handleOpenQuickTabPickerForPane}
+          onOpenTabManager={handleOpenTabManager}
           onSwitchSession={onSwitchSession}
+          onRenameSession={onRenameSession}
           onCloseSession={onCloseSession}
           splitVisible={splitVisible}
-          sessionPaneAssignments={splitPaneAssignments}
+          paneGroups={paneGroups}
           onAssignSessionToPane={assignSessionToPane}
           onMoveSessionToOtherPane={moveSessionToOtherPane}
+          onActivatePane={activatePaneAndSession}
         />
       </div>
       <TerminalNetworkBanner
@@ -2211,11 +2318,13 @@ function TerminalPageComponent({
         }}
       >
         <TerminalStageShell
-          activeSession={activeSession}
+          interactiveSession={interactiveSession}
           sessionBufferStore={sessionBufferStore}
+          sessionHeadStore={sessionHeadStore}
           renderedPaneSessions={renderedPaneSessions}
-          visiblePaneSessionIds={visiblePaneSessionIds}
+          visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
+          activePaneId={workspace.activePaneId}
           terminalChromeBottomPx={terminalChromeBottomPx}
           terminalImeLiftPx={terminalImeLiftPx}
           inputResetEpochBySession={inputResetEpochBySession}
@@ -2228,6 +2337,7 @@ function TerminalPageComponent({
           handleTerminalViewportChange={handleTerminalViewportChange}
           handleSwipeTab={handleSwipeTab}
           handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
+          onActivatePane={activatePaneAndSession}
           focusNonce={focusNonce}
           terminalFontSize={terminalFontSize}
           terminalThemeId={terminalThemeId}
@@ -2236,31 +2346,54 @@ function TerminalPageComponent({
         />
         <TerminalDebugOverlay
           visible={debugOverlayVisible}
-          session={activeSession}
+          session={interactiveSession}
           sessionViewportModeStore={sessionViewportModeStoreRef.current}
           getSessionDebugMetrics={getSessionDebugMetrics}
+          viewportMetrics={debugViewportMetrics}
+          keyboardInset={keyboardInset}
+          effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
+          terminalImeLiftPx={terminalImeLiftPx}
+          quickBarShellKeyboardLiftPx={quickBarShellKeyboardLiftPx}
+          shellHeight={shellHeight}
+          terminalChromeBottomPx={terminalChromeBottomPx}
+          terminalKeyboardRequested={terminalKeyboardRequested}
+          quickBarEditorFocused={quickBarEditorFocused}
+          terminalImeActive={terminalImeActive}
+          terminalWidthMode={terminalWidthMode}
           debugOverlayPos={debugOverlayPos}
           debugOverlayDragRef={debugOverlayDragRef}
           onClose={() => setDebugOverlayVisible(false)}
           onMove={setDebugOverlayPos}
         />
-        <TerminalQuickBarShell bottomPx={terminalImeLiftPx + TERMINAL_QUICK_BAR_TOUCH_SAFE_OFFSET_PX}>
+        <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
           {quickBarNode}
         </TerminalQuickBarShell>
       </div>
       <TabManagerSheet
         open={tabManagerOpen}
-        sessions={chromeSessions}
-        activeSessionId={activeSession?.id}
+        sessions={
+          tabManagerScopePaneId
+            ? chromeSessions.filter((session) => {
+                const pane = findPaneForSession(session.id);
+                return pane?.id === tabManagerScopePaneId;
+              })
+            : chromeSessions
+        }
+        activeSessionId={interactiveSession?.id}
         savedTabLists={savedTabLists}
-        onClose={() => setTabManagerOpen(false)}
+        onClose={() => {
+          setTabManagerOpen(false);
+          setTabManagerScopePaneId(null);
+        }}
         onSwitchSession={onSwitchSession}
         onRenameSession={onRenameSession}
         onCloseSession={onCloseSession}
         onMoveSession={onMoveSession}
         onOpenQuickTabPicker={() => {
           setTabManagerOpen(false);
-          onOpenQuickTabPicker();
+          const targetPaneId = tabManagerScopePaneId || undefined;
+          setTabManagerScopePaneId(null);
+          handleOpenQuickTabPickerForPane(targetPaneId);
         }}
         onSaveCurrentTabList={saveCurrentTabList}
         onLoadSavedTabList={loadSavedTabList}
@@ -2269,11 +2402,11 @@ function TerminalPageComponent({
         onExportSavedTabList={exportSavedTabList}
         onImportSavedTabLists={importSavedTabLists}
       />
-      {activeSession ? (
+      {interactiveSession ? (
         <SessionScheduleSheet
           open={scheduleOpen}
-          sessionName={activeSession.sessionName}
-          scheduleState={activeScheduleState || { sessionName: activeSession.sessionName, jobs: [], loading: false }}
+          sessionName={interactiveSession.sessionName}
+          scheduleState={activeScheduleState || { sessionName: interactiveSession.sessionName, jobs: [], loading: false }}
           composerSeedText={scheduleComposerSeed.text}
           composerSeedNonce={scheduleComposerSeed.nonce}
           keyboardInset={keyboardInset}
@@ -2281,14 +2414,14 @@ function TerminalPageComponent({
             setScheduleOpen(false);
             setScheduleComposerSeed((current) => (current.text ? { ...current, text: '' } : current));
           }}
-          onRefresh={() => onRequestScheduleList?.(activeSession.id)}
-          onSave={(job) => onUpsertScheduleJob?.(activeSession.id, job)}
-          onDelete={(jobId) => onDeleteScheduleJob?.(activeSession.id, jobId)}
-          onToggle={(jobId, enabled) => onToggleScheduleJob?.(activeSession.id, jobId, enabled)}
-          onRunNow={(jobId) => onRunScheduleJobNow?.(activeSession.id, jobId)}
+          onRefresh={() => onRequestScheduleList?.(interactiveSession.id)}
+          onSave={(job) => onUpsertScheduleJob?.(interactiveSession.id, job)}
+          onDelete={(jobId) => onDeleteScheduleJob?.(interactiveSession.id, jobId)}
+          onToggle={(jobId, enabled) => onToggleScheduleJob?.(interactiveSession.id, jobId, enabled)}
+          onRunNow={(jobId) => onRunScheduleJobNow?.(interactiveSession.id, jobId)}
         />
       ) : null}
-      {activeSession && onSendMessage && onFileTransferMessage ? (
+      {interactiveSession && onSendMessage && onFileTransferMessage ? (
         <FileTransferSheet
           open={fileTransferOpen}
           remoteCwd=""
@@ -2318,6 +2451,7 @@ function terminalPagePropsEqual(
       === terminalPageActiveRuntimeStatusKey(next.activeSession)
     && prev.getSessionDebugMetrics === next.getSessionDebugMetrics
     && prev.sessionBufferStore === next.sessionBufferStore
+    && prev.sessionHeadStore === next.sessionHeadStore
     && resolveSessionInputEpoch(prev.inputResetEpochBySession, prev.activeSession?.id)
       === resolveSessionInputEpoch(next.inputResetEpochBySession, next.activeSession?.id)
     && prev.followResetEpoch === next.followResetEpoch
@@ -2331,7 +2465,6 @@ function terminalPagePropsEqual(
     && prev.onTerminalInput === next.onTerminalInput
     && prev.onTerminalViewportChange === next.onTerminalViewportChange
     && prev.onLiveSessionIdsChange === next.onLiveSessionIdsChange
-    && prev.onTerminalVisibleRangeChange === next.onTerminalVisibleRangeChange
     && prev.onImagePaste === next.onImagePaste
     && prev.onFileAttach === next.onFileAttach
     && prev.onOpenSettings === next.onOpenSettings

@@ -9,6 +9,7 @@ import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-up
 import { APP_VERSION_CODE } from '../lib/app-version';
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { mobileTheme } from '../lib/mobile-ui';
 import {
   TERMINAL_WIDTH_MODE_OPTIONS,
@@ -73,6 +74,7 @@ export function SettingsPage({
   const [relayBaseUrl, setRelayBaseUrl] = useState(settings.traversalRelay?.relayBaseUrl || '');
   const [relayUsername, setRelayUsername] = useState('');
   const [relayPassword, setRelayPassword] = useState('');
+  const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
   const {
     account: relayAccount,
     relayDevices,
@@ -266,6 +268,38 @@ export function SettingsPage({
               );
             })}
           </div>
+        </div>
+
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>Daemon Debug</SettingsSectionTitle>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            打开后，客户端会通过当前已连接的 Tailscale WebSocket 自动持续把 runtime debug 日志上送到 daemon。关闭后立即停止上送。
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const nextEnabled = !runtimeDebugEnabled;
+              setRuntimeDebugEnabled(nextEnabled);
+              setRuntimeDebugEnabledState(nextEnabled);
+            }}
+            style={{
+              minHeight: '48px',
+              borderRadius: '16px',
+              border: 'none',
+              backgroundColor: runtimeDebugEnabled ? mobileTheme.colors.shell : '#eef3f8',
+              color: runtimeDebugEnabled ? '#ffffff' : mobileTheme.colors.lightText,
+              fontWeight: 800,
+              fontSize: '16px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>{runtimeDebugEnabled ? '✓' : '○'}</span>
+            Daemon Debug {runtimeDebugEnabled ? '已开启' : '已关闭'}
+          </button>
         </div>
 
         <div style={settingsSectionStyle()}>

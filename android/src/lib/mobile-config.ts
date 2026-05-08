@@ -28,6 +28,8 @@ export interface TerminalRefreshCadence {
   renderCommitMs: number;
 }
 
+const TERMINAL_RENDER_COMMIT_MS = ACTIVE_HEAD_REFRESH_TICK_MS;
+
 function readEffectiveNetworkProfile() {
   if (typeof navigator === 'undefined') {
     return {
@@ -62,7 +64,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
       headStalePingMs: 520,
       pullRequestStaleMs: 2200,
       readingSyncDelayMs: 72,
-      renderCommitMs: 120,
+      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -73,7 +75,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
       headStalePingMs: 320,
       pullRequestStaleMs: 1800,
       readingSyncDelayMs: 48,
-      renderCommitMs: 66,
+      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -83,7 +85,7 @@ export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
     headStalePingMs: 200,
     pullRequestStaleMs: 1500,
     readingSyncDelayMs: 24,
-    renderCommitMs: ACTIVE_HEAD_REFRESH_TICK_MS,
+    renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
   };
 }
 

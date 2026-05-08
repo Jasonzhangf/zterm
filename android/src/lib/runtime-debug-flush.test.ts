@@ -2,7 +2,12 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flushRuntimeDebugLogsToSessionTransport } from './runtime-debug-flush';
-import { drainRuntimeDebugEntries, runtimeDebug, setRuntimeDebugEnabled } from './runtime-debug';
+import {
+  drainRuntimeDebugEntries,
+  runtimeDebug,
+  setRuntimeDebugEnabled,
+} from './runtime-debug';
+import { resetRuntimeDebugTransportFlushStateForTests } from './runtime-debug-flush';
 
 describe('runtime-debug-flush', () => {
   beforeEach(() => {
@@ -22,6 +27,7 @@ describe('runtime-debug-flush', () => {
     while (drainRuntimeDebugEntries().length > 0) {
       // reset queue between tests
     }
+    resetRuntimeDebugTransportFlushStateForTests();
   });
 
   it('flushes queued runtime debug entries into the active session transport', () => {
@@ -38,8 +44,25 @@ describe('runtime-debug-flush', () => {
     });
 
     expect(flushed).toBe(true);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain('"type":"debug-log"');
-    expect(sent[0]).toContain('"scope":"session.input.send"');
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(sent.some((frame) => frame.includes('"type":"debug-log"'))).toBe(true);
+    expect(sent.some((frame) => frame.includes('"scope":"session.input.send"'))).toBe(true);
+  });
+
+  it('also flushes a client snapshot through the active session transport when debug is enabled', () => {
+    setRuntimeDebugEnabled(true);
+
+    const sent: string[] = [];
+    const flushed = flushRuntimeDebugLogsToSessionTransport({
+      activeSessionId: 's1',
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      sendSocketPayload: (_sessionId, _ws, data) => {
+        sent.push(String(data));
+      },
+    });
+
+    expect(flushed).toBe(true);
+    expect(sent.some((frame) => frame.includes('\"type\":\"debug-snapshot\"'))).toBe(true);
+    expect(sent.some((frame) => frame.includes('\"source\":\"session-transport-runtime-debug\"'))).toBe(true);
   });
 });

@@ -13,6 +13,11 @@ import type {
   TerminalCursorState,
   TerminalGapRange,
 } from '@zterm/shared/types';
+import type {
+  WorkspacePane,
+  WorkspaceState,
+  WorkspaceTab,
+} from '@zterm/shared';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
@@ -91,6 +96,13 @@ export interface SessionBufferState extends Omit<SharedSessionBufferState, 'curs
 
 export type TerminalViewportMode = 'follow' | 'reading';
 export type TerminalSplitPaneId = 'primary' | 'secondary';
+
+export interface AndroidWorkspaceTab extends WorkspaceTab {
+  sessionId: string;
+}
+
+export type AndroidWorkspacePane = WorkspacePane<AndroidWorkspaceTab>;
+export type AndroidWorkspaceState = WorkspaceState<AndroidWorkspaceTab>;
 
 export interface TerminalLayoutState {
   splitEnabled: boolean;

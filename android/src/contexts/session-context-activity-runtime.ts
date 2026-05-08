@@ -84,6 +84,8 @@ export function ensureActiveSessionFreshRuntime(options: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
   };
@@ -113,7 +115,8 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isActive = options.refs.stateRef.current.activeSessionId === options.refreshOptions.sessionId;
   const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
-  const isRefreshTarget = isActive || isLive;
+  const isExplicitForegroundResumeTarget = options.refreshOptions.source === 'active-resume';
+  const isRefreshTarget = isExplicitForegroundResumeTarget || isActive || isLive;
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
@@ -163,6 +166,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       hasSession: Boolean(session),
       isActive,
       isLive,
+      isExplicitForegroundResumeTarget,
       isRefreshTarget,
       sessionState,
       wsReadyState: ws?.readyState ?? null,
@@ -180,6 +184,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     activeSessionId: options.refs.stateRef.current.activeSessionId,
     isActive,
     isLive,
+    isExplicitForegroundResumeTarget,
     isRefreshTarget,
     localRevision: localBuffer.revision ?? null,
     localStartIndex: localBuffer.startIndex ?? null,
@@ -218,8 +223,10 @@ export function ensureActiveSessionFreshRuntime(options: {
       options.refreshOptions.source === 'active-resume'
       && shouldForceHeadRequest
       && ws?.readyState === WebSocket.OPEN
-      && lastActiveReentryAt > 0
-      && now - lastActiveReentryAt < cadence.headTickMs
+      && (
+        (lastActiveReentryAt > 0 && now - lastActiveReentryAt < cadence.headTickMs)
+        || options.refs.connectedBaselineBurstGuardRef.current.has(options.refreshOptions.sessionId)
+      )
     );
 
     if (options.refreshOptions.markResumeTail) {
@@ -227,6 +234,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     }
 
     if (shouldSkipImmediateForcedResumeHead) {
+      options.refs.connectedBaselineBurstGuardRef.current.delete(options.refreshOptions.sessionId);
       return true;
     }
 

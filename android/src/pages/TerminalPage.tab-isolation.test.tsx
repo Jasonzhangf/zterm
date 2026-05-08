@@ -28,7 +28,17 @@ vi.mock('@capacitor/keyboard', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: () => <div data-testid="terminal-header" />,
+  TerminalHeader: ({
+    onOpenQuickTabPicker,
+  }: {
+    onOpenQuickTabPicker?: (paneId?: string) => void;
+  }) => (
+    <div data-testid="terminal-header">
+      <button type="button" onClick={() => onOpenQuickTabPicker?.('pane-2')}>
+        open-quick-picker-pane-2
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../components/terminal/TabManagerSheet', () => ({
@@ -46,6 +56,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     splitVisible,
     onToggleSplitLayout,
     onCycleSplitPane,
+    onMeasuredHeightChange,
   }: {
     activeSessionId?: string;
     sessionDraft?: string;
@@ -56,6 +67,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     splitVisible?: boolean;
     onToggleSplitLayout?: () => void;
     onCycleSplitPane?: () => void;
+    onMeasuredHeightChange?: (height: number) => void;
   }) => (
     <div
       data-testid="terminal-quickbar"
@@ -69,6 +81,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
       <button type="button" onClick={() => onSessionDraftSend?.('draft-send')}>send-draft</button>
       <button type="button" onClick={() => onToggleSplitLayout?.()}>toggle-split</button>
       <button type="button" onClick={() => onCycleSplitPane?.()}>cycle-split</button>
+      <button type="button" onClick={() => onMeasuredHeightChange?.(180)}>measure-quickbar</button>
     </div>
   ),
 }));
@@ -170,6 +183,15 @@ describe('TerminalPage tab isolation', () => {
     } as Storage;
     vi.stubGlobal('localStorage', storageShim);
     localStorage.clear();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 1200,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
   });
 
   afterEach(() => {
@@ -263,6 +285,174 @@ describe('TerminalPage tab isolation', () => {
       viewportEndIndex: 120,
       viewportRows: 24,
     });
+  });
+
+  it('does not emit a second visible-range callback when viewport state already carries mode truth', async () => {
+    const sessions = [makeSession('s1')];
+    const onTerminalViewportChange = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={onTerminalViewportChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    screen.getByText('viewport-s1').click();
+
+    expect(onTerminalViewportChange).toHaveBeenCalledTimes(1);
+    expect(onTerminalViewportChange).toHaveBeenCalledWith('s1', {
+      mode: 'follow',
+      viewportEndIndex: 120,
+      viewportRows: 24,
+    });
+  });
+
+  it('reserves terminal shell bottom space from the measured quick bar height so input area is not occluded', async () => {
+    const sessions = [makeSession('s1')];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('measure-quickbar'));
+
+    await waitFor(() => {
+      const shell = screen.getByTestId('terminal-stage-shell').parentElement as HTMLElement | null;
+      expect(shell).toBeTruthy();
+      expect(shell?.getAttribute('style') || '').not.toContain('padding-bottom: 180px;');
+      expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toContain('bottom: 180px;');
+    });
+  });
+
+  it('keeps pane-target truth when applying an explicit non-P1 pane attach intent', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    const view = render(
+      <TerminalPage
+        sessions={[sessions[0], sessions[1]]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    view.rerender(
+      <TerminalPage
+        sessions={[sessions[0], sessions[1], sessions[2]]}
+        activeSession={sessions[2]}
+        pendingPaneAttachIntent={{ sessionIds: ['s3'], paneId: 'pane-2', nonce: 99 }}
+        onPaneAttachIntentApplied={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-view-s3')).toBeTruthy();
+    });
+    const panes = Array.from(document.querySelectorAll('[data-testid="terminal-pane-shell"]'));
+    const pane2 = panes.find((node) => node.getAttribute('data-pane-id') === 'pane-2') as HTMLElement | undefined;
+    expect(pane2?.querySelector('[data-testid="terminal-view-s3"]')).toBeTruthy();
+  });
+
+  it('applies explicit pane-attach intent so a newly opened session lands in the requested pane without relying on P1 fallback', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const onPaneAttachIntentApplied = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[2]}
+        pendingPaneAttachIntent={{ sessionIds: ['s3'], paneId: 'pane-2', nonce: 1 }}
+        onPaneAttachIntentApplied={onPaneAttachIntentApplied}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const panes = Array.from(document.querySelectorAll('[data-testid="terminal-pane-shell"]'));
+      const pane2 = panes.find((node) => node.getAttribute('data-pane-id') === 'pane-2') as HTMLElement | undefined;
+      expect(pane2?.querySelector('[data-testid="terminal-view-s3"]')).toBeTruthy();
+    });
+    expect(onPaneAttachIntentApplied).toHaveBeenCalledWith({ sessionIds: ['s3'], paneId: 'pane-2', nonce: 1 });
   });
 
   it('enables manual split regardless of width and keeps non-render logic bound to the active session', () => {
@@ -362,11 +552,11 @@ describe('TerminalPage tab isolation', () => {
     fireEvent.click(screen.getByText('toggle-split'));
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
 
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 120 });
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: {
-        width: 900,
+        width: 120,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
@@ -404,8 +594,10 @@ describe('TerminalPage tab isolation', () => {
 
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT) || '{}')).toMatchObject({
-      splitEnabled: true,
-      splitSecondarySessionId: 's2',
+      panes: [
+        { tabs: [{ sessionId: 's1' }], activeTabId: 'tab-s1' },
+        { tabs: [{ sessionId: 's2' }], activeTabId: 'tab-s2' },
+      ],
     });
 
     view.unmount();
@@ -478,12 +670,10 @@ describe('TerminalPage tab isolation', () => {
     );
 
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('false');
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT) || '{}')).toEqual({
-      splitEnabled: false,
-      splitSecondarySessionId: null,
-      splitPaneAssignments: {
-        s1: 'primary',
-      },
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT) || '{}')).toMatchObject({
+      panes: [
+        { tabs: [{ sessionId: 's1' }], activeTabId: 'tab-s1' },
+      ],
     });
   });
 });

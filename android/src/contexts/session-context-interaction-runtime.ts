@@ -1,8 +1,4 @@
 import {
-  enqueuePendingInput as enqueuePendingInputBaseRuntime,
-  flushPendingInputQueue as flushPendingInputQueueBaseRuntime,
-} from './session-context-input-runtime';
-import {
   ensureSessionReadyForPasteRuntime,
   requestRemoteScreenshotRuntime,
   sendFileAttachRuntime,
@@ -37,7 +33,6 @@ interface RemoteScreenshotRuntimeLike {
 export function createSessionInteractionRuntime(options: {
   refs: {
     stateRef: StateRefLike;
-    pendingInputQueueRef: { current: Map<string, string[]> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
   };
   imagePasteReadyTimeoutMs: number;
@@ -46,7 +41,7 @@ export function createSessionInteractionRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
-  requestSessionBufferHead: (sessionId: string, ws: BridgeTransportSocket, options?: { force?: boolean }) => void;
+  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   probeOrReconnectStaleSessionTransport: (
@@ -62,32 +57,6 @@ export function createSessionInteractionRuntime(options: {
   }) => boolean;
   reconnectSession: (sessionId: string) => void;
 }) {
-  const flushPendingInputQueue = (sessionId: string) => {
-    const sessionsSnapshotRef = {
-      current: options.refs.stateRef.current.sessions,
-    };
-    flushPendingInputQueueBaseRuntime({
-      sessionId,
-      refs: {
-        pendingInputQueueRef: options.refs.pendingInputQueueRef,
-        sessionsRef: sessionsSnapshotRef,
-      },
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      sendSocketPayload: options.sendSocketPayload,
-      markPendingInputTailRefresh: options.markPendingInputTailRefresh,
-      readSessionBufferSnapshot: options.readSessionBufferSnapshot,
-      requestSessionBufferHead: options.requestSessionBufferHead,
-    });
-  };
-
-  const enqueuePendingInput = (sessionId: string, payload: string) => {
-    enqueuePendingInputBaseRuntime({
-      sessionId,
-      payload,
-      pendingInputQueueRef: options.refs.pendingInputQueueRef,
-    });
-  };
-
   const sendInput = (sessionId: string, data: string) => {
     sendInputRuntime({
       sessionId,
@@ -104,7 +73,6 @@ export function createSessionInteractionRuntime(options: {
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferHead: options.requestSessionBufferHead,
       probeOrReconnectStaleSessionTransport: options.probeOrReconnectStaleSessionTransport,
-      enqueuePendingInput,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       shouldReconnectQueuedActiveInput: options.shouldReconnectQueuedActiveInput,
       reconnectSession: options.reconnectSession,
@@ -155,8 +123,6 @@ export function createSessionInteractionRuntime(options: {
   };
 
   return {
-    flushPendingInputQueue,
-    enqueuePendingInput,
     sendInput,
     ensureSessionReadyForPaste,
     sendImagePaste,

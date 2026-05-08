@@ -197,7 +197,6 @@ export function applyTransportOpenConnectedEffectsRuntime(options: {
     sessionName: string;
     ws: BridgeTransportSocket;
   }) => void;
-  flushPendingInputQueue: (sessionId: string) => void;
 }) {
   const connectedEffectPlan = buildTransportOpenConnectedEffectPlan(options.debugScope);
   options.runtimeDebug(connectedEffectPlan.debugEvent, {
@@ -212,9 +211,6 @@ export function applyTransportOpenConnectedEffectsRuntime(options: {
     sessionName: options.sessionName,
     ws: options.ws,
   });
-  if (connectedEffectPlan.flushPendingInputQueue) {
-    options.flushPendingInputQueue(options.sessionId);
-  }
 }
 
 export function applyTransportOpenLiveFailureEffectsRuntime(options: {

@@ -266,6 +266,20 @@ export function persistClosedTabReuseKeys(keys: Set<string>) {
   }
 }
 
+export function clearClosedTabReuseKeysForOwner(
+  keys: Set<string>,
+  target: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+) {
+  const variants = buildPersistedOpenTabReuseKeyVariants(target);
+  let deletedAny = false;
+  variants.forEach((key) => {
+    if (keys.delete(key)) {
+      deletedAny = true;
+    }
+  });
+  return deletedAny;
+}
+
 export function findReusableOpenTabSession(options: {
   sessions: Session[];
   host: Pick<Host, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'authToken'>;

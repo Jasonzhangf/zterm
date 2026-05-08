@@ -31,7 +31,7 @@ describe('mobile-config refresh cadence', () => {
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(66);
     expect(cadence.minTailRefreshGapMs).toBe(66);
-    expect(cadence.renderCommitMs).toBe(66);
+    expect(cadence.renderCommitMs).toBe(33);
     expect(cadence.readingSyncDelayMs).toBe(48);
   });
 
@@ -40,12 +40,12 @@ describe('mobile-config refresh cadence', () => {
     let cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
     expect(cadence.minTailRefreshGapMs).toBe(120);
-    expect(cadence.renderCommitMs).toBe(120);
+    expect(cadence.renderCommitMs).toBe(33);
     expect(cadence.readingSyncDelayMs).toBe(72);
 
     mockConnection('4g', true);
     cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
-    expect(cadence.renderCommitMs).toBe(120);
+    expect(cadence.renderCommitMs).toBe(33);
   });
 });

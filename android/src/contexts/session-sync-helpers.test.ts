@@ -459,12 +459,10 @@ describe('session sync helper session connection config truth', () => {
     expect(buildTransportOpenConnectedEffectPlan('connect')).toEqual({
       debugEvent: 'session.ws.connected',
       clearSupersededSockets: false,
-      flushPendingInputQueue: false,
     });
     expect(buildTransportOpenConnectedEffectPlan('reconnect')).toEqual({
       debugEvent: 'session.ws.reconnect.connected',
       clearSupersededSockets: true,
-      flushPendingInputQueue: true,
     });
   });
 

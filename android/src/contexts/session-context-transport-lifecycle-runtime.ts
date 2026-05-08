@@ -133,6 +133,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
   setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
   isSessionTransportActive?: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   handleSocketServerMessage: (params: {
     sessionId: string;
     host: Host;
@@ -150,6 +151,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
 }) {
   bindSessionTransportSocketLifecycleBaseRuntime({
     ...options,
+    shouldAcceptSessionLiveBuffer: options.shouldAcceptSessionLiveBuffer,
     connectMessagePayload: buildSessionConnectPayload({
       host: options.host,
       resolvedSessionName: options.resolvedSessionName,

@@ -28,6 +28,8 @@ export function createSessionMessageOrchestrationRuntime(options: {
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, { revision: number; latestEndIndex: number; seenAt: number }>>;
     sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
@@ -44,6 +46,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer: (sessionId: string) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   setScheduleStateForSession: (
@@ -214,6 +217,8 @@ export function createSessionMessageOrchestrationRuntime(options: {
       refs: {
         stateRef: options.refs.stateRef,
         pendingConnectTailRefreshRef: options.refs.pendingConnectTailRefreshRef,
+        lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
+        connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
       },
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       applyTransportDiagnostics: options.applyTransportDiagnostics,

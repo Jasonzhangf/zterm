@@ -1,4 +1,5 @@
 import { mobileTheme } from '../../lib/mobile-ui';
+import { resolveTerminalViewportMetrics } from '../../lib/terminal-viewport-metrics';
 import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
 import {
   buildTerminalShortcutSequence,
@@ -353,9 +354,12 @@ export function bubbleViewportRectWithInset(keyboardInsetPx: number) {
   if (typeof window === 'undefined') {
     return { width: FLOATING_BUBBLE_SIZE, height: FLOATING_BUBBLE_SIZE };
   }
-  const visualViewport = window.visualViewport;
-  const viewportWidth = Math.round(visualViewport?.width || window.innerWidth || FLOATING_BUBBLE_SIZE);
-  const viewportHeight = Math.round(visualViewport?.height || Math.max(FLOATING_BUBBLE_SIZE, (window.innerHeight || FLOATING_BUBBLE_SIZE) - Math.max(0, keyboardInsetPx)));
+  const metrics = resolveTerminalViewportMetrics();
+  const viewportWidth = Math.round(metrics.visualWidth || metrics.layoutWidth || FLOATING_BUBBLE_SIZE);
+  const viewportHeight = Math.round(
+    metrics.visualHeight
+    || Math.max(FLOATING_BUBBLE_SIZE, metrics.layoutHeight - Math.max(0, keyboardInsetPx)),
+  );
   return {
     width: Math.max(viewportWidth, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
     height: Math.max(viewportHeight, FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2),
@@ -366,12 +370,12 @@ export function resolveOverlayViewportMetrics(keyboardInsetPx: number) {
   if (typeof window === 'undefined') {
     return { sheetHeightPx: null as number | null, bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)) };
   }
-  const layoutHeight = Math.max(0, Math.round(window.innerHeight || 0));
-  const visualViewport = window.visualViewport;
-  if (!visualViewport) {
+  const metrics = resolveTerminalViewportMetrics();
+  const layoutHeight = Math.max(0, Math.round(metrics.layoutHeight || 0));
+  if (metrics.visualHeight <= 0) {
     return { sheetHeightPx: Math.max(320, layoutHeight - 16), bottomInsetPx: Math.max(0, Math.round(keyboardInsetPx || 0)) };
   }
-  const visibleBottom = Math.max(0, Math.round((visualViewport.height || 0) + (visualViewport.offsetTop || 0)));
+  const visibleBottom = Math.max(0, Math.round(metrics.visualBottom || 0));
   const occludedBottom = Math.max(0, layoutHeight - visibleBottom);
   const bottomInsetPx = Math.max(occludedBottom, Math.max(0, Math.round(keyboardInsetPx || 0)));
   return { sheetHeightPx: Math.max(320, visibleBottom - 16), bottomInsetPx };

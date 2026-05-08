@@ -68,4 +68,16 @@ describe('open-tab / history / connections truth gates', () => {
     expect(sessionHistorySource).not.toContain('createSession(');
     expect(connectionsPageSource).not.toContain('createSession(');
   });
+
+  it('keeps cold restore read-only for tombstones while explicit open remains the only tombstone-clearing path', () => {
+    const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
+    const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
+
+    expect(restoreRuntimeSource).not.toContain('persistClosedTabReuseKeys(');
+    expect(restoreRuntimeSource).not.toContain('clearClosedTabReuseKeysForOwner(');
+    expect(restoreRuntimeSource).not.toContain('closedOpenTabReuseKeysRef.current.delete(');
+
+    expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
+    expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
+  });
 });

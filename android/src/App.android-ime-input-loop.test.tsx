@@ -264,13 +264,15 @@ vi.mock('./hooks/useSessionHistoryStorage', () => ({
 
 vi.mock('./hooks/useAppUpdate', () => ({
   useAppUpdate: () => ({
+    preferences: { manifestUrl: '', autoCheckOnLaunch: false, ignoreUntilManualCheck: false, skippedVersionCode: undefined, lastCheckedAt: undefined, lastSeenVersionCode: undefined },
+    runtimeVersionCode: 1011491,
     latestManifest: null,
     availableManifest: null,
-    updateChecking: false,
-    updateInstalling: false,
-    updateError: null,
-    appUpdatePreferences: { manifestUrl: '', ignoredVersionName: null, ignoredVersionCode: null },
-    setAppUpdatePreferences: vi.fn(),
+    checking: false,
+    installing: false,
+    lastError: null,
+    updateStage: 'idle',
+    setPreferences: vi.fn(),
     checkForUpdates: vi.fn(),
     dismissAvailableManifest: vi.fn(),
     skipCurrentVersion: vi.fn(),

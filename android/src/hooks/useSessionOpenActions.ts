@@ -5,8 +5,7 @@ import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
   buildPersistedOpenTabFromHostSession,
-  buildPersistedOpenTabReuseKey,
-  buildPersistedOpenTabReuseKeyVariants,
+  clearClosedTabReuseKeysForOwner,
   persistClosedTabReuseKeys,
   resolveHostForPersistedOpenTab,
 } from '../lib/open-tab-persistence';
@@ -60,6 +59,7 @@ interface UseSessionOpenActionsOptions {
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
     options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
+  onSessionsOpenedInPane?: (sessionIds: string[], paneId: string) => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
@@ -68,9 +68,10 @@ export interface SessionOpenActionsResult {
   pickerMode: PickerMode;
   pickerTarget: BridgeTarget | null;
   pickerInitialSessions: string[];
+  pickerScopePaneId: string | null;
   handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => Promise<void>;
   handleAddNew: () => void;
-  handleOpenQuickTabPicker: () => void;
+  handleOpenQuickTabPicker: (paneId?: string) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
@@ -117,6 +118,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     runtimeRefs,
     ensureTerminalPageVisible,
     applyOpenTabState,
+    onSessionsOpenedInPane,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   } = options;
@@ -137,6 +139,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
+  const [pickerScopePaneId, setPickerScopePaneId] = useState<string | null>(null);
   const openDraftAsSessionRef = useRef<((host: HostDraft, options?: {
     rememberName?: string;
     activate?: boolean;
@@ -182,27 +185,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
     });
     closedOpenTabSessionIdsRef.current.delete(sessionId);
-    const reopenedReuseKey = buildPersistedOpenTabReuseKey({
+    const deletedAnyReuseKey = clearClosedTabReuseKeysForOwner(closedOpenTabReuseKeysRef.current, {
       daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
       bridgeHost: sessionHost.bridgeHost,
       bridgePort: sessionHost.bridgePort,
       sessionName: sessionHost.sessionName,
     });
-    const reopenedReuseKeyVariants = buildPersistedOpenTabReuseKeyVariants({
-      daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
-      bridgeHost: sessionHost.bridgeHost,
-      bridgePort: sessionHost.bridgePort,
-      sessionName: sessionHost.sessionName,
-    });
-    let deletedAnyReuseKey = false;
-    reopenedReuseKeyVariants.forEach((key) => {
-      if (closedOpenTabReuseKeysRef.current.delete(key)) {
-        deletedAnyReuseKey = true;
-      }
-    });
-    if (!deletedAnyReuseKey && closedOpenTabReuseKeysRef.current.delete(reopenedReuseKey)) {
-      deletedAnyReuseKey = true;
-    }
     if (deletedAnyReuseKey) {
       persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
     }
@@ -249,9 +237,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const openSessionPicker = useCallback((mode: Exclude<PickerMode, null>, pickerOptions?: {
     target?: BridgeTarget | null;
     initialSelectedSessions?: string[];
+    paneId?: string | null;
   }) => {
     setPickerMode(mode);
     setPickerInitialSessions(pickerOptions?.initialSelectedSessions || []);
+    setPickerScopePaneId(pickerOptions?.paneId || null);
     const currentBridgeSettings = bridgeSettingsRef.current;
     setPickerTarget(
       pickerOptions?.target || buildPreferredTarget(
@@ -269,15 +259,19 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [bridgeSettingsRef, sessionsRef, terminalActiveSessionIdRef]);
 
   const handleQuickConnectDraft = useCallback((draft: HostDraft, rememberName?: string) => {
-    return openDraftAsSession(draft, { rememberName, activate: true, navigate: true }).sessionId;
-  }, [openDraftAsSession]);
+    const opened = openDraftAsSession(draft, { rememberName, activate: true, navigate: true });
+    if (pickerScopePaneId) {
+      onSessionsOpenedInPane?.([opened.sessionId], pickerScopePaneId);
+    }
+    return opened.sessionId;
+  }, [onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
   const handleOpenMultipleTmuxSessions = useCallback((target: BridgeTarget, sessionNames: string[]) => {
     const uniqueSessionNames = [...new Set(sessionNames.map((name) => name.trim()).filter(Boolean))];
     if (uniqueSessionNames.length === 0) {
       return;
     }
-    let activeSessionId: string | null = null;
+    const openedSessionIds: string[] = [];
     uniqueSessionNames.forEach((sessionName, index) => {
       const draft = buildDraftFromTmuxSession(hosts, bridgeSettings.servers, target, sessionName);
       const sessionId = openDraftAsSession(draft, {
@@ -285,13 +279,15 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         activate: index === 0,
         navigate: false,
       }).sessionId;
-      if (!activeSessionId) {
-        activeSessionId = sessionId;
-      }
+      openedSessionIds.push(sessionId);
     });
+    if (pickerScopePaneId && openedSessionIds.length > 0) {
+      onSessionsOpenedInPane?.(openedSessionIds, pickerScopePaneId);
+    }
     setPickerMode(null);
+    setPickerScopePaneId(null);
     ensureTerminalPageVisible();
-  }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, openDraftAsSession]);
+  }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
   const handleOpenSingleTmuxSession = useCallback((target: BridgeTarget, sessionName: string) => {
     const draft = buildDraftFromTmuxSession(hosts, bridgeSettings.servers, target, sessionName);
@@ -370,6 +366,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     sessionNames: string[];
   }>) => {
     let activeSessionId: string | null = null;
+    const openedSessionIds: string[] = [];
 
     groups.forEach((group) => {
       const uniqueSessionNames = [...new Set(group.sessionNames.filter((item) => item.trim().length > 0))];
@@ -394,6 +391,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           activate: !activeSessionId && index === 0,
           navigate: false,
         }).sessionId;
+        openedSessionIds.push(sessionId);
         if (!activeSessionId) {
           activeSessionId = sessionId;
         }
@@ -401,10 +399,13 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
 
     });
 
+    if (pickerScopePaneId && openedSessionIds.length > 0) {
+      onSessionsOpenedInPane?.(openedSessionIds, pickerScopePaneId);
+    }
     if (activeSessionId) {
       ensureTerminalPageVisible();
     }
-  }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, openDraftAsSession]);
+  }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
   const handleLoadSavedTabList = useCallback(async (tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => {
     const importPlan = await resolveRemoteRestorableOpenTabState({
@@ -495,6 +496,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     setPickerMode(null);
     if (pickerMode === 'quick-tab') {
       handleQuickConnectDraft(draft, target.bridgeHost);
+      setPickerScopePaneId(null);
       return;
     }
     if (pickerMode === 'edit-group') {
@@ -510,18 +512,22 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     openSessionPicker('new-connection');
   }, [openSessionPicker]);
 
-  const handleOpenQuickTabPicker = useCallback(() => {
-    openSessionPicker('quick-tab');
+  const handleOpenQuickTabPicker = useCallback((paneId?: string) => {
+    openSessionPicker('quick-tab', {
+      paneId: paneId || null,
+    });
   }, [openSessionPicker]);
 
   const closePicker = useCallback(() => {
     setPickerMode(null);
+    setPickerScopePaneId(null);
   }, []);
 
   return {
     pickerMode,
     pickerTarget,
     pickerInitialSessions,
+    pickerScopePaneId,
     handleLoadSavedTabList,
     handleAddNew,
     handleOpenQuickTabPicker,

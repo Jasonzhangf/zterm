@@ -70,6 +70,7 @@ function createRuntime(options?: {
   const handleInput = vi.fn();
   const closeSession = vi.fn();
   const handleClientDebugLog = vi.fn();
+  const handleClientDebugSnapshot = vi.fn();
   const terminalFileTransferRuntime = createFileTransferRuntimeStub();
 
   const runtime = createTerminalMessageRuntime({
@@ -84,6 +85,7 @@ function createRuntime(options?: {
     closeSession,
     terminalFileTransferRuntime,
     handleClientDebugLog,
+    handleClientDebugSnapshot,
     controlRuntimeDeps: {
       sessions,
       mirrors: new Map<string, SessionMirror>(),
@@ -121,6 +123,8 @@ function createRuntime(options?: {
     sendMessage,
     sendBufferHeadToSession,
     refreshMirrorHeadForSession,
+    handleClientDebugLog,
+    handleClientDebugSnapshot,
   };
 }
 
@@ -248,5 +252,31 @@ describe('terminal message runtime explicit error truth', () => {
 
     expect(refreshMirrorHeadForSession).not.toHaveBeenCalled();
     expect(sendBufferHeadToSession).toHaveBeenCalledWith(session, mirror);
+  });
+
+  it('routes debug-snapshot frames to the dedicated client debug snapshot handler', async () => {
+    const { runtime, sessions, handleClientDebugSnapshot } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'debug-snapshot',
+      payload: {
+        snapshot: {
+          source: 'session-transport-runtime-debug',
+          keyboardInset: 320,
+        },
+      },
+    })));
+
+    expect(handleClientDebugSnapshot).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          keyboardInset: 320,
+        }),
+      }),
+    );
   });
 });

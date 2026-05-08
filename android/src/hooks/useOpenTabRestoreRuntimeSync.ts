@@ -1,5 +1,6 @@
 import { useEffect, type MutableRefObject } from 'react';
 import { resolveHostForPersistedOpenTab } from '../lib/open-tab-persistence';
+import { resolvePersistedLiveSessionIds } from '../lib/workspace-persistence';
 import { resolveRemoteRestorableOpenTabState } from '../lib/open-tab-restore';
 import {
   derivePersistedOpenTabRestorePlan,
@@ -197,6 +198,10 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
 
       const persistedTabs = remoteRestoreState.tabs;
       const nextActiveSessionId = remoteRestoreState.activeSessionId;
+      const visibleSessionIds = new Set(resolvePersistedLiveSessionIds(
+        persistedTabs.map((tab) => tab.sessionId),
+        nextActiveSessionId,
+      ));
       const restoredSessionIdRemap = new Map<string, string>();
       for (const tab of persistedTabs) {
         const host = resolveHostForPersistedOpenTab({
@@ -207,7 +212,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
 
         const restoredSessionId = createSession(host, {
           activate: tab.sessionId === nextActiveSessionId,
-          connect: tab.sessionId === nextActiveSessionId,
+          connect: visibleSessionIds.has(tab.sessionId),
           customName: tab.customName,
           createdAt: tab.createdAt,
           sessionId: tab.sessionId,

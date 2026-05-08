@@ -20,6 +20,40 @@ interface RemoteScreenshotRuntimeLike {
   dispose: (reason: string) => void;
 }
 
+export function collectNewlyVisibleLiveSessionIds(previousIds: string[], nextIds: string[]) {
+  const previousSet = new Set(previousIds.filter(Boolean));
+  return nextIds.filter((sessionId) => Boolean(sessionId) && !previousSet.has(sessionId));
+}
+
+export function buildLifecycleRefreshTargets(state: Pick<SessionManagerState, 'activeSessionId' | 'liveSessionIds'>) {
+  return Array.from(new Set([
+    ...(state.activeSessionId ? [state.activeSessionId] : []),
+    ...(Array.isArray(state.liveSessionIds) ? state.liveSessionIds : []),
+  ]));
+}
+
+export function shouldScheduleActiveTickRefresh(options: {
+  state: Pick<SessionManagerState, 'sessions'>;
+  sessionId: string;
+  lastServerActivityAtRef: { current: Map<string, number> };
+  headStalePingMs: number;
+  now?: number;
+}) {
+  const session = options.state.sessions.find((item) => item.id === options.sessionId) || null;
+  if (!session) {
+    return false;
+  }
+  if (session.state !== 'connected') {
+    return true;
+  }
+  const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  if (lastServerActivityAt <= 0) {
+    return false;
+  }
+  const now = options.now ?? Date.now();
+  return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
+}
+
 export function useSessionContextLifecycle(options: {
   appForegroundActive?: boolean;
   state: SessionManagerState;
@@ -32,6 +66,8 @@ export function useSessionContextLifecycle(options: {
     sessionPullStateRef: { current: Map<string, unknown> };
     lastActivatedSessionIdRef: { current: string | null };
     lastActiveReentryAtRef: { current: Map<string, number> };
+    lastConnectedBaselineAtRef: { current: Map<string, number> };
+    lastServerActivityAtRef: { current: Map<string, number> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
     handshakeTimeoutsRef: { current: Map<string, number> };
@@ -48,33 +84,16 @@ export function useSessionContextLifecycle(options: {
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
   resolveActiveHeadRefreshTickMs: () => number;
+  resolveHeadStalePingMs: () => number;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
 }) {
-  const ensureActiveSessionFreshRef = useRef(options.ensureActiveSessionFresh);
   const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
-  const previousForegroundActiveRef = useRef(options.appForegroundActive !== false);
+  const lastLiveSessionIdsRef = useRef<string[]>(options.state.liveSessionIds);
 
   useEffect(() => {
-    const nextForegroundActive = options.appForegroundActive !== false;
-    const previousForegroundActive = previousForegroundActiveRef.current;
-    options.refs.foregroundActiveRef.current = nextForegroundActive;
-    previousForegroundActiveRef.current = nextForegroundActive;
-    if (!nextForegroundActive || previousForegroundActive) {
-      return;
-    }
-    const activeSessionId = options.refs.stateRef.current.activeSessionId;
-    if (!activeSessionId) {
-      return;
-    }
-    ensureActiveSessionFreshRef.current({
-      sessionId: activeSessionId,
-      source: 'active-resume',
-      forceHead: true,
-      markResumeTail: true,
-      allowReconnectIfUnavailable: true,
-    });
+    options.refs.foregroundActiveRef.current = options.appForegroundActive !== false;
   }, [options.appForegroundActive]);
 
   useEffect(() => {
@@ -84,10 +103,6 @@ export function useSessionContextLifecycle(options: {
   useEffect(() => {
     options.refs.scheduleStatesRef.current = options.scheduleStates;
   }, [options.scheduleStates]);
-
-  useEffect(() => {
-    ensureActiveSessionFreshRef.current = options.ensureActiveSessionFresh;
-  }, [options.ensureActiveSessionFresh]);
 
   useEffect(() => {
     flushRuntimeDebugLogsRef.current = options.flushRuntimeDebugLogs;
@@ -124,13 +139,32 @@ export function useSessionContextLifecycle(options: {
       return;
     }
     options.refs.lastActivatedSessionIdRef.current = options.state.activeSessionId;
-    ensureActiveSessionFreshRef.current({
+    options.ensureActiveSessionFresh({
       sessionId: options.state.activeSessionId,
       source: 'active-reentry',
       forceHead: true,
       allowReconnectIfUnavailable: true,
     });
-  }, [options.state.activeSessionId]);
+  }, [options.ensureActiveSessionFresh, options.state.activeSessionId]);
+
+  useEffect(() => {
+    const nextLiveSessionIds = Array.isArray(options.state.liveSessionIds)
+      ? options.state.liveSessionIds
+      : [];
+    const previousLiveSessionIds = lastLiveSessionIdsRef.current;
+    lastLiveSessionIdsRef.current = nextLiveSessionIds;
+    collectNewlyVisibleLiveSessionIds(previousLiveSessionIds, nextLiveSessionIds).forEach((sessionId) => {
+      if (sessionId === options.state.activeSessionId) {
+        return;
+      }
+      options.ensureActiveSessionFresh({
+        sessionId,
+        source: 'active-reentry',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      });
+    });
+  }, [options.ensureActiveSessionFresh, options.state.liveSessionIds]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -155,23 +189,27 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const activeSessionId = options.refs.stateRef.current.activeSessionId;
-        const liveSessionIds = Array.isArray(options.refs.stateRef.current.liveSessionIds)
-          ? options.refs.stateRef.current.liveSessionIds
-          : [];
-        const refreshTargets = Array.from(new Set([
-          ...(activeSessionId ? [activeSessionId] : []),
-          ...liveSessionIds,
-        ]));
+        const refreshTargets = buildLifecycleRefreshTargets(options.refs.stateRef.current);
         if (refreshTargets.length === 0) {
           scheduleNext();
           return;
         }
+        const headStalePingMs = options.resolveHeadStalePingMs();
+        const now = Date.now();
         refreshTargets.forEach((sessionId) => {
-          ensureActiveSessionFreshRef.current({
+          if (!shouldScheduleActiveTickRefresh({
+            state: options.refs.stateRef.current,
+            sessionId,
+            lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+            headStalePingMs,
+            now,
+          })) {
+            return;
+          }
+          options.ensureActiveSessionFresh({
             sessionId,
             source: 'active-tick',
-            allowReconnectIfUnavailable: false,
+            allowReconnectIfUnavailable: true,
           });
         });
         scheduleNext();
@@ -186,7 +224,7 @@ export function useSessionContextLifecycle(options: {
         window.clearTimeout(timer);
       }
     };
-  }, [options.resolveActiveHeadRefreshTickMs]);
+  }, [options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
 
   useEffect(() => () => {
     options.refs.remoteScreenshotRuntimeRef.current.dispose(

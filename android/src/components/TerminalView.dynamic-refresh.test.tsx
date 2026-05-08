@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView as BaseTerminalView } from './TerminalView';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
+import { createSessionHeadStore } from '../lib/session-head-store';
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
 
 class ResizeObserverMock {
@@ -379,6 +381,101 @@ describe('TerminalView minimal mirror render', () => {
     expect(readRenderedRows(view.container)).not.toContain('typed-from-client');
   });
 
+  it('keeps follow-frame body truth coherent when output patches old rows and appends new tail while input stays active', async () => {
+    const onInput = vi.fn();
+    const baseSession = makeSession({
+      revision: 1,
+      lines: [
+        ...buildRows(37),
+        'stream-loading',
+        'prompt-$',
+      ],
+      bufferTailEndIndex: 39,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={baseSession.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: baseSession.buffer.lines,
+            bufferStartIndex: baseSession.buffer.startIndex,
+            bufferEndIndex: baseSession.buffer.endIndex,
+            bufferHeadStartIndex: baseSession.buffer.bufferHeadStartIndex,
+            bufferTailEndIndex: baseSession.buffer.bufferTailEndIndex,
+            bufferGapRanges: baseSession.buffer.gapRanges,
+            cursorKeysApp: baseSession.buffer.cursorKeysApp,
+            revision: baseSession.buffer.revision,
+          })}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedRows(view.container)).toContain('stream-loading');
+      expect(readRenderedRows(view.container)).toContain('prompt-$');
+    });
+
+    const input = view.container.querySelector('textarea[data-wterm-input="true"]') as HTMLTextAreaElement;
+    input.value = 'echo hi';
+    fireEvent.input(input);
+    expect(onInput).toHaveBeenCalledWith('s1', 'echo hi');
+
+    const nextLines = [
+      ...buildRows(37),
+      'stream-done',
+      'prompt-$ echo hi',
+      'tail-040',
+    ];
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={baseSession.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: createSessionBufferState({
+              lines: nextLines,
+              startIndex: 0,
+              endIndex: nextLines.length,
+              bufferHeadStartIndex: 0,
+              bufferTailEndIndex: nextLines.length,
+              rows: 24,
+              cols: 80,
+              cacheLines: 500,
+              revision: 2,
+            }).lines,
+            bufferStartIndex: 0,
+            bufferEndIndex: nextLines.length,
+            bufferHeadStartIndex: 0,
+            bufferTailEndIndex: nextLines.length,
+            bufferGapRanges: [],
+            cursorKeysApp: false,
+            revision: 2,
+          })}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('stream-done');
+      expect(rows).toContain('prompt-$ echo hi');
+      expect(rows).toContain('tail-040');
+      expect(rows).not.toContain('stream-loading');
+      expect(rows).not.toContain('echo hi');
+    });
+  });
+
   it('does not rebind dom input listeners when live buffer updates only change cursor key mode', async () => {
     const addEventListenerSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'addEventListener');
     const removeEventListenerSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'removeEventListener');
@@ -443,6 +540,102 @@ describe('TerminalView minimal mirror render', () => {
     fireEvent.keyDown(input, { key: 'ArrowUp' });
 
     expect(onInput).toHaveBeenLastCalledWith(nextSession.id, '\x1bOA');
+  });
+
+  it('does not realign follow scroll when only daemon head metadata advances without a body repaint', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const renderStore = createSessionRenderBufferStore();
+      const headStore = createSessionHeadStore();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+      renderStore.setBuffer(session.id, toRenderBufferSnapshot({
+        initialBufferLines: session.buffer.lines,
+        bufferStartIndex: session.buffer.startIndex,
+        bufferEndIndex: session.buffer.endIndex,
+        bufferHeadStartIndex: session.buffer.bufferHeadStartIndex,
+        bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+        bufferGapRanges: session.buffer.gapRanges,
+        revision: session.buffer.revision,
+      }));
+      headStore.setHead(session.id, {
+        daemonHeadRevision: 1,
+        daemonHeadEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <BaseTerminalView
+            sessionId={session.id}
+            sessionBufferStore={renderStore}
+            sessionHeadStore={headStore}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let currentScrollTop = 0;
+      let scrollTopWriteCount = 0;
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          scrollTopWriteCount += 1;
+          currentScrollTop = value;
+        },
+      });
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return 1360;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(currentScrollTop).toBe(952);
+      const initialScrollTopWriteCount = scrollTopWriteCount;
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 80,
+        viewportRows: 24,
+      });
+
+      act(() => {
+        headStore.setHead(session.id, {
+          daemonHeadRevision: 2,
+          daemonHeadEndIndex: 120,
+        });
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(readRenderedRows(view.container)).toContain('row-080');
+      expect(currentScrollTop).toBe(952);
+      expect(scrollTopWriteCount).toBe(initialScrollTopWriteCount);
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('forces follow mode back to the authoritative viewport after user input', async () => {
@@ -3736,8 +3929,86 @@ describe('TerminalView minimal mirror render', () => {
 
     expect(readRenderedRows(view.container)).toContain('row-080');
     expect(readRenderedRows(view.container)).toContain('row-081');
-    expect(scroller.scrollTop).toBe(952);
+    expect(scroller.scrollTop).toBe(969);
     expect(onViewportChange).toHaveBeenCalled();
+  });
+
+  it('keeps follow scroll aligned for a live non-interactive pane when render geometry changes', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active={false}
+          live
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let scrollHeight = 1360;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return scrollHeight;
+      },
+    });
+
+    await waitFor(() => {
+      expect(readRenderedRows(view.container)).toContain('row-080');
+    });
+
+    const initialScrollTop = scroller.scrollTop;
+    expect(initialScrollTop).toBe(952);
+
+    const nextSession = makeSession({
+      revision: 2,
+      lines: buildRows(96),
+      bufferTailEndIndex: 96,
+    });
+    scrollHeight = 1632;
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={nextSession.id}
+          initialBufferLines={nextSession.buffer.lines}
+          bufferStartIndex={nextSession.buffer.startIndex}
+          bufferEndIndex={nextSession.buffer.endIndex}
+          bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+          bufferGapRanges={nextSession.buffer.gapRanges}
+          cursorKeysApp={nextSession.buffer.cursorKeysApp}
+          active={false}
+          live
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedRows(view.container)).toContain('row-096');
+    });
+    expect(scroller.scrollTop).toBe(1224);
+    expect(scroller.scrollTop).toBeGreaterThan(initialScrollTop);
   });
 
 

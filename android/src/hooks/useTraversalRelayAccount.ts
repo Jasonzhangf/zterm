@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TraversalRelayClientSettings } from '../lib/bridge-settings';
 import {
-  connectTraversalRelayDevicesStream,
   readTraversalRelayAccountState,
   traversalRelayLogin,
   traversalRelayRefreshMe,
@@ -52,41 +51,6 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
   useEffect(() => {
     refreshLocalAccount();
   }, [refreshLocalAccount, initialRelaySettings?.accessToken, initialRelaySettings?.relayBaseUrl]);
-
-  useEffect(() => {
-    if (!account?.accessToken || !account.relayBaseUrl) {
-      return;
-    }
-    let cancelled = false;
-    let socket: WebSocket | null = null;
-    try {
-      socket = connectTraversalRelayDevicesStream({
-        account,
-        onDevices: (devices) => {
-          if (cancelled) {
-            return;
-          }
-          setRelayDevices(devices);
-          setAccount((current) => current ? { ...current, devices, updatedAt: Date.now() } : current);
-        },
-        onError: (message) => {
-          if (!cancelled) {
-            setRelayStatus(message);
-          }
-        },
-      });
-    } catch (error) {
-      setRelayStatus(error instanceof Error ? error.message : String(error));
-    }
-    return () => {
-      cancelled = true;
-      try {
-        socket?.close(1000, 'settings disposed');
-      } catch (error) {
-        console.error('[useTraversalRelayAccount] Failed to close relay device stream:', error);
-      }
-    };
-  }, [account]);
 
   const syncRelay = useCallback(async (
     mode: 'login' | 'register' | 'refresh',

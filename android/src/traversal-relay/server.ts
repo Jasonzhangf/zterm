@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
+import { TraversalRelayClientDebugStore } from './client-debug-store';
 import { TraversalRelayStore, type TraversalRelayPublicUser } from './store';
 
 interface SignalMessage {
@@ -20,17 +21,21 @@ interface RelayHostEnvelope {
 }
 
 interface DevicePresenceInputEnvelope {
-  type: 'devices-request' | 'device-meta';
+  type: 'devices-request' | 'device-meta' | 'client-debug-log' | 'client-debug-snapshot';
   payload?: {
     deviceId?: string;
     deviceName?: string;
     platform?: string;
     appVersion?: string;
+    entries?: Array<{ seq: number; ts: string; scope: string; payload?: string }>;
+    requestId?: string;
+    reason?: string;
+    snapshot?: unknown;
   };
 }
 
 interface DevicePresenceOutputEnvelope {
-  type: 'devices-snapshot' | 'device-updated' | 'relay-error';
+  type: 'devices-snapshot' | 'device-updated' | 'relay-error' | 'client-debug-request';
   payload?: Record<string, unknown>;
   reason?: string;
 }
@@ -481,6 +486,7 @@ const clients = new Map<string, RelayClientConnection>();
 const deviceStreams = new Map<string, DeviceStreamConnection>();
 const liveClientDevices = new Map<string, Set<string>>();
 const liveDaemonDevices = new Map<string, Set<string>>();
+const clientDebugStore = new TraversalRelayClientDebugStore();
 
 function addLivePresence(map: Map<string, Set<string>>, connectionId: string, userId: string, deviceId: string) {
   const key = deviceKey(userId, deviceId);
@@ -627,6 +633,116 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
       ok: true,
       user,
       devices: store.listDevices(user.id),
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/debug/client-devices')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    serveJson(response, {
+      ok: true,
+      user,
+      devices: clientDebugStore.listDeviceSummaries(user.id),
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/debug/client-device-logs')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    const deviceId = asString(url.searchParams.get('deviceId'));
+    if (!deviceId) {
+      serveJson(response, { ok: false, message: 'deviceId is required' }, 400);
+      return;
+    }
+    const limit = Number.parseInt(asString(url.searchParams.get('limit')) || '200', 10);
+    const scopeIncludes = asString(url.searchParams.get('scope'));
+    serveJson(response, {
+      ok: true,
+      user,
+      deviceId,
+      entries: clientDebugStore.listLogs(user.id, {
+        deviceId,
+        limit: Number.isFinite(limit) ? limit : 200,
+        scopeIncludes: scopeIncludes || undefined,
+      }),
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/debug/client-device-snapshot')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    const deviceId = asString(url.searchParams.get('deviceId'));
+    if (!deviceId) {
+      serveJson(response, { ok: false, message: 'deviceId is required' }, 400);
+      return;
+    }
+    serveJson(response, {
+      ok: true,
+      user,
+      deviceId,
+      snapshot: clientDebugStore.getSnapshot(user.id, deviceId),
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/debug/client-device-request')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    const body = await readJsonBody<{
+      deviceId?: string;
+      reason?: string;
+      includeSnapshot?: boolean;
+      includeLogs?: boolean;
+      logLimit?: number;
+    }>(request);
+    const deviceId = asString(body.deviceId);
+    if (!deviceId) {
+      serveJson(response, { ok: false, message: 'deviceId is required' }, 400);
+      return;
+    }
+    const requestId = randomUUID();
+    let delivered = 0;
+    for (const connection of deviceStreams.values()) {
+      if (connection.userId !== user.id || connection.deviceId !== deviceId) {
+        continue;
+      }
+      sendDeviceEnvelope(connection.socket, {
+        type: 'client-debug-request',
+        payload: {
+          requestId,
+          reason: asString(body.reason) || 'remote-http-debug-request',
+          includeSnapshot: body.includeSnapshot !== false,
+          includeLogs: body.includeLogs !== false,
+          logLimit: typeof body.logLimit === 'number' && Number.isFinite(body.logLimit) ? body.logLimit : 120,
+        },
+      });
+      delivered += 1;
+    }
+    serveJson(response, {
+      ok: true,
+      user,
+      deviceId,
+      requestId,
+      delivered,
     });
     return;
   }
@@ -901,6 +1017,30 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
           connected: true,
         });
         broadcastDevices(user.id);
+        return;
+      }
+      if (message.type === 'client-debug-log') {
+        const relayDeviceId = asString(message.payload?.deviceId) || connection.deviceId;
+        if (!relayDeviceId) {
+          throw new Error('deviceId is required for client-debug-log');
+        }
+        clientDebugStore.appendLogs(
+          user.id,
+          relayDeviceId,
+          Array.isArray(message.payload?.entries) ? message.payload.entries : [],
+        );
+        return;
+      }
+      if (message.type === 'client-debug-snapshot') {
+        const relayDeviceId = asString(message.payload?.deviceId) || connection.deviceId;
+        if (!relayDeviceId) {
+          throw new Error('deviceId is required for client-debug-snapshot');
+        }
+        clientDebugStore.setSnapshot(user.id, relayDeviceId, {
+          requestId: asString(message.payload?.requestId),
+          reason: asString(message.payload?.reason),
+          snapshot: message.payload?.snapshot,
+        });
       }
     } catch (error) {
       sendDeviceEnvelope(ws, {

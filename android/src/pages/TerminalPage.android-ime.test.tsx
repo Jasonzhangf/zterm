@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
-import { TerminalPage, resolveKeyboardLiftPx, resolveTerminalHeaderTopInsetPx } from './TerminalPage';
+import { TerminalPage, resolveKeyboardLiftPx, resolveLayoutViewportHeight, resolveTerminalHeaderTopInsetPx } from './TerminalPage';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 
 const imeListeners = new Map<string, (event: any) => void>();
@@ -619,9 +619,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     const terminalStage = screen.getByTestId('terminal-stage-shell');
     const quickBarShell = screen.getByTestId('terminal-quickbar-shell');
-    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 78px;');
+    expect(terminalStage.getAttribute('style') || '').toContain('bottom: 64px;');
     expect(terminalStage.getAttribute('style') || '').not.toContain('transform: translateY');
-    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 14px;');
+    expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 0px;');
 
     await waitFor(() => {
       expect(imeListeners.has('keyboardState')).toBe(true);
@@ -632,9 +632,9 @@ describe('TerminalPage Android IME bridge', () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute('style') || '';
-      expect(style).toContain('bottom: 398px;');
+      expect(style).toContain('bottom: 384px;');
       expect(style).not.toContain('transform: translateY');
-      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 334px;');
+      expect(quickBarShell.getAttribute('style') || '').toContain('bottom: 320px;');
     });
   });
 
@@ -963,6 +963,43 @@ describe('resolveKeyboardLiftPx', () => {
       value: originalVisualViewport,
     });
   });
+
+  it('does not over-lift when innerHeight has already shrunk to visualViewport height on Android', () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(280)).toBe(280);
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
 });
 
 describe('resolveTerminalHeaderTopInsetPx', () => {
@@ -978,6 +1015,84 @@ describe('resolveTerminalHeaderTopInsetPx', () => {
 
     expect(resolveTerminalHeaderTopInsetPx(true)).toBe(16);
 
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe('resolveLayoutViewportHeight', () => {
+  it('prefers stable layout viewport height when Android IME shrinks innerHeight on a tablet', () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: 1366,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveLayoutViewportHeight()).toBe(1366);
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe('resolveKeyboardLiftPx with stable layout viewport height override', () => {
+  it('uses the pre-keyboard stable layout height when Android shrinks all viewport metrics during IME popup', () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 328,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: 328,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        height: 328,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(303, 615)).toBe(287);
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: originalVisualViewport,

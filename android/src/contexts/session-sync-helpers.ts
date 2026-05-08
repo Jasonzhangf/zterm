@@ -83,7 +83,6 @@ export type SessionTransportOpenFailureStage = 'handshake' | 'live';
 export interface TransportOpenConnectedEffectPlan {
   debugEvent: 'session.ws.connected' | 'session.ws.reconnect.connected';
   clearSupersededSockets: boolean;
-  flushPendingInputQueue: boolean;
 }
 
 export interface TransportOpenLiveFailureEffectPlan {
@@ -199,13 +198,11 @@ export function buildTransportOpenConnectedEffectPlan(
     return {
       debugEvent: 'session.ws.reconnect.connected',
       clearSupersededSockets: true,
-      flushPendingInputQueue: true,
     };
   }
   return {
     debugEvent: 'session.ws.connected',
     clearSupersededSockets: false,
-    flushPendingInputQueue: true,
   };
 }
 

@@ -23,6 +23,7 @@ import {
   isPendingSessionTransportOpenStaleRuntime,
   isReconnectInFlightRuntime,
   isSessionTransportActiveRuntime,
+  shouldAcceptSessionLiveBufferRuntime,
   isSessionTransportActivityStaleInfraRuntime,
   markPendingInputTailRefreshInfraRuntime,
   moveSessionSyncRuntime,
@@ -174,6 +175,15 @@ export function createSessionInfraFacadeRuntime(options: {
     return isSessionTransportActiveRuntime({
       sessionId,
       stateRef: options.stateRef,
+    });
+  };
+
+
+  const shouldAcceptSessionLiveBuffer = (sessionId: string) => {
+    return shouldAcceptSessionLiveBufferRuntime({
+      sessionId,
+      stateRef: options.stateRef,
+      readSessionBufferSnapshot,
     });
   };
 
@@ -419,6 +429,7 @@ export function createSessionInfraFacadeRuntime(options: {
     readSessionTransportToken,
     writeSessionTransportToken,
     isSessionTransportActive,
+    shouldAcceptSessionLiveBuffer,
     hasPendingSessionTransportOpen,
     isPendingSessionTransportOpenStale,
     isReconnectInFlight,

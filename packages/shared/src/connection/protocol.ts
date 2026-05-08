@@ -177,6 +177,7 @@ export type BridgeClientMessage =
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> } }
+  | { type: 'debug-snapshot'; payload: { snapshot: unknown } }
   | { type: 'list-sessions' }
   | { type: 'schedule-list'; payload: { sessionName: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }

@@ -238,12 +238,12 @@ export function closeSessionRuntime(options: {
   sessionId: string;
   refs: {
     manualCloseRef: MutableRefObject<Set<string>>;
-    pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
     sessionRenderGateRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
@@ -264,7 +264,6 @@ export function closeSessionRuntime(options: {
   deleteSessionSync: (id: string) => void;
 }) {
   options.refs.manualCloseRef.current.add(options.sessionId);
-  options.refs.pendingInputQueueRef.current.delete(options.sessionId);
   deletePendingSessionTransportOpenIntent(
     options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
     options.sessionId,
@@ -292,6 +291,7 @@ export function closeSessionRuntime(options: {
   options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
   options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
   options.refs.lastActiveReentryAtRef.current.delete(options.sessionId);
+  options.refs.lastConnectedBaselineAtRef.current.delete(options.sessionId);
   options.refs.sessionVisibleRangeRef.current.delete(options.sessionId);
   options.refs.sessionBufferStoreRef.current.deleteSession(options.sessionId);
   options.refs.sessionRenderGateRef.current.deleteSession(options.sessionId);

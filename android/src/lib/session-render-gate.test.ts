@@ -103,7 +103,7 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('reuses committed render lines when only daemon head metadata changes', async () => {
+  it('keeps committed render rows semantically stable when only daemon head metadata changes', async () => {
     vi.useFakeTimers();
     try {
       const liveBufferStore = createSessionBufferStore();
@@ -118,10 +118,6 @@ describe('session-render-gate', () => {
       await flushScheduledRenderCommit();
 
       const before = renderStore.getSnapshot('session-1').buffer;
-      const beforeLines = before.lines;
-      const beforeRow0 = before.lines[0];
-      const beforeRow1 = before.lines[1];
-
       liveHeadStore.setHead('session-1', { daemonHeadRevision: 4, daemonHeadEndIndex: 20 });
       gate.scheduleCommit('session-1');
       await flushScheduledRenderCommit();
@@ -129,16 +125,17 @@ describe('session-render-gate', () => {
       const after = renderStore.getSnapshot('session-1').buffer;
       expect(after.daemonHeadRevision).toBe(4);
       expect(after.daemonHeadEndIndex).toBe(20);
-      expect(after.lines).toBe(beforeLines);
-      expect(after.lines[0]).toBe(beforeRow0);
-      expect(after.lines[1]).toBe(beforeRow1);
+      expect(after.lines).toEqual(before.lines);
+      expect(after.gapRanges).toEqual(before.gapRanges);
+      expect(after.cursor).toEqual(before.cursor);
+      expect(before.lines[0]?.[0]?.bg).toBe(256);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('reuses the last projected buffer when the live buffer reference is unchanged', async () => {
+  it('does not emit a new render snapshot when the live buffer truth is unchanged', async () => {
     vi.useFakeTimers();
     try {
       const liveBufferStore = createSessionBufferStore();
@@ -159,8 +156,7 @@ describe('session-render-gate', () => {
 
       const after = renderStore.getSnapshot('session-1').buffer;
       expect(after).toBe(before);
-      expect(after.lines).toBe(before.lines);
-      expect(after.gapRanges).toBe(before.gapRanges);
+      expect(after.lines).toEqual(before.lines);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -194,6 +190,86 @@ describe('session-render-gate', () => {
     await flushScheduledRenderCommit();
     const renderAfterCommit = renderStore.getSnapshot('session-1').buffer;
     expect(renderAfterCommit.lines[0]?.[0]?.bg).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps committed render snapshot isolated when the same live buffer object is mutated after commit', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+      const renderStore = gate.getRenderStore();
+
+      const liveBuffer = makeBuffer(['alpha', 'beta'], 1);
+      liveBufferStore.commitBuffer('session-1', liveBuffer);
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 2 });
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const committedBeforeMutation = renderStore.getSnapshot('session-1').buffer;
+      expect(committedBeforeMutation.lines[0]?.[0]?.bg).toBe(256);
+      expect(committedBeforeMutation.gapRanges).toEqual([]);
+      expect(committedBeforeMutation.cursor).toBeNull();
+
+      liveBuffer.lines[0]![0]!.bg = 2;
+      liveBuffer.gapRanges.push({ startIndex: 1, endIndex: 2 });
+      liveBuffer.cursor = { rowIndex: 1, col: 4, visible: true };
+
+      const committedAfterMutation = renderStore.getSnapshot('session-1').buffer;
+      expect(committedAfterMutation).toBe(committedBeforeMutation);
+      expect(committedAfterMutation.lines[0]?.[0]?.bg).toBe(256);
+      expect(committedAfterMutation.gapRanges).toEqual([]);
+      expect(committedAfterMutation.cursor).toBeNull();
+
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const committedAfterNextFrame = renderStore.getSnapshot('session-1').buffer;
+      expect(committedAfterNextFrame.lines[0]?.[0]?.bg).toBe(2);
+      expect(committedAfterNextFrame.gapRanges).toEqual([{ startIndex: 1, endIndex: 2 }]);
+      expect(committedAfterNextFrame.cursor).toEqual({ rowIndex: 1, col: 4, visible: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps committed render rows isolated when the same live row object is reused across later patches', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+      const renderStore = gate.getRenderStore();
+
+      const base = makeBuffer(['alpha', 'beta'], 1);
+      liveBufferStore.commitBuffer('session-1', base);
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 2 });
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const committedBeforePatch = renderStore.getSnapshot('session-1').buffer;
+      const reusedRow = base.lines[0]!;
+      const next = {
+        ...base,
+        lines: [reusedRow, base.lines[1]!],
+        revision: 2,
+      };
+      liveBufferStore.commitBuffer('session-1', next);
+      reusedRow[0]!.fg = 3;
+
+      expect(committedBeforePatch.lines[0]?.[0]?.fg).toBe(256);
+
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const committedAfterPatch = renderStore.getSnapshot('session-1').buffer;
+      expect(committedAfterPatch.lines[0]?.[0]?.fg).toBe(3);
+      expect(committedBeforePatch.lines[0]?.[0]?.fg).toBe(256);
     } finally {
       vi.useRealTimers();
     }

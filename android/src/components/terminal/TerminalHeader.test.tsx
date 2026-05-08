@@ -219,14 +219,97 @@ describe('TerminalHeader', () => {
       />,
     );
 
-    const tabButton = screen.getByTitle('Tap: switch · Long press tab: pane menu · Two-finger tap current tab: move menu');
+    const tabButton = screen.getAllByTitle('Tap: switch · Long press tab: pane menu · Two-finger tap current tab: move menu')[0]!;
     fireEvent.mouseDown(tabButton);
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     fireEvent.mouseUp(tabButton);
 
-    expect(screen.getByText('归到左屏')).toBeTruthy();
-    expect(screen.getByText('归到右屏')).toBeTruthy();
+    expect(screen.getByText('当前在 P1')).toBeTruthy();
+  });
+
+  it('renders real pane targets in split tab long-press menu and routes assignment to the chosen pane', () => {
+    const session1 = makeSession();
+    const session2 = {
+      ...makeSession(),
+      id: 'session-2',
+      hostId: 'host-2',
+      sessionName: 'zterm-2',
+      title: 'zterm-2',
+    };
+    const onAssignSessionToPane = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session1), toHeaderSession(session2)]}
+        activeSession={toHeaderSession(session1)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        paneGroups={[
+          {
+            paneId: 'pane-1',
+            size: 0.5,
+            sessions: [toHeaderSession(session1)],
+            activeSessionId: session1.id,
+            isActivePane: true,
+          },
+          {
+            paneId: 'pane-2',
+            size: 0.5,
+            sessions: [toHeaderSession(session2)],
+            activeSessionId: session2.id,
+            isActivePane: false,
+          },
+        ]}
+        onAssignSessionToPane={onAssignSessionToPane}
+      />,
+    );
+
+    const tabButton = screen.getAllByTitle('Tap: switch · Long press tab: pane menu · Two-finger tap current tab: move menu')[0]!;
+    fireEvent.mouseDown(tabButton);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    fireEvent.mouseUp(tabButton);
+
+    expect(screen.getByText('当前在 P1')).toBeTruthy();
+    const moveButton = screen.getByText('移到 P2');
+    fireEvent.click(moveButton);
+    expect(onAssignSessionToPane).toHaveBeenCalledWith('session-1', 'pane-2');
+  });
+
+  it('uses pane size as the shared split-width truth', () => {
+    const session = makeSession();
+    const { container } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        showBackButton={false}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        paneGroups={[
+          {
+            paneId: 'pane-1',
+            size: 0.25,
+            sessions: [toHeaderSession(session)],
+            activeSessionId: session.id,
+            isActivePane: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(container.innerHTML).toContain('flex: 0.25 1 0%');
   });
 });

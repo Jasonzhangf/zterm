@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import { RUNTIME_DEBUG_STORAGE_KEY } from '../lib/runtime-debug';
 
 const baseSettings: BridgeSettings = {
   targetHost: '',
@@ -25,6 +26,25 @@ const baseSettings: BridgeSettings = {
 };
 
 describe('SettingsPage terminal theme selection', () => {
+  beforeEach(() => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+        clear: () => {
+          storage.clear();
+        },
+      },
+    });
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -139,3 +159,39 @@ describe('SettingsPage terminal theme selection', () => {
     }));
   });
 });
+  it('toggles daemon debug through the runtime debug storage truth', () => {
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: '○Daemon Debug 已关闭' });
+    fireEvent.click(button);
+    expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
+    expect(screen.getByRole('button', { name: '✓Daemon Debug 已开启' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '✓Daemon Debug 已开启' }));
+    expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
+    expect(screen.getByRole('button', { name: '○Daemon Debug 已关闭' })).toBeTruthy();
+  });
+

@@ -153,6 +153,9 @@ operation -> event -> projection
   - close/prune already-open tabs
 - runtime sessions **不得 append runtime-only tabs 回 OPEN_TABS**
 - 关闭 tab、remote prune、session status closed 都必须统一走 open-tab close owner，再由它持久化
+- closed semantic tombstone（`closed-tab-reuse-keys`）也属于 open-tab persistence truth：
+  - 显式 reopen / saved-tab import 可以清 tombstone
+  - cold restore 不得偷偷清 tombstone
 - `SessionContext` 不得持久化 current tabs
 - `ConnectionsPage` 不得写 `OPEN_TABS`
 

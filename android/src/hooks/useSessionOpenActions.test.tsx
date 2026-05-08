@@ -318,6 +318,59 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('runtime:daemon-a:alpha');
   });
 
+  it('emits explicit pane-open intent for quick-tab single open instead of relying on later fallback pane guesses', () => {
+    const target = {
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    };
+    const onSessionsOpenedInPane = vi.fn();
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      onSessionsOpenedInPane,
+    }));
+
+    act(() => {
+      result.current.handleOpenQuickTabPicker('pane-2');
+    });
+    act(() => {
+      result.current.handleOpenSingleTmuxSession(target as any, 'alpha');
+    });
+
+    expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:alpha'], 'pane-2');
+  });
+
+  it('emits explicit pane-open intent for quick-tab multi-open with all opened sessionIds', () => {
+    const target = {
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    };
+    const onSessionsOpenedInPane = vi.fn();
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      onSessionsOpenedInPane,
+    }));
+
+    act(() => {
+      result.current.handleOpenQuickTabPicker('pane-2');
+    });
+    act(() => {
+      result.current.handleOpenMultipleTmuxSessions(target as any, ['alpha', 'beta']);
+    });
+
+    expect(onSessionsOpenedInPane).toHaveBeenCalledWith(
+      ['runtime:daemon-a:alpha', 'runtime:daemon-a:beta'],
+      'pane-2',
+    );
+  });
+
   it('does not persist transient host storage when explicitly opening a tmux session', () => {
     const target = {
       bridgeHost: '100.127.23.27',

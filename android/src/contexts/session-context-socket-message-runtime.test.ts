@@ -110,6 +110,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
       isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -167,6 +168,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
       isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -226,6 +228,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
       isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -274,6 +277,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
       isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
       summarizeBufferPayload: vi.fn(() => ({})),
       applyIncomingBufferSync: vi.fn(),
       handleBufferHead: vi.fn(),
@@ -341,6 +345,7 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
       settleSessionPullState,
       runtimeDebug,
       isSessionTransportActive: vi.fn(() => false),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => false),
       summarizeBufferPayload,
       applyIncomingBufferSync,
       handleBufferHead: vi.fn(),
@@ -363,4 +368,67 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
       }),
     );
   });
+
+  it('accepts bootstrap buffer-sync before live ids settle when local window is still empty', () => {
+    const summarizeBufferPayload = vi.fn(() => ({}));
+    const applyIncomingBufferSync = vi.fn();
+    const settleSessionPullState = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'buffer-sync',
+        payload: {
+          revision: 7,
+          startIndex: 120,
+          endIndex: 180,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          lines: Array.from({ length: 60 }, (_, index) => ({
+            i: 120 + index,
+            t: `row-${120 + index}`,
+          })),
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              ...makeSession(),
+              state: 'connected',
+            }],
+            activeSessionId: 'session-2',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState,
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => false),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload,
+      applyIncomingBufferSync,
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(settleSessionPullState).toHaveBeenCalledTimes(1);
+    expect(summarizeBufferPayload).toHaveBeenCalledTimes(1);
+    expect(applyIncomingBufferSync).toHaveBeenCalledTimes(1);
+  });
+
 });

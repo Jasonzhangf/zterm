@@ -275,6 +275,31 @@ describe('TerminalPage renderer scope', () => {
     expect(screen.queryByTestId('terminal-view-s3')).toBeNull();
   });
 
+  it('uses pane count as the single split width truth and ignores persisted skewed pane ratios', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.62, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.23, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+        { id: 'pane-3', size: 0.15, activeTabId: 'tab-s3', tabs: [{ id: 'tab-s3', sessionId: 's3' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const session3 = makeSession('s3');
+
+    renderTerminalPage([session1, session2, session3], session1);
+
+    const panes = screen.getAllByTestId('terminal-pane-shell');
+    expect(panes).toHaveLength(3);
+    expect(panes.map((pane) => pane.style.flex)).toEqual([
+      '0.3333333333333333 1 0%',
+      '0.3333333333333333 1 0%',
+      '0.3333333333333333 1 0%',
+    ]);
+  });
+
   it('does not rerender header when only debug overlay polling ticks', () => {
     const session1 = makeSession('s1');
     renderTerminalPage([session1], session1);
@@ -329,16 +354,22 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1], session1);
 
     expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByText('IH')).not.toBeNull();
+    expect(screen.getByText('CH')).not.toBeNull();
+    expect(screen.getByText('VVH')).not.toBeNull();
+    expect(screen.getByText('Lift')).not.toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
     expect(screen.queryByText('渲染')).toBeNull();
+    expect(screen.queryByText('IH')).toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
     expect(screen.getByText('渲染')).not.toBeNull();
+    expect(screen.getByText('IH')).not.toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
   });
 
@@ -507,5 +538,21 @@ describe('TerminalPage renderer scope', () => {
     view.unmount();
 
     expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('hides the back button when split mode is visible so pane header and shell stay aligned', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+
+    renderTerminalPage([session1, session2], session1);
+
+    expect(document.body.textContent || '').not.toContain('‹');
   });
 });

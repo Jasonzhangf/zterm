@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
-import type { TerminalVisibleRange, TerminalViewportState } from '../lib/types';
+import type { TerminalViewportState } from '../lib/types';
 
 interface UseTerminalShellActionsOptions {
   sendInput: (sessionId: string, data: string) => void;
-  updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
+  updateSessionViewport: (sessionId: string, visibleRange: TerminalViewportState) => void;
   getSessionRenderBufferStore: () => SessionRenderBufferStore;
   setSessionDraft: (sessionId: string, value: string) => void;
   clearSessionDraft: (sessionId: string) => void;
@@ -24,7 +24,7 @@ interface UseTerminalShellActionsOptions {
 export interface TerminalShellActionsResult {
   inputResetEpochBySession: Record<string, number>;
   handleTerminalInput: (sessionId: string, data: string) => void;
-  handleTerminalVisibleRangeChange: (sessionId: string, visibleRange: TerminalVisibleRange) => void;
+  handleTerminalViewportChange: (sessionId: string, visibleRange: TerminalViewportState) => void;
   handleQuickActionInput: (sequence: string, sessionId?: string) => void;
   handleSessionDraftChange: (value: string, sessionId?: string) => void;
   handleSessionDraftSend: (value: string, sessionId?: string) => void;
@@ -72,6 +72,10 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
     sendInput(sessionId, data);
   }, [bumpInputResetEpoch, sendInput]);
 
+  const handleTerminalViewportChange = useCallback((sessionId: string, viewportState: TerminalViewportState) => {
+    updateSessionViewport(sessionId, viewportState);
+  }, [updateSessionViewport]);
+
   const handleSendSessionDraft = useCallback((sessionId: string, value: string) => {
     if (!value) {
       return;
@@ -84,10 +88,6 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
     handleTerminalInput(sessionId, payload);
     clearSessionDraft(sessionId);
   }, [activeSessionIdRef, clearSessionDraft, handleSwitchSession, handleTerminalInput]);
-
-  const handleTerminalVisibleRangeChange = useCallback((sessionId: string, visibleRange: TerminalVisibleRange) => {
-    updateSessionViewport(sessionId, visibleRange);
-  }, [updateSessionViewport]);
 
   const handleQuickActionInput = useCallback((sequence: string, sessionId?: string) => {
     const targetSessionId = sessionId || terminalActiveSessionIdRef.current;
@@ -125,7 +125,7 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
   return {
     inputResetEpochBySession,
     handleTerminalInput,
-    handleTerminalVisibleRangeChange,
+    handleTerminalViewportChange,
     handleQuickActionInput,
     handleSessionDraftChange,
     handleSessionDraftSend,

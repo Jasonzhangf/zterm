@@ -44,13 +44,12 @@ export function sendInputRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
-  requestSessionBufferHead: (sessionId: string, ws: BridgeTransportSocket, options?: { force?: boolean }) => void;
+  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   probeOrReconnectStaleSessionTransport: (
     sessionId: string,
     ws: BridgeTransportSocket,
     reason: 'input' | 'active-tick' | 'active-reentry',
   ) => void;
-  enqueuePendingInput: (sessionId: string, payload: string) => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   shouldReconnectQueuedActiveInput: (options: {
     isActiveTarget: boolean;
@@ -80,7 +79,6 @@ export function sendInputRuntime(options: {
     readSessionBufferSnapshot: options.readSessionBufferSnapshot,
     requestSessionBufferHead: options.requestSessionBufferHead,
     probeOrReconnectStaleSessionTransport: options.probeOrReconnectStaleSessionTransport,
-    enqueuePendingInput: options.enqueuePendingInput,
     hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
     shouldReconnectQueuedActiveInput: options.shouldReconnectQueuedActiveInput,
     reconnectSession: options.reconnectSession,

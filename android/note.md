@@ -915,3 +915,259 @@ All green locally. Next focus stays on remaining real-world slowness after app r
   2. `useSessionOpenActions.ts`：用户显式打开单个 session/group/saved-tab-list
 - 其余模块（`useOpenTabRuntime` / `useSessionHistoryStorage` / `ConnectionsPage` / `connections-server-groups`）不应直接 createSession；已补 source gate 钉死该边界。
 - 结论：后续若仍出现“旧 tab 自动回来”，重点不再是 createSession 多入口，而是 restore/audit 时机或 persisted truth 本身是否被错误保留。
+[2026-05-07] tombstone clear owner narrowed
+- 继续审计 reopen 链后，确认 `closed-tab-reuse-keys` 清理不应散落在显式打开各分支；本轮已抽回 `open-tab-persistence.clearClosedTabReuseKeysForOwner()`，统一按 semantic owner variants 清 tombstone。
+- 规则冻结：
+  1. 显式 reopen / saved-tab import 可以清 tombstone
+  2. cold restore 不得偷偷清 tombstone
+- 当前 `useSessionOpenActions.openDraftAsSession()` 已改为只调该单点 helper；后续如果再需要清 tombstone，必须复用这一 owner。
+[2026-05-07] zterm-1.6 cold-restore tombstone gate frozen
+- 已在 `open-tab-history-truth.test.ts` 增加 source gate：cold restore (`useOpenTabRestoreRuntimeSync.ts`) 必须对 tombstone 只读，不得调用 `persistClosedTabReuseKeys` / `clearClosedTabReuseKeysForOwner` / 直接 delete tombstone。
+- 显式 open (`useSessionOpenActions.ts`) 仍是唯一允许清 tombstone 的 app-layer 路径，且必须同时保留 tombstone persist write 语义。
+- 验证：`vitest run src/lib/open-tab-history-truth.test.ts` 5/5 绿；`tsc --noEmit` 通过。
+[2026-05-07] quick-tab current-tabs owner fixed to OPEN_TABS truth
+- 继续审计“已有 tab 管理不准/像是又恢复”的链路时，确认 `App.tsx -> TmuxSessionPickerSheet` 的 `openTabs` 之前错误地取自 `terminalSessions`（runtime connected projection），不是 `openTabState.tabs`（OPEN_TABS truth）。
+- 后果：runtime 尚未连上、或某个 persisted tab 当前没有 live session 时，quick-tab 会错误地显示“没有这个 tab”，造成用户以为关闭/持久化失效。
+- 修复：`TmuxSessionPickerSheet.openTabs` 改为只读 `openTabState.tabs`，`activeTabId` 改为 `openTabState.activeSessionId`；不再从 runtime `terminalSessions` 投影已有 tab 管理视图。
+- 回归：`App.dynamic-refresh.test.tsx` 新增“runtime 未连上时 quick-tab 仍显示 persisted OPEN_TABS truth”；`vitest -t quick-tab current-tabs` 绿，`tsc --noEmit` 通过。
+[2026-05-07] foreground-resume owner narrowed to App lifecycle
+- 继续排查“后台返回前台卡住 / 前台能刷但不能输”时，确认 foreground resume 之前存在双实现：
+  1. App `useOpenTabLifecycleEffects` 调 `resumeActiveSessionTransport(activeSessionId)`
+  2. SessionContext `useSessionContextLifecycle` 在 `appForegroundActive` 翻回 true 时又自行触发一次 `ensureActiveSessionFresh(source='active-resume')`
+- 这违反 single-owner：前后台生命周期应由 App owner 发起一次 restore，SessionContext 只消费 `appForegroundActive` 作为前台真相，并继续自己的 `active-reentry / active-tick`。
+- 修复：删除 `session-context-lifecycle.ts` 内部 foreground->active-resume 重复触发，只保留 `foregroundActiveRef` 更新；App lifecycle 继续作为唯一 active-resume owner。
+- 验证：
+  1. `vitest run src/App.dynamic-refresh.test.tsx -t "foreground resume|foreground truth|delegates disconnected active-tab foreground resume|does not reconnect hidden unhealthy tabs during foreground resume"` 9/9 绿
+  2. `vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t "refreshes head on explicit active resume|does not double-request head when tab switch is immediately followed by explicit foreground resume|flushes queued input after first connect when tab switch input happens before that session handshake completes|reuses the active open websocket on foreground resume before any reconnect decision"` 4/4 绿
+  3. `tsc --noEmit` 通过
+
+## 2026-05-07 input target truth
+- 现象：前台可见 tab 已切换，但 SessionContext runtime active 还没切过去时，显式输入会被 queue 且不触发 reconnect / stale probe，表现为“界面能刷但不能输 / 要很久后才恢复”。
+- 收口：`sendInputThroughSessionTransport` 现在把“用户显式输入目标 session”视为输入链唯一真源；queued input reconnect 与 stale-open probe 不再依赖 runtime active 指针是否已经同步。runtime active 仅保留 debug 观测，不再决定显式输入是否重连。
+- 证据：新增 `src/contexts/session-context-input-runtime.test.ts` 两个 gate；并回归 `SessionContext.ws-refresh.test.tsx` 中 queued input / foreground resume 相关用例。
+
+## 2026-05-07 foreground resume refresh target truth
+- 现象：UI 已切到新 tab / 新 pane，前后台恢复时 App 会把该 tab 作为显式恢复目标，但 SessionContext runtime active 可能尚未同步，导致 `active-resume` 被判成非 refresh target，恢复后会出现卡住、能刷不能输、必须再次交互才恢复。
+- 收口：`ensureActiveSessionFreshRuntime` 里仅对 `active-resume` 引入显式恢复目标语义；foreground resume 的目标 session 直接视为 refresh target，不再等待 runtime active 指针追平。`active-tick` 仍严格只服务 runtime active/live，不扩大 owner。
+- 证据：新增 `src/contexts/session-context-activity-runtime.test.ts` 两个 gate，并回归 `App.dynamic-refresh.test.tsx` / `SessionContext.ws-refresh.test.tsx` 的 foreground resume 用例。
+[2026-05-07] render truth closeout first pass: buffer-head must drive render, render cadence must not be network-throttled
+- 继续排查“P 高频但 R=0、前台恢复后要靠输入才刷新、切 tab / 多 pane 时首帧久不渲染”后，确认 client 还有两处错误 owner：
+  1. `resolveTerminalRefreshCadence()` 把 `renderCommitMs` 和网络 profile 绑在一起，3g/2g 会把 render 人为拖到 66/120ms；这不符合“性能优化不能靠降低渲染帧率”的硬规则。
+  2. `handleBufferHeadRuntime()` 只更新 live head / cursor truth，但在“仅 head 变更”或“仅 cursor 变更”时不触发 `scheduleSessionRenderCommit()`；结果 debug 里会出现 P 在动但 R=0，屏幕要等后续 buffer-sync 或输入事件才被重画。
+- 本轮只在唯一 owner 收口：
+  1. `mobile-config.ts` 里把 `renderCommitMs` 固定为 33ms，只让 head/pull cadence 随网络变化，render cadence 不再跟 network profile 走。
+  2. `handleBufferHeadRuntime()` 新增 `renderCommitNeeded`，只要 cursor/body/head 任一 truth 更新成功，就由这一处统一触发 render gate commit；不改 daemon，不加 fallback，不引入第二渲染入口。
+- 对应红绿测试已同步改写：
+  1. `mobile-config.test.ts` 改为断言 3g/2g/saveData 下 `renderCommitMs` 仍为 33
+  2. `session-context-buffer-runtime.test.ts` 改为断言 buffer-head metadata/cursor 变化都会 schedule render commit
+
+[2026-05-07] multipane workspace truth recovery
+- 已确认当前分支为 main。
+- 已确认当前 main 的 Android 终端页退回旧双分屏状态，真实多分屏真源在 backup/dace81c-shell-return。
+- 本轮按单一真源收口：先恢复 packages/shared workspace-model，再恢复 android workspace-persistence + useTerminalWorkspace，随后把 TerminalQuickBar / TerminalPage 接回 pane-first workspace。
+
+[2026-05-07] multipane workspace truth recovery closeout
+- 已确认当前分支为 main。
+- 已把 TerminalPage.tab-isolation 测试从 legacy split layout 真源迁移到 pane-first workspace 真源。
+- 当前 workspace 持久化真源是 STORAGE_KEYS.TERMINAL_LAYOUT -> { panes, activePaneId }；legacy splitEnabled/splitSecondarySessionId 仅保留迁移兼容。
+- 回归已通过：tsc --noEmit；TerminalHeader / TerminalPage.render-scope / TerminalPage.tab-isolation。
+[2026-05-07] multipane visible refresh owner tightened
+- 用户新冻结：visible pane 不是二等公民；除输入焦点外，visible pane 必须与 active pane 同级刷新/connect/reconnect。
+- 本轮将 owner 收口到 `session-context-lifecycle.ts`：
+  1. 新进入 `liveSessionIds` 的 pane 立即触发 `active-reentry + forceHead + allowReconnectIfUnavailable`
+  2. `active-tick` 对 active/live 统一 `allowReconnectIfUnavailable: true`
+- 这样不改 daemon，不新增 split 专用状态机，只把“可见即 live refresh target”落实在客户端单点 owner。
+
+[2026-05-07] split width + quickbar bottom truth closeout
+- 现场根因确认：4 分屏宽度不一致不是 renderer 问题，而是 workspace pane size 在 1->2->3->4 扩容时沿用了历史比例；最终形成类似 1/8,1/8,1/4,1/2 的错误宽度分布。
+- 收口：pane 数量变化的唯一真源改为 `distributeEvenPaneSizes(...)`；仅保留 `normalizePaneSizes(...)` 用于纯比例归一，不再用于 split count 变化路径。
+- 同轮修正：TerminalPage 底部 quick bar shell 不再额外加 14px 偏移，避免快捷栏悬空浪费底部空间。
+
+[2026-05-07] terminal split layout / visible pane 收口
+- 现状确认：TerminalHeader / TerminalPage / workspace 三处都在各自维护 split 布局参数（padding/gap/radius/back-button 尺寸/outer margin），导致现场“改了但看起来没变”。
+- 现状确认：visible pane 刷新链已做 lifecycle 第一刀，但 split 下新开 pane 的 quick-tab 打开链路仍未显式把 pane 绑定意图一路传到 open action，属于高风险阻断点。
+- 本刀目标：1）新增唯一 `terminal-layout-profile`；2）Header/Stage 只消费 profile；3）补 split quick-open -> pane attach 真链路测试。
+
+
+[2026-05-07] split layout / P1 串屏 审计
+- 现场 P0 仍有两件事：1) split layout 没收口；2) 可见 split pane 存在错误 buffer 闪到 P1。
+- 代码审计结论（第一轮）：
+  1. `TerminalPage.tsx` split 渲染当前 pane shell `key={pane.id}`，pane 内 active session 变化时可能复用同一个 `TerminalView` 实例；这与“P1 短暂闪入别的 pane 内容”高度吻合，需补红灯测试验证。
+  2. `useTerminalWorkspace` / `workspace-persistence` 当前对 pane `size` 仍保留历史比例；但 Android 当前没有 pane 宽度手动调整能力，说明 `size` 在 split 布局上仍有第二真源（历史持久化比例），不是纯粹由当前 pane 数决定。需要收口成单一真相。
+- 当前执行顺序：先补 split render-isolation / layout 恢复红灯测试，再修改 `TerminalPage` key 与 workspace pane-size normalize。
+
+## 2026-05-07 pane-target / tab-menu / bottom-occlusion audit
+- 1535 真机新增 P0：1) 非 P1 新开 session 总落到 P1；2) 长按 tab 菜单仍是 primary/secondary 旧语义；3) terminal 底部/输入框被 quick bar 遮挡；4) 仍有偶发错刷 buffer，第二根因待继续补红灯。
+- 已确认：paneId 在 TerminalPage -> App/useSessionOpenActions 丢失；TerminalHeader 长按菜单仍硬编码 primary/secondary；bottom 需审 quickBar measured height 与 stage bottom 扣减链。
+
+## 2026-05-08 多 tab 切换卡顿 / 输入排队延迟审计（只读）
+
+### 现象
+- 多 tab / 多 pane 后切换明显卡顿。
+- 输入已发出，但回显晚很多拍，表现为排队延迟。
+- 现场常见指标：`P` 高频但 `R` 低或为 0，说明 pull / head 活跃但 render commit 没及时形成稳定可见刷新。
+
+### 已核对真源
+- `SessionContextLifecycle` 当前 active tick 目标 = `activeSessionId + liveSessionIds` 全量并集。
+- `TerminalView` 当前 `refreshActive = live ?? active`，所以 visible pane 都会继续参与 refresh / viewport / follow 链。
+- `sendInputThroughSessionTransport()` 在每次 input 后都会立即 `requestSessionBufferHead(..., { force: true })`。
+- `handleBufferHeadRuntime()` 对 cursor/head 变化会 `scheduleSessionRenderCommit()`，即使正文 body 尚未拿到新的 `buffer-sync apply`。
+- `createSessionRenderGate()` 统一 33ms gate，输入场景和普通刷新场景未分级。
+
+### 初步根因候选（按优先级）
+1. **active tick 扫描范围过宽**
+   - 位置：`android/src/contexts/session-context-lifecycle.ts`
+   - 现在每个 tick 都遍历 `active + live`。
+   - 在 split / 多 tab 下，visible pane 越多，head probe / stale probe / reconnect gate 越密。
+   - 这会直接和 active pane 的 input/refresh 竞争主线程与 transport 调度。
+
+2. **输入回显链路过长**
+   - 位置：`android/src/contexts/session-context-input-runtime.ts`
+   - 当前链路：`input -> force buffer-head-request -> 等 head -> buffer-sync -> render gate flush`。
+   - 用户看到的是：输入其实发出去了，但本地第一时间没有形成 render commit。
+
+3. **head/cursor metadata 触发 render commit，放大无效渲染**
+   - 位置：`android/src/contexts/session-context-buffer-runtime.ts`
+   - 当前 cursor/head metadata 变化会 `scheduleSessionRenderCommit()`。
+   - 这和文档里“只有 buffer-sync apply 可以驱动正文 repaint”的目标不完全一致，会造成大量 metadata-only commit。
+
+4. **render gate 对交互场景没有优先级**
+   - 位置：`android/src/lib/session-render-gate.ts`
+   - 当前统一 33ms gate；若前面已积压多 session head/pull，再叠一层 gate，active pane 回显就会肉眼变慢。
+
+### 架构判断
+- 目前主要问题不在 daemon 持有客户端状态；更像是 **client 端 refresh / head / render 调度过宽、过长、过多次**。
+- 优化方向应保持：
+  - daemon 继续只管 tmux mirror truth
+  - client buffer manager 只管 daemon -> sparse buffer
+  - renderer 只消费 render buffer
+- 不应靠降刷新率掩盖，应收窄错误调度与重复 commit。
+
+### 建议的最小修复方向
+1. active tick 分层：`interactive active` 与 `visible live` 不同 cadence / 不同 probe 权重。
+2. 输入路径去掉“每次 input 都强制 head 请求”的依赖，优先走已有 live push / sync 结果，必要时只做更轻量 probe。
+3. metadata-only（cursor/head）禁止触发正文 render commit，只更新 head/cursor store。
+4. render gate 分级：交互回显优先于普通后台刷新。
+- 2026-05-08 split 首帧白屏追踪：定位到 live pane 的首个 buffer-sync 可能在 `TerminalPage -> onLiveSessionIdsChange -> SessionContext.setLiveSessionIds` 生效前，被 `isSessionTransportActive` / `buffer-sync.preparse-inactive-drop` / `session.buffer.sync.inactive-drop` 提前丢弃；唯一修复方向应收口为统一“首帧 bootstrap 可接收 live buffer”判定，避免 socket/runtime 多处各自判断。
+- 2026-05-08 偶发错误帧再恢复：根因进一步收敛到 `session-render-gate.ts` 的 render snapshot 边界。旧实现把 `SessionBufferState.lines/gapRanges/cursor` 直接按引用投给 render snapshot，并且在 `liveBuffer` 引用未变时复用旧 `projectedBuffer`；若 live buffer 在下一次 patch/merge 时复用同一 row/object 再被写入，renderer 会短暂读到被污染的中间态。已收口：render gate 每次 commit 都产出独立 immutable render snapshot（clone lines/gapRanges/cursor），并补两条红灯测试覆盖“同一 live buffer 对象提交后被 mutate”与“row 对象复用后被下一次 patch 改写”。
+- 2026-05-08 Android 键盘偶发抬起过高：根因收敛到 `TerminalPage.resolveKeyboardLiftPx()` 同时混用了 `reportedKeyboardInset` 与 `window.innerHeight / visualViewport.height`。Android 某些 WebView 上 `innerHeight` 本身已经随 IME 缩过一次，此时再按 `visualViewport` 推 occludedBottom 会形成第二次收缩，导致 quick bar / terminal 整体抬高过头。已收口：layout viewport 高度改为单点取 `max(innerHeight, documentElement.clientHeight, visualViewportBottom)`，只允许对 `reportedKeyboardInset` 做一次上限裁切，不再让“已被缩过的 innerHeight”成为第二份真源。已补红灯测试覆盖 `innerHeight 已缩小但 clientHeight 仍是布局真值` 的 case。
+
+[2026-05-08] IME 抬高异常现场继续追踪（Jason 真机）
+- 最新截图：键盘弹出后 terminal 可视区被整体压成极小高度，说明这次不只是 quick bar 抬高数值误差，而是 stage 可用高度/底部 inset/keyboard lift 其中至少两个量被同时扣减。
+- 下一刀只允许检查唯一真源链：reportedKeyboardInset -> resolveKeyboardLiftPx -> terminal stage bottom padding / composer offset；禁止再引入第二套 viewport/IME 补偿。
+
+[2026-05-08] 新现场：1542 已装后，仍需并行追两件事
+- 1) 平板键盘抬起现场需要继续核对是否还有第二份高度真源未收口；截图已显示并非所有设备复现，疑似设备特定 WebView/viewport 行为差异。
+- 2) 应用内升级检测到包但安装阶段 timeout，优先查客户端升级安装链路与 adb/logcat 现场，不先猜测。
+
+[2026-05-08] 设备目标纠正
+- Jason 明确纠正：当前要排查的真实设备不是 `100.127.23.27:1234`，而是 `100.93.14.124` 对应机器。
+- 后续所有 adb/logcat/安装与 IME 现场结论必须绑定这台设备，避免把另一台设备的现象错当成当前现场。
+
+[2026-05-08] client debug snapshot 真源补口
+- 已把 IME/layout 现场与 app-update stage 收口到同一条 `registerClientDebugSnapshotSource -> collectClientDebugSnapshot -> active session WS debug-snapshot` 链，避免再开第二条 debug transport。
+- 升级安装现场后续只看 `app-shell` snapshot 的 `appUpdateStage/runtimeVersionCode/latestManifest*/availableManifest*`；键盘抬高现场只看 `terminal-page` snapshot 的 `keyboardInset/effectiveKeyboardLiftPx/shellHeight/layoutViewportHeight/terminalChromeBottomPx/layoutProfile`。
+
+[2026-05-08] head request owner 收口审计（本轮）
+- 已确认重复 owner 主要来自两处：
+  1) `handleSocketConnectedBaselineRuntime()` 在 connected 后无条件按 `buildConnectedHeadRefreshPlan(...).shouldRequestHead` 立刻 `requestSessionBufferHead(..., force:true)`。
+  2) `useSessionContextLifecycle()` 的 `active-reentry` / foreground `active-resume` 会在同一会话刚连上或刚切入时再次走 `ensureActiveSessionFreshRuntime()`。
+- 当前 `ensureActiveSessionFreshRuntime()` 只对 `active-resume` 做了“最近有 active-reentry 则跳过 forced head”的门禁，但 connected baseline 自己没有感知最近 reentry/resume，因此 connect + reentry/resume 仍可能双发。
+- 结论：head request 的唯一 owner 应收口为 `ensureActiveSessionFreshRuntime()`；connected baseline 只负责 transport connected/schedule-list/pending-tail 标记，不再主动抢 head owner。例外只保留 queued input reconnect 场景，由 reconnect 后 flush input 触发同一条 active freshness 闭环，而不是 baseline 再单独发一枪。
+
+[2026-05-08] 多机输入队列语义收口（进行中）
+- Jason 新要求：多机同时连接时，不接受“输入排队后延迟补发”；这种 client 侧队列语义没有意义。
+- 收口目标：client input 只允许两种结果：
+  1) 当前 open transport 立即发送；
+  2) transport 不可用则显式 debug + reconnect，但**不缓存、不重放旧输入**。
+- 本轮实现策略：先保持 `pendingInputQueueRef/flushPendingInputQueueRef` 结构兼容，避免误伤 transport/open wiring；但 flush 改成 no-op 清空，不再 replay。下一轮可继续物理删除 ref 与 wiring。
+- connected baseline / active-resume 重复 head 第一刀已收口：新增 `lastConnectedBaselineAtRef` 作为 client 内 head-owner 观测真相。当前策略：connected baseline 仍可发首帧 forced head，但若用户/前台在同一 `headTickMs` 内立刻触发 explicit resume，则 `ensureActiveSessionFreshRuntime()` 跳过第二发 forced head，避免 connect+resume 双发。该真相只属于 client refresh owner，不进入 daemon。
+- 多机输入队列残留第二刀已完成：`pendingInputQueueRef / flushPendingInputQueueRef / connect-open flush replay` 已从 client wiring 中物理删除；现在输入链唯一语义是 `open transport -> send` 或 `transport unavailable -> reconnect`。旧输入不缓存、不重放。
+
+[2026-05-08] client refresh/input 真源收口（本轮完成）
+- 先修了一个明确装配缺口：`SessionContext.tsx` 没把 `lastConnectedBaselineAtRef` 从 provider runtime 解构并下传，导致 `ensureActiveSessionFreshRuntime()` 在 ws-refresh 路径直接读到 `undefined.current`。现已收口到唯一装配点，避免 runtime/test 分叉。
+- 输入链真源已重新冻结为：`explicit input -> markPendingInputTailRefresh -> send input -> forced buffer-head-request(force:true)`；不再依赖别处“补一枪” head。这样 active input / stale-open input probe / burst input coalesce / input-exit-reading / older-tail-finish-catch-up 这些场景都回到单一路径。
+- `active-resume` 与 `connected baseline` 的 duplicate-head 门禁继续收细：
+  - 不再用 `lastConnectedBaselineAtRef < headTickMs` 粗暴吞掉所有 explicit resume；那会误伤“用户明确 resume 也必须立刻 fresh head”的 case。
+  - 新增 client-only `connectedBaselineBurstGuardRef`：仅在 `handleSocketConnectedBaselineRuntime()` 的同一事件轮次内，允许 suppress 一次紧随其后的 explicit resume head；microtask 结束即清除。
+  - 这样同时满足两条约束：
+    1. `connected -> immediate resume same turn` 不双发 head
+    2. `connected settled later -> explicit resume inside head throttle window` 仍必须 fresh head
+- 这轮没有把任何 client 状态机塞回 daemon；所有新增真相都留在 client refresh owner 内部，符合“daemon 不管理客户端状态”硬约束。
+- 回归证据：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-context-activity-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
+  - 结果：2 files / 115 tests 全绿
+
+[2026-05-08] active-tick 调度降噪（本轮）
+- 现状确认：`useSessionContextLifecycle()` 之前每个 `headTickMs(33ms)` 都会对 `activeSessionId + liveSessionIds` 全量执行 `ensureActiveSessionFresh()`；虽然大多数健康 connected session 最终会在 `tick-live-refresh-owned-by-daemon` 分支早退，但多 pane 下仍然有高频 JS 调度/Map 读写/runtimeDebug 判定开销。
+- 本轮收口：新增 `shouldScheduleActiveTickRefresh()`，active-tick 只对以下 session 触发：
+  1. 非 `connected`（如 connecting/reconnecting/closed）
+  2. `connected` 但 `lastServerActivityAt` 已静默超过 `headStalePingMs`
+- 结果：健康的 active/live pane 不再每 33ms 白跑 `ensureActiveSessionFresh()`；只在真正需要 stale probe / reconnect 恢复时才进入 active-tick 链。
+- 这刀没有改变 visible pane 必须和 active pane 一样“可刷新”的产品语义；只是把“健康期间的空转调度”从 client 主线程拿掉。
+- 回归证据：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-context-lifecycle.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/App.dynamic-refresh.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx --reporter dot`
+  - 结果：4 files / 244 tests 全绿
+
+[2026-05-08] render/body 真源继续收口（本轮完成）
+- 现象：多 tab / 多 pane 下，`P` 频繁但 `R` 偶尔低或为 0；审计发现 client 侧 `buffer-head` 的 daemon head metadata 变化也会走 `scheduleSessionRenderCommit()`，从而让 TerminalView 在 body 未变化时仍收到 render snapshot 变更，触发 follow/viewport/realign 链重算。
+- 真源修复：
+  1. `handleBufferHeadRuntime()` 不再因为 `sessionHeadStore.setHead()` 成功而调度 body render commit；head metadata 现在只进 `sessionHeadStore`。
+  2. `TerminalView` 新增独立 `sessionHeadStore` 订阅；`followDemandAnchorEndIndex` 的 head 语义改为：正文 body 继续只读 render buffer，daemon head metadata 单独从 head store 读取。这样保住“head 推进能驱动 follow demand”，但不再通过 body render store 唤醒整棵 renderer。
+  3. cursor / cursorKeysApp 仍留在 render snapshot，因为它们确实影响可见 cursor 与键盘方向键编码，不属于纯 metadata-only noop。
+- 收口后语义：
+  - `buffer-sync apply` = 正文 body repaint owner
+  - `buffer-head head-metadata` = head store owner
+  - `TerminalView` = body snapshot + head snapshot 双输入，但两者职责不再混写
+- 回归证据：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/App.dynamic-refresh.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/pages/TerminalPage.render-scope.test.tsx --reporter dot`
+    - 6 files / 264 tests 全绿
+  - `pnpm --dir android exec vitest run src/lib/session-render-gate.test.ts src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx --reporter dot`
+    - 3 files / 18 tests 全绿
+- 当前判断：这刀已经物理切掉一条 metadata-only -> body repaint 的错误路径，是继续追“多 tab 切换卡顿”的正确方向。下一刀重点应继续盯 `TerminalView` 自身 follow/realign/layout effect 是否仍有 body 未变时的多余重排。
+
+[2026-05-08] TerminalView head-only render 再收一刀（本轮完成）
+- 上一刀虽然已经切掉 `buffer-head -> renderStore body snapshot`，但 `TerminalView` 仍通过 React render 直接订阅 `sessionHeadStore`，意味着 head-only 推进仍会让整棵 `TerminalView` 顶层函数重跑一遍，继续触发一批 derived 计算。
+- 本轮继续收口：
+  1. 删掉 `useSessionHeadSnapshot()` 的 React render 订阅。
+  2. `TerminalView` 保留 body 只订阅 `sessionRenderBufferStore`。
+  3. head-only 路径改成 `sessionHeadStore.subscribe(sessionId, pushFollowDemandFromHead)` 的 imperative subscription，只在 `follow + active/live + 非 reading` 情况下发送新的 viewport demand；不触发 body render、不触发 follow realign。
+  4. `daemonHead*` 的最新值只放 ref，不再成为 React render 输入。
+- 新增红灯回归：`does not realign follow scroll when only daemon head metadata advances without a body repaint`
+  - 证明：head-only 推进后 viewportEndIndex 会从 80 -> 120，但 DOM scrollTop 不会再被多写一次，也不会 body repaint。
+- 回归证据：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/components/TerminalView.dynamic-refresh.test.tsx src/App.first-paint.real-terminal.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
+    - 4 files / 184 tests 全绿
+  - `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx src/lib/session-render-gate.test.ts --reporter dot`
+    - 4 files / 94 tests 全绿
+- 当前判断：client 侧 head-only 更新已经连续两刀从“body render 参与者”降为“只更新 follow demand 的轻量信号”。下一步若还卡，重点应下到 `TerminalPage` 多 pane / 多 tab 场景下是否仍有非 active/live pane 的 header/chrome 级联重渲，或者 TerminalView 的 layout/ResizeObserver 路径仍然过于积极。
+
+
+[2026-05-08] 多 tab / 多 pane 卡顿真因收敛（本轮）
+- 现象：切 tab / 多 pane 后 P 高频、R 低、输入回显慢。
+- 真因：`TerminalPage.handleTerminalViewportChange()` 先收到 renderer 的 `TerminalViewportState(mode=follow|reading)`，但又把它降格成普通 `TerminalVisibleRange` 回灌给 App/SessionContext，导致 `updateSessionViewportRuntime()` 看不到 `mode=follow`，把 follow 态也当成 reading-repair 触发 `buffer-sync-request`。visible pane 越多，误拉取越多。
+- 唯一修复方向：App 只消费 `TerminalViewportState` 这条链；`mode` 不得在 page shell 层丢失。若仍需可见行号/窗口观测，只能作为纯观测派生，不能再成为第二条 worker 入口。
+
+
+[2026-05-08] 三机同时卡顿 / 输入慢 / 多 pane 卡 第一刀止血（本轮）
+- 现象：三台设备同时连上后，输入明显排队，多 pane 刷新发卡；daemon `/health` 现场 heapUsed 一度 220MB+，`/debug/runtime` 汇总里 client debug entries 顶到 2000，最新 scope 常见 `runtime.debug.drop-summary`。
+- 真因 1（已确认）：`App.tsx` 在 relay device stream 建立后，无论是否有远程调试请求，都会每 1500ms 固定 `sendTraversalRelayClientDebugLogs(limit=60)`；这条链会把开启过的 runtime debug 日志常驻上传到 relay 侧，三机同时在线时形成持续 JSON 序列化 / 发送 / 聚合压力。
+- 真因 2（更关键，已确认）：`session-render-gate.ts` 的 `session.render-gate.flush.inspect` 与 `session-context-buffer-runtime.ts` 的 `session.buffer.apply.inspect`，虽然最终要经过 `runtimeDebug(...)` 门禁，但**重 payload 的 summarize 工作发生在调用前**；也就是 debug 一旦开启，这两处会在正常渲染/补丁热路径里频繁先构造 `liveBuffer/localBuffer/nextBuffer/projected` 摘要，再决定是否入队，直接拖慢输入与多 pane。
+- 真源修复：
+  1. 删除 `App.tsx` 中 relay device stream 的周期性 debug log upload；现在 relay debug 只在显式 `client-debug-request` 时返回 snapshot/log，不再常驻后台推送。
+  2. `runtime-debug.ts` 新增 `shouldCollectRuntimeDebugScope()` 与 `runtimeDebugPrechecked()`；重型 inspect scope（`session.buffer.apply.inspect` / `session.render-gate.flush.inspect`）先做开关+采样判定，再决定是否构造 payload，避免“门禁在后、重活先做”的错误路径。
+  3. inspect scope 单独提频控到 1500ms，保留排障能力，但不允许热路径每帧都建大对象。
+  4. 顺手删掉 `sendTraversalRelayClientDebugLogs()` 内部再次 `runtimeDebug('relay.debug.logs.sent')` 的自反馈，避免 debug 上传再反向制造 debug。
+- IME 相关补口：`terminal-quickbar-helpers.tsx` 之前还在用 `window.innerHeight` 作为 overlay 高度真源；现改为统一复用 `resolveTerminalViewportMetrics()`，避免 tablet 上 `innerHeight` 已被 IME 缩过后再次重复扣减，造成 overlay / quick bar 抬高过多。
+- 回归证据：
+  - `pnpm --dir android exec vitest run src/lib/runtime-debug.test.ts src/lib/runtime-debug-flush.test.ts src/components/terminal/TerminalQuickBar.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - 结果：6 files / 234 tests 全绿。
+- 结论：这刀是纯 client 侧止血，不把任何客户端状态塞回 daemon，符合“daemon 不管理客户端状态”的硬约束。下一步若真机仍卡，优先继续查 `TerminalView` / `TerminalPage` 的多 pane 可见 renderer 是否还有多余 reflow，而不是再回头怀疑 daemon mirror 主链。
+- [2026-05-08] IME debug overlay task: need expose viewport raw metrics + keyboard lift chain in local TerminalDebugOverlay so Jason can screenshot problematic devices. Root suspicion: keyboardInset has 3 competing sources (ImeAnchor / Keyboard / virtualKeyboard), and layoutHeight may already shrink on some Android WebViews causing double-lift.
+- [2026-05-08] New signal from Jason: devices with wrong IME lift also cannot left/right swipe tabs, while devices with correct IME lift can. Suspect shared root in viewport/gesture path (pointer capture / resize / overlay hit area / axis lock), not just wrong bottom inset.
+- [2026-05-08] Screenshot proof from same problematic device: no-IME state reports stable IH/CH/VVH/SH=615; IME-open state collapses IH/CH/VVH/SH to 328 while K/TI=303. Confirms root cause is WebView/layout viewport itself shrinking on IME, not wrong keyboard height. Fix: freeze Android shellHeight to last stable pre-IME layout height while keyboard is active.

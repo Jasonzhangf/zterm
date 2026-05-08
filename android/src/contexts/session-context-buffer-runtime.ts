@@ -3,6 +3,7 @@ import {
   createSessionBufferState,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
+import { runtimeDebugPrechecked, shouldCollectRuntimeDebugScope } from '../lib/runtime-debug';
 import { summarizeSessionBufferForDebug } from '../lib/terminal-buffer-debug';
 import type {
   ClientMessage,
@@ -129,6 +130,7 @@ export function handleBufferHeadRuntime(options: {
     || (localBuffer.cursor?.visible ?? null) !== (normalizedCursor?.visible ?? null)
   );
   const cursorKeysAppChanged = localBuffer.cursorKeysApp !== normalizedCursorKeysApp;
+  let renderCommitNeeded = false;
   if (cursorChanged || cursorKeysAppChanged) {
     const nextBuffer = {
       ...localBuffer,
@@ -137,6 +139,7 @@ export function handleBufferHeadRuntime(options: {
     };
     const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
     if (changed) {
+      renderCommitNeeded = true;
       session = {
         ...session,
         buffer: nextBuffer,
@@ -144,10 +147,11 @@ export function handleBufferHeadRuntime(options: {
     }
   }
 
-  options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
+  const headChanged = options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
     daemonHeadRevision: options.latestRevision,
     daemonHeadEndIndex: options.latestEndIndex,
   });
+  void headChanged;
   const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
 
   const plannerBuffer = cursorChanged
@@ -221,6 +225,9 @@ export function handleBufferHeadRuntime(options: {
     || shouldPullFollowBuffer(demandSession, visibleRange, plannerBuffer)
   );
   if (needsTailRefresh) {
+    if (renderCommitNeeded) {
+      options.scheduleSessionRenderCommit(options.sessionId);
+    }
     options.requestSessionBufferSync(options.sessionId, {
       reason:
         revisionResetDetected ? 'buffer-head-revision-reset'
@@ -236,9 +243,15 @@ export function handleBufferHeadRuntime(options: {
 
   const needsReadingRepair = shouldPullVisibleRangeBuffer(demandSession, visibleRange, liveHead, plannerBuffer);
   if (!needsReadingRepair) {
+    if (renderCommitNeeded) {
+      options.scheduleSessionRenderCommit(options.sessionId);
+    }
     return;
   }
 
+  if (renderCommitNeeded) {
+    options.scheduleSessionRenderCommit(options.sessionId);
+  }
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'buffer-head-visible-range-repair',
     purpose: 'reading-repair',
@@ -546,13 +559,15 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.resolveSessionCacheLines(options.payload.rows || nextBuffer.rows),
   );
 
-  options.runtimeDebug('session.buffer.apply.inspect', {
-    sessionId: options.sessionId,
-    activeSessionId: options.refs.stateRef.current.activeSessionId,
-    incoming: options.summarizeBufferPayload(options.payload),
-    localBuffer: summarizeSessionBufferForDebug(localBuffer),
-    nextBuffer: summarizeSessionBufferForDebug(nextBuffer),
-  });
+  if (shouldCollectRuntimeDebugScope('session.buffer.apply.inspect')) {
+    runtimeDebugPrechecked('session.buffer.apply.inspect', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      incoming: options.summarizeBufferPayload(options.payload),
+      localBuffer: summarizeSessionBufferForDebug(localBuffer),
+      nextBuffer: summarizeSessionBufferForDebug(nextBuffer),
+    });
+  }
 
   if (revisionResetExpectation && nextBuffer.revision >= 0) {
     options.refs.sessionRevisionResetRef.current.delete(options.sessionId);

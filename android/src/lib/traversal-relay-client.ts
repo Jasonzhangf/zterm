@@ -1,5 +1,7 @@
 import { APP_VERSION } from './app-version';
 import { getBrowserStorage } from './browser-storage';
+import { collectClientDebugSnapshot } from './client-debug-snapshot';
+import { readRuntimeDebugEntries } from './runtime-debug';
 import type { BridgeSettings, TraversalRelayClientSettings } from './bridge-settings';
 import type { TraversalRelayDeviceSnapshot, TraversalRelayUser } from './types';
 
@@ -28,6 +30,19 @@ interface TraversalRelayDeviceMeta {
   deviceName: string;
   platform: string;
 }
+
+interface RelayDebugRequestPayload {
+  requestId?: string;
+  reason?: string;
+  includeSnapshot?: boolean;
+  includeLogs?: boolean;
+  logLimit?: number;
+}
+
+type RelayDeviceStreamMessage =
+  | { type?: 'devices-snapshot' | 'device-updated'; payload?: { devices?: TraversalRelayDeviceSnapshot[] } }
+  | { type?: 'relay-error'; reason?: string }
+  | { type?: 'client-debug-request'; payload?: RelayDebugRequestPayload };
 
 export interface TraversalRelayAccountState {
   username: string;
@@ -345,6 +360,7 @@ export function connectTraversalRelayDevicesStream(options: {
   account: TraversalRelayAccountState;
   onDevices: (devices: TraversalRelayDeviceSnapshot[]) => void;
   onError?: (message: string) => void;
+  onDebugRequest?: (payload: RelayDebugRequestPayload, socket: WebSocket) => void;
 }) {
   const relay = options.account.relaySettings;
   if (!relay?.wsDevicesUrl) {
@@ -372,7 +388,7 @@ export function connectTraversalRelayDevicesStream(options: {
   };
   socket.onmessage = (event) => {
     try {
-      const payload = JSON.parse(String(event.data)) as { type?: string; payload?: { devices?: TraversalRelayDeviceSnapshot[] }; reason?: string };
+      const payload = JSON.parse(String(event.data)) as RelayDeviceStreamMessage;
       if ((payload.type === 'devices-snapshot' || payload.type === 'device-updated') && Array.isArray(payload.payload?.devices)) {
         const nextState: TraversalRelayAccountState = {
           ...options.account,
@@ -385,6 +401,10 @@ export function connectTraversalRelayDevicesStream(options: {
       }
       if (payload.type === 'relay-error') {
         options.onError?.(payload.reason || 'relay device stream error');
+        return;
+      }
+      if (payload.type === 'client-debug-request') {
+        options.onDebugRequest?.(payload.payload || {}, socket);
       }
     } catch (error) {
       options.onError?.(error instanceof Error ? error.message : String(error));
@@ -394,4 +414,55 @@ export function connectTraversalRelayDevicesStream(options: {
     options.onError?.('relay device stream websocket error');
   };
   return socket;
+}
+
+export function sendTraversalRelayClientDebugSnapshot(options: {
+  socket: WebSocket;
+  account: TraversalRelayAccountState;
+  requestId?: string;
+  reason?: string;
+  snapshot?: unknown;
+}) {
+  if (options.socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  options.socket.send(JSON.stringify({
+    type: 'client-debug-snapshot',
+    payload: {
+      deviceId: options.account.deviceId,
+      requestId: options.requestId?.trim() || undefined,
+      reason: options.reason?.trim() || undefined,
+      snapshot: options.snapshot ?? collectClientDebugSnapshot({
+        relayDeviceId: options.account.deviceId,
+        relayUsername: options.account.username,
+      }),
+    },
+  }));
+  return true;
+}
+
+export function sendTraversalRelayClientDebugLogs(options: {
+  socket: WebSocket;
+  account: TraversalRelayAccountState;
+  limit?: number;
+  sinceSeq?: number;
+}) {
+  if (options.socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  const entries = readRuntimeDebugEntries({
+    limit: options.limit,
+    sinceSeq: options.sinceSeq,
+  });
+  if (entries.length === 0) {
+    return false;
+  }
+  options.socket.send(JSON.stringify({
+    type: 'client-debug-log',
+    payload: {
+      deviceId: options.account.deviceId,
+      entries,
+    },
+  }));
+  return true;
 }

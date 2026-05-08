@@ -11,6 +11,7 @@ let previousQuickBarProps: Record<string, unknown> | null = null;
 let quickBarChangedKeys: string[] = [];
 const terminalViewRenderCounter = new Map<string, number>();
 const terminalHeaderRenderCounter = { count: 0 };
+const terminalViewInstanceCounter = { next: 1 };
 
 function bumpTerminalViewRender(sessionId: string) {
   terminalViewRenderCounter.set(sessionId, (terminalViewRenderCounter.get(sessionId) || 0) + 1);
@@ -114,12 +115,14 @@ vi.mock('../components/TerminalView', () => ({
     sessionId: string;
     showAbsoluteLineNumbers?: boolean;
   }) => {
+    const [instanceId] = (require('react') as typeof import('react')).useState(() => terminalViewInstanceCounter.next++);
     bumpTerminalViewRender(sessionId);
     return (
       <div
         data-testid={`terminal-view-${sessionId}`}
         data-render-count={terminalViewRenderCounter.get(sessionId) || 0}
         data-show-line-numbers={showAbsoluteLineNumbers ? 'true' : 'false'}
+        data-instance-id={String(instanceId)}
       >
         terminal:{sessionId}
       </div>
@@ -190,6 +193,7 @@ describe('TerminalPage render isolation', () => {
     quickBarChangedKeys = [];
     terminalViewRenderCounter.clear();
     terminalHeaderRenderCounter.count = 0;
+    terminalViewInstanceCounter.next = 1;
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -285,6 +289,73 @@ describe('TerminalPage render isolation', () => {
 
     expect(readRenderCount('terminal-view-s1')).toBe(activeTerminalRenderCountBefore);
     expect(readRenderCount('terminal-view-s2')).toBe(inactiveTerminalRenderCountBefore);
+  });
+
+  it('remounts the split pane renderer when the pane switches to a different session so stale buffer state cannot flash into P1', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        {
+          id: 'pane-1',
+          size: 0.5,
+          activeTabId: 'tab-s1',
+          tabs: [
+            { id: 'tab-s1', sessionId: 's1' },
+            { id: 'tab-s3', sessionId: 's3' },
+          ],
+        },
+        {
+          id: 'pane-2',
+          size: 0.5,
+          activeTabId: 'tab-s2',
+          tabs: [{ id: 'tab-s2', sessionId: 's2' }],
+        },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const session3 = makeSession('s3');
+    const props = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+      onLoadSavedTabList: vi.fn(),
+    };
+
+    const view = render(
+      <TerminalPage
+        sessions={[session1, session2, session3]}
+        activeSession={session1}
+        {...props}
+      />,
+    );
+
+    const firstPaneInstanceBefore = screen.getByTestId('terminal-view-s1').getAttribute('data-instance-id');
+    expect(firstPaneInstanceBefore).toBeTruthy();
+    expect(screen.getByTestId('terminal-view-s2')).toBeTruthy();
+
+    view.rerender(
+      <TerminalPage
+        sessions={[session1, session2, session3]}
+        activeSession={session3}
+        {...props}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
+    expect(screen.getByTestId('terminal-view-s2')).toBeTruthy();
+    expect(screen.getByTestId('terminal-view-s3')).toBeTruthy();
+    expect(screen.getByTestId('terminal-view-s3').getAttribute('data-instance-id')).not.toBe(firstPaneInstanceBefore);
   });
 
   it('does not rerender terminal shell when only an inactive tab runtime status changes', () => {

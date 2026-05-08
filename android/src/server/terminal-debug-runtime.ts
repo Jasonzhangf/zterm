@@ -15,6 +15,7 @@ export interface TerminalDebugRuntime {
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
 }
 
 export function createTerminalDebugRuntime(
@@ -100,6 +101,21 @@ export function createTerminalDebugRuntime(
     }
   }
 
+  function handleClientDebugSnapshot(session: TerminalSession, payload: { snapshot?: unknown }) {
+    deps.clientRuntimeDebugStore.setSnapshot(
+      {
+        sessionId: session.id,
+        tmuxSessionName: session.sessionName || 'unknown',
+        requestOrigin: session.transport?.requestOrigin,
+      },
+      payload.snapshot ?? null,
+    );
+
+    console.log(
+      `[${logTimePrefix()}] [client-debug-snapshot] session=${session.id} tmux=${session.sessionName || 'unknown'}`,
+    );
+  }
+
   function summarizePayload(message: ServerMessage) {
     if (message.type !== 'buffer-sync') {
       return null;
@@ -125,5 +141,6 @@ export function createTerminalDebugRuntime(
     daemonRuntimeDebug,
     summarizePayload,
     handleClientDebugLog,
+    handleClientDebugSnapshot,
   };
 }

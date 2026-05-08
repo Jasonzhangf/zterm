@@ -30,12 +30,13 @@ interface SessionLifecycleRuntimeOptions {
   refs: {
     stateRef: SessionStateRef;
     manualCloseRef: MutableRefObject<Set<string>>;
-    pendingInputQueueRef: MutableRefObject<Map<string, string[]>>;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
       commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
@@ -149,12 +150,12 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       sessionId,
       refs: {
         manualCloseRef: options.refs.manualCloseRef,
-        pendingInputQueueRef: options.refs.pendingInputQueueRef,
         pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
         pendingInputTailRefreshRef: options.refs.pendingInputTailRefreshRef,
         pendingConnectTailRefreshRef: options.refs.pendingConnectTailRefreshRef,
         pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
+        lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
         sessionVisibleRangeRef: options.refs.sessionVisibleRangeRef,
         sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
         sessionRenderGateRef: options.refs.sessionRenderGateRef,
@@ -254,6 +255,8 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         stateRef: options.refs.stateRef,
         pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
+        lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
+        connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
         lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
       },

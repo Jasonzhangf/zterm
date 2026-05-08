@@ -88,6 +88,36 @@ describe('runtime debug store', () => {
       latestScope: 'scope-3',
       latestTs: '2026-04-23T10:00:02.000Z',
     });
+    expect(summary.snapshotCount).toBe(0);
+  });
+
+  it('stores latest snapshot per session and exposes it in updated-first order', () => {
+    const store = createRuntimeDebugStore();
+    store.setSnapshot(
+      {
+        sessionId: 's1',
+        tmuxSessionName: 'alpha',
+        requestOrigin: 'http://device-a',
+      },
+      { ime: { inset: 240 } },
+    );
+    store.setSnapshot(
+      {
+        sessionId: 's2',
+        tmuxSessionName: 'beta',
+        requestOrigin: 'http://device-b',
+      },
+      { ime: { inset: 120 } },
+    );
+
+    expect(store.getSnapshot('s1')).toMatchObject({
+      sessionId: 's1',
+      tmuxSessionName: 'alpha',
+      requestOrigin: 'http://device-a',
+      snapshot: { ime: { inset: 240 } },
+    });
+    expect(store.listSnapshots().map((item) => item.sessionId).sort()).toEqual(['s1', 's2']);
+    expect(store.getSummary().snapshotCount).toBe(2);
   });
 
   it('clamps debug route limit to a safe range', () => {

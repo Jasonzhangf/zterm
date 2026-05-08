@@ -5,6 +5,7 @@ import { STORAGE_KEYS } from './types';
 import type { Session } from './types';
 import {
   buildPersistedOpenTabFromHostSession,
+  clearClosedTabReuseKeysForOwner,
   findReusableOpenTabSession,
   persistOpenTabsState,
   persistClosedTabReuseKeys,
@@ -314,5 +315,22 @@ describe('open-tab persistence truth', () => {
     persistClosedTabReuseKeys(new Set(['daemon:a:main', 'daemon:b:logs']));
 
     expect(Array.from(readPersistedClosedTabReuseKeys())).toEqual(['daemon:a:main', 'daemon:b:logs']);
+  });
+
+  it('clears all semantic closed-tab tombstone variants for a reopened owner through one helper', () => {
+    const keys = new Set([
+      'daemon:daemon-a::session:shared',
+      'bridge:100.127.23.27::3333::session:shared',
+      'daemon:daemon-b::session:other',
+    ]);
+
+    expect(clearClosedTabReuseKeysForOwner(keys, {
+      daemonHostId: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'shared',
+    })).toBe(true);
+
+    expect(Array.from(keys)).toEqual(['daemon:daemon-b::session:other']);
   });
 });

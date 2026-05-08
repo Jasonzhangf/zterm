@@ -90,4 +90,45 @@ describe('useAppUpdate', () => {
     expect(result.current.availableManifest).toBeNull();
     expect(result.current.latestManifest?.versionCode).toBe(1011492);
   });
+
+  it('tracks explicit update stage truth across install completion', async () => {
+    globalThis.localStorage.setItem('zterm:app-update-settings', JSON.stringify({
+      manifestUrl: 'https://example.com/updates/latest.json',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    }));
+
+    const { AppUpdatePlugin } = await import('../plugins/AppUpdatePlugin');
+    vi.mocked(AppUpdatePlugin.canRequestPackageInstalls).mockResolvedValue({ allowed: true } as any);
+    vi.mocked(AppUpdatePlugin.downloadAndInstall).mockResolvedValue({
+      filePath: '/tmp/zterm.apk',
+      sha256: 'abc123',
+      packageName: 'com.zterm.android',
+    } as any);
+
+    const { useAppUpdate } = await import('./useAppUpdate');
+    const { result } = renderHook(() => useAppUpdate());
+
+    await waitFor(() => {
+      expect(result.current.runtimeVersionCode).toBe(1011492);
+    });
+
+    let installed = false;
+    await act(async () => {
+      installed = await result.current.startUpdate({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        buildNumber: 1493,
+        apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
+        sha256: 'abc123',
+        notes: [],
+      });
+    });
+
+    expect(installed).toBe(true);
+    expect(AppUpdatePlugin.canRequestPackageInstalls).toHaveBeenCalledTimes(1);
+    expect(AppUpdatePlugin.downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect(result.current.updateStage).toBe('completed');
+  });
+
 });

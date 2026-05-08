@@ -33,6 +33,7 @@ import {
 } from './session-context-core';
 import {
   shouldAutoReconnectSession,
+  hasSessionLocalWindow,
 } from './session-sync-helpers';
 import {
   scheduleReconnectRuntime,
@@ -44,7 +45,8 @@ interface MutableRefObject<T> {
 }
 
 export function createSessionTransportOrchestrationRuntime(options: {
-  stateRef: MutableRefObject<{ activeSessionId: string | null; liveSessionIds?: string[] }>;
+  stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
+  readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
   refs: {
@@ -56,7 +58,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
     sessionDebugMetricsStoreRef: MutableRefObject<{
       recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
     }>;
-    flushPendingInputQueueRef: MutableRefObject<((sessionId: string) => void) | null>;
     handleSocketServerMessageRef: MutableRefObject<((params: {
       sessionId: string;
       host: Host;
@@ -220,6 +221,19 @@ export function createSessionTransportOrchestrationRuntime(options: {
         options.stateRef.current.activeSessionId === sessionId
         || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
       ),
+      shouldAcceptSessionLiveBuffer: (sessionId: string) => {
+        if (
+          options.stateRef.current.activeSessionId === sessionId
+          || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
+        ) {
+          return true;
+        }
+        const session = options.stateRef.current.sessions.find((candidate) => candidate.id === sessionId) || null;
+        if (!session) {
+          return false;
+        }
+        return !hasSessionLocalWindow(session, options.readSessionBufferSnapshot(sessionId));
+      },
       handleSocketServerMessage: (params, msg) => {
         options.refs.handleSocketServerMessageRef.current?.(params, msg);
       },
@@ -314,9 +328,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
       clearSupersededSockets,
       handleSocketConnectedBaseline: (connectedOptions) => {
         options.refs.handleSocketConnectedBaselineRef.current?.(connectedOptions);
-      },
-      flushPendingInputQueue: (sessionId) => {
-        options.refs.flushPendingInputQueueRef.current?.(sessionId);
       },
     });
   };

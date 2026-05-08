@@ -35,11 +35,6 @@ vi.mock('../lib/traversal-relay-client', async () => {
         updatedAt: 1,
       },
     })),
-    connectTraversalRelayDevicesStream: vi.fn(() => ({
-      close: vi.fn(() => {
-        throw new Error('close failed');
-      }),
-    })),
     traversalRelayRegister: vi.fn(),
     traversalRelayLogin: vi.fn(),
     traversalRelayRefreshMe: vi.fn(),
@@ -47,6 +42,7 @@ vi.mock('../lib/traversal-relay-client', async () => {
   };
 });
 
+import * as relayClient from '../lib/traversal-relay-client';
 import { useTraversalRelayAccount } from './useTraversalRelayAccount';
 
 describe('useTraversalRelayAccount', () => {
@@ -54,16 +50,9 @@ describe('useTraversalRelayAccount', () => {
     vi.clearAllMocks();
   });
 
-  it('logs relay device stream close failures instead of silently swallowing them', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { unmount } = renderHook(() => useTraversalRelayAccount());
-
-    unmount();
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[useTraversalRelayAccount] Failed to close relay device stream:',
-      expect.any(Error),
-    );
-    errorSpy.mockRestore();
+  it('keeps relay account hook as pure account state owner and does not open device streams itself', () => {
+    const connectSpy = vi.spyOn(relayClient, 'connectTraversalRelayDevicesStream');
+    renderHook(() => useTraversalRelayAccount());
+    expect(connectSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSessionRenderBufferSnapshot, type SessionRenderBufferStore } from '../lib/session-render-buffer-store';
+import type { SessionHeadStore } from '../lib/session-head-store';
 import { DEFAULT_TERMINAL_COLOR, getTerminalThemePreset, packedTruecolorToCss, type TerminalThemePreset } from '@zterm/shared';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import type {
@@ -15,6 +16,7 @@ import type {
 interface TerminalViewProps {
   sessionId: string | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
+  sessionHeadStore?: SessionHeadStore | null;
   renderBufferSnapshot?: SessionRenderBufferSnapshot | null;
   active?: boolean;
   live?: boolean;
@@ -927,6 +929,7 @@ const VisibleRow = memo(function VisibleRow({
 function TerminalViewComponent({
   sessionId,
   sessionBufferStore = null,
+  sessionHeadStore = null,
   renderBufferSnapshot = null,
   active = false,
   live,
@@ -956,8 +959,9 @@ function TerminalViewComponent({
   const bufferLines = renderBuffer.lines || [];
   const effectiveBufferEndIndex = Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.endIndex || (renderBuffer.startIndex + bufferLines.length)));
   const bufferTailAnchorEndIndex = Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.bufferTailEndIndex || effectiveBufferEndIndex));
-  const demandHeadEndIndex = typeof renderBuffer.daemonHeadEndIndex === 'number' && Number.isFinite(renderBuffer.daemonHeadEndIndex)
-    ? Math.max(renderBuffer.startIndex, Math.floor(renderBuffer.daemonHeadEndIndex))
+  const demandHeadEndIndexSource = renderBuffer.daemonHeadEndIndex;
+  const demandHeadEndIndex = typeof demandHeadEndIndexSource === 'number' && Number.isFinite(demandHeadEndIndexSource)
+    ? Math.max(renderBuffer.startIndex, Math.floor(demandHeadEndIndexSource))
     : bufferTailAnchorEndIndex;
   const followDemandAnchorEndIndex = Math.max(bufferTailAnchorEndIndex, demandHeadEndIndex);
 
@@ -999,6 +1003,8 @@ function TerminalViewComponent({
   } | null>(null);
   const previousPrePaintFollowRealignKeyRef = useRef<string | null>(null);
   const userScrollIntentDeadlineRef = useRef(0);
+  const daemonHeadEndIndexRef = useRef(demandHeadEndIndex);
+  const daemonHeadRevisionRef = useRef(Math.max(0, Math.floor(renderBuffer.daemonHeadRevision || 0)));
   const touchGestureRef = useRef({
     active: false,
     pointerCaptured: false,
@@ -1040,6 +1046,8 @@ function TerminalViewComponent({
   );
   const maxScrollTop = Math.max(0, (totalRows - viewportRows) * rowHeightPx);
   readingModeRef.current = readingMode;
+  daemonHeadEndIndexRef.current = demandHeadEndIndex;
+  daemonHeadRevisionRef.current = Math.max(0, Math.floor(renderBuffer.daemonHeadRevision || 0));
   const followMode = !readingMode;
   const effectiveRenderBottomIndex = followMode ? followVisualBottomIndex : clampedRenderBottomIndex;
   const visibleWindowStartIndex = Math.max(renderBuffer.startIndex, effectiveRenderBottomIndex - viewportRows);
@@ -1690,12 +1698,11 @@ function TerminalViewComponent({
     if (previousKey === null || previousKey === followRealignKey) {
       return;
     }
-    if (!active || !refreshActive || readingModeRef.current) {
+    if (!refreshActive || readingModeRef.current) {
       return;
     }
     syncScrollHostToRenderBottom(followVisualBottomIndex);
   }, [
-    active,
     effectiveBufferEndIndex,
     followVisualBottomIndex,
     refreshActive,
@@ -1787,6 +1794,50 @@ function TerminalViewComponent({
     emitRenderDemandSignalsForCurrentFrame,
     followDemandAnchorEndIndex,
     renderGeometryRevision,
+    viewportRows,
+  ]);
+
+  useEffect(() => {
+    if (renderBufferSnapshot || !sessionHeadStore || !sessionId) {
+      return;
+    }
+    const pushFollowDemandFromHead = () => {
+      if (!refreshActive || readingModeRef.current || !onViewportChange) {
+        return;
+      }
+      const headSnapshot = sessionHeadStore.getSnapshot(sessionId);
+      const nextHeadRevision = Math.max(0, Math.floor(headSnapshot.daemonHeadRevision || 0));
+      const nextHeadEndIndex = Math.max(
+        renderBuffer.startIndex,
+        Math.floor(headSnapshot.daemonHeadEndIndex || 0),
+      );
+      const revisionUnchanged = daemonHeadRevisionRef.current === nextHeadRevision;
+      const endUnchanged = daemonHeadEndIndexRef.current === nextHeadEndIndex;
+      daemonHeadRevisionRef.current = nextHeadRevision;
+      daemonHeadEndIndexRef.current = nextHeadEndIndex;
+      if (revisionUnchanged && endUnchanged) {
+        return;
+      }
+      const key = `follow:${nextHeadEndIndex}:${viewportRows}`;
+      if (lastReportedViewportRef.current === key) {
+        return;
+      }
+      lastReportedViewportRef.current = key;
+      onViewportChange(sessionId, {
+        mode: 'follow',
+        viewportEndIndex: nextHeadEndIndex,
+        viewportRows,
+      });
+    };
+    pushFollowDemandFromHead();
+    return sessionHeadStore.subscribe(sessionId, pushFollowDemandFromHead);
+  }, [
+    onViewportChange,
+    refreshActive,
+    renderBuffer.startIndex,
+    renderBufferSnapshot,
+    sessionHeadStore,
+    sessionId,
     viewportRows,
   ]);
 

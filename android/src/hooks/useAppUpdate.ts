@@ -13,6 +13,17 @@ import {
 } from '../lib/app-update';
 import { AppUpdatePlugin, isNativeAppUpdateSupported } from '../plugins/AppUpdatePlugin';
 
+export type AppUpdateStage =
+  | 'idle'
+  | 'checking-manifest'
+  | 'awaiting-install-target'
+  | 'validating-native-support'
+  | 'checking-install-permission'
+  | 'awaiting-install-permission'
+  | 'downloading-and-installing'
+  | 'completed'
+  | 'failed';
+
 function parseRuntimeVersionCode(input: unknown) {
   if (typeof input === 'number' && Number.isFinite(input)) {
     return Math.max(0, Math.floor(input));
@@ -31,6 +42,7 @@ export function useAppUpdate() {
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [updateStage, setUpdateStage] = useState<AppUpdateStage>('idle');
   const [runtimeVersionCode, setRuntimeVersionCode] = useState(APP_VERSION_CODE);
   const didAutoCheckRef = useRef(false);
 
@@ -93,6 +105,7 @@ export function useAppUpdate() {
     if (!manifestUrl) {
       const message = '未配置升级 manifest URL';
       setLastError(message);
+      setUpdateStage('failed');
       setAvailableManifest(null);
       return {
         manifest: null,
@@ -103,6 +116,7 @@ export function useAppUpdate() {
 
     setChecking(true);
     setLastError(null);
+    setUpdateStage('checking-manifest');
 
     try {
       const response = await fetch(manifestUrl, {
@@ -141,6 +155,7 @@ export function useAppUpdate() {
         setAvailableManifest(null);
       }
 
+      setUpdateStage('idle');
       return {
         manifest: resolvedManifest,
         updateAvailable,
@@ -149,6 +164,7 @@ export function useAppUpdate() {
     } catch (error) {
       const message = error instanceof Error ? error.message : '检查更新失败';
       setLastError(message);
+      setUpdateStage('failed');
       setAvailableManifest(null);
       return {
         manifest: null,
@@ -202,14 +218,18 @@ export function useAppUpdate() {
   }, [setPreferences]);
 
   const startUpdate = useCallback(async (manifest?: AppUpdateManifest | null) => {
+    setUpdateStage('awaiting-install-target');
     const target = manifest || availableManifest || latestManifest;
     if (!target) {
       setLastError('没有可安装的升级包');
+      setUpdateStage('failed');
       return false;
     }
 
+    setUpdateStage('validating-native-support');
     if (!isNativeAppUpdateSupported()) {
       setLastError('当前环境不支持应用内安装');
+      setUpdateStage('failed');
       return false;
     }
 
@@ -217,12 +237,15 @@ export function useAppUpdate() {
     setLastError(null);
 
     try {
+      setUpdateStage('checking-install-permission');
       const permission = await AppUpdatePlugin.canRequestPackageInstalls();
       if (!permission.allowed) {
+        setUpdateStage('awaiting-install-permission');
         await AppUpdatePlugin.openInstallPermissionSettings();
         throw new Error('需要先允许本应用安装未知来源应用');
       }
 
+      setUpdateStage('downloading-and-installing');
       await AppUpdatePlugin.downloadAndInstall({
         url: target.apkUrl,
         sha256: target.sha256,
@@ -235,10 +258,12 @@ export function useAppUpdate() {
         ignoreUntilManualCheck: false,
       }));
       setAvailableManifest(null);
+      setUpdateStage('completed');
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : '下载或安装升级包失败';
       setLastError(message);
+      setUpdateStage('failed');
       return false;
     } finally {
       setInstalling(false);
@@ -265,6 +290,7 @@ export function useAppUpdate() {
     checking,
     installing,
     lastError,
+    updateStage,
     setPreferences,
     checkForUpdates,
     dismissAvailableManifest,

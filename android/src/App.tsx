@@ -3,7 +3,7 @@
  * 只负责页面级切换与跨页 orchestration。
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
@@ -20,6 +20,14 @@ import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
+import {
+  connectTraversalRelayDevicesStream,
+  readTraversalRelayAccountState,
+  sendTraversalRelayClientDebugSnapshot,
+  sendTraversalRelayClientDebugLogs,
+} from './lib/traversal-relay-client';
+import { collectClientDebugSnapshot, registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
+import { runtimeDebug } from './lib/runtime-debug';
 import { openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
@@ -33,6 +41,8 @@ interface AppContentProps {
 }
 
 export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActiveChange }: AppContentProps) {
+  const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
+  const relayDeviceSocketRef = useRef<WebSocket | null>(null);
   const {
     preferences: appUpdatePreferences,
     latestManifest,
@@ -40,6 +50,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     checking: updateChecking,
     installing: updateInstalling,
     lastError: updateError,
+    updateStage,
+    runtimeVersionCode,
     setPreferences: setAppUpdatePreferences,
     checkForUpdates,
     dismissAvailableManifest,
@@ -72,6 +84,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     toggleScheduleJob,
     runScheduleJobNow,
     getSessionRenderBufferStore,
+    getSessionHeadStore,
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
@@ -113,7 +126,65 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     ensureTerminalPageVisible,
   });
 
+  useEffect(() => {
+    const account = readTraversalRelayAccountState();
+    if (!bridgeSettings.traversalRelay?.accessToken || !account?.accessToken || !account.relayBaseUrl) {
+      relayDeviceSocketRef.current?.close(1000, 'relay disabled');
+      relayDeviceSocketRef.current = null;
+      return;
+    }
+
+    const socket = connectTraversalRelayDevicesStream({
+      account,
+      onDevices: () => {},
+      onError: (message) => {
+        runtimeDebug('relay.device-stream.error', { message });
+      },
+      onDebugRequest: (payload, liveSocket) => {
+        runtimeDebug('relay.device-stream.debug-request', {
+          requestId: payload.requestId || null,
+          reason: payload.reason || null,
+          includeSnapshot: payload.includeSnapshot !== false,
+          includeLogs: payload.includeLogs !== false,
+          logLimit: payload.logLimit || null,
+        });
+        if (payload.includeSnapshot !== false) {
+          sendTraversalRelayClientDebugSnapshot({
+            socket: liveSocket,
+            account,
+            requestId: payload.requestId,
+            reason: payload.reason || 'remote-request',
+            snapshot: collectClientDebugSnapshot({
+              requestId: payload.requestId || null,
+              reason: payload.reason || null,
+            }),
+          });
+        }
+        if (payload.includeLogs !== false) {
+          sendTraversalRelayClientDebugLogs({
+            socket: liveSocket,
+            account,
+            limit: payload.logLimit || 120,
+          });
+        }
+      },
+    });
+    relayDeviceSocketRef.current = socket;
+
+    return () => {
+      try {
+        socket.close(1000, 'app relay runtime disposed');
+      } catch (error) {
+        console.error('[App] Failed to close relay device stream:', error);
+      }
+      if (relayDeviceSocketRef.current === socket) {
+        relayDeviceSocketRef.current = null;
+      }
+    };
+  }, [bridgeSettings.traversalRelay?.accessToken, bridgeSettings.traversalRelay?.relayBaseUrl]);
+
   const {
+    openTabState,
     terminalSessions,
     terminalActiveSession,
     sessionIds,
@@ -146,6 +217,44 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     onForegroundActiveChange,
   });
 
+  useEffect(() => registerClientDebugSnapshotSource('app-shell', () => ({
+    page: pageState.kind,
+    activeRuntimeSessionId: state.activeSessionId,
+    runtimeSessionIds: state.sessions.map((session) => session.id),
+    terminalSessionIds: sessionIds,
+    terminalActiveSessionId: terminalActiveSession?.id || null,
+    relayConfigured: Boolean(bridgeSettings.traversalRelay?.accessToken),
+    runtimeVersionCode,
+    appUpdateStage: appUpdatePreferences.manifestUrl.trim() ? updateStage : 'idle',
+    updateChecking,
+    updateInstalling,
+    updateError,
+    updateManifestUrlConfigured: Boolean(appUpdatePreferences.manifestUrl.trim()),
+    updateAutoCheckOnLaunch: Boolean(appUpdatePreferences.autoCheckOnLaunch),
+    latestManifestVersionCode: latestManifest?.versionCode || null,
+    latestManifestVersionName: latestManifest?.versionName || null,
+    availableManifestVersionCode: availableManifest?.versionCode || null,
+    availableManifestVersionName: availableManifest?.versionName || null,
+  })), [
+    appUpdatePreferences.autoCheckOnLaunch,
+    appUpdatePreferences.manifestUrl,
+    availableManifest?.versionCode,
+    availableManifest?.versionName,
+    bridgeSettings.traversalRelay?.accessToken,
+    latestManifest?.versionCode,
+    latestManifest?.versionName,
+    pageState.kind,
+    runtimeVersionCode,
+    sessionIds,
+    state.activeSessionId,
+    state.sessions,
+    terminalActiveSession?.id,
+    updateChecking,
+    updateError,
+    updateInstalling,
+    updateStage,
+  ]);
+
   const handleOpenConnectionsPageWithAudit = useCallback(() => {
     handleOpenConnectionsPage();
     void auditOpenTabsAgainstRemoteSessions('connections-page-open').catch((error) => {
@@ -157,7 +266,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   const {
     inputResetEpochBySession,
     handleTerminalInput,
-    handleTerminalVisibleRangeChange,
+    handleTerminalViewportChange,
     handleQuickActionInput,
     handleSessionDraftChange,
     handleSessionDraftSend,
@@ -207,6 +316,22 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     runtimeRefs,
     ensureTerminalPageVisible,
     applyOpenTabState,
+    onSessionsOpenedInPane: (sessionIds, paneId) => {
+      const normalizedSessionIds = [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))];
+      const normalizedPaneId = paneId.trim();
+      if (normalizedSessionIds.length === 0 || !normalizedPaneId) {
+        console.error('[App] Refused to queue pane-attach intent without explicit sessionIds/paneId.', {
+          sessionIds,
+          paneId,
+        });
+        return;
+      }
+      setPendingPaneAttachIntent({
+        sessionIds: normalizedSessionIds,
+        paneId: normalizedPaneId,
+        nonce: Date.now(),
+      });
+    },
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });
@@ -297,18 +422,30 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
             sessionBufferStore={sessionRenderBufferStore}
+            sessionHeadStore={getSessionHeadStore()}
             onSwitchSession={handleSwitchSession}
             onMoveSession={handleMoveSession}
             onRenameSession={handleRenameSession}
             onCloseSession={handleCloseSession}
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
+            pendingPaneAttachIntent={pendingPaneAttachIntent}
+            onPaneAttachIntentApplied={(intent) => {
+              setPendingPaneAttachIntent((current) => (
+                current
+                && current.nonce === intent.nonce
+                && current.paneId === intent.paneId
+                && current.sessionIds.join('||') === intent.sessionIds.join('||')
+                  ? null
+                  : current
+              ));
+            }}
             onResize={undefined}
             onTerminalInput={handleTerminalInput}
+            onTerminalViewportChange={handleTerminalViewportChange}
             onLiveSessionIdsChange={setLiveSessionIds}
             inputResetEpochBySession={inputResetEpochBySession}
             followResetEpoch={followResetEpoch}
-            onTerminalVisibleRangeChange={handleTerminalVisibleRangeChange}
             onImagePaste={sendImagePaste}
             onFileAttach={sendFileAttach}
             onOpenSettings={handleOpenSettingsPage}
@@ -344,14 +481,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         open={pickerMode !== null}
         servers={bridgeSettings.servers}
         bridgeSettings={bridgeSettings}
-        openTabs={terminalSessions.map((session) => ({
-          id: session.id,
-          sessionName: session.sessionName,
-          customName: session.customName,
-          bridgeHost: session.bridgeHost,
-          bridgePort: session.bridgePort,
+        openTabs={openTabState.tabs.map((tab) => ({
+          id: tab.sessionId,
+          sessionName: tab.sessionName,
+          customName: tab.customName,
+          bridgeHost: tab.bridgeHost,
+          bridgePort: tab.bridgePort,
         }))}
-        activeTabId={terminalActiveSession?.id || null}
+        activeTabId={openTabState.activeSessionId}
         initialTarget={pickerTarget}
         initialSelectedSessions={pickerInitialSessions}
         onClose={closePicker}

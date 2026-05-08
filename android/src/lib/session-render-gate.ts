@@ -3,17 +3,17 @@ import {
   createSessionRenderBufferStore,
   type SessionRenderBufferStore,
 } from './session-render-buffer-store';
+import { runtimeDebugPrechecked, shouldCollectRuntimeDebugScope } from './runtime-debug';
 import { summarizeRenderBufferForDebug, summarizeSessionBufferForDebug } from './terminal-buffer-debug';
 import type { SessionBufferState, SessionRenderBufferSnapshot } from './types';
 import type { SessionHeadStore } from './session-head-store';
+import type { TerminalCell, TerminalCursorState, TerminalGapRange } from './types';
 
 interface RenderGateSessionRuntime {
   flushing: boolean;
   dirty: boolean;
   scheduled: boolean;
   frameTimerId: number | null;
-  lastLiveBuffer: SessionBufferState | null;
-  lastProjectedBuffer: SessionRenderBufferSnapshot | null;
 }
 
 export interface SessionRenderGate {
@@ -22,10 +22,29 @@ export interface SessionRenderGate {
   deleteSession: (sessionId: string) => void;
 }
 
+function cloneRenderLines(lines: TerminalCell[][]): TerminalCell[][] {
+  return lines.map((row) => row.map((cell) => ({ ...cell })));
+}
+
+function cloneRenderGapRanges(gapRanges: TerminalGapRange[]): TerminalGapRange[] {
+  return gapRanges.map((range) => ({ ...range }));
+}
+
+function cloneRenderCursor(cursor: TerminalCursorState | null): TerminalCursorState | null {
+  if (!cursor) {
+    return null;
+  }
+  return {
+    rowIndex: cursor.rowIndex,
+    col: cursor.col,
+    visible: cursor.visible,
+  };
+}
+
 function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSnapshot {
   return {
-    lines: buffer.lines,
-    gapRanges: buffer.gapRanges,
+    lines: cloneRenderLines(buffer.lines),
+    gapRanges: cloneRenderGapRanges(buffer.gapRanges),
     startIndex: buffer.startIndex,
     endIndex: buffer.endIndex,
     bufferHeadStartIndex: buffer.bufferHeadStartIndex,
@@ -35,7 +54,7 @@ function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSna
     cols: buffer.cols,
     rows: buffer.rows,
     cursorKeysApp: buffer.cursorKeysApp,
-    cursor: buffer.cursor,
+    cursor: cloneRenderCursor(buffer.cursor),
     revision: buffer.revision,
   };
 }
@@ -60,8 +79,6 @@ export function createSessionRenderGate(options: {
       dirty: false,
       scheduled: false,
       frameTimerId: null,
-      lastLiveBuffer: null,
-      lastProjectedBuffer: null,
     };
     runtimes.set(sessionId, next);
     return next;
@@ -86,31 +103,24 @@ export function createSessionRenderGate(options: {
         runtime.dirty = false;
         const liveBuffer = options.liveBufferStore.getSnapshot(sessionId).buffer;
         const liveHead = options.liveHeadStore.getSnapshot(sessionId);
-        const projectedBuffer = (
-          runtime.lastLiveBuffer === liveBuffer
-          && runtime.lastProjectedBuffer
-        )
-          ? runtime.lastProjectedBuffer
-          : projectRenderBuffer(liveBuffer);
-        if (runtime.lastLiveBuffer !== liveBuffer || runtime.lastProjectedBuffer !== projectedBuffer) {
-          runtime.lastLiveBuffer = liveBuffer;
-          runtime.lastProjectedBuffer = projectedBuffer;
-        }
+        const projectedBuffer = projectRenderBuffer(liveBuffer);
         const projected = {
           ...projectedBuffer,
           daemonHeadRevision: liveHead.daemonHeadRevision,
           daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
         };
-        options.runtimeDebug?.('session.render-gate.flush.inspect', {
-          sessionId,
-          liveBuffer: summarizeSessionBufferForDebug(liveBuffer),
-          liveHead: {
-            revision: liveHead.revision,
-            daemonHeadRevision: liveHead.daemonHeadRevision,
-            daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
-          },
-          projected: summarizeRenderBufferForDebug(projected),
-        });
+        if (options.runtimeDebug && shouldCollectRuntimeDebugScope('session.render-gate.flush.inspect')) {
+          runtimeDebugPrechecked('session.render-gate.flush.inspect', {
+            sessionId,
+            liveBuffer: summarizeSessionBufferForDebug(liveBuffer),
+            liveHead: {
+              revision: liveHead.revision,
+              daemonHeadRevision: liveHead.daemonHeadRevision,
+              daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
+            },
+            projected: summarizeRenderBufferForDebug(projected),
+          });
+        }
         const changed = renderStore.setBuffer(sessionId, projected);
         if (changed) {
           options.recordSessionRenderCommit(sessionId);

@@ -4,6 +4,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalQuickBar } from './TerminalQuickBar';
+import { resolveOverlayViewportMetrics } from './terminal-quickbar-helpers';
 
 vi.mock('../../plugins/DeviceClipboardPlugin', () => ({
   DeviceClipboardPlugin: {
@@ -225,6 +226,28 @@ describe('TerminalQuickBar', () => {
     });
   });
 
+  it('uses stable layout viewport metrics for overlay bottom inset when IME shrinks visual viewport', () => {
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 720,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      value: 1024,
+    });
+    stubVisualViewport({
+      width: 1200,
+      height: 560,
+      offsetTop: 0,
+      offsetLeft: 0,
+    });
+
+    const metrics = resolveOverlayViewportMetrics(280);
+    expect(metrics.bottomInsetPx).toBe(464);
+    expect(metrics.sheetHeightPx).toBe(544);
+  });
+
   it('hides shell quick rows while floating menu is open', async () => {
     renderQuickBar();
 
@@ -279,7 +302,17 @@ describe('TerminalQuickBar', () => {
 
 
 
-  it('renders three shell rows with the third row as the visible tool bar', async () => {
+  it('renders two shell rows in landscape with tools merged into the second row', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1200,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
     renderQuickBar({
       onOpenFileTransfer: vi.fn(),
       onToggleDebugOverlay: vi.fn(),
@@ -288,7 +321,7 @@ describe('TerminalQuickBar', () => {
     });
 
     const shellRows = screen.getByTestId('terminal-quickbar-shell-rows');
-    expect(shellRows.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(3);
+    expect(shellRows.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(2);
     expect(screen.getByRole('button', { name: '状态' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '键盘' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '↑' })).not.toBeNull();
@@ -756,7 +789,7 @@ describe('TerminalQuickBar', () => {
     expect(style).toContain('overflow-x: hidden');
     expect(style).toContain('touch-action: pan-y');
     expect(sheet?.getAttribute('style') || '').toContain('height: 441px');
-    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 297px');
+    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 567px');
     expect(screen.getByTestId('shortcut-editor-list').getAttribute('style') || '').toContain('min-height: max-content');
   });
 
@@ -794,7 +827,7 @@ describe('TerminalQuickBar', () => {
     const sheet = scrollContainer.parentElement;
     const overlay = sheet?.parentElement;
     expect(sheet?.getAttribute('style') || '').toContain('height: 441px');
-    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 297px');
+    expect(overlay?.getAttribute('style') || '').toContain('padding-bottom: 567px');
   });
 
   it('resets shortcut editor scrollTop when switching from list to form', async () => {
@@ -870,5 +903,22 @@ describe('TerminalQuickBar', () => {
     expect(enterButton.getAttribute('aria-pressed')).toBe('false');
     expect(onSendSequence).toHaveBeenCalledTimes(callCountBeforeStop);
     vi.useRealTimers();
+  });
+
+  it('uses two shell rows in landscape mode', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1200,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+
+    renderQuickBar();
+
+    expect(document.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(2);
   });
 });

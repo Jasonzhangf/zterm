@@ -60,6 +60,7 @@ export function handleSocketServerMessageRuntime(options: {
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   runtimeDebug: RuntimeDebugFn;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   applyIncomingBufferSync: (sessionId: string, payload: TerminalBufferPayload) => void;
   handleBufferHead: (
@@ -87,7 +88,9 @@ export function handleSocketServerMessageRuntime(options: {
     Boolean(currentSession)
     && currentSession!.state !== 'connected'
     && (msg.type === 'buffer-sync' || msg.type === 'buffer-head');
-  const shouldAcceptLiveBufferPayload = options.isSessionTransportActive(params.sessionId);
+  const shouldAcceptLiveBufferPayload = options.shouldAcceptSessionLiveBuffer
+    ? options.shouldAcceptSessionLiveBuffer(params.sessionId)
+    : options.isSessionTransportActive(params.sessionId);
 
   switch (msg.type) {
     case 'connected':
@@ -215,6 +218,8 @@ export function handleSocketConnectedBaselineRuntime(options: {
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
   };
   readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
@@ -245,7 +250,7 @@ export function handleSocketConnectedBaselineRuntime(options: {
     payload: { sessionName: options.sessionName },
   } satisfies ClientMessage));
   const connectedHeadRefreshPlan = buildConnectedHeadRefreshPlan({
-    shouldLiveRefresh: options.isSessionTransportActive(options.sessionId),
+    shouldLiveRefresh: true,
     hadLocalWindowBeforeConnected,
   });
   if (connectedHeadRefreshPlan.shouldMarkPendingConnectTailRefresh) {
@@ -254,6 +259,11 @@ export function handleSocketConnectedBaselineRuntime(options: {
   if (connectedHeadRefreshPlan.shouldRequestHead) {
     options.requestSessionBufferHead(options.sessionId, options.ws, { force: true });
   }
+  options.refs.lastConnectedBaselineAtRef.current.set(options.sessionId, Date.now());
+  options.refs.connectedBaselineBurstGuardRef.current.add(options.sessionId);
+  queueMicrotask(() => {
+    options.refs.connectedBaselineBurstGuardRef.current.delete(options.sessionId);
+  });
   options.incrementConnectedSync();
 }
 

@@ -490,3 +490,8 @@ tmux truth
 - 若现场表现为“**语音/CJK commit 已经发生，但要再补一个字符才刷新**”，优先查两件事：
   1. **same-end 新 revision** 是否被旧的 in-flight tail-refresh 误判成“已覆盖”；同窗同 range 但 `targetHeadRevision` 变了，必须允许重发
   2. `buffer-head.cursor` 是否被 client 丢弃；head 已经带来的 cursor metadata 必须立刻进入本地 truth，不能等下一次 buffer-sync 才纠正高亮/光标
+- 若现场表现为“**偶发先出现错误帧内容，下一帧又恢复正常**”，优先审 **render truth 边界是否持有 live buffer 的可变引用**：
+  1. `SessionBufferState -> SessionRenderBufferSnapshot` 必须产出 **immutable render snapshot**
+  2. `lines / gapRanges / cursor` 不得把 live buffer 引用直接交给 renderer/store
+  3. render store 读取到的只能是独立 render truth；否则后续 patch/merge 复用 row/object 时，会把已准备绘制的上一帧污染成“短暂错帧”
+- 若现场要排 Android IME 抬高 / 安装升级 timeout，debug 观测链也必须服从唯一真源：只允许 `client snapshot source -> collectClientDebugSnapshot -> active session WS debug-snapshot -> daemon store` 这一条链；禁止再开第二条 relay/debug transport 或散落页面内临时上报。

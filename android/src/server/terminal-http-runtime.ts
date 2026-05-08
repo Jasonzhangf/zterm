@@ -174,6 +174,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       authEnabled: Boolean(deps.requiredAuthToken),
       health: buildRuntimeHealthSnapshot(request),
       clientDebug: deps.clientRuntimeDebugStore.getSummary(),
+      clientDebugSnapshots: deps.clientRuntimeDebugStore.listSnapshots(),
       clientSessions: sessionEntries.map((session) => ({
         id: session.id,
         sessionName: session.sessionName,

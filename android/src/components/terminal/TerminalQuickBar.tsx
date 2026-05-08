@@ -60,6 +60,7 @@ import {
   type ShortcutToken,
 } from './terminal-quickbar-helpers';
 import { buildTerminalShortcutSequence } from '../../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
+import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics';
 
 interface TerminalQuickBarProps {
   activeSessionId?: string | null;
@@ -80,6 +81,9 @@ interface TerminalQuickBarProps {
   onOpenScheduleComposer?: (text: string) => void;
   splitAvailable?: boolean;
   splitVisible?: boolean;
+  currentSplitCount?: number;
+  splitCountOptions?: number[];
+  onSetSplitCount?: (count: number) => void;
   onToggleSplitLayout?: () => void;
   onCycleSplitPane?: () => void;
   onEditorDomFocusChange?: (active: boolean) => void;
@@ -114,6 +118,9 @@ function TerminalQuickBarComponent({
   onOpenScheduleComposer,
   splitAvailable = false,
   splitVisible = false,
+  currentSplitCount = splitVisible ? 2 : 1,
+  splitCountOptions = [],
+  onSetSplitCount,
   onToggleSplitLayout,
   onCycleSplitPane,
   onEditorDomFocusChange,
@@ -179,6 +186,10 @@ function TerminalQuickBarComponent({
     width: FLOATING_BUBBLE_SIZE,
     height: FLOATING_BUBBLE_SIZE,
   });
+  const normalizedSplitCountOptions = useMemo(
+    () => Array.from(new Set(splitCountOptions.filter((count) => Number.isFinite(count) && count >= 1))).sort((a, b) => a - b),
+    [splitCountOptions],
+  );
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -191,6 +202,7 @@ function TerminalQuickBarComponent({
   const quickInputDirtyRef = useRef(false);
   const quickInputValueRef = useRef(sessionDraft || '');
   const [quickInputValue, setQuickInputValue] = useState(sessionDraft || '');
+  const [landscape, setLandscape] = useState(() => resolveTerminalOrientation() === 'landscape');
 
   const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
   const sortedShortcutActions = useMemo(() => {
@@ -591,6 +603,10 @@ function TerminalQuickBarComponent({
     () => buildVisibleShortcutRowActions('bottom-scroll', sortedShortcutActions),
     [sortedShortcutActions],
   );
+  const mergedScrollActions = useMemo(
+    () => [...topScrollActions, ...bottomScrollActions],
+    [bottomScrollActions, topScrollActions],
+  );
 
   const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
   const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
@@ -744,6 +760,22 @@ function TerminalQuickBarComponent({
       window.cancelAnimationFrame(rafId);
     };
   }, [editingShortcutId, shortcutEditorMode, shortcutEditorOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const syncLandscape = () => {
+      setLandscape(resolveTerminalOrientation() === 'landscape');
+    };
+    syncLandscape();
+    window.addEventListener('resize', syncLandscape);
+    window.visualViewport?.addEventListener('resize', syncLandscape);
+    return () => {
+      window.removeEventListener('resize', syncLandscape);
+      window.visualViewport?.removeEventListener('resize', syncLandscape);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2169,30 +2201,67 @@ function TerminalQuickBarComponent({
               </div>
 
               {splitAvailable && (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onToggleSplitLayout?.();
-                      setFloatingMenuOpen(false);
-                    }}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' }}>
+                  <div
                     style={{
-                      flex: 1,
-                      minHeight: '40px',
-                      border: '1px solid rgba(113, 164, 255, 0.24)',
-                      borderRadius: '14px',
-                      backgroundColor: splitVisible ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
-                      color: splitVisible ? '#8db7ff' : '#fff',
-                      fontWeight: 800,
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '8px',
+                      alignItems: 'center',
                     }}
                   >
-                    {splitVisible ? '关闭分屏' : '开启分屏'}
-                  </button>
-                  {splitVisible && (
+                    {normalizedSplitCountOptions.map((count) => {
+                      const active = count === currentSplitCount;
+                      return (
+                        <button
+                          key={`split-count-${count}`}
+                          type="button"
+                          onClick={() => {
+                            onSetSplitCount?.(count);
+                            setFloatingMenuOpen(false);
+                          }}
+                          aria-label={`${count} 分屏`}
+                          style={{
+                            minWidth: '72px',
+                            minHeight: '40px',
+                            padding: '0 12px',
+                            border: `1px solid ${active ? 'rgba(113, 164, 255, 0.28)' : 'rgba(255,255,255,0.08)'}`,
+                            borderRadius: '14px',
+                            backgroundColor: active ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
+                            color: active ? '#8db7ff' : '#fff',
+                            fontWeight: 800,
+                          }}
+                        >
+                          {count} 分屏
+                        </button>
+                      );
+                    })}
+                    {normalizedSplitCountOptions.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onToggleSplitLayout?.();
+                          setFloatingMenuOpen(false);
+                        }}
+                        style={{
+                          flex: 1,
+                          minHeight: '40px',
+                          border: '1px solid rgba(113, 164, 255, 0.24)',
+                          borderRadius: '14px',
+                          backgroundColor: splitVisible ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
+                          color: splitVisible ? '#8db7ff' : '#fff',
+                          fontWeight: 800,
+                        }}
+                      >
+                        {splitVisible ? '关闭分屏' : '开启分屏'}
+                      </button>
+                    ) : null}
+                  </div>
+                  {splitVisible && onCycleSplitPane ? (
                     <button
                       type="button"
                       onClick={() => {
-                        onCycleSplitPane?.();
+                        onCycleSplitPane();
                         setFloatingMenuOpen(false);
                       }}
                       style={{
@@ -2207,7 +2276,7 @@ function TerminalQuickBarComponent({
                     >
                       切换副屏
                     </button>
-                  )}
+                  ) : null}
                 </div>
               )}
 
@@ -2555,64 +2624,114 @@ function TerminalQuickBarComponent({
 
       {!floatingMenuOpen && (
         <div data-testid="terminal-quickbar-shell-rows">
-          <div
-            data-quickbar-shell-row="true"
-            style={{
-              minHeight: '40px',
-              display: 'flex',
-              alignItems: 'stretch',
-              gap: `${QUICK_BAR_ROW_GAP}px`,
-              padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
-              marginBottom: `${QUICK_BAR_ROW_GAP}px`,
-            }}
-          >
-            <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
-              {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
-            </div>
-            <div style={scrollTrackShellStyle}>
-              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                {topScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-                {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
+          {landscape ? (
+            <>
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: '40px',
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+                  marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+                }}
+              >
+                <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
+                  {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                    {mergedScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                    {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
+                    {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <div
-            data-quickbar-shell-row="true"
-            style={{
-              minHeight: '40px',
-              display: 'flex',
-              alignItems: 'stretch',
-              gap: `${QUICK_BAR_ROW_GAP}px`,
-              padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-              backgroundColor: 'rgba(255,255,255,0.02)',
-            }}
-          >
-            <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
-              {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
-            </div>
-            <div style={scrollTrackShellStyle}>
-              <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-                {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: '40px',
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                  backgroundColor: 'rgba(255,255,255,0.02)',
+                }}
+              >
+                <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
+                  {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                    {toolRowActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            <>
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: '40px',
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+                  marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+                }}
+              >
+                <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
+                  {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                    {topScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                    {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
+                  </div>
+                </div>
+              </div>
 
-          <div
-            data-quickbar-shell-row="true"
-            style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-            }}
-          >
-            <div style={scrollTrackShellStyle}>
-              <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                {toolRowActions.map((action) => renderBaseActionButton(action))}
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: '40px',
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                  backgroundColor: 'rgba(255,255,255,0.02)',
+                }}
+              >
+                <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
+                  {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                    {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                    {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                }}
+              >
+                <div style={scrollTrackShellStyle}>
+                  <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
+                    {toolRowActions.map((action) => renderBaseActionButton(action))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
       {toastMessage && (

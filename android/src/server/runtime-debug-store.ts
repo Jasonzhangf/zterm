@@ -13,6 +13,14 @@ export interface RuntimeDebugStoredEntry extends RuntimeDebugLogEntry {
   requestOrigin?: string;
 }
 
+export interface RuntimeDebugSnapshotRecord {
+  sessionId: string;
+  tmuxSessionName: string;
+  requestOrigin?: string;
+  updatedAt: string;
+  snapshot: unknown;
+}
+
 interface RuntimeDebugSessionSummary {
   sessionId: string;
   tmuxSessionName: string;
@@ -41,6 +49,7 @@ const MAX_QUERY_LIMIT = 1000;
 export class RuntimeDebugStore {
   private readonly maxEntries: number;
   private readonly entries: RuntimeDebugStoredEntry[] = [];
+  private readonly snapshots = new Map<string, RuntimeDebugSnapshotRecord>();
 
   constructor(options?: RuntimeDebugStoreOptions) {
     const requestedMaxEntries = Math.floor(options?.maxEntries || DEFAULT_MAX_STORED_ENTRIES);
@@ -63,6 +72,24 @@ export class RuntimeDebugStore {
     if (overflow > 0) {
       this.entries.splice(0, overflow);
     }
+  }
+
+  setSnapshot(source: RuntimeDebugSourceMeta, snapshot: unknown) {
+    this.snapshots.set(source.sessionId, {
+      sessionId: source.sessionId,
+      tmuxSessionName: source.tmuxSessionName,
+      requestOrigin: source.requestOrigin,
+      updatedAt: new Date().toISOString(),
+      snapshot,
+    });
+  }
+
+  getSnapshot(sessionId: string) {
+    return this.snapshots.get(sessionId.trim()) || null;
+  }
+
+  listSnapshots() {
+    return Array.from(this.snapshots.values()).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   listEntries(query?: RuntimeDebugEntryQuery) {
@@ -119,6 +146,7 @@ export class RuntimeDebugStore {
     return {
       totalEntries: this.entries.length,
       sessions: Array.from(sessions.values()).sort((left, right) => right.latestSeq - left.latestSeq),
+      snapshotCount: this.snapshots.size,
     };
   }
 }

@@ -471,7 +471,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
   });
 
-  it('does not schedule a render commit when buffer-head only updates cursor metadata', () => {
+  it('schedules a render commit when buffer-head updates cursor metadata', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
     const commitSessionBufferUpdate = vi.fn(() => true);
@@ -509,6 +509,6 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
     expect(commitSessionBufferUpdate).toHaveBeenCalledTimes(1);
     expect(setHead).toHaveBeenCalledTimes(1);
-    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledTimes(1);
   });
 });

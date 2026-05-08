@@ -169,6 +169,7 @@ export function handleSocketServerMessageOrchestrationRuntime(options: {
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   applyIncomingBufferSync: (sessionId: string, payload: TerminalBufferPayload) => void;
   handleBufferHead: (
@@ -197,6 +198,8 @@ export function handleSocketConnectedBaselineOrchestrationRuntime(options: {
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
   };
   readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;

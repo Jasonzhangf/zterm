@@ -7,6 +7,7 @@ import {
   RUNTIME_DEBUG_STORAGE_KEY,
   drainRuntimeDebugEntries,
   runtimeDebug,
+  shouldCollectRuntimeDebugScope,
   setRuntimeDebugEnabled,
 } from './runtime-debug';
 
@@ -82,6 +83,19 @@ describe('runtime debug storage flag', () => {
       ]);
       expect(entries[0]?.payload).toContain('"seq":1');
       expect(entries[1]?.payload).toContain('"seq":3');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('samples inspect scopes before any heavy payload is built', () => {
+    vi.useFakeTimers();
+    try {
+      setRuntimeDebugEnabled(true);
+      expect(shouldCollectRuntimeDebugScope('session.buffer.apply.inspect')).toBe(true);
+      expect(shouldCollectRuntimeDebugScope('session.buffer.apply.inspect')).toBe(false);
+      vi.advanceTimersByTime(1600);
+      expect(shouldCollectRuntimeDebugScope('session.buffer.apply.inspect')).toBe(true);
     } finally {
       vi.useRealTimers();
     }

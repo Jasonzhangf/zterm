@@ -29,7 +29,7 @@ import {
   createSessionContextTransportAccessors,
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import type { SessionBufferHeadState, SessionPullPurpose } from './session-sync-helpers';
+import { hasSessionLocalWindow, type SessionBufferHeadState, type SessionPullPurpose } from './session-sync-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
 export function applySessionActionRuntime(options: {
@@ -150,6 +150,24 @@ export function isSessionTransportActiveRuntime(options: {
     options.stateRef.current.activeSessionId === options.sessionId
     || options.stateRef.current.liveSessionIds.includes(options.sessionId)
   );
+}
+
+export function shouldAcceptSessionLiveBufferRuntime(options: {
+  sessionId: string;
+  stateRef: { current: SessionManagerState };
+  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
+}) {
+  if (
+    options.stateRef.current.activeSessionId === options.sessionId
+    || options.stateRef.current.liveSessionIds.includes(options.sessionId)
+  ) {
+    return true;
+  }
+  const session = options.stateRef.current.sessions.find((candidate) => candidate.id === options.sessionId) || null;
+  if (!session) {
+    return false;
+  }
+  return !hasSessionLocalWindow(session, options.readSessionBufferSnapshot(options.sessionId));
 }
 
 export function hasPendingSessionTransportOpenRuntime(options: {

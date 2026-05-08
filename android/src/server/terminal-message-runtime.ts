@@ -38,6 +38,7 @@ export interface TerminalMessageRuntimeDeps {
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
   controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
 }
 
@@ -249,6 +250,16 @@ export function createTerminalMessageRuntime(
           break;
         }
         deps.handleClientDebugLog(session, message.payload);
+        break;
+      case 'debug-snapshot':
+        if (!session) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'debug-snapshot requires an attached session transport', code: 'session_required' },
+          });
+          break;
+        }
+        deps.handleClientDebugSnapshot(session, message.payload);
         break;
       case 'tmux-create-session':
         handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);

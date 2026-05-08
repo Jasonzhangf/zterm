@@ -394,6 +394,7 @@ export function bindSessionTransportSocketLifecycle(options: {
   setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
   isSessionTransportActive?: (sessionId: string) => boolean;
+  shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   handleSocketServerMessage: (params: {
     sessionId: string;
     host: Host;
@@ -450,10 +451,12 @@ export function bindSessionTransportSocketLifecycle(options: {
       }
       const fastMessageType = resolveIncomingMessageTypeFast(event.data);
       if (fastMessageType === 'buffer-sync' && options.isSessionTransportActive && !options.isSessionTransportActive(sessionId)) {
-        options.runtimeDebug?.(`session.ws.${debugScope}.buffer-sync.preparse-inactive-drop`, {
-          sessionId,
-        });
-        return;
+        if (!options.shouldAcceptSessionLiveBuffer?.(sessionId)) {
+          options.runtimeDebug?.(`session.ws.${debugScope}.buffer-sync.preparse-inactive-drop`, {
+            sessionId,
+          });
+          return;
+        }
       }
       const msg: ServerMessage = JSON.parse(event.data);
       options.handleSocketServerMessage({

@@ -373,16 +373,21 @@ vi.mock('./contexts/SessionContext', () => ({
 
 vi.mock('./hooks/useAppUpdate', () => ({
   useAppUpdate: () => ({
+    preferences: { manifestUrl: '', autoCheckOnLaunch: false, ignoreUntilManualCheck: false, skippedVersionCode: undefined, lastCheckedAt: undefined, lastSeenVersionCode: undefined },
+    runtimeVersionCode: 1011491,
     latestManifest: null,
     availableManifest: null,
-    updateChecking: false,
-    updateInstalling: false,
-    updateError: null,
-    appUpdatePreferences: { manifestUrl: '', ignoredVersionName: null, ignoredVersionCode: null },
-    setAppUpdatePreferences: vi.fn(),
+    checking: false,
+    installing: false,
+    lastError: null,
+    updateStage: 'idle',
+    setPreferences: vi.fn(),
     checkForUpdates: vi.fn(),
-    startUpdate: vi.fn(),
+    dismissAvailableManifest: vi.fn(),
+    skipCurrentVersion: vi.fn(),
+    ignoreUntilManualCheck: vi.fn(),
     resetIgnorePolicy: vi.fn(),
+    startUpdate: vi.fn(),
   }),
 }));
 
@@ -3083,6 +3088,45 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => {
       const pickerProps = tmuxPickerHarness.readProps();
       expect(pickerProps?.openTabs?.map((tab: { id: string }) => tab.id)).toEqual(['s2']);
+    });
+  });
+
+  it('uses persisted OPEN_TABS truth for quick-tab current-tabs even before runtime sessions reconnect', async () => {
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'persisted-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-a',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'persisted-b',
+        hostId: 'host-b',
+        connectionName: 'Conn B',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-b',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'persisted-b');
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      const pickerProps = tmuxPickerHarness.readProps();
+      expect(pickerProps?.openTabs?.map((tab: { id: string }) => tab.id)).toEqual(['persisted-a', 'persisted-b']);
+      expect(pickerProps?.activeTabId).toBe('persisted-b');
     });
   });
 

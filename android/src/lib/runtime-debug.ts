@@ -7,6 +7,7 @@ const MAX_RUNTIME_DEBUG_PAYLOAD_CHARS = 900;
 const MAX_RUNTIME_DEBUG_BATCH_ENTRIES = 8;
 const MAX_RUNTIME_DEBUG_BATCH_CHARS = 4800;
 const HIGH_FREQUENCY_RUNTIME_DEBUG_MIN_INTERVAL_MS = 500;
+const INSPECT_RUNTIME_DEBUG_MIN_INTERVAL_MS = 1500;
 
 let runtimeDebugSequence = 0;
 let droppedRuntimeDebugEntries = 0;
@@ -112,24 +113,48 @@ function shouldSampleRuntimeDebugScope(scope: string) {
   return (
     scope === 'session.buffer.head'
     || scope === 'session.buffer.request'
+    || scope === 'session.buffer.apply.inspect'
+    || scope === 'session.render-gate.flush.inspect'
     || scope.startsWith('session.transport.active-tick')
   );
 }
 
-export function runtimeDebug(scope: string, payload?: unknown) {
+function resolveRuntimeDebugScopeMinIntervalMs(scope: string) {
+  if (
+    scope === 'session.buffer.apply.inspect'
+    || scope === 'session.render-gate.flush.inspect'
+  ) {
+    return INSPECT_RUNTIME_DEBUG_MIN_INTERVAL_MS;
+  }
+  return HIGH_FREQUENCY_RUNTIME_DEBUG_MIN_INTERVAL_MS;
+}
+
+export function shouldCollectRuntimeDebugScope(scope: string) {
   if (!safeReadStorageFlag()) {
-    return;
+    return false;
   }
 
   const now = Date.now();
   if (shouldSampleRuntimeDebugScope(scope)) {
     const previousAt = runtimeDebugLastSampleAt.get(scope) || 0;
-    if (now - previousAt < HIGH_FREQUENCY_RUNTIME_DEBUG_MIN_INTERVAL_MS) {
-      return;
+    const minIntervalMs = resolveRuntimeDebugScopeMinIntervalMs(scope);
+    if (now - previousAt < minIntervalMs) {
+      return false;
     }
     runtimeDebugLastSampleAt.set(scope, now);
   }
+  return true;
+}
 
+export function runtimeDebug(scope: string, payload?: unknown) {
+  if (!shouldCollectRuntimeDebugScope(scope)) {
+    return;
+  }
+  runtimeDebugPrechecked(scope, payload);
+}
+
+export function runtimeDebugPrechecked(scope: string, payload?: unknown) {
+  const now = Date.now();
   const timestamp = new Date(now).toISOString();
   const normalizedPayload = normalizePayload(payload);
   enqueueRuntimeDebugEntry({
@@ -188,11 +213,26 @@ export function getPendingRuntimeDebugEntryCount() {
   return runtimeDebugQueue.length;
 }
 
+export function readRuntimeDebugEntries(options?: {
+  limit?: number;
+  sinceSeq?: number;
+}) {
+  const limit = Math.max(1, Math.min(MAX_RUNTIME_DEBUG_QUEUE, Math.floor(options?.limit || MAX_RUNTIME_DEBUG_QUEUE)));
+  const sinceSeq = typeof options?.sinceSeq === 'number' && Number.isFinite(options.sinceSeq)
+    ? options.sinceSeq
+    : null;
+  const filtered = sinceSeq === null
+    ? runtimeDebugQueue
+    : runtimeDebugQueue.filter((entry) => entry.seq > sinceSeq);
+  return filtered.slice(Math.max(0, filtered.length - limit));
+}
+
 export {
   MAX_RUNTIME_DEBUG_BATCH_ENTRIES,
   MAX_RUNTIME_DEBUG_BATCH_CHARS,
   MAX_RUNTIME_DEBUG_PAYLOAD_CHARS,
   MAX_RUNTIME_DEBUG_QUEUE,
   RUNTIME_DEBUG_CONSOLE_STORAGE_KEY,
+  INSPECT_RUNTIME_DEBUG_MIN_INTERVAL_MS,
   RUNTIME_DEBUG_STORAGE_KEY,
 };
