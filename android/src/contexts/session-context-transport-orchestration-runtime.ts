@@ -422,11 +422,11 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   }
 
-  const queueConnectTransportOpenIntent = (sessionId: string, host: Host, activate: boolean) => {
+  const queueConnectTransportOpenIntent = (sessionId: string, host: Host) => {
     queueTransportOpenIntentRuntime({
       sessionId,
       host,
-      activate,
+      
       mode: 'connect',
       queueSessionTransportOpenIntent,
       buildReconnectTransportOpenIntentOptions,

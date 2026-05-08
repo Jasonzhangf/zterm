@@ -3,15 +3,16 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
-  applyIncomingBufferSyncOrchestrationRuntime,
-  commitSessionBufferUpdateRuntime,
-  finalizeSocketFailureBaselineOrchestrationRuntime,
-  handleBufferHeadOrchestrationRuntime,
-  handleSocketConnectedBaselineOrchestrationRuntime,
-  handleSocketServerMessageOrchestrationRuntime,
-  requestSessionBufferHeadOrchestrationRuntime,
-  requestSessionBufferSyncOrchestrationRuntime,
-} from './session-context-buffer-message-runtime';
+  applyIncomingBufferSyncRuntime,
+  handleBufferHeadRuntime,
+  requestSessionBufferHeadRuntime,
+  requestSessionBufferSyncRuntime,
+} from './session-context-buffer-runtime';
+import {
+  finalizeSocketFailureBaselineRuntime,
+  handleSocketConnectedBaselineRuntime,
+  handleSocketServerMessageRuntime,
+} from './session-context-socket-message-runtime';
 
 interface MutableRefObject<T> {
   current: T;
@@ -63,11 +64,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
 }) {
   const commitSessionBufferUpdate = (sessionId: string, nextBuffer: SessionBufferState) => {
-    return commitSessionBufferUpdateRuntime({
-      sessionId,
-      nextBuffer,
-      sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
-    });
+    return options.refs.sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer);
   };
 
   const requestSessionBufferSync = (sessionId: string, requestOptions?: {
@@ -78,9 +75,9 @@ export function createSessionMessageOrchestrationRuntime(options: {
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
   }) => {
-    return requestSessionBufferSyncOrchestrationRuntime({
+    return requestSessionBufferSyncRuntime({
       sessionId,
-      requestOptions,
+      ...(requestOptions || {}),
       refs: {
         stateRef: options.refs.stateRef,
         sessionVisibleRangeRef: options.refs.sessionVisibleRangeRef,
@@ -100,7 +97,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   };
 
   const requestSessionBufferHead = (sessionId: string, ws?: BridgeTransportSocket | null, headOptions?: { force?: boolean }) => {
-    return requestSessionBufferHeadOrchestrationRuntime({
+    return requestSessionBufferHeadRuntime({
       sessionId,
       ws,
       force: headOptions?.force,
@@ -124,7 +121,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     cursor?: TerminalCursorState | null,
     cursorKeysApp?: boolean,
   ) => {
-    handleBufferHeadOrchestrationRuntime({
+    handleBufferHeadRuntime({
       sessionId,
       latestRevision,
       latestEndIndex,
@@ -153,7 +150,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
   };
 
   const applyIncomingBufferSync = (sessionId: string, payload: TerminalBufferPayload) => {
-    applyIncomingBufferSyncOrchestrationRuntime({
+    applyIncomingBufferSyncRuntime({
       sessionId,
       payload,
       refs: {
@@ -186,7 +183,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;
   }, msg: ServerMessage) => {
-    handleSocketServerMessageOrchestrationRuntime({
+    handleSocketServerMessageRuntime({
       params: messageOptions,
       msg,
       refs: {
@@ -214,7 +211,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     sessionName: string;
     ws: BridgeTransportSocket;
   }) => {
-    handleSocketConnectedBaselineOrchestrationRuntime({
+    handleSocketConnectedBaselineRuntime({
       sessionId: connectedOptions.sessionId,
       sessionName: connectedOptions.sessionName,
       ws: connectedOptions.ws,
@@ -240,7 +237,7 @@ export function createSessionMessageOrchestrationRuntime(options: {
     message: string;
     markCompleted: () => boolean;
   }) => {
-    return finalizeSocketFailureBaselineOrchestrationRuntime({
+    return finalizeSocketFailureBaselineRuntime({
       sessionId: baselineOptions.sessionId,
       message: baselineOptions.message,
       markCompleted: baselineOptions.markCompleted,

@@ -1,3 +1,4 @@
+import type { Host } from "../lib/types";
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { SessionScheduleState } from '../lib/types';
@@ -59,7 +60,7 @@ export interface SessionProviderCoreAssembliesResult {
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
-  queueConnectTransportOpenIntent: (sessionId: string, host: any, activate: boolean) => void;
+  queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   readSessionTransportSocket: (sessionId: string) => any;
   readSessionTransportHost: (sessionId: string) => any;
