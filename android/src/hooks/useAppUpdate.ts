@@ -11,6 +11,7 @@ import {
   type AppUpdateRuntimeSnapshot,
   type AppUpdateStage,
 } from '../lib/app-update-runtime';
+import { deriveAppUpdateProjection } from '@zterm/shared';
 import { AppUpdatePlugin, isNativeAppUpdateSupported } from '../plugins/AppUpdatePlugin';
 
 function useAppUpdateSnapshot(
@@ -93,6 +94,17 @@ export function useAppUpdate() {
     return result;
   }, [syncSnapshot]);
 
+  const projection = deriveAppUpdateProjection({
+    preferences: snapshot.preferences,
+    latestManifest: snapshot.latestManifest,
+    availableManifest: snapshot.availableManifest,
+    checking: snapshot.checking,
+    installing: snapshot.installing,
+    lastError: snapshot.lastError,
+    updateStage: snapshot.updateStage,
+    runtimeVersionCode: snapshot.runtimeVersionCode,
+  });
+
   useEffect(() => {
     if (didAutoCheckRef.current) {
       return;
@@ -106,14 +118,17 @@ export function useAppUpdate() {
   }, [checkForUpdates, snapshot.preferences.autoCheckOnLaunch, snapshot.preferences.manifestUrl]);
 
   return useMemo(() => ({
-    preferences: snapshot.preferences,
-    runtimeVersionCode: snapshot.runtimeVersionCode,
-    latestManifest: snapshot.latestManifest,
-    availableManifest: snapshot.availableManifest,
-    checking: snapshot.checking,
-    installing: snapshot.installing,
-    lastError: snapshot.lastError,
-    updateStage: snapshot.updateStage,
+    preferences: projection.preferences,
+    runtimeVersionCode: projection.runtimeVersionCode,
+    latestManifest: projection.latestManifest,
+    availableManifest: projection.availableManifest,
+    checking: projection.checking,
+    installing: projection.installing,
+    lastError: projection.lastError,
+    updateStage: projection.updateStage,
+    hasNewVersion: projection.hasNewVersion,
+    hasUpdateIgnorePolicy: projection.hasUpdateIgnorePolicy,
+    updateManifestUrlConfigured: projection.updateManifestUrlConfigured,
     setPreferences,
     checkForUpdates,
     dismissAvailableManifest,
@@ -122,14 +137,17 @@ export function useAppUpdate() {
     resetIgnorePolicy,
     startUpdate,
   }), [
-    snapshot.preferences,
-    snapshot.runtimeVersionCode,
-    snapshot.latestManifest,
-    snapshot.availableManifest,
-    snapshot.checking,
-    snapshot.installing,
-    snapshot.lastError,
-    snapshot.updateStage,
+    projection.preferences,
+    projection.runtimeVersionCode,
+    projection.latestManifest,
+    projection.availableManifest,
+    projection.checking,
+    projection.installing,
+    projection.lastError,
+    projection.updateStage,
+    projection.hasNewVersion,
+    projection.hasUpdateIgnorePolicy,
+    projection.updateManifestUrlConfigured,
     setPreferences,
     checkForUpdates,
     dismissAvailableManifest,

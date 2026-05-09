@@ -6,7 +6,6 @@ import {
   type BridgeSettings,
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-update';
-import { APP_VERSION_CODE } from '../lib/app-version';
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
@@ -28,6 +27,8 @@ interface SettingsPageProps {
   updateChecking: boolean;
   updateInstalling: boolean;
   updateError: string | null;
+  hasNewVersion: boolean;
+  hasUpdateIgnorePolicy: boolean;
   onSave: (settings: BridgeSettings) => void;
   onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
   onCheckForUpdate: (next: AppUpdatePreferences) => void;
@@ -61,6 +62,8 @@ export function SettingsPage({
   updateChecking,
   updateInstalling,
   updateError,
+  hasNewVersion,
+  hasUpdateIgnorePolicy,
   onSave,
   onUpdatePreferencesChange,
   onCheckForUpdate,
@@ -83,8 +86,6 @@ export function SettingsPage({
     syncRelay,
   } = useTraversalRelayAccount(settings.traversalRelay);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
-  const hasUpdateIgnorePolicy = updatePreferences.ignoreUntilManualCheck || Boolean(updatePreferences.skippedVersionCode);
-  const hasNewVersion = Boolean(latestManifest && latestManifest.versionCode > APP_VERSION_CODE);
   const suggestedManifestUrl = useMemo(
     () => deriveDaemonUpdateManifestUrl(
       defaultServer?.targetHost || draft.targetHost || '',

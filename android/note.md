@@ -2350,3 +2350,43 @@ user open
 - 待验证：
   - `tsc`
   - `session-context-core/session-runtime/useSessionOpenActions/SessionContext.ws-refresh` 定向回归
+
+## [2026-05-09] update-check interaction baseline 二次审计：只保留 projection 真切片，删除假 operation/event 接线
+- 本轮目标：review 未提交代码，确认 update-check 是否真的把 shared interaction contract 接成了首个 production slice；若没有，则物理删掉错误接线，不保留并存。
+- 分析：
+  - 生产消费证据成立的只有 `projection`：
+    - `packages/shared/src/interaction/projection.ts` 已被 `android/src/hooks/useAppUpdate.ts` 消费；
+    - `SettingsPage.tsx` 删除本地 `hasNewVersion / hasUpdateIgnorePolicy` 派生，改为消费 hook 投影；
+    - 因此 `update-check projection truth` 已形成真实唯一消费链：`runtime snapshot -> shared projection -> hook return -> page UI`。
+  - `operation/event` 不成立：
+    - `useAppUpdate.ts` 只是把 operation/event push 到 `operationLogRef/eventLogRef` 本地 ref；
+    - 全仓没有 block/orchestration/adapter 读取这些 ref，也没有生产侧 event bus / operation dispatcher；
+    - 这不是“接入中的唯一真源”，而是错误存活的假接线/死语义。
+- 当前 owner 判定：
+  - `update-check truth owner`：`android/src/lib/app-update-runtime.ts`
+  - `update-check projection truth owner`：`packages/shared/src/interaction/projection.ts`
+  - `useAppUpdate.ts`：只应做 React adapter，不应伪装成 operation/event 管道 owner
+- 本轮唯一正确修改点：
+  - `android/src/hooks/useAppUpdate.ts`
+  - `packages/shared/src/interaction/operation.ts`
+  - `packages/shared/src/interaction/event.ts`
+  - 删除 `android/src/lib/app-update-interaction-runtime.ts`
+  - 删除 `android/src/lib/app-update-interaction-runtime.test.ts`
+- 为什么这是唯一正确修改点：
+  - 问题不在 `SettingsPage` / `App` / native plugin，而在 hook 内偷偷接入了没有生产读口的 operation/event 假链路；
+  - 如果继续保留这些 ref，只会制造“shared contract 已接入生产”的错误认知；
+  - 但 projection 已经有真实消费，不能连 projection 一起删，否则会把已经形成的唯一投影真源打回 page 第二真源。
+- 本轮收口：
+  1. `useAppUpdate.ts` 删除 `operationLogRef/eventLogRef`；
+  2. 删除 hook 内所有 update operation/event helper 接线；
+  3. hook 改为直接消费 shared `deriveAppUpdateProjection(...)`；
+  4. 删除 `android/src/lib/app-update-interaction-runtime.ts` 及其测试；
+  5. shared `operation.ts` / `event.ts` 回退到此前真实基线，不再宣称 update-check 已接入 operation/event contract。
+- 待验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx --reporter dot`
+  - 如需 shared coverage，再补 `packages/shared/src/interaction/*.test.ts`
+- 结论：本轮之后，update-check 只有 `projection` 成为 shared 真切片；`operation/event` 仍未冻结为生产 owner，因此被物理删回，不保留半拆状态。
+- 下一轮最高优先级：
+  1. 若要继续 interaction contract，必须先挑一个真正存在 block dispatcher / event consumer 的 owner，再做最小 production 接线；
+  2. 否则继续按当前节奏，只推进“shared pure projection + domain runtime block + thin adapter”。

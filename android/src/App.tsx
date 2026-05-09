@@ -52,6 +52,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     lastError: updateError,
     updateStage,
     runtimeVersionCode,
+    hasNewVersion,
+    hasUpdateIgnorePolicy,
     setPreferences: setAppUpdatePreferences,
     checkForUpdates,
     dismissAvailableManifest,
@@ -390,6 +392,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             updateChecking={updateChecking}
             updateInstalling={updateInstalling}
             updateError={updateError}
+            hasNewVersion={hasNewVersion}
+            hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
             onSave={(next) => {
               setBridgeSettings((current) => ({
                 ...applyTraversalRelaySettings(next, next.traversalRelay),
