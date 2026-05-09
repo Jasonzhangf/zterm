@@ -1960,3 +1960,30 @@ user open
     - shared renderer tests: `13 passed`
     - tsc: green
 - 结论：本轮继续削掉了一层 renderer orchestration 残胶，但 goal 还不能宣称完成；下一刀应继续收口 viewport measure / width-mode signal / resize commit 相关 helper，直到 `TerminalView` 只剩薄编排壳。
+
+## 2026-05-09 P0-3 multi-pane 审计报告
+
+### 1. 布局动态漂移根因
+- `useTerminalWorkspace.ts:214-218`：每次 render 都调用 `resolveMaxSplitCount(viewportWidth, viewportHeight, 0.22, maxSplitCount)`。
+- `viewportWidth` 来自 `TerminalPage.tsx:983`，会随窗口 resize、键盘弹起等事件更新。
+- `resolveMaxSplitCount` 在 `workspace-model.ts:204` 中每次调用都重新计算 `Math.floor(safeWidth / (safeHeight * minAspect))`。
+- 当键盘弹起时 `viewportHeight` 变小，导致 `currentMaxSplitCount` 从 4 降为 3 或 2，触发 `useEffect:230-266` 强制合并 pane，然后再拆分回来，造成 3.5→2.5 屏跳变。
+- **根本问题**：分屏数量应由横竖屏方向决定，不应随 IME 高度变化。`viewportHeight` 变化不应影响 pane 数量。
+
+### 2. multi-pane 刷新行为
+- `TerminalView.tsx:232`：`refreshActive = live ?? active`，其中 `live` 在 `TerminalPage.tsx:580` 硬编码为 `true`。所以所有 visible pane 的 TerminalView 组件内 `refreshActive` 均为 `true`。
+- 这意味着渲染循环不会因 inactive pane 而停止。非 active pane 理论上应该持续刷新。
+- 但用户报告"非 P1 的 pane 白屏"，说明问题可能在 buffer sync 分发层：head/sync 请求可能只在 active session 上发送。
+- 当前 `session-context-buffer-runtime.ts` 没有多 pane 订阅概念，head refresh 和 buffer sync 是针对单个 session 的；如果 TerminalPage 只为 active session 发起请求，其余 pane 将收不到数据。
+
+### 3. head 请求缺乏去重
+- 同一 session 出现在 2 个 pane 时，每个 TerminalView 各自触发 head request，daemon 收到 2 次相同请求，浪费带宽。
+- 当前无去重机制。
+
+### 4. UI 浪费空间
+- `terminal-layout-profile.ts` 的 splitVisible 布局 header 仍保留 back 按钮 + 多行 tab，在横屏设备上浪费约 80-100px。
+- 工具栏在分屏时仍占据底部 2 行空间（约 100px），没有折叠或浮窗化。
+
+### 5. 现有测试状况
+- 无 multi-pane 专用测试。
+- 现有 949 个测试需保持全部通过。
