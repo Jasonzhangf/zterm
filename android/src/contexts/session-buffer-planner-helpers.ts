@@ -8,6 +8,7 @@ import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { mergeGapRanges, collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
 import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
+import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
 import {
   resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
@@ -320,16 +321,15 @@ export function shouldPullFollowBuffer(
   const localHasWindow = localEndIndex > localStartIndex;
   const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
   const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
-  const sameEndRevisionAdvanced = (
-    localHasWindow
-    && distanceToHead === 0
-    && daemonRevision > localRevision
-  );
-
-  if (!localHasWindow || distanceToHead > cacheLines || localEndIndex < desiredEndIndex) {
-    return true;
-  }
-  return sameEndRevisionAdvanced;
+  return sharedShouldPullFollowBuffer({
+    localHasWindow,
+    distanceToHead,
+    cacheLines,
+    localEndIndex,
+    desiredEndIndex,
+    daemonRevision,
+    localRevision,
+  });
 }
 
 export function shouldCatchUpFollowTailAfterBufferApply(
@@ -350,19 +350,16 @@ export function shouldCatchUpFollowTailAfterBufferApply(
   const localHasWindow = localEndIndex > localStartIndex;
   const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
   const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
-  const sameEndRevisionAdvanced = (
-    localHasWindow
-    && distanceToHead === 0
-    && daemonRevision > localRevision
-  );
-
-  return (
-    !localHasWindow
-    || distanceToHead > cacheLines
-    || localEndIndex < desiredEndIndex
-    || sameEndRevisionAdvanced
-    || (Boolean(options?.forceSameEndRefresh) && daemonRevision > localRevision)
-  );
+  return sharedShouldCatchUpFollowTailAfterBufferApply({
+    localHasWindow,
+    distanceToHead,
+    cacheLines,
+    localEndIndex,
+    desiredEndIndex,
+    daemonRevision,
+    localRevision,
+    forceSameEndRefresh: Boolean(options?.forceSameEndRefresh),
+  });
 }
 
 export function shouldPullVisibleRangeBuffer(
