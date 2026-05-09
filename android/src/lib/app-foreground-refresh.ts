@@ -1,4 +1,10 @@
 import { runtimeDebug } from './runtime-debug';
+import {
+  createForegroundResumeState as createSharedForegroundState,
+  markHidden as markHiddenPure,
+  shouldResumeForeground,
+  type ForegroundResumeState,
+} from '@zterm/shared/terminal/foreground-resume';
 
 export interface ResumeSessionSnapshot {
   id: string;
@@ -33,14 +39,12 @@ export function summarizeResumeSessions(sessions: ResumeSessionSnapshot[]) {
 }
 
 export function createForegroundRefreshRuntime(): ForegroundRefreshRuntime {
-  return {
-    wasHidden: false,
-    lastResumeAt: 0,
-  };
+  return createSharedForegroundState();
 }
 
 export function markForegroundRuntimeHidden(runtime: ForegroundRefreshRuntime, visibilityState?: string) {
-  runtime.wasHidden = true;
+  const updated = markHiddenPure(runtime);
+  runtime.wasHidden = updated.wasHidden;
   runtimeDebug('app.visibility.hidden', {
     visibilityState: visibilityState || null,
   });
@@ -48,18 +52,21 @@ export function markForegroundRuntimeHidden(runtime: ForegroundRefreshRuntime, v
 
 export function performForegroundRefresh(options: PerformForegroundRefreshOptions) {
   const currentSessions = options.sessions;
-  if (currentSessions.length === 0) {
-    runtimeDebug('app.resume.skip', { reason: options.reason, why: 'no-sessions' });
-    return false;
-  }
-
   const now = Date.now();
   const debounceMs = typeof options.debounceMs === 'number' ? options.debounceMs : 800;
-  if (now - options.runtime.lastResumeAt < debounceMs) {
+  const decision = shouldResumeForeground(
+    now,
+    options.runtime.lastResumeAt,
+    debounceMs,
+    options.runtime.wasHidden,
+    currentSessions.length > 0,
+    Boolean(options.activeSessionId),
+  );
+
+  if (!decision.shouldResume) {
     runtimeDebug('app.resume.skip', {
       reason: options.reason,
-      why: 'debounced',
-      deltaMs: now - options.runtime.lastResumeAt,
+      why: decision.skipReason,
       sessions: summarizeResumeSessions(currentSessions),
     });
     return false;
@@ -71,16 +78,7 @@ export function performForegroundRefresh(options: PerformForegroundRefreshOption
     sessions: summarizeResumeSessions(currentSessions),
   });
 
-  const activeSessionId = options.activeSessionId;
-  if (!activeSessionId) {
-    runtimeDebug('app.resume.skip', {
-      reason: options.reason,
-      why: 'no-active-session',
-      sessions: summarizeResumeSessions(currentSessions),
-    });
-    return false;
-  }
-
+  const activeSessionId = options.activeSessionId!;
   const currentActiveSession = currentSessions.find((session) => session.id === activeSessionId) || null;
   const resumed = options.resumeActiveSessionTransport(activeSessionId);
   options.log?.({
