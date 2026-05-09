@@ -8,7 +8,7 @@ import type { SessionHeadStore } from '../lib/session-head-store';
 import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type SessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
-import { RemoteScreenshotSheet, type RemoteScreenshotPreviewState } from '../components/terminal/RemoteScreenshotSheet';
+import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
@@ -22,6 +22,12 @@ import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalizat
 import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
+import {
+  createRemoteScreenshotPreviewRuntime,
+  persistRemoteScreenshotCaptureRuntime,
+  resolveRemoteScreenshotQuickBarStatus,
+  type RemoteScreenshotPreviewState,
+} from '../lib/remote-screenshot-preview-runtime';
 import {
   STORAGE_KEYS,
   type AndroidWorkspacePane,
@@ -780,31 +786,6 @@ function toPersistedOpenTab(session: Session): PersistedOpenTab {
   };
 }
 
-async function persistRemoteScreenshotCapture(fileName: string, dataBase64: string) {
-  const downloadDir = '/storage/emulated/0/Download/zterm';
-  try {
-    await Filesystem.mkdir({
-      path: downloadDir,
-      directory: Directory.ExternalStorage,
-      recursive: true,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const alreadyExists = /exist/i.test(message) || /EEXIST/i.test(message);
-    if (!alreadyExists) {
-      throw new Error(`创建截图保存目录失败: ${message}`);
-    }
-  }
-
-  const savedPath = `${downloadDir}/${fileName}`;
-  await Filesystem.writeFile({
-    path: savedPath,
-    data: dataBase64,
-    directory: Directory.ExternalStorage,
-  });
-  return savedPath;
-}
-
 function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -999,8 +980,7 @@ function TerminalPageComponent({
   const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
   const terminalFocusRetryTimeoutsRef = useRef<number[]>([]);
-  const remoteScreenshotPreviewUrlRef = useRef<string | null>(null);
-  const remoteScreenshotRequestEpochRef = useRef(0);
+  const remoteScreenshotPreviewRuntimeRef = useRef(createRemoteScreenshotPreviewRuntime());
   const stableLayoutViewportHeightRef = useRef(resolveLayoutViewportHeight());
 
 
@@ -1376,23 +1356,13 @@ function TerminalPageComponent({
     scheduleTerminalFocusRetries();
   }, [clearTerminalFocusRetries, isAndroid, quickBarEditorFocused, restoreAndroidTerminalImeRoute, scheduleTerminalFocusRetries]);
 
-  const revokeRemoteScreenshotPreviewUrl = useCallback(() => {
-    if (!remoteScreenshotPreviewUrlRef.current) {
-      return;
-    }
-    URL.revokeObjectURL(remoteScreenshotPreviewUrlRef.current);
-    remoteScreenshotPreviewUrlRef.current = null;
+  const closeRemoteScreenshotPreview = useCallback(() => {
+    setRemoteScreenshotPreview(remoteScreenshotPreviewRuntimeRef.current.closePreview());
   }, []);
 
-  const closeRemoteScreenshotPreview = useCallback(() => {
-    remoteScreenshotRequestEpochRef.current += 1;
-    revokeRemoteScreenshotPreviewUrl();
-    setRemoteScreenshotPreview(null);
-  }, [revokeRemoteScreenshotPreviewUrl]);
-
   useEffect(() => () => {
-    revokeRemoteScreenshotPreviewUrl();
-  }, [revokeRemoteScreenshotPreviewUrl]);
+    remoteScreenshotPreviewRuntimeRef.current.dispose();
+  }, []);
 
   const handleRequestRemoteScreenshot = useCallback(async () => {
     const targetSessionId = uiSessionId;
@@ -1401,76 +1371,35 @@ function TerminalPageComponent({
       return;
     }
 
-    const requestEpoch = remoteScreenshotRequestEpochRef.current + 1;
-    remoteScreenshotRequestEpochRef.current = requestEpoch;
-    revokeRemoteScreenshotPreviewUrl();
-    setRemoteScreenshotPreview({
-      phase: 'request-sent',
-      fileName: `remote-screenshot-${Date.now()}.png`,
-      previewDataUrl: null,
-      rawDataBase64: null,
-    });
+    const started = remoteScreenshotPreviewRuntimeRef.current.beginRequest();
+    const requestEpoch = started.requestEpoch;
+    setRemoteScreenshotPreview(started.state);
 
     try {
       const capture = await onRequestRemoteScreenshot(targetSessionId, (progress) => {
-        if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
-          return;
-        }
-        setRemoteScreenshotPreview((current) => ({
-          phase: progress.phase,
-          fileName: progress.fileName || current?.fileName || `remote-screenshot-${Date.now()}.png`,
-          previewDataUrl: current?.previewDataUrl || null,
-          rawDataBase64: current?.rawDataBase64 || null,
-          receivedChunks: Math.max(0, Math.floor(progress.receivedChunks || current?.receivedChunks || 0)),
-          totalChunks: Math.max(0, Math.floor(progress.totalChunks || current?.totalChunks || 0)),
-          totalBytes: Math.max(0, Math.floor(progress.totalBytes || current?.totalBytes || 0)),
-        }));
+        setRemoteScreenshotPreview((current) => (
+          remoteScreenshotPreviewRuntimeRef.current.applyProgress(current, requestEpoch, progress)
+        ));
       });
 
-      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+      if (!remoteScreenshotPreviewRuntimeRef.current.isRequestCurrent(requestEpoch)) {
         return;
       }
-      setRemoteScreenshotPreview((current) => current ? {
-        ...current,
-        phase: 'transfer-complete',
-        fileName: capture.fileName,
-        totalBytes: capture.totalBytes,
-      } : current);
-
-      const binary = capture.dataBytes
-        ?? Uint8Array.from(atob(capture.dataBase64), (char) => char.charCodeAt(0));
-      const blob = new Blob([binary.buffer as ArrayBuffer], { type: capture.mimeType || 'image/png' });
-      const previewUrl = URL.createObjectURL(blob);
-      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
-        URL.revokeObjectURL(previewUrl);
-        return;
-      }
-      remoteScreenshotPreviewUrlRef.current = previewUrl;
-      setRemoteScreenshotPreview({
-        phase: 'preview-ready',
-        fileName: capture.fileName,
-        previewDataUrl: previewUrl,
-        rawDataBase64: capture.dataBase64,
-        receivedChunks: undefined,
-        totalChunks: undefined,
-        totalBytes: capture.totalBytes,
-      });
+      setRemoteScreenshotPreview((current) => (
+        remoteScreenshotPreviewRuntimeRef.current.markTransferComplete(current, requestEpoch, capture)
+      ));
+      setRemoteScreenshotPreview((current) => (
+        remoteScreenshotPreviewRuntimeRef.current.completeCapture(current, requestEpoch, capture)
+      ));
     } catch (error) {
-      if (remoteScreenshotRequestEpochRef.current !== requestEpoch) {
+      if (!remoteScreenshotPreviewRuntimeRef.current.isRequestCurrent(requestEpoch)) {
         return;
       }
-      setRemoteScreenshotPreview((current) => ({
-        phase: 'failed',
-        fileName: current?.fileName || `remote-screenshot-${Date.now()}.png`,
-        previewDataUrl: null,
-        rawDataBase64: null,
-        receivedChunks: current?.receivedChunks,
-        totalChunks: current?.totalChunks,
-        totalBytes: current?.totalBytes,
-        errorMessage: error instanceof Error ? error.message : '远程截图失败',
-      }));
+      setRemoteScreenshotPreview((current) => (
+        remoteScreenshotPreviewRuntimeRef.current.failCapture(current, requestEpoch, error)
+      ));
     }
-  }, [onRequestRemoteScreenshot, revokeRemoteScreenshotPreviewUrl, uiSessionId]);
+  }, [onRequestRemoteScreenshot, uiSessionId]);
 
   const handleQuickBarMeasuredHeightChange = useCallback((height: number) => {
     setQuickBarHeight((current) => (current === height ? current : height));
@@ -1557,16 +1486,19 @@ function TerminalPageComponent({
       return;
     }
 
-    setRemoteScreenshotPreview((current) => current ? { ...current, phase: 'saving' } : current);
+    setRemoteScreenshotPreview((current) => remoteScreenshotPreviewRuntimeRef.current.beginSave(current));
     try {
-      const savedPath = await persistRemoteScreenshotCapture(
-        remoteScreenshotPreview.fileName,
-        remoteScreenshotPreview.rawDataBase64,
-      );
+      const savedPath = await persistRemoteScreenshotCaptureRuntime({
+        fileName: remoteScreenshotPreview.fileName,
+        dataBase64: remoteScreenshotPreview.rawDataBase64,
+        directory: Directory.ExternalStorage,
+        mkdir: Filesystem.mkdir,
+        writeFile: Filesystem.writeFile,
+      });
       closeRemoteScreenshotPreview();
       alert(`截图已保存到 ${savedPath}`);
     } catch (error) {
-      setRemoteScreenshotPreview((current) => current ? { ...current, phase: 'preview-ready' } : current);
+      setRemoteScreenshotPreview((current) => remoteScreenshotPreviewRuntimeRef.current.restorePreviewReady(current));
       alert(error instanceof Error ? error.message : '保存远程截图失败');
     }
   }, [closeRemoteScreenshotPreview, remoteScreenshotPreview]);
@@ -2100,23 +2032,7 @@ function TerminalPageComponent({
       onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
       debugOverlayVisible={debugOverlayVisible}
       absoluteLineNumbersVisible={absoluteLineNumbersVisible}
-      remoteScreenshotStatus={
-        remoteScreenshotPreview?.phase === 'request-sent'
-          ? 'capturing'
-          : remoteScreenshotPreview?.phase === 'transfer-complete'
-            ? 'transferring'
-            : remoteScreenshotPreview?.phase === 'preview-ready'
-              ? 'preview-ready'
-              : remoteScreenshotPreview?.phase === 'saving'
-                ? 'saving'
-                : remoteScreenshotPreview?.phase === 'failed'
-                  ? 'failed'
-                : remoteScreenshotPreview?.phase === 'capturing'
-                  ? 'capturing'
-                : remoteScreenshotPreview?.phase === 'transferring'
-                  ? 'transferring'
-                  : 'idle'
-      }
+      remoteScreenshotStatus={resolveRemoteScreenshotQuickBarStatus(remoteScreenshotPreview)}
       shortcutSmartSort={shortcutSmartSort}
       shortcutFrequencyMap={shortcutFrequencyMap}
       onShortcutUse={onShortcutUse}

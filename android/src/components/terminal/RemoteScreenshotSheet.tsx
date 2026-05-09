@@ -1,16 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
-
-export interface RemoteScreenshotPreviewState {
-  phase: 'request-sent' | 'capturing' | 'transferring' | 'transfer-complete' | 'preview-ready' | 'saving' | 'failed';
-  fileName: string;
-  previewDataUrl?: string | null;
-  rawDataBase64?: string | null;
-  receivedChunks?: number;
-  totalChunks?: number;
-  totalBytes?: number;
-  errorMessage?: string | null;
-}
+import type { RemoteScreenshotPreviewState } from '../../lib/remote-screenshot-preview-runtime';
 
 interface RemoteScreenshotSheetProps {
   state: RemoteScreenshotPreviewState | null;

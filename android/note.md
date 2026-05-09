@@ -2274,3 +2274,32 @@ user open
   - 7 files / 22 tests passed；
   - 生产代码中 interaction 引用已只剩 note 文档记录，不再存在 shared 根导出或生产接线。
 - 下一轮最高优先级：继续收 `screenshot truth`，把 `TerminalPage` 中 remote screenshot preview/save/discard lifecycle 下沉到 runtime/page-block，让 page 再薄一层。
+
+## [2026-05-09] remote screenshot preview/save lifecycle 收口到 runtime block
+- 本轮目标：只收 `TerminalPage` 里的 remote screenshot preview/save/discard 生命周期，不碰 SessionContext / daemon / terminal 主链。
+- 分析：旧 owner 实际在 `TerminalPage.tsx`，同时持有 `requestEpoch`、`preview object url revoke/dispose`、`progress -> preview state`、`save/restore`、`quickbar status mapping`，导致 page 既是 UI shell 又是 screenshot 业务 owner。
+- 本轮唯一正确修改点：
+  - 新增 `android/src/lib/remote-screenshot-preview-runtime.ts`
+  - 修改 `android/src/pages/TerminalPage.tsx`
+  - 修改 `android/src/components/terminal/RemoteScreenshotSheet.tsx`
+- 为什么这是唯一正确修改点：
+  - 问题不在 daemon，也不在 screenshot capture wire contract，而在 page 持有了 preview/save/dispose 真相；若继续在 page 内补状态/测试，只会保留第二真源。
+  - `RemoteScreenshotSheet` 只是 projection/UI，不应定义 screenshot preview state；`TerminalPage` 也只应做 adapter/orchestration。
+  - 因此唯一正确路径是把 preview lifecycle 下沉到独立 runtime block，并让 page 只接 runtime snapshot。
+- 本轮收口结果：
+  1. `requestEpoch + stale-request gate` 下沉到 runtime；
+  2. `preview object URL create/revoke/dispose` 下沉到 runtime；
+  3. `progress -> transfer-complete -> preview-ready -> saving -> restore/fail` 状态推进下沉到 runtime；
+  4. `persistRemoteScreenshotCaptureRuntime(...)` 从 page 抽离，保存逻辑不再散落在 UI；
+  5. quickbar screenshot status mapping 收成 `resolveRemoteScreenshotQuickBarStatus(...)` 单一 helper；
+  6. `RemoteScreenshotPreviewState` 改为 runtime type owner，sheet 不再重复定义。
+- 已删除/收口的 page 本地真相：
+  - `remoteScreenshotPreviewUrlRef`
+  - `remoteScreenshotRequestEpochRef`
+  - page 内联 `persistRemoteScreenshotCapture(...)`
+  - page 内联 quickbar screenshot status mapping
+- 验证：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  2. `pnpm --dir android exec vitest run src/lib/remote-screenshot-runtime.test.ts src/lib/remote-screenshot-preview-runtime.test.ts src/pages/TerminalPage.remote-screenshot.test.tsx --reporter dot`
+  3. 结果：`3 files / 16 tests passed`
+- 结论：remote screenshot preview/save/discard 生命周期现在由 runtime block 唯一持有；`TerminalPage` 变薄为 orchestration adapter，`RemoteScreenshotSheet` 只消费 projection/UI。
