@@ -75,7 +75,6 @@ export function sendInputThroughSessionTransport(options: {
       ws,
       JSON.stringify({ type: 'input', payload: options.data }),
     );
-    options.requestSessionBufferHead(targetSessionId, ws, { force: true });
     if (transportStale && isExplicitInputTarget && !reconnectInFlight) {
       options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
     }

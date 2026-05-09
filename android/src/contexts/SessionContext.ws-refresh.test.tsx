@@ -1451,7 +1451,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
         expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
-        expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThanOrEqual(2);
+        // buffer-head-request no longer sent on input; daemon push handles echo
       });
       expect(screen.getByTestId('session-state').textContent).toBe('connected');
     } finally {
@@ -2402,7 +2402,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       .map((item) => JSON.parse(item));
 
     expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(3);
-    expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBe(3);
+    // input no longer sends buffer-head-request; daemon push handles echo
     expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
 
     await new Promise((resolve) => setTimeout(resolve, 180));
@@ -2443,7 +2443,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(2);
-      expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBe(2);
+      // input no longer sends buffer-head-request; daemon push handles echo
+      expect(sentMessages.filter((item) => item.type === "buffer-head-request").length).toBe(0);
     } finally {
       nowSpy.mockRestore();
     }
@@ -2662,7 +2663,8 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request').length).toBeGreaterThanOrEqual(2);
-      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      // input no longer triggers buffer-head-request; only the initial cold-start head-request counted
+      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 1)).toBe(true);
     }, { timeout: 220 });
   });
