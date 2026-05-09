@@ -29,3 +29,4 @@ export * from './interaction/projection';
 export * from './harness/event-bus';
 export * from './harness/harness';
 export * from './harness/update-check-block';
+export * from './terminal/gap-utils';
