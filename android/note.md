@@ -2182,3 +2182,34 @@ user open
 - 下一轮最高优先级：
   1. 先补完整 owner map（operation/event/projection/update-check/file-transfer/screenshot）到 note；
   2. 再只做一个最小可接线的 interaction baseline：建议先做 `update-check block` 或 `file-transfer message block`，因为 owner 已相对清晰、与 terminal buffer/render 主链解耦。
+
+## [2026-05-09] update-check truth 收口到 runtime block
+- 本轮目标：只收 `update-check truth`，不扩散到 terminal / file-transfer / screenshot。把 `useAppUpdate` 从业务 owner 收成薄 React adapter，让 build-time local test 直接打 block。
+- 分析：
+  - 旧 owner 实际上是 `useAppUpdate.ts`：同时持有 preferences restore/persist、manifest fetch、available-manifest 决策、stage 状态机、native install orchestration。
+  - 重复/越界点：`useAppUpdate.ts` 直接碰 `localStorage`，属于与 `workspace-persistence` 同类的 adapter 越界；UI 侧再派生 `hasNewVersion` 等 projection，但核心真相仍被 hook 持有，导致本地 harness 只能绕 React 去测。
+- 本轮唯一正确修改点：
+  - 新增 `android/src/lib/app-update-runtime.ts`
+  - 修改 `android/src/hooks/useAppUpdate.ts`
+- 为什么这是唯一正确修改点：
+  - 问题不是 UI，也不是 native plugin，而是 update-check 真相被放在 hook 里。若只继续补 hook 单测，Android 仍不是 thin adapter；若直接推到 shared，会过早扩散跨端 contract，超出本轮 owner 范围。
+  - 因此唯一正确做法是先在 Android 内把它收成独立 domain block/runtime，再由 hook 只做 React state/sync 壳。
+- 本轮设计冻结：
+  - `app-update-runtime.ts` 成为 update-check truth owner：
+    - preferences restore/persist
+    - manifest fetch/normalize/resolve
+    - updateAvailable / suppressedReason / availableManifest 决策
+    - install stage state transitions
+    - native install orchestration 输入输出
+  - `useAppUpdate.ts` 只保留：
+    - runtime 实例注入（storage/fetch/plugin/time）
+    - snapshot -> React state 同步
+    - auto-check on launch effect
+- 已删除/收口：
+  - `useAppUpdate.ts` 中对 `localStorage` 的直接读写
+  - hook 内联的 update-check 业务真相
+- 验证：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  2. `pnpm --dir android exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx --reporter dot`
+     - `2 files / 6 tests passed`
+- 结论：本轮已让 update-check 从 Android hook owner 收口为可本地直接测试的 runtime block；下一轮适合用同样模式收 `file-transfer message block` 或 `remote screenshot runtime` 的 UI/hook 残余边界。
