@@ -7,6 +7,7 @@ import type {
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
+import { mergeGapRanges, collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
   resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
   resolveVisibleRangeViewportRows,
@@ -54,15 +55,8 @@ function resolveRequestedBufferWindow(
   minStartIndex = 0,
 ) {
   const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
-  const safeEndIndex = Math.max(0, Math.floor(endIndex || 0));
-  const safeMinStartIndex = Math.max(0, Math.floor(minStartIndex || 0));
   const cacheLines = resolveTerminalRequestWindowLines(safeViewportRows);
-  const requestEndIndex = Math.max(safeMinStartIndex, safeEndIndex);
-  const requestStartIndex = Math.max(safeMinStartIndex, requestEndIndex - cacheLines);
-  return {
-    requestStartIndex,
-    requestEndIndex,
-  };
+  return sharedResolveRequestedBufferWindow(endIndex, viewportRows, cacheLines, minStartIndex);
 }
 
 function resolveAuthoritativeAvailableEndIndex(
@@ -109,44 +103,7 @@ function resolveTailTargetEndIndex(
   return resolveVisibleRangeEndIndex(session, visibleRange, bufferOverride);
 }
 
-function mergeGapRanges(ranges: TerminalGapRange[]) {
-  if (ranges.length <= 1) {
-    return ranges;
-  }
-  const sorted = [...ranges]
-    .map((range) => ({
-      startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-      endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-    }))
-    .filter((range) => range.endIndex > range.startIndex)
-    .sort((left, right) => left.startIndex - right.startIndex);
-  const merged: TerminalGapRange[] = [];
-  for (const range of sorted) {
-    const current = merged[merged.length - 1];
-    if (!current || range.startIndex > current.endIndex) {
-      merged.push({ ...range });
-      continue;
-    }
-    current.endIndex = Math.max(current.endIndex, range.endIndex);
-  }
-  return merged;
-}
 
-function collectIntersectingGapRanges(
-  gapRanges: TerminalGapRange[],
-  startIndex: number,
-  endIndex: number,
-) {
-  if (endIndex <= startIndex) {
-    return [] as TerminalGapRange[];
-  }
-  return gapRanges
-    .map((range) => ({
-      startIndex: Math.max(startIndex, range.startIndex),
-      endIndex: Math.min(endIndex, range.endIndex),
-    }))
-    .filter((range) => range.endIndex > range.startIndex);
-}
 
 function collectVisibleRangeRepairRanges(
   session: Session,
