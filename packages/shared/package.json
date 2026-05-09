@@ -17,7 +17,8 @@
     "./terminal/foreground-resume": "./src/terminal/foreground-resume.ts",
     "./terminal/visible-range": "./src/terminal/visible-range.ts",
     "./terminal/buffer-head-state": "./src/terminal/buffer-head-state.ts",
-    "./terminal/viewport-utils": "./src/terminal/viewport-utils.ts"
+    "./terminal/viewport-utils": "./src/terminal/viewport-utils.ts",
+    "./terminal/buffer-sync-planner": "./src/terminal/buffer-sync-planner.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

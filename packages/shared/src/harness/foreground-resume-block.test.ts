@@ -13,7 +13,7 @@ describe('foreground-resume-block', () => {
     const block = createForegroundResumeBlock({ now: () => 1000, debounceMs: 800 });
     harness.registerBlock(block.opTypes, block.handler);
 
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
 
     const failed = harness.bus.last('operation/failed');
     expect(failed).toBeDefined();
@@ -27,7 +27,7 @@ describe('foreground-resume-block', () => {
     harness.registerBlock(block.opTypes, block.handler);
 
     markForegroundHidden(harness);
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
 
     const resumed = harness.bus.last('app/foreground-resumed');
     expect(resumed).toBeDefined();
@@ -41,12 +41,12 @@ describe('foreground-resume-block', () => {
 
     markForegroundHidden(harness);
     time = 1000;
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
     expect(harness.bus.last('app/foreground-resumed')).toBeDefined();
 
     markForegroundHidden(harness);
     time = 1050;
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
     const failed = harness.bus.last('operation/failed');
     expect(failed).toBeDefined();
     expect(failed!.payload.error).toContain('debounced');
@@ -60,12 +60,12 @@ describe('foreground-resume-block', () => {
 
     markForegroundHidden(harness);
     time = 1000;
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
     expect(harness.bus.last('app/foreground-resumed')).toBeDefined();
 
     markForegroundHidden(harness);
     time = 1200;
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
     expect(harness.bus.last('app/foreground-resumed')).toBeDefined();
   });
 
@@ -80,7 +80,7 @@ describe('foreground-resume-block', () => {
     const afterHidden = harness.getProjection<{ wasHidden: boolean }>(FOREGROUND_RESUME_PROJECTION_KEY);
     expect(afterHidden?.wasHidden).toBe(true);
 
-    harness.dispatch(createOperation('foreground/resume', { reason: 'resume' }));
+    harness.dispatch(createOperation('foreground/resume', {}));
     const afterResume = harness.getProjection<{ wasHidden: boolean }>(FOREGROUND_RESUME_PROJECTION_KEY);
     expect(afterResume?.wasHidden).toBe(false);
   });
