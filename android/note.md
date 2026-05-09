@@ -2250,3 +2250,27 @@ user open
   2. `pnpm --dir android exec vitest run src/lib/file-transfer-session-runtime.test.ts src/lib/file-transfer-message-runtime.test.ts src/components/terminal/FileTransferSheet.test.tsx --reporter dot`
      - `3 files / 10 tests passed`
 - 结论：本轮已让 file-transfer truth 从 component owner 收口为独立 session runtime block；下一轮适合继续收 `screenshot truth` 与 file-transfer 的 shared interaction contract，或继续把 `onFileTransferMessage(msg: any)` 从 facade 改成显式 typed projection。
+
+## [2026-05-09] interaction 残胶物理删除（本轮）
+- 分析：`packages/shared/src/interaction/operation.ts` / `event.ts` 重新出现在工作树，并再次从 `packages/shared/src/index.ts` 根导出；但全仓生产 `rg` 证据仍是 0 个生产消费者，只有 interaction 自己的测试在引用，projection/block/orchestration owner 依然不存在。
+- 当前 owner 判定：interaction contract 真源 **尚未建立**，因此这套文件不是“未接线但正确的未来真源”，而是错误存活的半拆残胶。
+- 本轮唯一修改点：
+  - `packages/shared/src/index.ts`
+  - `packages/shared/src/interaction/*`
+  - `packages/shared/vitest.config.ts`
+- 设计：
+  - 不新建替代 facade；不把 operation/event 临时转移到 Android；
+  - 直接删除 shared 根导出的假真源，恢复到“未冻结 contract 就不存在 contract 文件”的唯一状态；
+  - 同时删除只为这套残胶服务的 shared 独立 vitest config，避免仓库继续暗示这套 contract 已成型。
+- 为什么这是唯一正确修改点：
+  - 问题在 shared 根出口出现了无 owner 导出；如果不删，只是在下游“不使用”，仍然保留了第二真源入口。
+  - 当前并没有最小 production owner 可以接住 operation/event/projection，因此继续保留只会制造并存和误导，不符合无 fallback / 删除错误实现规则。
+- 验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx src/lib/file-transfer-session-runtime.test.ts src/lib/file-transfer-message-runtime.test.ts src/components/terminal/FileTransferSheet.test.tsx src/lib/workspace-persistence.test.ts src/hooks/useTerminalWorkspace.test.tsx --reporter dot`
+  - `rg -n "interaction/(operation|event)|createOperation\(|createEvent\(|TerminalOperation|TerminalEvent" packages android --glob '!android/evidence/**'`
+- 结果：
+  - tsc 通过；
+  - 7 files / 22 tests passed；
+  - 生产代码中 interaction 引用已只剩 note 文档记录，不再存在 shared 根导出或生产接线。
+- 下一轮最高优先级：继续收 `screenshot truth`，把 `TerminalPage` 中 remote screenshot preview/save/discard lifecycle 下沉到 runtime/page-block，让 page 再薄一层。

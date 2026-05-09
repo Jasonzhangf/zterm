@@ -23,5 +23,3 @@ export * from './shortcuts/terminal-shortcut-composer';
 export * from './workspace/workspace-model';
 
 export * from './terminal/renderer/index';
-export * from './interaction/operation';
-export * from './interaction/event';
