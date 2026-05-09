@@ -336,7 +336,6 @@ export function openSocketConnectHandshake(options: {
   resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
-  activate?: boolean;
   readActiveSessionId: () => string | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   connectMessagePayload: HostConfigMessage;
@@ -354,9 +353,7 @@ export function openSocketConnectHandshake(options: {
   options.runtimeDebug(`session.ws.${options.debugScope}.onopen`, {
     sessionId: options.sessionId,
     activeSessionId: options.readActiveSessionId(),
-    ...(options.debugScope === 'connect'
-      ? { activate: Boolean(options.activate) }
-      : { targetSessionName: sessionName }),
+    targetSessionName: sessionName,
   });
   options.onBeforeConnectSend?.({ sessionName });
   options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
@@ -377,7 +374,6 @@ export function bindSessionTransportSocketLifecycle(options: {
   resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
-  activate?: boolean;
   readActiveSessionId: () => string | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -410,7 +406,7 @@ export function bindSessionTransportSocketLifecycle(options: {
   onClosed?: (reason?: string) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
-  const { sessionId, host, ws, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected } = options;
+  const { sessionId, host, ws, debugScope, finalizeFailure, onBeforeConnectSend, onConnected } = options;
   const isCurrentActiveSocket = () => options.readSessionTransportSocket(sessionId) === ws;
 
   ws.onopen = () => {
@@ -424,7 +420,6 @@ export function bindSessionTransportSocketLifecycle(options: {
       resolvedSessionName: options.resolvedSessionName,
       ws,
       debugScope,
-      activate,
       readActiveSessionId: options.readActiveSessionId,
       sendSocketPayload: options.sendSocketPayload,
       connectMessagePayload: options.connectMessagePayload,

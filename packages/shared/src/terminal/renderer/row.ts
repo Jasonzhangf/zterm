@@ -1,0 +1,286 @@
+import type { CSSProperties } from 'react';
+import type { TerminalCell, TerminalGapRange } from '../../connection/types';
+import type { TerminalThemePreset } from '../theme';
+import { safeTerminalCodePointToString } from '../cell-render';
+import { terminalCellStyle } from '../renderer';
+
+export interface TerminalRenderRowModel {
+  absoluteIndex: number;
+  row: TerminalCell[];
+  isGap: boolean;
+  viewportOffset: number;
+}
+
+export interface TerminalRenderFrame {
+  dataRowCount: number;
+  minimumRenderBottomIndex: number;
+  followVisualBottomIndex: number;
+  maximumRenderBottomIndex: number;
+  clampedRenderBottomIndex: number;
+  totalRows: number;
+  maxScrollTop: number;
+  effectiveRenderBottomIndex: number;
+  visibleWindowStartIndex: number;
+  visibleWindowEndIndex: number;
+  visibleDataRows: number;
+  leadingBlankRows: number;
+  visibleStartOffset: number;
+  renderStartOffset: number;
+  renderEndOffset: number;
+}
+
+export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
+  return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
+}
+
+export function hasDiscontinuousNeighbor(
+  rows: Array<{ absoluteIndex: number }>,
+  rowIndex: number,
+) {
+  const current = rows[rowIndex];
+  if (!current) return false;
+  const previous = rows[rowIndex - 1];
+  const next = rows[rowIndex + 1];
+  const brokenBefore = Boolean(previous) && previous.absoluteIndex + 1 !== current.absoluteIndex;
+  const brokenAfter = Boolean(next) && current.absoluteIndex + 1 !== next.absoluteIndex;
+  return brokenBefore || brokenAfter;
+}
+
+export function buildTerminalRenderRows(options: {
+  bufferLines: TerminalCell[][];
+  gapRanges: TerminalGapRange[];
+  startIndex: number;
+  leadingBlankRows: number;
+  renderStartOffset: number;
+  renderEndOffset: number;
+}) {
+  const rows: TerminalRenderRowModel[] = [];
+  const visibleDataStartOffset = Math.max(0, options.renderStartOffset - options.leadingBlankRows);
+  const visibleDataEndOffset = Math.max(
+    visibleDataStartOffset,
+    Math.min(options.bufferLines.length, options.renderEndOffset - options.leadingBlankRows),
+  );
+
+  for (let dataOffset = visibleDataStartOffset; dataOffset < visibleDataEndOffset; dataOffset += 1) {
+    const viewportOffset = options.leadingBlankRows + dataOffset;
+    const absoluteIndex = options.startIndex + dataOffset;
+    rows.push({
+      absoluteIndex,
+      row: options.bufferLines[dataOffset] || [],
+      isGap: isTerminalGapIndex(options.gapRanges, absoluteIndex),
+      viewportOffset,
+    });
+  }
+
+  return rows;
+}
+
+export function buildTerminalRenderFrame(options: {
+  bufferStartIndex: number;
+  effectiveBufferEndIndex: number;
+  bufferLinesLength: number;
+  viewportRows: number;
+  rowHeightPx: number;
+  renderBottomIndex: number;
+  followDemandAnchorEndIndex: number;
+  readingMode: boolean;
+  overscanRows: number;
+}) : TerminalRenderFrame {
+  const dataRowCount = Math.max(0, options.effectiveBufferEndIndex - options.bufferStartIndex);
+  const minimumRenderBottomIndex = dataRowCount <= options.viewportRows
+    ? options.effectiveBufferEndIndex
+    : options.bufferStartIndex + options.viewportRows;
+  const followVisualBottomIndex = Math.max(
+    minimumRenderBottomIndex,
+    Math.min(
+      Math.max(minimumRenderBottomIndex, Math.floor(options.followDemandAnchorEndIndex || 0)),
+      Math.max(minimumRenderBottomIndex, Math.floor(options.effectiveBufferEndIndex || 0)),
+    ),
+  );
+  const maximumRenderBottomIndex = Math.max(minimumRenderBottomIndex, options.effectiveBufferEndIndex);
+  const clampedRenderBottomIndex = Math.max(
+    minimumRenderBottomIndex,
+    Math.min(maximumRenderBottomIndex, Math.floor(options.renderBottomIndex || followVisualBottomIndex)),
+  );
+  const totalRows = Math.max(
+    options.bufferLinesLength,
+    options.effectiveBufferEndIndex - options.bufferStartIndex,
+    options.viewportRows,
+  );
+  const maxScrollTop = Math.max(0, (totalRows - options.viewportRows) * options.rowHeightPx);
+  const effectiveRenderBottomIndex = options.readingMode ? clampedRenderBottomIndex : followVisualBottomIndex;
+  const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - options.viewportRows);
+  const visibleWindowEndIndex = Math.min(
+    options.effectiveBufferEndIndex,
+    Math.max(visibleWindowStartIndex, effectiveRenderBottomIndex),
+  );
+  const visibleDataRows = Math.max(0, visibleWindowEndIndex - visibleWindowStartIndex);
+  const leadingBlankRows = Math.max(0, options.viewportRows - visibleDataRows);
+  const visibleStartOffset = Math.max(0, visibleWindowStartIndex - options.bufferStartIndex);
+  const renderStartOffset = Math.max(0, visibleStartOffset - options.overscanRows);
+  const renderEndOffset = Math.min(totalRows, visibleStartOffset + options.viewportRows + options.overscanRows);
+
+  return {
+    dataRowCount,
+    minimumRenderBottomIndex,
+    followVisualBottomIndex,
+    maximumRenderBottomIndex,
+    clampedRenderBottomIndex,
+    totalRows,
+    maxScrollTop,
+    effectiveRenderBottomIndex,
+    visibleWindowStartIndex,
+    visibleWindowEndIndex,
+    visibleDataRows,
+    leadingBlankRows,
+    visibleStartOffset,
+    renderStartOffset,
+    renderEndOffset,
+  };
+}
+
+export function renderGapMarker(options: {
+  absoluteIndex: number;
+  rowHeight: string;
+  theme: TerminalThemePreset;
+}) {
+  return {
+    key: `row-${options.absoluteIndex}`,
+    rowStyle: {
+      display: 'flex',
+      alignItems: 'center',
+      height: options.rowHeight,
+      lineHeight: options.rowHeight,
+      whiteSpace: 'pre',
+      color: options.theme.foreground,
+      opacity: 0.88,
+      background: 'rgba(239, 68, 68, 0.12)',
+      borderTop: '1px dashed rgba(239, 68, 68, 0.42)',
+      borderBottom: '1px dashed rgba(239, 68, 68, 0.42)',
+    } satisfies CSSProperties,
+    fillProps: {
+      'data-terminal-gap-fill': 'true',
+      style: {
+        display: 'block',
+        minWidth: 0,
+        flex: 1,
+        height: '100%',
+        background: 'rgba(239, 68, 68, 0.08)',
+      } satisfies CSSProperties,
+    },
+  };
+}
+
+export function renderRowCells(options: {
+  absoluteIndex: number;
+  row: TerminalCell[];
+  rowHeight: string;
+  cellWidthPx: number;
+  theme: TerminalThemePreset;
+  cursorColumn: number;
+}) {
+  return options.row.map((cell, cellIndex) => ({
+    key: `cell-${options.absoluteIndex}-${cellIndex}`,
+    char: cell.width === 0 ? '' : safeTerminalCodePointToString(cell.char),
+    cursorActive: options.cursorColumn === cellIndex,
+    style: terminalCellStyle(
+      cell,
+      options.rowHeight,
+      options.cellWidthPx,
+      options.theme,
+      options.cursorColumn === cellIndex,
+    ),
+  }));
+}
+
+export function buildTerminalLineNumberProps(options: {
+  absoluteIndex: number;
+  theme: TerminalThemePreset;
+  discontinuousLineNumber?: boolean;
+}) {
+  return {
+    'data-terminal-line-number': 'true',
+    'data-terminal-line-discontinuous': options.discontinuousLineNumber ? 'true' : undefined,
+    style: {
+      display: 'inline-flex',
+      width: '48px',
+      minWidth: '48px',
+      justifyContent: 'flex-end',
+      paddingRight: '8px',
+      boxSizing: 'border-box',
+      color: options.discontinuousLineNumber ? '#ef4444' : options.theme.colors[8],
+      opacity: 0.92,
+      fontWeight: options.discontinuousLineNumber ? 700 : 500,
+    } satisfies CSSProperties,
+    text: options.absoluteIndex,
+  };
+}
+
+export function buildTerminalVisibleRowViewModel(options: {
+  absoluteIndex: number;
+  row: TerminalCell[];
+  rowHeight: string;
+  cellWidthPx: number;
+  isGap: boolean;
+  theme: TerminalThemePreset;
+  cursorColumn: number;
+  showAbsoluteLineNumbers?: boolean;
+  discontinuousLineNumber?: boolean;
+}) {
+  const lineNumber = options.showAbsoluteLineNumbers
+    ? buildTerminalLineNumberProps({
+        absoluteIndex: options.absoluteIndex,
+        theme: options.theme,
+        discontinuousLineNumber: options.discontinuousLineNumber,
+      })
+    : null;
+
+  if (options.isGap) {
+    return {
+      kind: 'gap' as const,
+      dataset: {
+        terminalRow: 'true',
+        terminalGap: 'true',
+        terminalIndex: options.absoluteIndex,
+      },
+      rowStyle: renderGapMarker({
+        absoluteIndex: options.absoluteIndex,
+        rowHeight: options.rowHeight,
+        theme: options.theme,
+      }).rowStyle,
+      gapFillProps: renderGapMarker({
+        absoluteIndex: options.absoluteIndex,
+        rowHeight: options.rowHeight,
+        theme: options.theme,
+      }).fillProps,
+      lineNumber,
+    };
+  }
+
+  return {
+    kind: 'row' as const,
+    dataset: {
+      terminalRow: 'true',
+      terminalIndex: options.absoluteIndex,
+    },
+    rowStyle: {
+      display: 'flex',
+      alignItems: 'center',
+      height: options.rowHeight,
+      lineHeight: options.rowHeight,
+      whiteSpace: 'pre',
+    } satisfies CSSProperties,
+    lineNumber,
+    cellWrapProps: {
+      style: { display: 'inline-block', minWidth: 0, flex: 1 } satisfies CSSProperties,
+    },
+    cells: renderRowCells({
+      absoluteIndex: options.absoluteIndex,
+      row: options.row,
+      rowHeight: options.rowHeight,
+      cellWidthPx: options.cellWidthPx,
+      theme: options.theme,
+      cursorColumn: options.cursorColumn,
+    }),
+  };
+}

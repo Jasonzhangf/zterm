@@ -12,7 +12,7 @@
     "./schedule-types": "./src/schedule/types.ts",
     "./terminal/color": "./src/terminal/color.ts",
     "./terminal/theme": "./src/terminal/theme.ts",
-    "./react/terminal-view": "./src/react/terminal-view.tsx"
+    "./terminal/renderer": "./src/terminal/renderer/index.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

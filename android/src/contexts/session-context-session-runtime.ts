@@ -76,7 +76,7 @@ export function connectSessionRuntime(options: {
     sessionId: string,
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
   ) => void;
-  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate?: boolean) => void;
+  queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
 }) {
   const primeState = buildSessionTransportPrimeState(options.host, 'connect');
   options.clearReconnectForSession(options.sessionId);
@@ -328,7 +328,6 @@ export function reconnectSessionRuntime(options: {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
-  setActiveSessionSync: (id: string) => void;
   scheduleReconnect: (
     sessionId: string,
     message: string,

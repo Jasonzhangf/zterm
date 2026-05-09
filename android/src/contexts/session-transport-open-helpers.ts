@@ -55,7 +55,6 @@ export interface PendingSessionTransportOpenIntent {
   host: Host;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
-  activate?: boolean;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onConnected: (ws: BridgeTransportSocket) => void;
@@ -68,7 +67,6 @@ export interface QueueSessionTransportOpenIntentOptions {
   host: Host;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
-  activate?: boolean;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onHandshakeConnected?: (ws: BridgeTransportSocket, sessionName: string) => void;
   onHandshakeFailure?: (message: string, retryable: boolean, stage: SessionTransportOpenFailureStage) => void;
@@ -109,7 +107,6 @@ export function createPendingSessionTransportOpenIntent(
     host: options.host,
     resolvedSessionName: options.resolvedSessionName,
     debugScope: options.debugScope,
-    activate: options.activate,
     onBeforeConnectSend: options.onBeforeConnectSend,
     onClosed: options.onClosed,
     finalizeFailure: (message: string, retryable: boolean) => {

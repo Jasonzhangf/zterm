@@ -183,7 +183,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
     host: Host;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
-    activate?: boolean;
     finalizeFailure: (message: string, retryable: boolean) => void;
     onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
     onConnected: () => void;
@@ -196,7 +195,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
       resolvedSessionName: getResolvedSessionName(bindOptions.host),
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
-      activate: bindOptions.activate,
       readActiveSessionId: () => options.stateRef.current.activeSessionId,
       readSessionTransportSocket: options.readSessionTransportSocket,
       readSessionTransportToken: options.readSessionTransportToken,
@@ -398,12 +396,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
   const buildConnectTransportOpenIntentOptions = (
     sessionId: string,
     host: Host,
-    activate: boolean,
   ): QueueSessionTransportOpenIntentOptions => {
     return buildConnectTransportOpenIntentOptionsRuntime({
       sessionId,
       host,
-      activate,
       applyTransportOpenLiveFailureEffects,
       scheduleReconnect,
       applyTransportOpenConnectedEffects,

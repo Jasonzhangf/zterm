@@ -3,7 +3,6 @@ import { useSessionRenderBufferSnapshot, type SessionRenderBufferStore } from '.
 import type { SessionHeadStore } from '../lib/session-head-store';
 import {
   getTerminalThemePreset,
-  safeTerminalCodePointToString,
   type TerminalThemePreset,
   // renderer pure functions
   DEFAULT_ROWS,
@@ -11,11 +10,11 @@ import {
   TAB_SWIPE_LOCK_THRESHOLD_PX,
   TAB_SWIPE_TRIGGER_THRESHOLD_PX,
   TERMINAL_FONT_STACK,
-  terminalCellStyle,
   measureTerminalViewport,
-  isTerminalGapIndex,
+  buildTerminalRenderRows,
+  buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
-  resolveCursorCellColumn,
+  resolveCursorOverlay,
   isScrollAtBottom,
   resolveFollowScrollSyncTarget,
   commitProgrammaticTerminalScroll,
@@ -126,81 +125,57 @@ const VisibleRow = memo(function VisibleRow({
   showAbsoluteLineNumbers?: boolean;
   discontinuousLineNumber?: boolean;
 }) {
-  const lineNumberCell = showAbsoluteLineNumbers ? (
+  const viewModel = buildTerminalVisibleRowViewModel({
+    absoluteIndex,
+    row,
+    rowHeight,
+    cellWidthPx,
+    isGap,
+    theme,
+    cursorColumn,
+    showAbsoluteLineNumbers,
+    discontinuousLineNumber,
+  });
+
+  const lineNumberCell = viewModel.lineNumber ? (
     <span
-      data-terminal-line-number="true"
-      data-terminal-line-discontinuous={discontinuousLineNumber ? 'true' : undefined}
-      style={{
-        display: 'inline-flex',
-        width: '48px',
-        minWidth: '48px',
-        justifyContent: 'flex-end',
-        paddingRight: '8px',
-        boxSizing: 'border-box',
-        color: discontinuousLineNumber ? '#ef4444' : theme.colors[8],
-        opacity: 0.92,
-        fontWeight: discontinuousLineNumber ? 700 : 500,
-      }}
+      data-terminal-line-number={viewModel.lineNumber['data-terminal-line-number']}
+      data-terminal-line-discontinuous={viewModel.lineNumber['data-terminal-line-discontinuous']}
+      style={viewModel.lineNumber.style}
     >
-      {absoluteIndex}
+      {viewModel.lineNumber.text}
     </span>
   ) : null;
 
-  if (isGap) {
+  if (viewModel.kind === 'gap') {
     return (
       <div
-        data-terminal-row="true"
-        data-terminal-gap="true"
-        data-terminal-index={absoluteIndex}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          height: rowHeight,
-          lineHeight: rowHeight,
-          whiteSpace: 'pre',
-          color: theme.foreground,
-          opacity: 0.88,
-          background: 'rgba(239, 68, 68, 0.12)',
-          borderTop: `1px dashed rgba(239, 68, 68, 0.42)`,
-          borderBottom: `1px dashed rgba(239, 68, 68, 0.42)`,
-        }}
+        data-terminal-row={viewModel.dataset.terminalRow}
+        data-terminal-gap={viewModel.dataset.terminalGap}
+        data-terminal-index={viewModel.dataset.terminalIndex}
+        style={viewModel.rowStyle}
       >
         {lineNumberCell}
-        <span
-          data-terminal-gap-fill="true"
-          style={{
-            display: 'block',
-            minWidth: 0,
-            flex: 1,
-            height: '100%',
-            background: 'rgba(239, 68, 68, 0.08)',
-          }}
-        />
+        <span {...viewModel.gapFillProps} />
       </div>
     );
   }
   return (
     <div
-      data-terminal-row="true"
-      data-terminal-index={absoluteIndex}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        height: rowHeight,
-        lineHeight: rowHeight,
-        whiteSpace: 'pre',
-      }}
+      data-terminal-row={viewModel.dataset.terminalRow}
+      data-terminal-index={viewModel.dataset.terminalIndex}
+      style={viewModel.rowStyle}
     >
       {lineNumberCell}
-      <span style={{ display: 'inline-block', minWidth: 0, flex: 1 }}>
-        {row.length > 0
-          ? row.map((cell, cellIndex) => (
+      <span {...viewModel.cellWrapProps}>
+        {viewModel.cells.length > 0
+          ? viewModel.cells.map((cell) => (
               <span
-                key={`cell-${absoluteIndex}-${cellIndex}`}
-                data-terminal-cursor={cursorColumn === cellIndex ? 'true' : undefined}
-                style={terminalCellStyle(cell, rowHeight, cellWidthPx, theme, cursorColumn === cellIndex)}
+                key={cell.key}
+                data-terminal-cursor={cell.cursorActive ? 'true' : undefined}
+                style={cell.style}
               >
-                {cell.width === 0 ? '' : safeTerminalCodePointToString(cell.char)}
+                {cell.char}
               </span>
             ))
           : ' '}
@@ -351,24 +326,14 @@ function TerminalViewComponent({
   const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
   const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
   const renderRows = useMemo(() => {
-    const rows: Array<{ absoluteIndex: number; row: TerminalCell[]; isGap: boolean; viewportOffset: number }> = [];
-    const visibleDataStartOffset = Math.max(0, renderStartOffset - leadingBlankRows);
-    const visibleDataEndOffset = Math.max(
-      visibleDataStartOffset,
-      Math.min(bufferLines.length, renderEndOffset - leadingBlankRows),
-    );
-
-    for (let dataOffset = visibleDataStartOffset; dataOffset < visibleDataEndOffset; dataOffset += 1) {
-      const viewportOffset = leadingBlankRows + dataOffset;
-      const absoluteIndex = renderBuffer.startIndex + dataOffset;
-      rows.push({
-        absoluteIndex,
-        row: bufferLines[dataOffset] || [],
-        isGap: isTerminalGapIndex(renderBuffer.gapRanges, absoluteIndex),
-        viewportOffset,
-      });
-    }
-    return rows;
+    return buildTerminalRenderRows({
+      bufferLines,
+      gapRanges: renderBuffer.gapRanges,
+      startIndex: renderBuffer.startIndex,
+      leadingBlankRows,
+      renderStartOffset,
+      renderEndOffset,
+    });
   }, [
     bufferLines,
     leadingBlankRows,
@@ -1325,6 +1290,13 @@ function TerminalViewComponent({
     >
       <div className="term-grid" data-cursor-source="cursor-metadata" style={{ paddingTop: `${termGridPaddingTopPx}px`, paddingBottom: `${termGridPaddingBottomPx}px` }}>
         {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) => (
+          (() => {
+            const cursorOverlay = resolveCursorOverlay({
+              row,
+              cursor: renderBuffer.cursor,
+              absoluteIndex,
+            });
+            return (
           <VisibleRow
             key={`row-${absoluteIndex}`}
             absoluteIndex={absoluteIndex}
@@ -1334,14 +1306,12 @@ function TerminalViewComponent({
             cellWidthPx={resolvedCellWidthPx}
             isGap={isGap}
             theme={theme}
-            cursorColumn={
-              renderBuffer.cursor && renderBuffer.cursor.visible && renderBuffer.cursor.rowIndex === absoluteIndex
-                ? resolveCursorCellColumn(row, renderBuffer.cursor.col)
-                : -1
-            }
+            cursorColumn={cursorOverlay.cursorColumn}
             showAbsoluteLineNumbers={showAbsoluteLineNumbers}
             discontinuousLineNumber={isGap || hasDiscontinuousNeighbor(renderRows, rowIndex)}
           />
+            );
+          })()
         ))}
       </div>
       <textarea

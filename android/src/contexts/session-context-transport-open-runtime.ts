@@ -115,7 +115,6 @@ export function openSessionTransportByIntentRuntime(options: {
     resolvedSessionName: string;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
-    activate?: boolean;
     finalizeFailure: (message: string, retryable: boolean) => void;
     onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
     onConnected: () => void;
@@ -123,7 +122,7 @@ export function openSessionTransportByIntentRuntime(options: {
   }) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
 }) {
-  const { sessionId, host, debugScope, activate, finalizeFailure, onBeforeConnectSend, onConnected, onClosed } = options.intent;
+  const { sessionId, host, debugScope, finalizeFailure, onBeforeConnectSend, onConnected, onClosed } = options.intent;
   const sessionTransportToken = options.readSessionTransportToken(sessionId);
   if (!sessionTransportToken) {
     finalizeFailure('missing session transport token', true);
@@ -137,7 +136,6 @@ export function openSessionTransportByIntentRuntime(options: {
     host: host.bridgeHost,
     port: host.bridgePort,
     sessionName: getResolvedSessionName(host),
-    activate: Boolean(activate),
   });
   options.primeSessionTransportSocket(sessionId, ws);
 
@@ -148,7 +146,6 @@ export function openSessionTransportByIntentRuntime(options: {
     resolvedSessionName: options.intent.resolvedSessionName,
     ws,
     debugScope,
-    activate,
     finalizeFailure,
     onBeforeConnectSend,
     onConnected: () => {
@@ -367,7 +364,6 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
 export function buildConnectTransportOpenIntentOptionsRuntime(options: {
   sessionId: string;
   host: Host;
-  activate: boolean;
   applyTransportOpenLiveFailureEffects: (options: {
     sessionId: string;
     debugScope: 'connect' | 'reconnect';
@@ -387,7 +383,6 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
     sessionId: options.sessionId,
     host: options.host,
     debugScope: 'connect',
-    activate: options.activate,
     onHandshakeFailure: (message, retryable, stage) => {
       if (stage === 'live') {
         options.applyTransportOpenLiveFailureEffects({
@@ -417,18 +412,13 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
 export function queueTransportOpenIntentRuntime(options: {
   sessionId: string;
   host: Host;
-  activate?: boolean;
   mode: 'connect' | 'reconnect';
   queueSessionTransportOpenIntent: QueueSessionTransportOpenIntent;
   buildReconnectTransportOpenIntentOptions: (sessionId: string, host: Host) => QueueSessionTransportOpenIntentOptions;
-  buildConnectTransportOpenIntentOptions: (
-    sessionId: string,
-    host: Host,
-    activate: boolean,
-  ) => QueueSessionTransportOpenIntentOptions;
+  buildConnectTransportOpenIntentOptions: (sessionId: string, host: Host) => QueueSessionTransportOpenIntentOptions;
 }) {
   const intentOptions = options.mode === 'reconnect'
     ? options.buildReconnectTransportOpenIntentOptions(options.sessionId, options.host)
-    : options.buildConnectTransportOpenIntentOptions(options.sessionId, options.host, Boolean(options.activate));
+    : options.buildConnectTransportOpenIntentOptions(options.sessionId, options.host);
   options.queueSessionTransportOpenIntent(intentOptions);
 }

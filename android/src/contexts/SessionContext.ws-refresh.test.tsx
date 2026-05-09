@@ -211,6 +211,7 @@ function SessionHarness() {
   const {
     state,
     createSession,
+    switchSession,
     sendInput,
     sendImagePaste,
     requestRemoteScreenshot,
@@ -227,7 +228,8 @@ function SessionHarness() {
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1' });
-  }, [createSession]);
+    switchSession('session-1');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -369,8 +371,9 @@ function MultiSessionHarness() {
 
   useEffect(() => {
     createSession(host, { sessionId: 'session-1' });
-    createSession(host2, { sessionId: 'session-2', connect: false });
-  }, []);
+    createSession(host2, { sessionId: 'session-2' });
+    switchSession('session-1');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const sessionBufferStore = getSessionBufferStore();
@@ -490,7 +493,7 @@ function MultiSessionHarness() {
 }
 
 function StaleFollowHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -507,7 +510,8 @@ function StaleFollowHarness() {
         cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
-  }, [createSession]);
+    switchSession('stale-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -544,7 +548,7 @@ function StaleFollowHarness() {
 }
 
 function StaleFollowVisibleTruthHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -561,7 +565,8 @@ function StaleFollowVisibleTruthHarness() {
         cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
-  }, [createSession]);
+    switchSession('stale-visible-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -602,7 +607,7 @@ function StaleFollowVisibleTruthHarness() {
 }
 
 function FarBehindFollowHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -619,7 +624,8 @@ function FarBehindFollowHarness() {
         cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
-  }, [createSession]);
+    switchSession('far-behind-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -656,7 +662,7 @@ function FarBehindFollowHarness() {
 }
 
 function NearHeadFollowHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -673,7 +679,8 @@ function NearHeadFollowHarness() {
         cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
-  }, [createSession]);
+    switchSession('near-head-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -710,7 +717,7 @@ function NearHeadFollowHarness() {
 }
 
 function NearHeadGapFollowHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     const sparseBuffer = applyBufferSyncToSessionBuffer(
@@ -731,7 +738,8 @@ function NearHeadGapFollowHarness() {
       sessionId: 'near-head-gap-session',
             buffer: sparseBuffer,
     });
-  }, [createSession]);
+    switchSession('near-head-gap-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -768,7 +776,7 @@ function NearHeadGapFollowHarness() {
 }
 
 function CompactFollowImmediateApplyHarness() {
-  const { state, createSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
+  const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
   useEffect(() => {
     createSession(host, {
@@ -785,7 +793,8 @@ function CompactFollowImmediateApplyHarness() {
         cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
       }),
     });
-  }, [createSession]);
+    switchSession('compact-follow-session');
+  }, [createSession, switchSession]);
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
@@ -5994,12 +6003,13 @@ describe('SessionContext websocket dynamic refresh', () => {
 
   it('deduplicates semantic duplicate createSession requests onto one managed session truth', async () => {
     function DuplicateSessionHarness() {
-      const { state, createSession } = useSession();
+      const { state, createSession, switchSession } = useSession();
 
       useEffect(() => {
         createSession(host, { sessionId: 'session-1' });
         createSession({ ...host, id: 'host-dup' }, { sessionId: 'session-dup' });
-      }, [createSession]);
+        switchSession('session-1');
+      }, [createSession, switchSession]);
 
       return (
         <div>
@@ -6087,7 +6097,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       useEffect(() => {
         createSession(host, { sessionId: 'session-1' });
-      }, [createSession]);
+        switchSession('session-1');
+      }, [createSession, switchSession]);
 
       useEffect(() => {
         snapshots.push({

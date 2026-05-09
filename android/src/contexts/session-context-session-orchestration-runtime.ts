@@ -86,7 +86,7 @@ interface SessionLifecycleRuntimeOptions {
   readSessionTargetKey: (sessionId: string) => string | null;
   clearSessionTransportRuntime: (sessionId: string) => unknown;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  queueConnectTransportOpenIntent: (sessionId: string, host: Host, activate?: boolean) => void;
+  queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
   scheduleReconnect: (
     sessionId: string,
     message: string,
@@ -202,7 +202,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       cleanupSocket: options.cleanupSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,
       updateSessionSync: options.updateSessionSync,
-      setActiveSessionSync: options.setActiveSessionSync,
       scheduleReconnect: options.scheduleReconnect,
     });
   };

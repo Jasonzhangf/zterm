@@ -5,8 +5,11 @@ import {
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { TerminalBufferPayload } from '../lib/types';
 import {
-  createSessionMessageOrchestrationRuntime,
-} from './session-context-message-orchestration-runtime';
+  applyIncomingBufferSyncRuntime,
+  handleBufferHeadRuntime,
+  requestSessionBufferHeadRuntime,
+  requestSessionBufferSyncRuntime,
+} from './session-context-buffer-runtime';
 import {
   createSessionInfraFacadeRuntime,
 } from './session-context-infra-facade-runtime';
@@ -16,6 +19,11 @@ import {
 import {
   reduceSessionAction,
 } from './session-context-core';
+import {
+  finalizeSocketFailureBaselineRuntime,
+  handleSocketConnectedBaselineRuntime,
+  handleSocketServerMessageRuntime,
+} from './session-context-socket-message-runtime';
 import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
@@ -253,58 +261,232 @@ export function useSessionProviderCoreAssemblies(
     writeSessionTransportToken,
   ]);
 
-  const sessionMessageRuntime = useMemo(() => createSessionMessageOrchestrationRuntime({
-    refs: {
-      stateRef: options.stateRef,
-      scheduleStatesRef: options.scheduleStatesRef,
-      lastHeadRequestAtRef,
-      lastPongAtRef,
-      sessionVisibleRangeRef,
-      sessionBufferHeadsRef,
-      sessionPullStateRef,
-      pendingInputTailRefreshRef,
-      pendingConnectTailRefreshRef,
-      pendingResumeTailRefreshRef,
-      lastConnectedBaselineAtRef,
-      connectedBaselineBurstGuardRef,
-      sessionRevisionResetRef,
-      sessionBufferStoreRef,
-      sessionHeadStoreRef,
-      sessionDebugMetricsStoreRef,
-      pendingSessionTransportOpenIntentsRef,
-      manualCloseRef,
-    },
-    readSessionTransportSocket,
-    readSessionBufferSnapshot,
-    clearSessionPullState,
-    sendSocketPayload,
-    resolveTerminalRefreshCadence,
-    resolveSessionCacheLines,
-    summarizeBufferPayload,
-    runtimeDebug,
-    isSessionTransportActive,
-    shouldAcceptSessionLiveBuffer,
-    scheduleSessionRenderCommit,
-    settleSessionPullState,
-    setScheduleStateForSession,
-    setSessionTitleSync,
-    fileTransferMessageRuntime: fileTransferMessageRuntimeRef.current,
+  const sessionMessageRuntime = useMemo(() => {
+    const commitSessionBufferUpdate = (sessionId: string, nextBuffer: any) => {
+      return sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer);
+    };
+
+    const requestSessionBufferSync = (sessionId: string, requestOptions?: {
+      ws?: any;
+      reason?: string;
+      purpose?: any;
+      sessionOverride?: any;
+      liveHead?: any;
+      invalidLocalWindow?: boolean;
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+    }) => requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions,
+      refs: {
+        stateRef: options.stateRef,
+        sessionVisibleRangeRef,
+        sessionBufferHeadsRef,
+        sessionPullStateRef,
+        pendingInputTailRefreshRef,
+        pendingConnectTailRefreshRef,
+        pendingResumeTailRefreshRef,
+      },
+      readSessionTransportSocket,
+      readSessionBufferSnapshot,
+      clearSessionPullState,
+      sendSocketPayload,
+      runtimeDebug,
+      resolveTerminalRefreshCadence,
+    });
+
+    const requestSessionBufferHead = (
+      sessionId: string,
+      ws?: any,
+      headOptions?: { force?: boolean },
+    ) => requestSessionBufferHeadRuntime({
+      sessionId,
+      ws,
+      force: headOptions?.force,
+      refs: {
+        stateRef: options.stateRef,
+        lastHeadRequestAtRef,
+        sessionDebugMetricsStoreRef,
+      },
+      readSessionTransportSocket,
+      sendSocketPayload,
+      resolveTerminalRefreshCadence,
+    });
+
+    const handleBufferHead = (
+      sessionId: string,
+      latestRevision: number,
+      latestEndIndex: number,
+      availableStartIndex?: number,
+      availableEndIndex?: number,
+      cursor?: any,
+      cursorKeysApp?: boolean,
+    ) => {
+      handleBufferHeadRuntime({
+        sessionId,
+        latestRevision,
+        latestEndIndex,
+        availableStartIndex,
+        availableEndIndex,
+        cursor,
+        cursorKeysApp,
+        refs: {
+          stateRef: options.stateRef,
+          sessionBufferHeadsRef,
+          lastHeadRequestAtRef,
+          sessionRevisionResetRef,
+          sessionVisibleRangeRef,
+          sessionBufferStoreRef,
+          sessionHeadStoreRef,
+        },
+        readSessionTransportSocket,
+        readSessionBufferSnapshot,
+        commitSessionBufferUpdate,
+        scheduleSessionRenderCommit,
+        isSessionTransportActive,
+        shouldAcceptSessionLiveBuffer,
+        runtimeDebug,
+        requestSessionBufferSync,
+      });
+    };
+
+    const applyIncomingBufferSync = (sessionId: string, payload: TerminalBufferPayload) => {
+      applyIncomingBufferSyncRuntime({
+        sessionId,
+        payload,
+        refs: {
+          stateRef: options.stateRef,
+          sessionRevisionResetRef,
+          sessionBufferHeadsRef,
+          pendingInputTailRefreshRef,
+          pendingConnectTailRefreshRef,
+          pendingResumeTailRefreshRef,
+          sessionVisibleRangeRef,
+        },
+        readSessionBufferSnapshot,
+        resolveSessionCacheLines,
+        summarizeBufferPayload,
+        runtimeDebug,
+        commitSessionBufferUpdate,
+        scheduleSessionRenderCommit,
+        isSessionTransportActive,
+        shouldAcceptSessionLiveBuffer,
+        requestSessionBufferSync,
+      });
+    };
+
+    const handleSocketServerMessage = (messageOptions: {
+      sessionId: string;
+      host: any;
+      ws: any;
+      debugScope: 'connect' | 'reconnect';
+      onConnected: () => void;
+      onFailure: (message: string, retryable: boolean) => void;
+      onClosed: (reason?: string) => void;
+    }, msg: any) => {
+      handleSocketServerMessageRuntime({
+        params: messageOptions,
+        msg,
+        refs: {
+          stateRef: options.stateRef,
+          scheduleStatesRef: options.scheduleStatesRef,
+          lastHeadRequestAtRef,
+          lastPongAtRef,
+        },
+        settleSessionPullState,
+        runtimeDebug,
+        isSessionTransportActive,
+        shouldAcceptSessionLiveBuffer,
+        summarizeBufferPayload,
+        applyIncomingBufferSync,
+        handleBufferHead,
+        setScheduleStateForSession,
+        setSessionTitleSync,
+        fileTransferMessageRuntime: fileTransferMessageRuntimeRef.current,
+        updateSessionSync,
+      });
+    };
+
+    const handleSocketConnectedBaseline = (connectedOptions: {
+      sessionId: string;
+      sessionName: string;
+      ws: any;
+    }) => {
+      handleSocketConnectedBaselineRuntime({
+        sessionId: connectedOptions.sessionId,
+        sessionName: connectedOptions.sessionName,
+        ws: connectedOptions.ws,
+        refs: {
+          stateRef: options.stateRef,
+          pendingConnectTailRefreshRef,
+          lastConnectedBaselineAtRef,
+          connectedBaselineBurstGuardRef,
+        },
+        readSessionBufferSnapshot,
+        applyTransportDiagnostics,
+        updateSessionSync,
+        setScheduleStateForSession,
+        sendSocketPayload,
+        isSessionTransportActive,
+        requestSessionBufferHead,
+        incrementConnectedSync,
+      });
+    };
+
+    const finalizeSocketFailureBaseline = (baselineOptions: {
+      sessionId: string;
+      message: string;
+      markCompleted: () => boolean;
+    }) => {
+      return finalizeSocketFailureBaselineRuntime({
+        sessionId: baselineOptions.sessionId,
+        message: baselineOptions.message,
+        markCompleted: baselineOptions.markCompleted,
+        refs: {
+          pendingSessionTransportOpenIntentsRef,
+          manualCloseRef,
+        },
+        cleanupSocket,
+        writeSessionTransportToken,
+        setScheduleStateForSession,
+      });
+    };
+
+    return {
+      requestSessionBufferSync,
+      requestSessionBufferHead,
+      handleSocketServerMessage,
+      handleSocketConnectedBaseline,
+      finalizeSocketFailureBaseline,
+    };
+  }, [
     applyTransportDiagnostics,
-    updateSessionSync,
-    incrementConnectedSync,
-    cleanupSocket,
-    writeSessionTransportToken,
-  }), [
-    applyTransportDiagnostics,
     cleanupSocket,
     clearSessionPullState,
+    connectedBaselineBurstGuardRef,
     incrementConnectedSync,
     isSessionTransportActive,
+    lastConnectedBaselineAtRef,
+    lastHeadRequestAtRef,
+    lastPongAtRef,
+    manualCloseRef,
+    options.scheduleStatesRef,
+    options.stateRef,
+    pendingConnectTailRefreshRef,
+    pendingInputTailRefreshRef,
+    pendingResumeTailRefreshRef,
+    pendingSessionTransportOpenIntentsRef,
     readSessionBufferSnapshot,
     readSessionTransportSocket,
     resolveSessionCacheLines,
     scheduleSessionRenderCommit,
     sendSocketPayload,
+    sessionBufferHeadsRef,
+    sessionBufferStoreRef,
+    sessionDebugMetricsStoreRef,
+    sessionHeadStoreRef,
+    sessionPullStateRef,
+    sessionRevisionResetRef,
+    sessionVisibleRangeRef,
     setScheduleStateForSession,
     settleSessionPullState,
     setSessionTitleSync,

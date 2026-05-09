@@ -1,7 +1,7 @@
 // Shared terminal renderer helpers — pure functions, no React/page/context/plugin deps
 // Extracted from TerminalView.tsx to keep renderer truth in a single shared module.
 
-import type { TerminalCell, TerminalGapRange } from '../connection/types';
+import type { TerminalCell } from '../connection/types';
 import type { TerminalThemePreset } from './theme';
 import {
   buildBlockBackground,
@@ -161,35 +161,6 @@ export function measureTerminalViewport(
 }
 
 // ─── Gap detection ──────────────────────────────────────────
-
-export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
-  return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
-}
-
-export function hasDiscontinuousNeighbor(
-  rows: Array<{ absoluteIndex: number }>,
-  rowIndex: number,
-) {
-  const current = rows[rowIndex];
-  if (!current) return false;
-  const previous = rows[rowIndex - 1];
-  const next = rows[rowIndex + 1];
-  const brokenBefore = Boolean(previous) && previous.absoluteIndex + 1 !== current.absoluteIndex;
-  const brokenAfter = Boolean(next) && current.absoluteIndex + 1 !== next.absoluteIndex;
-  return brokenBefore || brokenAfter;
-}
-
-// ─── Cursor ─────────────────────────────────────────────────
-
-export function resolveCursorCellColumn(row: TerminalCell[], preferredCol: number) {
-  if (row.length === 0) return -1;
-  const clamped = Math.max(0, Math.min(row.length - 1, Math.floor(preferredCol)));
-  if (row[clamped]?.width !== 0) return clamped;
-  for (let col = clamped - 1; col >= 0; col -= 1) {
-    if (row[col]?.width !== 0) return col;
-  }
-  return clamped;
-}
 
 // ─── Scroll helpers ─────────────────────────────────────────
 

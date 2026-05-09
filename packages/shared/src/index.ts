@@ -22,4 +22,4 @@ export * from './schedule/next-fire';
 export * from './shortcuts/terminal-shortcut-composer';
 export * from './workspace/workspace-model';
 
-export * from './terminal/renderer';
+export * from './terminal/renderer/index';
