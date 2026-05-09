@@ -1834,3 +1834,129 @@ user open
 - quickbar
 
 
+
+## 2026-05-09 未提交代码审计（当前工作区）
+
+- `git diff` 仅存在 5 个未提交项：
+  - `CACHE.md`
+  - `android/.build-meta.json`
+  - `android/release-dist/zterm-daemon-0.1.1-darwin-arm64.tar.gz`
+  - `android/release-dist/zterm-daemon-0.1.1-darwin-arm64.tar.gz.sha256`
+  - `android/release-dist/zterm-daemon-0.1.1-darwin-arm64/runtime/server.cjs`
+- 结论：当前未提交代码**不是** P0-1 active/open-tab/runtime arbitration 半拆源码；P0-1 源码已经在主干源码中闭环存在，关键证据：
+  - `session-context-core.ts` 的 `CREATE_SESSION` 已不再写 active
+  - `createSessionRuntime()` reuse existing session 时不再抢写 active
+  - `connectSessionRuntime()` 不再直接 `setActiveSessionSync(...)`
+- 当前脏工作区主要是一次**未收口的 daemon release 打包**：
+  - `release-dist/.../runtime/server.cjs` 内容对应源码中已存在的 server 侧能力（stable daemonHostId、changed-ranges buffer sync、cursorKeysApp、truecolor 修正）
+  - 但源码本身未 dirty，说明这是构建/打包产物差异，不是新的真源改动
+- 风险判断：
+  - `CACHE.md` 属于会话/缓存污染，不能作为功能提交内容
+  - `build-meta + release-dist` 目前缺少“这次为什么要发版”的闭环证据，暂不应直接提交
+- 下一步唯一主线：
+  1. 先清理/隔离这批 release 脏变更（尤其 `CACHE.md`）
+  2. 再从当前真源代码继续 P0/P1 审计，而不是误以为还在修 P0-1 半拆
+  3. 优先审计 session/tab 唯一真源与 open-tab/runtime owner 边界是否还有旁路
+
+## 2026-05-09 buffer facade / TerminalView renderer owner map 审计
+
+- 目标真源对齐：
+  - `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md` 已冻结：
+    - daemon 只管 mirror/read api
+    - buffer manager 只管本地 sparse buffer / request plan / merge
+    - renderer 只管 visible range / follow-reading / renderBottomIndex
+    - UI shell 只管容器、裁切、事件
+- 当前代码与 prompt 的一个关键偏差：
+  - `android/src/contexts/session-context-buffer-message-runtime.ts` **已不存在**
+  - 当前仍存活的冗余 facade 是 `android/src/contexts/session-context-message-orchestration-runtime.ts`
+  - 它内部仍在做：
+    - `requestSessionBufferSyncRuntime(...)` 包装
+    - `requestSessionBufferHeadRuntime(...)` 包装
+    - `handleBufferHeadRuntime(...)` 包装
+    - `applyIncomingBufferSyncRuntime(...)` 包装
+  - 然后再把这些 wrapper 注入 `handleSocketServerMessageRuntime(...)`
+- 当前 buffer-message 调用链 owner map：
+  - `SessionContext provider core assemblies`
+    -> `createSessionMessageOrchestrationRuntime(...)`
+    -> local wrapper `applyIncomingBufferSync / handleBufferHead / requestSessionBuffer*`
+    -> `session-context-buffer-runtime.ts`
+  - 结论：buffer runtime 的唯一正确 owner 已经是 `session-context-buffer-runtime.ts`；
+    `session-context-message-orchestration-runtime.ts` 对 buffer 部分只剩一层转发，没有独立业务真相，属于冗余 facade。
+- 现状第二处架构问题：
+  - `android/src/components/TerminalView.tsx` 仍有大量 renderer 纯逻辑内嵌：
+    - `VisibleRow`
+    - renderRows absolute-index/gap/discontinuous 计算
+    - gap 占位视觉
+    - cursor 列覆盖选择
+    - 行号样式映射
+  - 虽然 cell-level style / measure / scroll guard 已部分下沉到 `packages/shared/src/terminal/renderer.ts`
+    ，但 row-level render model 仍在 Android component 内，不满足 thin orchestration。
+- 现状第三处重复实现：
+  - `packages/shared/src/react/terminal-view.tsx` 仍保留第二套 terminal row/cell render 逻辑
+  - repo 内当前未发现活引用，但它仍是公开导出路径 `./react/terminal-view`
+  - 若继续放任，shared react terminal-view 与 android TerminalView 将继续各自演化为两套 renderer 语义
+- 本轮最小收口计划冻结：
+  1. 删除 `session-context-message-orchestration-runtime.ts` 这层 buffer/message facade，
+     在 `session-context-provider-core-assemblies.ts` 里直接装配：
+     - `requestSessionBufferSyncRuntime`
+     - `requestSessionBufferHeadRuntime`
+     - `handleBufferHeadRuntime`
+     - `applyIncomingBufferSyncRuntime`
+     - `handleSocketServerMessageRuntime`
+     - `handleSocketConnectedBaselineRuntime`
+     - `finalizeSocketFailureBaselineRuntime`
+  2. 将 `packages/shared/src/terminal/renderer.ts` 收口成目录模块：
+     - `packages/shared/src/terminal/renderer/index.ts`
+     - `packages/shared/src/terminal/renderer/row.ts`
+     - `packages/shared/src/terminal/renderer/cursor.ts`
+  3. 纯渲染逻辑下沉目标：
+     - row/cell style mapping
+     - gap row model
+     - discontinuous line marker
+     - cursor column / overlay metadata
+     - double-width char helper
+  4. `TerminalView.tsx` 保留：
+     - DOM refs
+     - viewport measure
+     - scroll / touch / input 事件绑定
+     - visible range emit
+  5. 本轮明确不碰：
+     - `TerminalPage.tsx`
+     - `TerminalQuickBar.tsx`
+     - relay / daemon
+
+
+## 2026-05-09 TerminalView renderer orchestration 第二刀
+
+- 继续对照 goal 成功标准审计：
+  - `session-context-message-orchestration-runtime.ts` 已删除，buffer/message facade 不再存活。
+  - `TerminalView.tsx` 仍未达到 thin shell：剩余残胶集中在 follow scroll sync、viewport relayout guard、follow/read reconcile 三组 renderer orchestration helper。
+- 本轮唯一收口点：
+  - 新增 `packages/shared/src/terminal/renderer/follow.ts`
+  - 将以下 renderer orchestration 纯逻辑下沉到 shared：
+    - `markTerminalFollowViewportRealignOnLayoutDrift`
+    - `queueTerminalFollowScrollSync`
+    - `cancelTerminalFollowScrollSync`
+    - `flushTerminalFollowScrollSync`
+    - `clearTerminalRecentViewportLayoutChange`
+    - `handleTerminalFollowModeScrollGuards`
+    - `alignTerminalRenderBottomToFollow`
+    - `reconcileTerminalViewportAfterBufferShift`
+- Android `TerminalView.tsx` 当前变化：
+  - 上述 follow/read/guard/reconcile 逻辑已改为调用 shared pure helpers
+  - 组件内已删除对应重复实现，不再在 page/component 内保留第二份同语义逻辑
+- 当前仍未完全达到终态：
+  - `commitMeasuredViewportState`
+  - `emitWidthModeSignalIfNeeded`
+  - `scheduleViewportResizeCommit`
+  - `syncViewport`
+  仍在 `TerminalView.tsx`，说明 shell 还没瘦到“只剩 DOM refs / 事件 / measure / emit”的最小形态
+- 已验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/components/TerminalView.theme.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx --reporter dot`
+  - `pnpm dlx vitest run packages/shared/src/terminal/renderer.test.ts --reporter dot`
+  - 结果：
+    - Android TerminalView tests: `69 passed`
+    - shared renderer tests: `13 passed`
+    - tsc: green
+- 结论：本轮继续削掉了一层 renderer orchestration 残胶，但 goal 还不能宣称完成；下一刀应继续收口 viewport measure / width-mode signal / resize commit 相关 helper，直到 `TerminalView` 只剩薄编排壳。

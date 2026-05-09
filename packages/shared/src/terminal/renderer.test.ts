@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getTerminalThemePreset } from './theme';
 import {
+  alignTerminalRenderBottomToFollow,
   buildTerminalRenderFrame,
   buildTerminalRenderRows,
   buildTerminalViewportDemand,
   buildTerminalViewportDemandKey,
+  clearTerminalRecentViewportLayoutChange,
+  flushTerminalFollowScrollSync,
+  markTerminalFollowViewportRealignOnLayoutDrift,
+  reconcileTerminalViewportAfterBufferShift,
+  queueTerminalFollowScrollSync,
   detectDoubleWidthChar,
   hasDiscontinuousNeighbor,
   renderGapMarker,
@@ -70,6 +76,139 @@ describe('shared terminal renderer pure helpers', () => {
       viewportRows: 12,
     });
     expect(buildTerminalViewportDemandKey(demand)).toBe('reading:132:12');
+  });
+
+  it('queues follow scroll sync as pure pending timer state', () => {
+    vi.useFakeTimers();
+    try {
+      const pendingFollowRenderBottomIndexRef = { current: null as number | null };
+      const lastQueuedFollowRenderBottomIndexRef = { current: null as number | null };
+      const pendingFollowScrollSyncRef = { current: false };
+      const followScrollSyncTimerRef = { current: null as number | null };
+      const flushed: number[] = [];
+
+      queueTerminalFollowScrollSync({
+        nextRenderBottomIndex: 139.7,
+        minimumRenderBottomIndex: 110,
+        pendingFollowRenderBottomIndexRef,
+        lastQueuedFollowRenderBottomIndexRef,
+        pendingFollowScrollSyncRef,
+        followScrollSyncTimerRef,
+        guardPendingFollowDrift: true,
+        flushPendingRenderBottomIndex: () => {
+          flushed.push(pendingFollowRenderBottomIndexRef.current ?? -1);
+        },
+      });
+
+      expect(pendingFollowRenderBottomIndexRef.current).toBe(139);
+      expect(lastQueuedFollowRenderBottomIndexRef.current).toBe(139);
+      expect(pendingFollowScrollSyncRef.current).toBe(true);
+      expect(followScrollSyncTimerRef.current).not.toBeNull();
+
+      vi.runAllTimers();
+      expect(flushed).toEqual([139]);
+      expect(followScrollSyncTimerRef.current).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes follow scroll sync only when active and not reading', () => {
+    const pendingFollowRenderBottomIndexRef = { current: 135 as number | null };
+    const pendingImmediateFollowScrollSyncRef = { current: false };
+    const followScrollSyncTimerRef = { current: null as number | null };
+    const synced: number[] = [];
+
+    const didFlush = flushTerminalFollowScrollSync({
+      refreshActive: true,
+      readingMode: false,
+      pendingFollowRenderBottomIndexRef,
+      pendingImmediateFollowScrollSyncRef,
+      followScrollSyncTimerRef,
+      followVisualBottomIndex: 140,
+      syncScrollHostToRenderBottom: (next) => synced.push(next),
+    });
+
+    expect(didFlush).toBe(true);
+    expect(synced).toEqual([135]);
+    expect(pendingFollowRenderBottomIndexRef.current).toBeNull();
+  });
+
+  it('marks viewport relayout drift as pending follow realign', () => {
+    vi.useFakeTimers();
+    try {
+      const pendingFollowViewportRealignRef = { current: false };
+      const recentViewportLayoutChangeRef = { current: false };
+      const recentViewportLayoutChangeTimerRef = { current: null as number | null };
+
+      markTerminalFollowViewportRealignOnLayoutDrift({
+        readingMode: false,
+        viewportLayoutChanged: true,
+        pendingFollowViewportRealignRef,
+        viewportClientHeightPx: 240,
+        recentViewportLayoutChangeRef,
+        recentViewportLayoutChangeTimerRef,
+      });
+
+      expect(pendingFollowViewportRealignRef.current).toBe(true);
+      expect(recentViewportLayoutChangeRef.current).toBe(true);
+      clearTerminalRecentViewportLayoutChange({
+        recentViewportLayoutChangeRef,
+        recentViewportLayoutChangeTimerRef,
+      });
+      expect(recentViewportLayoutChangeRef.current).toBe(false);
+      expect(recentViewportLayoutChangeTimerRef.current).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aligns follow render bottom via injected follow orchestration hooks', () => {
+    const calls: Array<[string, number | boolean | undefined]> = [];
+    const aligned = alignTerminalRenderBottomToFollow({
+      followVisualBottomIndex: 140,
+      resetReportedViewport: true,
+      immediateScrollSync: true,
+      resetFollowViewportReport: () => calls.push(['reset', true]),
+      setFollowModeState: (next) => calls.push(['state', next]),
+      scheduleFollowScrollRealign: (next, options) => calls.push(['queue', options?.immediateScrollSync ? next : -1]),
+      emitFollowViewportDemand: (next) => calls.push(['emit', next]),
+    });
+
+    expect(aligned).toBe(140);
+    expect(calls).toEqual([
+      ['reset', true],
+      ['state', 140],
+      ['queue', 140],
+      ['emit', 140],
+    ]);
+  });
+
+  it('reconciles buffer shift in reading mode without crossing renderer ownership', () => {
+    const alignCalls: number[] = [];
+    const setRenderBottomIndexCalls: number[] = [];
+    const emitReadingDemandCalls: number[] = [];
+
+    reconcileTerminalViewportAfterBufferShift({
+      refreshActive: true,
+      readingMode: true,
+      hasSettledFollowFrame: false,
+      effectiveRenderBottomIndex: 132,
+      followVisualBottomIndex: 140,
+      minimumRenderBottomIndex: 110,
+      maximumRenderBottomIndex: 140,
+      maxScrollTop: 500,
+      alignRenderBottomToFollow: () => {
+        alignCalls.push(1);
+        return 140;
+      },
+      setRenderBottomIndex: (next) => setRenderBottomIndexCalls.push(next),
+      emitReadingRenderDemand: (next) => emitReadingDemandCalls.push(next ?? -1),
+    });
+
+    expect(alignCalls).toEqual([]);
+    expect(setRenderBottomIndexCalls).toEqual([]);
+    expect(emitReadingDemandCalls).toEqual([132]);
   });
 
   it('renders row cells with cursor styling and preserves double-width widths', () => {
