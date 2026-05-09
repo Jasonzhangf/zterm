@@ -14,7 +14,8 @@
     "./terminal/theme": "./src/terminal/theme.ts",
     "./terminal/renderer": "./src/terminal/renderer/index.ts",
     "./terminal/gap-utils": "./src/terminal/gap-utils.ts",
-    "./terminal/foreground-resume": "./src/terminal/foreground-resume.ts"
+    "./terminal/foreground-resume": "./src/terminal/foreground-resume.ts",
+    "./terminal/visible-range": "./src/terminal/visible-range.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

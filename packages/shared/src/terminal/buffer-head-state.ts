@@ -32,9 +32,14 @@ export function resolveHeadAvailableBounds(
     availableStartIndex = Math.max(0, Math.floor(buffer.startIndex));
   }
 
-  if (head?.availableEndIndex !== undefined && Number.isFinite(head.availableEndIndex)) {
+  // No head → endIndex is unknown, return null
+  if (head == null) {
+    return { availableStartIndex, availableEndIndex: null };
+  }
+
+  if (head.availableEndIndex !== undefined && Number.isFinite(head.availableEndIndex)) {
     availableEndIndex = Math.max(0, Math.floor(head.availableEndIndex));
-  } else if (head?.latestEndIndex !== undefined && Number.isFinite(head.latestEndIndex)) {
+  } else if (typeof head.latestEndIndex === 'number' && head.latestEndIndex > 0) {
     availableEndIndex = Math.max(0, Math.floor(head.latestEndIndex));
   } else if (buffer.endIndex !== undefined && Number.isFinite(buffer.endIndex)) {
     availableEndIndex = Math.max(0, Math.floor(buffer.endIndex));
