@@ -3,7 +3,6 @@ import { useSessionRenderBufferSnapshot, type SessionRenderBufferStore } from '.
 import type { SessionHeadStore } from '../lib/session-head-store';
 import {
   getTerminalThemePreset,
-  type TerminalThemePreset,
   // renderer pure functions
   DEFAULT_ROWS,
   OVERSCAN_ROWS,
@@ -28,7 +27,6 @@ import {
   hasTerminalViewportLayoutChanged,
   resolveTerminalWidthModeSignal,
   resolveTerminalResizeCommitPlan,
-  buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
   resolveCursorOverlay,
   resolveScrollTopForRenderBottomIndex as resolveScrollTopForRenderBottomIndexShared,
@@ -46,12 +44,13 @@ import {
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import type {
   SessionRenderBufferSnapshot,
-  TerminalCell,
   TerminalResizeHandler,
   TerminalViewportChangeHandler,
   TerminalWidthModeHandler,
   TerminalWidthMode,
 } from '../lib/types';
+
+import { VisibleRow } from './terminal/VisibleRow';
 
 interface TerminalViewProps {
   sessionId: string | null;
@@ -116,97 +115,6 @@ const EMPTY_RENDER_BUFFER: SessionRenderBufferSnapshot = {
 
 
 
-const VisibleRow = memo(function VisibleRow({
-  row,
-  rowIndex: _rowIndex,
-  absoluteIndex,
-  rowHeight,
-  cellWidthPx,
-  isGap,
-  theme,
-  cursorColumn,
-  showAbsoluteLineNumbers = false,
-  discontinuousLineNumber = false,
-}: {
-  row: TerminalCell[];
-  rowIndex: number;
-  absoluteIndex: number;
-  rowHeight: string;
-  cellWidthPx: number;
-  isGap: boolean;
-  theme: TerminalThemePreset;
-  cursorColumn: number;
-  showAbsoluteLineNumbers?: boolean;
-  discontinuousLineNumber?: boolean;
-}) {
-  const viewModel = buildTerminalVisibleRowViewModel({
-    absoluteIndex,
-    row,
-    rowHeight,
-    cellWidthPx,
-    isGap,
-    theme,
-    cursorColumn,
-    showAbsoluteLineNumbers,
-    discontinuousLineNumber,
-  });
-
-  const lineNumberCell = viewModel.lineNumber ? (
-    <span
-      data-terminal-line-number={viewModel.lineNumber['data-terminal-line-number']}
-      data-terminal-line-discontinuous={viewModel.lineNumber['data-terminal-line-discontinuous']}
-      style={viewModel.lineNumber.style}
-    >
-      {viewModel.lineNumber.text}
-    </span>
-  ) : null;
-
-  if (viewModel.kind === 'gap') {
-    return (
-      <div
-        data-terminal-row={viewModel.dataset.terminalRow}
-        data-terminal-gap={viewModel.dataset.terminalGap}
-        data-terminal-index={viewModel.dataset.terminalIndex}
-        style={viewModel.rowStyle}
-      >
-        {lineNumberCell}
-        <span {...viewModel.gapFillProps} />
-      </div>
-    );
-  }
-  return (
-    <div
-      data-terminal-row={viewModel.dataset.terminalRow}
-      data-terminal-index={viewModel.dataset.terminalIndex}
-      style={viewModel.rowStyle}
-    >
-      {lineNumberCell}
-      <span {...viewModel.cellWrapProps}>
-        {viewModel.cells.length > 0
-          ? viewModel.cells.map((cell) => (
-              <span
-                key={cell.key}
-                data-terminal-cursor={cell.cursorActive ? 'true' : undefined}
-                style={cell.style}
-              >
-                {cell.char}
-              </span>
-            ))
-          : ' '}
-      </span>
-    </div>
-  );
-}, (prev, next) => (
-  prev.row === next.row
-  && prev.rowHeight === next.rowHeight
-  && prev.cellWidthPx === next.cellWidthPx
-  && prev.isGap === next.isGap
-  && prev.absoluteIndex === next.absoluteIndex
-  && prev.theme === next.theme
-  && prev.cursorColumn === next.cursorColumn
-  && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
-  && prev.discontinuousLineNumber === next.discontinuousLineNumber
-));
 
 function TerminalViewComponent({
   sessionId,
