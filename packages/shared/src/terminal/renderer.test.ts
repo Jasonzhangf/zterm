@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { getTerminalThemePreset } from './theme';
 import {
+  buildTerminalRenderFrame,
   buildTerminalRenderRows,
+  buildTerminalViewportDemand,
+  buildTerminalViewportDemandKey,
   detectDoubleWidthChar,
   hasDiscontinuousNeighbor,
   renderGapMarker,
@@ -28,6 +31,45 @@ describe('shared terminal renderer pure helpers', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ absoluteIndex: 0, isGap: false, viewportOffset: 0 });
     expect(rows[1]).toMatchObject({ absoluteIndex: 1, isGap: true, viewportOffset: 1 });
+  });
+
+  it('builds follow/read render frame geometry as pure derived state', () => {
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 100,
+      effectiveBufferEndIndex: 140,
+      bufferLinesLength: 40,
+      viewportRows: 10,
+      rowHeightPx: 17,
+      renderBottomIndex: 128,
+      followDemandAnchorEndIndex: 140,
+      readingMode: false,
+      overscanRows: 4,
+    });
+
+    expect(frame.minimumRenderBottomIndex).toBe(110);
+    expect(frame.followVisualBottomIndex).toBe(140);
+    expect(frame.effectiveRenderBottomIndex).toBe(140);
+    expect(frame.visibleWindowStartIndex).toBe(130);
+    expect(frame.visibleWindowEndIndex).toBe(140);
+    expect(frame.renderStartOffset).toBe(26);
+    expect(frame.renderEndOffset).toBe(40);
+  });
+
+  it('builds viewport demand and stable key from pure renderer inputs', () => {
+    const demand = buildTerminalViewportDemand({
+      nextMode: 'reading',
+      nextRenderBottomIndex: 132,
+      viewportRows: 12,
+      bufferStartIndex: 100,
+      followDemandAnchorEndIndex: 140,
+    });
+
+    expect(demand).toEqual({
+      mode: 'reading',
+      viewportEndIndex: 132,
+      viewportRows: 12,
+    });
+    expect(buildTerminalViewportDemandKey(demand)).toBe('reading:132:12');
   });
 
   it('renders row cells with cursor styling and preserves double-width widths', () => {

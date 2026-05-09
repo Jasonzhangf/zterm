@@ -12,9 +12,16 @@ import {
   TERMINAL_FONT_STACK,
   measureTerminalViewport,
   buildTerminalRenderRows,
+  buildTerminalRenderFrame,
+  buildTerminalGridPadding,
+  buildTerminalRenderGeometryRevision,
+  buildTerminalViewportDemand,
+  buildTerminalViewportDemandKey,
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
   resolveCursorOverlay,
+  resolveScrollTopForRenderBottomIndex as resolveScrollTopForRenderBottomIndexShared,
+  resolveTerminalRenderDemandFromScroll,
   isScrollAtBottom,
   resolveFollowScrollSyncTarget,
   commitProgrammaticTerminalScroll,
@@ -291,40 +298,41 @@ function TerminalViewComponent({
   const [readingMode, setReadingMode] = useState(false);
 
   const rowHeightPx = Math.max(1, parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17);
-  const dataRowCount = Math.max(0, effectiveBufferEndIndex - renderBuffer.startIndex);
-  const minimumRenderBottomIndex = dataRowCount <= viewportRows
-    ? effectiveBufferEndIndex
-    : renderBuffer.startIndex + viewportRows;
-  const followVisualBottomIndex = Math.max(
-    minimumRenderBottomIndex,
-    Math.min(
-      Math.max(minimumRenderBottomIndex, Math.floor(followDemandAnchorEndIndex || 0)),
-      Math.max(minimumRenderBottomIndex, Math.floor(effectiveBufferEndIndex || 0)),
-    ),
-  );
-  const maximumRenderBottomIndex = Math.max(minimumRenderBottomIndex, effectiveBufferEndIndex);
-  const clampedRenderBottomIndex = Math.max(
-    minimumRenderBottomIndex,
-    Math.min(maximumRenderBottomIndex, Math.floor(renderBottomIndex || followVisualBottomIndex)),
-  );
-  const totalRows = Math.max(
-    bufferLines.length,
-    effectiveBufferEndIndex - renderBuffer.startIndex,
-    viewportRows,
-  );
-  const maxScrollTop = Math.max(0, (totalRows - viewportRows) * rowHeightPx);
   readingModeRef.current = readingMode;
   daemonHeadEndIndexRef.current = demandHeadEndIndex;
   daemonHeadRevisionRef.current = Math.max(0, Math.floor(renderBuffer.daemonHeadRevision || 0));
-  const followMode = !readingMode;
-  const effectiveRenderBottomIndex = followMode ? followVisualBottomIndex : clampedRenderBottomIndex;
-  const visibleWindowStartIndex = Math.max(renderBuffer.startIndex, effectiveRenderBottomIndex - viewportRows);
-  const visibleWindowEndIndex = Math.min(effectiveBufferEndIndex, Math.max(visibleWindowStartIndex, effectiveRenderBottomIndex));
-  const visibleDataRows = Math.max(0, visibleWindowEndIndex - visibleWindowStartIndex);
-  const leadingBlankRows = Math.max(0, viewportRows - visibleDataRows);
-  const visibleStartOffset = Math.max(0, visibleWindowStartIndex - renderBuffer.startIndex);
-  const renderStartOffset = Math.max(0, visibleStartOffset - OVERSCAN_ROWS);
-  const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + OVERSCAN_ROWS);
+  const renderFrame = useMemo(() => buildTerminalRenderFrame({
+    bufferStartIndex: renderBuffer.startIndex,
+    effectiveBufferEndIndex,
+    bufferLinesLength: bufferLines.length,
+    viewportRows,
+    rowHeightPx,
+    renderBottomIndex,
+    followDemandAnchorEndIndex,
+    readingMode,
+    overscanRows: OVERSCAN_ROWS,
+  }), [
+    bufferLines.length,
+    effectiveBufferEndIndex,
+    followDemandAnchorEndIndex,
+    readingMode,
+    renderBottomIndex,
+    renderBuffer.startIndex,
+    rowHeightPx,
+    viewportRows,
+  ]);
+  const {
+    dataRowCount,
+    minimumRenderBottomIndex,
+    followVisualBottomIndex,
+    maximumRenderBottomIndex,
+    totalRows,
+    maxScrollTop,
+    effectiveRenderBottomIndex,
+    leadingBlankRows,
+    renderStartOffset,
+    renderEndOffset,
+  } = renderFrame;
   const renderRows = useMemo(() => {
     return buildTerminalRenderRows({
       bufferLines,
@@ -342,23 +350,35 @@ function TerminalViewComponent({
     renderBuffer.gapRanges,
     renderBuffer.startIndex,
   ]);
-  const termGridPaddingTopPx = renderRows.length > 0
-    ? renderRows[0]!.viewportOffset * rowHeightPx
-    : totalRows * rowHeightPx;
-  const termGridPaddingBottomPx = renderRows.length > 0
-    ? Math.max(0, totalRows - (renderRows[renderRows.length - 1]!.viewportOffset + 1)) * rowHeightPx
-    : 0;
-  const renderGeometryRevision = [
-    renderBuffer.revision,
-    renderBuffer.startIndex,
+  const {
+    termGridPaddingTopPx,
+    termGridPaddingBottomPx,
+  } = useMemo(() => buildTerminalGridPadding({
+    renderRows,
+    rowHeightPx,
+    totalRows,
+  }), [renderRows, rowHeightPx, totalRows]);
+  const renderGeometryRevision = useMemo(() => buildTerminalRenderGeometryRevision({
+    revision: renderBuffer.revision,
+    startIndex: renderBuffer.startIndex,
     effectiveBufferEndIndex,
     followVisualBottomIndex,
     viewportRows,
     rowHeightPx,
-    renderRows.length,
+    renderRowsLength: renderRows.length,
     termGridPaddingTopPx,
     termGridPaddingBottomPx,
-  ].join(':');
+  }), [
+    effectiveBufferEndIndex,
+    followVisualBottomIndex,
+    renderBuffer.revision,
+    renderBuffer.startIndex,
+    renderRows.length,
+    rowHeightPx,
+    termGridPaddingBottomPx,
+    termGridPaddingTopPx,
+    viewportRows,
+  ]);
 
   const focusTerminal = useCallback(() => {
     if (!allowDomFocus) {
@@ -384,40 +404,35 @@ function TerminalViewComponent({
   cursorKeysAppRef.current = renderBuffer.cursorKeysApp;
 
   const resolveScrollTopForRenderBottomIndex = useCallback((nextRenderBottomIndex: number) => {
-    const topOffset = Math.max(
-      0,
-      Math.min(
-        totalRows - viewportRows,
-        Math.max(0, Math.floor(nextRenderBottomIndex) - renderBuffer.startIndex - viewportRows),
-      ),
-    );
-    return Math.max(0, Math.min(maxScrollTop, topOffset * rowHeightPx));
+    return resolveScrollTopForRenderBottomIndexShared({
+      nextRenderBottomIndex,
+      totalRows,
+      viewportRows,
+      bufferStartIndex: renderBuffer.startIndex,
+      rowHeightPx,
+      maxScrollTop,
+    });
   }, [maxScrollTop, renderBuffer.startIndex, rowHeightPx, totalRows, viewportRows]);
 
   const resolveRenderDemandFromScroll = useCallback((nextScrollTop: number, host?: HTMLDivElement | null) => {
-    const clampedScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
     const scrollHost = host ?? containerRef.current;
+    const clampedScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
     const observedScrollTop = scrollHost ? scrollHost.scrollTop : clampedScrollTop;
-    const visibleTopOffset = Math.max(0, Math.floor(clampedScrollTop / rowHeightPx));
-    const nextWindowBottomIndex = dataRowCount <= viewportRows
-      ? effectiveBufferEndIndex
-      : Math.max(
-          minimumRenderBottomIndex,
-          Math.min(bufferTailAnchorEndIndex, renderBuffer.startIndex + visibleTopOffset + viewportRows),
-        );
-    const nextMode: 'follow' | 'reading' = isScrollAtBottom(scrollHost, observedScrollTop, maxScrollTop)
-      ? 'follow'
-      : 'reading';
-    const nextRenderBottomIndex = nextMode === 'follow'
-      ? followVisualBottomIndex
-      : nextWindowBottomIndex;
-    return {
-      clampedScrollTop: nextMode === 'follow'
-        ? resolveScrollTopForRenderBottomIndex(nextRenderBottomIndex)
-        : clampedScrollTop,
-      nextMode,
-      nextRenderBottomIndex,
-    };
+    return resolveTerminalRenderDemandFromScroll({
+      nextScrollTop,
+      maxScrollTop,
+      rowHeightPx,
+      dataRowCount,
+      viewportRows,
+      effectiveBufferEndIndex,
+      minimumRenderBottomIndex,
+      bufferTailAnchorEndIndex,
+      bufferStartIndex: renderBuffer.startIndex,
+      followVisualBottomIndex,
+      observedScrollTop,
+      isAtBottom: isScrollAtBottom(scrollHost, observedScrollTop, maxScrollTop),
+      resolveScrollTopForRenderBottomIndex,
+    });
   }, [
     renderBuffer.startIndex,
     dataRowCount,
@@ -548,21 +563,20 @@ function TerminalViewComponent({
       return;
     }
 
-    const viewportEndIndex = typeof options?.viewportEndIndex === 'number'
-      ? Math.max(renderBuffer.startIndex, Math.floor(options.viewportEndIndex))
-      : nextMode === 'follow'
-      ? followDemandAnchorEndIndex
-      : Math.max(renderBuffer.startIndex, Math.floor(nextRenderBottomIndex));
-    const key = `${nextMode}:${viewportEndIndex}:${viewportRows}`;
+    const demand = buildTerminalViewportDemand({
+      nextMode,
+      nextRenderBottomIndex,
+      viewportRows,
+      bufferStartIndex: renderBuffer.startIndex,
+      followDemandAnchorEndIndex,
+      viewportEndIndexOverride: options?.viewportEndIndex,
+    });
+    const key = buildTerminalViewportDemandKey(demand);
     if (lastReportedViewportRef.current === key) {
       return;
     }
     lastReportedViewportRef.current = key;
-    onViewportChange(sessionId, {
-      mode: nextMode,
-      viewportEndIndex,
-      viewportRows,
-    });
+    onViewportChange(sessionId, demand);
   }, [followDemandAnchorEndIndex, onViewportChange, refreshActive, renderBuffer.startIndex, sessionId, viewportRows]);
 
   const applyScrollState = useCallback((nextScrollTop: number, host?: HTMLDivElement | null) => {
@@ -1076,7 +1090,11 @@ function TerminalViewComponent({
       if (revisionUnchanged && endUnchanged) {
         return;
       }
-      const key = `follow:${nextHeadEndIndex}:${viewportRows}`;
+      const key = buildTerminalViewportDemandKey({
+        mode: 'follow',
+        viewportEndIndex: nextHeadEndIndex,
+        viewportRows,
+      });
       if (lastReportedViewportRef.current === key) {
         return;
       }

@@ -29,6 +29,18 @@ export interface TerminalRenderFrame {
   renderEndOffset: number;
 }
 
+export interface TerminalRenderDemandFromScroll {
+  clampedScrollTop: number;
+  nextMode: 'follow' | 'reading';
+  nextRenderBottomIndex: number;
+}
+
+export interface TerminalViewportDemand {
+  mode: 'follow' | 'reading';
+  viewportEndIndex: number;
+  viewportRows: number;
+}
+
 export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
@@ -137,6 +149,125 @@ export function buildTerminalRenderFrame(options: {
     renderStartOffset,
     renderEndOffset,
   };
+}
+
+export function buildTerminalGridPadding(options: {
+  renderRows: Array<{ viewportOffset: number }>;
+  rowHeightPx: number;
+  totalRows: number;
+}) {
+  const termGridPaddingTopPx = options.renderRows.length > 0
+    ? options.renderRows[0]!.viewportOffset * options.rowHeightPx
+    : options.totalRows * options.rowHeightPx;
+  const termGridPaddingBottomPx = options.renderRows.length > 0
+    ? Math.max(0, options.totalRows - (options.renderRows[options.renderRows.length - 1]!.viewportOffset + 1)) * options.rowHeightPx
+    : 0;
+  return {
+    termGridPaddingTopPx,
+    termGridPaddingBottomPx,
+  };
+}
+
+export function buildTerminalRenderGeometryRevision(options: {
+  revision: number;
+  startIndex: number;
+  effectiveBufferEndIndex: number;
+  followVisualBottomIndex: number;
+  viewportRows: number;
+  rowHeightPx: number;
+  renderRowsLength: number;
+  termGridPaddingTopPx: number;
+  termGridPaddingBottomPx: number;
+}) {
+  return [
+    options.revision,
+    options.startIndex,
+    options.effectiveBufferEndIndex,
+    options.followVisualBottomIndex,
+    options.viewportRows,
+    options.rowHeightPx,
+    options.renderRowsLength,
+    options.termGridPaddingTopPx,
+    options.termGridPaddingBottomPx,
+  ].join(':');
+}
+
+export function resolveScrollTopForRenderBottomIndex(options: {
+  nextRenderBottomIndex: number;
+  totalRows: number;
+  viewportRows: number;
+  bufferStartIndex: number;
+  rowHeightPx: number;
+  maxScrollTop: number;
+}) {
+  const topOffset = Math.max(
+    0,
+    Math.min(
+      options.totalRows - options.viewportRows,
+      Math.max(0, Math.floor(options.nextRenderBottomIndex) - options.bufferStartIndex - options.viewportRows),
+    ),
+  );
+  return Math.max(0, Math.min(options.maxScrollTop, topOffset * options.rowHeightPx));
+}
+
+export function resolveTerminalRenderDemandFromScroll(options: {
+  nextScrollTop: number;
+  maxScrollTop: number;
+  rowHeightPx: number;
+  dataRowCount: number;
+  viewportRows: number;
+  effectiveBufferEndIndex: number;
+  minimumRenderBottomIndex: number;
+  bufferTailAnchorEndIndex: number;
+  bufferStartIndex: number;
+  followVisualBottomIndex: number;
+  observedScrollTop: number;
+  isAtBottom: boolean;
+  resolveScrollTopForRenderBottomIndex: (nextRenderBottomIndex: number) => number;
+}) : TerminalRenderDemandFromScroll {
+  const clampedScrollTop = Math.max(0, Math.min(options.maxScrollTop, options.nextScrollTop));
+  const visibleTopOffset = Math.max(0, Math.floor(clampedScrollTop / options.rowHeightPx));
+  const nextWindowBottomIndex = options.dataRowCount <= options.viewportRows
+    ? options.effectiveBufferEndIndex
+    : Math.max(
+        options.minimumRenderBottomIndex,
+        Math.min(options.bufferTailAnchorEndIndex, options.bufferStartIndex + visibleTopOffset + options.viewportRows),
+      );
+  const nextMode: 'follow' | 'reading' = options.isAtBottom ? 'follow' : 'reading';
+  const nextRenderBottomIndex = nextMode === 'follow'
+    ? options.followVisualBottomIndex
+    : nextWindowBottomIndex;
+  return {
+    clampedScrollTop: nextMode === 'follow'
+      ? options.resolveScrollTopForRenderBottomIndex(nextRenderBottomIndex)
+      : clampedScrollTop,
+    nextMode,
+    nextRenderBottomIndex,
+  };
+}
+
+export function buildTerminalViewportDemand(options: {
+  nextMode: 'follow' | 'reading';
+  nextRenderBottomIndex: number;
+  viewportRows: number;
+  bufferStartIndex: number;
+  followDemandAnchorEndIndex: number;
+  viewportEndIndexOverride?: number;
+}) : TerminalViewportDemand {
+  const viewportEndIndex = typeof options.viewportEndIndexOverride === 'number'
+    ? Math.max(options.bufferStartIndex, Math.floor(options.viewportEndIndexOverride))
+    : options.nextMode === 'follow'
+      ? Math.max(options.bufferStartIndex, Math.floor(options.followDemandAnchorEndIndex))
+      : Math.max(options.bufferStartIndex, Math.floor(options.nextRenderBottomIndex));
+  return {
+    mode: options.nextMode,
+    viewportEndIndex,
+    viewportRows: options.viewportRows,
+  };
+}
+
+export function buildTerminalViewportDemandKey(demand: TerminalViewportDemand) {
+  return `${demand.mode}:${demand.viewportEndIndex}:${demand.viewportRows}`;
 }
 
 export function renderGapMarker(options: {
