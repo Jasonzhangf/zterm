@@ -336,6 +336,7 @@ export function useSessionProviderCoreAssemblies(
           stateRef: options.stateRef,
           sessionBufferHeadsRef,
           lastHeadRequestAtRef,
+          lastSyncRequestAtRef,
           sessionRevisionResetRef,
           sessionVisibleRangeRef,
           sessionBufferStoreRef,

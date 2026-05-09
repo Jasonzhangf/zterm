@@ -2134,3 +2134,13 @@ user open
 ## [2026-05-09 11:34:50] build gate status
 - 标准 build-android-debug.sh 被仓库现有 App.first-paint / SessionContext.ws-refresh 回归阻塞，非本次 useAppUpdate 改动引入。
 - 为交付 APK，本轮改走显式构建链路：pnpm build -> cap sync -> gradlew assembleDebug -> prepare-update-bundle，并保留门禁失败证据。
+
+## [2026-05-09 11:47:53] multi-pane现场回归排查
+- 现场: 多 pane 安装测试后，底部工具栏缺失；P2/P3/P4 不正常刷新；buffer 很旧；可见 pane 看起来只 P1 真在显示内容。
+- 初判方向: 先查 client transport/active-visible pane refresh/buffer apply/render scope 是否重新退化为只驱动 P1 或只有 active transport 在工作。
+
+## [2026-05-09 12:02:31] multi-pane 首屏链路止血
+- 直接证据：`App.first-paint*` 红测失败点统一卡在“收到 buffer-head 后等不到 buffer-sync-request”。
+- 真因：`session-context-provider-core-assemblies.ts` 调 `handleBufferHeadRuntime` 时漏传 `lastSyncRequestAtRef`；不是 daemon、不是 visible pane owner、不是 renderer DOM 挂载缺失。
+- 修复后：`App.first-paint.test.tsx` / `App.first-paint.real-terminal.test.tsx` 冷启动与切 tab 首屏都转绿。
+- 同轮顺手修正：`terminal-layout-profile.ts` 的 split-landscape quickbar 误设成 `floating-collapsed`，恢复为 `inline`，否则用户看到的就是“底栏不见，只剩悬浮球”。

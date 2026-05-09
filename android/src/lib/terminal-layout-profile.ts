@@ -79,7 +79,7 @@ function buildSplitLandscapeProfile(safeTopInsetPx: number): TerminalLayoutProfi
     },
     quickBar: {
       touchSafeOffsetPx: 0,
-      shellMode: 'floating-collapsed',
+      shellMode: 'inline',
     },
   };
 }

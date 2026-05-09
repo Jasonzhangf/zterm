@@ -71,6 +71,25 @@ function makePayload(revision: number): TerminalBufferPayload {
   };
 }
 
+function makeHeadRuntimeRefs(options: {
+  sessions: Session[];
+  activeSessionId: string;
+  setHead?: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean;
+  visibleRangeEntries?: Array<[string, ReturnType<typeof buildDefaultSessionVisibleRange>]>;
+  sessionBufferHeadsEntries?: Array<[string, any]>;
+}) {
+  return {
+    stateRef: { current: { sessions: options.sessions, activeSessionId: options.activeSessionId } },
+    sessionBufferHeadsRef: { current: new Map<string, any>(options.sessionBufferHeadsEntries || []) },
+    lastHeadRequestAtRef: { current: new Map<string, number>() },
+    lastSyncRequestAtRef: { current: new Map<string, any>() },
+    sessionRevisionResetRef: { current: new Map() },
+    sessionVisibleRangeRef: { current: new Map(options.visibleRangeEntries || []) },
+    sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
+    sessionHeadStoreRef: { current: { setHead: options.setHead || vi.fn(() => true) } },
+  };
+}
+
 describe('session-context-buffer-runtime inactive gating', () => {
   it('drops inactive buffer-head before buffer/head/render apply', () => {
     const sessionId = 'session-1';
@@ -79,8 +98,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const scheduleSessionRenderCommit = vi.fn();
     const setHead = vi.fn(() => true);
     const runtimeDebug = vi.fn();
-    const lastHeadRequestAtRef = { current: new Map<string, number>() };
-    const sessionBufferHeadsRef = { current: new Map<string, any>() };
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: 'other-session',
+      setHead,
+    });
 
     handleBufferHeadRuntime({
       sessionId,
@@ -93,15 +115,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         col: 3,
         visible: true,
       },
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
-        sessionBufferHeadsRef,
-        lastHeadRequestAtRef,
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
@@ -111,13 +125,13 @@ describe('session-context-buffer-runtime inactive gating', () => {
       requestSessionBufferSync: vi.fn(() => true),
     });
 
-    expect(sessionBufferHeadsRef.current.get(sessionId)).toMatchObject({
+    expect(refs.sessionBufferHeadsRef.current.get(sessionId)).toMatchObject({
       revision: 5,
       latestEndIndex: 20,
       availableStartIndex: 0,
       availableEndIndex: 20,
     });
-    expect(lastHeadRequestAtRef.current.has(sessionId)).toBe(true);
+    expect(refs.lastHeadRequestAtRef.current.has(sessionId)).toBe(true);
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(setHead).not.toHaveBeenCalled();
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
@@ -197,21 +211,19 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const setHead = vi.fn(() => true);
     const runtimeDebug = vi.fn();
 
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: 'other-session',
+      setHead,
+    });
+
     handleBufferHeadRuntime({
       sessionId,
       latestRevision: 5,
       latestEndIndex: 20,
       availableStartIndex: 0,
       availableEndIndex: 20,
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
-        sessionBufferHeadsRef: { current: new Map() },
-        lastHeadRequestAtRef: { current: new Map() },
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
@@ -254,23 +266,20 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const requestSessionBufferSync = vi.fn(() => true);
     const setHead = vi.fn(() => true);
 
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      setHead,
+      visibleRangeEntries: [[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]],
+    });
+
     handleBufferHeadRuntime({
       sessionId,
       latestRevision: 6,
       latestEndIndex: 3,
       availableStartIndex: 0,
       availableEndIndex: 3,
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
-        sessionBufferHeadsRef: { current: new Map() },
-        lastHeadRequestAtRef: { current: new Map() },
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: {
-          current: new Map([[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]]),
-        },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
@@ -653,6 +662,19 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const setHead = vi.fn(() => false);
     const runtimeDebug = vi.fn();
 
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      setHead,
+      sessionBufferHeadsEntries: [[sessionId, {
+        revision: 0,
+        latestEndIndex: 0,
+        availableStartIndex: 0,
+        availableEndIndex: 0,
+        seenAt: 1,
+      }]],
+    });
+
     handleBufferHeadRuntime({
       sessionId,
       latestRevision: 0,
@@ -660,25 +682,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 0,
       cursor: null,
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
-        sessionBufferHeadsRef: {
-          current: new Map([
-            [sessionId, {
-              revision: 0,
-              latestEndIndex: 0,
-              availableStartIndex: 0,
-              availableEndIndex: 0,
-              seenAt: 1,
-            }],
-          ]),
-        },
-        lastHeadRequestAtRef: { current: new Map() },
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
@@ -700,6 +704,12 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const scheduleSessionRenderCommit = vi.fn();
     const setHead = vi.fn(() => true);
 
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      setHead,
+    });
+
     handleBufferHeadRuntime({
       sessionId,
       latestRevision: 2,
@@ -707,15 +717,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 32,
       cursor: session.buffer.cursor,
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
-        sessionBufferHeadsRef: { current: new Map() },
-        lastHeadRequestAtRef: { current: new Map() },
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
@@ -737,6 +739,12 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const scheduleSessionRenderCommit = vi.fn();
     const setHead = vi.fn(() => false);
 
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      setHead,
+    });
+
     handleBufferHeadRuntime({
       sessionId,
       latestRevision: 1,
@@ -748,15 +756,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         col: 4,
         visible: true,
       },
-      refs: {
-        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
-        sessionBufferHeadsRef: { current: new Map() },
-        lastHeadRequestAtRef: { current: new Map() },
-        sessionRevisionResetRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead } },
-      },
+      refs,
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,

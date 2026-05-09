@@ -13,7 +13,7 @@ describe('terminal-layout-profile', () => {
     expect(profile.header.tabMinHeight).toBe('22px');
     expect(profile.header.outerPadding).toBe('1px 4px 2px');
     expect(profile.stage.paneGap).toBe('6px');
-    expect(profile.quickBar.shellMode).toBe('floating-collapsed');
+    expect(profile.quickBar.shellMode).toBe('inline');
   });
 
   it('keeps default split profile when not in landscape', () => {
