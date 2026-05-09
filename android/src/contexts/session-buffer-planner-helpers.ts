@@ -7,6 +7,7 @@ import type {
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { mergeGapRanges, collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
+import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
 import {
   resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
@@ -377,24 +378,12 @@ export function resolveHeadAvailableBounds(
   session: Session,
   liveHead?: SessionBufferHeadState | null,
   bufferOverride?: SessionBufferState | null,
-) {
+): { availableStartIndex: number; availableEndIndex: number } {
   const buffer = resolveSessionBufferView(session, bufferOverride);
-  const availableEndIndex = Math.max(0, Math.floor(
-    resolveAuthoritativeAvailableEndIndex(session, liveHead, buffer)
-    ?? 0,
-  ));
-  const authoritativeAvailableStartIndex = (
-    typeof liveHead?.availableStartIndex === 'number' && Number.isFinite(liveHead.availableStartIndex)
-      ? Math.floor(liveHead.availableStartIndex)
-      : 0
-  );
-  const availableStartIndex = Math.max(0, Math.min(
-    availableEndIndex,
-    authoritativeAvailableStartIndex,
-  ));
+  const result = sharedResolveHeadAvailableBounds(liveHead, buffer);
   return {
-    availableStartIndex,
-    availableEndIndex,
+    availableStartIndex: result.availableStartIndex ?? 0,
+    availableEndIndex: result.availableEndIndex ?? 0,
   };
 }
 
@@ -402,18 +391,7 @@ export function hasImpossibleLocalWindow(
   session: Session,
   liveHead?: SessionBufferHeadState | null,
   bufferOverride?: SessionBufferState | null,
-) {
+): boolean {
   const buffer = resolveSessionBufferView(session, bufferOverride);
-  const { availableEndIndex } = resolveHeadAvailableBounds(session, liveHead, buffer);
-  const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
-  const localEndIndex = Math.max(0, Math.floor(buffer.endIndex || 0));
-  const localHeadStartIndex = Math.max(0, Math.floor(buffer.bufferHeadStartIndex || 0));
-  const localTailEndIndex = Math.max(0, Math.floor(buffer.bufferTailEndIndex || 0));
-
-  return (
-    localStartIndex > availableEndIndex
-    || localEndIndex > availableEndIndex
-    || localHeadStartIndex > availableEndIndex
-    || localTailEndIndex > availableEndIndex
-  );
+  return sharedHasImpossibleLocalWindow(liveHead, buffer);
 }
