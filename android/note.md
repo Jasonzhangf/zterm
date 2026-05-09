@@ -2144,3 +2144,10 @@ user open
 - 真因：`session-context-provider-core-assemblies.ts` 调 `handleBufferHeadRuntime` 时漏传 `lastSyncRequestAtRef`；不是 daemon、不是 visible pane owner、不是 renderer DOM 挂载缺失。
 - 修复后：`App.first-paint.test.tsx` / `App.first-paint.real-terminal.test.tsx` 冷启动与切 tab 首屏都转绿。
 - 同轮顺手修正：`terminal-layout-profile.ts` 的 split-landscape quickbar 误设成 `floating-collapsed`，恢复为 `inline`，否则用户看到的就是“底栏不见，只剩悬浮球”。
+
+## [2026-05-09 12:10:51] workspace persistence storage adapter 收口
+- 分析：标准 terminal contracts 虽然全绿，但 `TerminalPage.android-ime.test.tsx` 大量 stderr 暴露 `workspace-persistence.ts` 直接假定 `window.localStorage` 完整可用；这让 local harness/test 环境长出隐式浏览器存储语义，违反 adapter 边界。
+- 唯一修改点：`android/src/lib/workspace-persistence.ts`
+- 本轮设计：workspace persistence 不再直接碰 `localStorage`，统一只经 `browser-storage.ts -> getBrowserStorage()` 访问；无有效 storage 能力时静默返回默认 workspace，不再进入异常日志分支。
+- 新增回归：`workspace-persistence.test.ts` 增加“storage 不可用时不 log / 不 throw”场景。
+- 验证：`tsc` + `workspace-persistence/useTerminalWorkspace` 定向绿；`TerminalPage.android-ime` 子集也保持绿。

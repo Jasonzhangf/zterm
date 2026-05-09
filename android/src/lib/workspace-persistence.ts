@@ -10,6 +10,7 @@ import {
   type AndroidWorkspaceTab,
   type TerminalLayoutState,
 } from './types';
+import { getBrowserStorage } from './browser-storage';
 
 function normalizeAndroidWorkspaceTab(input: unknown): AndroidWorkspaceTab | null {
   if (!input || typeof input !== 'object') {
@@ -206,11 +207,12 @@ export function readPersistedWorkspace(
   sessionIds: string[] = [],
   activeSessionId: string | null = null,
 ): AndroidWorkspaceState {
-  if (typeof window === 'undefined') {
+  const storage = getBrowserStorage();
+  if (!storage) {
     return createWorkspaceFromSessions(sessionIds, activeSessionId);
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
+    const raw = storage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
     const parsed = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Partial<AndroidWorkspaceState>).panes)) {
       return normalizeAndroidWorkspaceState(parsed);
@@ -227,11 +229,12 @@ export function readPersistedWorkspace(
 }
 
 export function persistWorkspace(workspace: AndroidWorkspaceState): void {
-  if (typeof window === 'undefined') {
+  const storage = getBrowserStorage();
+  if (!storage) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(workspace));
+    storage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify(workspace));
   } catch (error) {
     console.error('[workspace-persistence] Failed to persist workspace:', error);
   }

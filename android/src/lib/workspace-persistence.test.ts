@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readPersistedWorkspace } from './workspace-persistence';
+import { persistWorkspace, readPersistedWorkspace } from './workspace-persistence';
 import { STORAGE_KEYS } from './types';
 
 describe('workspace-persistence', () => {
@@ -32,7 +32,9 @@ describe('workspace-persistence', () => {
   });
 
   afterEach(() => {
-    localStorage.clear();
+    if (typeof localStorage?.clear === 'function') {
+      localStorage.clear();
+    }
   });
 
   it('treats pane count as the only split width truth and redistributes persisted pane sizes evenly', () => {
@@ -54,5 +56,19 @@ describe('workspace-persistence', () => {
       1 / 3,
       1 / 3,
     ]);
+  });
+
+  it('does not log or throw when browser storage is unavailable in local harness mode', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('localStorage', {} as Storage);
+
+    const workspace = readPersistedWorkspace(['s1', 's2'], 's2');
+
+    expect(workspace.panes).toHaveLength(1);
+    expect(workspace.panes[0]?.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    persistWorkspace(workspace);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });
