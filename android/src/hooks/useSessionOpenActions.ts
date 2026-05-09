@@ -5,6 +5,7 @@ import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
   buildPersistedOpenTabFromHostSession,
+  buildPersistedOpenTabReuseKey,
   clearClosedTabReuseKeysForOwner,
   persistClosedTabReuseKeys,
   resolveHostForPersistedOpenTab,
@@ -421,7 +422,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         droppedTargets: importPlan.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
       });
     }
-    if (importPlan.tabs.length === 0) {
+    // Filter out tabs whose reuse keys were explicitly closed by the user
+    const filteredTabs = importPlan.tabs.filter((tab) => {
+      const reuseKey = buildPersistedOpenTabReuseKey(tab);
+      return !closedOpenTabReuseKeysRef.current.has(reuseKey);
+    });
+    if (filteredTabs.length === 0) {
       applyOpenTabState({
         tabs: [],
         activeSessionId: null,
@@ -432,11 +438,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     const openedTabs: PersistedOpenTab[] = [];
     runtimeDebug('app.saved-tab-list.load', {
       requestedActiveSessionId: requestedActiveSessionId || null,
-      sessionIds: importPlan.tabs.map((tab) => tab.sessionId),
-      bridgeTargets: importPlan.tabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
+      sessionIds: filteredTabs.map((tab) => tab.sessionId),
+      bridgeTargets: filteredTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
     });
 
-    importPlan.tabs.forEach((tab) => {
+    filteredTabs.forEach((tab) => {
       const host: Host = resolveHostForPersistedOpenTab({
         tab,
         hosts: hostsRef.current,

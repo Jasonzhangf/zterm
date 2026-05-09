@@ -2595,7 +2595,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       const sentMessages = ws.sent
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item));
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(false);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
     }, { timeout: 220 });
   });

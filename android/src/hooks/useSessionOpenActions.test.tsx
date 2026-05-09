@@ -559,7 +559,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('saved-a');
   });
 
-  it('clears persisted reuse tombstones when a saved tab import explicitly reopens that semantic tab', async () => {
+  it('skips closed tabs and preserves their reuse tombstones when loading saved tab list', async () => {
     const reuseKey = buildPersistedOpenTabReuseKey({
       daemonHostId: 'daemon-a',
       bridgeHost: '100.127.23.27',
@@ -628,14 +628,10 @@ describe('useSessionOpenActions explicit-open truth', () => {
       ], 'saved-a');
     });
 
-    expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(false);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
-    expect(harness.refs.openTabStateRef.current.tabs).toEqual([
-      expect.objectContaining({
-        sessionId: 'saved-a',
-        daemonHostId: 'daemon-a',
-        sessionName: 'alpha',
-      }),
-    ]);
+    // Reuse key should remain — the tab was explicitly closed, so it must not be reopened
+    expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(true);
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([reuseKey]));
+    // No tabs should have been opened because the only candidate was filtered out
+    expect(harness.refs.openTabStateRef.current.tabs).toEqual([]);
   });
 });
