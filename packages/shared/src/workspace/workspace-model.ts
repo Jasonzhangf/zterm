@@ -28,6 +28,14 @@ export const MAX_WORKSPACE_PANES = 4;
 export const MIN_PANE_RATIO = 0.18;
 export const DEFAULT_MAX_SPLIT_COUNT = 2;
 
+export interface StaticPaneLayout {
+  orientation: 'landscape' | 'portrait';
+  baselineHeightPx: number;
+  layoutSourceKey: string;
+  maxSplitCount: number;
+  paneRatios: number[];
+}
+
 export function generateWorkspaceId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -199,6 +207,37 @@ export function moveTabBetweenPanes<TTab extends WorkspaceTab>(
   };
   next.activePaneId = targetPaneId;
   return next;
+}
+
+export function resolveStaticPaneLayout(options: {
+  viewportWidth: number;
+  viewportHeight: number;
+  minAspect?: number;
+  hardCap?: number;
+  paneCount?: number;
+  previousLayout?: StaticPaneLayout | null;
+}): StaticPaneLayout {
+  const safeWidth = Math.max(0, Number.isFinite(options.viewportWidth) ? options.viewportWidth : 0);
+  const safeHeight = Math.max(1, Number.isFinite(options.viewportHeight) ? options.viewportHeight : 1);
+  const orientation = safeWidth >= safeHeight ? 'landscape' : 'portrait';
+  const baselineHeightPx = options.previousLayout?.orientation === orientation
+    ? options.previousLayout.baselineHeightPx
+    : safeHeight;
+  const maxSplitCount = resolveMaxSplitCount(
+    safeWidth,
+    baselineHeightPx,
+    options.minAspect,
+    options.hardCap,
+  );
+  const paneCount = Math.max(1, Math.min(options.paneCount ?? 1, maxSplitCount));
+  const paneRatios = Array.from({ length: paneCount }, () => 1 / paneCount);
+  return {
+    orientation,
+    baselineHeightPx,
+    layoutSourceKey: `${orientation}:${Math.round(safeWidth)}:${baselineHeightPx}:${options.hardCap ?? MAX_WORKSPACE_PANES}:${paneCount}`,
+    maxSplitCount,
+    paneRatios,
+  };
 }
 
 export function resolveMaxSplitCount(

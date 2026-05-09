@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   cloneWorkspaceState,
   createWorkspacePane,
@@ -8,7 +8,7 @@ import {
   moveTabBetweenPanes,
   resolveActivePane,
   resolveActiveTab,
-  resolveMaxSplitCount,
+  resolveStaticPaneLayout,
   updateWorkspacePane,
 } from '@zterm/shared';
 import { persistWorkspace, readPersistedWorkspace } from '../lib/workspace-persistence';
@@ -112,7 +112,10 @@ function syncWorkspaceWithSessions(
   return workspaceStatesEqual(current, next) ? current : next;
 }
 
-function cleanupWorkspaceAfterMove(current: AndroidWorkspaceState): AndroidWorkspaceState {
+function cleanupWorkspaceAfterMove(
+  current: AndroidWorkspaceState,
+  paneSizes?: number[] | null,
+): AndroidWorkspaceState {
   const panes = current.panes
     .filter((pane) => pane.tabs.length > 0)
     .map((pane) => {
@@ -122,8 +125,12 @@ function cleanupWorkspaceAfterMove(current: AndroidWorkspaceState): AndroidWorks
   if (panes.length === 0) {
     return current;
   }
+  const normalizedPanes = distributeEvenPaneSizes(panes).map((pane, index) => ({
+    ...pane,
+    size: paneSizes?.[index] ?? pane.size,
+  }));
   return {
-    panes: distributeEvenPaneSizes(panes),
+    panes: normalizedPanes,
     activePaneId: panes.some((pane) => pane.id === current.activePaneId)
       ? current.activePaneId
       : panes[0].id,
@@ -211,12 +218,15 @@ export function useTerminalWorkspace({
   const [workspace, setWorkspace] = useState<AndroidWorkspaceState>(() => (
     readPersistedWorkspace(sessionIds, activeSessionId)
   ));
-  const currentMaxSplitCount = resolveMaxSplitCount(
+  const layoutSnapshotRef = useRef(resolveStaticPaneLayout({
     viewportWidth,
-    viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-    0.22,
-    maxSplitCount,
-  );
+    viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
+    minAspect: 0.22,
+    hardCap: maxSplitCount,
+    paneCount: workspace.panes.length,
+  }));
+  const [layoutSnapshot, setLayoutSnapshot] = useState(layoutSnapshotRef.current);
+  const currentMaxSplitCount = layoutSnapshot.maxSplitCount;
 
   useLayoutEffect(() => {
     setWorkspace((current) => syncWorkspaceWithSessions(current, sessions, activeSessionId));
@@ -225,6 +235,22 @@ export function useTerminalWorkspace({
   useEffect(() => {
     persistWorkspace(workspace);
   }, [workspace]);
+
+  useEffect(() => {
+    const nextLayout = resolveStaticPaneLayout({
+      viewportWidth,
+      viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
+      minAspect: 0.22,
+      hardCap: maxSplitCount,
+      paneCount: workspace.panes.length,
+      previousLayout: layoutSnapshotRef.current,
+    });
+    if (nextLayout.layoutSourceKey === layoutSnapshotRef.current.layoutSourceKey) {
+      return;
+    }
+    layoutSnapshotRef.current = nextLayout;
+    setLayoutSnapshot(nextLayout);
+  }, [maxSplitCount, viewportHeight, viewportWidth, workspace.panes.length]);
 
   useEffect(() => {
     if (workspace.panes.length <= currentMaxSplitCount) {
@@ -259,11 +285,14 @@ export function useTerminalWorkspace({
         };
       }
       return {
-        panes: distributeEvenPaneSizes(next.panes),
+        panes: distributeEvenPaneSizes(next.panes).map((pane, index) => ({
+          ...pane,
+          size: layoutSnapshot.paneRatios[index] ?? pane.size,
+        })),
         activePaneId: next.activePaneId,
       };
     });
-  }, [currentMaxSplitCount, workspace.panes.length]);
+  }, [currentMaxSplitCount, layoutSnapshot.paneRatios, workspace.panes.length]);
 
   const splitAvailable = sessions.length > 1;
   const splitVisible = workspace.panes.length >= 2 && workspace.panes.every((pane) => pane.tabs.length >= 1);
@@ -338,10 +367,13 @@ export function useTerminalWorkspace({
           activePaneId: next.activePaneId === removedPane.id ? keptPane.id : next.activePaneId,
         };
       }
-      next.panes = distributeEvenPaneSizes(next.panes);
+      next.panes = distributeEvenPaneSizes(next.panes).map((pane, index) => ({
+        ...pane,
+        size: layoutSnapshot.paneRatios[index] ?? pane.size,
+      }));
       return next;
     });
-  }, [activeSessionId, currentMaxSplitCount]);
+  }, [activeSessionId, currentMaxSplitCount, layoutSnapshot.paneRatios]);
 
   const moveSessionToOtherPane = useCallback((sessionId: string) => {
     setWorkspace((current) => {
@@ -354,9 +386,9 @@ export function useTerminalWorkspace({
       if (!targetPane) {
         return current;
       }
-      return cleanupWorkspaceAfterMove(moveTabBetweenPanes(current, sourcePane.id, tabId, targetPane.id));
+      return cleanupWorkspaceAfterMove(moveTabBetweenPanes(current, sourcePane.id, tabId, targetPane.id), layoutSnapshot.paneRatios);
     });
-  }, []);
+  }, [layoutSnapshot.paneRatios]);
 
   const assignSessionToPane = useCallback((sessionId: string, paneId: string) => {
     setWorkspace((current) => {
@@ -365,14 +397,14 @@ export function useTerminalWorkspace({
       if (!sourcePane || sourcePane.id === paneId) {
         return current;
       }
-      const moved = cleanupWorkspaceAfterMove(moveTabBetweenPanes(current, sourcePane.id, tabId, paneId));
+      const moved = cleanupWorkspaceAfterMove(moveTabBetweenPanes(current, sourcePane.id, tabId, paneId), layoutSnapshot.paneRatios);
       return {
         ...moved,
         activePaneId: paneId,
         panes: moved.panes.map((pane) => (pane.id === paneId ? { ...pane, activeTabId: tabId } : pane)),
       };
     });
-  }, []);
+  }, [layoutSnapshot.paneRatios]);
 
   const attachSessionsToPane = useCallback((
     sessionIdsToAttach: string[],
@@ -420,7 +452,7 @@ export function useTerminalWorkspace({
         const tabId = `tab-${sessionId}`;
         const sourcePane = findPaneContainingTab(next, tabId) as AndroidWorkspacePane | null;
         if (sourcePane && sourcePane.id !== targetPaneId) {
-          next = cleanupWorkspaceAfterMove(moveTabBetweenPanes(next, sourcePane.id, tabId, targetPaneId));
+          next = cleanupWorkspaceAfterMove(moveTabBetweenPanes(next, sourcePane.id, tabId, targetPaneId), layoutSnapshot.paneRatios);
           return;
         }
         if (!sourcePane) {
@@ -442,10 +474,10 @@ export function useTerminalWorkspace({
       next = cleanupWorkspaceAfterMove({
         ...next,
         activePaneId: targetPaneId,
-      });
+      }, layoutSnapshot.paneRatios);
       return next;
     });
-  }, [activeSessionId, sessions]);
+  }, [activeSessionId, layoutSnapshot.paneRatios, sessions]);
 
   const attachSessionToPane = useCallback((
     sessionId: string,
@@ -462,7 +494,7 @@ export function useTerminalWorkspace({
       }
       return { ...current, activePaneId: paneId };
     });
-  }, []);
+  }, [layoutSnapshot.paneRatios]);
 
   const switchTabInPane = useCallback((paneId: string, tabId: string) => {
     setWorkspace((current) => ({
@@ -490,7 +522,10 @@ export function useTerminalWorkspace({
       }
       return {
         ...next,
-        panes: distributeEvenPaneSizes(nonEmptyPanes.length > 0 ? nonEmptyPanes : next.panes),
+        panes: distributeEvenPaneSizes(nonEmptyPanes.length > 0 ? nonEmptyPanes : next.panes).map((pane, index) => ({
+          ...pane,
+          size: layoutSnapshot.paneRatios[index] ?? pane.size,
+        })),
         activePaneId: nonEmptyPanes.some((pane) => pane.id === next.activePaneId)
           ? next.activePaneId
           : nonEmptyPanes[0]?.id || next.activePaneId,

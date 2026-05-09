@@ -146,4 +146,35 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     expect(result.current.workspace.activePaneId).toBe('pane-2');
     expect(result.current.activePaneSessionId).toBe('s2');
   });
+
+  it('does not collapse a 4-pane layout when only viewport height shrinks like IME lift', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.25, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.25, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+        { id: 'pane-3', size: 0.25, activeTabId: 'tab-s3', tabs: [{ id: 'tab-s3', sessionId: 's3' }] },
+        { id: 'pane-4', size: 0.25, activeTabId: 'tab-s4', tabs: [{ id: 'tab-s4', sessionId: 's4' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    const { result, rerender } = renderHook(({ viewportHeight }) => useTerminalWorkspace({
+      sessions: [makeSession('s1'), makeSession('s2'), makeSession('s3'), makeSession('s4')],
+      activeSessionId: 's1',
+      viewportWidth: 1200,
+      viewportHeight,
+      maxSplitCount: 4,
+    }), {
+      initialProps: { viewportHeight: 900 },
+    });
+
+    expect(result.current.currentMaxSplitCount).toBe(4);
+    expect(result.current.workspace.panes).toHaveLength(4);
+
+    rerender({ viewportHeight: 620 });
+
+    expect(result.current.currentMaxSplitCount).toBe(4);
+    expect(result.current.workspace.panes).toHaveLength(4);
+    expect(result.current.workspace.panes.map((pane) => pane.size)).toEqual([0.25, 0.25, 0.25, 0.25]);
+  });
 });
