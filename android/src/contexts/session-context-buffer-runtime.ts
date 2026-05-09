@@ -76,6 +76,7 @@ export function handleBufferHeadRuntime(options: {
     sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
+    lastSyncRequestAtRef: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
     sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
@@ -122,6 +123,10 @@ export function handleBufferHeadRuntime(options: {
     seenAt: Date.now(),
   });
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
+  // Clear sync debounce for this session when fresh server head arrives
+  options.refs.lastSyncRequestAtRef.current.delete(`${options.sessionId}:tail-refresh`);
+  options.refs.lastSyncRequestAtRef.current.delete(`${options.sessionId}:reading-repair`);
+
 
   const activeTransport = options.isSessionTransportActive(options.sessionId);
   const shouldAcceptLiveBuffer = activeTransport

@@ -300,6 +300,7 @@ export function resetSessionTransportPullBookkeepingInfraRuntime(options: {
   reason: string;
   activeSessionId: string | null;
   sessionPullStateRef: { current: Map<string, unknown> };
+  lastSyncRequestAtRef: { current: Map<string, unknown> };
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   resetSessionTransportPullBookkeepingRuntime(options as Parameters<typeof resetSessionTransportPullBookkeepingRuntime>[0]);

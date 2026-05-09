@@ -73,6 +73,7 @@ export function createSessionInfraFacadeRuntime(options: {
   sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
   sessionRevisionResetRef: { current: Map<string, RevisionResetExpectation> };
   lastHeadRequestAtRef: { current: Map<string, number> };
+  lastSyncRequestAtRef: { current: Map<string, unknown> };
   terminalCacheLines: number;
   defaultRows: number;
   bridgeSettings: BridgeSettings;
@@ -301,6 +302,7 @@ export function createSessionInfraFacadeRuntime(options: {
       reason,
       activeSessionId: options.stateRef.current.activeSessionId,
       sessionPullStateRef: options.sessionPullStateRef,
+      lastSyncRequestAtRef: options.lastSyncRequestAtRef,
       runtimeDebug: options.runtimeDebug,
     });
   };

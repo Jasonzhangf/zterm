@@ -24,9 +24,9 @@ describe('server mirror capture truth gates', () => {
     expect(source).toContain('captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux');
   });
 
-  it('canonicalizes captured lines directly instead of replaying a joined screen snapshot into synthetic scrollback', () => {
+  it('canonicalizes captured lines directly inside the snapshot capture owner instead of replaying a joined screen snapshot into synthetic scrollback', () => {
     const source = readMirrorCaptureSource();
-    const block = extractBlock(source, 'async function captureMirrorAuthoritativeBufferFromTmux');
+    const block = extractBlock(source, 'async function captureTmuxMirrorSnapshot');
 
     expect(block).toContain('canonicalizeCapturedMirrorLines');
     expect(block).not.toContain("writeString(capturedLines.join('\\r\\n'))");

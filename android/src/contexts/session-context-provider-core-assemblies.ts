@@ -120,6 +120,7 @@ export function useSessionProviderCoreAssemblies(
     sessionBufferHeadsRef,
     sessionRevisionResetRef,
     lastHeadRequestAtRef,
+    lastSyncRequestAtRef,
     terminalCacheLines: options.terminalCacheLines,
     defaultRows: DEFAULT_TERMINAL_SESSION_VIEWPORT.rows,
     bridgeSettings: options.bridgeSettings,

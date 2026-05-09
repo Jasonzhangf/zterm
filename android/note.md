@@ -1,4 +1,23 @@
 # note
+- Jason 2026-05-09 multi-pane goal completion audit补口:
+  - 现象：completion audit 只剩 `SessionContext.ws-refresh` 一条红测：
+    `reissues tail refresh after active tab re-entry even when the stale in-flight request targets the same head window`
+  - 真因：`active-reentry` 路径的 `resetSessionTransportPullBookkeeping()` 之前只清 `sessionPullStateRef`，**没清 `lastSyncRequestAtRef` 的 33ms semantic debounce 真相**
+  - 后果：旧 in-flight pull 虽然语义已被 active re-entry 作废，但同 session/purpose 的 debounce 仍残留，第二次 head 到来时合法的 `tail-refresh` 被误判成 duplicate，导致只剩 `buffer-head-request`，不再发 `buffer-sync-request`
+  - 唯一正确修改点：`session-context-pull-runtime.ts/resetSessionTransportPullBookkeeping`
+    - 因为 `sessionPullStateRef + lastSyncRequestAtRef` 都属于 **transport pull bookkeeping**
+    - 不能去放宽 planner，也不能去改测试，更不能在 active/runtime 再加第二套 reset
+  - 本轮收口：
+    - reset 时同时清：
+      - in-flight pull state
+      - `sessionId:tail-refresh`
+      - `sessionId:reading-repair`
+    - 新增 `session-context-pull-runtime.test.ts`
+  - 本轮验证：
+    - `pnpm --dir android exec vitest run src/contexts/session-context-pull-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx -t "clears both in-flight pull state and sync debounce truth on bookkeeping reset|reissues tail refresh after active tab re-entry even when the stale in-flight request targets the same head window" --reporter dot`
+    - `pnpm --dir android exec vitest run src/hooks/useTerminalShellActions.test.tsx src/lib/terminal-layout-profile.test.ts src/components/terminal/TerminalHeader.test.tsx src/components/terminal/TerminalQuickBar.test.tsx src/contexts/multi-pane-refresh.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx src/hooks/useTerminalWorkspace.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-context-pull-runtime.test.ts --reporter dot`
+    - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+
 - Jason 2026-04-25 新冻结:
   - server 的唯一职责：mirror tmux truth，回答 head 和 ranges
   - server 不得碰：策略、渲染、follow、reading、patch 规划
