@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { createFileTransferSessionRuntime } from '../../lib/file-transfer-session-runtime';
 import type {
   FileEntry,
   FileListRequestPayload,
-  FileListResponsePayload,
-  FileDownloadRequestPayload,
-  FileDownloadChunkPayload,
-  FileDownloadCompletePayload,
-  FileUploadStartPayload,
-  FileUploadChunkPayload,
-  FileUploadEndPayload,
   TransferProgress,
 } from '../../lib/types';
 
@@ -165,10 +159,36 @@ export function FileTransferSheet({
   }, [sendJson]);
 
   // Remote state
-  const [remotePath, setRemotePath] = useState('');
-  const [remoteEntries, setRemoteEntries] = useState<RemoteFileEntry[]>([]);
-  const [remoteParentPath, setRemoteParentPath] = useState<string | null>(null);
-  const [remoteLoading, setRemoteLoading] = useState(false);
+  const fileTransferRuntimeRef = useRef(createFileTransferSessionRuntime({
+    onDownloadComplete: async (payload, orderedChunksBase64) => {
+      try {
+        const combined = orderedChunksBase64.join('');
+        const downloadDir = localPath || '/storage/emulated/0/Download/zterm';
+        try {
+          await Filesystem.mkdir({ path: downloadDir, directory: Directory.ExternalStorage, recursive: true });
+        } catch (mkdirError) { console.warn('[FileTransferSheet] mkdir failed (may already exist):', mkdirError); }
+
+        await Filesystem.writeFile({
+          path: `${downloadDir}/${payload.fileName}`,
+          data: combined,
+          directory: Directory.ExternalStorage,
+        });
+        loadLocalDir(downloadDir, showHiddenLocal);
+      } catch (error) {
+        fileTransferRuntimeRef.current.markDownloadWriteError(
+          payload.requestId,
+          error instanceof Error ? error.message : String(error),
+        );
+        forceRuntimeTick((value) => value + 1);
+      }
+    },
+  }));
+  const [, forceRuntimeTick] = useState(0);
+  const runtimeState = fileTransferRuntimeRef.current.getState();
+  const remotePath = runtimeState.remotePath;
+  const remoteEntries = runtimeState.remoteEntries as RemoteFileEntry[];
+  const remoteParentPath = runtimeState.remoteParentPath;
+  const remoteLoading = runtimeState.remoteLoading;
   const [showHiddenRemote, setShowHiddenRemote] = useState(false);
   const [selectedRemote, setSelectedRemote] = useState<Set<string>>(new Set());
 
@@ -183,21 +203,14 @@ export function FileTransferSheet({
   const [direction, setDirection] = useState<'upload' | 'download'>('download');
 
   // Transfers
-  const [transfers, setTransfers] = useState<TransferProgress[]>([]);
-
-  // Request tracking
-  const activeListRequestRef = useRef<string | null>(null);
-  const activeDownloadRequestRef = useRef<string | null>(null);
-  const downloadChunksRef = useRef<Map<number, string>>(new Map());
-  const transferDoneCallbacksRef = useRef<Map<string, () => void>>(new Map());
+  const transfers = runtimeState.transfers as TransferProgress[];
 
   // Request remote file list
   const requestRemoteList = useCallback((path: string, showHidden: boolean) => {
-    const requestId = `flist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    activeListRequestRef.current = requestId;
-    setRemoteLoading(true);
-    const payload: FileListRequestPayload = { requestId, path, showHidden };
+    const request = fileTransferRuntimeRef.current.requestRemoteList(path, showHidden);
+    const payload: FileListRequestPayload = request.message.payload;
     sendJsonRef.current({ type: 'file-list-request', payload });
+    forceRuntimeTick((value) => value + 1);
   }, []);
 
   useEffect(() => {
@@ -206,12 +219,10 @@ export function FileTransferSheet({
     }
 
     const initialRemotePath = remoteCwd.trim();
-    setRemotePath(initialRemotePath);
-    setRemoteParentPath(null);
-    setRemoteEntries([]);
+    fileTransferRuntimeRef.current.open(initialRemotePath);
     setSelectedRemote(new Set());
     setSelectedLocal(new Set());
-    setTransfers([]);
+    forceRuntimeTick((value) => value + 1);
     requestRemoteList(initialRemotePath, showHiddenRemote);
   }, [open, remoteCwd, requestRemoteList, showHiddenRemote]);
 
@@ -255,99 +266,13 @@ export function FileTransferSheet({
   useEffect(() => {
     if (!open || !onFileTransferMessage) return;
     return onFileTransferMessage((msg: any) => {
-      if (msg.type === 'file-list-response') {
-        const payload = msg.payload as FileListResponsePayload;
-        if (activeListRequestRef.current !== payload.requestId) return;
-        activeListRequestRef.current = null;
-        setRemotePath(payload.path);
-        setRemoteParentPath(payload.parentPath);
-        setRemoteEntries(payload.entries);
-        setRemoteLoading(false);
-      } else if (msg.type === 'file-list-error') {
-        activeListRequestRef.current = null;
-        setRemoteLoading(false);
-      } else if (msg.type === 'file-download-chunk') {
-        const payload = msg.payload as FileDownloadChunkPayload;
-        if (activeDownloadRequestRef.current !== payload.requestId) return;
-        downloadChunksRef.current.set(payload.chunkIndex, payload.dataBase64);
-        setTransfers(prev => prev.map(t =>
-          t.id === payload.requestId
-            ? { ...t, transferredBytes: t.transferredBytes + 1, status: 'transferring' as const }
-            : t
-        ));
-      } else if (msg.type === 'file-download-complete') {
-        const payload = msg.payload as FileDownloadCompletePayload;
-        if (activeDownloadRequestRef.current !== payload.requestId) return;
-        activeDownloadRequestRef.current = null;
-        transferDoneCallbacksRef.current.get(payload.requestId)?.();
-        transferDoneCallbacksRef.current.delete(payload.requestId);
-        // Reassemble and write to local
-        void reassembleDownload(payload);
-      } else if (msg.type === 'file-download-error') {
-        activeDownloadRequestRef.current = null;
-        transferDoneCallbacksRef.current.get(msg.payload.requestId)?.();
-        transferDoneCallbacksRef.current.delete(msg.payload.requestId);
-        setTransfers(prev => prev.map(t =>
-          t.id === msg.payload.requestId ? { ...t, status: 'error' as const, error: msg.payload.error } : t
-        ));
-      } else if (msg.type === 'file-upload-progress') {
-        const payload = msg.payload as any;
-        setTransfers(prev => prev.map(t =>
-          t.id === payload.requestId
-            ? { ...t, transferredBytes: payload.chunkIndex, status: 'transferring' as const }
-            : t
-        ));
-      } else if (msg.type === 'file-upload-complete') {
-        const payload = msg.payload as any;
-        setTransfers(prev => prev.map(t =>
-          t.id === payload.requestId ? { ...t, status: 'done' as const, transferredBytes: t.totalBytes } : t
-        ));
-        transferDoneCallbacksRef.current.get(payload.requestId)?.();
-        transferDoneCallbacksRef.current.delete(payload.requestId);
-      } else if (msg.type === 'file-upload-error') {
-        setTransfers(prev => prev.map(t =>
-          t.id === msg.payload.requestId ? { ...t, status: 'error' as const, error: msg.payload.error } : t
-        ));
-        transferDoneCallbacksRef.current.get(msg.payload.requestId)?.();
-        transferDoneCallbacksRef.current.delete(msg.payload.requestId);
-      }
+      void fileTransferRuntimeRef.current.applyMessage(msg).then((handled) => {
+        if (handled) {
+          forceRuntimeTick((value) => value + 1);
+        }
+      });
     });
   }, [open, onFileTransferMessage]);
-
-  // Reassemble downloaded chunks and write to local
-  const reassembleDownload = useCallback(async (payload: FileDownloadCompletePayload) => {
-    try {
-      const chunks = downloadChunksRef.current;
-      downloadChunksRef.current = new Map();
-      const sortedBase64: string[] = [];
-      for (let i = 0; i < (chunks.size || 0); i++) {
-        const chunk = chunks.get(i);
-        if (chunk) sortedBase64.push(chunk);
-      }
-      const combined = sortedBase64.join('');
-      const downloadDir = localPath || '/storage/emulated/0/Download/zterm';
-
-      // Ensure directory exists
-      try {
-        await Filesystem.mkdir({ path: downloadDir, directory: Directory.ExternalStorage, recursive: true });
-      } catch (mkdirError) { console.warn('[FileTransferSheet] mkdir failed (may already exist):', mkdirError); }
-
-      await Filesystem.writeFile({
-        path: `${downloadDir}/${payload.fileName}`,
-        data: combined,
-        directory: Directory.ExternalStorage,
-      });
-
-      setTransfers(prev => prev.map(t =>
-        t.id === payload.requestId ? { ...t, status: 'done' as const, transferredBytes: t.totalBytes } : t
-      ));
-      loadLocalDir(downloadDir, showHiddenLocal);
-    } catch (err) {
-      setTransfers(prev => prev.map(t =>
-        t.id === payload.requestId ? { ...t, status: 'error' as const, error: String(err) } : t
-      ));
-    }
-  }, [localPath, showHiddenLocal, loadLocalDir]);
 
   // Toggle selection
   const toggleRemote = useCallback((name: string) => {
@@ -369,7 +294,6 @@ export function FileTransferSheet({
   }, []);
 
   const navigateRemotePath = useCallback((path: string) => {
-    setRemotePath(path);
     setSelectedRemote(new Set());
     requestRemoteList(path, showHiddenRemote);
   }, [requestRemoteList, showHiddenRemote]);
@@ -382,33 +306,13 @@ export function FileTransferSheet({
       for (const name of selectedRemote) {
         const entry = remoteEntries.find(e => e.name === name);
         if (!entry || entry.type !== 'file') continue;
-        const requestId = `fdl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const remoteFilePath = remotePath === '/' ? `/${name}` : `${remotePath}/${name}`;
-        activeDownloadRequestRef.current = requestId;
-        downloadChunksRef.current = new Map();
-        setTransfers(prev => [...prev, {
-          id: requestId,
-          fileName: name,
-          direction: 'download',
-          totalBytes: entry.size,
-          transferredBytes: 0,
-          status: 'transferring',
-        }]);
-        const payload: FileDownloadRequestPayload = {
-          requestId,
-          remotePath: remoteFilePath,
-          fileName: name,
-          totalBytes: entry.size,
-        };
-        sendJson({ type: 'file-download-request', payload });
-        // Wait for this download to finish before starting next
-        await new Promise<void>((resolve) => {
-          transferDoneCallbacksRef.current.set(requestId, resolve);
-          setTimeout(() => {
-            transferDoneCallbacksRef.current.delete(requestId);
-            resolve();
-          }, 60000);
-        });
+        const request = fileTransferRuntimeRef.current.startDownload({ name, size: entry.size }, remotePath);
+        forceRuntimeTick((value) => value + 1);
+        sendJson(request.message);
+        await Promise.race([
+          request.waitForDone(),
+          new Promise<void>((resolve) => setTimeout(resolve, 60000)),
+        ]);
       }
       setSelectedRemote(new Set());
     } else {
@@ -416,7 +320,6 @@ export function FileTransferSheet({
       for (const name of selectedLocal) {
         const entry = localEntries.find(e => e.name === name);
         if (!entry || entry.type !== 'file') continue;
-        const requestId = `ful-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         try {
           const readResult = await Filesystem.readFile({
             path: `${localPath}/${name}`,
@@ -428,38 +331,21 @@ export function FileTransferSheet({
           if (!targetDir) {
             throw new Error('remote path unavailable');
           }
-
-          setTransfers(prev => [...prev, {
-            id: requestId,
-            fileName: name,
-            direction: 'upload',
-            totalBytes: entry.size,
-            transferredBytes: 0,
-            status: 'transferring',
-          }]);
-
-          const startPayload: FileUploadStartPayload = {
-            requestId,
-            targetDir,
-            fileName: name,
-            fileSize: entry.size,
-            chunkCount,
-          };
-          sendJson({ type: 'file-upload-start', payload: startPayload });
+          const request = fileTransferRuntimeRef.current.startUpload({ name, size: entry.size }, targetDir, chunkCount);
+          forceRuntimeTick((value) => value + 1);
+          sendJson(request.startMessage);
 
           // Split base64 into chunks and send
           for (let i = 0; i < chunkCount; i++) {
             const start = i * FILE_CHUNK_SIZE;
             const end = Math.min(start + FILE_CHUNK_SIZE, base64.length);
             const chunk = base64.slice(start, end);
-            const chunkPayload: FileUploadChunkPayload = { requestId, chunkIndex: i, dataBase64: chunk };
-            sendJson({ type: 'file-upload-chunk', payload: chunkPayload });
+            sendJson(request.buildChunkMessage(i, chunk));
           }
-
-          const endPayload: FileUploadEndPayload = { requestId };
-          sendJson({ type: 'file-upload-end', payload: endPayload });
+          sendJson(request.endMessage);
         } catch (err) {
-          setTransfers(prev => [...prev, {
+          const requestId = `ful-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          fileTransferRuntimeRef.current.appendTransferError({
             id: requestId,
             fileName: name,
             direction: 'upload',
@@ -467,14 +353,15 @@ export function FileTransferSheet({
             transferredBytes: 0,
             status: 'error',
             error: String(err),
-          }]);
+          });
+          forceRuntimeTick((value) => value + 1);
         }
       }
       setSelectedLocal(new Set());
       // Refresh remote list
       requestRemoteList(remotePath, showHiddenRemote);
     }
-  }, [direction, selectedRemote, selectedLocal, remoteEntries, localEntries, remotePath, localPath, sendJson, transfers, requestRemoteList, showHiddenRemote]);
+  }, [direction, selectedRemote, selectedLocal, remoteEntries, localEntries, remotePath, localPath, sendJson, requestRemoteList, showHiddenRemote]);
 
   if (!open) return null;
 

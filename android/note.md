@@ -2213,3 +2213,40 @@ user open
   2. `pnpm --dir android exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx --reporter dot`
      - `2 files / 6 tests passed`
 - 结论：本轮已让 update-check 从 Android hook owner 收口为可本地直接测试的 runtime block；下一轮适合用同样模式收 `file-transfer message block` 或 `remote screenshot runtime` 的 UI/hook 残余边界。
+
+## [2026-05-09] file-transfer truth 收口到 session runtime block
+- 本轮目标：只收 `file-transfer truth`，不碰 terminal 主链与 UI 布局。把 `FileTransferSheet.tsx` 中的消息 owner / 传输进度真相 / 下载上传生命周期拉到独立 block。
+- 分析：
+  - 旧 owner 是 `android/src/components/terminal/FileTransferSheet.tsx`：同时持有 requestId、在途下载、chunk cache、transfer progress、daemon message apply、下载重组、上传请求编排。
+  - 这违反 Android 只做 adapter/shell 的要求；component 不应该持有 file-transfer 业务真相。
+  - 另外仓库里还残留两份 0 调用的旧 file-transfer 实现：
+    - `android/src/lib/file-transfer/FileTransferCoordinator.ts`
+    - `android/src/lib/file-transfer/FileTransferMessageHandler.ts`
+    属于错误存活实现，必须物理删除。
+- 本轮唯一正确修改点：
+  - 新增 `android/src/lib/file-transfer-session-runtime.ts`
+  - 修改 `android/src/components/terminal/FileTransferSheet.tsx`
+  - 删除 `android/src/lib/file-transfer/FileTransferCoordinator.ts`
+  - 删除 `android/src/lib/file-transfer/FileTransferMessageHandler.ts`
+- 为什么这是唯一正确修改点：
+  - 问题不在 SessionContext/socket/server，而在 file-transfer session lifecycle 真相被塞进了 component。若只继续给 component 补测试，Android 仍然过厚；若直接改 SessionContext contract，会超出本轮 owner 范围。
+  - 因此唯一正确路径是先把 `FileTransferSheet` 里的 request/progress/chunk/settle 真相下沉到独立 runtime block，再让 component 只保留本地目录 adapter + 选择/导航 UI。
+- 本轮设计冻结：
+  - `file-transfer-session-runtime.ts` 成为 file-transfer truth owner：
+    - remote list request / response truth
+    - active download request truth
+    - chunk accumulation / completion truth
+    - upload/download transfer progress truth
+    - message apply / settle
+  - `FileTransferSheet.tsx` 只保留：
+    - Capacitor Filesystem 适配
+    - 本地目录列表/导航/选择 UI
+    - 调用 runtime 产出的 request message 并刷新视图
+- 已删除/收口：
+  - 删除未接线旧实现：`FileTransferCoordinator.ts` / `FileTransferMessageHandler.ts`
+  - 删除 `FileTransferSheet` 内联的 file-transfer message owner / chunk owner / progress owner
+- 验证：
+  1. `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  2. `pnpm --dir android exec vitest run src/lib/file-transfer-session-runtime.test.ts src/lib/file-transfer-message-runtime.test.ts src/components/terminal/FileTransferSheet.test.tsx --reporter dot`
+     - `3 files / 10 tests passed`
+- 结论：本轮已让 file-transfer truth 从 component owner 收口为独立 session runtime block；下一轮适合继续收 `screenshot truth` 与 file-transfer 的 shared interaction contract，或继续把 `onFileTransferMessage(msg: any)` 从 facade 改成显式 typed projection。
