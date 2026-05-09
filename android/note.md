@@ -2126,3 +2126,11 @@ user open
 - 目标: 修复已安装最新版后仍重复提示升级
 - 假设: useAppUpdate 错把 App.getInfo().build 当 Android versionCode 使用，导致 1551 < 1011551 持续判新
 - 范围: useAppUpdate.ts / useAppUpdate.test.tsx / 仅客户端构建，暂不动 daemon
+
+## [2026-05-09 11:32:54] update loop fix
+- 设计: 升级比较唯一真源固定为编译注入 APP_VERSION_CODE；删除 App.getInfo().build 覆盖路径，避免短 buildNumber 误判为旧版本。
+- 测试: 增加 manifest versionCode == APP_VERSION_CODE 不提示；manifest versionCode 与长 versionCode 相等但 buildNumber 更短也不提示。
+
+## [2026-05-09 11:34:50] build gate status
+- 标准 build-android-debug.sh 被仓库现有 App.first-paint / SessionContext.ws-refresh 回归阻塞，非本次 useAppUpdate 改动引入。
+- 为交付 APK，本轮改走显式构建链路：pnpm build -> cap sync -> gradlew assembleDebug -> prepare-update-bundle，并保留门禁失败证据。
