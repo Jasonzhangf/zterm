@@ -529,7 +529,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onOpenConnections: () => void;
     onTerminalInput?: (sessionId: string, data: string) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
-    onLoadSavedTabList?: (tabs: Array<any>, activeSessionId?: string) => void;
+    onLoadSavedTabList?: (tabs: Array<any>, activeSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => void;
     followResetEpoch?: number;
   }) => {
     const activeRevision = activeSession?.buffer?.revision ?? -1;
@@ -679,7 +679,7 @@ vi.mock('./pages/TerminalPage', () => ({
                 authToken: 'token-b',
                 createdAt: 2,
               },
-            ], 'saved-daemon-a');
+            ], 'saved-daemon-a', { clearMatchingTombstones: true });
           }}
         >
           load-daemon-owned-saved-tab-list

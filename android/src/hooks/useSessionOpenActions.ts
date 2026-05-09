@@ -70,7 +70,7 @@ export interface SessionOpenActionsResult {
   pickerTarget: BridgeTarget | null;
   pickerInitialSessions: string[];
   pickerScopePaneId: string | null;
-  handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => Promise<void>;
+  handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => Promise<void>;
   handleAddNew: () => void;
   handleOpenQuickTabPicker: (paneId?: string) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
@@ -409,7 +409,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
   }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
-  const handleLoadSavedTabList = useCallback(async (tabs: PersistedOpenTab[], requestedActiveSessionId?: string) => {
+  const handleLoadSavedTabList = useCallback(async (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => {
     const importPlan = await resolveRemoteRestorableOpenTabState({
       tabs,
       activeSessionId: requestedActiveSessionId?.trim() || null,
@@ -422,11 +422,33 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         droppedTargets: importPlan.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
       });
     }
-    // Filter out tabs whose reuse keys were explicitly closed by the user
-    const filteredTabs = importPlan.tabs.filter((tab) => {
-      const reuseKey = buildPersistedOpenTabReuseKey(tab);
-      return !closedOpenTabReuseKeysRef.current.has(reuseKey);
-    });
+    // Handle tabs whose reuse keys were explicitly closed by the user
+    // - Cold start (clearMatchingTombstones=false): filter them out (don't auto-restore closed tabs)
+    // - Explicit import (clearMatchingTombstones=true): clear tombstones and allow restore
+    const filteredTabs = options?.clearMatchingTombstones
+      ? importPlan.tabs.map((tab) => {
+          const reuseKey = buildPersistedOpenTabReuseKey(tab);
+          if (closedOpenTabReuseKeysRef.current.has(reuseKey)) {
+            closedOpenTabReuseKeysRef.current.delete(reuseKey);
+            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
+            runtimeDebug('app.saved-tab-list.clear-tombstone', {
+              sessionId: tab.sessionId,
+              sessionName: tab.sessionName,
+            });
+          }
+          return tab;
+        })
+      : importPlan.tabs.filter((tab) => {
+          const reuseKey = buildPersistedOpenTabReuseKey(tab);
+          if (closedOpenTabReuseKeysRef.current.has(reuseKey)) {
+            runtimeDebug('app.saved-tab-list.skip-closed', {
+              sessionId: tab.sessionId,
+              sessionName: tab.sessionName,
+            });
+            return false;
+          }
+          return true;
+        });
     if (filteredTabs.length === 0) {
       applyOpenTabState({
         tabs: [],
