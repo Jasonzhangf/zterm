@@ -1987,3 +1987,33 @@ user open
 ### 5. 现有测试状况
 - 无 multi-pane 专用测试。
 - 现有 949 个测试需保持全部通过。
+
+
+## 2026-05-09 TerminalView renderer orchestration 第三刀（viewport/resize/width-mode）
+
+- 继续对照 goal 审计：上一轮 follow/read/guard 已下沉，但 `TerminalView.tsx` 仍残留 viewport/resize/width-mode 决策逻辑，未达到 thin orchestration shell。
+- 本轮新增 `packages/shared/src/terminal/renderer/viewport.ts`，下沉纯决策：
+  - `buildTerminalMeasuredViewportState`
+  - `hasTerminalViewportLayoutChanged`
+  - `resolveTerminalWidthModeSignal`
+  - `resolveTerminalResizeCommitPlan`
+- `TerminalView.tsx` 当前变化：
+  - `commitMeasuredViewportState` 改为消费 shared state builder
+  - `emitWidthModeSignalIfNeeded` 改为消费 shared width-mode signal resolver
+  - `scheduleViewportResizeCommit` 改为消费 shared resize commit plan resolver
+  - `syncViewport` 的 layout-drift 判定改为消费 shared helper
+- 这刀的意义：
+  - viewport/resize/width-mode 的判断规则不再散落在 React component 内
+  - `TerminalView` 继续朝“只剩 refs / event bind / effect wiring / DOM measure / emit”靠拢
+- 已验证：
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir android exec vitest run src/components/TerminalView.theme.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx --reporter dot`
+  - `pnpm dlx vitest run packages/shared/src/terminal/renderer.test.ts --reporter dot`
+  - 结果：
+    - Android TerminalView tests: `69 passed`
+    - shared renderer tests: `16 passed`
+    - tsc: green
+- 当前状态：
+  - facade 删除：已完成
+  - row/cursor/follow/viewport 纯逻辑下沉：已完成
+  - 仍待最终审计 `TerminalView` 是否还剩超出 thin orchestration shell 的真相逻辑；若没有，即可进入本 goal 完成审计。

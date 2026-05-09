@@ -24,6 +24,10 @@ import {
   handleTerminalFollowModeScrollGuards,
   alignTerminalRenderBottomToFollow,
   reconcileTerminalViewportAfterBufferShift,
+  buildTerminalMeasuredViewportState,
+  hasTerminalViewportLayoutChanged,
+  resolveTerminalWidthModeSignal,
+  resolveTerminalResizeCommitPlan,
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
   resolveCursorOverlay,
@@ -460,65 +464,50 @@ function TerminalViewComponent({
   }, [viewportClientHeightPx]);
 
   const commitMeasuredViewportState = useCallback((nextViewport: ReturnType<typeof measureTerminalViewport>, nextClientHeight: number) => {
-    setViewportClientHeightPx((current) => (current === nextClientHeight ? current : nextClientHeight));
-    setResolvedRowHeight((current) => current === nextViewport.resolvedRowHeight ? current : nextViewport.resolvedRowHeight);
-    setResolvedCellWidthPx((current) => current === nextViewport.resolvedCellWidthPx ? current : nextViewport.resolvedCellWidthPx);
-    setViewportRows((current) => current === nextViewport.rows ? current : nextViewport.rows);
+    const nextState = buildTerminalMeasuredViewportState(nextViewport, nextClientHeight);
+    setViewportClientHeightPx((current) => (current === nextState.viewportClientHeightPx ? current : nextState.viewportClientHeightPx));
+    setResolvedRowHeight((current) => current === nextState.resolvedRowHeight ? current : nextState.resolvedRowHeight);
+    setResolvedCellWidthPx((current) => current === nextState.resolvedCellWidthPx ? current : nextState.resolvedCellWidthPx);
+    setViewportRows((current) => current === nextState.viewportRows ? current : nextState.viewportRows);
   }, []);
 
   const emitWidthModeSignalIfNeeded = useCallback((nextViewport: ReturnType<typeof measureTerminalViewport>) => {
-    if (!sessionId) {
+    const nextSignal = resolveTerminalWidthModeSignal({
+      refreshActive,
+      sessionId,
+      hasWidthModeHandler: Boolean(onWidthModeChange),
+      widthMode,
+      nextViewport,
+      previousWidthSignal: lastWidthModeSignalRef.current,
+    });
+    if (!nextSignal) {
       return;
     }
-    const widthSignalCols = widthMode === 'adaptive-phone' ? nextViewport.cols : null;
-    const previousWidthSignal = lastWidthModeSignalRef.current;
-    const shouldEmitWidthModeSignal = Boolean(
-      refreshActive
-      && sessionId
-      && onWidthModeChange
-      && (
-        !previousWidthSignal
-        || previousWidthSignal.mode !== widthMode
-        || previousWidthSignal.cols !== widthSignalCols
-      )
-    );
-
-    if (!shouldEmitWidthModeSignal) {
-      return;
-    }
-
-    lastWidthModeSignalRef.current = {
-      mode: widthMode,
-      cols: widthSignalCols,
-    };
-    onWidthModeChange?.(sessionId, widthMode, widthSignalCols);
+    lastWidthModeSignalRef.current = nextSignal;
+    onWidthModeChange?.(sessionId!, nextSignal.mode, nextSignal.cols);
   }, [onWidthModeChange, refreshActive, sessionId, widthMode]);
 
   const scheduleViewportResizeCommit = useCallback((nextViewport: ReturnType<typeof measureTerminalViewport>, previousViewport: { cols: number; rows: number } | null) => {
-    if (!sessionId) {
+    const plan = resolveTerminalResizeCommitPlan({
+      sessionId,
+      widthMode,
+      previousViewport,
+      nextViewport,
+    });
+    if (plan.action === 'skip') {
       return;
     }
-    if (previousViewport && previousViewport.cols === nextViewport.cols && previousViewport.rows === nextViewport.rows) {
-      return;
-    }
-
     if (resizeCommitTimerRef.current) {
       window.clearTimeout(resizeCommitTimerRef.current);
     }
-
-    if (widthMode === 'mirror-fixed') {
-      lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
-      return;
-    }
-
-    if (previousViewport && previousViewport.cols === nextViewport.cols && previousViewport.rows !== nextViewport.rows) {
-      lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
+    if (plan.action === 'store-only') {
+      lastViewportRef.current = plan.viewport;
       return;
     }
 
     resizeCommitTimerRef.current = window.setTimeout(() => {
-      lastViewportRef.current = { cols: nextViewport.cols, rows: nextViewport.rows };
-      onResize?.(sessionId, nextViewport.cols, nextViewport.rows);
+      lastViewportRef.current = plan.viewport;
+      onResize?.(sessionId!, plan.viewport.cols, plan.viewport.rows);
       resizeCommitTimerRef.current = null;
     }, 60);
   }, [onResize, sessionId, widthMode]);
@@ -531,7 +520,12 @@ function TerminalViewComponent({
 
     const nextViewport = measureTerminalViewport(host, fontSize, rowHeight);
     const nextClientHeight = Math.max(0, Math.round(host.clientHeight || 0));
-    const viewportLayoutChanged = nextViewport.rows !== viewportRows || nextClientHeight !== viewportClientHeightPx;
+    const viewportLayoutChanged = hasTerminalViewportLayoutChanged({
+      nextViewport,
+      nextClientHeight,
+      viewportRows,
+      viewportClientHeightPx,
+    });
 
     markFollowViewportRealignOnLayoutDrift(viewportLayoutChanged);
     commitMeasuredViewportState(nextViewport, nextClientHeight);

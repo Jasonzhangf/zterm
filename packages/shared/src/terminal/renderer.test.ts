@@ -3,6 +3,7 @@ import { getTerminalThemePreset } from './theme';
 import {
   alignTerminalRenderBottomToFollow,
   buildTerminalRenderFrame,
+  buildTerminalMeasuredViewportState,
   buildTerminalRenderRows,
   buildTerminalViewportDemand,
   buildTerminalViewportDemandKey,
@@ -11,6 +12,9 @@ import {
   markTerminalFollowViewportRealignOnLayoutDrift,
   reconcileTerminalViewportAfterBufferShift,
   queueTerminalFollowScrollSync,
+  resolveTerminalResizeCommitPlan,
+  resolveTerminalWidthModeSignal,
+  hasTerminalViewportLayoutChanged,
   detectDoubleWidthChar,
   hasDiscontinuousNeighbor,
   renderGapMarker,
@@ -209,6 +213,117 @@ describe('shared terminal renderer pure helpers', () => {
     expect(alignCalls).toEqual([]);
     expect(setRenderBottomIndexCalls).toEqual([]);
     expect(emitReadingDemandCalls).toEqual([132]);
+  });
+
+  it('derives measured viewport state and layout-drift truth as pure state', () => {
+    const state = buildTerminalMeasuredViewportState({
+      cols: 80,
+      rows: 24,
+      resolvedRowHeight: '17px',
+      resolvedCellWidthPx: 8,
+    }, 408);
+
+    expect(state).toEqual({
+      viewportClientHeightPx: 408,
+      resolvedRowHeight: '17px',
+      resolvedCellWidthPx: 8,
+      viewportRows: 24,
+    });
+
+    expect(hasTerminalViewportLayoutChanged({
+      nextViewport: {
+        cols: 80,
+        rows: 25,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+      nextClientHeight: 425,
+      viewportRows: 24,
+      viewportClientHeightPx: 408,
+    })).toBe(true);
+  });
+
+  it('emits width-mode signal only when width truth really changes', () => {
+    expect(resolveTerminalWidthModeSignal({
+      refreshActive: true,
+      sessionId: 's1',
+      hasWidthModeHandler: true,
+      widthMode: 'adaptive-phone',
+      nextViewport: {
+        cols: 81,
+        rows: 24,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+      previousWidthSignal: null,
+    })).toEqual({
+      mode: 'adaptive-phone',
+      cols: 81,
+    });
+
+    expect(resolveTerminalWidthModeSignal({
+      refreshActive: true,
+      sessionId: 's1',
+      hasWidthModeHandler: true,
+      widthMode: 'mirror-fixed',
+      nextViewport: {
+        cols: 81,
+        rows: 24,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+      previousWidthSignal: {
+        mode: 'mirror-fixed',
+        cols: null,
+      },
+    })).toBeNull();
+  });
+
+  it('builds resize commit plan without hiding width-mode rules in TerminalView', () => {
+    expect(resolveTerminalResizeCommitPlan({
+      sessionId: 's1',
+      widthMode: 'mirror-fixed',
+      previousViewport: { cols: 80, rows: 24 },
+      nextViewport: {
+        cols: 90,
+        rows: 30,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+    })).toEqual({
+      action: 'store-only',
+      viewport: { cols: 90, rows: 30 },
+    });
+
+    expect(resolveTerminalResizeCommitPlan({
+      sessionId: 's1',
+      widthMode: 'adaptive-phone',
+      previousViewport: { cols: 80, rows: 24 },
+      nextViewport: {
+        cols: 80,
+        rows: 30,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+    })).toEqual({
+      action: 'store-only',
+      viewport: { cols: 80, rows: 30 },
+    });
+
+    expect(resolveTerminalResizeCommitPlan({
+      sessionId: 's1',
+      widthMode: 'adaptive-phone',
+      previousViewport: { cols: 80, rows: 24 },
+      nextViewport: {
+        cols: 81,
+        rows: 24,
+        resolvedRowHeight: '17px',
+        resolvedCellWidthPx: 8,
+      },
+    })).toEqual({
+      action: 'emit-resize',
+      viewport: { cols: 81, rows: 24 },
+    });
   });
 
   it('renders row cells with cursor styling and preserves double-width widths', () => {
