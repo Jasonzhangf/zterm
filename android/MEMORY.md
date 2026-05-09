@@ -164,3 +164,8 @@
 - [2026-05-06] traversal relay 产品化真源冻结：用户不应再手填 `signalUrl / turnServerUrl / turnUsername / turnCredential`。客户端唯一协议真源应是登录控制面后得到的 `relayBaseUrl + ws(devices/host/client) + turn + accessToken + device metadata`；UI 只暴露 relay 登录和 device list，不暴露协议细节。
 - [2026-05-06] relay 控制面接线若要真正走 RTC relay，client target 真源必须带 `relayHostId`；`ws/client` 不是普通 signal server，而是按 `hostId` 路由到在线 daemon host。只下发 `wsClientUrl` 不带 `hostId` 仍然无法连到指定 daemon。
 - [2026-05-06] transport 自动模式真源再次冻结：**只允许固定顺序** `Tailscale -> IPv6 -> IPv4 -> Relay`。这不是“fallback 系统”，只是单一连接策略；禁止再长出额外 transport 状态机、补偿分叉或第二顺序语义。
+
+- [2026-05-09] input 丢失根因冻结：`sendInputThroughSessionTransport` 中 `hasPendingSessionTransportOpen` 为 true 时原直接 return，input 静默丢失。修复：新增 `pendingInputQueueRef` (Map<string, string[]>) 队列机制，transport pending 时入队，transport ready 后在 `finalizeSocketConnectionBaseline` 中 flush。flush 失败（ws 非 OPEN）时队列已被 delete，不产生内存泄漏。
+- [2026-05-09] multi-pane 优化真源冻结：(1) `resolveStaticPaneLayout` 在 orientation change 时冻结 `baselineHeightPx`，`currentMaxSplitCount` 不再依赖 viewportHeight/IME；(2) sync debounce 33ms 防重复请求风暴，`handleBufferHeadRuntime` 收到 fresh head 时必须清除 debounce 状态否则会阻塞后续 tail entry；(3) 所有可见 pane 的 TerminalView 均 `live=true`；(4) split landscape 新增 `shellMode: floating-collapsed` 折叠快捷栏。
+- [2026-05-09] 构建版本元数据门禁：`update-dist/latest.json` 的 `versionName / versionCode / buildNumber / apkUrl / sha256` 必须与 `android/.build-meta.json` 和 `android/release-dist/latest.json` 保持一致。曾出现 `undefined.1001` 错误版本，根因是构建脚本在 versionName 解析失败时回退到硬编码默认值。
+- [2026-05-09] CACHE.md 体积膨胀门禁：CACHE.md 已被加入 .gitignore；项目级 CACHE.md 不应提交到 git。对话缓存只在本地保留，超过合理大小应定期清理。
