@@ -2151,3 +2151,34 @@ user open
 - 本轮设计：workspace persistence 不再直接碰 `localStorage`，统一只经 `browser-storage.ts -> getBrowserStorage()` 访问；无有效 storage 能力时静默返回默认 workspace，不再进入异常日志分支。
 - 新增回归：`workspace-persistence.test.ts` 增加“storage 不可用时不 log / 不 throw”场景。
 - 验证：`tsc` + `workspace-persistence/useTerminalWorkspace` 定向绿；`TerminalPage.android-ime` 子集也保持绿。
+## [2026-05-09] interaction contract baseline / local harness 场景矩阵审计
+- 本轮目标：不落半成品 contract，不碰 terminal 主链；只清理错误存活的 interaction 残胶，并把 owner map / harness / contract baseline 补成下一刀真源。
+- 直接证据：
+  1. `packages/shared/src/interaction/operation.ts` / `event.ts` 已被加到 `packages/shared/src/index.ts` 根导出。
+  2. 全仓 `rg` 结果显示 **0 个生产调用点**；只有孤立的 `operation.test.ts`。
+  3. 当前不存在 `projection` contract，也不存在 block/orchestration 消费者，因此这套 interaction 文件并未形成真正的唯一真源。
+- 结论：这不是“已落地的 contract baseline”，而是**错误存活的半拆实现**。按无 fallback / 无死语义规则，不能继续保留并混淆为 shared 真源。
+- 本轮唯一正确修改点：
+  - `packages/shared/src/index.ts`
+  - `packages/shared/src/interaction/*`（物理删除）
+- 为什么这是唯一正确修改点：
+  - 问题不在 Android/page/context/hook，而在 shared 根出口被接入了未落地 contract；如果只在下游不使用、却继续保留导出，就是典型“假真源”。
+  - 现在去设计/接入 operation/event/projection 还不具备条件，因为 owner map 虽已有初稿，但 projection contract、block owner、local harness driver 都未冻结；继续保留只会制造第二轮重复实现。
+- local harness 场景矩阵当前证据（build 前本地可驱动）：
+  - cold start：`App.first-paint.test.tsx` / `App.first-paint.real-terminal.test.tsx`
+  - open/switch/foreground resume：`App.dynamic-refresh.test.tsx` / `App.first-paint.real-terminal.test.tsx`
+  - input -> head -> sync -> render：`App.android-ime-input-loop.test.tsx` / `TerminalView.dynamic-refresh.test.tsx`
+  - reading gap repair / input exits reading：`SessionContext.ws-refresh.test.tsx`
+  - close tab persistence / prune：`App.dynamic-refresh.test.tsx`
+  - update check：`useAppUpdate.test.tsx`
+  - file transfer lifecycle：`file-transfer-message-runtime.test.ts` / `FileTransferSheet.test.tsx`
+  - screenshot lifecycle：`remote-screenshot-runtime.test.ts` / `TerminalPage.remote-screenshot.test.tsx`
+  - schedule/reconnect/multi-pane visible refresh：`App.dynamic-refresh.test.tsx` / `SessionContext.ws-refresh.test.tsx` / `TerminalPage.render-scope.test.tsx`
+- interaction contract baseline 排序（下一刀前置冻结，不本轮落代码）：
+  1. operation truth：先只覆盖 open-tab / active-session / session-open-close / foreground-resume / update-check / file-transfer / screenshot / schedule；禁止一开始就全量 terminal renderer 细节化。
+  2. event truth：只记录 block 输出事实，不允许带 planner/retry/fallback 语义。
+  3. projection truth：先从 `connections projection` 与 `terminal workspace projection` 两块冻结，避免一上来把整个 SessionContext 映射都做成第二真源。
+  4. local harness driver：必须以现有 vitest contracts 为底座，不引入 Android 壳依赖。
+- 下一轮最高优先级：
+  1. 先补完整 owner map（operation/event/projection/update-check/file-transfer/screenshot）到 note；
+  2. 再只做一个最小可接线的 interaction baseline：建议先做 `update-check block` 或 `file-transfer message block`，因为 owner 已相对清晰、与 terminal buffer/render 主链解耦。
