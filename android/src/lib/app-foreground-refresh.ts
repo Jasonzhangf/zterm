@@ -3,7 +3,7 @@ import {
   createForegroundResumeState as createSharedForegroundState,
   markHidden as markHiddenPure,
   shouldResumeForeground,
-  type ForegroundResumeState,
+  
 } from '@zterm/shared/terminal/foreground-resume';
 
 export interface ResumeSessionSnapshot {
