@@ -2303,3 +2303,28 @@ user open
   2. `pnpm --dir android exec vitest run src/lib/remote-screenshot-runtime.test.ts src/lib/remote-screenshot-preview-runtime.test.ts src/pages/TerminalPage.remote-screenshot.test.tsx --reporter dot`
   3. 结果：`3 files / 16 tests passed`
 - 结论：remote screenshot preview/save/discard 生命周期现在由 runtime block 唯一持有；`TerminalPage` 变薄为 orchestration adapter，`RemoteScreenshotSheet` 只消费 projection/UI。
+
+## [2026-05-09] APK 分发 latest alias 真源止血
+- 现象：Jason 现场反馈“源码明明是多panel新版本，但设备安装后像老版本：缺工具栏、只刷 P1、split 行为回退”。
+- 证据：
+  1. 当前代码/提交链已经包含 split / pane-first / 新 toolbar 逻辑，不符合设备现场；
+  2. `android/update-dist/latest.json` 与 `android/release-dist/latest.json` 已指向 `0.1.1.1559 / versionCode 1011559`；
+  3. 但历史脚本使用 `process.cwd()` 作为根路径，导致从 repo 根或其他 cwd 触发时，会把 alias/manifest 发到错误目录；
+  4. repo 根当前仍存在误发残留 `./update-dist` / `./release-dist`，说明过去确实发生过路径漂移；
+  5. 用户升级链通常使用 `zterm-latest-debug.apk` / `latest.json`，一旦 alias 目录漂移，设备就会装到旧包，现场看起来像“代码回退”。
+- 根因：`android/scripts/prepare-update-bundle.mjs` 的项目根与 latest alias 发布路径不是唯一真源，受 `cwd` 污染。
+- 本轮唯一正确修改点：`android/scripts/prepare-update-bundle.mjs`
+- 为什么这是唯一正确修改点：
+  - 问题不在 terminal/pane/render 代码，而在 APK 发布别名的生成路径；如果只继续查 UI/连接逻辑，会误判为运行时回退。
+  - 只有修正 update bundle 脚本，让它永远以 `android/` 为项目根，并同步更新 `android/update-dist`、`android/release-dist`、`~/.wterm/updates` 三处 latest alias，才能恢复唯一分发真源。
+- 本轮修复：
+  1. 脚本改为 `fileURLToPath(import.meta.url)` 推导 `projectRoot`，不再依赖 `process.cwd()`；
+  2. latest alias `zterm-latest-debug.apk` 同步发布到：
+     - `android/update-dist/`
+     - `android/release-dist/`
+     - `~/.wterm/updates/`
+  3. `latest.json` 同步写入 `android/update-dist/` 与 `android/release-dist/`；
+  4. 发布前显式移除旧 alias，避免旧包继续残留同名文件。
+- 当前未做：
+  - repo 根误发残留 `./update-dist` / `./release-dist` / `zterm-undefined.1001.apk` 尚未物理删除，因为这属于破坏性清理，需要单独授权。
+- 结论：多panel设备“看起来像老版本”的主要根因是升级分发 alias 错位，而不是当前源码回退。

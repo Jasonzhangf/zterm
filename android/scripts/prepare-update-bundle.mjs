@@ -1,19 +1,23 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'fs';
 import { createHash } from 'crypto';
-import { basename, resolve } from 'path';
+import { basename, dirname, resolve } from 'path';
 import { homedir } from 'os';
+import { fileURLToPath } from 'url';
 
-const cwd = process.cwd();
-const packageJson = JSON.parse(readFileSync(resolve(cwd, 'package.json'), 'utf-8'));
-const buildMetaPath = resolve(cwd, '.build-meta.json');
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(scriptDir, '..');
+const packageJson = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf-8'));
+const buildMetaPath = resolve(projectRoot, '.build-meta.json');
 const buildMeta = existsSync(buildMetaPath)
   ? JSON.parse(readFileSync(buildMetaPath, 'utf-8'))
   : { buildNumber: 1000 };
 
-const DEFAULT_APK_PATH = resolve(cwd, 'native/android/app/build/outputs/apk/debug/app-debug.apk');
-const apkPath = process.argv[2] ? resolve(cwd, process.argv[2]) : DEFAULT_APK_PATH;
-const outputDir = resolve(cwd, 'update-dist');
+const DEFAULT_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/apk/debug/app-debug.apk');
+const apkPath = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : DEFAULT_APK_PATH;
+const outputDir = resolve(projectRoot, 'update-dist');
+const releaseDistDir = resolve(projectRoot, 'release-dist');
 const daemonUpdatesDir = resolve(homedir(), '.wterm/updates');
+const latestAliasName = 'zterm-latest-debug.apk';
 
 function computeVersionCode(version, buildNumber) {
   const semver = String(version)
@@ -40,14 +44,24 @@ if (!existsSync(apkPath)) {
 }
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(releaseDistDir, { recursive: true });
+rmSync(resolve(outputDir, latestAliasName), { force: true });
+rmSync(resolve(releaseDistDir, latestAliasName), { force: true });
+rmSync(resolve(daemonUpdatesDir, latestAliasName), { force: true });
 
 const buildNumber = Math.max(1000, Number.parseInt(String(buildMeta.buildNumber || 1000), 10));
 const versionName = `${packageJson.version}.${String(buildNumber).padStart(4, '0')}`;
 const versionCode = computeVersionCode(packageJson.version, buildNumber);
 const targetApkName = `zterm-${versionName}.apk`;
 const targetApkPath = resolve(outputDir, targetApkName);
+const latestAliasPath = resolve(outputDir, latestAliasName);
+const releaseVersionedApkPath = resolve(releaseDistDir, targetApkName);
+const releaseLatestAliasPath = resolve(releaseDistDir, latestAliasName);
 
 copyFileSync(apkPath, targetApkPath);
+copyFileSync(apkPath, latestAliasPath);
+copyFileSync(apkPath, releaseVersionedApkPath);
+copyFileSync(apkPath, releaseLatestAliasPath);
 
 const manifest = {
   versionName,
@@ -63,13 +77,17 @@ const manifest = {
 };
 
 writeFileSync(resolve(outputDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+writeFileSync(resolve(releaseDistDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 mkdirSync(daemonUpdatesDir, { recursive: true });
 copyFileSync(targetApkPath, resolve(daemonUpdatesDir, targetApkName));
+copyFileSync(targetApkPath, resolve(daemonUpdatesDir, latestAliasName));
 writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log('[prepare-update-bundle] ready');
 console.log(`- apk: ${targetApkPath}`);
+console.log(`- update latest alias: ${latestAliasPath}`);
+console.log(`- release latest alias: ${releaseLatestAliasPath}`);
 console.log(`- manifest: ${resolve(outputDir, 'latest.json')}`);
 console.log(`- daemon updates dir: ${daemonUpdatesDir}`);
 console.log(`- versionName: ${versionName}`);
