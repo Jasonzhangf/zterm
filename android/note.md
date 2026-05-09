@@ -2121,3 +2121,8 @@ user open
      - `does not send Android UI viewport rows/cols in connect or reconnect handshakes`
 - 结论：
   - client 默认不再改写 tmux 高度；高度真相回到远端 tmux/daemon。
+
+## [2026-05-09 11:30:02] update loop audit
+- 目标: 修复已安装最新版后仍重复提示升级
+- 假设: useAppUpdate 错把 App.getInfo().build 当 Android versionCode 使用，导致 1551 < 1011551 持续判新
+- 范围: useAppUpdate.ts / useAppUpdate.test.tsx / 仅客户端构建，暂不动 daemon
