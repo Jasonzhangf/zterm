@@ -13,6 +13,7 @@ describe('terminal-layout-profile', () => {
     expect(profile.header.tabMinHeight).toBe('22px');
     expect(profile.header.outerPadding).toBe('1px 4px 2px');
     expect(profile.stage.paneGap).toBe('6px');
+    expect(profile.quickBar.shellMode).toBe('floating-collapsed');
   });
 
   it('keeps default split profile when not in landscape', () => {
@@ -24,6 +25,7 @@ describe('terminal-layout-profile', () => {
 
     expect(profile.mode).toBe('split-default');
     expect(profile.header.tabMinHeight).toBe('28px');
+    expect(profile.quickBar.shellMode).toBe('inline');
   });
 
   it('keeps single-pane phone profile untouched', () => {
@@ -34,5 +36,6 @@ describe('terminal-layout-profile', () => {
 
     expect(profile.mode).toBe('single-pane');
     expect(profile.header.outerPadding).toBe('44px 6px 6px');
+    expect(profile.quickBar.shellMode).toBe('inline');
   });
 });

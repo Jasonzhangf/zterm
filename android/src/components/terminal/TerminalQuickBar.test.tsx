@@ -111,6 +111,7 @@ describe('TerminalQuickBar', () => {
         onShortcutActionsChange={vi.fn()}
         onOpenScheduleComposer={vi.fn()}
         onMeasuredHeightChange={vi.fn()}
+        shellMode="inline"
         {...props}
       />,
     );
@@ -340,6 +341,30 @@ describe('TerminalQuickBar', () => {
     expect(Array.from(topFixedClusterButtons).map((node) => node.getAttribute('aria-label'))).toEqual(['状态', '↑', '键盘']);
     const topClusterStyle = screen.getByTestId('quickbar-fixed-cluster-top').getAttribute('style') || '';
     expect(topClusterStyle).toContain('width: 158px');
+  });
+
+  it('hides inline shell rows and keeps only the floating toggle when shellMode is floating-collapsed', async () => {
+    renderQuickBar({
+      shellMode: 'floating-collapsed',
+    });
+
+    expect(screen.queryByTestId('terminal-quickbar-shell-rows')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Toggle floating quick menu' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '状态' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
+  });
+
+  it('shows floating quick menu content after tapping the toggle in floating-collapsed shell mode', async () => {
+    renderQuickBar({
+      shellMode: 'floating-collapsed',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('快捷输入')).not.toBeNull();
+      expect(screen.queryByTestId('terminal-quickbar-shell-rows')).toBeNull();
+    });
   });
 
   it('routes visible tool bar actions through explicit callbacks and keeps file/sync semantics correct', async () => {

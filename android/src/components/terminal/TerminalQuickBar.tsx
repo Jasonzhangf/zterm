@@ -81,6 +81,7 @@ interface TerminalQuickBarProps {
   onOpenScheduleComposer?: (text: string) => void;
   splitAvailable?: boolean;
   splitVisible?: boolean;
+  shellMode?: 'inline' | 'floating-collapsed';
   currentSplitCount?: number;
   splitCountOptions?: number[];
   onSetSplitCount?: (count: number) => void;
@@ -118,6 +119,7 @@ function TerminalQuickBarComponent({
   onOpenScheduleComposer,
   splitAvailable = false,
   splitVisible = false,
+  shellMode = 'inline',
   currentSplitCount = splitVisible ? 2 : 1,
   splitCountOptions = [],
   onSetSplitCount,
@@ -652,6 +654,13 @@ function TerminalQuickBarComponent({
     };
   }, [keyboardInsetPx]);
 
+  useEffect(() => {
+    if (shellMode !== 'floating-collapsed') {
+      return;
+    }
+    setFloatingMenuOpen(false);
+  }, [shellMode]);
+
   const scrollTrackShellStyle = {
     flex: 1,
     minWidth: 0,
@@ -1157,6 +1166,11 @@ function TerminalQuickBarComponent({
     return Boolean(target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label'));
   };
 
+  const shellCollapsed = shellMode === 'floating-collapsed'
+    && !floatingMenuOpen
+    && !editorOpen
+    && !shortcutEditorOpen;
+
   const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
     if (quickBarAllowsTarget(target)) {
@@ -1208,10 +1222,10 @@ function TerminalQuickBarComponent({
         blockShellEvent(event);
       }}
       style={{
-        padding: floatingMenuOpen ? '0' : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
+        padding: shellCollapsed ? '0' : floatingMenuOpen ? '0' : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
         position: 'relative',
-        backgroundColor: floatingMenuOpen ? 'transparent' : 'rgba(11, 15, 24, 0.88)',
-        borderTop: floatingMenuOpen ? 'none' : '1px solid rgba(255,255,255,0.08)',
+        backgroundColor: shellCollapsed || floatingMenuOpen ? 'transparent' : 'rgba(11, 15, 24, 0.88)',
+        borderTop: shellCollapsed || floatingMenuOpen ? 'none' : '1px solid rgba(255,255,255,0.08)',
       }}
     >
       <input
@@ -2622,7 +2636,7 @@ function TerminalQuickBarComponent({
         </button>
       )}
 
-      {!floatingMenuOpen && (
+      {shellMode === 'inline' && !floatingMenuOpen && (
         <div data-testid="terminal-quickbar-shell-rows">
           {landscape ? (
             <>

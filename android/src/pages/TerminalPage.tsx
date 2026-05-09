@@ -2083,6 +2083,7 @@ function TerminalPageComponent({
       onOpenScheduleComposer={handleQuickBarOpenScheduleComposer}
       splitAvailable={splitAvailable}
       splitVisible={splitVisible}
+      shellMode={layoutProfile.quickBar.shellMode}
       currentSplitCount={workspacePanes.length}
       splitCountOptions={
         splitAvailable

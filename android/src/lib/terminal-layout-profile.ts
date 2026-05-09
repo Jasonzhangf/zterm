@@ -35,6 +35,7 @@ export interface TerminalLayoutProfile {
   };
   quickBar: {
     touchSafeOffsetPx: number;
+    shellMode: 'inline' | 'floating-collapsed';
   };
 }
 
@@ -78,6 +79,7 @@ function buildSplitLandscapeProfile(safeTopInsetPx: number): TerminalLayoutProfi
     },
     quickBar: {
       touchSafeOffsetPx: 0,
+      shellMode: 'floating-collapsed',
     },
   };
 }
@@ -120,6 +122,7 @@ function buildSplitDefaultProfile(safeTopInsetPx: number): TerminalLayoutProfile
     },
     quickBar: {
       touchSafeOffsetPx: 0,
+      shellMode: 'inline',
     },
   };
 }
@@ -162,6 +165,7 @@ function buildSinglePaneProfile(safeTopInsetPx: number): TerminalLayoutProfile {
     },
     quickBar: {
       touchSafeOffsetPx: 0,
+      shellMode: 'inline',
     },
   };
 }
