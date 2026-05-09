@@ -26,3 +26,6 @@ export * from './terminal/renderer/index';
 export * from './interaction/operation';
 export * from './interaction/event';
 export * from './interaction/projection';
+export * from './harness/event-bus';
+export * from './harness/harness';
+export * from './harness/update-check-block';
