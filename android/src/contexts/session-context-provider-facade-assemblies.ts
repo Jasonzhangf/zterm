@@ -77,7 +77,6 @@ export function useSessionProviderFacadeAssemblies(
     activeTransportProbeWaitMs: ACTIVE_TRANSPORT_PROBE_WAIT_MS,
     resolveSessionCacheLines: core.resolveSessionCacheLines,
     createSessionSync: core.createSessionSync,
-    setActiveSessionSync: core.setActiveSessionSync,
     deleteSessionSync: core.deleteSessionSync,
     moveSessionSync: core.moveSessionSync,
     updateSessionSync: core.updateSessionSync,
@@ -134,8 +133,8 @@ export function useSessionProviderFacadeAssemblies(
     reconnectAllSessions,
     probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
-    switchSession,
   } = sessionLifecycleRuntime;
+  const switchSession = core.setActiveSessionSync;
 
   const sessionPublicFacadeRuntime = useMemo(() => createSessionPublicFacadeRuntime({
     stateRef: options.stateRef,

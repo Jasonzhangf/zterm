@@ -65,7 +65,6 @@ interface SessionLifecycleRuntimeOptions {
   activeTransportProbeWaitMs: number;
   resolveSessionCacheLines: (rows?: number | null) => number;
   createSessionSync: (session: Session) => void;
-  setActiveSessionSync: (id: string) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
@@ -273,10 +272,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
-  const switchSession = (sessionId: string) => {
-    options.setActiveSessionSync(sessionId);
-  };
-
   return {
     connectSession,
     createSession,
@@ -287,6 +282,5 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     reconnectAllSessions,
     probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
-    switchSession,
   };
 }

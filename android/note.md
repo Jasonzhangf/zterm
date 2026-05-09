@@ -2328,3 +2328,25 @@ user open
 - 当前未做：
   - repo 根误发残留 `./update-dist` / `./release-dist` / `zterm-undefined.1001.apk` 尚未物理删除，因为这属于破坏性清理，需要单独授权。
 - 结论：多panel设备“看起来像老版本”的主要根因是升级分发 alias 错位，而不是当前源码回退。
+
+## [2026-05-09] P0-1 active/open-tab/runtime arbitration：session lifecycle 剥离 active 写口
+- 本轮目标：只收 `active-session truth` 的最后一处 lifecycle 级语义耦合；不碰 buffer / renderer / TerminalPage / relay。
+- 分析：
+  - `createSessionRuntime()` / `connectSessionRuntime()` 已经不再直接调用 `setActiveSessionSync`，这部分旧风险已被之前修改消掉；当前残胶变成了 **session lifecycle orchestration 仍把 `switchSession` 作为自身返回能力，并通过 `setActiveSessionSync` 内联实现**。
+  - 这会在结构上继续暗示“runtime session lifecycle 也拥有 active truth”，与已冻结规则冲突：runtime primitive 只负责 session existence / transport lifecycle，active 只能由 explicit open-tab orchestration 决定，并通过独立 primitive 写入 runtime reducer。
+- 本轮唯一正确修改点：
+  - `android/src/contexts/session-context-session-orchestration-runtime.ts`
+  - `android/src/contexts/session-context-provider-facade-assemblies.ts`
+- 为什么这是唯一正确修改点：
+  - 问题不在 reducer，也不在 open-tab runtime；`SET_ACTIVE_SESSION` 本来就是 runtime primitive，真正多余的是 **session lifecycle 模块把 active 写口夹带成了自己的职责**。
+  - 如果去改 reducer/open-tab，会造成错误层级；只有把 lifecycle runtime 中的 `switchSession/setActiveSessionSync` 依赖物理剥离，才能让 active truth 回到“open-tab orchestration -> 独立 active primitive”这一条单路径。
+- 本轮修改：
+  1. `createSessionLifecycleRuntime(...)` 删除 `setActiveSessionSync` 依赖；
+  2. `session-context-session-orchestration-runtime.ts` 不再返回 `switchSession`；
+  3. `session-context-provider-facade-assemblies.ts` 改为直接把 `core.setActiveSessionSync` 作为对外 `switchSession` primitive 暴露，不再经过 lifecycle runtime 夹带。
+- 结果：
+  - session lifecycle runtime 现在只负责：create/connect/close/move/rename/reconnect/active-freshness；
+  - active 写口单独保留在 infra/core primitive，不再被 runtime lifecycle owner 误持有。
+- 待验证：
+  - `tsc`
+  - `session-context-core/session-runtime/useSessionOpenActions/SessionContext.ws-refresh` 定向回归
