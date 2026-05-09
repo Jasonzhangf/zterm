@@ -13,7 +13,6 @@ import type { TerminalEvent } from '../interaction/event';
 import { createEvent } from '../interaction/event';
 import type { BlockHandler, BlockContext } from './harness';
 import {
-  deriveAppUpdateProjection,
   type AppUpdateProjectionPreferences,
   type AppUpdateProjectionManifest,
   type AppUpdateProjectionInput,
