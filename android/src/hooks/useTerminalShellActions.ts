@@ -81,7 +81,8 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
   }, [updateSessionViewport]);
 
   const handleTerminalResize = useCallback((sessionId: string, cols: number, rows: number) => {
-    sendTerminalResize(sessionId, cols, rows, bridgeSettings.terminalWidthMode);
+    void rows;
+    sendTerminalResize(sessionId, cols, undefined, bridgeSettings.terminalWidthMode);
   }, [bridgeSettings.terminalWidthMode, sendTerminalResize]);
 
   const handleTerminalWidthModeChange = useCallback((sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {

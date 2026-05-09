@@ -2084,3 +2084,21 @@ user open
 - 当前仍未收口项：
   - quickbar 默认折叠/浮窗策略还没接到唯一 owner，不能宣称本 goal 已完整完成
   - 但 multi-pane 的 layout 静态化 + visible pane refresh 真实链路 + head/sync 去重证据已经可以形成本轮干净提交
+
+## 2026-05-09 terminal 默认高度收口（client 默认不设 rows）
+
+- 用户新增反馈：默认 tmux 高度被压矮；期望 client 默认不设置高度，原本远端一屏多高就保持多高。
+- 真因审计：
+  - `connect/reconnect` 握手本身已经不发 rows/cols，现有 `SessionContext.ws-refresh.test.tsx` 已有证据。
+  - 真正的 rows 写口是 `useTerminalShellActions.ts -> handleTerminalResize(...)`，它会把 `TerminalView` 本地测得的 `rows` 通过 `sendTerminalResize` 发给 daemon。
+- 唯一正确修改点：
+  - `android/src/hooks/useTerminalShellActions.ts`
+  - 将默认 resize 改为只发 `cols`，`rows` 显式保持 `undefined`
+- 已补验证：
+  1. `android/src/hooks/useTerminalShellActions.test.tsx`
+     - `does not send rows in default adaptive-phone resize writes`
+  2. 保留既有协议门禁：
+     - `SessionContext.ws-refresh.test.tsx`
+     - `does not send Android UI viewport rows/cols in connect or reconnect handshakes`
+- 结论：
+  - client 默认不再改写 tmux 高度；高度真相回到远端 tmux/daemon。
