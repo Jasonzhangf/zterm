@@ -12,7 +12,8 @@
     "./schedule-types": "./src/schedule/types.ts",
     "./terminal/color": "./src/terminal/color.ts",
     "./terminal/theme": "./src/terminal/theme.ts",
-    "./terminal/renderer": "./src/terminal/renderer/index.ts"
+    "./terminal/renderer": "./src/terminal/renderer/index.ts",
+    "./terminal/gap-utils": "./src/terminal/gap-utils.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

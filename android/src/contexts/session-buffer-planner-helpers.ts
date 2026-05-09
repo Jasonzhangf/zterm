@@ -6,8 +6,8 @@ import type {
 } from '../lib/types';
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
-import {
 import { mergeGapRanges, collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
+import {
   resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
   resolveVisibleRangeViewportRows,
