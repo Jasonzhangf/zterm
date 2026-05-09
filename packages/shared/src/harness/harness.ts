@@ -29,6 +29,8 @@ export interface TestHarness {
   dispatch(op: TerminalEvent extends infer _ ? TerminalOperation : never): void;
   /** 读取某个 projection 的当前快照 */
   getProjection<T>(key: string): T | undefined;
+  /** 写入某个 projection（供 block helper 调用） */
+  setProjection<T>(key: string, value: T): void;
   /** 获取 event bus（用于测试中监听事件） */
   bus: TypedEventBus;
   /** 清除全部状态（projection store + event bus + block 注册） */
@@ -77,6 +79,9 @@ export function createTestHarness(): TestHarness {
     getProjection<T>(key: string): T | undefined {
       return projections.get(key) as T | undefined;
     },
+    setProjection<T>(key: string, value: T): void {
+      projections.set(key, value);
+    },
 
     clear() {
       bus.clear();
@@ -85,4 +90,3 @@ export function createTestHarness(): TestHarness {
     },
   };
 }
-
