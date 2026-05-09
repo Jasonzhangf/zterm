@@ -449,6 +449,9 @@ function MultiSessionHarness() {
       <button type="button" onClick={() => setLiveSessionIds(['session-2', 'session-1'])}>
         live-both-reversed
       </button>
+      <button type="button" onClick={() => setLiveSessionIds(['session-2', 'session-2'])}>
+        live-second-duplicated
+      </button>
       <button type="button" onClick={() => setLiveSessionIds(['session-2'])}>
         live-second-only
       </button>
@@ -1967,6 +1970,141 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
       expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('active tick refreshes a stale visible non-active pane without requiring it to become interactive active', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+      fireEvent.click(screen.getByText('live-both'));
+      ws1.sent.length = 0;
+      ws2.sent.length = 0;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(260);
+      });
+
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('active tick keeps stale visible panes refreshing after interactive active tab switches away', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByText('live-both'));
+      fireEvent.click(screen.getByText('switch-second'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+      ws1.sent.length = 0;
+      ws2.sent.length = 0;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(260);
+      });
+
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('active tick deduplicates duplicate live-pane references for the same session in the real SessionContext loop', async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByText('switch-second'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+      fireEvent.click(screen.getByText('live-second-duplicated'));
+      ws1.sent.length = 0;
+      ws2.sent.length = 0;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(260);
+      });
+
+      expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }

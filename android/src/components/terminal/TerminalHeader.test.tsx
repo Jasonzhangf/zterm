@@ -87,6 +87,43 @@ describe('TerminalHeader', () => {
     expect(root?.style.padding).toBe('44px 6px 6px');
   });
 
+  it('uses the compact split-landscape header profile when split is visible in landscape', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1200,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+    const session = makeSession();
+    const { container } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        paneGroups={[{
+          paneId: 'pane-1',
+          size: 1,
+          sessions: [toHeaderSession(session)],
+          activeSessionId: session.id,
+          isActivePane: true,
+        }]}
+      />,
+    );
+
+    const root = container.firstElementChild as HTMLElement | null;
+    expect(root?.style.padding).toBe('1px 4px 2px');
+  });
+
   it('renders a close button on the active tab and closes on single tap', () => {
     const session = makeSession();
     const onCloseSession = vi.fn();

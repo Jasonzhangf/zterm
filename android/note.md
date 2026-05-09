@@ -2017,3 +2017,70 @@ user open
   - facade 删除：已完成
   - row/cursor/follow/viewport 纯逻辑下沉：已完成
   - 仍待最终审计 `TerminalView` 是否还剩超出 thin orchestration shell 的真相逻辑；若没有，即可进入本 goal 完成审计。
+
+## 2026-05-09 multi-pane 布局静态化设计（第 2 步）
+
+- 本轮只做 layout owner 收口，不扩散到 buffer/runtime/TerminalPage。
+- 当前双语义问题：
+  1. `resolveMaxSplitCount(viewportWidth, viewportHeight, ...)` 每次 render 按即时高宽重算 pane 上限。
+  2. `useEffect(currentMaxSplitCount)` 会在 IME 改变 `viewportHeight` 后强制 merge pane。
+- 正确 owner：
+  - `workspace-model.ts` 提供单一 pure truth：`resolveStaticPaneLayout(...)`
+  - `useTerminalWorkspace.ts` 只保存 `layoutSnapshot`，仅在显式布局源变化时更新
+- 本轮冻结语义：
+  1. pane 数量上限只由 `viewportWidth + landscape/portrait orientation + hardCap` 决定
+  2. IME / resize 导致的纯高度变化不得降低 split count
+  3. 已有 pane size 只在显式 `setSplitCount/toggleSplit/attach/close` 或 layout bucket 真正变化时重分配
+- 计划最小切口：
+  1. shared 新增 `resolveStaticPaneLayout`
+  2. `useTerminalWorkspace` 用 `layoutSnapshotRef/state` 保存 `maxSplitCount + paneSizes`
+  3. 删除对 `viewportHeight` 的即时重算依赖，改成 orientation + width 主导
+  4. 补 shared + hook 定向测试：验证高度变化不会把 4 pane 压回 2/3 pane
+
+## 2026-05-09 multi-pane 布局静态化验证
+
+- 已实现：`resolveStaticPaneLayout(previousLayout)`，同 orientation 下冻结 baselineHeight，IME 仅改即时高度，不改 split capacity。
+- 已实现：`useTerminalWorkspace` 改为 layout snapshot truth；只有 `layoutSourceKey` 真变化时才更新 snapshot。
+- 已验证：
+  - `pnpm dlx vitest run packages/shared/src/workspace/workspace-model.test.ts --reporter dot` -> 4 passed
+  - `pnpm --dir android exec vitest run src/hooks/useTerminalWorkspace.test.tsx --reporter dot` -> 4 passed
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` -> green
+- 当前结论：4 pane 在 IME-style 高度缩小时不再被 layout owner 压回 2/3 pane；下一步进入 visible pane subscriptions / head-sync 去重。
+
+## 2026-05-09 multi-pane UI shell 瘦身（第 4 步进行中）
+
+- 当前唯一修改点收口到 `terminal-layout-profile.ts`：
+  - 新增 `mode: single-pane | split-default | split-landscape`
+  - split + landscape 不再沿用普通 split profile，改走独立紧凑 profile
+- 当前冻结：
+  1. header 压缩规则只允许从 layout profile 取，不允许在 `TerminalPage/TerminalHeader` 散写尺寸
+  2. `split-landscape` 下 header 垂直占用明显缩小（outerPadding/tabMinHeight/paneScrollerMinHeight/backButtonSize 全部下调）
+  3. page/header 通过 `resolveTerminalOrientation()` 只读消费 landscape truth，不在本轮引入第二套方向状态机
+- 当前尚未完成：
+  - QuickBar 默认折叠/浮窗化策略还未接入 profile owner
+  - pane active/idle 边框细节后续继续收
+
+## 2026-05-09 multi-pane refresh / head 去重强证据补齐（本轮提交）
+
+- 本轮没有再改 daemon / relay / login；只补 client multi-pane goal 的真实链路证据与现有收口代码提交。
+- 已确认本轮 owner 仍然单一：
+  - layout truth -> `terminal-layout-profile.ts` / shared workspace model
+  - visible pane refresh truth -> `SessionContext lifecycle + activity runtime`
+  - sync debounce truth -> `requestSessionBufferSyncRuntime(...)`
+- 新增/补强证据：
+  1. `SessionContext.ws-refresh.test.tsx`
+     - `active tick refreshes a stale visible non-active pane...`
+     - `active tick keeps stale visible panes refreshing after interactive active tab switches away`
+     - `active tick deduplicates duplicate live-pane references for the same session in the real SessionContext loop`
+  2. 这些测试直接钉死：
+     - non-active 但 visible 的 pane 在 stale 后仍会收到 head 请求
+     - active 切换后，旧 visible pane 不会停止 active-tick refresh
+     - 同一 session 即使在 live pane 引用里重复出现，真实 SessionContext loop 也只发 1 次 head request
+- 已跑验证：
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t "active tick refreshes a stale visible non-active pane without requiring it to become interactive active|active tick keeps stale visible panes refreshing after interactive active tab switches away|active tick deduplicates duplicate live-pane references for the same session in the real SessionContext loop" --reporter dot`
+  - `pnpm --dir android exec vitest run src/contexts/multi-pane-refresh.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx src/hooks/useTerminalWorkspace.test.tsx src/lib/terminal-layout-profile.test.ts src/components/terminal/TerminalHeader.test.tsx --reporter dot`
+  - `pnpm dlx vitest run packages/shared/src/workspace/pane-layout.test.ts packages/shared/src/workspace/workspace-model.test.ts --reporter dot`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+- 当前仍未收口项：
+  - quickbar 默认折叠/浮窗策略还没接到唯一 owner，不能宣称本 goal 已完整完成
+  - 但 multi-pane 的 layout 静态化 + visible pane refresh 真实链路 + head/sync 去重证据已经可以形成本轮干净提交

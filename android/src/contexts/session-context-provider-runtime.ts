@@ -75,6 +75,7 @@ export function useSessionProviderRuntime(options: {
   const pendingConnectTailRefreshRef = useRef<Set<string>>(new Set());
   const pendingResumeTailRefreshRef = useRef<Set<string>>(new Set());
   const lastHeadRequestAtRef = useRef<Map<string, number>>(new Map());
+  const lastSyncRequestAtRef = useRef<Map<string, any>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
@@ -128,6 +129,7 @@ export function useSessionProviderRuntime(options: {
       pendingConnectTailRefreshRef,
       pendingResumeTailRefreshRef,
       lastHeadRequestAtRef,
+      lastSyncRequestAtRef,
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,

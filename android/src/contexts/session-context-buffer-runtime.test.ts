@@ -374,6 +374,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         sessionVisibleRangeRef: { current: new Map() },
         sessionBufferHeadsRef: { current: new Map() },
         sessionPullStateRef: { current: new Map() },
+        lastSyncRequestAtRef: { current: new Map() },
         pendingInputTailRefreshRef: { current: new Map() },
         pendingConnectTailRefreshRef: { current: new Set() },
         pendingResumeTailRefreshRef: { current: new Set() },
@@ -383,7 +384,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       clearSessionPullState: vi.fn(),
       sendSocketPayload,
       runtimeDebug: vi.fn(),
-      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
     });
 
     expect(requested).toBe(false);
@@ -428,6 +429,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               }],
             ]),
           },
+          lastSyncRequestAtRef: { current: new Map() },
           pendingInputTailRefreshRef: { current: new Map() },
           pendingConnectTailRefreshRef: { current: new Set() },
           pendingResumeTailRefreshRef: { current: new Set() },
@@ -437,7 +439,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         clearSessionPullState,
         sendSocketPayload,
         runtimeDebug,
-        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
       });
 
       expect(requested).toBe(true);
@@ -504,6 +506,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
             }],
           ]),
         },
+        lastSyncRequestAtRef: { current: new Map() },
         pendingInputTailRefreshRef: { current: new Map() },
         pendingConnectTailRefreshRef: { current: new Set() },
         pendingResumeTailRefreshRef: { current: new Set() },
@@ -513,7 +516,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       clearSessionPullState: vi.fn(),
       sendSocketPayload,
       runtimeDebug: vi.fn(),
-      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500 }),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
     });
 
     expect(requested).toBe(true);
@@ -528,6 +531,118 @@ describe('session-context-buffer-runtime inactive gating', () => {
         requestEndIndex: 120,
       }),
     });
+  });
+
+  it('debounces duplicate tail-refresh sync requests within 33ms for the same semantic payload', () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = 'session-1';
+      const session = makeSession(sessionId);
+      const ws = { readyState: WebSocket.OPEN } as any;
+      const sendSocketPayload = vi.fn();
+      const refs = {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map() },
+        sessionPullStateRef: { current: new Map() },
+        lastSyncRequestAtRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set<string>() },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+      };
+
+      const first = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'active-tick',
+          purpose: 'tail-refresh',
+        },
+        refs,
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState: vi.fn(),
+        sendSocketPayload,
+        runtimeDebug: vi.fn(),
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+      });
+      const second = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'active-tick-duplicate',
+          purpose: 'tail-refresh',
+        },
+        refs,
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState: vi.fn(),
+        sendSocketPayload,
+        runtimeDebug: vi.fn(),
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+      });
+
+      expect(first).toBe(true);
+      expect(second).toBe(false);
+      expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows reading-repair sync re-request after the 33ms debounce window expires', () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = 'session-1';
+      const session = makeSession(sessionId);
+      const ws = { readyState: WebSocket.OPEN } as any;
+      const sendSocketPayload = vi.fn();
+      const refs = {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map() },
+        sessionPullStateRef: { current: new Map() },
+        lastSyncRequestAtRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set<string>() },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+      };
+
+      const runtimeDebug = vi.fn();
+      const first = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'reading-1',
+          purpose: 'reading-repair',
+        },
+        refs,
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState: vi.fn(),
+        sendSocketPayload,
+        runtimeDebug,
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+      });
+      vi.advanceTimersByTime(34);
+      const second = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'reading-2',
+          purpose: 'reading-repair',
+        },
+        refs,
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState: vi.fn(),
+        sendSocketPayload,
+        runtimeDebug,
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+      });
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not schedule a render commit when buffer-head repeats the same head and cursor truth', () => {

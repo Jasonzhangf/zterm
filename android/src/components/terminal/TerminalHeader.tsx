@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { getServerColorTone } from '../../lib/server-color';
 import { resolveTerminalLayoutProfile } from '../../lib/terminal-layout-profile';
+import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics';
 
 const TAB_LONG_PRESS_MS = 920;
 const PLUS_LONG_PRESS_MS = 680;
@@ -91,7 +92,8 @@ function TerminalHeaderComponent({
   const plusLongPressTriggeredRef = useRef(false);
   const lastTouchCloseIntentRef = useRef<{ sessionId: string; at: number } | null>(null);
   const [paneMenuState, setPaneMenuState] = useState<PaneMenuState | null>(null);
-  const layoutProfile = resolveTerminalLayoutProfile({ splitVisible, topInsetPx });
+  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
+  const layoutProfile = resolveTerminalLayoutProfile({ splitVisible, topInsetPx, landscape });
 
   const closePaneMenu = () => setPaneMenuState(null);
   const resolvedPaneGroups: TerminalHeaderPaneGroup[] = splitVisible && paneGroups?.length

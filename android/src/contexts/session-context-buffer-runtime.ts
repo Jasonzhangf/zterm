@@ -45,6 +45,18 @@ interface SessionDebugMetricsRecorder {
   recordRefreshRequest: (sessionId: string) => void;
 }
 
+interface SessionSyncRequestDebounceState {
+  sentAt: number;
+  requestStartIndex: number;
+  requestEndIndex: number;
+  knownRevision: number;
+  localStartIndex: number;
+  localEndIndex: number;
+  targetHeadRevision: number;
+}
+
+const SESSION_SYNC_REQUEST_DEBOUNCE_MS = 33;
+
 interface RevisionResetExpectation {
   revision: number;
   latestEndIndex: number;
@@ -282,6 +294,7 @@ export function requestSessionBufferSyncRuntime(options: {
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
     sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
     sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
+    lastSyncRequestAtRef: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
@@ -304,7 +317,11 @@ export function requestSessionBufferSyncRuntime(options: {
     },
   ) => void;
   runtimeDebug: RuntimeDebugFn;
-  resolveTerminalRefreshCadence: () => { pullRequestStaleMs: number };
+  resolveTerminalRefreshCadence: () => {
+    pullRequestStaleMs: number;
+    minTailRefreshGapMs: number;
+    readingSyncDelayMs: number;
+  };
 }) {
   const session = options.requestOptions?.sessionOverride
     || options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId)
@@ -345,8 +362,9 @@ export function requestSessionBufferSyncRuntime(options: {
     },
   );
   const inFlightPull = (options.refs.sessionPullStateRef.current.get(options.sessionId) || null)?.[requestPurpose] || null;
+  const cadence = options.resolveTerminalRefreshCadence();
+  const debounceThresholdMs = SESSION_SYNC_REQUEST_DEBOUNCE_MS;
   if (inFlightPull) {
-    const cadence = options.resolveTerminalRefreshCadence();
     const pullAgeMs = Math.max(0, Date.now() - Math.max(0, Math.floor(inFlightPull.startedAt || 0)));
     if (pullAgeMs >= cadence.pullRequestStaleMs) {
       options.runtimeDebug('session.buffer.pull.stale-expire', {
@@ -400,13 +418,13 @@ export function requestSessionBufferSyncRuntime(options: {
     }
   }
 
-  options.runtimeDebug('session.buffer.request', {
-    sessionId: options.sessionId,
-    activeSessionId: options.refs.stateRef.current.activeSessionId,
-    reason: options.requestOptions?.reason || null,
-    purpose: requestPurpose,
-    payload,
-  });
+  const now = Date.now();
+  const debounceKey = `${options.sessionId}:${requestPurpose}`;
+  const previousSyncRequest = options.refs.lastSyncRequestAtRef.current.get(debounceKey) || null;
+  const targetHeadRevision = Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0));
+  const requestKnownRevision = Math.max(0, Math.floor(payload.knownRevision || 0));
+  const requestLocalStartIndex = Math.max(0, Math.floor(payload.localStartIndex || 0));
+  const requestLocalEndIndex = Math.max(0, Math.floor(payload.localEndIndex || 0));
   const requestTargetStartIndex = Math.max(0, Math.floor(payload.requestStartIndex || 0));
   const requestTargetEndIndex = Math.max(requestTargetStartIndex, Math.floor(
     requestPurpose === 'reading-repair'
@@ -419,17 +437,63 @@ export function requestSessionBufferSyncRuntime(options: {
         || 0
       ),
   ));
+  const isSemanticDuplicateWithinDebounce = Boolean(
+    previousSyncRequest
+    && now - previousSyncRequest.sentAt < debounceThresholdMs
+    && previousSyncRequest.targetHeadRevision === targetHeadRevision
+    && previousSyncRequest.requestStartIndex === requestTargetStartIndex
+    && previousSyncRequest.requestEndIndex === requestTargetEndIndex
+    && previousSyncRequest.knownRevision === requestKnownRevision
+    && previousSyncRequest.localStartIndex === requestLocalStartIndex
+    && previousSyncRequest.localEndIndex === requestLocalEndIndex
+  );
+  if (isSemanticDuplicateWithinDebounce) {
+    options.runtimeDebug('session.buffer.request.debounced', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      reason: options.requestOptions?.reason || null,
+      purpose: requestPurpose,
+      debounceThresholdMs,
+      previous: previousSyncRequest,
+      next: {
+        targetHeadRevision,
+        requestStartIndex: requestTargetStartIndex,
+        requestEndIndex: requestTargetEndIndex,
+        requestKnownRevision,
+        requestLocalStartIndex,
+        requestLocalEndIndex,
+      },
+    });
+    return false;
+  }
+
+  options.runtimeDebug('session.buffer.request', {
+    sessionId: options.sessionId,
+    activeSessionId: options.refs.stateRef.current.activeSessionId,
+    reason: options.requestOptions?.reason || null,
+    purpose: requestPurpose,
+    payload,
+  });
+  options.refs.lastSyncRequestAtRef.current.set(debounceKey, {
+    sentAt: now,
+    requestStartIndex: requestTargetStartIndex,
+    requestEndIndex: requestTargetEndIndex,
+    knownRevision: requestKnownRevision,
+    localStartIndex: requestLocalStartIndex,
+    localEndIndex: requestLocalEndIndex,
+    targetHeadRevision,
+  });
   options.sendSocketPayload(options.sessionId, targetWs, JSON.stringify({
     type: 'buffer-sync-request',
     payload,
   } satisfies ClientMessage), {
     pullPurpose: requestPurpose,
-    targetHeadRevision: Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
+    targetHeadRevision,
     targetStartIndex: requestTargetStartIndex,
     targetEndIndex: requestTargetEndIndex,
-    requestKnownRevision: Math.max(0, Math.floor(payload.knownRevision || 0)),
-    requestLocalStartIndex: Math.max(0, Math.floor(payload.localStartIndex || 0)),
-    requestLocalEndIndex: Math.max(0, Math.floor(payload.localEndIndex || 0)),
+    requestKnownRevision,
+    requestLocalStartIndex,
+    requestLocalEndIndex,
   });
   return true;
 }

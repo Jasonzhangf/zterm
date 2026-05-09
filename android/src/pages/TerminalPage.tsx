@@ -20,6 +20,7 @@ import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot'
 import { useTerminalWorkspace } from '../hooks/useTerminalWorkspace';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
+import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
 import {
   STORAGE_KEYS,
@@ -567,7 +568,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalWidthMode: TerminalWidthMode;
   absoluteLineNumbersVisible: boolean;
 }) {
-  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible }), [splitVisible]);
+  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
+  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, landscape }), [landscape, splitVisible]);
 
   const renderTerminal = useCallback((session: Session, sessionIsActive: boolean, renderInstanceKey?: string) => (
     <TerminalView
@@ -1860,7 +1862,12 @@ function TerminalPageComponent({
     };
   }, [updateKeyboardInset]);
 
-  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, topInsetPx: headerTopInsetPx }), [headerTopInsetPx, splitVisible]);
+  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
+  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({
+    splitVisible,
+    topInsetPx: headerTopInsetPx,
+    landscape,
+  }), [headerTopInsetPx, landscape, splitVisible]);
   const terminalChromeBottomPx = Math.max(0, quickBarHeight + layoutProfile.quickBar.touchSafeOffsetPx);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset, shellHeight);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
