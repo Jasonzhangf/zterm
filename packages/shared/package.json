@@ -18,7 +18,8 @@
     "./terminal/visible-range": "./src/terminal/visible-range.ts",
     "./terminal/buffer-head-state": "./src/terminal/buffer-head-state.ts",
     "./terminal/viewport-utils": "./src/terminal/viewport-utils.ts",
-    "./terminal/buffer-sync-planner": "./src/terminal/buffer-sync-planner.ts"
+    "./terminal/buffer-sync-planner": "./src/terminal/buffer-sync-planner.ts",
+    "./terminal/gap-repair-planner": "./src/terminal/gap-repair-planner.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

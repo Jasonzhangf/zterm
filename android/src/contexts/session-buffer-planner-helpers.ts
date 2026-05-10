@@ -6,9 +6,10 @@ import type {
 } from '../lib/types';
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
-import { mergeGapRanges, collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
+import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
 import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
 import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
+import { computeVisibleRangeRepairRanges as sharedComputeVisibleRangeRepairRanges } from '@zterm/shared/terminal/gap-repair-planner';
 import {
   resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
@@ -112,7 +113,7 @@ function collectVisibleRangeRepairRanges(
   visibleRange?: SessionVisibleRangeState,
   liveHead?: SessionBufferHeadState | null,
   bufferOverride?: SessionBufferState | null,
-) {
+): TerminalGapRange[] {
   if (!visibleRange) {
     return [] as TerminalGapRange[];
   }
@@ -133,34 +134,15 @@ function collectVisibleRangeRepairRanges(
       ? requestWindow.requestEndIndex
       : Math.min(authoritativeAvailableEndIndex, requestWindow.requestEndIndex),
   );
-  if (visibleEndIndex <= visibleStartIndex) {
-    return [] as TerminalGapRange[];
-  }
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
-  const missingRanges: TerminalGapRange[] = [];
-
-  if (localStartIndex > visibleStartIndex) {
-    missingRanges.push({
-      startIndex: visibleStartIndex,
-      endIndex: Math.min(localStartIndex, visibleEndIndex),
-    });
-  }
-
-  missingRanges.push(...collectIntersectingGapRanges(
-    buffer.gapRanges,
+  return sharedComputeVisibleRangeRepairRanges({
     visibleStartIndex,
     visibleEndIndex,
-  ));
-
-  if (localEndIndex < visibleEndIndex) {
-    missingRanges.push({
-      startIndex: Math.max(localEndIndex, visibleStartIndex),
-      endIndex: visibleEndIndex,
-    });
-  }
-
-  return mergeGapRanges(missingRanges);
+    localStartIndex,
+    localEndIndex,
+    localGapRanges: buffer.gapRanges,
+  });
 }
 
 function buildTailRefreshBufferSyncRequestPayload(
