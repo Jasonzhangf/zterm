@@ -4,10 +4,10 @@
 
 /**
  * Calculate the number of request lines for terminal buffer sync.
- * Requests 2.5x visible rows to provide smooth scrolling and gap coverage.
+ * Requests 3x visible rows (TERMINAL_CACHE_SCREENS=3) to provide smooth scrolling and gap coverage.
  */
 export function resolveTerminalRequestWindowLines(visibleRows: number): number {
   const safeRows = Math.max(1, Math.floor(visibleRows));
-  // Request 2.5x visible rows for smooth scrolling and to reduce gaps
-  return Math.max(safeRows, Math.floor(safeRows * 2.5));
+  // Request 3x visible rows to fill cache screens (matches Android TERMINAL_CACHE_SCREENS=3)
+  return safeRows * 3;
 }
