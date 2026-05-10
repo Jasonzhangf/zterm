@@ -66,3 +66,41 @@ export function hasImpossibleLocalWindow(
 
   return false;
 }
+
+/**
+ * Resolve the authoritative available end index from head and buffer.
+ * This is a pure decision function used to determine how far the server has data.
+ *
+ * @param headAvailableEndIndex - liveHead.availableEndIndex (may be undefined/null)
+ * @param headLatestEndIndex - liveHead.latestEndIndex (may be 0 if not available)
+ * @param daemonHeadRevision - session.daemonHeadRevision (0 if none)
+ * @param daemonHeadEndIndex - session.daemonHeadEndIndex (0 if none)
+ * @param bufferTailEndIndex - buffer.bufferTailEndIndex (0 if none)
+ * @param bufferEndIndex - buffer.endIndex (0 if none)
+ * @returns number or null if no authoritative end index can be determined
+ */
+export function resolveAuthoritativeAvailableEndIndex(
+  headAvailableEndIndex: number | null | undefined,
+  headLatestEndIndex: number,
+  daemonHeadRevision: number,
+  daemonHeadEndIndex: number,
+  bufferTailEndIndex: number,
+  bufferEndIndex: number,
+): number | null {
+  if (typeof headAvailableEndIndex === 'number' && Number.isFinite(headAvailableEndIndex)) {
+    return Math.max(0, Math.floor(headAvailableEndIndex));
+  }
+  if (typeof headLatestEndIndex === 'number' && headLatestEndIndex > 0) {
+    return Math.max(0, Math.floor(headLatestEndIndex));
+  }
+  if (daemonHeadRevision > 0 || daemonHeadEndIndex > 0) {
+    return Math.max(0, Math.floor(daemonHeadEndIndex));
+  }
+  if (bufferTailEndIndex > 0) {
+    return Math.max(0, Math.floor(bufferTailEndIndex));
+  }
+  if (bufferEndIndex > 0) {
+    return Math.max(0, Math.floor(bufferEndIndex));
+  }
+  return null;
+}

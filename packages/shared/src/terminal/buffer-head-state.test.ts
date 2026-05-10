@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveHeadAvailableBounds,
+  resolveAuthoritativeAvailableEndIndex,
   hasImpossibleLocalWindow,
   type SessionBufferHeadState,
 } from './buffer-head-state';
@@ -85,5 +86,36 @@ describe('hasImpossibleLocalWindow', () => {
   it('returns false when head is null', () => {
     const buffer = makeBuffer({ startIndex: 0, endIndex: 100 });
     expect(hasImpossibleLocalWindow(null, buffer)).toBe(false);
+  });
+});
+
+describe('resolveAuthoritativeAvailableEndIndex', () => {
+
+  it('uses headAvailableEndIndex when provided', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(500, 0, 0, 0, 0, 0)).toBe(500);
+  });
+
+  it('falls back to headLatestEndIndex when headAvailableEndIndex missing', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(null, 300, 0, 0, 0, 0)).toBe(300);
+  });
+
+  it('falls back to daemonHeadEndIndex when head fields missing and daemon has revision', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(null, 0, 10, 200, 0, 0)).toBe(200);
+  });
+
+  it('falls back to bufferTailEndIndex when no head and daemonHeadEndIndex zero', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(null, 0, 0, 0, 150, 0)).toBe(150);
+  });
+
+  it('falls back to bufferEndIndex when other sources are zero', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(null, 0, 0, 0, 0, 80)).toBe(80);
+  });
+
+  it('returns null when all sources are zero/invalid', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(null, 0, 0, 0, 0, 0)).toBeNull();
+  });
+
+  it('clamps negative values to 0', () => {
+    expect(resolveAuthoritativeAvailableEndIndex(-10, 0, 0, 0, 0, 0)).toBe(0);
   });
 });
