@@ -85,3 +85,17 @@ export function visibleRangesEqual(
     left.viewportRows === right.viewportRows
   );
 }
+
+/**
+ * Determine the target end index for buffer tail refresh.
+ * Prefers daemonHeadEndIndex if valid; otherwise uses fallback.
+ */
+export function resolveTailTargetEndIndex(
+  daemonHeadEndIndex: number,
+  fallbackEndIndex: number,
+): number {
+  if (typeof daemonHeadEndIndex === 'number' && Number.isFinite(daemonHeadEndIndex)) {
+    return Math.max(0, Math.floor(daemonHeadEndIndex));
+  }
+  return Math.max(0, Math.floor(fallbackEndIndex));
+}

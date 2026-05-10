@@ -5,6 +5,7 @@ import {
   buildDefaultVisibleRange,
   normalizeVisibleRange,
   visibleRangesEqual,
+  resolveTailTargetEndIndex,
   type VisibleRangeState,
 } from './visible-range';
 
@@ -101,5 +102,29 @@ describe('visibleRangesEqual', () => {
     expect(visibleRangesEqual(undefined, range)).toBe(false);
     expect(visibleRangesEqual(range, undefined)).toBe(false);
     expect(visibleRangesEqual(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("resolveTailTargetEndIndex", () => {
+
+  it("uses daemonHeadEndIndex when valid", () => {
+    expect(resolveTailTargetEndIndex(200, 100)).toBe(200);
+  });
+
+  it("falls back to fallbackEndIndex when daemonHeadEndIndex is missing", () => {
+    expect(resolveTailTargetEndIndex(undefined, 100)).toBe(100);
+  });
+
+  it("falls back to fallbackEndIndex when daemonHeadEndIndex is null", () => {
+    expect(resolveTailTargetEndIndex(null, 100)).toBe(100);
+  });
+
+  it("clamps negative values to 0", () => {
+    expect(resolveTailTargetEndIndex(-10, 100)).toBe(0);
+    expect(resolveTailTargetEndIndex(-10, -50)).toBe(0);
+  });
+
+  it("handles finite check: Infinity falls back", () => {
+    expect(resolveTailTargetEndIndex(Infinity, 100)).toBe(100);
   });
 });
