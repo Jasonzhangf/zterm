@@ -43,6 +43,8 @@ export interface TerminalOperationMap {
 
   'foreground/resume': Record<string, never>;
   'background/pause': Record<string, never>;
+
+  'app/cold-start': { persistedSessionIds: string[]; tombstonedSessionIds: string[] };
 }
 
 export type OperationType = keyof TerminalOperationMap;
