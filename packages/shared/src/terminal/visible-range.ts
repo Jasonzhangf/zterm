@@ -22,7 +22,7 @@ export function resolveVisibleRangeViewportRows(
 }
 
 export function resolveVisibleRangeEndIndex(
-  daemonHeadEndIndex: number,
+  daemonHeadEndIndex: number | undefined | null,
   bufferTailEndIndex: number,
   bufferEndIndex: number,
   visibleRange?: VisibleRangeState,
@@ -38,7 +38,7 @@ export function resolveVisibleRangeEndIndex(
 
 export function buildDefaultVisibleRange(
   bufferRows: number,
-  daemonHeadEndIndex: number,
+  daemonHeadEndIndex: number | undefined | null,
   bufferTailEndIndex: number,
   bufferEndIndex: number,
   previousVisibleRange?: VisibleRangeState,
@@ -91,7 +91,7 @@ export function visibleRangesEqual(
  * Prefers daemonHeadEndIndex if valid; otherwise uses fallback.
  */
 export function resolveTailTargetEndIndex(
-  daemonHeadEndIndex: number,
+  daemonHeadEndIndex: number | undefined | null,
   fallbackEndIndex: number,
 ): number {
   if (typeof daemonHeadEndIndex === 'number' && Number.isFinite(daemonHeadEndIndex)) {

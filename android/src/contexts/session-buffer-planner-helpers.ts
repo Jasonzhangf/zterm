@@ -8,6 +8,7 @@ import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
 import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex } from '@zterm/shared/terminal/buffer-head-state';
+import { resolveTailTargetEndIndex as sharedResolveTailTargetEndIndex } from '@zterm/shared/terminal/visible-range';
 import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
 import { computeVisibleRangeRepairRanges as sharedComputeVisibleRangeRepairRanges } from '@zterm/shared/terminal/gap-repair-planner';
 import {
@@ -82,14 +83,9 @@ function resolveTailTargetEndIndex(
   session: Session,
   visibleRange?: SessionVisibleRangeState,
   bufferOverride?: SessionBufferState | null,
-) {
-  if (
-    typeof session.daemonHeadEndIndex === 'number'
-    && Number.isFinite(session.daemonHeadEndIndex)
-  ) {
-    return Math.max(0, Math.floor(session.daemonHeadEndIndex));
-  }
-  return resolveVisibleRangeEndIndex(session, visibleRange, bufferOverride);
+): number {
+  const fallbackEndIndex = resolveVisibleRangeEndIndex(session, visibleRange, bufferOverride);
+  return sharedResolveTailTargetEndIndex(session.daemonHeadEndIndex, fallbackEndIndex);
 }
 
 
