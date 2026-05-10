@@ -104,3 +104,18 @@ export function resolveAuthoritativeAvailableEndIndex(
   }
   return null;
 }
+
+/**
+ * Check if a buffer has a local window (non-empty range with valid revision).
+ * Pure function: accepts primitive values, no session dependency.
+ */
+export function hasLocalWindow(
+  startIndex: number,
+  endIndex: number,
+  revision: number,
+): boolean {
+  return (
+    Math.max(0, Math.floor(endIndex)) > Math.max(0, Math.floor(startIndex))
+    && Math.max(0, Math.floor(revision)) > 0
+  );
+}

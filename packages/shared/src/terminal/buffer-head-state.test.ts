@@ -3,6 +3,7 @@ import {
   resolveHeadAvailableBounds,
   resolveAuthoritativeAvailableEndIndex,
   hasImpossibleLocalWindow,
+  hasLocalWindow,
   type SessionBufferHeadState,
 } from './buffer-head-state';
 
@@ -117,5 +118,28 @@ describe('resolveAuthoritativeAvailableEndIndex', () => {
 
   it('clamps negative values to 0', () => {
     expect(resolveAuthoritativeAvailableEndIndex(-10, 0, 0, 0, 0, 0)).toBe(0);
+  });
+});
+
+describe('hasLocalWindow', () => {
+
+  it('returns true when valid window exists', () => {
+    expect(hasLocalWindow(0, 100, 1)).toBe(true);
+  });
+
+  it('returns false when startIndex == endIndex', () => {
+    expect(hasLocalWindow(50, 50, 1)).toBe(false);
+  });
+
+  it('returns false when revision is 0', () => {
+    expect(hasLocalWindow(0, 100, 0)).toBe(false);
+  });
+
+  it('returns false when endIndex < startIndex', () => {
+    expect(hasLocalWindow(100, 50, 1)).toBe(false);
+  });
+
+  it('returns false when revision is negative', () => {
+    expect(hasLocalWindow(0, 100, -1)).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import type {
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
-import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex } from '@zterm/shared/terminal/buffer-head-state';
+import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex, hasLocalWindow as sharedHasLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
 import { resolveTailTargetEndIndex as sharedResolveTailTargetEndIndex } from '@zterm/shared/terminal/visible-range';
 import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
 import { computeVisibleRangeRepairRanges as sharedComputeVisibleRangeRepairRanges } from '@zterm/shared/terminal/gap-repair-planner';
@@ -29,15 +29,15 @@ export interface SessionBufferHeadState {
 export function hasSessionLocalWindow(
   session: Session | null | undefined,
   bufferOverride?: SessionBufferState | null,
-) {
+): boolean {
   if (!session) {
     return false;
   }
   const buffer = resolveSessionBufferView(session, bufferOverride);
-  return (
-    Math.max(0, Math.floor(buffer.endIndex || 0))
-      > Math.max(0, Math.floor(buffer.startIndex || 0))
-    && Math.max(0, Math.floor(buffer.revision || 0)) > 0
+  return sharedHasLocalWindow(
+    buffer.startIndex ?? 0,
+    buffer.endIndex ?? 0,
+    buffer.revision ?? 0,
   );
 }
 
