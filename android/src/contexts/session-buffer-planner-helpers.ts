@@ -17,6 +17,7 @@ import {
   resolveVisibleRangeViewportRows,
   type SessionVisibleRangeState,
 } from './session-visible-range-helpers';
+import { resolveTailRefreshWindow as sharedResolveTailRefreshWindow } from '@zterm/shared/terminal/buffer-sync-request-planner';
 
 export interface SessionBufferHeadState {
   revision: number;
@@ -176,47 +177,18 @@ function buildTailRefreshBufferSyncRequestPayload(
       viewportEndIndex,
     ).length > 0
   );
-  let window: { requestStartIndex: number; requestEndIndex: number };
-
-  if (options?.requestWindowOverride) {
-    window = {
-      requestStartIndex: Math.max(
-        authoritativeHeadStartIndex,
-        Math.floor(options.requestWindowOverride.requestStartIndex || 0),
-      ),
-      requestEndIndex: Math.max(
-        authoritativeHeadStartIndex,
-        Math.floor(options.requestWindowOverride.requestEndIndex || 0),
-      ),
-    };
-  } else if (!localHasWindow || invalidLocalWindow || distanceToHead > cacheLines) {
-    window = resolveRequestedBufferWindow(
-      viewportEndIndex,
-      viewportRows,
-      authoritativeHeadStartIndex,
-    );
-  } else if (localEndIndex < viewportEndIndex) {
-    window = {
-      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
-      requestEndIndex: viewportEndIndex,
-    };
-  } else if (sameEndRevisionAdvanced && sameEndWindowHasLocalGaps) {
-    window = {
-      requestStartIndex: Math.max(authoritativeHeadStartIndex, viewportEndIndex - viewportRows),
-      requestEndIndex: viewportEndIndex,
-    };
-  } else if (sameEndRevisionAdvanced) {
-    window = resolveRequestedBufferWindow(
-      viewportEndIndex,
-      viewportRows,
-      authoritativeHeadStartIndex,
-    );
-  } else {
-    window = {
-      requestStartIndex: Math.max(authoritativeHeadStartIndex, localEndIndex),
-      requestEndIndex: viewportEndIndex,
-    };
-  }
+  const window = sharedResolveTailRefreshWindow({
+    authoritativeHeadStartIndex,
+    viewportEndIndex,
+    viewportRows,
+    cacheLines,
+    localHasWindow,
+    distanceToHead,
+    sameEndRevisionAdvanced,
+    sameEndWindowHasLocalGaps,
+    invalidLocalWindow,
+    requestWindowOverride: options?.requestWindowOverride ?? null,
+  });
   return {
     ...buildBaseBufferSyncRequestPayload(session, buffer),
     requestStartIndex: window.requestStartIndex,

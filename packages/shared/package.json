@@ -20,7 +20,8 @@
     "./terminal/viewport-utils": "./src/terminal/viewport-utils.ts",
     "./terminal/buffer-sync-planner": "./src/terminal/buffer-sync-planner.ts",
     "./terminal/gap-repair-planner": "./src/terminal/gap-repair-planner.ts",
-    "./terminal/pull-state-planner": "./src/terminal/pull-state-planner.ts"
+    "./terminal/pull-state-planner": "./src/terminal/pull-state-planner.ts",
+    "./terminal/buffer-sync-request-planner": "./src/terminal/buffer-sync-request-planner.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"
