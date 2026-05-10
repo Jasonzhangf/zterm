@@ -7,7 +7,7 @@ import type {
 import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
-import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
+import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex } from '@zterm/shared/terminal/buffer-head-state';
 import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
 import { computeVisibleRangeRepairRanges as sharedComputeVisibleRangeRepairRanges } from '@zterm/shared/terminal/gap-repair-planner';
 import {
@@ -66,30 +66,16 @@ function resolveAuthoritativeAvailableEndIndex(
   session: Session,
   liveHead?: SessionBufferHeadState | null,
   bufferOverride?: SessionBufferState | null,
-) {
+): number | null {
   const buffer = resolveSessionBufferView(session, bufferOverride);
-  if (
-    typeof liveHead?.availableEndIndex === 'number'
-    && Number.isFinite(liveHead.availableEndIndex)
-  ) {
-    return Math.max(0, Math.floor(liveHead.availableEndIndex));
-  }
-  if (typeof liveHead?.latestEndIndex === 'number' && Number.isFinite(liveHead.latestEndIndex)) {
-    return Math.max(0, Math.floor(liveHead.latestEndIndex));
-  }
-  if (
-    Math.max(0, Math.floor(session.daemonHeadRevision || 0)) > 0
-    || Math.max(0, Math.floor(session.daemonHeadEndIndex || 0)) > 0
-  ) {
-    return Math.max(0, Math.floor(session.daemonHeadEndIndex || 0));
-  }
-  if (Math.max(0, Math.floor(buffer.bufferTailEndIndex || 0)) > 0) {
-    return Math.max(0, Math.floor(buffer.bufferTailEndIndex || 0));
-  }
-  if (Math.max(0, Math.floor(buffer.endIndex || 0)) > 0) {
-    return Math.max(0, Math.floor(buffer.endIndex || 0));
-  }
-  return null;
+  return sharedResolveAuthoritativeAvailableEndIndex(
+    liveHead?.availableEndIndex,
+    liveHead?.latestEndIndex ?? 0,
+    Math.max(0, Math.floor(session.daemonHeadRevision || 0)),
+    Math.max(0, Math.floor(session.daemonHeadEndIndex || 0)),
+    Math.max(0, Math.floor(buffer.bufferTailEndIndex || 0)),
+    Math.max(0, Math.floor(buffer.endIndex || 0)),
+  );
 }
 
 function resolveTailTargetEndIndex(
