@@ -16,6 +16,8 @@ export function buildDaemonSessionName(port: number = DEFAULT_DAEMON_PORT) {
 
 export const DEFAULT_DAEMON_SESSION_NAME = buildDaemonSessionName();
 export const BRIDGE_URL_PLACEHOLDER = `ws://host:${DEFAULT_BRIDGE_PORT}`;
+import { resolveTerminalRequestWindowLines as sharedResolveRequestWindowLines } from '@zterm/shared/terminal/viewport-utils';
+
 export const TERMINAL_CACHE_SCREENS = 3;
 export const ACTIVE_HEAD_REFRESH_TICK_MS = 33;
 
@@ -93,10 +95,10 @@ export function withDefaultBridgePort(port?: number | null) {
   return port || DEFAULT_BRIDGE_PORT;
 }
 
-export function resolveTerminalRequestWindowLines(rows?: number | null) {
+export function resolveTerminalRequestWindowLines(rows?: number | null): number {
   const viewportRows =
     typeof rows === 'number' && Number.isFinite(rows)
       ? Math.max(1, Math.floor(rows))
       : 24;
-  return viewportRows * TERMINAL_CACHE_SCREENS;
+  return sharedResolveRequestWindowLines(viewportRows);
 }
