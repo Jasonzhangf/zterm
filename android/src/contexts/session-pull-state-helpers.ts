@@ -2,6 +2,14 @@ import type {
   BufferSyncRequestPayload,
   TerminalBufferPayload,
 } from '../lib/types';
+import {
+  doesBufferSyncSatisfyPullState as sharedSatisfiesPull,
+  doesPullStateCoverRequest as sharedCoversRequest,
+  doesPullStateMatchExactSnapshot as sharedMatchExact,
+  type PullStateSnapshot,
+  type BufferSyncPayloadSnapshot,
+  type BufferSyncRequestSnapshot,
+} from '@zterm/shared/terminal/pull-state-planner';
 
 export type SessionPullPurpose = 'tail-refresh' | 'reading-repair';
 
@@ -21,32 +29,24 @@ export type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullSt
 function doesBufferSyncSatisfyPullState(
   pullState: SessionPullState,
   payload: TerminalBufferPayload,
-) {
-  const payloadRevision = Math.max(0, Math.floor(payload.revision || 0));
-  const payloadStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const payloadEndIndex = Math.max(payloadStartIndex, Math.floor(payload.endIndex || 0));
-  if (pullState.purpose === 'reading-repair') {
-    return (
-      payloadRevision >= pullState.requestKnownRevision
-      && payloadStartIndex <= pullState.targetStartIndex
-      && payloadEndIndex >= pullState.targetEndIndex
-    );
-  }
-  const settlesExistingWindowRefresh = (
-    pullState.requestLocalEndIndex >= pullState.targetEndIndex
-    && pullState.requestLocalStartIndex <= pullState.targetStartIndex
-    && pullState.requestKnownRevision < pullState.targetHeadRevision
-    && payloadRevision >= pullState.targetHeadRevision
-    && payloadEndIndex >= pullState.targetEndIndex
-  );
-  return (
-    settlesExistingWindowRefresh
-    || (
-      payloadRevision >= pullState.targetHeadRevision
-      && payloadStartIndex <= pullState.targetStartIndex
-      && payloadEndIndex >= pullState.targetEndIndex
-    )
-  );
+): boolean {
+  const snap: PullStateSnapshot = {
+    purpose: pullState.purpose,
+    startedAt: pullState.startedAt,
+    targetHeadRevision: pullState.targetHeadRevision,
+    targetStartIndex: pullState.targetStartIndex,
+    targetEndIndex: pullState.targetEndIndex,
+    requestKnownRevision: pullState.requestKnownRevision,
+    requestLocalStartIndex: pullState.requestLocalStartIndex,
+    requestLocalEndIndex: pullState.requestLocalEndIndex,
+  };
+  const payloadSnap: BufferSyncPayloadSnapshot = {
+    revision: Number(payload.revision ?? 0),
+    startIndex: Number(payload.startIndex ?? 0),
+    endIndex: Number(payload.endIndex ?? 0),
+    lineCount: Number(payload.lines?.length ?? 0),
+  };
+  return sharedSatisfiesPull(snap, payloadSnap);
 }
 
 export function hasActiveSessionPullState(pullStates?: SessionPullStates | null) {
@@ -90,33 +90,50 @@ export function settleSessionPullStatesWithBufferSync(
 export function doesSessionPullStateCoverRequest(
   pullState: SessionPullState,
   payload: BufferSyncRequestPayload,
-) {
-  return (
-    pullState.requestKnownRevision === Math.max(0, Math.floor(payload.knownRevision || 0))
-    && pullState.requestLocalStartIndex === Math.max(0, Math.floor(payload.localStartIndex || 0))
-    && pullState.requestLocalEndIndex === Math.max(0, Math.floor(payload.localEndIndex || 0))
-    && pullState.targetStartIndex <= Math.max(0, Math.floor(payload.requestStartIndex || 0))
-    && pullState.targetEndIndex >= Math.max(0, Math.floor(payload.requestEndIndex || 0))
-  );
+): boolean {
+  const snap: PullStateSnapshot = {
+    purpose: pullState.purpose,
+    startedAt: pullState.startedAt,
+    targetHeadRevision: pullState.targetHeadRevision,
+    targetStartIndex: pullState.targetStartIndex,
+    targetEndIndex: pullState.targetEndIndex,
+    requestKnownRevision: pullState.requestKnownRevision,
+    requestLocalStartIndex: pullState.requestLocalStartIndex,
+    requestLocalEndIndex: pullState.requestLocalEndIndex,
+  };
+  const req: BufferSyncRequestSnapshot = {
+    knownRevision: Number(payload.knownRevision ?? 0),
+    localStartIndex: Number(payload.localStartIndex ?? 0),
+    localEndIndex: Number(payload.localEndIndex ?? 0),
+    requestStartIndex: Number(payload.requestStartIndex ?? 0),
+    requestEndIndex: Number(payload.requestEndIndex ?? 0),
+  };
+  return sharedCoversRequest(snap, req);
 }
 
 export function doesSessionPullStateMatchExactLocalSnapshot(
   pullState: SessionPullState,
   payload: BufferSyncRequestPayload,
   targetHeadRevision?: number | null,
-) {
-  return (
-    pullState.requestKnownRevision === Math.max(0, Math.floor(payload.knownRevision || 0))
-    && pullState.requestLocalStartIndex === Math.max(0, Math.floor(payload.localStartIndex || 0))
-    && pullState.requestLocalEndIndex === Math.max(0, Math.floor(payload.localEndIndex || 0))
-    && pullState.targetStartIndex === Math.max(0, Math.floor(payload.requestStartIndex || 0))
-    && pullState.targetEndIndex === Math.max(0, Math.floor(payload.requestEndIndex || 0))
-    && (
-      targetHeadRevision === undefined
-      || targetHeadRevision === null
-      || pullState.targetHeadRevision === Math.max(0, Math.floor(targetHeadRevision || 0))
-    )
-  );
+): boolean {
+  const snap: PullStateSnapshot = {
+    purpose: pullState.purpose,
+    startedAt: pullState.startedAt,
+    targetHeadRevision: pullState.targetHeadRevision,
+    targetStartIndex: pullState.targetStartIndex,
+    targetEndIndex: pullState.targetEndIndex,
+    requestKnownRevision: pullState.requestKnownRevision,
+    requestLocalStartIndex: pullState.requestLocalStartIndex,
+    requestLocalEndIndex: pullState.requestLocalEndIndex,
+  };
+  const req: BufferSyncRequestSnapshot = {
+    knownRevision: Number(payload.knownRevision ?? 0),
+    localStartIndex: Number(payload.localStartIndex ?? 0),
+    localEndIndex: Number(payload.localEndIndex ?? 0),
+    requestStartIndex: Number(payload.requestStartIndex ?? 0),
+    requestEndIndex: Number(payload.requestEndIndex ?? 0),
+  };
+  return sharedMatchExact(snap, req, targetHeadRevision);
 }
 
 export function clearSessionPullStateEntry(
