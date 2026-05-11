@@ -11,6 +11,15 @@ describe('resolveAttachGeometry', () => {
     })).toEqual({ cols: 120, rows: 40 });
   });
 
+  it('does not let client widen upstream width beyond the authoritative baseline', () => {
+    expect(resolveAttachGeometry({
+      requestedGeometry: { cols: 200, rows: 12 },
+      currentMirrorGeometry: { cols: 132, rows: 40 },
+      existingTmuxGeometry: { cols: 140, rows: 44 },
+      previousSessionGeometry: { cols: 80, rows: 24 },
+    })).toEqual({ cols: 132, rows: 40 });
+  });
+
   it('reuses the current connected mirror geometry when the client omits rows/cols', () => {
     expect(resolveAttachGeometry({
       requestedGeometry: null,

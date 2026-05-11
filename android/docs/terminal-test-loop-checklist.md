@@ -71,7 +71,7 @@
 - follow / reading 只影响窗口，不影响 buffer truth
 - 当前窗口不连续时，只能画：
   - 已有内容
-  - gap / blank marker
+  - 空白 gap 占位
 - **不能**把“窗口不连续”解释成“已有内容不存在”
 - `mirror-fixed` 下长行只能裁切，不能换行/重排/回写上游宽度
 - `mirror-fixed` 下横向查看只改 renderer horizontal window
@@ -149,7 +149,7 @@ tmux oracle
 4. reading 上滚不会被 live update 拉回
 5. 输入会退出 reading 回到底部
 6. 底部继续下拉/拖动不会把已有内容画空
-7. 当前窗口有 gap 时继续画已有内容 + gap marker
+7. 当前窗口有 gap 时继续画已有内容 + 空白 gap 占位
 8. `mirror-fixed` 长行默认左裁切，不本地重排
 9. `mirror-fixed` 横向平移只移动 renderer 列窗口，不改 buffer / head
 10. `mirror-fixed` 开启后左右滑切 tab 自动关闭

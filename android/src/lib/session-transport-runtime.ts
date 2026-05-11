@@ -7,6 +7,11 @@ export interface SessionTransportRuntime {
   host: Host;
   activeSocket: BridgeTransportSocket | null;
   supersededSockets: BridgeTransportSocket[];
+  requestedTerminalGeometry: {
+    cols?: number | null;
+    rows?: number | null;
+    widthMode?: 'adaptive-phone' | 'mirror-fixed';
+  } | null;
 }
 
 export interface TargetTransportRuntime {
@@ -134,6 +139,7 @@ export function upsertSessionTransportRuntime(
     host: normalizedHost,
     activeSocket: current?.activeSocket || null,
     supersededSockets: current?.supersededSockets ? [...current.supersededSockets] : [],
+    requestedTerminalGeometry: current?.requestedTerminalGeometry || null,
   };
   store.sessions.set(sessionId, nextRuntime);
   if (!nextTarget.sessionIds.includes(sessionId)) {
@@ -161,6 +167,36 @@ export function getSessionTransportSocket(
   sessionId: string,
 ) {
   return store.sessions.get(sessionId)?.activeSocket || null;
+}
+
+export function getSessionRequestedTerminalGeometry(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+) {
+  return store.sessions.get(sessionId)?.requestedTerminalGeometry || null;
+}
+
+export function setSessionRequestedTerminalGeometry(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+  geometry: {
+    cols?: number | null;
+    rows?: number | null;
+    widthMode?: 'adaptive-phone' | 'mirror-fixed';
+  } | null,
+) {
+  const runtime = store.sessions.get(sessionId);
+  if (!runtime) {
+    return null;
+  }
+  runtime.requestedTerminalGeometry = geometry
+    ? {
+        cols: Number.isFinite(geometry.cols) ? Math.max(1, Math.floor(geometry.cols || 0)) : undefined,
+        rows: Number.isFinite(geometry.rows) ? Math.max(1, Math.floor(geometry.rows || 0)) : undefined,
+        widthMode: geometry.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
+      }
+    : null;
+  return runtime.requestedTerminalGeometry;
 }
 
 export function setSessionTransportSocket(

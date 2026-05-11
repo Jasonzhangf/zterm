@@ -1,5 +1,6 @@
 import {
   buildConnectedHeadRefreshPlan,
+  buildSessionClosedUpdates,
   buildSessionConnectedUpdates,
   buildSessionScheduleListLoadingState,
 } from './session-transport-open-helpers';
@@ -282,6 +283,7 @@ export function finalizeSocketFailureBaselineRuntime(options: {
   };
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
   setScheduleStateForSession: (
     sessionId: string,
     nextState:
@@ -302,6 +304,10 @@ export function finalizeSocketFailureBaselineRuntime(options: {
     options.sessionId,
   );
   options.writeSessionTransportToken(options.sessionId, null);
+  options.updateSessionSync(
+    options.sessionId,
+    buildSessionClosedUpdates(options.message),
+  );
   options.setScheduleStateForSession(options.sessionId, (current) => ({
     ...current,
     loading: false,

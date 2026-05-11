@@ -448,6 +448,9 @@ tmux truth
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
 - App foreground resume 的真相只能是：**先 probe/resume 当前 active transport，再决定是否 reconnect**；App 不得再按 UI `session.state` 先分叉，否则会把“label stale but transport alive”误杀成重连。
 - foreground/background 的 hidden gate 也必须只有一份真源；若 App 已统一消费 `visibilitychange / resume / appStateChange`，`SessionContext` active tick 不得再自行读取 `document.visibilityState` 做第二份停刷判定。
+- open-tab restore / runtime sync 允许为 persisted tabs **恢复 local runtime shell**：可 `createSession(connect:false)` 做 cold restore / sessionId remap，但**不得**自动打开 daemon session。真正的 daemon open 只能来自显式用户 open/import/resume 动作。
+- active re-entry / active tick / foreground resume 若遇到 `closed/error/unavailable` session，生命周期链只能 skip 或 probe 当前 live transport；**不得**自动 reconnect。只有显式 open / explicit resume 才允许重新打开 daemon session。
+- `adaptive-phone` 的 upstream geometry 真相只能是 **client-owned latest cols**；attach/reconnect 可带 cols，但**不得**带 runtime rows。daemon 只消费 cols，rows 继续取 tmux/mirror baseline。
 - 若 App 首帧就已经持有现存 `sessions[]`，也必须立刻持久化 `OPEN_TABS / ACTIVE_SESSION`；不能因为“这次不是 restore 分支”就跳过首次回写，否则下次冷启动恢复会拿到陈旧 tab 真相。
 - 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。

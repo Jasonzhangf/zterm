@@ -61,7 +61,7 @@ export function createSessionPublicFacadeRuntime(options: {
   ) => boolean;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -137,7 +137,7 @@ export function createSessionPublicFacadeRuntime(options: {
   const resumeActiveSessionTransport = (sessionId: string) => {
     return options.ensureActiveSessionFresh({
       sessionId,
-      source: 'active-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
       allowReconnectIfUnavailable: true,
@@ -159,6 +159,7 @@ export function createSessionPublicFacadeRuntime(options: {
     updateSessionViewportRuntime({
       sessionId,
       visibleRange: normalizedVisibleRange,
+      viewportMode: 'mode' in visibleRange ? visibleRange.mode : undefined,
       sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       isSessionTransportActive: options.isSessionTransportActive,
       sessions: options.stateRef.current.sessions,

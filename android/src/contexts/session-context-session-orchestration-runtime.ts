@@ -218,7 +218,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
   const probeOrReconnectStaleSessionTransport = (
     sessionId: string,
     ws: BridgeTransportSocket,
-    reason: 'active-reentry' | 'active-tick' | 'input',
+    reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input',
   ) => {
     return probeOrReconnectStaleSessionTransportRuntime({
       sessionId,
@@ -239,7 +239,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
 
   const ensureActiveSessionFresh = (refreshOptions: {
     sessionId: string;
-    source: 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;

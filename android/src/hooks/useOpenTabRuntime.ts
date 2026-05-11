@@ -6,7 +6,6 @@ import {
   readPersistedClosedTabReuseKeys,
   persistClosedTabReuseKeys,
 } from '../lib/open-tab-persistence';
-import { fetchRemoteTmuxSessionNamesByOwner, filterRestorableOpenTabsByRemoteSessionNames } from '../lib/open-tab-restore';
 import {
   deriveCloseOpenTabIntent,
   normalizeOpenTabIntentState,
@@ -14,12 +13,12 @@ import {
 } from '../lib/open-tab-intent';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
 import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib/page-state';
-import { runtimeDebug } from '../lib/runtime-debug';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from '../lib/types';
 import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTabLifecycleEffects';
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
+import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
 
 function buildSessionStructureSignature(
   sessions: Array<Pick<
@@ -122,6 +121,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     switchSession,
     moveSession,
     renameSession,
+    resumeActiveSessionTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
@@ -295,93 +295,18 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   }, [applyOpenTabState, clearSessionDraft, closeSession, setPageState]);
 
   const auditOpenTabsAgainstRemoteSessions = useCallback(async (reason: OpenTabAuditReason) => {
-    const currentTabs = openTabStateRef.current.tabs;
-    const auditTargets = [
-      ...currentTabs,
-      ...sessionGroups,
-    ];
-    if (auditTargets.length === 0) {
-      return;
-    }
-
-    const auditToken = remoteOpenTabAuditTokenRef.current + 1;
-    remoteOpenTabAuditTokenRef.current = auditToken;
-    const sessionNamesByTarget = await fetchRemoteTmuxSessionNamesByOwner({
-      targets: auditTargets,
-      bridgeSettings: bridgeSettingsRef.current,
-      hosts: hostsRef.current,
+    await auditOpenTabsAgainstRemoteSessionsLib(reason, {
+      openTabStateRef,
+      sessionGroups,
+      bridgeSettingsRef,
+      hostsRef,
+      sessionsRef,
+      runtimeActiveSessionIdRef,
+      remoteOpenTabAuditTokenRef,
+      pruneSessionGroupSelectionToRemoteTruth,
+      applyClosedOpenTabIntent,
     });
-    if (remoteOpenTabAuditTokenRef.current !== auditToken) {
-      return;
-    }
-
-    const prunedOwnerKeys = new Set<string>();
-    for (const target of auditTargets) {
-      const ownerKey = `${target.daemonHostId?.trim() ? `daemon:${target.daemonHostId.trim()}` : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`}`;
-      if (prunedOwnerKeys.has(ownerKey)) {
-        continue;
-      }
-      prunedOwnerKeys.add(ownerKey);
-      const remoteSessionNames = sessionNamesByTarget.get(ownerKey);
-      if (!remoteSessionNames) {
-        continue;
-      }
-      pruneSessionGroupSelectionToRemoteTruth({
-        bridgeHost: target.bridgeHost,
-        bridgePort: target.bridgePort,
-        daemonHostId: target.daemonHostId,
-      }, remoteSessionNames);
-    }
-
-    const remoteAvailability = filterRestorableOpenTabsByRemoteSessionNames({
-      tabs: currentTabs,
-      sessionNamesByTarget,
-    });
-    const normalizedRemoteState = normalizeOpenTabIntentState(
-      remoteAvailability.restorableTabs,
-      openTabStateRef.current.activeSessionId,
-    );
-    const remoteState = {
-      tabs: normalizedRemoteState.tabs,
-      activeSessionId: normalizedRemoteState.activeSessionId,
-      droppedTabs: remoteAvailability.droppedTabs,
-    };
-    if (remoteOpenTabAuditTokenRef.current !== auditToken) {
-      return;
-    }
-
-    const droppedTabs = remoteState.droppedTabs.filter((tab) => (
-      openTabStateRef.current.tabs.some((currentTab) => currentTab.sessionId === tab.sessionId)
-    ));
-    if (droppedTabs.length === 0) {
-      return;
-    }
-
-    runtimeDebug('app.open-tabs.remote-session-prune', {
-      reason,
-      droppedSessionIds: droppedTabs.map((tab) => tab.sessionId),
-      droppedTargets: droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-      remainingSessionIds: remoteState.tabs.map((tab) => tab.sessionId),
-    });
-
-    for (const tab of droppedTabs) {
-      const runtimeSessions = sessionsRef.current;
-      if (!openTabStateRef.current.tabs.some((currentTab) => currentTab.sessionId === tab.sessionId)) {
-        continue;
-      }
-      applyClosedOpenTabIntent(tab.sessionId, {
-        runtimeSessions,
-        runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
-        fallbackSessionIds: runtimeSessions
-          .filter((session) => session.id !== tab.sessionId)
-          .map((session) => session.id),
-        closeRuntimeSession: runtimeSessions.some((session) => session.id === tab.sessionId),
-        clearDraft: true,
-        source: `remote-session-audit:${reason}`,
-      });
-    }
   }, [applyClosedOpenTabIntent, pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
-
   useEffect(() => {
     sessionsRef.current = sessions;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;
@@ -478,6 +403,10 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     setFollowResetEpoch((current) => current + 1);
   }, []);
 
+  const openExplicitSessionById = useCallback((sessionId: string) => {
+    return resumeActiveSessionTransport(sessionId);
+  }, [resumeActiveSessionTransport]);
+
   useOpenTabLifecycleEffects({
     sessionsRef,
     openTabStateRef,
@@ -504,6 +433,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     moveSession,
     renameSession,
     applyClosedOpenTabIntent,
+    openExplicitSessionById,
   });
 
   const runtimeRefs = useMemo<OpenTabRuntimeRefs>(() => ({

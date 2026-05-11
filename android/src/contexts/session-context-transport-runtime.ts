@@ -2,6 +2,7 @@ import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
 import { getResolvedSessionName } from '../lib/connection-target';
 import {
   clearSessionSupersededSockets,
+  getSessionRequestedTerminalGeometry,
   getSessionTargetControlTransport,
   getSessionTargetTransportRuntime,
   getSessionTransportHost,
@@ -10,6 +11,7 @@ import {
   getSessionTransportTargetKey,
   moveSessionTransportSocketToSuperseded,
   removeSessionTransportRuntime,
+  setSessionRequestedTerminalGeometry,
   setSessionTargetControlTransport,
   setSessionTransportSocket,
   upsertSessionTransportRuntime,
@@ -35,9 +37,14 @@ export interface SessionContextTransportAccessors {
   readSessionTargetRuntime: (sessionId: string) => ReturnType<typeof getSessionTargetTransportRuntime>;
   readSessionTargetKey: (sessionId: string) => string | null;
   readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionRequestedTerminalGeometry: (sessionId: string) => ReturnType<typeof getSessionRequestedTerminalGeometry>;
   writeSessionTransportHost: (sessionId: string, host: Host) => ReturnType<typeof upsertSessionTransportRuntime>;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTransportSocket>;
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTargetControlTransport>;
+  writeSessionRequestedTerminalGeometry: (
+    sessionId: string,
+    geometry: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null,
+  ) => ReturnType<typeof setSessionRequestedTerminalGeometry>;
   moveSessionTransportSocketAside: (sessionId: string) => ReturnType<typeof moveSessionTransportSocketToSuperseded>;
   clearSessionTransportRuntime: (sessionId: string) => ReturnType<typeof removeSessionTransportRuntime>;
   drainSessionSupersededSockets: (sessionId: string) => ReturnType<typeof clearSessionSupersededSockets>;
@@ -69,9 +76,11 @@ export function createSessionContextTransportAccessors(
     readSessionTargetRuntime: (sessionId) => getSessionTargetTransportRuntime(storeRef.current, sessionId),
     readSessionTargetKey: (sessionId) => getSessionTransportTargetKey(storeRef.current, sessionId),
     readSessionTargetControlSocket: (sessionId) => getSessionTargetControlTransport(storeRef.current, sessionId),
+    readSessionRequestedTerminalGeometry: (sessionId) => getSessionRequestedTerminalGeometry(storeRef.current, sessionId),
     writeSessionTransportHost: (sessionId, host) => upsertSessionTransportRuntime(storeRef.current, sessionId, host),
     writeSessionTransportSocket: (sessionId, socket) => setSessionTransportSocket(storeRef.current, sessionId, socket),
     writeSessionTargetControlSocket: (sessionId, socket) => setSessionTargetControlTransport(storeRef.current, sessionId, socket),
+    writeSessionRequestedTerminalGeometry: (sessionId, geometry) => setSessionRequestedTerminalGeometry(storeRef.current, sessionId, geometry),
     moveSessionTransportSocketAside: (sessionId) => moveSessionTransportSocketToSuperseded(storeRef.current, sessionId),
     clearSessionTransportRuntime: (sessionId) => removeSessionTransportRuntime(storeRef.current, sessionId),
     drainSessionSupersededSockets: (sessionId) => clearSessionSupersededSockets(storeRef.current, sessionId),

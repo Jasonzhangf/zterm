@@ -33,3 +33,7 @@ packages/shared/src/**/*.js
 packages/shared/src/**/*.js.map
 android/vite.config.js
 CACHE.md
+
+# Build artifacts (release APKs)
+android/release-dist/*.apk
+android/release-dist/latest.json

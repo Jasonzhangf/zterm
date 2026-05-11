@@ -1313,7 +1313,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
-      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: false }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
   });
@@ -1355,7 +1355,7 @@ describe('App dynamic refresh matrix', () => {
         sessionName: 'alpha',
         authToken: 'token-a',
       }),
-      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: false }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
   });
@@ -1425,7 +1425,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
-      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: false }),
     );
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 'tab-b', sessionName: 'beta' }),
@@ -1712,7 +1712,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-z', sessionName: 'zterm' }),
-      expect.objectContaining({ sessionId: 'tab-z-new', activate: false, connect: true, customName: 'Keep Me' }),
+      expect.objectContaining({ sessionId: 'tab-z-new', activate: false, connect: false, customName: 'Keep Me' }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-z-new');
   });
@@ -1781,7 +1781,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ id: 'host-a', sessionName: 'alpha' }),
-      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: false }),
     );
     expect(sessionHarness.createSession).toHaveBeenNthCalledWith(
       2,
@@ -1905,7 +1905,7 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({
         sessionId: 'tab-daemon-stale',
         activate: false,
-        connect: true,
+        connect: false,
       }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('session-live-bridge');
@@ -2524,7 +2524,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: false }),
     );
   });
 
@@ -2695,6 +2695,65 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).not.toHaveBeenCalledWith('s1');
   });
 
+  it('does not auto create sessions from persisted OPEN_TABS on cold launch without explicit open intent', async () => {
+    sessionHarness.reset();
+    sessionHarness.update({
+      sessions: [],
+      activeSessionId: null,
+      connectedCount: 0,
+    } as any, null as any);
+    hostHarness.setHosts([
+      {
+        id: 'host-a',
+        createdAt: 1,
+        name: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+    ]);
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'tab-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'tab-a');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'tab-a' }),
+    ]));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'host-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+      }),
+      expect.objectContaining({
+        sessionId: 'tab-a',
+        activate: false,
+        connect: false,
+      }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
+  });
+
   it('removes the persisted representative when closing a runtime session that reuses the same bridge target', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
@@ -2825,7 +2884,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: false }),
     );
     expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-shared' }),
@@ -3242,7 +3301,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),
-      expect.objectContaining({ sessionId: 's2', activate: false, connect: true }),
+      expect.objectContaining({ sessionId: 's2', activate: false, connect: false }),
     );
     expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'session-shared' }),
@@ -4265,7 +4324,7 @@ describe('App dynamic refresh matrix', () => {
         bridgePort: 3333,
         authToken: 'token-b',
       }),
-      expect.objectContaining({ sessionId: 'saved-b-new', activate: false, connect: true, customName: 'Keep Me' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', activate: false, connect: false, customName: 'Keep Me' }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
@@ -4361,7 +4420,7 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({
         sessionId: 'saved-daemon-a',
         activate: false,
-        connect: true,
+        connect: false,
       }),
     );
   });

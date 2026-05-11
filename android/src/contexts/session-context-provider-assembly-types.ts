@@ -67,6 +67,8 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionTransportRuntime: (sessionId: string) => any;
   readSessionTargetRuntime: (sessionId: string) => any;
   readSessionTargetKey: (sessionId: string) => any;
+  readSessionRequestedTerminalGeometry: (sessionId: string) => any;
+  writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: any) => any;
   clearSessionTransportRuntime: (sessionId: string) => any;
   readSessionBufferHead?: (sessionId: string) => any;
   requestSessionBufferSync: (sessionId: string, options?: any) => boolean;

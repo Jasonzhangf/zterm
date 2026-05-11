@@ -43,11 +43,11 @@ describe('resolveHeadAvailableBounds', () => {
     expect(result.availableEndIndex).toBe(500);
   });
 
-  it('falls back to buffer bounds when head has no available bounds', () => {
+  it('does not invent availableStartIndex from the local buffer when head has no authoritative start bound', () => {
     const head = makeHead({ latestEndIndex: 200 });
-    const buffer = makeBuffer({ startIndex: 0, endIndex: 100 });
+    const buffer = makeBuffer({ startIndex: 96, endIndex: 120 });
     const result = resolveHeadAvailableBounds(head, buffer);
-    expect(result.availableStartIndex).toBe(0);
+    expect(result.availableStartIndex).toBeNull();
     expect(result.availableEndIndex).toBe(200);
   });
 
@@ -57,16 +57,16 @@ describe('resolveHeadAvailableBounds', () => {
       latestEndIndex: 0,
       seenAt: 0,
     };
-    const buffer = makeBuffer({ startIndex: 0, endIndex: 100 });
+    const buffer = makeBuffer({ startIndex: 96, endIndex: 120 });
     const result = resolveHeadAvailableBounds(head, buffer);
-    expect(result.availableStartIndex).toBe(0);
-    expect(result.availableEndIndex).toBe(100);
+    expect(result.availableStartIndex).toBeNull();
+    expect(result.availableEndIndex).toBe(120);
   });
 
   it('handles null head gracefully', () => {
     const buffer = makeBuffer({ startIndex: 5, endIndex: 50 });
     const result = resolveHeadAvailableBounds(null, buffer);
-    expect(result.availableStartIndex).toBe(5);
+    expect(result.availableStartIndex).toBeNull();
     expect(result.availableEndIndex).toBeNull();
   });
 });

@@ -30,7 +30,7 @@ function readBridgeRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-bridge-runtime.ts'), 'utf8');
 }
 
-function extractBlock(source: string, anchor: string, length = 420) {
+function extractBlock(source: string, anchor: string, length = 600) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
   return source.slice(start, start + length);

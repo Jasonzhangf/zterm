@@ -82,7 +82,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
   handleControlTransportMessage: (options: { sessionId: string }, msg: ServerMessage) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   sessionHandshakeTimeoutMs: number;
-  readRequestedTerminalGeometry?: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
+  readRequestedTerminalGeometry?: (sessionId: string) => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {
   ensureControlTransportForSessionOpenBaseRuntime({
     ...options,
@@ -93,7 +93,7 @@ export function ensureControlTransportForSessionOpenOrchestrationRuntime(options
         resolvedSessionName: options.intent.resolvedSessionName,
         sessionId: options.intent.sessionId,
         openRequestId: options.intent.openRequestId,
-        geometry: options.readRequestedTerminalGeometry?.() || null,
+        geometry: options.readRequestedTerminalGeometry?.(options.intent.sessionId) || null,
       }),
     },
   });
@@ -150,7 +150,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
   onConnected: () => void;
   onClosed?: (reason?: string) => void;
   sessionHandshakeTimeoutMs: number;
-  readRequestedTerminalGeometry?: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
+  readRequestedTerminalGeometry?: (sessionId: string) => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {
   bindSessionTransportSocketLifecycleBaseRuntime({
     ...options,
@@ -161,7 +161,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
       sessionId: options.sessionId,
       openRequestId: options.openRequestId,
       sessionTransportToken: options.readSessionTransportToken(options.sessionId),
-      geometry: options.readRequestedTerminalGeometry?.() || null,
+      geometry: options.readRequestedTerminalGeometry?.(options.sessionId) || null,
     }),
     onClosed: options.onClosed,
   });
@@ -171,10 +171,24 @@ export function sendTerminalResizeRuntime(options: {
   sessionId: string;
   ws: BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  writeRequestedTerminalGeometry: (
+    sessionId: string,
+    geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null,
+  ) => unknown;
   cols?: number | null;
   rows?: number | null;
   widthMode?: TerminalWidthMode;
 }) {
+  const normalizedWidthMode = options.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  const geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } = normalizedWidthMode === 'adaptive-phone'
+    ? {
+        cols: Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined,
+        widthMode: normalizedWidthMode,
+      }
+    : {
+        widthMode: normalizedWidthMode,
+      };
+  options.writeRequestedTerminalGeometry(options.sessionId, geometry);
   if (!options.ws || options.ws.readyState !== WebSocket.OPEN) {
     return false;
   }

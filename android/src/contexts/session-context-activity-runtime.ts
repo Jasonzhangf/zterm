@@ -23,7 +23,7 @@ interface SessionTargetRuntimeLike {
 export function probeOrReconnectStaleSessionTransportRuntime(options: {
   sessionId: string;
   ws: BridgeTransportSocket;
-  reason: 'active-reentry' | 'active-tick' | 'input';
+  reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input';
   refs: {
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
@@ -75,7 +75,7 @@ export function probeOrReconnectStaleSessionTransportRuntime(options: {
 export function ensureActiveSessionFreshRuntime(options: {
   refreshOptions: {
     sessionId: string;
-    source: 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -101,7 +101,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   probeOrReconnectStaleSessionTransport: (
     sessionId: string,
     ws: BridgeTransportSocket,
-    reason: 'active-reentry' | 'active-tick' | 'input',
+    reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input',
   ) => 'probed' | 'waiting' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
@@ -116,7 +116,8 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
   const isExplicitForegroundResumeTarget = options.refreshOptions.source === 'active-resume';
-  const isRefreshTarget = isExplicitForegroundResumeTarget || isActive || isLive;
+  const isExplicitResumeTarget = options.refreshOptions.source === 'explicit-resume';
+  const isRefreshTarget = isExplicitForegroundResumeTarget || isExplicitResumeTarget || isActive || isLive;
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
@@ -146,6 +147,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       isActive,
       isLive,
       isExplicitForegroundResumeTarget,
+      isExplicitResumeTarget,
       isRefreshTarget,
       sessionState,
       wsReadyState: ws?.readyState ?? null,
@@ -164,6 +166,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     isActive,
     isLive,
     isExplicitForegroundResumeTarget,
+    isExplicitResumeTarget,
     isRefreshTarget,
     localRevision: localBuffer.revision ?? null,
     localStartIndex: localBuffer.startIndex ?? null,
@@ -199,7 +202,10 @@ export function ensureActiveSessionFreshRuntime(options: {
     const lastActiveReentryAt = options.refs.lastActiveReentryAtRef.current.get(options.refreshOptions.sessionId) || 0;
     const shouldForceHeadRequest = Boolean(options.refreshOptions.forceHead);
     const shouldSkipImmediateForcedResumeHead = (
-      options.refreshOptions.source === 'active-resume'
+      (
+        options.refreshOptions.source === 'active-resume'
+        || options.refreshOptions.source === 'explicit-resume'
+      )
       && shouldForceHeadRequest
       && ws?.readyState === WebSocket.OPEN
       && (

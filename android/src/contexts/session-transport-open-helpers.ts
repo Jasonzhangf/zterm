@@ -7,7 +7,7 @@ export interface SessionReconnectDecisionOptions {
   reconnectInFlight: boolean;
 }
 
-export type ActiveRefreshSource = 'active-resume' | 'active-reentry' | 'active-tick';
+export type ActiveRefreshSource = 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
 
 export interface ActiveSessionRefreshPlanOptions {
   hasSession: boolean;
@@ -23,8 +23,8 @@ export interface ActiveSessionRefreshPlanOptions {
 }
 
 export type ActiveSessionRefreshPlan =
-  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' }
-  | { action: 'probe-stale-transport'; probeReason: 'active-tick' | 'active-reentry' }
+  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' }
+  | { action: 'probe-stale-transport'; probeReason: 'active-tick' | 'active-reentry' | 'explicit-resume' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
   | { action: 'reconnect' };
 
@@ -295,6 +295,17 @@ export function buildSessionErrorUpdates(
   };
 }
 
+export function buildSessionClosedUpdates(
+  message?: string,
+): Pick<Session, 'state' | 'lastError' | 'reconnectAttempt' | 'ws'> {
+  return {
+    state: 'closed',
+    lastError: message || undefined,
+    reconnectAttempt: 0,
+    ws: null,
+  };
+}
+
 export function buildSessionIdleAfterReconnectBlockedUpdates(
   message: string,
 ): Pick<Session, 'state' | 'lastError' | 'reconnectAttempt' | 'ws'> {
@@ -400,11 +411,21 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
   const transportOpen = options.wsReadyState === WebSocket.OPEN;
   const unavailableState = options.sessionState === 'closed' || options.sessionState === 'error';
 
+  if (unavailableState) {
+    if (options.source !== 'explicit-resume') {
+      return { action: 'skip', reason: 'closed-session-requires-explicit-open' };
+    }
+  }
+
   if (transportOpen && !unavailableState) {
     if (options.transportStale && !options.reconnectInFlight) {
       return {
         action: 'probe-stale-transport',
-        probeReason: options.source === 'active-tick' ? 'active-tick' : 'active-reentry',
+        probeReason: options.source === 'active-tick'
+          ? 'active-tick'
+          : options.source === 'explicit-resume'
+            ? 'explicit-resume'
+            : 'active-reentry',
       };
     }
     if (options.source === 'active-tick') {

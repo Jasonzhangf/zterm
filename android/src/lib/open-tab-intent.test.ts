@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { PersistedOpenTab, Session } from './types';
 import {
   activateOpenTabIntentSession,
-  buildBootstrapOpenTabIntentStateFromSessions,
   closeOpenTabIntentSession,
   deriveCloseOpenTabIntent,
   derivePersistedOpenTabRestorePlan,
@@ -104,17 +103,7 @@ describe('open-tab intent truth', () => {
     expect(state.activeSessionId).toBe('daemon-b');
   });
 
-  it('builds bootstrap state directly from runtime sessions', () => {
-    const state = buildBootstrapOpenTabIntentStateFromSessions([
-      makeSession('s1'),
-      makeSession('s2', { createdAt: 2 }),
-    ], 's2');
-
-    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
-    expect(state.activeSessionId).toBe('s2');
-  });
-
-  it('derives runtime bootstrap decision with a single pure rule', () => {
+  it('lets runtime-only sessions bootstrap open tabs only when there is no persisted explicit open-tab truth yet', () => {
     const decision = deriveRuntimeOpenTabSyncDecision({
       currentState: normalizeOpenTabIntentState([], null),
       runtimeSessions: [makeSession('s1'), makeSession('s2', { createdAt: 2 })],
@@ -124,35 +113,16 @@ describe('open-tab intent truth', () => {
       closedSessionIds: new Set<string>(),
     });
 
-    expect(decision.kind).toBe('bootstrap');
-    expect(decision.state?.activeSessionId).toBe('s2');
-    expect(decision.state?.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
-  });
-
-  it('derives runtime merge decision when semantic duplicate ids need rewriting', () => {
-    const decision = deriveRuntimeOpenTabSyncDecision({
-      currentState: normalizeOpenTabIntentState([
-        makeTab('persisted-old', {
-          sessionName: 'tmux-shared',
-          authToken: 'shared-token',
-          customName: 'Keep Me',
-        }),
-      ], 'persisted-old'),
-      runtimeSessions: [
-        makeSession('runtime-new', {
-          sessionName: 'tmux-shared',
-          authToken: 'shared-token',
-        }),
-      ],
-      runtimeActiveSessionId: 'runtime-new',
-      restoredTabsHandled: true,
-      hasPersistedOpenTabsTruth: true,
-      closedSessionIds: new Set<string>(),
+    expect(decision).toEqual({
+      kind: 'bootstrap',
+      state: {
+        tabs: [
+          expect.objectContaining({ sessionId: 's1' }),
+          expect.objectContaining({ sessionId: 's2' }),
+        ],
+        activeSessionId: 's2',
+      },
     });
-
-    expect(decision.kind).toBe('merge');
-    expect(decision.state?.tabs[0]?.sessionId).toBe('runtime-new');
-    expect(decision.state?.activeSessionId).toBe('runtime-new');
   });
 
   it('derives runtime switch decision when persisted active truth differs from runtime active session', () => {

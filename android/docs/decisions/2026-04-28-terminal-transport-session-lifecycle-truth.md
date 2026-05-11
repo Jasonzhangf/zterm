@@ -250,6 +250,31 @@ control transport 的生命周期：
   - App 退出/销毁
   才允许关闭
 
+### 1.2a explicit-open freeze（2026-05-11）
+
+client 侧再补一条硬冻结：
+
+- **只有显式用户动作**允许把一个 closed/missing session 重新打开到 daemon
+- 以下路径都**不得**自动 reopen daemon session：
+  - cold start restore
+  - foreground resume
+  - active re-entry
+  - active tick / stale health refresh
+  - runtime/open-tab sync
+
+允许 reopen 的唯一入口只能是显式 intent，例如：
+
+- 显式打开单个 tmux session
+- 显式打开 server group
+- 显式导入/加载 saved tab list
+- 显式 resume/enter 某个 live session
+
+额外规则：
+
+- lifecycle refresh 若 transport 仍可用，只允许 probe / head refresh
+- lifecycle refresh 若 transport 不可用、session 已 `closed/error`，只能显式 skip，不得偷偷 reconnect
+- 若 persisted tab 绑定 session 已关闭或不存在，只能保持 dead / 被 prune；下次启动也不得自动 reopen
+
 每个 `clientSessionId` 还必须有 **自己独立的 session transport**：
 
 session transport 职责：

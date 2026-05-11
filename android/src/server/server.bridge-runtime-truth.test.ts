@@ -48,7 +48,7 @@ describe('server bridge runtime truth gates', () => {
 
     expect(rtcBlock).toContain("deps.detachSessionTransportOnly(session, reason, connection.transportId)");
     expect(rtcBlock).toContain('deps.connections.delete(connection.id)');
-    expect(wsBlock).toContain("ws.on('close', () => {");
+    expect(wsBlock).toContain("ws.on('close', (code, rawReason) => {");
     expect(wsBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId)");
     expect(upgradeBlock).toContain("if (pathname === '/signal')");
     expect(upgradeBlock).toContain("if (pathname !== '/' && pathname !== '/ws')");

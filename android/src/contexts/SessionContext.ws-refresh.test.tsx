@@ -11,6 +11,7 @@ import {
   useSession,
 } from './SessionContext';
 import { useSessionBufferSnapshot } from '../lib/session-buffer-store';
+import { useSessionRenderBufferSnapshot } from '../lib/session-render-buffer-store';
 import { useSessionHeadSnapshot } from '../lib/session-head-store';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
@@ -218,9 +219,11 @@ function SessionHarness() {
     reconnectSession,
     reconnectAllSessions,
     resumeActiveSessionTransport,
+    sendTerminalResize,
     updateSessionViewport,
     getSessionDebugMetrics,
     getSessionBufferStore,
+    getSessionRenderBufferStore,
     getSessionHeadStore,
   } = useSession();
   const [remoteScreenshotResult, setRemoteScreenshotResult] = useState('idle');
@@ -233,9 +236,12 @@ function SessionHarness() {
 
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
   const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeRenderBufferSnapshot = useSessionRenderBufferSnapshot(getSessionRenderBufferStore(), activeSession?.id || null);
   const activeHeadSnapshot = useSessionHeadSnapshot(getSessionHeadStore(), activeSession?.id || null);
   const activeBuffer = activeSession ? activeBufferSnapshot.buffer : null;
+  const activeRenderBuffer = activeSession ? activeRenderBufferSnapshot.buffer : null;
   const renderedLines = activeBuffer?.lines.map(cellsToLine) || [];
+  const renderSnapshotLines = activeRenderBuffer?.lines.map(cellsToLine) || [];
   const emitFollowViewport = () => {
     if (!activeSession || !activeBuffer) {
       return;
@@ -274,6 +280,8 @@ function SessionHarness() {
       <div data-testid="session-start-index">{activeBuffer?.startIndex ?? -1}</div>
       <div data-testid="session-end-index">{activeBuffer?.endIndex ?? -1}</div>
       <div data-testid="session-lines">{renderedLines.join('|')}</div>
+      <div data-testid="render-session-revision">{activeRenderBuffer?.revision ?? -1}</div>
+      <div data-testid="render-session-lines">{renderSnapshotLines.join('|')}</div>
       <div data-testid="session-debug-status">{activeSession ? (getSessionDebugMetrics(activeSession.id)?.status || 'missing') : 'missing'}</div>
       <div data-testid="session-buffer-pull-active">{activeSession && getSessionDebugMetrics(activeSession.id)?.bufferPullActive ? 'true' : 'false'}</div>
       <div data-testid="session-debug-active">{activeSession && getSessionDebugMetrics(activeSession.id)?.active ? 'true' : 'false'}</div>
@@ -319,6 +327,9 @@ function SessionHarness() {
       </button>
       <button type="button" onClick={() => resumeActiveSessionTransport('session-1')}>
         resume-active
+      </button>
+      <button type="button" onClick={() => sendTerminalResize('session-1', 91, undefined, 'adaptive-phone')}>
+        resize-adaptive
       </button>
       <button
         type="button"
@@ -990,6 +1001,12 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
 
       expect(screen.getByTestId('session-lines').textContent).toContain('stable-line-001');
+      await vi.advanceTimersByTimeAsync(33);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('render-session-lines').textContent).toContain('stable-line-001');
+      expect(screen.getByTestId('render-session-revision').textContent).toBe('1');
     } finally {
       vi.useRealTimers();
     }
@@ -1451,7 +1468,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
         expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
-        // buffer-head-request no longer sent on input; daemon push handles echo
+        expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       });
       expect(screen.getByTestId('session-state').textContent).toBe('connected');
     } finally {
@@ -1623,6 +1640,32 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('resume-active'));
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(1));
+  });
+
+  it('marks the session non-connected immediately after live transport close so active refresh cannot keep treating it as connected', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+    ws.close();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-state').textContent).not.toBe('connected');
+    });
   });
 
   it('reuses an active open transport on explicit resume even while the session label is still connecting', async () => {
@@ -2402,7 +2445,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       .map((item) => JSON.parse(item));
 
     expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(3);
-    // input no longer sends buffer-head-request; daemon push handles echo
+    expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(3);
     expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
 
     await new Promise((resolve) => setTimeout(resolve, 180));
@@ -2443,8 +2486,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(2);
-      // input no longer sends buffer-head-request; daemon push handles echo
-      expect(sentMessages.filter((item) => item.type === "buffer-head-request").length).toBe(0);
+      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();
     }
@@ -2595,7 +2637,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       const sentMessages = ws.sent
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item));
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(false);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
     }, { timeout: 220 });
   });
@@ -2663,8 +2705,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request').length).toBeGreaterThanOrEqual(2);
-      // input no longer triggers buffer-head-request; only the initial cold-start head-request counted
-      expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThanOrEqual(1);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 1)).toBe(true);
     }, { timeout: 220 });
   });
@@ -3597,11 +3638,14 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
-  it('does not send Android UI viewport rows/cols in connect or reconnect handshakes', async () => {
+  it('sends adaptive-phone cols but never rows in connect or reconnect handshakes after explicit resize truth exists', async () => {
     const originalInnerHeight = window.innerHeight;
     try {
       render(
-        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionProvider
+          wsUrl="ws://127.0.0.1:3333/ws"
+          bridgeSettings={{ terminalWidthMode: 'adaptive-phone' } as any}
+        >
           <SessionHarness />
         </SessionProvider>,
       );
@@ -3609,6 +3653,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
+      const resizeMessage = readSentMessages(ws).find((item) => item.type === 'resize');
+      expect(resizeMessage).toBeUndefined();
 
       await waitFor(() => {
         const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
@@ -3616,6 +3662,17 @@ describe('SessionContext websocket dynamic refresh', () => {
         expect(connectMessage?.payload?.openRequestId).not.toBe('session-1');
         expect(connectMessage?.payload?.cols).toBeUndefined();
         expect(connectMessage?.payload?.rows).toBeUndefined();
+      });
+
+      act(() => {
+        fireEvent.click(screen.getByText('resize-adaptive'));
+      });
+
+      await waitFor(() => {
+        const resizeMessageAfterExplicitWrite = readSentMessages(ws).find((item) => item.type === 'resize');
+        expect(resizeMessageAfterExplicitWrite?.payload?.widthMode).toBe('adaptive-phone');
+        expect(resizeMessageAfterExplicitWrite?.payload?.cols).toBe(91);
+        expect(resizeMessageAfterExplicitWrite?.payload?.rows).toBeUndefined();
       });
 
       Object.defineProperty(window, 'innerHeight', {
@@ -3633,7 +3690,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
         expect(typeof reconnectMessage?.payload?.openRequestId).toBe('string');
         expect(reconnectMessage?.payload?.openRequestId).not.toBe('session-1');
-        expect(reconnectMessage?.payload?.cols).toBeUndefined();
+        expect(typeof reconnectMessage?.payload?.cols).toBe('number');
         expect(reconnectMessage?.payload?.rows).toBeUndefined();
       });
     } finally {
@@ -3642,6 +3699,28 @@ describe('SessionContext websocket dynamic refresh', () => {
         value: originalInnerHeight,
       });
     }
+  });
+
+  it('keeps mirror-fixed connect handshake free of client cols/rows even after resize writes', async () => {
+    render(
+      <SessionProvider
+        wsUrl="ws://127.0.0.1:3333/ws"
+        bridgeSettings={{ terminalWidthMode: 'mirror-fixed' } as any}
+      >
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+
+    await waitFor(() => {
+      const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
+      expect(connectMessage?.payload?.widthMode).toBe('mirror-fixed');
+      expect(connectMessage?.payload?.cols).toBeUndefined();
+      expect(connectMessage?.payload?.rows).toBeUndefined();
+    });
   });
 
   it('keeps the inactive tab transport open when switching active tabs', async () => {

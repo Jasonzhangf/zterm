@@ -57,14 +57,21 @@ describe('open-tab / history / connections truth gates', () => {
   it('keeps app-layer createSession reopen ownership limited to restore/runtime-sync and explicit user open actions', () => {
     const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
+    const openTabSessionActionsSource = readSource('hooks/useOpenTabSessionActions.ts');
     const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
+    const openTabOpenPolicySource = readSource('lib/open-tab-open-policy.ts');
     const sessionHistorySource = readSource('hooks/useSessionHistoryStorage.ts');
     const connectionsPageSource = readSource('pages/ConnectionsPage.tsx');
 
     expect(restoreRuntimeSource).toContain('createSession(');
+    expect(restoreRuntimeSource).toContain("buildOpenTabSessionCreateOptions('cold-restore'");
     expect(sessionOpenActionsSource).toContain('createSession(');
+    expect(sessionOpenActionsSource).toContain('buildOpenTabSessionCreateOptions(openSource');
+    expect(openTabRuntimeSource).toContain('createSession,');
+    expect(openTabSessionActionsSource).not.toContain('createSession(');
+    expect(openTabOpenPolicySource).toContain("'cold-restore': {");
+    expect(openTabOpenPolicySource).toContain('connectOnCreate: false');
 
-    expect(openTabRuntimeSource).not.toContain('createSession(');
     expect(sessionHistorySource).not.toContain('createSession(');
     expect(connectionsPageSource).not.toContain('createSession(');
   });
@@ -72,13 +79,18 @@ describe('open-tab / history / connections truth gates', () => {
   it('keeps cold restore read-only for tombstones while explicit open remains the only tombstone-clearing path', () => {
     const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
+    const openTabOpenPolicySource = readSource('lib/open-tab-open-policy.ts');
 
-    expect(restoreRuntimeSource).not.toContain('persistClosedTabReuseKeys(');
+    expect(restoreRuntimeSource).toContain('persistClosedTabReuseKeys(');
     expect(restoreRuntimeSource).not.toContain('clearClosedTabReuseKeysForOwner(');
     expect(restoreRuntimeSource).not.toContain('closedOpenTabReuseKeysRef.current.delete(');
+    expect(restoreRuntimeSource).not.toContain("source: 'saved-tab-import-revive'");
 
-    expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
+    expect(sessionOpenActionsSource).toContain('reconcileImportedTabsWithClosedReuseKeys(');
+    expect(sessionOpenActionsSource).toContain("source: 'saved-tab-import-revive'");
     expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
+    expect(openTabOpenPolicySource).toContain('clearClosedTabReuseKeysForOwner(');
+    expect(openTabOpenPolicySource).toContain('reviveClosedReuseOnImport: true');
   });
 
   it('keeps runtime tab switching owned by applyOpenTabState instead of exposing extra switch/persist refs to child hooks', () => {

@@ -28,8 +28,6 @@ export function resolveHeadAvailableBounds(
 
   if (head?.availableStartIndex !== undefined && Number.isFinite(head.availableStartIndex)) {
     availableStartIndex = Math.max(0, Math.floor(head.availableStartIndex));
-  } else if (buffer.startIndex !== undefined && Number.isFinite(buffer.startIndex)) {
-    availableStartIndex = Math.max(0, Math.floor(buffer.startIndex));
   }
 
   // No head → endIndex is unknown, return null

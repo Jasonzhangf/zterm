@@ -31,7 +31,7 @@ export { type AppUpdateStage };
 export function useAppUpdate() {
   const runtimeRef = useRef(createAppUpdateRuntime({
     storage: getBrowserStorage(),
-    fetchFn: fetch,
+    fetchFn: (...args) => globalThis.fetch(...args),
     now: () => Date.now(),
     runtimeVersionCode: APP_VERSION_CODE,
     packageName: APP_PACKAGE_NAME,

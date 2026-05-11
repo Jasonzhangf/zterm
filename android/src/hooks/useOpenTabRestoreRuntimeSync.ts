@@ -1,12 +1,17 @@
 import { useEffect, type MutableRefObject } from 'react';
-import { resolveHostForPersistedOpenTab } from '../lib/open-tab-persistence';
-import { resolvePersistedLiveSessionIds } from '../lib/workspace-persistence';
+import {
+  buildOpenTabSessionCreateOptions,
+} from '../lib/open-tab-open-policy';
+import {
+  buildPersistedOpenTabReuseKeyVariants,
+  persistClosedTabReuseKeys,
+  resolveHostForPersistedOpenTab,
+} from '../lib/open-tab-persistence';
 import { resolveRemoteRestorableOpenTabState } from '../lib/open-tab-restore';
 import {
   derivePersistedOpenTabRestorePlan,
   deriveRuntimeOpenTabSyncDecision,
   normalizeOpenTabIntentState,
-  resolveRestoredOpenTabIntentState,
 } from '../lib/open-tab-intent';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { BridgeSettings } from '../lib/bridge-settings';
@@ -30,6 +35,16 @@ interface UseOpenTabRestoreRuntimeSyncOptions {
   hosts: Host[];
   hostsLoaded: boolean;
   runtimeActiveSessionId: string | null;
+  createSession: (
+    host: Host,
+    options?: {
+      activate?: boolean;
+      connect?: boolean;
+      customName?: string;
+      createdAt?: number;
+      sessionId?: string;
+    },
+  ) => string;
   runtimeSessionStructure: Array<Pick<
     Session,
     'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
@@ -43,16 +58,6 @@ interface UseOpenTabRestoreRuntimeSyncOptions {
   closedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   closedOpenTabReuseKeysRef: MutableRefObject<Set<string>>;
   applyOpenTabState: ApplyOpenTabStateFn;
-  createSession: (
-    host: Host,
-    options?: {
-      activate?: boolean;
-      connect?: boolean;
-      customName?: string;
-      createdAt?: number;
-      sessionId?: string;
-    },
-  ) => string;
 }
 
 export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSyncOptions) {
@@ -61,6 +66,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     hosts,
     hostsLoaded,
     runtimeActiveSessionId,
+    createSession,
     runtimeSessionStructure,
     openTabStateRef,
     restoredTabsHandledRef,
@@ -68,7 +74,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
     applyOpenTabState,
-    createSession,
   } = options;
 
   useEffect(() => {
@@ -98,6 +103,17 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
               droppedSessionIds: initialRestoreState.droppedTabs.map((tab) => tab.sessionId),
               droppedTargets: initialRestoreState.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
             });
+            // Permanently mark dropped tabs as "do not open"
+            for (const tab of initialRestoreState.droppedTabs) {
+              const reuseKeys = buildPersistedOpenTabReuseKeyVariants({
+                daemonHostId: tab.daemonHostId,
+                bridgeHost: tab.bridgeHost,
+                bridgePort: tab.bridgePort,
+                sessionName: tab.sessionName,
+              });
+              reuseKeys.forEach((key) => closedOpenTabReuseKeysRef.current.add(key));
+            }
+            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
           }
           currentOpenTabState = applyOpenTabState({
             tabs: initialRestoreState.tabs,
@@ -185,6 +201,16 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
               droppedSessionIds: restoreState.droppedTabs.map((tab) => tab.sessionId),
               droppedTargets: restoreState.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
             });
+            for (const tab of restoreState.droppedTabs) {
+              const reuseKeys = buildPersistedOpenTabReuseKeyVariants({
+                daemonHostId: tab.daemonHostId,
+                bridgeHost: tab.bridgeHost,
+                bridgePort: tab.bridgePort,
+                sessionName: tab.sessionName,
+              });
+              reuseKeys.forEach((key) => closedOpenTabReuseKeysRef.current.add(key));
+            }
+            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
           }
           return {
             tabs: restoreState.tabs,
@@ -194,77 +220,56 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
       if (cancelled) {
         return;
       }
-      applyOpenTabState(remoteRestoreState, {
-        markExplicitTruth: restorePlan.tabs.length > 0,
-      });
-
       if (remoteRestoreState.tabs.length === 0) {
+        applyOpenTabState(remoteRestoreState, {
+          markExplicitTruth: restorePlan.tabs.length > 0,
+        });
         return;
       }
 
-      const persistedTabs = remoteRestoreState.tabs;
-      const nextActiveSessionId = remoteRestoreState.activeSessionId;
-      const visibleSessionIds = new Set(resolvePersistedLiveSessionIds(
-        persistedTabs.map((tab) => tab.sessionId),
-        nextActiveSessionId,
-      ));
-      const restoredSessionIdRemap = new Map<string, string>();
-      for (const tab of persistedTabs) {
-        const host = resolveHostForPersistedOpenTab({
-          tab,
-          hosts,
-          fallbackIdPrefix: 'restored',
-        });
-
-        const restoredSessionId = createSession(host, {
-          activate: false,
-          connect: visibleSessionIds.has(tab.sessionId),
-          customName: tab.customName,
-          createdAt: tab.createdAt,
-          sessionId: tab.sessionId,
-        });
-        runtimeDebug('app.session.restore.persisted-tab', {
-          requestedSessionId: tab.sessionId,
-          restoredSessionId,
-          bridgeHost: tab.bridgeHost,
-          bridgePort: tab.bridgePort,
-          sessionName: tab.sessionName,
-          activate: false,
-        });
-        if (restoredSessionId !== tab.sessionId) {
-          restoredSessionIdRemap.set(tab.sessionId, restoredSessionId);
-        }
-      }
-      if (restoredSessionIdRemap.size > 0 || nextActiveSessionId) {
-        const restoredIntentState = resolveRestoredOpenTabIntentState(
-          normalizeOpenTabIntentState(persistedTabs, nextActiveSessionId),
-          restoredSessionIdRemap,
+      const restoredRuntimeTabs: PersistedOpenTab[] = [];
+      for (const tab of remoteRestoreState.tabs) {
+        const createdSessionId = createSession(
+          resolveHostForPersistedOpenTab({
+            tab,
+            hosts,
+          }),
+          buildOpenTabSessionCreateOptions('cold-restore', {
+            customName: tab.customName,
+            createdAt: tab.createdAt,
+            sessionId: tab.sessionId,
+          }),
         );
-        const resolvedTabs = restoredIntentState.tabs;
-        const restoredActiveSessionId = restoredIntentState.activeSessionId;
-        if (restoredSessionIdRemap.size > 0) {
-          if (restoredActiveSessionId) {
-            applyOpenTabState({
-              tabs: resolvedTabs,
-              activeSessionId: restoredActiveSessionId,
-            }, {
-              switchRuntime: true,
-            });
-          } else {
-            applyOpenTabState({
-              tabs: resolvedTabs,
-              activeSessionId: null,
-            });
-          }
-        } else if (restoredActiveSessionId) {
-          applyOpenTabState({
-            tabs: resolvedTabs,
-            activeSessionId: restoredActiveSessionId,
-          }, {
-            switchRuntime: true,
-          });
-        }
+        const restoredSessionId =
+          typeof createdSessionId === 'string' && createdSessionId.trim().length > 0
+            ? createdSessionId
+            : tab.sessionId;
+        restoredRuntimeTabs.push(
+          restoredSessionId === tab.sessionId
+            ? tab
+            : {
+                ...tab,
+                sessionId: restoredSessionId,
+              },
+        );
       }
+
+      const restoredRuntimeState = normalizeOpenTabIntentState(
+        restoredRuntimeTabs,
+        remoteRestoreState.activeSessionId,
+      );
+      applyOpenTabState(
+        restoredRuntimeState,
+        restoredRuntimeState.activeSessionId
+          ? {
+              switchRuntime: true,
+              markExplicitTruth: restorePlan.tabs.length > 0,
+            }
+          : {
+              markExplicitTruth: restorePlan.tabs.length > 0,
+            },
+      );
+      return;
     };
 
     void run().catch((error) => {
@@ -277,7 +282,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     };
   }, [
     bridgeSettings,
-    createSession,
     hosts,
     hostsLoaded,
     applyOpenTabState,
@@ -288,5 +292,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     hasPersistedOpenTabsTruthRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    createSession,
   ]);
 }

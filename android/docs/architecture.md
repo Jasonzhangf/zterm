@@ -210,17 +210,29 @@ operation -> event -> projection
 
 ### 5. createSession 调用边界
 
-- 自动 reopen / cold restore 的唯一 app-layer owner：
+- cold restore / runtime sync 的唯一 app-layer owner：
   - `src/hooks/useOpenTabRestoreRuntimeSync.ts`
 - 用户显式打开 session / group / saved tabs 的唯一 app-layer owner：
   - `src/hooks/useSessionOpenActions.ts`
 
 硬规则：
 
-- 除上述两个 owner 外，其余 App / page / projection / history 模块不得直接调用 `createSession`
+- `useOpenTabRestoreRuntimeSync.ts` 只允许做：
+  - persisted open-tab truth 的远端审计 / prune
+  - persisted open tabs 对应的 **local runtime shell restore**
+  - runtime live session id remap
+  - active tab truth 对齐
+- `useOpenTabRestoreRuntimeSync.ts` 允许调用 `createSession`，但**仅限** `connect:false`：
+  - 允许恢复本地 runtime shell / tab truth
+  - **禁止**自动打开 daemon session / transport
+- `createSession(connect:true)` 只能由 `useSessionOpenActions.ts` 中的**显式用户动作**触发，或显式 `Resume/Open` 动作触发
+- 除上述 owner 外，其余 App / page / projection / history 模块不得直接调用 `createSession`
 - `ConnectionsPage` 只发用户操作 intent，不得直接 reopen session
 - `useOpenTabRuntime` 负责 current tabs truth，但不得直接批量 cold restore runtime session
 - `SessionContext` 内部的 `createSession` 仅是 runtime primitive，不得自行推导“该不该 reopen 某个 tab”
+- 若某个 persisted tab 绑定的 session 已关闭、已不存在、或当前没有 live runtime session 承接：
+  - 允许恢复为 **local closed runtime shell**
+  - 但不得在下一次启动或前后台恢复时自动 reopen daemon session
 
 ## 图片传送链路
 

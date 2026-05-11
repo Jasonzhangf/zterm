@@ -157,7 +157,7 @@
   - short follow bottom align
   - input reset -> follow
   - return to follow at bottom
-  - reading viewport updates + gap markers
+  - reading viewport updates + blank gap placeholders
   - follow gap 不冻结旧帧
   - follow tail gaps 继续渲染最新 tail
   - same tail window content change -> immediate rerender

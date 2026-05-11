@@ -89,18 +89,21 @@ vi.mock('../components/TerminalView', () => ({
     allowDomFocus,
     onActivateInput,
     onResize,
+    onWidthModeChange,
     widthMode,
   }: {
     sessionId: string;
     allowDomFocus?: boolean;
     onActivateInput?: () => void;
     onResize?: (...args: any[]) => void;
+    onWidthModeChange?: (...args: any[]) => void;
     widthMode?: string;
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-allow-dom-focus={allowDomFocus ? 'true' : 'false'}
       data-has-onresize={onResize ? 'true' : 'false'}
+      data-has-onwidthmodechange={onWidthModeChange ? 'true' : 'false'}
       data-width-mode={widthMode || 'adaptive-phone'}
       onClick={() => onActivateInput?.()}
     />
@@ -248,12 +251,45 @@ describe('TerminalPage Android IME bridge', () => {
 
     const terminalView = screen.getByTestId('terminal-view-s1');
     expect(terminalView.getAttribute('data-has-onresize')).toBe('false');
+    expect(terminalView.getAttribute('data-has-onwidthmodechange')).toBe('false');
 
     keyboardListeners.get('keyboardDidShow')?.({ keyboardHeight: 320 });
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onresize')).toBe('false');
+      expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onwidthmodechange')).toBe('false');
     });
+  });
+
+  it('keeps Android adaptive-phone upstream geometry on the width-mode channel instead of the resize channel', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onTerminalWidthModeChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="adaptive-phone"
+      />,
+    );
+
+    const terminalView = screen.getByTestId('terminal-view-s1');
+    expect(terminalView.getAttribute('data-has-onresize')).toBe('false');
+    expect(terminalView.getAttribute('data-has-onwidthmodechange')).toBe('true');
+    expect(terminalView.getAttribute('data-width-mode')).toBe('adaptive-phone');
   });
 
   it('passes settings terminal width mode down to the active renderer', async () => {

@@ -39,6 +39,7 @@ interface UseOpenTabSessionActionsOptions {
     clearDraft?: boolean;
     source?: string;
   }) => unknown;
+  openExplicitSessionById: (sessionId: string) => boolean;
 }
 
 export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOptions) {
@@ -51,6 +52,7 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
     moveSession,
     renameSession,
     applyClosedOpenTabIntent,
+    openExplicitSessionById,
   } = options;
 
   const handleSwitchSession = useCallback((sessionId: string) => {
@@ -116,8 +118,11 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   }, [applyClosedOpenTabIntent, runtimeActiveSessionIdRef, sessionsRef]);
 
   const handleResumeSession = useCallback((sessionId: string) => {
+    if (openExplicitSessionById(sessionId)) {
+      return;
+    }
     handleSwitchSession(sessionId);
-  }, [handleSwitchSession]);
+  }, [handleSwitchSession, openExplicitSessionById]);
 
   return {
     handleSwitchSession,

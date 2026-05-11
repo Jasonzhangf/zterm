@@ -161,4 +161,48 @@ describe('useAppUpdate', () => {
     expect(result.current.updateStage).toBe('completed');
   });
 
+  it('binds fetch to the global owner so WebView-style fetch implementations do not throw illegal invocation', async () => {
+    globalThis.localStorage.setItem('zterm:app-update-settings', JSON.stringify({
+      manifestUrl: 'https://example.com/updates/latest.json',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    }));
+
+    const ownerSensitiveFetch = vi.fn(function (this: typeof globalThis, _input: RequestInfo | URL, _init?: RequestInit) {
+      if (this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          versionName: '0.1.1.1569',
+          versionCode: 1011569,
+          buildNumber: 1569,
+          apkUrl: 'zterm-0.1.1.1569.apk',
+          sha256: 'abc123',
+          notes: [],
+        }),
+      } as Response);
+    });
+    vi.stubGlobal('fetch', ownerSensitiveFetch as typeof fetch);
+
+    const { useAppUpdate } = await import('./useAppUpdate');
+    const { result } = renderHook(() => useAppUpdate());
+
+    await waitFor(() => expect(result.current.runtimeVersionCode).toBe(1011491));
+
+    let checkResultPromiseValue: AppUpdateCheckResult | undefined;
+    await act(async () => {
+      checkResultPromiseValue = await result.current.checkForUpdates({ manual: true });
+    });
+
+    if (!checkResultPromiseValue) {
+      throw new Error('expected check result');
+    }
+    expect(ownerSensitiveFetch).toHaveBeenCalledTimes(1);
+    expect(result.current.lastError).toBeNull();
+    expect(checkResultPromiseValue.updateAvailable).toBe(true);
+    expect(result.current.latestManifest?.versionCode).toBe(1011569);
+  });
+
 });

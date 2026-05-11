@@ -590,7 +590,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
       allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
       domInputOffscreen={isAndroid}
       onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
-      onResize={sessionIsActive && (terminalWidthMode === 'adaptive-phone' || !isAndroid) ? onResize : undefined}
+      onResize={sessionIsActive && !isAndroid ? onResize : undefined}
       onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
       onInput={sessionIsActive ? onTerminalInput : undefined}
       onViewportChange={handleTerminalViewportChange}

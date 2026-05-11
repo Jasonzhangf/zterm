@@ -112,7 +112,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
     sessionId: string,
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
   ) => void;
-  readRequestedTerminalGeometry: () => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
+  readRequestedTerminalGeometry: (sessionId: string) => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
+  writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null) => unknown;
 }) {
   let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
   const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
@@ -435,6 +436,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       sessionId,
       ws: options.readSessionTransportSocket(sessionId),
       sendSocketPayload: options.sendSocketPayload,
+      writeRequestedTerminalGeometry: options.writeSessionRequestedTerminalGeometry,
       cols,
       rows,
       widthMode,

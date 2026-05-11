@@ -78,7 +78,7 @@ export function useSessionContextLifecycle(options: {
   clientRuntimeDebugFlushIntervalMs: number;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;

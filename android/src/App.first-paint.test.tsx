@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
-import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
+import { STORAGE_KEYS, type ServerMessage, type TerminalCell } from './lib/types';
 import { useSessionRenderBufferSnapshot } from './lib/session-render-buffer-store';
 
 const fetchTmuxSessionsMock = vi.fn();
@@ -95,40 +95,6 @@ class MockWebSocket {
     MockWebSocket.instances = [];
     MockWebSocket.controlInstances = [];
   }
-}
-
-function row(text: string): TerminalCell[] {
-  return Array.from(text).map((char) => ({
-    char: char.codePointAt(0) || 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  }));
-}
-
-function linesToPayload(lines: string[], revision: number, startIndex = 0) {
-  const indexedLines: TerminalIndexedLine[] = lines.map((line, offset) => ({
-    index: startIndex + offset,
-    cells: row(line),
-  }));
-  return {
-    revision,
-    startIndex,
-    endIndex: startIndex + lines.length,
-    availableStartIndex: startIndex,
-    availableEndIndex: startIndex + lines.length,
-    cols: 80,
-    rows: 24,
-    cursorKeysApp: false,
-    lines: indexedLines,
-  };
-}
-
-function readSentMessages(ws: MockWebSocket) {
-  return ws.sent
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => JSON.parse(item));
 }
 
 function encodeCells(cells: TerminalCell[]) {
@@ -339,7 +305,7 @@ describe('App first paint regression', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('cold start single active tab pulls head then latest range and paints without any input', async () => {
+  it('cold start single active tab restores the local shell without auto opening daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -358,45 +324,11 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-
-    const ws = MockWebSocket.instances[0]!;
-    ws.triggerOpen();
-    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-1',
-        revision: 9,
-        latestEndIndex: 240,
-        availableStartIndex: 0,
-        availableEndIndex: 240,
-      },
-    });
-
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-sync',
-      payload: linesToPayload(['first-paint-001', 'first-paint-002', 'first-paint-003'], 9, 237),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('active-session-lines').textContent).toContain('first-paint-001');
-      expect(screen.getByTestId('active-session-lines').textContent).toContain('first-paint-003');
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    expect(screen.getByTestId('active-session-lines').textContent).toBe('');
   });
 
-  it('prefers the persisted latest active tab over a stale terminal page focus id during cold restore', async () => {
+  it('prefers the persisted latest active tab over a stale terminal page focus id during cold restore without auto opening daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -424,19 +356,10 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-
-    const ws = MockWebSocket.instances[0]!;
-    ws.triggerOpen();
-    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'connect' && item.payload?.sessionName === 'zterm_mirror_lab_2')).toBe(true);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 
-  it('ignores ACTIVE_PAGE terminal focus when ACTIVE_SESSION is missing and restores the first persisted tab', async () => {
+  it('ignores ACTIVE_PAGE terminal focus when ACTIVE_SESSION is missing and restores the first persisted tab without auto opening daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -464,17 +387,7 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-
-    const ws = MockWebSocket.instances[0]!;
-    ws.triggerOpen();
-    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'connect' && item.payload?.sessionName === 'zterm_mirror_lab')).toBe(true);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 
   it('restores the last active tab after app relaunch instead of defaulting to the first tab', async () => {
@@ -520,7 +433,7 @@ describe('App first paint regression', () => {
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
   });
 
-  it('switching to another tab pulls head then latest range and paints the new active tab without any input', async () => {
+  it('switching to another restored tab keeps the local shell only and does not auto open daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -547,50 +460,13 @@ describe('App first paint regression', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-    const ws1 = MockWebSocket.instances[0]!;
-    ws1.triggerOpen();
-    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
-
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
 
     fireEvent.click(screen.getByText('switch-session-2'));
 
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
-    const ws2 = MockWebSocket.instances[1]!;
-    ws2.triggerOpen();
-    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-2',
-        revision: 6,
-        latestEndIndex: 120,
-        availableStartIndex: 0,
-        availableEndIndex: 120,
-      },
-    });
-
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-sync',
-      payload: linesToPayload(['tab-two-line-001', 'tab-two-line-002'], 6, 118),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('active-session-id').textContent).toBe('session-2');
-      expect(screen.getByTestId('active-session-lines').textContent).toContain('tab-two-line-001');
-      expect(screen.getByTestId('active-session-lines').textContent).toContain('tab-two-line-002');
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    expect(screen.getByTestId('active-session-lines').textContent).toBe('');
   });
 });

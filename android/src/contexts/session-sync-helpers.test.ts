@@ -115,7 +115,7 @@ describe('session sync helper refresh planner', () => {
     });
   });
 
-  it('reconnects when active foreground restore finds no usable transport and reconnect is allowed', () => {
+  it('skips reconnect when active foreground restore finds closed session and requires explicit open', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -126,6 +126,20 @@ describe('session sync helper refresh planner', () => {
       allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-resume',
+    })).toEqual({ action: 'skip', reason: 'closed-session-requires-explicit-open' });
+  });
+
+  it('allows explicit resume to reconnect a closed session transport', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'closed',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
     })).toEqual({ action: 'reconnect' });
   });
 
@@ -826,7 +840,7 @@ describe('session sync helper visible-range truth', () => {
       knownRevision: 13822,
       localStartIndex: 135484,
       localEndIndex: 136484,
-      requestStartIndex: 136484,
+      requestStartIndex: 136394,
       requestEndIndex: 136484,
     });
   });

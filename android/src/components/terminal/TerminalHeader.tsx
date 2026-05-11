@@ -340,7 +340,7 @@ function TerminalHeaderComponent({
                     overflowY: 'hidden',
                     scrollbarWidth: 'none',
                     WebkitOverflowScrolling: 'touch',
-                    touchAction: 'pan-x',
+                    touchAction: 'manipulation',
                     WebkitTapHighlightColor: 'transparent',
                     outline: 'none',
                     boxShadow: 'none',
@@ -467,14 +467,14 @@ function TerminalHeaderComponent({
                             ) : null}
                           </span>
                         </button>
-                        {active ? (
+                        
                           <button
                             type="button"
                             aria-label="关闭当前 tab"
                             tabIndex={-1}
                             onFocus={(event) => event.currentTarget.blur()}
                             onMouseDown={(event) => event.preventDefault()}
-                            onTouchEnd={(event) => {
+                            onTouchEnd={(event) => { endTabLongPress();
                               event.stopPropagation();
                               event.preventDefault();
                               lastTouchCloseIntentRef.current = { sessionId: session.id, at: Date.now() };
@@ -519,7 +519,7 @@ function TerminalHeaderComponent({
                           >
                             ×
                           </button>
-                        ) : null}
+                        
                         {menuOpen ? (
                           <div
                             ref={paneMenuRef}

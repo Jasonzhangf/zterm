@@ -284,10 +284,10 @@ export function renderGapMarker(options: {
       lineHeight: options.rowHeight,
       whiteSpace: 'pre',
       color: options.theme.foreground,
-      opacity: 0.88,
-      background: 'rgba(239, 68, 68, 0.12)',
-      borderTop: '1px dashed rgba(239, 68, 68, 0.42)',
-      borderBottom: '1px dashed rgba(239, 68, 68, 0.42)',
+      opacity: 1,
+      background: 'transparent',
+      borderTop: 'none',
+      borderBottom: 'none',
     } satisfies CSSProperties,
     fillProps: {
       'data-terminal-gap-fill': 'true',
@@ -296,7 +296,7 @@ export function renderGapMarker(options: {
         minWidth: 0,
         flex: 1,
         height: '100%',
-        background: 'rgba(239, 68, 68, 0.08)',
+        background: 'transparent',
       } satisfies CSSProperties,
     },
   };

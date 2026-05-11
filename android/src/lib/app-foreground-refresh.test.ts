@@ -26,6 +26,7 @@ describe('app foreground refresh orchestrator', () => {
 
   it('delegates foreground restore to SessionContext refresh truth only once', () => {
     const runtime = createForegroundRefreshRuntime();
+    runtime.wasHidden = true;
     const resumeActiveSessionTransport = vi.fn(() => false);
     const log = vi.fn();
 
@@ -50,6 +51,7 @@ describe('app foreground refresh orchestrator', () => {
 
   it('debounces duplicate foreground restore bursts', () => {
     const runtime = createForegroundRefreshRuntime();
+    runtime.wasHidden = true;
     const resumeActiveSessionTransport = vi.fn(() => true);
 
     expect(performForegroundRefresh({

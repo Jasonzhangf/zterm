@@ -152,7 +152,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source
-- active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + gap marker；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
+- active tab 的 follow 三屏窗口允许存在 gap；`TerminalView` 不能因 visible/precheck window 不连续而冻结上一帧，必须先渲染最新 tail + 空白 gap 占位；**follow 态禁止 prefetch/request 补洞**，只等 live tail 或显式切到 reading
 - active 页的 gap repair 只针对 reading 态当前三屏窗口命中的缺口；不要从旧 stop point 连续追到最新，窗口外内容允许保持不连续以控制带宽
 - reading 贴近缓存顶部时，3 屏只是 cache window，不是滚动上限；要先预取前两屏并显示 loading，再继续上滚，不能把顶部卡成固定三屏
 - client 本地 cache window 必须围绕当前 reading viewport 动态移动；禁止 trim 时永远只保最新 tail，否则向前补到的历史会被立刻愚蠢扔掉

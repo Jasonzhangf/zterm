@@ -50,6 +50,8 @@ export interface SessionMirror {
   lifecycle: 'idle' | 'booting' | 'ready' | 'failed' | 'destroyed';
   cols: number;
   rows: number;
+  baselineCols?: number;
+  baselineRows?: number;
   consecutiveFailures: number;
   adaptiveCols: Map<string, { cols: number; widthMode: TerminalWidthMode }>;
   cursorKeysApp: boolean;

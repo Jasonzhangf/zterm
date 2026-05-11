@@ -23,9 +23,11 @@ function createTransportConnection(id: string): TerminalTransportConnection {
 function createDeps() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
+  const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
   return {
     sessions,
     mirrors,
+    runTmux,
     runtime: createTerminalRuntime({
       defaultSessionName: 'default',
       defaultViewport: { cols: 120, rows: 40 },
@@ -77,7 +79,7 @@ function createDeps() {
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmux,
       daemonRuntimeDebug: vi.fn(),
       logTimePrefix: () => '2026-05-03 00:00:00',
     }),
@@ -125,5 +127,47 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(session.transport).toBeNull();
     expect(session.mirrorKey).toBeNull();
     expect(mirror.subscribers.has(session.id)).toBe(false);
+  });
+
+  it('restores tmux baseline geometry after the last adaptive subscriber detaches', () => {
+    const { runtime, mirrors, runTmux } = createDeps();
+    const connection = createTransportConnection('transport-1');
+    const session = runtime.createTransportBoundSession(connection);
+    const mirror: SessionMirror = {
+      key: 'demo',
+      sessionName: 'demo',
+      scratchBridge: null,
+      lifecycle: 'ready',
+      cols: 88,
+      rows: 44,
+      baselineCols: 140,
+      baselineRows: 44,
+      cursorKeysApp: false,
+      revision: 1,
+      lastScrollbackCount: 0,
+      bufferStartIndex: 0,
+      bufferLines: [],
+      cursor: null,
+      lastFlushStartedAt: 0,
+      lastFlushCompletedAt: 0,
+      flushInFlight: false,
+      flushPromise: null,
+      liveSyncTimer: null,
+      consecutiveFailures: 0,
+      adaptiveCols: new Map([[session.id, { cols: 88, widthMode: 'adaptive-phone' }]]),
+      subscribers: new Set([session.id]),
+    };
+
+    mirrors.set(mirror.key, mirror);
+    session.sessionName = mirror.sessionName;
+    session.mirrorKey = mirror.key;
+    session.widthMode = 'adaptive-phone';
+
+    runtime.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
+
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '140', '-y', '44']);
+    expect(mirror.cols).toBe(140);
+    expect(mirror.rows).toBe(44);
+    expect(mirror.adaptiveCols.has(session.id)).toBe(false);
   });
 });

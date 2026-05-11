@@ -210,7 +210,7 @@ describe('TerminalHeader', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[1]!);
     expect(onCloseSession).toHaveBeenCalledWith('session-2', 'terminal-header-close-button');
   });
 

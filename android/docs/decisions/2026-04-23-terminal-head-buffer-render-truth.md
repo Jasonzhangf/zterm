@@ -494,6 +494,11 @@ UI shell 只负责：
   - `resize` 不得再写 rows
   - `width-mode reconcile` 只允许在 `adaptive-phone` 下改 cols
   - `mirror-fixed` 下 upstream geometry write 必须是 0
+- `adaptive-phone` 的 attach / reconnect 几何真相也必须干净：
+  - client 可以携带**最近一次已测得的 adaptive cols**
+  - client **不得**携带 runtime rows
+  - daemon 只允许消费 `cols`，`rows` 继续取 mirror / tmux baseline
+  - 若当前没有已测得的 adaptive cols，则 attach 不得凭 UI 容器高度/抖动构造脏 geometry
 
 ### 4.3 app lifecycle 规则
 

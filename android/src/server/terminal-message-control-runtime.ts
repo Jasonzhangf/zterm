@@ -58,6 +58,9 @@ export function handleSessionOpenMessageRuntime(
   connection.boundSessionId = null;
   const sessionName = deps.sanitizeSessionName(payload.sessionName);
   const sessionTransportToken = deps.issueSessionTransportToken();
+  console.log(
+    `[server] session-open transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${sessionName} clientSessionId=${payload.clientSessionId?.trim() || 'n/a'}`,
+  );
   // Compatibility-only attach handshake:
   // - openRequestId remains client-local request correlation
   // - session-ticket / sessionTransportToken remain attach-only wire material
@@ -83,6 +86,9 @@ export function handleSessionTransportConnectRuntime(
   // The token is only a one-shot attach proof for this transport connection.
   const token = (payload.sessionTransportToken || '').trim();
   if (!token || !deps.consumeSessionTransportToken(token)) {
+    console.warn(
+      `[server] transport-attach-invalid transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${deps.sanitizeSessionName(payload.sessionName)} tokenPresent=${token ? 'yes' : 'no'}`,
+    );
     deps.sendTransportMessage(connection.transport, {
       type: 'error',
       payload: {
@@ -93,6 +99,9 @@ export function handleSessionTransportConnectRuntime(
     connection.closeTransport('transport attach invalid');
     return null;
   }
+  console.log(
+    `[server] transport-attach-ok transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${deps.sanitizeSessionName(payload.sessionName)}`,
+  );
   const serverSession = deps.createTransportBoundSession(connection);
   return deps.bindConnectionToSession(connection, serverSession);
 }

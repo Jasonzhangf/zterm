@@ -2390,3 +2390,138 @@ user open
 - 下一轮最高优先级：
   1. 若要继续 interaction contract，必须先挑一个真正存在 block dispatcher / event consumer 的 owner，再做最小 production 接线；
   2. 否则继续按当前节奏，只推进“shared pure projection + domain runtime block + thin adapter”。
+
+## 2026-05-11 tab close / explicit-open / adaptive width 排查
+- 现象1：tab 关闭后仍可能因 restore/runtime-sync 被重新带回；用户要求只有显式打开才能重新建立 daemon session，不允许 runtime/bootstrap/merge 隐式补开。
+- 现象2：adaptive-phone 显示不全，怀疑 width 上报链路把 UI layout/height 抖动与 upstream cols 写入混在一起。
+- 初判真源：
+  1. `src/hooks/useOpenTabRestoreRuntimeSync.ts` 仍允许 `deriveRuntimeOpenTabSyncDecision()` 产出 bootstrap/merge/switch，破坏 open-tab 持久化显式真源。
+  2. `src/components/TerminalView.tsx` 在 viewport 变化时仍会经 `onResize` 上报，需进一步限制到“仅 adaptive 且 cols 真变更”；同时 `readRequestedTerminalGeometry` 不能在非显式打开/非自适应场景携带脏 cols。
+- 2026-05-11 真源补充冻结：
+  1. `useOpenTabRestoreRuntimeSync` 只允许 remote prune / runtime remap / active truth 对齐，禁止 `createSession`；daemon session 只能由显式用户 open/import 动作创建。
+  2. lifecycle `active-reentry / active-tick / active-resume` 遇到 closed/error/unavailable session 时只能 skip/probe，禁止自动 reconnect reopen。
+  3. adaptive-phone attach/reconnect 只允许带 client-owned latest cols，不得带 runtime rows；daemon attach 只消费 cols，rows 继续取 baseline。
+
+## 2026-05-11 restore/session-open 真源二次收口
+- 新确认：用户要求的禁止项是“禁止自动打开 daemon session”，不是“禁止 cold restore 恢复本地 runtime shell”。
+- 唯一正确语义：`useOpenTabRestoreRuntimeSync` 允许 `createSession(connect:false)` 恢复 persisted open tabs 对应的 local closed runtime shell，并做 active truth / sessionId remap；但 cold start / foreground restore / runtime sync 仍禁止自动 connect daemon。
+- 显式 daemon open owner 继续只有：`useSessionOpenActions` 的 open/import，和 `useOpenTabRuntime.openExplicitSessionById()` 的 explicit resume。
+- 这也是当前架构下唯一正确修改点：若彻底禁止 restore createSession，会让 TerminalPage/App shell 丢失 runtime session projection，导致大面积首屏/active body 红测；而把 restore 收口为 `connect:false`，既满足“不会自动开 daemon”，又保持现有 tab/runtime shell 模型单真源。
+
+## [2026-05-11] first-paint regression gate 对齐“禁止自动打开 daemon session”
+- 现象：`pnpm --dir android run build:android` 被 `App.first-paint*.test.tsx` 卡住；失败点仍要求 cold restore / restored tab switch 自动创建 websocket 并拉 `buffer-head-request`。
+- 根因：first-paint 回归仍沿用旧真相“恢复 persisted open tabs == 自动 reopen daemon session”，与本轮已冻结语义冲突：restore 只允许 `createSession(connect:false)` 恢复 local shell；daemon open 只能显式 open/import/resume。
+- 处理：把 first-paint 回归改成验证“恢复 active tab/local shell 但不自动开 websocket”；保留显式 transport 已建立后的 foreground resume 动态链测试。
+## [2026-05-11] app-update fetch Illegal invocation 排查
+- 现象：设置页 App Update 显示 `Failed to execute 'fetch' on 'Window': Illegal invocation`，真机无法检查升级。
+- 初判：`useAppUpdate.ts` 把裸 `fetch` 作为 `fetchFn` 传入 runtime；在 Android WebView 中 method 丢失 owner 绑定会触发 Illegal invocation。
+- 待验证唯一修改点：`android/src/hooks/useAppUpdate.ts`，把 `fetchFn` 绑定到 `globalThis/window`，不改 runtime 结构，不加 fallback。
+
+## [2026-05-11] app-update fetch owner 绑定修复与安装态受阻证据
+- 已修：`useAppUpdate.ts` 不再传裸 `fetch`，改为 `(...args) => globalThis.fetch(...args)`；唯一目标是保住 WebView/Window fetch owner，消除 `Illegal invocation`。
+- 已补红灯测试：`useAppUpdate.test.tsx` 新增 owner-sensitive fetch，用 `this !== globalThis` 直接抛 `Illegal invocation`，确保 hook 未来不能再回归成裸 method 引用。
+- 安装态现状：1569 已成功安装到设备（`versionCode=1011569`），但真机当前被系统锁屏/图案解锁拦住，无法继续自动进入 Settings/App Update 区块，因此尚未拿到“错误已消失”的最终 UI 证据。
+- 已留证据目录：`android/evidence/manual-smoke-20260511-tab-width/post-fix/`，含前台 activity、锁屏 screenshot、uiautomator dump、logcat 过滤结果。
+## 2026-05-11 continue: inspect session height/gap placeholder + daemon restore tmux geometry after small-window exit
+- 新判定：用户截图里的“大块点阵/占位”真源不是 quick bar，而是 renderer 把 gap 画成显式 marker；这与 skill 中“gap 先画空白，占位后局部重刷”冲突。
+- server 侧已确认 reconcileMirrorAdaptiveWidth 只有缩窄，没有在 adaptive subscriber 清空后恢复 tmux baseline；唯一修点应为 mirror baseline geometry + detach restore。
+
+## [2026-05-11] 全局架构审计报告
+
+### 审计基线
+- tsc --noEmit: ✅ 零错误
+- 测试: 117/121 文件通过, 975/986 测试通过 (11 个已有失败, 非本轮引入)
+- 未提交变更: 31 files, +651/-506
+
+---
+
+### 维度1: 架构合规
+
+#### ✅ 合规项
+1. **daemon/client 读写解耦**: daemon 不持有 follow/reading/renderBottomIndex/viewport, buffer manager 不持有 renderer 状态
+2. **createSession 调用路径**: 严格限于 useSessionOpenActions (显式用户打开) 和 useOpenTabRestoreRuntimeSync (connect:false 仅恢复 shell)
+3. **无 fallback/降级/双路径**: 搜索确认无违规兜底模式
+4. **SessionContext 不持久化 current tabs**: 符合架构规则
+
+#### ⚠️ 需关注项
+| # | 位置 | 问题 | 严重度 | 建议 |
+|---|------|------|--------|------|
+| A1 | `server/terminal-message-control-runtime.ts:70` | `clientSessionId` 存在于 daemon 协议中 | 低 | 已有注释标注为 compatibility-only, 不作为 daemon 状态真源; 可在下个大版本清理 |
+| A2 | `server/terminal-message-runtime.ts:129` | 同上, `clientSessionId` 透传 | 低 | 同上 |
+
+---
+
+### 维度2: 性能优化
+
+| # | 位置 | 问题 | 严重度 | 建议 |
+|---|------|------|--------|------|
+| P1 | `hooks/useOpenTabRuntime.ts` | 579 行, 超 500 行门禁 | 中 | 拆分为: open-tab-state (persist/apply), open-tab-audit (remote audit), open-tab-lifecycle (effects wiring) |
+| P2 | `hooks/useSessionOpenActions.ts` | 575 行, 超 500 行门禁 | 中 | 拆分 pure functions 到 lib/ |
+| P3 | `hooks/useOpenTabRuntime.ts:270` | 每次 drop 即写 localStorage (`persistClosedTabReuseKeys`) | 低 | 可合并 debounce, 但当前语义要求即时持久化以保证 tombstone 不丢失; 风险可控 |
+| P4 | `dist/assets/index-*.js` | 主 bundle 762KB | 低 | 可做 code splitting (TerminalPage lazy load), 非紧急 |
+
+---
+
+### 维度3: 可维护性
+
+| # | 位置 | 问题 | 严重度 | 建议 |
+|---|------|------|--------|------|
+| M1 | 7 个文件 2698 行 | open-tab 逻辑分散, 职责边界需进一步明确 | 中 | useOpenTabRuntime (579行) 承担了 state+audit+lifecycle 三重职责, 是主要拆分目标 |
+| M2 | `lib/open-tab-persistence.ts:80-114` | reuse key 构建有 4 个 wrapper 函数 (buildPersistedOpenTabReuseKey / Variants / FromSession / VariantsFromSession) | 低 | 可简化为 2 个 (key + variants), FromSession 变体内联 |
+| M3 | 12 处 persist 调用 | `persistClosedTabReuseKeys` 在 useOpenTabRuntime, useOpenTabRestoreRuntimeSync, useSessionOpenActions 三处重复调用 | 低 | 可在 applyOpenTabState 内统一持久化 |
+| M4 | `useSessionOpenActions.test.tsx` | closed set 测试嵌入在 session open actions 测试中, 无独立专测 | 低 | 可提取 closed set 纯逻辑到 lib/ 并加独立 test |
+
+---
+
+### 维度4: 测试覆盖缺口
+
+| # | 缺口 | 影响 |
+|---|------|------|
+| T1 | closed set 无独立专测 (逻辑分散在 useSessionOpenActions.test.tsx) | 低风险: tombstone 逻辑已有间接覆盖 |
+| T2 | first-paint 测试已适配 "禁止自动 open daemon" 新语义 (已修) | ✅ 已对齐 |
+| T3 | 11 个已有测试失败 (session-sync-helpers, session-context-input-runtime, app-foreground-refresh, App.android-ime-input-loop) | 已有失败, 非本轮引入, 需单独排期修复 |
+
+---
+
+### 已完成修复 (本轮)
+1. ✅ tsc 零错误 (修复 useAppUpdate.test.tsx 未用参数)
+2. ✅ open-tab-history-truth 测试对齐新语义 (restore runtime 允许 persistClosedTabReuseKeys)
+
+### 建议的高优先级修复 (3项)
+1. **P1-M1**: 拆分 `useOpenTabRuntime.ts` (579行→≤500行): 提取 audit 逻辑到独立 hook
+2. **P2**: 拆分 `useSessionOpenActions.ts` (575行→≤500行): 提取 pure helpers 到 lib/
+3. **M3**: 统一 persistClosedTabReuseKeys 调用点为 applyOpenTabState 内部
+
+- 已实施：renderer gap 由红色 marker 改为空白占位；server mirror 新增 baselineCols/baselineRows，并在 adaptive subscriber 清空后 resize-window 恢复 baseline。
+## 2026-05-11 用户新现场：新版本明显卡顿，尤其输入几乎无法输入；即使回显快也难以输入；session 低高度进入退出后仍不恢复。需要把输入链与几何恢复链分开追。
+
+## 2026-05-11 输入闭环排查
+- 现象：用户现场“输入卡顿/几乎无法输入/刷新刷错”。
+- 已证据：`session-context-input-runtime.test.ts` 期待 explicit input 在 open transport 后立刻 `requestSessionBufferHead(..., { force: true })`，当前实现缺失。
+- 假设：输入发出后未立即触发 head-first 闭环，导致 tail refresh / render 推进滞后，符合现场。
+
+- 继续排查“刷新刷错”：转向 buffer/apply/catchup 真源，重点看 same-end new revision、pendingInputTailRefresh 清理时机、buffer-sync-catchup 是否会错过或错拉。
+
+## 2026-05-11 transport stale connected root-cause
+- 新证据：`finalizeSocketFailureBaselineRuntime()` 只做 cleanup socket / clear token / schedule error，但**不更新 session.state**；而 `ensureActiveSessionFreshRuntime()` 的 refresh plan 仍以 `session.state + ws.readyState` 判定。
+- 这会允许 session 在 transport 已死后短时间继续保留 `connected` 投影，active tick/resume/input 可能沿错误分支继续 `request-head` 或被 pending gate 卡住，符合“UI 像连着但 daemon attached=0、不刷新”的现场。
+- 下一步：补红灯验证 live transport close/error 后 session 必须立刻离开 connected，再在 baseline failure owner 修。
+
+## 2026-05-11 安装态验证计划
+- 已完成：client stale-connected 真源修复 + ws-refresh 回归转绿 + tsc 通过。
+- 下一步：build APK -> adb install -> 清 logcat -> 前台复现“连上但不刷新” -> 同步看 daemon /debug/runtime 与 stdout。
+
+## 2026-05-11 tab-session audit
+- TerminalHeader 当前只给 active tab 渲染关闭按钮；非 active tab 无直接 close affordance，mirror-fixed 下又禁用 swipe-tab，导致用户主路径上“无法关闭 tab”。
+- open-tab 真源在 localStorage OPEN_TABS + ACTIVE_SESSION；runtime SessionContext 不直接持久化 tab。close 会写 tombstone(zterm:closed-tab-reuse-keys) 防止冷启动/多机自动复活。
+- restore/audit 会按 remote tmux session truth 过滤不存在的 session；缺失 session 会从 OPEN_TABS 和 sessionGroups 一起裁掉。
+- 远端 tmux session 显式创建唯一入口是 tmux-create-session；普通 attach/restore/open existing tab 不应隐式 new-session。
+- sessionGroups 持久化只保存 owner(daemonHostId/bridgeHost/port)+sessionNames，不保存 tab/open state；它是“可恢复候选集合”，不是客户端打开状态真源。
+
+## 2026-05-11 connected-input-no-render audit
+- 现象：连接显示已连上，输入有效，但 UI 无刷新；按 terminal-buffer-truth 需沿 daemon push / client buffer apply / renderer repaint 单链追真源。
+
+## [2026-05-11] connected-input-no-render continue
+- 继续沿 render truth 排查：当前新怀疑点不是 transport，而是 TerminalPage 顶层 memo 门禁过窄，只比较 active runtime status / active input epoch，未把非 activeSession 的 render truth 变化纳入 props 变化触发条件。
+- 这会在 runtime activeSession 对象/状态不变、但 sessionRenderBufferStore 内部某个 terminal session 的 render snapshot 已更新时，让 React.memo(TerminalPage) 直接跳过整页 render，导致 TerminalView 子树拿不到新的 sessionId/render path，现场表现可为“连上了、输入有效、后台 buffer apply/flush 了，但界面不刷新”。
+- 下一步：用回归测试证明 TerminalPage 在相同 props 但 render store 内部变化时不会自行刷新；若成立，唯一修点应收口在 TerminalPage memo 门禁，而不是 transport/buffer 层。

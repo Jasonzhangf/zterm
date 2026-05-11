@@ -347,7 +347,7 @@ describe('shared terminal renderer pure helpers', () => {
     expect(cells[1]?.style.width).toBe('0px');
   });
 
-  it('builds gap marker payload with explicit fill block', () => {
+  it('builds blank gap placeholder payload with explicit fill block', () => {
     const gap = renderGapMarker({
       absoluteIndex: 99,
       rowHeight: '17px',
@@ -355,7 +355,8 @@ describe('shared terminal renderer pure helpers', () => {
     });
 
     expect(gap.key).toBe('row-99');
-    expect(gap.rowStyle.background).toBe('rgba(239, 68, 68, 0.12)');
+    expect(gap.rowStyle.background).toBe('transparent');
+    expect(gap.rowStyle.borderTop).toBe('none');
     expect(gap.fillProps['data-terminal-gap-fill']).toBe('true');
   });
 

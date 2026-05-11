@@ -83,7 +83,9 @@ export function createTerminalBridgeRuntime(
       deps.createWebSocketSessionTransport(ws),
       deps.resolveRequestOrigin(request),
     );
-    console.log(`[${deps.logTimePrefix()}] websocket transport ${connection.id} created`);
+    console.log(
+      `[${deps.logTimePrefix()}] websocket transport ${connection.id} created origin=${connection.requestOrigin} role=${connection.role}`,
+    );
 
     ws.on('pong', () => {
       connection.wsAlive = true;
@@ -94,8 +96,11 @@ export function createTerminalBridgeRuntime(
       void deps.handleMessage(connection, rawData, isBinary);
     });
 
-    ws.on('close', () => {
-      console.log(`[${deps.logTimePrefix()}] websocket transport ${connection.id} closed`);
+    ws.on('close', (code, rawReason) => {
+      const reason = Buffer.isBuffer(rawReason) ? rawReason.toString('utf8') : String(rawReason || '');
+      console.log(
+        `[${deps.logTimePrefix()}] websocket transport ${connection.id} closed code=${code} reason=${reason || 'n/a'} role=${connection.role} bound=${connection.boundSessionId || 'none'}`,
+      );
       const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
       if (session) {
         deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);

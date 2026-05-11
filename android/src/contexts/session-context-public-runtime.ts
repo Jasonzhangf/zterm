@@ -138,6 +138,7 @@ export function updateSessionViewportRuntime(options: {
   sessionId: string;
   visibleRange: TerminalVisibleRange;
   triggerRepair?: boolean;
+  viewportMode?: 'follow' | 'reading';
   sessionVisibleRangeRef: { current: Map<string, SessionVisibleRangeState> };
   isSessionTransportActive: (sessionId: string) => boolean;
   sessions: Session[];
@@ -162,7 +163,14 @@ export function updateSessionViewportRuntime(options: {
   if (!options.isSessionTransportActive(options.sessionId)) {
     return;
   }
-  if (options.triggerRepair === false) {
+  const followViewportExpandedUpward = (
+    options.viewportMode === 'follow'
+    && Boolean(previous)
+    && normalized.endIndex >= previous!.endIndex
+    && normalized.startIndex < previous!.startIndex
+    && normalized.viewportRows > previous!.viewportRows
+  );
+  if (options.triggerRepair === false && !followViewportExpandedUpward) {
     return;
   }
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;

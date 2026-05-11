@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
-import { STORAGE_KEYS, type ServerMessage, type TerminalCell, type TerminalIndexedLine } from './lib/types';
+import { STORAGE_KEYS, type ServerMessage } from './lib/types';
 
 const fetchTmuxSessionsMock = vi.fn();
 
@@ -124,55 +124,6 @@ class ResizeObserverMock {
   static reset() {
     ResizeObserverMock.instances.clear();
   }
-}
-
-function row(text: string): TerminalCell[] {
-  return Array.from(text).map((char) => ({
-    char: char.codePointAt(0) || 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  }));
-}
-
-function linesToPayload(lines: string[], revision: number, startIndex = 0) {
-  const indexedLines: TerminalIndexedLine[] = lines.map((line, offset) => ({
-    index: startIndex + offset,
-    cells: row(line),
-  }));
-  return {
-    revision,
-    startIndex,
-    endIndex: startIndex + lines.length,
-    availableStartIndex: startIndex,
-    availableEndIndex: startIndex + lines.length,
-    cols: 80,
-    rows: 24,
-    cursorKeysApp: false,
-    lines: indexedLines,
-  };
-}
-
-function fullTailWindowPayload(options: {
-  revision: number;
-  startIndex: number;
-  endIndex: number;
-  tailLines: string[];
-}) {
-  const lines: string[] = [];
-  const fillerCount = Math.max(0, (options.endIndex - options.startIndex) - options.tailLines.length);
-  for (let index = 0; index < fillerCount; index += 1) {
-    lines.push(`line-${String(options.startIndex + index).padStart(3, '0')}`);
-  }
-  lines.push(...options.tailLines);
-  return linesToPayload(lines, options.revision, options.startIndex);
-}
-
-function readSentMessages(ws: MockWebSocket) {
-  return ws.sent
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => JSON.parse(item));
 }
 
 vi.mock('@capacitor/app', () => ({
@@ -450,7 +401,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     ResizeObserverMock.reset();
   });
 
-  it('cold start single active tab does head -> sync -> visible rows without any input', async () => {
+  it('cold start single active tab restores the local shell without auto opening daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -465,48 +416,13 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
-    const view = render(<App />);
+    render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-
-    const ws = MockWebSocket.instances[0]!;
-    ws.triggerOpen();
-    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-1',
-        revision: 9,
-        latestEndIndex: 240,
-        availableStartIndex: 0,
-        availableEndIndex: 240,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-sync',
-      payload: linesToPayload(['first-paint-001', 'first-paint-002', 'first-paint-003'], 9, 237),
-    });
-
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('first-paint-001');
-      expect(view.container.textContent).toContain('first-paint-003');
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 
-  it('switching to another tab does head -> sync -> visible rows on the new tab without input', async () => {
+  it('switching to another restored tab keeps the local shell only and does not auto open daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -530,54 +446,17 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
-    const view = render(<App />);
-
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-    const ws1 = MockWebSocket.instances[0]!;
-    ws1.triggerOpen();
-    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
 
     fireEvent.click(screen.getByText('switch-session-2'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
-    const ws2 = MockWebSocket.instances[1]!;
-    ws2.triggerOpen();
-    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
-    await waitFor(() => {
-      const sent = readSentMessages(ws2);
-      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-2',
-        revision: 6,
-        latestEndIndex: 120,
-        availableStartIndex: 0,
-        availableEndIndex: 120,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws2);
-      expect(sent.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    ws2.triggerMessage({
-      type: 'buffer-sync',
-      payload: linesToPayload(['tab-two-line-001', 'tab-two-line-002'], 6, 118),
-    });
-
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('tab-two-line-001');
-      expect(view.container.textContent).toContain('tab-two-line-002');
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 
-  it('foreground resume on the active tab does head -> sync -> visible body repaint without switching tabs', async () => {
+  it('foreground resume on the active restored tab does not auto reopen daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -592,52 +471,10 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
 
-    const view = render(<App />);
+    render(<App />);
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-    const ws = MockWebSocket.instances[0]!;
-    ws.triggerOpen();
-    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-1',
-        revision: 3,
-        latestEndIndex: 240,
-        availableStartIndex: 0,
-        availableEndIndex: 240,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-sync-request')).toBe(true);
-    });
-
-    const firstSync = readSentMessages(ws).find((item) => item.type === 'buffer-sync-request');
-    expect(firstSync?.payload).toBeTruthy();
-    ws.triggerMessage({
-      type: 'buffer-sync',
-      payload: fullTailWindowPayload({
-        revision: 3,
-        startIndex: firstSync.payload.requestStartIndex,
-        endIndex: firstSync.payload.requestEndIndex,
-        tailLines: ['before-resume-line-001', 'before-resume-line-002'],
-      }),
-    });
-
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('before-resume-line-001');
-      expect(view.container.textContent).toContain('before-resume-line-002');
-    });
-
-    ws.sent.length = 0;
+    await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -651,45 +488,6 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     });
     document.dispatchEvent(new Event('visibilitychange'));
 
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
-
-    ws.triggerMessage({
-      type: 'buffer-head',
-      payload: {
-        sessionId: 'session-1',
-        revision: 4,
-        latestEndIndex: 240,
-        availableStartIndex: 0,
-        availableEndIndex: 240,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'buffer-sync-request' && item.payload?.knownRevision === 3)).toBe(true);
-    });
-
-    const resumeSyncRequests = readSentMessages(ws)
-      .filter((item) => item.type === 'buffer-sync-request');
-    const resumeSync = resumeSyncRequests[resumeSyncRequests.length - 1];
-    expect(resumeSync?.payload).toBeTruthy();
-    ws.triggerMessage({
-      type: 'buffer-sync',
-      payload: fullTailWindowPayload({
-        revision: 4,
-        startIndex: resumeSync.payload.requestStartIndex,
-        endIndex: resumeSync.payload.requestEndIndex,
-        tailLines: ['after-resume-line-001', 'after-resume-line-002'],
-      }),
-    });
-
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('after-resume-line-001');
-      expect(view.container.textContent).toContain('after-resume-line-002');
-      expect(view.container.textContent).not.toContain('before-resume-line-001');
-    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 });

@@ -4,13 +4,9 @@ import { upsertBridgeServer, type BridgeSettings } from '../lib/bridge-settings'
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
-  buildPersistedOpenTabFromHostSession,
-  buildPersistedOpenTabReuseKey,
   clearClosedTabReuseKeysForOwner,
   persistClosedTabReuseKeys,
-  resolveHostForPersistedOpenTab,
 } from '../lib/open-tab-persistence';
-import { resolveRemoteRestorableOpenTabState } from '../lib/open-tab-restore';
 import {
   upsertOpenTabIntentSession,
 } from '../lib/open-tab-intent';
@@ -23,9 +19,10 @@ import {
   type BridgeTarget,
   type HostDraft,
 } from '../lib/session-picker';
-import { openConnectionPropertiesPage, openConnectionsPage, type AppPageState } from '../lib/page-state';
+import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import type { Host, PersistedOpenTab } from '../lib/types';
+import { loadSavedTabList } from '../lib/saved-tab-loader';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 
@@ -410,105 +407,17 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
   const handleLoadSavedTabList = useCallback(async (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => {
-    const importPlan = await resolveRemoteRestorableOpenTabState({
-      tabs,
-      activeSessionId: requestedActiveSessionId?.trim() || null,
-      bridgeSettings: bridgeSettingsRef.current,
-      hosts: hostsRef.current,
-    });
-    if (importPlan.droppedTabs.length > 0) {
-      runtimeDebug('app.saved-tab-list.drop-missing-remote-sessions', {
-        droppedSessionIds: importPlan.droppedTabs.map((tab) => tab.sessionId),
-        droppedTargets: importPlan.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-      });
-    }
-    // Handle tabs whose reuse keys were explicitly closed by the user
-    // - Cold start (clearMatchingTombstones=false): filter them out (don't auto-restore closed tabs)
-    // - Explicit import (clearMatchingTombstones=true): clear tombstones and allow restore
-    const filteredTabs = options?.clearMatchingTombstones
-      ? importPlan.tabs.map((tab) => {
-          const reuseKey = buildPersistedOpenTabReuseKey(tab);
-          if (closedOpenTabReuseKeysRef.current.has(reuseKey)) {
-            closedOpenTabReuseKeysRef.current.delete(reuseKey);
-            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
-            runtimeDebug('app.saved-tab-list.clear-tombstone', {
-              sessionId: tab.sessionId,
-              sessionName: tab.sessionName,
-            });
-          }
-          return tab;
-        })
-      : importPlan.tabs.filter((tab) => {
-          const reuseKey = buildPersistedOpenTabReuseKey(tab);
-          if (closedOpenTabReuseKeysRef.current.has(reuseKey)) {
-            runtimeDebug('app.saved-tab-list.skip-closed', {
-              sessionId: tab.sessionId,
-              sessionName: tab.sessionName,
-            });
-            return false;
-          }
-          return true;
-        });
-    if (filteredTabs.length === 0) {
-      applyOpenTabState({
-        tabs: [],
-        activeSessionId: null,
-      });
-      setPageState(openConnectionsPage());
-      return;
-    }
-    const openedTabs: PersistedOpenTab[] = [];
-    runtimeDebug('app.saved-tab-list.load', {
-      requestedActiveSessionId: requestedActiveSessionId || null,
-      sessionIds: filteredTabs.map((tab) => tab.sessionId),
-      bridgeTargets: filteredTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-    });
-
-    filteredTabs.forEach((tab) => {
-      const host: Host = resolveHostForPersistedOpenTab({
-        tab,
-        hosts: hostsRef.current,
-        fallbackIdPrefix: 'saved',
-        fallbackLastConnected: Date.now(),
-      });
-
-      const opened = openDraftAsSessionRef.current?.(host, {
-        rememberName: host.name,
-        activate: false,
-        navigate: false,
-        sessionId: tab.sessionId,
-      });
-      if (!opened) {
-        throw new Error('openDraftAsSession ref unavailable while loading saved tab list');
-      }
-
-      openedTabs.push(buildPersistedOpenTabFromHostSession({
-        sessionId: opened.sessionId,
-        host: opened.host,
-        customName: tab.customName,
-        createdAt: tab.createdAt,
-      }));
-
-      if (tab.customName?.trim()) {
-        renameSessionRef.current(opened.sessionId, tab.customName.trim());
-      }
-    });
-
-    const activeSessionId = importPlan.activeSessionId
-      ? (openedTabs.find((tab) => tab.sessionId === importPlan.activeSessionId)?.sessionId || openedTabs[0]?.sessionId || null)
-      : null;
-
-    if (activeSessionId) {
-      applyOpenTabState({
-        tabs: openedTabs,
-        activeSessionId,
-      }, {
-        switchRuntime: true,
-      });
-      ensureTerminalPageVisibleRef.current();
-    }
+    await loadSavedTabList(tabs, requestedActiveSessionId, {
+      bridgeSettingsRef,
+      hostsRef,
+      closedOpenTabReuseKeysRef,
+      openDraftAsSessionRef,
+      renameSessionRef,
+      applyOpenTabState,
+      setPageState,
+      ensureTerminalPageVisibleRef,
+    }, options);
   }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, renameSessionRef]);
-
   const handleRemoteSessionsRefreshed = useCallback((target: BridgeTarget, sessionNames: string[]) => {
     pruneSessionGroupSelectionToRemoteTruth({
       bridgeHost: target.bridgeHost,

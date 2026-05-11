@@ -107,6 +107,94 @@ describe('session-context-activity-runtime', () => {
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
   });
 
+  it('does not auto reconnect a closed active session on active reentry', () => {
+    const reconnectSession = vi.fn();
+    const refreshed = ensureActiveSessionFreshRuntime({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-reentry',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [buildSession('session-1', 'closed')],
+            activeSessionId: 'session-1',
+            liveSessionIds: ['session-1'],
+          },
+        },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        lastActiveReentryAtRef: { current: new Map<string, number>() },
+        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+        connectedBaselineBurstGuardRef: { current: new Set<string>() },
+        lastServerActivityAtRef: { current: new Map<string, number>() },
+        lastHeadRequestAtRef: { current: new Map<string, number>() },
+      },
+      readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      readSessionTransportSocket: () => null,
+      isReconnectInFlight: () => false,
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      isSessionTransportActivityStale: () => false,
+      runtimeDebug: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
+      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
+      resetSessionTransportPullBookkeeping: vi.fn(),
+      requestSessionBufferHead: vi.fn(() => true),
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      reconnectSession,
+    });
+
+    expect(refreshed).toBe(false);
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('allows explicit resume to reconnect a closed active session', () => {
+    const reconnectSession = vi.fn();
+    const refreshed = ensureActiveSessionFreshRuntime({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [buildSession('session-1', 'closed')],
+            activeSessionId: 'session-1',
+            liveSessionIds: ['session-1'],
+          },
+        },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        lastActiveReentryAtRef: { current: new Map<string, number>() },
+        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+        connectedBaselineBurstGuardRef: { current: new Set<string>() },
+        lastServerActivityAtRef: { current: new Map<string, number>() },
+        lastHeadRequestAtRef: { current: new Map<string, number>() },
+      },
+      readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      readSessionTransportSocket: () => null,
+      isReconnectInFlight: () => false,
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      isSessionTransportActivityStale: () => false,
+      runtimeDebug: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
+      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
+      resetSessionTransportPullBookkeeping: vi.fn(),
+      requestSessionBufferHead: vi.fn(() => true),
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      reconnectSession,
+    });
+
+    expect(refreshed).toBe(true);
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
+  });
+
   it('requests head for a visible live pane during active tick even when it is not the interactive active session', () => {
     const requestSessionBufferHead = vi.fn(() => true);
 
