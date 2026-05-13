@@ -14,6 +14,9 @@ interface RenderGateSessionRuntime {
   dirty: boolean;
   scheduled: boolean;
   frameTimerId: number | null;
+  sourceStartIndex: number;
+  sourceEndIndex: number;
+  sourceRows: TerminalCell[][];
 }
 
 export interface SessionRenderGate {
@@ -22,8 +25,8 @@ export interface SessionRenderGate {
   deleteSession: (sessionId: string) => void;
 }
 
-function cloneRenderLines(lines: TerminalCell[][]): TerminalCell[][] {
-  return lines.map((row) => row.map((cell) => ({ ...cell })));
+function cloneRenderRow(row: TerminalCell[]): TerminalCell[] {
+  return row.map((cell) => ({ ...cell }));
 }
 
 function cloneRenderGapRanges(gapRanges: TerminalGapRange[]): TerminalGapRange[] {
@@ -41,21 +44,145 @@ function cloneRenderCursor(cursor: TerminalCursorState | null): TerminalCursorSt
   };
 }
 
-function projectRenderBuffer(buffer: SessionBufferState): SessionRenderBufferSnapshot {
+function rowsEqual(left: TerminalCell[], right: TerminalCell[]) {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (!a || !b) {
+      return false;
+    }
+    if (
+      a.char !== b.char
+      || a.fg !== b.fg
+      || a.bg !== b.bg
+      || a.flags !== b.flags
+      || a.width !== b.width
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function gapRangesEqual(left: TerminalGapRange[], right: TerminalGapRange[]) {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (
+      left[index]?.startIndex !== right[index]?.startIndex
+      || left[index]?.endIndex !== right[index]?.endIndex
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function cursorEqual(left: TerminalCursorState | null, right: TerminalCursorState | null) {
+  if (left === right) {
+    return true;
+  }
+  return (
+    (left?.rowIndex ?? null) === (right?.rowIndex ?? null)
+    && (left?.col ?? null) === (right?.col ?? null)
+    && (left?.visible ?? null) === (right?.visible ?? null)
+  );
+}
+
+function projectRenderBuffer(options: {
+  buffer: SessionBufferState;
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
+  previousProjected: SessionRenderBufferSnapshot | null;
+  previousSourceStartIndex: number;
+  previousSourceEndIndex: number;
+  previousSourceRows: TerminalCell[][];
+}) {
+  const { buffer, previousProjected } = options;
+  const nextLines = buffer.lines.map((row, offset) => {
+    if (!previousProjected) {
+      return cloneRenderRow(row);
+    }
+    const absoluteIndex = buffer.startIndex + offset;
+    if (
+      absoluteIndex < options.previousSourceStartIndex
+      || absoluteIndex >= options.previousSourceEndIndex
+    ) {
+      return cloneRenderRow(row);
+    }
+    const previousOffset = absoluteIndex - options.previousSourceStartIndex;
+    const previousSourceRow = options.previousSourceRows[previousOffset];
+    const previousProjectedRow = previousProjected.lines[previousOffset];
+    if (
+      previousSourceRow === row
+      && previousProjectedRow
+      && rowsEqual(row, previousProjectedRow)
+    ) {
+      return previousProjectedRow;
+    }
+    return cloneRenderRow(row);
+  });
+
+  const nextGapRanges = (
+    previousProjected && gapRangesEqual(buffer.gapRanges, previousProjected.gapRanges)
+      ? previousProjected.gapRanges
+      : cloneRenderGapRanges(buffer.gapRanges)
+  );
+  const nextCursor = (
+    previousProjected && cursorEqual(buffer.cursor, previousProjected.cursor)
+      ? previousProjected.cursor
+      : cloneRenderCursor(buffer.cursor)
+  );
+
+  const canReusePrevious = Boolean(
+    previousProjected
+    && previousProjected.startIndex === buffer.startIndex
+    && previousProjected.endIndex === buffer.endIndex
+    && previousProjected.bufferHeadStartIndex === buffer.bufferHeadStartIndex
+    && previousProjected.bufferTailEndIndex === buffer.bufferTailEndIndex
+    && previousProjected.daemonHeadRevision === options.daemonHeadRevision
+    && previousProjected.daemonHeadEndIndex === options.daemonHeadEndIndex
+    && previousProjected.cols === buffer.cols
+    && previousProjected.rows === buffer.rows
+    && previousProjected.cursorKeysApp === buffer.cursorKeysApp
+    && previousProjected.cursor === nextCursor
+    && previousProjected.gapRanges === nextGapRanges
+    && previousProjected.revision === buffer.revision
+    && previousProjected.lines.length === nextLines.length
+    && previousProjected.lines.every((line, index) => line === nextLines[index])
+  );
+
   return {
-    lines: cloneRenderLines(buffer.lines),
-    gapRanges: cloneRenderGapRanges(buffer.gapRanges),
-    startIndex: buffer.startIndex,
-    endIndex: buffer.endIndex,
-    bufferHeadStartIndex: buffer.bufferHeadStartIndex,
-    bufferTailEndIndex: buffer.bufferTailEndIndex,
-    daemonHeadRevision: 0,
-    daemonHeadEndIndex: buffer.bufferTailEndIndex,
-    cols: buffer.cols,
-    rows: buffer.rows,
-    cursorKeysApp: buffer.cursorKeysApp,
-    cursor: cloneRenderCursor(buffer.cursor),
-    revision: buffer.revision,
+    projected: canReusePrevious
+      ? previousProjected!
+      : {
+          lines: nextLines,
+          gapRanges: nextGapRanges,
+          startIndex: buffer.startIndex,
+          endIndex: buffer.endIndex,
+          bufferHeadStartIndex: buffer.bufferHeadStartIndex,
+          bufferTailEndIndex: buffer.bufferTailEndIndex,
+          daemonHeadRevision: options.daemonHeadRevision,
+          daemonHeadEndIndex: options.daemonHeadEndIndex,
+          cols: buffer.cols,
+          rows: buffer.rows,
+          cursorKeysApp: buffer.cursorKeysApp,
+          cursor: nextCursor,
+          revision: buffer.revision,
+        },
+    sourceStartIndex: buffer.startIndex,
+    sourceEndIndex: buffer.endIndex,
+    sourceRows: buffer.lines,
   };
 }
 
@@ -79,6 +206,9 @@ export function createSessionRenderGate(options: {
       dirty: false,
       scheduled: false,
       frameTimerId: null,
+      sourceStartIndex: 0,
+      sourceEndIndex: 0,
+      sourceRows: [],
     };
     runtimes.set(sessionId, next);
     return next;
@@ -103,12 +233,21 @@ export function createSessionRenderGate(options: {
         runtime.dirty = false;
         const liveBuffer = options.liveBufferStore.getSnapshot(sessionId).buffer;
         const liveHead = options.liveHeadStore.getSnapshot(sessionId);
-        const projectedBuffer = projectRenderBuffer(liveBuffer);
-        const projected = {
-          ...projectedBuffer,
+        const previousProjected = renderStore.getSnapshot(sessionId).buffer;
+        const {
+          projected,
+          sourceStartIndex,
+          sourceEndIndex,
+          sourceRows,
+        } = projectRenderBuffer({
+          buffer: liveBuffer,
           daemonHeadRevision: liveHead.daemonHeadRevision,
           daemonHeadEndIndex: liveHead.daemonHeadEndIndex,
-        };
+          previousProjected: previousProjected.revision > 0 ? previousProjected : null,
+          previousSourceStartIndex: runtime.sourceStartIndex,
+          previousSourceEndIndex: runtime.sourceEndIndex,
+          previousSourceRows: runtime.sourceRows,
+        });
         if (options.runtimeDebug && shouldCollectRuntimeDebugScope('session.render-gate.flush.inspect')) {
           runtimeDebugPrechecked('session.render-gate.flush.inspect', {
             sessionId,
@@ -121,6 +260,9 @@ export function createSessionRenderGate(options: {
             projected: summarizeRenderBufferForDebug(projected),
           });
         }
+        runtime.sourceStartIndex = sourceStartIndex;
+        runtime.sourceEndIndex = sourceEndIndex;
+        runtime.sourceRows = sourceRows;
         const changed = renderStore.setBuffer(sessionId, projected);
         if (changed) {
           options.recordSessionRenderCommit(sessionId);

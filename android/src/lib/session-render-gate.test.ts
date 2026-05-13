@@ -20,6 +20,10 @@ function makeBuffer(lines: string[], revision: number) {
   });
 }
 
+function cloneRow(row: ReturnType<typeof makeBuffer>['lines'][number]) {
+  return row.map((cell) => ({ ...cell }));
+}
+
 async function flushScheduledRenderCommit() {
   await vi.runAllTimersAsync();
 }
@@ -270,6 +274,46 @@ describe('session-render-gate', () => {
       const committedAfterPatch = renderStore.getSnapshot('session-1').buffer;
       expect(committedAfterPatch.lines[0]?.[0]?.fg).toBe(3);
       expect(committedBeforePatch.lines[0]?.[0]?.fg).toBe(256);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses unchanged projected rows across later patches so split panes do not pay full-row clone cost again', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+      const renderStore = gate.getRenderStore();
+
+      const base = makeBuffer(['alpha', 'beta', 'gamma'], 1);
+      liveBufferStore.commitBuffer('session-1', base);
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 3 });
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const first = renderStore.getSnapshot('session-1').buffer;
+      const unchangedRow0 = first.lines[0];
+      const unchangedRow2 = first.lines[2];
+      const replacementRow1 = cloneRow(makeBuffer(['BETA!'], 2).lines[0]!);
+
+      const patched = {
+        ...base,
+        lines: [base.lines[0]!, replacementRow1, base.lines[2]!],
+        revision: 2,
+      };
+      liveBufferStore.commitBuffer('session-1', patched);
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 2, daemonHeadEndIndex: 3 });
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const second = renderStore.getSnapshot('session-1').buffer;
+      expect(second.lines[0]).toBe(unchangedRow0);
+      expect(second.lines[2]).toBe(unchangedRow2);
+      expect(second.lines[1]).not.toBe(first.lines[1]);
+      expect(second.lines[1]?.[0]?.char).toBe('B'.codePointAt(0));
     } finally {
       vi.useRealTimers();
     }
