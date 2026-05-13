@@ -3,6 +3,7 @@ import type {
   TerminalBufferPayload,
 } from '../lib/types';
 import {
+  buildBufferSyncRepairSignature,
   doesBufferSyncSatisfyPullState as sharedSatisfiesPull,
   doesPullStateCoverRequest as sharedCoversRequest,
   doesPullStateMatchExactSnapshot as sharedMatchExact,
@@ -22,6 +23,7 @@ export interface SessionPullState {
   requestKnownRevision: number;
   requestLocalStartIndex: number;
   requestLocalEndIndex: number;
+  repairSignature?: string;
 }
 
 export type SessionPullStates = Partial<Record<SessionPullPurpose, SessionPullState>>;
@@ -39,6 +41,7 @@ function doesBufferSyncSatisfyPullState(
     requestKnownRevision: pullState.requestKnownRevision,
     requestLocalStartIndex: pullState.requestLocalStartIndex,
     requestLocalEndIndex: pullState.requestLocalEndIndex,
+    repairSignature: pullState.repairSignature || '',
   };
   const payloadSnap: BufferSyncPayloadSnapshot = {
     revision: Number(payload.revision ?? 0),
@@ -100,6 +103,7 @@ export function doesSessionPullStateCoverRequest(
     requestKnownRevision: pullState.requestKnownRevision,
     requestLocalStartIndex: pullState.requestLocalStartIndex,
     requestLocalEndIndex: pullState.requestLocalEndIndex,
+    repairSignature: pullState.repairSignature || '',
   };
   const req: BufferSyncRequestSnapshot = {
     knownRevision: Number(payload.knownRevision ?? 0),
@@ -107,6 +111,7 @@ export function doesSessionPullStateCoverRequest(
     localEndIndex: Number(payload.localEndIndex ?? 0),
     requestStartIndex: Number(payload.requestStartIndex ?? 0),
     requestEndIndex: Number(payload.requestEndIndex ?? 0),
+    repairSignature: buildBufferSyncRepairSignature(payload.missingRanges),
   };
   return sharedCoversRequest(snap, req);
 }
@@ -125,6 +130,7 @@ export function doesSessionPullStateMatchExactLocalSnapshot(
     requestKnownRevision: pullState.requestKnownRevision,
     requestLocalStartIndex: pullState.requestLocalStartIndex,
     requestLocalEndIndex: pullState.requestLocalEndIndex,
+    repairSignature: pullState.repairSignature || '',
   };
   const req: BufferSyncRequestSnapshot = {
     knownRevision: Number(payload.knownRevision ?? 0),
@@ -132,6 +138,7 @@ export function doesSessionPullStateMatchExactLocalSnapshot(
     localEndIndex: Number(payload.localEndIndex ?? 0),
     requestStartIndex: Number(payload.requestStartIndex ?? 0),
     requestEndIndex: Number(payload.requestEndIndex ?? 0),
+    repairSignature: buildBufferSyncRepairSignature(payload.missingRanges),
   };
   return sharedMatchExact(snap, req, targetHeadRevision);
 }

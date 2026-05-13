@@ -30,6 +30,7 @@ export interface RecordSessionTxOptions {
   requestKnownRevision?: number;
   requestLocalStartIndex?: number;
   requestLocalEndIndex?: number;
+  repairSignature?: string;
 }
 
 export function recordSessionTx(options: {
@@ -58,6 +59,9 @@ export function recordSessionTx(options: {
       requestKnownRevision: Math.max(0, Math.floor(options.recordOptions.requestKnownRevision || 0)),
       requestLocalStartIndex: Math.max(0, Math.floor(options.recordOptions.requestLocalStartIndex || 0)),
       requestLocalEndIndex: Math.max(0, Math.floor(options.recordOptions.requestLocalEndIndex || 0)),
+      repairSignature: typeof options.recordOptions.repairSignature === 'string'
+        ? options.recordOptions.repairSignature
+        : '',
     },
   } satisfies SessionPullStates;
   options.refs.sessionPullStateRef.current.set(options.sessionId, nextPullStates);

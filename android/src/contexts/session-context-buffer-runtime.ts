@@ -32,6 +32,7 @@ import {
   type SessionPullStates,
 } from './session-pull-state-helpers';
 import { normalizeTerminalCursorState } from './session-wire-helpers';
+import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 
 interface MutableRefObject<T> {
   current: T;
@@ -53,6 +54,7 @@ interface SessionSyncRequestDebounceState {
   localStartIndex: number;
   localEndIndex: number;
   targetHeadRevision: number;
+  repairSignature: string;
 }
 
 const SESSION_SYNC_REQUEST_DEBOUNCE_MS = 33;
@@ -319,6 +321,7 @@ export function requestSessionBufferSyncRuntime(options: {
       requestKnownRevision?: number;
       requestLocalStartIndex?: number;
       requestLocalEndIndex?: number;
+      repairSignature?: string;
     },
   ) => void;
   runtimeDebug: RuntimeDebugFn;
@@ -430,6 +433,7 @@ export function requestSessionBufferSyncRuntime(options: {
   const requestKnownRevision = Math.max(0, Math.floor(payload.knownRevision || 0));
   const requestLocalStartIndex = Math.max(0, Math.floor(payload.localStartIndex || 0));
   const requestLocalEndIndex = Math.max(0, Math.floor(payload.localEndIndex || 0));
+  const repairSignature = buildBufferSyncRepairSignature(payload.missingRanges);
   const requestTargetStartIndex = Math.max(0, Math.floor(payload.requestStartIndex || 0));
   const requestTargetEndIndex = Math.max(requestTargetStartIndex, Math.floor(
     requestPurpose === 'reading-repair'
@@ -451,6 +455,7 @@ export function requestSessionBufferSyncRuntime(options: {
     && previousSyncRequest.knownRevision === requestKnownRevision
     && previousSyncRequest.localStartIndex === requestLocalStartIndex
     && previousSyncRequest.localEndIndex === requestLocalEndIndex
+    && previousSyncRequest.repairSignature === repairSignature
   );
   if (isSemanticDuplicateWithinDebounce) {
     options.runtimeDebug('session.buffer.request.debounced', {
@@ -467,6 +472,7 @@ export function requestSessionBufferSyncRuntime(options: {
         requestKnownRevision,
         requestLocalStartIndex,
         requestLocalEndIndex,
+        repairSignature,
       },
     });
     return false;
@@ -487,6 +493,7 @@ export function requestSessionBufferSyncRuntime(options: {
     localStartIndex: requestLocalStartIndex,
     localEndIndex: requestLocalEndIndex,
     targetHeadRevision,
+    repairSignature,
   });
   options.sendSocketPayload(options.sessionId, targetWs, JSON.stringify({
     type: 'buffer-sync-request',
@@ -499,6 +506,7 @@ export function requestSessionBufferSyncRuntime(options: {
     requestKnownRevision,
     requestLocalStartIndex,
     requestLocalEndIndex,
+    repairSignature,
   });
   return true;
 }

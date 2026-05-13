@@ -17,6 +17,7 @@ export interface PullStateSnapshot {
   requestKnownRevision: number;
   requestLocalStartIndex: number;
   requestLocalEndIndex: number;
+  repairSignature?: string;
 }
 
 export interface BufferSyncPayloadSnapshot {
@@ -32,6 +33,19 @@ export interface BufferSyncRequestSnapshot {
   localEndIndex: number;
   requestStartIndex: number;
   requestEndIndex: number;
+  repairSignature?: string;
+}
+
+export function buildBufferSyncRepairSignature(
+  missingRanges?: Array<{ startIndex?: number | null; endIndex?: number | null }> | null,
+): string {
+  if (!Array.isArray(missingRanges) || missingRanges.length === 0) {
+    return '';
+  }
+  return JSON.stringify(missingRanges.map((range) => ({
+    startIndex: Math.max(0, Math.floor(range?.startIndex ?? 0)),
+    endIndex: Math.max(0, Math.floor(range?.endIndex ?? 0)),
+  })));
 }
 
 /**
@@ -75,10 +89,13 @@ export function doesPullStateCoverRequest(
   pullState: PullStateSnapshot,
   request: BufferSyncRequestSnapshot,
 ): boolean {
+  const pullRepairSignature = typeof pullState.repairSignature === 'string' ? pullState.repairSignature : '';
+  const requestRepairSignature = typeof request.repairSignature === 'string' ? request.repairSignature : '';
   return (
     pullState.requestKnownRevision === Math.max(0, Math.floor(request.knownRevision || 0))
     && pullState.requestLocalStartIndex === Math.max(0, Math.floor(request.localStartIndex || 0))
     && pullState.requestLocalEndIndex === Math.max(0, Math.floor(request.localEndIndex || 0))
+    && pullRepairSignature === requestRepairSignature
     && pullState.targetStartIndex <= Math.max(0, Math.floor(request.requestStartIndex || 0))
     && pullState.targetEndIndex >= Math.max(0, Math.floor(request.requestEndIndex || 0))
   );
@@ -92,12 +109,15 @@ export function doesPullStateMatchExactSnapshot(
   request: BufferSyncRequestSnapshot,
   targetHeadRevision?: number | null,
 ): boolean {
+  const pullRepairSignature = typeof pullState.repairSignature === 'string' ? pullState.repairSignature : '';
+  const requestRepairSignature = typeof request.repairSignature === 'string' ? request.repairSignature : '';
   return (
     pullState.requestKnownRevision === Math.max(0, Math.floor(request.knownRevision || 0))
     && pullState.requestLocalStartIndex === Math.max(0, Math.floor(request.localStartIndex || 0))
     && pullState.requestLocalEndIndex === Math.max(0, Math.floor(request.localEndIndex || 0))
     && pullState.targetStartIndex === Math.max(0, Math.floor(request.requestStartIndex || 0))
     && pullState.targetEndIndex === Math.max(0, Math.floor(request.requestEndIndex || 0))
+    && pullRepairSignature === requestRepairSignature
     && (
       targetHeadRevision === undefined
       || targetHeadRevision === null

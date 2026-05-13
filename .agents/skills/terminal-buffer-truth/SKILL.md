@@ -497,6 +497,7 @@ tmux truth
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。
 - 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
 - 若现场是“有内容但要等补齐才整屏一起跳出来”，优先判 **renderer / buffer manager 边界错**；正确语义是 gap 先空白，补齐后局部重刷
+- `reading-repair` / visible-gap repair 的 client 判重与 in-flight cover **必须纳入当前 `missingRanges` / gap 拓扑语义**；同一 `knownRevision/localWindow/requestWindow` 下，只要可见区 gap 变了，就必须允许再次发 repair。否则现场会出现：页面局部空白，手动上下划一下（viewport 改变）后才补刷。
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。

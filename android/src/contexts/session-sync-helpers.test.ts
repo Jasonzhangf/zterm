@@ -46,6 +46,7 @@ import {
   doesSessionPullStateMatchExactLocalSnapshot,
   settleSessionPullStatesWithBufferSync,
 } from './session-pull-state-helpers';
+import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 
 function makeSession(overrides?: Partial<Session>): Session {
   return {
@@ -975,6 +976,36 @@ describe('session sync helper pull-state truth', () => {
       requestStartIndex: 187519,
       requestEndIndex: 187550,
     })).toBe(true);
+  });
+
+  it('treats same-gap reading repair requests as covered and different-gap requests as uncovered', () => {
+    const pullState = {
+      purpose: 'reading-repair' as const,
+      startedAt: 1,
+      targetHeadRevision: 5,
+      targetStartIndex: 20,
+      targetEndIndex: 80,
+      requestKnownRevision: 5,
+      requestLocalStartIndex: 0,
+      requestLocalEndIndex: 60,
+      repairSignature: buildBufferSyncRepairSignature([{ startIndex: 60, endIndex: 61 }]),
+    };
+    expect(doesSessionPullStateCoverRequest(pullState, {
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 60,
+      requestStartIndex: 30,
+      requestEndIndex: 70,
+      missingRanges: [{ startIndex: 60, endIndex: 61 }],
+    })).toBe(true);
+    expect(doesSessionPullStateCoverRequest(pullState, {
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 60,
+      requestStartIndex: 30,
+      requestEndIndex: 70,
+      missingRanges: [{ startIndex: 70, endIndex: 71 }],
+    })).toBe(false);
   });
 
   it('treats a compact same-end tail payload as settling an existing-window refresh', () => {

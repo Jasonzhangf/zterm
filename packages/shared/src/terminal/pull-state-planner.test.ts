@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildBufferSyncRepairSignature,
   doesBufferSyncSatisfyPullState,
   doesPullStateCoverRequest,
   doesPullStateMatchExactSnapshot,
@@ -18,6 +19,7 @@ function makeTailPull(overrides?: Partial<PullStateSnapshot>): PullStateSnapshot
     requestKnownRevision: 5,
     requestLocalStartIndex: 0,
     requestLocalEndIndex: 50,
+    repairSignature: '',
     ...overrides,
   };
 }
@@ -32,6 +34,7 @@ function makeReadingPull(overrides?: Partial<PullStateSnapshot>): PullStateSnaps
     requestKnownRevision: 5,
     requestLocalStartIndex: 0,
     requestLocalEndIndex: 60,
+    repairSignature: buildBufferSyncRepairSignature([{ startIndex: 60, endIndex: 61 }]),
     ...overrides,
   };
 }
@@ -53,6 +56,7 @@ function makeRequest(overrides?: Partial<BufferSyncRequestSnapshot>): BufferSync
     localEndIndex: 50,
     requestStartIndex: 0,
     requestEndIndex: 100,
+    repairSignature: '',
     ...overrides,
   };
 }
@@ -102,6 +106,27 @@ describe('doesPullStateCoverRequest', () => {
   it('returns false when target range does not cover request', () => {
     expect(doesPullStateCoverRequest(makeTailPull({ targetStartIndex: 50, targetEndIndex: 150 }), makeRequest())).toBe(false);
   });
+
+  it('returns false when repair signature differs even if the window matches', () => {
+    expect(doesPullStateCoverRequest(
+      makeReadingPull({
+        requestKnownRevision: 5,
+        requestLocalStartIndex: 0,
+        requestLocalEndIndex: 60,
+        targetStartIndex: 20,
+        targetEndIndex: 80,
+        repairSignature: buildBufferSyncRepairSignature([{ startIndex: 60, endIndex: 61 }]),
+      }),
+      makeRequest({
+        knownRevision: 5,
+        localStartIndex: 0,
+        localEndIndex: 60,
+        requestStartIndex: 20,
+        requestEndIndex: 80,
+        repairSignature: buildBufferSyncRepairSignature([{ startIndex: 70, endIndex: 71 }]),
+      }),
+    )).toBe(false);
+  });
 });
 
 describe('doesPullStateMatchExactSnapshot', () => {
@@ -119,5 +144,28 @@ describe('doesPullStateMatchExactSnapshot', () => {
 
   it('returns false when requestStartIndex differs', () => {
     expect(doesPullStateMatchExactSnapshot(makeTailPull({ targetStartIndex: 10 }), makeRequest(), 10)).toBe(false);
+  });
+
+  it('returns false when repair signature differs', () => {
+    expect(doesPullStateMatchExactSnapshot(
+      makeReadingPull({
+        requestKnownRevision: 5,
+        requestLocalStartIndex: 0,
+        requestLocalEndIndex: 60,
+        targetStartIndex: 20,
+        targetEndIndex: 80,
+        targetHeadRevision: 10,
+        repairSignature: buildBufferSyncRepairSignature([{ startIndex: 60, endIndex: 61 }]),
+      }),
+      makeRequest({
+        knownRevision: 5,
+        localStartIndex: 0,
+        localEndIndex: 60,
+        requestStartIndex: 20,
+        requestEndIndex: 80,
+        repairSignature: buildBufferSyncRepairSignature([{ startIndex: 70, endIndex: 71 }]),
+      }),
+      10,
+    )).toBe(false);
   });
 });
