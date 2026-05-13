@@ -57,6 +57,8 @@ export function createSessionPublicFacadeRuntime(options: {
       ws?: BridgeTransportSocket | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+      requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
     },
   ) => boolean;
   ensureActiveSessionFresh: (options: {

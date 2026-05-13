@@ -195,4 +195,34 @@ describe('useTerminalWorkspace explicit pane truth', () => {
 
     expect(result.current.workspace.panes).toHaveLength(2);
   });
+
+  it('adds newly opened explicit sessions into the single-pane workspace so split actions have real tabs to split', () => {
+    const { result, rerender } = renderHook(({ sessions }) => useTerminalWorkspace({
+      sessions,
+      activeSessionId: 's1',
+      viewportWidth: 390,
+      viewportHeight: 844,
+      maxSplitCount: 4,
+    }), {
+      initialProps: {
+        sessions: [makeSession('s1')] as Session[],
+      },
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(1);
+    expect(result.current.workspace.panes[0]?.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+
+    rerender({
+      sessions: [makeSession('s1'), makeSession('s2')],
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(1);
+    expect(result.current.workspace.panes[0]?.tabs.map((tab) => tab.sessionId)).toEqual(['s1', 's2']);
+
+    act(() => {
+      result.current.setSplitCount(2);
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(2);
+  });
 });

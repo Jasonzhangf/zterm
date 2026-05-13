@@ -68,6 +68,8 @@ describe('session-context-public-runtime', () => {
     expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
       reason: 'viewport-visible-range-demand',
       purpose: 'reading-repair',
+      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
+      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
       sessionOverride: session,
     });
   });
@@ -103,5 +105,118 @@ describe('session-context-public-runtime', () => {
     });
 
     expect(requestSessionBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('requests visible-range repair when follow viewport expands upward over stale rows even if local buffer still covers the old smaller follow window', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    updateSessionViewportRuntime({
+      sessionId,
+      visibleRange: {
+        startIndex: 80,
+        endIndex: 120,
+        viewportRows: 40,
+      },
+      triggerRepair: false,
+      viewportMode: 'follow',
+      sessionVisibleRangeRef: {
+        current: new Map([
+          [sessionId, {
+            startIndex: 96,
+            endIndex: 120,
+            viewportRows: 24,
+          }],
+        ]),
+      },
+      isSessionTransportActive: () => true,
+      sessions: [session],
+      sessionBufferHeadsRef: {
+        current: new Map([
+          [sessionId, {
+            revision: 6,
+            latestEndIndex: 120,
+            availableStartIndex: 0,
+            availableEndIndex: 120,
+            seenAt: 1,
+          }],
+        ]),
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
+      reason: 'viewport-visible-range-demand',
+      purpose: 'reading-repair',
+      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
+      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
+      sessionOverride: session,
+    });
+  });
+
+  it('requests visible-range repair when follow viewport expands upward over already-filled local rows that may be stale from a narrower tail repaint', () => {
+    const sessionId = 'session-1';
+    const session: Session = {
+      ...makeSession(sessionId),
+      buffer: createSessionBufferState({
+        lines: Array.from({ length: 40 }, (_, index) => `row-${80 + index}`),
+        startIndex: 80,
+        endIndex: 120,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 120,
+        cols: 80,
+        rows: 40,
+        revision: 6,
+        cacheLines: 1000,
+      }),
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 120,
+    };
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    updateSessionViewportRuntime({
+      sessionId,
+      visibleRange: {
+        startIndex: 80,
+        endIndex: 120,
+        viewportRows: 40,
+      },
+      triggerRepair: false,
+      viewportMode: 'follow',
+      sessionVisibleRangeRef: {
+        current: new Map([
+          [sessionId, {
+            startIndex: 96,
+            endIndex: 120,
+            viewportRows: 24,
+          }],
+        ]),
+      },
+      isSessionTransportActive: () => true,
+      sessions: [session],
+      sessionBufferHeadsRef: {
+        current: new Map([
+          [sessionId, {
+            revision: 6,
+            latestEndIndex: 120,
+            availableStartIndex: 0,
+            availableEndIndex: 120,
+            seenAt: 1,
+          }],
+        ]),
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
+      reason: 'viewport-visible-range-demand',
+      purpose: 'reading-repair',
+      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
+      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
+      sessionOverride: session,
+    });
   });
 });

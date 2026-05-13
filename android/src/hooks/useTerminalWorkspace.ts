@@ -96,6 +96,26 @@ function syncWorkspaceWithSessions(
     next.activePaneId = next.panes[0].id;
   }
 
+  const existingSessionIds = new Set(
+    next.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId)),
+  );
+  const missingSessionIds = sessions
+    .map((session) => session.id)
+    .filter((sessionId) => !existingSessionIds.has(sessionId));
+
+  if (missingSessionIds.length > 0 && next.panes.length === 1) {
+    const targetPane = next.panes[0];
+    if (targetPane) {
+      next.panes[0] = {
+        ...targetPane,
+        tabs: [
+          ...targetPane.tabs,
+          ...missingSessionIds.map(sessionToWorkspaceTab),
+        ],
+      };
+    }
+  }
+
   if (activeSessionId && next.panes.length === 1) {
     const activeTabId = `tab-${activeSessionId}`;
     const activePaneIndex = next.panes.findIndex((pane) => pane.tabs.some((tab) => tab.id === activeTabId));

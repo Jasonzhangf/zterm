@@ -828,6 +828,31 @@ describe('session sync helper visible-range truth', () => {
     });
   });
 
+  it('widens same-end tail refresh to the full cache window when resume requests force a tail re-sync', () => {
+    const session = makeSession({
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        gapRanges: [{ startIndex: 68, endIndex: 69 }],
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { purpose: 'tail-refresh', forceSameEndRefresh: true },
+    )).toMatchObject({
+      knownRevision: 5,
+      localStartIndex: 8,
+      localEndIndex: 80,
+      requestStartIndex: 8,
+      requestEndIndex: 80,
+    });
+  });
+
   it('clamps tail-refresh request window to daemon authoritative head end', () => {
     const session = makeSession({
       daemonHeadRevision: 13822,

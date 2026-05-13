@@ -151,6 +151,8 @@ export function updateSessionViewportRuntime(options: {
       reason?: string;
       force?: boolean;
       purpose?: 'tail-refresh' | 'reading-repair';
+      requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+      requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
     },
   ) => boolean;
 }) {
@@ -176,13 +178,37 @@ export function updateSessionViewportRuntime(options: {
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;
   const liveHead = options.sessionBufferHeadsRef.current.get(options.sessionId) || null;
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
-  if (!session || !shouldPullVisibleRangeBuffer(session, normalized, liveHead, localBuffer)) {
+  if (!session) {
+    return;
+  }
+  const expandedFollowRepairRange = followViewportExpandedUpward
+    ? {
+        startIndex: normalized.startIndex,
+        endIndex: Math.min(normalized.endIndex, previous!.startIndex),
+      }
+    : null;
+  const shouldRepairVisibleRange = shouldPullVisibleRangeBuffer(session, normalized, liveHead, localBuffer);
+  if (
+    (
+      !shouldRepairVisibleRange
+      && !expandedFollowRepairRange
+    )
+  ) {
     return;
   }
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'viewport-visible-range-demand',
     purpose: 'reading-repair',
     sessionOverride: session,
+    requestWindowOverride: expandedFollowRepairRange
+      ? {
+          requestStartIndex: normalized.startIndex,
+          requestEndIndex: normalized.endIndex,
+        }
+      : null,
+    requestMissingRangesOverride: expandedFollowRepairRange
+      ? [expandedFollowRepairRange]
+      : null,
   });
 }
 

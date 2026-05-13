@@ -30,6 +30,10 @@ export interface ResolveTailRefreshWindowParams {
   sameEndWindowHasLocalGaps: boolean;
   /** Whether the local window is considered invalid. */
   invalidLocalWindow: boolean;
+  /** Whether caller explicitly requires a full same-end refresh after resume/re-entry. */
+  forceSameEndRefresh?: boolean;
+  /** Explicit same-end refresh scope override. */
+  sameEndRefreshMode?: 'auto' | 'visible-window' | 'full-cache';
   /** Optional override for the request window range. */
   requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
 }
@@ -63,6 +67,8 @@ export function resolveTailRefreshWindow(
     sameEndRevisionAdvanced,
     sameEndWindowHasLocalGaps,
     invalidLocalWindow,
+    forceSameEndRefresh,
+    sameEndRefreshMode,
     requestWindowOverride,
   } = params;
 
@@ -101,7 +107,32 @@ export function resolveTailRefreshWindow(
   }
 
   // At this point: localHasWindow && !invalidLocalWindow && distanceToHead === 0
-  // Branch 4: same end, revision advanced, gaps in visible window
+  const normalizedSameEndRefreshMode = sameEndRefreshMode || 'auto';
+
+  // Branch 4: explicit same-end refresh request → full cache window
+  if (
+    sameEndRevisionAdvanced
+    && (forceSameEndRefresh || normalizedSameEndRefreshMode === 'full-cache')
+  ) {
+    return resolveRequestedBufferWindow(
+      viewportEndIndex,
+      viewportRows,
+      cacheLines,
+      authoritativeHeadStartIndex,
+    );
+  }
+
+  // Branch 4.5: explicit visible repaint request or same-end gaps in visible window
+  if (sameEndRevisionAdvanced && normalizedSameEndRefreshMode === 'visible-window') {
+    return {
+      requestStartIndex: Math.max(
+        authoritativeHeadStartIndex,
+        viewportEndIndex - viewportRows,
+      ),
+      requestEndIndex: viewportEndIndex,
+    };
+  }
+
   if (sameEndRevisionAdvanced && sameEndWindowHasLocalGaps) {
     return {
       requestStartIndex: Math.max(

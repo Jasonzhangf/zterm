@@ -295,6 +295,7 @@ export function requestSessionBufferSyncRuntime(options: {
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+    requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
   };
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
@@ -359,13 +360,20 @@ export function requestSessionBufferSyncRuntime(options: {
     visibleRange,
     {
       purpose: options.requestOptions?.purpose,
+      sameEndRefreshMode:
+        options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
+        || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId)
+          ? 'full-cache'
+          : options.refs.pendingInputTailRefreshRef.current.has(options.sessionId)
+            ? 'visible-window'
+            : 'auto',
       forceSameEndRefresh:
-        options.refs.pendingInputTailRefreshRef.current.has(options.sessionId)
-        || options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
+        options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
         || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId),
       liveHead: options.requestOptions?.liveHead || liveHead || null,
       invalidLocalWindow: Boolean(options.requestOptions?.invalidLocalWindow),
       requestWindowOverride: options.requestOptions?.requestWindowOverride || null,
+      requestMissingRangesOverride: options.requestOptions?.requestMissingRangesOverride || null,
       bufferOverride: localBuffer,
     },
   );
@@ -581,6 +589,7 @@ export function applyIncomingBufferSyncRuntime(options: {
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
       requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+      requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
     },
   ) => boolean;
 }) {
@@ -736,8 +745,7 @@ export function applyIncomingBufferSyncRuntime(options: {
 
   if (shouldCatchUpFollowTailAfterBufferApply(nextSession, visibleRange, {
     forceSameEndRefresh:
-      options.refs.pendingInputTailRefreshRef.current.has(options.sessionId)
-      || options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
+      options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
       || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId),
     bufferOverride: nextBuffer,
   })) {

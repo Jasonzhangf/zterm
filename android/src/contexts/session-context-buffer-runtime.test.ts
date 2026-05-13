@@ -597,6 +597,124 @@ describe('session-context-buffer-runtime inactive gating', () => {
     }
   });
 
+  it('widens same-end tail-refresh to the full local tail window when resume tail refresh is pending', () => {
+    const sessionId = 'session-1';
+    const session: Session = {
+      ...makeSession(sessionId),
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: createSessionBufferState({
+        lines: Array.from({ length: 72 }, (_, offset) => `row-${String(8 + offset).padStart(3, '0')}`),
+        startIndex: 8,
+        endIndex: 80,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 80,
+        cols: 80,
+        rows: 24,
+        revision: 5,
+        cacheLines: 1000,
+      }),
+    };
+    session.buffer.gapRanges = [{ startIndex: 68, endIndex: 69 }];
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: {
+        reason: 'explicit-resume',
+        purpose: 'tail-refresh',
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, { startIndex: 56, endIndex: 80, viewportRows: 24 }]]) },
+        sessionBufferHeadsRef: { current: new Map() },
+        sessionPullStateRef: { current: new Map() },
+        lastSyncRequestAtRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set<string>() },
+        pendingResumeTailRefreshRef: { current: new Set<string>([sessionId]) },
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+
+    expect(requested).toBe(true);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'buffer-sync-request',
+      payload: expect.objectContaining({
+        knownRevision: 5,
+        localStartIndex: 8,
+        localEndIndex: 80,
+        requestStartIndex: 8,
+        requestEndIndex: 80,
+      }),
+    });
+  });
+
+  it('keeps input-driven same-end tail refresh scoped to the current visible tail screen instead of widening to the full cache window', () => {
+    const sessionId = 'session-1';
+    const session: Session = {
+      ...makeSession(sessionId),
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: createSessionBufferState({
+        lines: Array.from({ length: 72 }, (_, offset) => `row-${String(8 + offset).padStart(3, '0')}`),
+        startIndex: 8,
+        endIndex: 80,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 80,
+        cols: 80,
+        rows: 24,
+        revision: 5,
+        cacheLines: 1000,
+      }),
+    };
+    session.buffer.gapRanges = [{ startIndex: 68, endIndex: 69 }];
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: {
+        reason: 'input',
+        purpose: 'tail-refresh',
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, { startIndex: 56, endIndex: 80, viewportRows: 24 }]]) },
+        sessionBufferHeadsRef: { current: new Map() },
+        sessionPullStateRef: { current: new Map() },
+        lastSyncRequestAtRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map([[sessionId, { requestedAt: 1, localRevision: 5 }]]) },
+        pendingConnectTailRefreshRef: { current: new Set<string>() },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+
+    expect(requested).toBe(true);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'buffer-sync-request',
+      payload: expect.objectContaining({
+        knownRevision: 5,
+        localStartIndex: 8,
+        localEndIndex: 80,
+        requestStartIndex: 56,
+        requestEndIndex: 80,
+      }),
+    });
+  });
+
   it('does not suppress reading-repair when missingRanges changed inside the same visible window', () => {
     const sessionId = 'session-1';
     const lines = Array.from({ length: 120 }, (_, index) => `row-${String(index + 1).padStart(3, '0')}`);

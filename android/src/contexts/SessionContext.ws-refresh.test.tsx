@@ -361,6 +361,16 @@ function SessionHarness() {
       >
         viewport-follow
       </button>
+      <button
+        type="button"
+        onClick={() => updateSessionViewport('session-1', {
+          mode: 'follow',
+          viewportEndIndex: 120,
+          viewportRows: 40,
+        })}
+      >
+        viewport-follow-expanded
+      </button>
     </div>
   );
 }
@@ -5472,6 +5482,66 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
+  it('widens re-entry same-end refresh to the full visible tail window instead of only patching the bottom rows', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    fireEvent.click(screen.getByText('switch-second'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    ws2.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        lines: Array.from({ length: 72 }, (_, offset) => [8 + offset, `row-${String(8 + offset).padStart(3, '0')}`] as const),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-2-revision').textContent).toBe('5'));
+    ws2.sent.length = 0;
+
+    fireEvent.click(screen.getByText('switch-first'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    fireEvent.click(screen.getByText('switch-second'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+
+    ws2.sent.length = 0;
+    ws2.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-2',
+        revision: 6,
+        latestEndIndex: 80,
+        availableStartIndex: 0,
+        availableEndIndex: 80,
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws2);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestStartIndex: 8,
+          requestEndIndex: 80,
+        }),
+      });
+    });
+  });
+
   it('reissues tail-refresh after stale in-flight request is stranded without any buffer-sync response', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
@@ -5902,6 +5972,122 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
+    });
+  });
+
+  it('does not widen input-driven same-end refresh to a full cache pull when only the current tail screen needs repaint', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        lines: Array.from({ length: 72 }, (_, offset) => [8 + offset, `row-${String(8 + offset).padStart(3, '0')}`] as const),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('5'));
+
+    fireEvent.click(screen.getByText('send-input'));
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+
+    ws.sent.length = 0;
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 6,
+        latestEndIndex: 80,
+        availableStartIndex: 0,
+        availableEndIndex: 80,
+      },
+    });
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestStartIndex: 56,
+          requestEndIndex: 80,
+        }),
+      });
+      expect(sentMessages).not.toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestStartIndex: 8,
+          requestEndIndex: 80,
+        }),
+      });
+    });
+  });
+
+  it('requests repair for the newly exposed upper band when follow viewport expands after a narrower tail repaint', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: indexedPayload({
+        startIndex: 96,
+        endIndex: 120,
+        revision: 5,
+        lines: Array.from({ length: 24 }, (_, offset) => [96 + offset, `row-${String(96 + offset).padStart(3, '0')}`] as const),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('5'));
+
+    ws.sent.length = 0;
+    fireEvent.click(screen.getByText('viewport-follow'));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(readSentMessages(ws).filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
+
+    ws.sent.length = 0;
+    fireEvent.click(screen.getByText('viewport-follow-expanded'));
+
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestStartIndex: 80,
+          requestEndIndex: 120,
+          missingRanges: [{ startIndex: 80, endIndex: 96 }],
+        }),
+      });
     });
   });
 

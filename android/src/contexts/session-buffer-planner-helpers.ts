@@ -134,6 +134,7 @@ function buildTailRefreshBufferSyncRequestPayload(
   options?: {
     liveHead?: SessionBufferHeadState | null;
     forceSameEndRefresh?: boolean;
+    sameEndRefreshMode?: 'auto' | 'visible-window' | 'full-cache';
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     bufferOverride?: SessionBufferState | null;
@@ -187,6 +188,8 @@ function buildTailRefreshBufferSyncRequestPayload(
     sameEndRevisionAdvanced,
     sameEndWindowHasLocalGaps,
     invalidLocalWindow,
+    forceSameEndRefresh: Boolean(options?.forceSameEndRefresh),
+    sameEndRefreshMode: options?.sameEndRefreshMode || 'auto',
     requestWindowOverride: options?.requestWindowOverride ?? null,
   });
   return {
@@ -199,23 +202,40 @@ function buildTailRefreshBufferSyncRequestPayload(
 function buildReadingBufferSyncRequestPayload(
   session: Session,
   visibleRange?: SessionVisibleRangeState,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  options?: {
+    liveHead?: SessionBufferHeadState | null;
+    missingRangesOverride?: TerminalGapRange[] | null;
+    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+    bufferOverride?: SessionBufferState | null;
+  },
 ): BufferSyncRequestPayload {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
+  const buffer = resolveSessionBufferView(session, options?.bufferOverride);
   const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
   const viewportEndIndex = resolveVisibleRangeEndIndex(session, visibleRange, buffer);
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead, buffer);
-  const window = resolveRequestedBufferWindow(
-    viewportEndIndex,
-    viewportRows,
-    availableStartIndex,
-  );
+  const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead, buffer);
+  const window = options?.requestWindowOverride
+    ? {
+        requestStartIndex: Math.max(
+          availableStartIndex,
+          Math.floor(options.requestWindowOverride.requestStartIndex || 0),
+        ),
+        requestEndIndex: Math.max(
+          availableStartIndex,
+          Math.floor(options.requestWindowOverride.requestEndIndex || 0),
+        ),
+      }
+    : resolveRequestedBufferWindow(
+        viewportEndIndex,
+        viewportRows,
+        availableStartIndex,
+      );
   return {
     ...buildBaseBufferSyncRequestPayload(session, buffer),
     requestStartIndex: window.requestStartIndex,
     requestEndIndex: window.requestEndIndex,
-    missingRanges: collectVisibleRangeRepairRanges(session, visibleRange, liveHead, buffer),
+    missingRanges: options?.missingRangesOverride
+      ? options.missingRangesOverride.map((range) => ({ ...range }))
+      : collectVisibleRangeRepairRanges(session, visibleRange, options?.liveHead, buffer),
   };
 }
 
@@ -225,9 +245,11 @@ export function buildSessionBufferSyncRequestPayload(
   options?: {
     purpose?: SessionPullPurpose;
     forceSameEndRefresh?: boolean;
+    sameEndRefreshMode?: 'auto' | 'visible-window' | 'full-cache';
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+    requestMissingRangesOverride?: TerminalGapRange[] | null;
     bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
@@ -236,8 +258,12 @@ export function buildSessionBufferSyncRequestPayload(
     ? buildReadingBufferSyncRequestPayload(
         session,
         visibleRange,
-        options?.liveHead,
-        options?.bufferOverride,
+        {
+          liveHead: options?.liveHead,
+          missingRangesOverride: options?.requestMissingRangesOverride ?? null,
+          requestWindowOverride: options?.requestWindowOverride ?? null,
+          bufferOverride: options?.bufferOverride,
+        },
       )
     : buildTailRefreshBufferSyncRequestPayload(session, visibleRange, options);
 }

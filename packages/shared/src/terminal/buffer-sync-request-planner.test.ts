@@ -96,6 +96,18 @@ describe('resolveTailRefreshWindow', () => {
     expect(result.requestEndIndex).toBe(100);
   });
 
+  it('Branch 4.5: forceSameEndRefresh widens same-end resume refresh to full cache window', () => {
+    const result = resolveTailRefreshWindow({
+      ...base,
+      authoritativeHeadStartIndex: 8,
+      sameEndRevisionAdvanced: true,
+      sameEndWindowHasLocalGaps: true,
+      forceSameEndRefresh: true,
+    });
+    expect(result.requestStartIndex).toBe(8);
+    expect(result.requestEndIndex).toBe(100);
+  });
+
   it('Branch 5: sameEndRevisionAdvanced without gaps → full cache window', () => {
     const result = resolveTailRefreshWindow({
       ...base,

@@ -98,6 +98,7 @@ export function createSessionMessageAssemblies(
     liveHead?: any;
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+    requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
   }) => requestSessionBufferSyncRuntime({
     sessionId,
     requestOptions,
