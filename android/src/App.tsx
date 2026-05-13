@@ -20,6 +20,7 @@ import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
+import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
   connectTraversalRelayDevicesStream,
   readTraversalRelayAccountState,
@@ -387,6 +388,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         {pageState.kind === 'settings' && (
           <SettingsPage
             settings={bridgeSettings}
+            currentVersionName={APP_VERSION}
+            currentVersionCode={APP_VERSION_CODE}
             updatePreferences={appUpdatePreferences}
             latestManifest={latestManifest}
             updateChecking={updateChecking}

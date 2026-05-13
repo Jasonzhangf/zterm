@@ -53,6 +53,8 @@ describe('SettingsPage terminal theme selection', () => {
     render(
       <SettingsPage
         settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
         updatePreferences={{
           manifestUrl: '',
           autoCheckOnLaunch: false,
@@ -99,6 +101,8 @@ describe('SettingsPage terminal theme selection', () => {
     render(
       <SettingsPage
         settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
         updatePreferences={{
           manifestUrl: '',
           autoCheckOnLaunch: false,
@@ -133,6 +137,8 @@ describe('SettingsPage terminal theme selection', () => {
     render(
       <SettingsPage
         settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
         updatePreferences={{
           manifestUrl: '',
           autoCheckOnLaunch: false,
@@ -169,6 +175,8 @@ describe('SettingsPage terminal theme selection', () => {
     render(
       <SettingsPage
         settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
         updatePreferences={{
           manifestUrl: '',
           autoCheckOnLaunch: false,

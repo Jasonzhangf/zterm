@@ -22,6 +22,8 @@ import { TerminalThemeSection } from '../components/settings/TerminalThemeSectio
 
 interface SettingsPageProps {
   settings: BridgeSettings;
+  currentVersionName: string;
+  currentVersionCode: number;
   updatePreferences: AppUpdatePreferences;
   latestManifest: AppUpdateManifest | null;
   updateChecking: boolean;
@@ -57,6 +59,8 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
 
 export function SettingsPage({
   settings,
+  currentVersionName,
+  currentVersionCode,
   updatePreferences,
   latestManifest,
   updateChecking,
@@ -203,6 +207,8 @@ export function SettingsPage({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
         <AppUpdateSection
+          currentVersionName={currentVersionName}
+          currentVersionCode={currentVersionCode}
           updateDraft={updateDraft}
           latestManifest={latestManifest}
           updateChecking={updateChecking}

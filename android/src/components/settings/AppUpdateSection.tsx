@@ -3,6 +3,8 @@ import type { AppUpdateManifest, AppUpdatePreferences } from '../../lib/app-upda
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
 
 interface AppUpdateSectionProps {
+  currentVersionName: string;
+  currentVersionCode: number;
   updateDraft: AppUpdatePreferences;
   latestManifest: AppUpdateManifest | null;
   updateChecking: boolean;
@@ -18,6 +20,8 @@ interface AppUpdateSectionProps {
 }
 
 export function AppUpdateSection({
+  currentVersionName,
+  currentVersionCode,
   updateDraft,
   latestManifest,
   updateChecking,
@@ -96,6 +100,10 @@ export function AppUpdateSection({
         />
         启动时自动检查更新
       </label>
+
+      <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+        当前版本 {currentVersionName} · versionCode {currentVersionCode}
+      </div>
 
       {latestManifest ? (
         <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
