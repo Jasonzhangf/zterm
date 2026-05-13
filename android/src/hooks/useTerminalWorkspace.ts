@@ -173,13 +173,14 @@ function splitOutTabToNewPane(
     if (!movableTab) {
       continue;
     }
+    const remainingTabs = pane.tabs.filter((tab) => tab.id !== movableTab.id);
+    const newActiveTabId = pane.activeTabId === movableTab.id
+      ? (remainingTabs[0]?.id ?? pane.activeTabId)
+      : pane.activeTabId;
     next.panes[paneIndex] = {
       ...pane,
-      tabs: pane.tabs.filter((tab) => tab.id !== movableTab.id),
-      activeTabId:
-        pane.activeTabId === movableTab.id
-          ? (pane.tabs.find((tab) => tab.id !== movableTab.id)?.id ?? pane.activeTabId)
-          : pane.activeTabId,
+      tabs: remainingTabs,
+      activeTabId: newActiveTabId,
     };
     next.panes.splice(paneIndex + 1, 0, createWorkspacePane(movableTab, 1));
     next.panes = distributeEvenPaneSizes(next.panes);

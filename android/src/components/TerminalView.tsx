@@ -137,7 +137,7 @@ function TerminalViewComponent({
   showAbsoluteLineNumbers = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
-  const refreshActive = live ?? active;
+  const refreshActive = Boolean(live);
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore, sessionBufferStore ? sessionId : null);
   const renderBuffer = renderBufferSnapshot
     || (sessionBufferStore && sessionId ? sessionBufferSnapshot.buffer : EMPTY_RENDER_BUFFER);
