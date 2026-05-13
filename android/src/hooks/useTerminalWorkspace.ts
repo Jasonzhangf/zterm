@@ -207,6 +207,8 @@ export interface UseTerminalWorkspaceResult {
   cycleTabInPane: (paneId: string, direction: 'next' | 'previous') => void;
 }
 
+const MOBILE_MANUAL_SPLIT_MIN_ASPECT = 0.2;
+
 export function useTerminalWorkspace({
   sessions,
   activeSessionId,
@@ -221,7 +223,7 @@ export function useTerminalWorkspace({
   const layoutSnapshotRef = useRef(resolveStaticPaneLayout({
     viewportWidth,
     viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-    minAspect: 0.22,
+    minAspect: MOBILE_MANUAL_SPLIT_MIN_ASPECT,
     hardCap: maxSplitCount,
     paneCount: workspace.panes.length,
   }));
@@ -240,7 +242,7 @@ export function useTerminalWorkspace({
     const nextLayout = resolveStaticPaneLayout({
       viewportWidth,
       viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-      minAspect: 0.22,
+      minAspect: MOBILE_MANUAL_SPLIT_MIN_ASPECT,
       hardCap: maxSplitCount,
       paneCount: workspace.panes.length,
       previousLayout: layoutSnapshotRef.current,

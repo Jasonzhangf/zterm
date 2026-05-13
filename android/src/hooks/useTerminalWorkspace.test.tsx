@@ -177,4 +177,22 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     expect(result.current.workspace.panes).toHaveLength(4);
     expect(result.current.workspace.panes.map((pane) => pane.size)).toEqual([0.25, 0.25, 0.25, 0.25]);
   });
+
+  it('keeps two-pane manual split available on a 320px phone viewport', () => {
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [makeSession('s1'), makeSession('s2')],
+      activeSessionId: 's1',
+      viewportWidth: 320,
+      viewportHeight: 800,
+      maxSplitCount: 4,
+    }));
+
+    expect(result.current.currentMaxSplitCount).toBe(2);
+
+    act(() => {
+      result.current.setSplitCount(2);
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(2);
+  });
 });
