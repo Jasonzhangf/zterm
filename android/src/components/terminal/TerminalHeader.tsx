@@ -7,6 +7,7 @@ import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics'
 const TAB_LONG_PRESS_MS = 920;
 const PLUS_LONG_PRESS_MS = 680;
 const DOUBLE_TAP_MS = 280;
+const TAB_TOUCH_TAP_SLOP_PX = 12;
 
 export interface TerminalHeaderSessionItem {
   id: string;
@@ -91,6 +92,13 @@ function TerminalHeaderComponent({
   const plusLongPressTimerRef = useRef<number | null>(null);
   const plusLongPressTriggeredRef = useRef(false);
   const lastTouchCloseIntentRef = useRef<{ sessionId: string; at: number } | null>(null);
+  const tabTouchGestureRef = useRef<{
+    sessionId: string;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressedTouchTabClickRef = useRef<{ sessionId: string; at: number } | null>(null);
   const [paneMenuState, setPaneMenuState] = useState<PaneMenuState | null>(null);
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const layoutProfile = resolveTerminalLayoutProfile({ splitVisible, topInsetPx, landscape });
@@ -378,13 +386,56 @@ function TerminalHeaderComponent({
                               openPaneMenu(session.id, event.currentTarget);
                               return;
                             }
+                            const touch = event.touches[0];
+                            tabTouchGestureRef.current = touch ? {
+                              sessionId: session.id,
+                              startX: touch.clientX,
+                              startY: touch.clientY,
+                              moved: false,
+                            } : null;
                             startTabLongPress(session.id, event.currentTarget);
                           }}
-                          onTouchEnd={endTabLongPress}
-                          onTouchCancel={endTabLongPress}
+                          onTouchMove={(event) => {
+                            const gesture = tabTouchGestureRef.current;
+                            const touch = event.touches[0];
+                            if (!gesture || !touch || gesture.sessionId !== session.id) {
+                              return;
+                            }
+                            if (gesture.moved) {
+                              return;
+                            }
+                            if (Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY) < TAB_TOUCH_TAP_SLOP_PX) {
+                              return;
+                            }
+                            gesture.moved = true;
+                            endTabLongPress();
+                          }}
+                          onTouchEnd={() => {
+                            const gesture = tabTouchGestureRef.current;
+                            endTabLongPress();
+                            if (gesture?.sessionId === session.id && gesture.moved) {
+                              suppressedTouchTabClickRef.current = {
+                                sessionId: session.id,
+                                at: Date.now(),
+                              };
+                            }
+                            tabTouchGestureRef.current = null;
+                          }}
+                          onTouchCancel={() => {
+                            endTabLongPress();
+                            tabTouchGestureRef.current = null;
+                          }}
                           onClick={(event) => {
                             if (longPressTriggeredRef.current) {
                               longPressTriggeredRef.current = false;
+                              return;
+                            }
+                            const suppressedTouchClick = suppressedTouchTabClickRef.current;
+                            if (
+                              suppressedTouchClick
+                              && suppressedTouchClick.sessionId === session.id
+                              && Date.now() - suppressedTouchClick.at < 600
+                            ) {
                               return;
                             }
                             if (splitVisible) {
@@ -467,7 +518,7 @@ function TerminalHeaderComponent({
                             ) : null}
                           </span>
                         </button>
-                        
+                        {active ? (
                           <button
                             type="button"
                             aria-label="关闭当前 tab"
@@ -519,7 +570,7 @@ function TerminalHeaderComponent({
                           >
                             ×
                           </button>
-                        
+                        ) : null}
                         {menuOpen ? (
                           <div
                             ref={paneMenuRef}

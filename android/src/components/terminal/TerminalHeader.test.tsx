@@ -210,8 +210,34 @@ describe('TerminalHeader', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[1]!);
+    fireEvent.click(screen.getByRole('button', { name: '关闭当前 tab' }));
     expect(onCloseSession).toHaveBeenCalledWith('session-2', 'terminal-header-close-button');
+  });
+
+  it('does not render close buttons for non-active tabs', () => {
+    const session1 = makeSession();
+    const session2 = {
+      ...makeSession(),
+      id: 'session-2',
+      hostId: 'host-2',
+      sessionName: 'zterm-2',
+      title: 'zterm-2',
+    };
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session1), toHeaderSession(session2)]}
+        activeSession={toHeaderSession(session1)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: '关闭当前 tab' })).toHaveLength(1);
   });
 
   it('does not open the tab manager when long pressing a non-split tab', () => {
@@ -264,6 +290,57 @@ describe('TerminalHeader', () => {
     fireEvent.mouseUp(tabButton);
 
     expect(screen.getByText('当前在 P1')).toBeTruthy();
+  });
+
+  it('does not treat a horizontal tab-strip touch scroll as a tap on the touch-start tab', () => {
+    const session1 = makeSession();
+    const session2 = {
+      ...makeSession(),
+      id: 'session-2',
+      hostId: 'host-2',
+      sessionName: 'zterm-2',
+      title: 'zterm-2',
+    };
+    const session3 = {
+      ...makeSession(),
+      id: 'session-3',
+      hostId: 'host-3',
+      sessionName: 'zterm-3',
+      title: 'zterm-3',
+    };
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session1), toHeaderSession(session2), toHeaderSession(session3)]}
+        activeSession={toHeaderSession(session3)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={onSwitchSession}
+        onCloseSession={vi.fn()}
+      />,
+    );
+
+    const touchedTab = screen.getByText('zterm-2').closest('button');
+    expect(touchedTab).toBeTruthy();
+
+    fireEvent.touchStart(touchedTab!, {
+      touches: [{ clientX: 220, clientY: 24 }],
+    });
+    fireEvent.touchMove(touchedTab!, {
+      touches: [{ clientX: 96, clientY: 28 }],
+    });
+    fireEvent.touchEnd(touchedTab!, {
+      changedTouches: [{ clientX: 96, clientY: 28 }],
+    });
+
+    // Mobile browsers can still synthesize a click on the original touch-start
+    // target after a horizontal scroll gesture unless the component gates it.
+    fireEvent.click(touchedTab!);
+
+    expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
   it('renders real pane targets in split tab long-press menu and routes assignment to the chosen pane', () => {
