@@ -98,11 +98,14 @@ describe('open-tab / history / connections truth gates', () => {
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
     const openTabSessionActionsSource = readSource('hooks/useOpenTabSessionActions.ts');
     const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
+    const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
 
     expect(sessionOpenActionsSource).not.toContain('persistAndSwitchExplicitOpenTabsRef');
     expect(openTabSessionActionsSource).not.toContain('requestRuntimeActiveSessionSwitch(');
     expect(restoreRuntimeSource).not.toContain('requestRuntimeActiveSessionSwitch(');
     expect(openTabSessionActionsSource).toContain("switchRuntime: 'explicit-resume'");
     expect(restoreRuntimeSource).toContain("switchRuntime: 'restore-sync'");
+    expect(openTabRuntimeSource).toContain("if (switchReason === 'explicit-resume')");
+    expect(openTabRuntimeSource).not.toContain("if (switchReason === 'restore-sync')");
   });
 });

@@ -148,6 +148,14 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android WebView 若出现“sheet/表单看起来不能滚”，先不要凭截图猜高度；应先附着 `webview_devtools_remote_<pid>` 给目标滚动容器打 `touchstart/touchmove/scrollTop` probe，并用 `adb logcat` 验证 `defaultPrevented` 与 `scrollTop` 是否真实变化，再决定改事件捕获还是布局
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
+- 2026-05-13 新冻结：open-tab runtime switch 必须永远拆成两条语义：
+  - `restore-sync` = 只恢复 local shell / active runtime，不开 transport
+  - `explicit-resume` = 用户显式激活后才允许 `resumeActiveSessionTransport`
+  - 若 UI 只是把 active tab 切对了，就宣称 connected，这是假状态；transport freshness 真源只能留在 `SessionContext`
+- 相关回归至少保留三条：
+  - cold restore 不自动打开 daemon transport
+  - explicit tab switch 触发 `explicit-resume`
+  - foreground/active refresh 不得在 App 层长出第二套 transport reopen 语义
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading

@@ -22,6 +22,27 @@ tmux truth
 
 四层只允许单向依赖，禁止越层漂移。
 
+## 0. transport / session 语义冻结
+
+- client 侧必须把下面两类动作彻底拆开，禁止再混成一个 `switchRuntime` 布尔语义：
+  1. `restore-sync`
+     - 只恢复本地 runtime shell / active tab
+     - **不得**自动打开或恢复 daemon transport
+  2. `explicit-resume`
+     - 只在用户显式切 tab / 显式恢复当前 session 时触发
+     - 才允许桥接到 `resumeActiveSessionTransport` / `ensureActiveSessionFresh`
+- App 层若只是把 tab/runtime 切成 active，**不等于 transport 已连通**
+- `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
+- transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`
+- 现场若出现：
+  - app 说 connected
+  - 但 daemon 看不到 subscriber / session-open / head-sync 进展
+  - 优先回查这条语义分裂，不要先怀疑 daemon / token / tmux 宽高逻辑
+- 回归最少要同时覆盖：
+  - cold restore 不自动开 transport
+  - explicit tab switch / explicit resume 会触发 transport reopen
+  - App 层不得再长出第二套 foreground refresh / reconnect 语义
+
 ## 1. daemon server
 
 server / daemon 是独立层，只做：
