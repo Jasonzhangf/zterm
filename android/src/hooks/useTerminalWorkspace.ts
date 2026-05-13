@@ -310,7 +310,7 @@ export function useTerminalWorkspace({
       return {
         panes: distributeEvenPaneSizes(next.panes).map((pane, index) => ({
           ...pane,
-          size: layoutSnapshot.paneRatios[index] ?? pane.size,
+          size: layoutSnapshotRef.current.paneRatios[index] ?? pane.size,
         })),
         activePaneId: next.activePaneId,
       };
@@ -392,7 +392,7 @@ export function useTerminalWorkspace({
       }
       next.panes = distributeEvenPaneSizes(next.panes).map((pane, index) => ({
         ...pane,
-        size: layoutSnapshot.paneRatios[index] ?? pane.size,
+        size: layoutSnapshotRef.current.paneRatios[index] ?? pane.size,
       }));
       return next;
     });
@@ -547,7 +547,7 @@ export function useTerminalWorkspace({
         ...next,
         panes: distributeEvenPaneSizes(nonEmptyPanes.length > 0 ? nonEmptyPanes : next.panes).map((pane, index) => ({
           ...pane,
-          size: layoutSnapshot.paneRatios[index] ?? pane.size,
+          size: layoutSnapshotRef.current.paneRatios[index] ?? pane.size,
         })),
         activePaneId: nonEmptyPanes.some((pane) => pane.id === next.activePaneId)
           ? next.activePaneId
