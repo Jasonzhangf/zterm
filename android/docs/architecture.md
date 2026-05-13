@@ -45,6 +45,7 @@
   - gap 先空白占位，不等待补齐
   - buffer patch 到达后只按行/区间重刷，不整屏重算
   - head metadata / cursor metadata 可以被 renderer 读取，但不得成为正文 repaint 触发源
+  - tab swipe / pane activate / shell gesture 不属于 renderer；renderer 只声明 viewport demand，不持有 tab navigation 手势状态机
 - Client Render Width Mode：`adaptive-phone | mirror-fixed`
 - Client Render Width 不变量：
   - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
@@ -152,7 +153,10 @@ operation -> event -> projection
   - sync active id
   - close/prune already-open tabs
 - runtime sessions **不得 append runtime-only tabs 回 OPEN_TABS**
-- 关闭 tab、remote prune、session status closed 都必须统一走 open-tab close owner，再由它持久化
+- 用户显式关闭 tab、remote prune 必须统一走 open-tab close owner，再由它持久化
+- `session-status closed/error/tmux_session_unavailable` 只属于 transport 事实：
+  - 可触发 remote tmux audit
+  - **不得**直接映射成 open-tab 物理关闭
 - closed semantic tombstone（`closed-tab-reuse-keys`）也属于 open-tab persistence truth：
   - 显式 reopen / saved-tab import 可以清 tombstone
   - cold restore 不得偷偷清 tombstone

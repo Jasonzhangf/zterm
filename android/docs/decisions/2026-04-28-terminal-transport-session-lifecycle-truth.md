@@ -128,6 +128,7 @@ Android / daemon 后续规则：
 
 - daemon `connect/attach` **不得**隐式创建远端 tmux session
 - 远端 tmux session 不存在时，daemon 只能显式返回 `tmux_session_unavailable`
+- `invalid pane metrics / pane is dead` 只属于 mirror capture / pane target 故障，**不是** tmux session 真缺失；不得升级成 `tmux_session_unavailable`
 - 显式创建 tmux session 的唯一入口只能是控制语义 `tmux-create-session`
 - client restore / saved tabs / open existing session 也必须先基于远端 `list-sessions` 真相过滤；不存在则不打开，并持久化移除
 
@@ -258,6 +259,35 @@ client 侧再补一条硬冻结：
 - 以下路径都**不得**自动 reopen daemon session：
   - cold start restore
   - foreground resume
+
+### 1.2b transport close vs open-tab truth freeze（2026-05-13）
+
+- `session-status closed`
+- `session-status error`
+- daemon `tmux_session_unavailable`
+- attach/open 失败后的 transport close
+
+以上都只属于 **transport / attach / mirror fact**。
+
+它们**不得**被 App 直接映射成：
+
+1. open tab 从 `OPEN_TABS` 物理删除
+2. `ACTIVE_SESSION` 改写
+3. runtime session 立即 `closeSession`
+
+App 正确动作只能是：
+
+```text
+transport/session-status closed
+-> audit remote tmux session-name truth
+-> only if tmux truth confirms missing
+-> prune open tab + close runtime shell
+```
+
+也就是说，open-tab 关闭 owner 只能是：
+
+1. 用户显式 close
+2. remote tmux truth audit
   - active re-entry
   - active tick / stale health refresh
   - runtime/open-tab sync

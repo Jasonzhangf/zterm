@@ -420,11 +420,9 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   useOpenTabLifecycleEffects({
     sessionsRef,
     openTabStateRef,
-    runtimeActiveSessionIdRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
-    applyClosedOpenTabIntent,
     bumpFollowResetEpoch,
   });
 

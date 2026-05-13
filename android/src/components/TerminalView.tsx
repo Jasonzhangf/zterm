@@ -6,8 +6,6 @@ import {
   // renderer pure functions
   DEFAULT_ROWS,
   OVERSCAN_ROWS,
-  TAB_SWIPE_LOCK_THRESHOLD_PX,
-  TAB_SWIPE_TRIGGER_THRESHOLD_PX,
   TERMINAL_FONT_STACK,
   measureTerminalViewport,
   buildTerminalRenderRows,
@@ -68,7 +66,6 @@ interface TerminalViewProps {
   onResize?: TerminalResizeHandler;
   onWidthModeChange?: TerminalWidthModeHandler;
   onViewportChange?: TerminalViewportChangeHandler;
-  onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
   focusNonce?: number;
   fontSize?: number;
   rowHeight?: string;
@@ -132,7 +129,6 @@ function TerminalViewComponent({
   onResize,
   onWidthModeChange,
   onViewportChange,
-  onSwipeTab,
   focusNonce = 0,
   fontSize = 14,
   rowHeight = '17px',
@@ -142,7 +138,6 @@ function TerminalViewComponent({
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const refreshActive = live ?? active;
-  const swipeTabEnabled = widthMode !== 'mirror-fixed' && Boolean(onSwipeTab);
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore, sessionBufferStore ? sessionId : null);
   const renderBuffer = renderBufferSnapshot
     || (sessionBufferStore && sessionId ? sessionBufferSnapshot.buffer : EMPTY_RENDER_BUFFER);
@@ -195,16 +190,6 @@ function TerminalViewComponent({
   const userScrollIntentDeadlineRef = useRef(0);
   const daemonHeadEndIndexRef = useRef(demandHeadEndIndex);
   const daemonHeadRevisionRef = useRef(Math.max(0, Math.floor(renderBuffer.daemonHeadRevision || 0)));
-  const touchGestureRef = useRef({
-    active: false,
-    pointerCaptured: false,
-    axis: null as 'horizontal' | 'vertical' | null,
-    startX: 0,
-    startY: 0,
-    deltaX: 0,
-    deltaY: 0,
-  });
-
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
   const [resolvedCellWidthPx, setResolvedCellWidthPx] = useState(Math.max(1, fontSize * 0.62));
@@ -717,18 +702,6 @@ function TerminalViewComponent({
     sessionId,
   }), [refreshActive, sessionId]);
 
-  const resetTouchGesture = useCallback(() => {
-    touchGestureRef.current = {
-      active: false,
-      pointerCaptured: false,
-      axis: null,
-      startX: 0,
-      startY: 0,
-      deltaX: 0,
-      deltaY: 0,
-    };
-  }, []);
-
   useEffect(() => {
     applySessionSwitchRenderReset({
       sessionId,
@@ -1002,8 +975,7 @@ function TerminalViewComponent({
       window.clearTimeout(resizeCommitTimerRef.current);
       resizeCommitTimerRef.current = null;
     }
-    resetTouchGesture();
-  }, [cancelPendingFollowScrollSync, resetTouchGesture]);
+  }, [cancelPendingFollowScrollSync]);
 
   return (
     <div
@@ -1014,7 +986,6 @@ function TerminalViewComponent({
       data-active={active ? 'true' : 'false'}
       data-has-oninput={onInput ? 'true' : 'false'}
       data-has-onresize={onResize ? 'true' : 'false'}
-      data-has-onswipetab={swipeTabEnabled ? 'true' : 'false'}
       data-width-mode={widthMode}
       onClick={() => {
         if (!sessionId) {
@@ -1037,66 +1008,10 @@ function TerminalViewComponent({
         applyScrollState(host.scrollTop, host);
         lastSettledScrollTopRef.current = host.scrollTop;
       }}
-      onTouchStart={(event) => {
-        if (!active || !sessionId || !swipeTabEnabled || event.touches.length !== 1) {
-          resetTouchGesture();
-          return;
-        }
-        markUserScrollIntent(userScrollIntentDeadlineRef, 300);
-        const touch = event.touches[0];
-        touchGestureRef.current = {
-          active: true,
-          pointerCaptured: false,
-          axis: null,
-          startX: touch.clientX,
-          startY: touch.clientY,
-          deltaX: 0,
-          deltaY: 0,
-        };
-      }}
       onTouchMove={(event) => {
-        const gesture = touchGestureRef.current;
-        if (!gesture.active || event.touches.length !== 1) {
-          return;
+        if (event.touches.length === 1) {
+          markUserScrollIntent(userScrollIntentDeadlineRef, 300);
         }
-        const touch = event.touches[0];
-        const deltaX = touch.clientX - gesture.startX;
-        const deltaY = touch.clientY - gesture.startY;
-        gesture.deltaX = deltaX;
-        gesture.deltaY = deltaY;
-
-        if (!gesture.axis) {
-          if (Math.abs(deltaX) < TAB_SWIPE_LOCK_THRESHOLD_PX && Math.abs(deltaY) < TAB_SWIPE_LOCK_THRESHOLD_PX) {
-            return;
-          }
-          gesture.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
-        }
-
-        if (gesture.axis === 'horizontal') {
-          gesture.pointerCaptured = true;
-          event.preventDefault();
-          return;
-        }
-        markUserScrollIntent(userScrollIntentDeadlineRef, 300);
-      }}
-      onTouchEnd={() => {
-        const gesture = touchGestureRef.current;
-        if (!gesture.active) {
-          return;
-        }
-        const direction = gesture.axis === 'horizontal' && Math.abs(gesture.deltaX) >= TAB_SWIPE_TRIGGER_THRESHOLD_PX
-          ? gesture.deltaX < 0
-            ? 'next'
-            : 'previous'
-          : null;
-        resetTouchGesture();
-        if (!active || !sessionId || !swipeTabEnabled || !direction) {
-          return;
-        }
-        onSwipeTab?.(sessionId, direction);
-      }}
-      onTouchCancel={() => {
-        resetTouchGesture();
       }}
       onWheel={() => {
         markUserScrollIntent(userScrollIntentDeadlineRef, 250);
@@ -1112,7 +1027,7 @@ function TerminalViewComponent({
         overflowY: 'auto',
         overflowX: 'hidden',
         overscrollBehavior: 'contain',
-        touchAction: swipeTabEnabled ? 'pan-y' : 'pan-x pan-y',
+        touchAction: 'pan-x pan-y',
         padding: '0',
         borderRadius: '0',
         boxShadow: 'none',

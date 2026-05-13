@@ -93,9 +93,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
 
-  function isTmuxTargetUnavailableError(error: unknown) {
+  function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return message.includes('invalid pane metrics') || message.includes('pane is dead');
+    return /no server running|can(?:'t| not) find session|no such session|session .*not found/i.test(message);
   }
 
   function resolveMirrorBaselineCols(mirror: SessionMirror) {
@@ -437,7 +437,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       })
       .catch((error) => {
         mirror.consecutiveFailures += 1;
-        const isInvalidTarget = isTmuxTargetUnavailableError(error);
+        const isInvalidTarget = isTmuxSessionUnavailableError(error);
         const failureMsg = `[${deps.logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName} (streak=${mirror.consecutiveFailures}): ${
           error instanceof Error ? error.message : String(error)
         }`;
@@ -550,7 +550,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       announceMirrorSubscribersReady(mirror);
       scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
     } catch (error) {
-      if (isTmuxTargetUnavailableError(error)) {
+      if (isTmuxSessionUnavailableError(error)) {
         console.error(
           `[${deps.logTimePrefix()}] initial buffer sync released unavailable tmux target for ${mirror.sessionName}: ${
             error instanceof Error ? error.message : String(error)

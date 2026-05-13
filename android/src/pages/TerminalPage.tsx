@@ -12,6 +12,7 @@ import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSh
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
+import { TerminalTabSwipeSurface } from '../components/terminal/TerminalTabSwipeSurface';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -578,30 +579,36 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, landscape }), [landscape, splitVisible]);
 
   const renderTerminal = useCallback((session: Session, sessionIsActive: boolean, renderInstanceKey?: string) => (
-    <TerminalView
+    <TerminalTabSwipeSurface
       key={renderInstanceKey || session.id}
       sessionId={session.id}
-      sessionBufferStore={sessionBufferStore}
-      sessionHeadStore={sessionHeadStore}
       active={sessionIsActive}
-      live
-      inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
-      followResetEpoch={sessionIsActive ? followResetEpoch : 0}
-      allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
-      domInputOffscreen={isAndroid}
-      onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
-      onResize={sessionIsActive && !isAndroid ? onResize : undefined}
-      onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
-      onInput={sessionIsActive ? onTerminalInput : undefined}
-      onViewportChange={handleTerminalViewportChange}
-      onSwipeTab={sessionIsActive ? handleSwipeTab : undefined}
-      focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
-      fontSize={terminalFontSize}
-      rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
-      themeId={terminalThemeId || 'default'}
-      widthMode={terminalWidthMode}
-      showAbsoluteLineNumbers={absoluteLineNumbersVisible}
-    />
+      enabled={terminalWidthMode !== 'mirror-fixed'}
+      onSwipeTab={handleSwipeTab}
+    >
+      <TerminalView
+        sessionId={session.id}
+        sessionBufferStore={sessionBufferStore}
+        sessionHeadStore={sessionHeadStore}
+        active={sessionIsActive}
+        live
+        inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
+        followResetEpoch={sessionIsActive ? followResetEpoch : 0}
+        allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
+        domInputOffscreen={isAndroid}
+        onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
+        onResize={sessionIsActive && !isAndroid ? onResize : undefined}
+        onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
+        onInput={sessionIsActive ? onTerminalInput : undefined}
+        onViewportChange={handleTerminalViewportChange}
+        focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
+        fontSize={terminalFontSize}
+        rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
+        themeId={terminalThemeId || 'default'}
+        widthMode={terminalWidthMode}
+        showAbsoluteLineNumbers={absoluteLineNumbersVisible}
+      />
+    </TerminalTabSwipeSurface>
   ), [
     absoluteLineNumbersVisible,
     focusNonce,

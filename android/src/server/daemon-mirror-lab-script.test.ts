@@ -63,4 +63,12 @@ describe('daemon mirror lab isolation gate', () => {
     expect(script).toContain("'top exit settled payload'");
     expect(script).toContain("'vim exit settled payload'");
   });
+
+  it('waits for probe transport detach before killing the fixed lab session during teardown', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
+    expect(script).toContain('async close()');
+    expect(script).toContain('await probe.close();');
+    expect(script).toContain('cleanupLabSession();');
+    expect(script.indexOf('await probe.close();')).toBeLessThan(script.indexOf('cleanupLabSession();'));
+  });
 });

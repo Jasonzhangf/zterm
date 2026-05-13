@@ -269,6 +269,13 @@ and daemon mirror close loop green
   - 存在则 reset / clear / 复用
 - 每个 case 结束后：
   - 关闭或重置这个 session
+- teardown 顺序固定为：
+  1. 先关闭 daemon probe transport
+  2. 等 daemon 完成 transport detach
+  3. 再 kill/recreate `zterm_mirror_lab`
+- 禁止在 probe ws 仍未 detach 时直接 `kill-session`
+  - 否则旧 mirror 下一拍会撞上旧 `pane_id`
+  - 日志会出现 `can't find pane: %...` / `rows= cols=` 的伪故障
 
 ## 实验角色
 

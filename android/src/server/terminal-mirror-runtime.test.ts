@@ -162,7 +162,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     );
   });
 
-  it('releases subscribers with tmux_session_unavailable when initial sync hits a dead pane target', async () => {
+  it('keeps the mirror/runtime shell alive and reports initial sync failure when initial capture hits a dead pane target', async () => {
     const { sessions, mirrors, sendMessage } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);
@@ -218,17 +218,22 @@ describe('terminal mirror runtime lifecycle truth', () => {
       rows: 56,
     });
 
-    expect(mirrors.get('rcc-zterm')).toBeUndefined();
-    expect(session.mirrorKey).toBeNull();
+    const mirror = mirrors.get('rcc-zterm');
+    expect(mirror?.lifecycle).toBe('failed');
+    expect(session.mirrorKey).toBe('rcc-zterm');
     expect(sendMessage).toHaveBeenCalledWith(
       session,
       expect.objectContaining({
         type: 'error',
         payload: expect.objectContaining({
-          code: 'tmux_session_unavailable',
-          message: expect.stringContaining('pane is dead'),
+          code: 'initial_buffer_sync_failed',
+          message: expect.stringContaining('Failed to capture canonical tmux buffer during initial sync'),
         }),
       }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'connected' }),
     );
   });
 
@@ -610,7 +615,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     );
   });
 
-  it('releases a ready mirror with tmux_session_unavailable when live sync later discovers a dead pane target', async () => {
+  it('does not release a ready mirror when live sync later discovers a dead pane target', async () => {
     const { sessions, sendMessage } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);
@@ -691,15 +696,14 @@ describe('terminal mirror runtime lifecycle truth', () => {
     const ok = await customRuntime.syncMirrorCanonicalBuffer(mirror);
 
     expect(ok).toBe(false);
-    expect(mirrors.get('rcc-zterm')).toBeUndefined();
-    expect(session.mirrorKey).toBeNull();
-    expect(sendMessage).toHaveBeenCalledWith(
+    expect(mirrors.get('rcc-zterm')).toBe(mirror);
+    expect(session.mirrorKey).toBe('rcc-zterm');
+    expect(sendMessage).not.toHaveBeenCalledWith(
       session,
       expect.objectContaining({
         type: 'error',
         payload: expect.objectContaining({
           code: 'tmux_session_unavailable',
-          message: expect.stringContaining('pane is dead'),
         }),
       }),
     );

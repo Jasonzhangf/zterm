@@ -3189,7 +3189,7 @@ describe('App dynamic refresh matrix', () => {
     });
   });
 
-  it('auto-closes tabs from remote session status events and persists the close intent', async () => {
+  it('does not prune open tabs directly from session-status closed while remote tmux truth still contains the session', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('s1', 1), makeSession('s2', 2)],
@@ -3210,6 +3210,8 @@ describe('App dynamic refresh matrix', () => {
         expect.objectContaining({ sessionId: 's2' }),
       ]);
     });
+    fetchTmuxSessionsMock.mockClear();
+    sessionHarness.closeSession.mockClear();
 
     act(() => {
       window.dispatchEvent(new CustomEvent('zterm:session-status', {
@@ -3217,15 +3219,17 @@ describe('App dynamic refresh matrix', () => {
       }));
     });
 
-    await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1'));
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
   });
 
-  it('does not cold-restore a semantic-duplicate tab after a remote closed event removed its live reused session', async () => {
+  it('prunes a session-status closed tab only after remote audit confirms tmux truth missing, and keeps the semantic tombstone on relaunch', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'persisted-old',
@@ -3274,6 +3278,8 @@ describe('App dynamic refresh matrix', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s2']);
 
     act(() => {
       window.dispatchEvent(new CustomEvent('zterm:session-status', {
@@ -3286,6 +3292,8 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 's2', sessionName: 'session-s2' }),
     ]);
     expect(sessionHarness.closeSession).toHaveBeenCalledWith('runtime-new');
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValue(['session-s2']);
 
     view.unmount();
     sessionHarness.reset();

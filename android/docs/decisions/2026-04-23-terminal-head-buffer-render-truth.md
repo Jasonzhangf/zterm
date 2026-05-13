@@ -441,6 +441,16 @@ terminal 宽度语义固定为两种模式：
 
 这条属于 UI shell / renderer 的边界，不属于 buffer manager，更不属于 daemon
 
+补充冻结：
+
+- `adaptive-phone` 下若保留左右滑切 tab，**owner 也必须是 UI shell interaction surface**，不是 renderer body
+- renderer 只允许：
+  - 维护 follow / reading / renderBottomIndex
+  - 声明 visible range / viewport demand
+  - 处理自身滚动窗口与 DOM input
+- renderer **不得**再持有 tab swipe 手势状态机、tab navigation 命中判定、pane activate 语义
+- 原因：tab 切换属于 shell navigation；若把它塞进 renderer，会把 scroll / horizontal pan / click hit-test / tab navigation 混成第二份交互真相
+
 ---
 
 ## 4. UI shell

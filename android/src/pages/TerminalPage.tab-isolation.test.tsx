@@ -94,7 +94,6 @@ vi.mock('../components/TerminalView', () => ({
     onResize,
     onWidthModeChange,
     onViewportChange,
-    onSwipeTab,
     widthMode,
   }: {
     sessionId: string;
@@ -103,7 +102,6 @@ vi.mock('../components/TerminalView', () => ({
     onResize?: TerminalResizeHandler;
     onWidthModeChange?: (sessionId: string, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number | null) => void;
     onViewportChange?: TerminalViewportChangeHandler;
-    onSwipeTab?: (sessionId: string, direction: 'previous' | 'next') => void;
     widthMode?: 'adaptive-phone' | 'mirror-fixed';
   }) => (
     <div
@@ -113,7 +111,6 @@ vi.mock('../components/TerminalView', () => ({
       data-has-onresize={onResize ? 'true' : 'false'}
       data-has-onwidthmodechange={onWidthModeChange ? 'true' : 'false'}
       data-has-onviewport={onViewportChange ? 'true' : 'false'}
-      data-has-onswipetab={onSwipeTab ? 'true' : 'false'}
       data-width-mode={widthMode || 'adaptive-phone'}
     >
       <button type="button" onClick={() => onInput?.(sessionId, `typed:${sessionId}`)}>
@@ -569,6 +566,7 @@ describe('TerminalPage tab isolation', () => {
         onSessionDraftChange={onSessionDraftChange}
         onSessionDraftSend={onSessionDraftSend}
         onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="adaptive-phone"
       />,
     );
 
@@ -585,11 +583,11 @@ describe('TerminalPage tab isolation', () => {
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-oninput')).toBe('true');
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onresize')).toBe('true');
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onviewport')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-has-onswipetab')).toBe('true');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-oninput')).toBe('false');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onresize')).toBe('false');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onviewport')).toBe('true');
-    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-has-onswipetab')).toBe('false');
+    expect(screen.getByTestId('terminal-swipe-surface-s1').getAttribute('data-swipe-enabled')).toBe('true');
+    expect(screen.getByTestId('terminal-swipe-surface-s2').getAttribute('data-swipe-enabled')).toBe('false');
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-active-session-id')).toBe('s1');
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-session-draft')).toBe('draft-s1');
     expect(screen.getByTestId('terminal-quickbar').getAttribute('data-split-visible')).toBe('true');
@@ -601,6 +599,42 @@ describe('TerminalPage tab isolation', () => {
     expect(onQuickActionInput).toHaveBeenCalledWith('quick-seq', 's1');
     expect(onSessionDraftChange).toHaveBeenCalledWith('draft-next', 's1');
     expect(onSessionDraftSend).toHaveBeenCalledWith('draft-send', 's1');
+  });
+
+  it('routes adaptive swipe at the shell layer instead of the renderer', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="adaptive-phone"
+      />,
+    );
+
+    const surface = screen.getByTestId('terminal-swipe-surface-s1');
+    fireEvent.touchStart(surface, { touches: [{ clientX: 220, clientY: 160 }] });
+    fireEvent.touchMove(surface, {
+      touches: [{ clientX: 120, clientY: 166 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 120, clientY: 166 }] });
+
+    expect(onSwitchSession).toHaveBeenCalledWith('s2');
   });
 
   it('auto closes split when width shrinks back from wide profile to single-column', async () => {

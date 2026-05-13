@@ -34,6 +34,10 @@ tmux truth
 - App 层若只是把 tab/runtime 切成 active，**不等于 transport 已连通**
 - `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
 - transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`
+- transport `closed/error/tmux_session_unavailable` 只属于 **transport / attach fact**，**不得**被 App 直接映射成 open-tab 物理关闭
+- open-tab prune 只能由：
+  1. 用户显式 close
+  2. 远端 tmux session-name audit 确认真缺失
 - 现场若出现：
   - app 说 connected
   - 但 daemon 看不到 subscriber / session-open / head-sync 进展
@@ -101,6 +105,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - mirror 是 daemon 可持有的 terminal 真相
   - tmux session / file transfer / schedule 是 daemon 可持有的业务真相
 - daemon attach/connect **不得**隐式 `new-session`；远端 tmux session 不存在时只能显式报 `tmux_session_unavailable`，显式创建唯一走 `tmux-create-session`。
+  - `invalid pane metrics / pane is dead` **不是** `tmux_session_unavailable`；它只表示 mirror capture/pane target 故障，不得 release subscriber / close client runtime
   - transport 断开只影响该 transport 自身，不允许推导客户端 active/inactive/foreground/background 语义
   - 多客户端只表示“多个 transport/订阅者读同一 mirror”，不是 daemon 维护一份客户端状态机
 - daemon 不允许保留 client 风格状态机：
@@ -363,6 +368,11 @@ UI 只负责容器位置与裁切：
   - 自动关闭左右滑切 tab
   - 单指横滑只服务于 renderer horizontal pan
   - 不允许一次手势里同时尝试切 tab 与横向平移
+- `adaptive-phone` 下若保留左右滑切 tab，该手势也必须属于 **UI shell interaction surface**：
+  - renderer 不得自己持有 swipe gesture state machine
+  - renderer 不得自己决定 tab navigation 命中
+  - renderer 只允许上报 viewport / scroll / input 真相
+  - tab swipe 的 owner 只能是 shell 包裹层或独立 interaction block
 
 ## 5. 反模式清单
 

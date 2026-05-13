@@ -11,18 +11,10 @@ export type OpenTabAuditReason =
   | 'appStateChange'
   | 'connect'
   | 'session-picker-refresh'
-  | 'connections-page-open';
+  | 'connections-page-open'
+  | 'session-status-closed';
 
 type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange'>;
-
-interface OpenTabLifecycleCloseOptions {
-  runtimeActiveSessionId?: string | null;
-  fallbackSessionIds?: string[];
-  runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
-  closeRuntimeSession?: boolean;
-  clearDraft?: boolean;
-  source?: string;
-}
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
@@ -30,11 +22,9 @@ interface UseOpenTabLifecycleEffectsOptions {
     tabs: any[];
     activeSessionId: string | null;
   }>;
-  runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
-  applyClosedOpenTabIntent: (sessionId: string, closeOptions?: OpenTabLifecycleCloseOptions) => unknown;
   bumpFollowResetEpoch: () => void;
 }
 
@@ -42,11 +32,9 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   const {
     sessionsRef,
     openTabStateRef,
-    runtimeActiveSessionIdRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
-    applyClosedOpenTabIntent,
     bumpFollowResetEpoch,
   } = options;
 
@@ -147,15 +135,8 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         })),
       });
       if (detail?.type === 'closed') {
-        applyClosedOpenTabIntent(sessionId, {
-          runtimeSessions: sessionsRef.current,
-          runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
-          fallbackSessionIds: sessionsRef.current
-            .filter((session) => session.id !== sessionId)
-            .map((session) => session.id),
-          closeRuntimeSession: true,
-          clearDraft: true,
-          source: 'session-status-closed',
+        void auditOpenTabsAgainstRemoteSessions('session-status-closed').catch((error) => {
+          console.error('[App] Failed to audit remote session truth after session-status closed:', error);
         });
       }
     };
@@ -164,5 +145,5 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     return () => {
       window.removeEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
     };
-  }, [applyClosedOpenTabIntent, runtimeActiveSessionIdRef, sessionsRef]);
+  }, [auditOpenTabsAgainstRemoteSessions, sessionsRef]);
 }

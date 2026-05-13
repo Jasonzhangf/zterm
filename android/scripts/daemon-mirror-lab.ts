@@ -892,11 +892,41 @@ class DaemonProbe {
     await this.waitForPayload('initial buffer-sync');
   }
 
-  close() {
-    this.controlWs?.close();
+  private async closeSocket(ws: WebSocket | null) {
+    if (!ws) {
+      return;
+    }
+    if (ws.readyState === WebSocket.CLOSED) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(finish, 300);
+      ws.once('close', finish);
+      ws.once('error', finish);
+      if (ws.readyState < WebSocket.CLOSING) {
+        ws.close();
+      }
+    });
+  }
+
+  async close() {
+    const controlWs = this.controlWs;
+    const sessionWs = this.ws;
     this.controlWs = null;
-    this.ws?.close();
     this.ws = null;
+    await Promise.all([
+      this.closeSocket(controlWs),
+      this.closeSocket(sessionWs),
+    ]);
   }
 
   sendInput(data: string) {
@@ -1786,7 +1816,8 @@ async function runCase(caseName: CaseName, daemonController: LabDaemonController
     return writeFailedCaseEvidence(caseName, reason, probe);
   } finally {
     operator.close();
-    probe.close();
+    await probe.close();
+    await sleep(150);
     cleanupLabSession();
   }
 }
