@@ -171,3 +171,4 @@
 - [2026-05-09] CACHE.md 体积膨胀门禁：CACHE.md 已被加入 .gitignore；项目级 CACHE.md 不应提交到 git。对话缓存只在本地保留，超过合理大小应定期清理。
 - [2026-05-13] open-tab runtime switch 语义必须冻结成两类且只能在 App 层唯一桥接：`restore-sync` 只切 runtime active，不开 transport；`explicit-resume` 才允许桥接到 `resumeActiveSessionTransport`。若继续用单个布尔 `switchRuntime` 混写两类语义，会重演“cold restore 首帧误连”与“用户显式激活却不开 transport”这两种互相冲突的 bug。
 - [2026-05-13] foreground refresh 的 transport 恢复真源只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`；App 层旧的 `performForegroundRefresh` 若已不接运行态，必须物理删除，避免再长出第二套前台恢复语义。
+- [2026-05-13] 已验证的 tmux 高度真因：当前 `adaptive-phone` daemon 实现若走 `resize-window -x`，tmux 会自动把该 window 切到 `window-size=manual`；此后即使后续 client 更高，window/pane rows 也不会自动恢复，直到显式切回 `window-size=latest`。所以“代码没写 rows，但 session 高度一直很矮”仍然是**当前代码路径通过 tmux manual 语义间接冻高**，不是单纯历史残留。已补真实 tmux PTY 回归 `src/server/tmux-window-size-semantics.test.ts`。

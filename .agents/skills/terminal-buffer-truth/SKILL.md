@@ -474,6 +474,8 @@ tmux truth
 - `adaptive-phone` 的 upstream geometry 真相只能是 **client-owned latest cols**；attach/reconnect 可带 cols，但**不得**带 runtime rows。daemon 只消费 cols，rows 继续取 tmux/mirror baseline。
 - `adaptive-phone` 的 upstream width owner 只能是 **daemon**：
 - `adaptive-phone` 做过 `resize-window -x` 之后，tmux 会把目标 window 置为 `window-size=manual`；当最后一个 adaptive subscriber 断开时，daemon 必须显式释放回 `window-size=latest` 并刷新 mirror baseline，否则 session 会永久卡在历史的 `80x24/56x24` 一类旧高度。
+  - 更关键：**只改 `-x` 并不等于“只改宽”**。真实 tmux 语义下，`resize-window -x` 一旦把 window-size 切到 `manual`，后续更高的 client attach 也不会再自动抬高 rows；高度会一起冻结在进入 manual 那一刻的值。
+  - 所以凡是用户现场看到“我们明明没写 rows，但 session 高度一直很矮”，优先判定为 **当前 adaptive width 实现通过 tmux manual 模式间接冻高**，不是单纯遗留脏数据。
   - client 只能上报自己最新实测 `cols`
   - daemon 只允许在所有活着的 `adaptive-phone` 连接里取 **最小 cols**
   - 连接断开 / attach 迁移 / close 后必须立刻重算
