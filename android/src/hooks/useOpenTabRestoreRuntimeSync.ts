@@ -35,6 +35,7 @@ interface UseOpenTabRestoreRuntimeSyncOptions {
   bridgeSettings: BridgeSettings;
   hosts: Host[];
   hostsLoaded: boolean;
+  restoreSwitchReason: OpenTabRuntimeSwitchReason;
   runtimeActiveSessionId: string | null;
   createSession: (
     host: Host,
@@ -66,6 +67,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     bridgeSettings,
     hosts,
     hostsLoaded,
+    restoreSwitchReason,
     runtimeActiveSessionId,
     createSession,
     runtimeSessionStructure,
@@ -172,7 +174,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             tabs: currentOpenTabState.tabs,
             activeSessionId: runtimeSyncDecision.activeSessionId,
           }, {
-            switchRuntime: 'restore-sync',
+            switchRuntime: restoreSwitchReason,
           });
         }
         return;
@@ -263,7 +265,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
         restoredRuntimeState,
         restoredRuntimeState.activeSessionId
           ? {
-              switchRuntime: 'restore-sync',
+              switchRuntime: restoreSwitchReason,
               markExplicitTruth: restorePlan.tabs.length > 0,
             }
           : {
@@ -285,6 +287,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     bridgeSettings,
     hosts,
     hostsLoaded,
+    restoreSwitchReason,
     applyOpenTabState,
     runtimeActiveSessionId,
     runtimeSessionStructure,

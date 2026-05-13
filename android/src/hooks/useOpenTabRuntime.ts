@@ -46,6 +46,7 @@ interface UseOpenTabRuntimeOptions {
   bridgeSettings: BridgeSettings;
   hosts: Host[];
   hostsLoaded: boolean;
+  restoreSwitchReason: OpenTabRuntimeSwitchReason;
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
   runtimeActiveSessionId: string | null;
@@ -114,6 +115,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     bridgeSettings,
     hosts,
     hostsLoaded,
+    restoreSwitchReason,
     sessions,
     sessionGroups,
     runtimeActiveSessionId,
@@ -391,6 +393,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     bridgeSettings,
     hosts,
     hostsLoaded,
+    restoreSwitchReason,
     runtimeActiveSessionId,
     runtimeSessionStructure,
     openTabStateRef,

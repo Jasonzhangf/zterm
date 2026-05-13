@@ -205,6 +205,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     hosts,
     hostsLoaded,
+    restoreSwitchReason: pageState.kind === 'terminal' ? 'explicit-resume' : 'restore-sync',
     sessions,
     sessionGroups,
     runtimeActiveSessionId: state.activeSessionId,

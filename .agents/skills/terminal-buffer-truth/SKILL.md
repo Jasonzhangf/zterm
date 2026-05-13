@@ -31,6 +31,7 @@ tmux truth
   2. `explicit-resume`
      - 只在用户显式切 tab / 显式恢复当前 session 时触发
      - 才允许桥接到 `resumeActiveSessionTransport` / `ensureActiveSessionFresh`
+- 新冻结：**persisted terminal page** 的冷启动不属于“纯 restore-sync”；它必须把 restored active tab 直接映射成一次 `explicit-resume`，否则现场会出现“当前 tab 黑屏不刷，切到别的 tab 再切回来才首连首刷”。
 - App 层若只是把 tab/runtime 切成 active，**不等于 transport 已连通**
 - `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
 - transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`

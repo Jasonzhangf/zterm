@@ -305,7 +305,7 @@ describe('App first paint regression', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('cold start single active tab restores the local shell without auto opening daemon transport', async () => {
+  it('cold start terminal page explicitly resumes the restored active tab without requiring a tab round-trip', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -324,11 +324,10 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
-    expect(screen.getByTestId('active-session-lines').textContent).toBe('');
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 
-  it('prefers the persisted latest active tab over a stale terminal page focus id during cold restore without auto opening daemon transport', async () => {
+  it('prefers the persisted latest active tab over a stale terminal page focus id during cold restore and explicitly resumes it', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -356,10 +355,10 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 
-  it('ignores ACTIVE_PAGE terminal focus when ACTIVE_SESSION is missing and restores the first persisted tab without auto opening daemon transport', async () => {
+  it('ignores ACTIVE_PAGE terminal focus when ACTIVE_SESSION is missing and explicitly resumes the first restored tab', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -387,7 +386,7 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 
   it('restores the last active tab after app relaunch instead of defaulting to the first tab', async () => {
@@ -433,32 +432,6 @@ describe('App first paint regression', () => {
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
   });
 
-  it('tapping the active restored tab explicitly opens daemon transport', async () => {
-    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
-      {
-        sessionId: 'session-1',
-        hostId: 'host-1',
-        connectionName: 'local-test',
-        bridgeHost: '127.0.0.1',
-        bridgePort: 3333,
-        sessionName: 'zterm_mirror_lab',
-        createdAt: 1,
-      },
-    ]));
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
-
-    render(<App />);
-
-    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
-
-    fireEvent.click(screen.getByText('switch-session-1'));
-
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-  });
-
   it('switching to another restored tab explicitly opens daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
@@ -487,12 +460,12 @@ describe('App first paint regression', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
 
     fireEvent.click(screen.getByText('switch-session-2'));
 
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2));
     expect(screen.getByTestId('active-session-lines').textContent).toBe('');
   });
 });

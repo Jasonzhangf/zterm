@@ -401,7 +401,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     ResizeObserverMock.reset();
   });
 
-  it('cold start single active tab restores the local shell without auto opening daemon transport', async () => {
+  it('cold start terminal page explicitly resumes the restored active tab', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -419,10 +419,10 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 
-  it('switching to another restored tab explicitly opens daemon transport', async () => {
+  it('switching to another restored tab explicitly opens a second daemon transport after the cold-start active tab resumed', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -449,14 +449,14 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
 
     fireEvent.click(screen.getByText('switch-session-2'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
   });
 
-  it('foreground resume on the active restored tab does not auto reopen daemon transport', async () => {
+  it('foreground resume on the active restored tab does not open a second transport after the initial explicit resume', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -474,7 +474,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     render(<App />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -488,6 +488,6 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     });
     document.dispatchEvent(new Event('visibilitychange'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 });

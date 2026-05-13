@@ -32,7 +32,7 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
     });
   });
 
-  it('restores local shell with restore-sync and never auto-connects daemon transport', async () => {
+  it('explicitly resumes the restored active tab when the persisted page is terminal', async () => {
     const applyOpenTabState = vi.fn((nextState, options) => ({
       tabs: nextState.tabs,
       activeSessionId: nextState.activeSessionId ?? options?.fallbackActiveSessionId ?? null,
@@ -81,10 +81,57 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
       hasPersistedOpenTabsTruthRef: createRef(true),
       closedOpenTabSessionIdsRef: createRef(new Set<string>()),
       closedOpenTabReuseKeysRef: createRef(new Set<string>()),
+      restoreSwitchReason: 'explicit-resume',
       applyOpenTabState,
     }));
 
     await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    expect(applyOpenTabState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ activeSessionId: 'session-1' }),
+      expect.objectContaining({ switchRuntime: 'explicit-resume', markExplicitTruth: true }),
+    );
+  });
+
+  it('keeps restore-sync when the persisted page is not terminal', async () => {
+    const applyOpenTabState = vi.fn((nextState, options) => ({
+      tabs: nextState.tabs,
+      activeSessionId: nextState.activeSessionId ?? options?.fallbackActiveSessionId ?? null,
+    }));
+
+    renderHook(() => useOpenTabRestoreRuntimeSync({
+      bridgeSettings: { servers: [], targetHost: '127.0.0.1', targetPort: 3333, targetAuthToken: '' } as any,
+      hosts: [{
+        id: 'host-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      }] as any,
+      hostsLoaded: true,
+      runtimeActiveSessionId: null,
+      createSession: vi.fn(() => 'session-1'),
+      runtimeSessionStructure: [],
+      openTabStateRef: createRef({
+        tabs: [{
+          sessionId: 'session-1',
+          hostId: 'host-1',
+          connectionName: 'local-test',
+          bridgeHost: '127.0.0.1',
+          bridgePort: 3333,
+          sessionName: 'zterm_mirror_lab',
+          createdAt: 1,
+        }],
+        activeSessionId: 'session-1',
+      }),
+      restoredTabsHandledRef: createRef(false),
+      hasPersistedOpenTabsTruthRef: createRef(true),
+      closedOpenTabSessionIdsRef: createRef(new Set<string>()),
+      closedOpenTabReuseKeysRef: createRef(new Set<string>()),
+      restoreSwitchReason: 'restore-sync',
+      applyOpenTabState,
+    }));
+
+    await waitFor(() => expect(applyOpenTabState).toHaveBeenCalled());
     expect(applyOpenTabState).toHaveBeenLastCalledWith(
       expect.objectContaining({ activeSessionId: 'session-1' }),
       expect.objectContaining({ switchRuntime: 'restore-sync', markExplicitTruth: true }),

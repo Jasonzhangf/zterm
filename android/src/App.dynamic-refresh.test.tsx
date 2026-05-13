@@ -1244,7 +1244,7 @@ describe('App dynamic refresh matrix', () => {
     expect(capacitorAppHarness.addListener).toHaveBeenCalledTimes(1);
   });
 
-  it('restores persisted open tabs using the stored latest tab set and active tab id', async () => {
+  it('restores persisted terminal tabs using the stored latest tab set and explicit-resumes the active tab', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha', 'beta']);
     sessionHarness.update({
       sessions: [],
@@ -1318,7 +1318,8 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: false }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('tab-b');
   });
 
   it('restores persisted open tabs without requiring a matching HOSTS entry', async () => {
