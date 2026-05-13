@@ -433,7 +433,33 @@ describe('App first paint regression', () => {
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
   });
 
-  it('switching to another restored tab keeps the local shell only and does not auto open daemon transport', async () => {
+  it('tapping the active restored tab explicitly opens daemon transport', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-1'));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+
+    fireEvent.click(screen.getByText('switch-session-1'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+  });
+
+  it('switching to another restored tab explicitly opens daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -466,7 +492,7 @@ describe('App first paint regression', () => {
     fireEvent.click(screen.getByText('switch-session-2'));
 
     await waitFor(() => expect(screen.getByTestId('active-session-id').textContent).toBe('session-2'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     expect(screen.getByTestId('active-session-lines').textContent).toBe('');
   });
 });

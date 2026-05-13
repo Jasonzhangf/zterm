@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSessionOpenActions } from './useSessionOpenActions';
 import { normalizeOpenTabIntentState } from '../lib/open-tab-intent';
 import { buildPersistedOpenTabReuseKey, buildPersistedOpenTabReuseKeyVariants } from '../lib/open-tab-persistence';
+import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 
@@ -29,7 +30,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
   const setPageState = vi.fn();
-  const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean }) => {
+  const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
       nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null,

@@ -13,6 +13,7 @@ import {
 } from '../lib/open-tab-intent';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
 import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib/page-state';
+import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from '../lib/types';
 import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTabLifecycleEffects';
@@ -98,7 +99,7 @@ export interface OpenTabRuntimeResult {
   runtimeRefs: OpenTabRuntimeRefs;
   applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean; markExplicitTruth?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   handleSwitchSession: (sessionId: string) => void;
   handleMoveSession: (sessionId: string, toIndex: number) => void;
@@ -211,19 +212,28 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     return nextState;
   }, []);
 
-  const requestRuntimeActiveSessionSwitch = useCallback((nextActiveSessionId: string | null) => {
+  const requestRuntimeActiveSessionSwitch = useCallback((
+    nextActiveSessionId: string | null,
+    switchReason: OpenTabRuntimeSwitchReason,
+  ) => {
     if (!nextActiveSessionId) {
       return;
     }
-    if (nextActiveSessionId === runtimeActiveSessionIdRef.current) {
-      return;
+    if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
+      switchSession(nextActiveSessionId);
     }
-    switchSession(nextActiveSessionId);
-  }, [switchSession]);
+    if (switchReason === 'explicit-resume') {
+      resumeActiveSessionTransport(nextActiveSessionId);
+    }
+  }, [resumeActiveSessionTransport, switchSession]);
 
-  const persistAndSwitchExplicitOpenTabs = useCallback((tabs: PersistedOpenTab[], activeSessionId: string | null) => {
+  const persistAndSwitchExplicitOpenTabs = useCallback((
+    tabs: PersistedOpenTab[],
+    activeSessionId: string | null,
+    switchReason: OpenTabRuntimeSwitchReason,
+  ) => {
     const nextState = persistExplicitOpenTabs(tabs, activeSessionId);
-    requestRuntimeActiveSessionSwitch(nextState.activeSessionId);
+    requestRuntimeActiveSessionSwitch(nextState.activeSessionId, switchReason);
     return nextState;
   }, [persistExplicitOpenTabs, requestRuntimeActiveSessionSwitch]);
 
@@ -232,12 +242,12 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     activeSessionId: string | null;
   }, persistOptions?: {
     fallbackActiveSessionId?: string | null;
-    switchRuntime?: boolean;
+    switchRuntime?: OpenTabRuntimeSwitchReason;
     markExplicitTruth?: boolean;
   }) => {
     const normalizedActiveSessionId = nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null;
     if (persistOptions?.switchRuntime) {
-      return persistAndSwitchExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId);
+      return persistAndSwitchExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId, persistOptions.switchRuntime);
     }
     return persistExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId, {
       markExplicitTruth: persistOptions?.markExplicitTruth,

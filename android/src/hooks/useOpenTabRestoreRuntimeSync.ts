@@ -14,6 +14,7 @@ import {
   normalizeOpenTabIntentState,
 } from '../lib/open-tab-intent';
 import { runtimeDebug } from '../lib/runtime-debug';
+import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { Host, PersistedOpenTab, Session } from '../lib/types';
 
@@ -23,7 +24,7 @@ interface ApplyOpenTabStateFn {
       tabs: PersistedOpenTab[];
       activeSessionId: string | null;
     },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean; markExplicitTruth?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
   ): {
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;
@@ -171,7 +172,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
             tabs: currentOpenTabState.tabs,
             activeSessionId: runtimeSyncDecision.activeSessionId,
           }, {
-            switchRuntime: true,
+            switchRuntime: 'restore-sync',
           });
         }
         return;
@@ -262,7 +263,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
         restoredRuntimeState,
         restoredRuntimeState.activeSessionId
           ? {
-              switchRuntime: true,
+              switchRuntime: 'restore-sync',
               markExplicitTruth: restorePlan.tabs.length > 0,
             }
           : {

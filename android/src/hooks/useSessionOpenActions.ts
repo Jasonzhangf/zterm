@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { OpenTabAuditReason } from './useOpenTabLifecycleEffects';
+import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import { upsertBridgeServer, type BridgeSettings } from '../lib/bridge-settings';
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -55,7 +56,7 @@ interface UseSessionOpenActionsOptions {
   ensureTerminalPageVisible: () => void;
   applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   onSessionsOpenedInPane?: (sessionIds: string[], paneId: string) => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
@@ -212,7 +213,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       },
     );
     applyOpenTabState(nextOpenTabState, shouldActivate ? {
-      switchRuntime: true,
+      switchRuntime: 'explicit-resume',
     } : undefined);
     if (options?.navigate !== false) {
       ensureTerminalPageVisible();

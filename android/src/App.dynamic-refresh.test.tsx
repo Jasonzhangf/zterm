@@ -958,6 +958,8 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
     expect(openTerminalPageSpy).not.toHaveBeenCalled();
   });
 
@@ -1316,6 +1318,7 @@ describe('App dynamic refresh matrix', () => {
       expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: false }),
     );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-b');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
   });
 
   it('restores persisted open tabs without requiring a matching HOSTS entry', async () => {

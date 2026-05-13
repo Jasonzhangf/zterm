@@ -422,7 +422,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
   });
 
-  it('switching to another restored tab keeps the local shell only and does not auto open daemon transport', async () => {
+  it('switching to another restored tab explicitly opens daemon transport', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -453,7 +453,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
 
     fireEvent.click(screen.getByText('switch-session-2'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(0));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   });
 
   it('foreground resume on the active restored tab does not auto reopen daemon transport', async () => {

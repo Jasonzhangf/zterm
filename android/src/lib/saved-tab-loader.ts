@@ -7,6 +7,7 @@ import {
   resolveHostForPersistedOpenTab,
 } from './open-tab-persistence';
 import { openConnectionsPage } from './page-state';
+import type { OpenTabRuntimeSwitchReason } from './open-tab-runtime-switch';
 import type { Host, PersistedOpenTab } from './types';
 import type { BridgeSettings } from './bridge-settings';
 
@@ -16,7 +17,7 @@ export interface LoadSavedTabListDeps {
   closedOpenTabReuseKeysRef: { current: Set<string> };
   openDraftAsSessionRef: { current: ((host: Host, options?: { rememberName?: string; activate?: boolean; navigate?: boolean; sessionId?: string }) => { sessionId: string; host: Host } | null) | null };
   renameSessionRef: { current: (sessionId: string, name: string) => void };
-  applyOpenTabState: (state: { tabs: PersistedOpenTab[]; activeSessionId: string | null }, options?: { switchRuntime?: boolean }) => void;
+  applyOpenTabState: (state: { tabs: PersistedOpenTab[]; activeSessionId: string | null }, options?: { switchRuntime?: OpenTabRuntimeSwitchReason }) => void;
   setPageState: (state: any) => void;
   ensureTerminalPageVisibleRef: { current: () => void };
 }
@@ -107,7 +108,7 @@ export async function loadSavedTabList(
     : null;
 
   if (activeSessionId) {
-    deps.applyOpenTabState({ tabs: openedTabs, activeSessionId }, { switchRuntime: true });
+    deps.applyOpenTabState({ tabs: openedTabs, activeSessionId }, { switchRuntime: 'explicit-resume' });
     deps.ensureTerminalPageVisibleRef.current();
   }
 }

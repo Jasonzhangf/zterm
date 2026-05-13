@@ -102,7 +102,7 @@ describe('open-tab / history / connections truth gates', () => {
     expect(sessionOpenActionsSource).not.toContain('persistAndSwitchExplicitOpenTabsRef');
     expect(openTabSessionActionsSource).not.toContain('requestRuntimeActiveSessionSwitch(');
     expect(restoreRuntimeSource).not.toContain('requestRuntimeActiveSessionSwitch(');
-    expect(openTabSessionActionsSource).toContain('switchRuntime: true');
-    expect(restoreRuntimeSource).toContain('switchRuntime: true');
+    expect(openTabSessionActionsSource).toContain("switchRuntime: 'explicit-resume'");
+    expect(restoreRuntimeSource).toContain("switchRuntime: 'restore-sync'");
   });
 });

@@ -169,3 +169,5 @@
 - [2026-05-09] multi-pane 优化真源冻结：(1) `resolveStaticPaneLayout` 在 orientation change 时冻结 `baselineHeightPx`，`currentMaxSplitCount` 不再依赖 viewportHeight/IME；(2) sync debounce 33ms 防重复请求风暴，`handleBufferHeadRuntime` 收到 fresh head 时必须清除 debounce 状态否则会阻塞后续 tail entry；(3) 所有可见 pane 的 TerminalView 均 `live=true`；(4) split landscape 新增 `shellMode: floating-collapsed` 折叠快捷栏。
 - [2026-05-09] 构建版本元数据门禁：`update-dist/latest.json` 的 `versionName / versionCode / buildNumber / apkUrl / sha256` 必须与 `android/.build-meta.json` 和 `android/release-dist/latest.json` 保持一致。曾出现 `undefined.1001` 错误版本，根因是构建脚本在 versionName 解析失败时回退到硬编码默认值。
 - [2026-05-09] CACHE.md 体积膨胀门禁：CACHE.md 已被加入 .gitignore；项目级 CACHE.md 不应提交到 git。对话缓存只在本地保留，超过合理大小应定期清理。
+- [2026-05-13] open-tab runtime switch 语义必须冻结成两类且只能在 App 层唯一桥接：`restore-sync` 只切 runtime active，不开 transport；`explicit-resume` 才允许桥接到 `resumeActiveSessionTransport`。若继续用单个布尔 `switchRuntime` 混写两类语义，会重演“cold restore 首帧误连”与“用户显式激活却不开 transport”这两种互相冲突的 bug。
+- [2026-05-13] foreground refresh 的 transport 恢复真源只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`；App 层旧的 `performForegroundRefresh` 若已不接运行态，必须物理删除，避免再长出第二套前台恢复语义。

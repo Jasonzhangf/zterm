@@ -5,6 +5,7 @@ import {
   renameOpenTabIntentSession,
 } from '../lib/open-tab-intent';
 import { runtimeDebug } from '../lib/runtime-debug';
+import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { Session, PersistedOpenTab } from '../lib/types';
 
 interface ApplyOpenTabStateFn {
@@ -13,7 +14,7 @@ interface ApplyOpenTabStateFn {
       tabs: PersistedOpenTab[];
       activeSessionId: string | null;
     },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: boolean },
+    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
   ): {
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;
@@ -58,7 +59,7 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   const handleSwitchSession = useCallback((sessionId: string) => {
     const nextOpenTabState = activateOpenTabIntentSession(openTabStateRef.current, sessionId);
     applyOpenTabState(nextOpenTabState, {
-      switchRuntime: true,
+      switchRuntime: 'explicit-resume',
     });
     ensureTerminalPageVisible();
   }, [
