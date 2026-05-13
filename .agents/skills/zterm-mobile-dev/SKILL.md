@@ -809,6 +809,16 @@ android/
 - **动作**: daemon ready mirror 维持固定 cadence live capture；body 变更发 `buffer-sync diff`，纯 metadata 变更发 `buffer-head/info`。client 正常模式不再高频主动问 head；只在 `resume / reconnect / stale probe` 发 `buffer-head-request`，只在 reading gap repair 发 `buffer-sync-request`
 - **反模式**: 1) client 常态 33ms 主动轮询 head 2) `buffer-head-request` 反向触发 daemon capture 3) 把 reading repair 和正常 live 主链混成一条
 
+### 模式: foreground 恢复 owner 只能在 SessionContext lifecycle
+- **触发信号**: 现场出现“回到前台 timeout、不重连、杀进程才恢复”，且 App 侧只是在切 `appForegroundActive`
+- **动作**: App 只提供 foreground truth；真正的 transport 恢复必须由 `SessionContext lifecycle` 在 false->true 时唯一触发 `active-resume`
+- **反模式**: 指望 active tick 被动兜底，或在 App/page 层再长一套 reconnect fallback
+
+### 模式: stale reconnect bookkeeping 必须允许重启 reconnect
+- **触发信号**: runtime/logs 出现 `sessionState=reconnecting + ws=null + no pending open intent`
+- **动作**: 判定为 reconnect bookkeeping 卡死；foreground/explicit refresh 必须允许直接重启 reconnect
+- **反模式**: 把 `reconnectInFlight` 当单一真相，导致 `transport-unavailable` 永久 skip
+
 ### 模式: 移动端发热先看 CPU/IO 真源
 - **触发信号**: 手机明显发热，但网络流量不大
 - **动作**: 先抓 `adb shell dumpsys cpuinfo`、`top -H -p <pid>`、`dumpsys gfxinfo`；重点看 `Chrome_IOThread` / `RenderThread` / `Slow issue draw commands`

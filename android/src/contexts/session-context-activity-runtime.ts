@@ -88,6 +88,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+    reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;
   };
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
@@ -124,6 +125,12 @@ export function ensureActiveSessionFreshRuntime(options: {
   const pendingTransportOpenStale = pendingTransportOpen
     ? options.isPendingSessionTransportOpenStale(options.refreshOptions.sessionId)
     : false;
+  const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.refreshOptions.sessionId) || null;
+  const staleReconnectInFlight = Boolean(
+    reconnectRuntime?.connecting
+    && ws?.readyState !== WebSocket.OPEN
+    && !pendingTransportOpen,
+  );
 
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
   const refreshPlan = buildActiveSessionRefreshPlan({
@@ -132,6 +139,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     sessionState,
     wsReadyState: ws?.readyState ?? null,
     reconnectInFlight,
+    staleReconnectInFlight,
     pendingTransportOpen,
     pendingTransportOpenStale,
     allowReconnectIfUnavailable: options.refreshOptions.allowReconnectIfUnavailable,
@@ -154,6 +162,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
       pendingTransportOpenStale,
+      staleReconnectInFlight,
       reason: refreshPlan.reason,
     });
     return false;
@@ -172,6 +181,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     localStartIndex: localBuffer.startIndex ?? null,
     localEndIndex: localBuffer.endIndex ?? null,
     transportStale,
+    staleReconnectInFlight,
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
     plan: refreshPlan.action,

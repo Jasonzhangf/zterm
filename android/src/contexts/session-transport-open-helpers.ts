@@ -15,6 +15,7 @@ export interface ActiveSessionRefreshPlanOptions {
   sessionState: string | null;
   wsReadyState: number | null;
   reconnectInFlight: boolean;
+  staleReconnectInFlight?: boolean;
   pendingTransportOpen: boolean;
   pendingTransportOpenStale?: boolean;
   allowReconnectIfUnavailable?: boolean;
@@ -446,6 +447,14 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
 
   if (hasBlockingPendingTransportOpen) {
     return { action: 'skip', reason: 'transport-open-pending' };
+  }
+
+  if (
+    options.staleReconnectInFlight
+    && options.source !== 'active-tick'
+    && options.allowReconnectIfUnavailable
+  ) {
+    return { action: 'reconnect' };
   }
 
   if (shouldReconnectActivatedSession({

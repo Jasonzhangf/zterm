@@ -63,6 +63,7 @@ export function useSessionProviderFacadeAssemblies(
       lastActiveReentryAtRef,
       lastConnectedBaselineAtRef,
       connectedBaselineBurstGuardRef,
+      reconnectRuntimesRef,
       sessionVisibleRangeRef,
       sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
       sessionRenderGateRef: options.refs.sessionRenderGateRef,

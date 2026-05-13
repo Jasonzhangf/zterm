@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import { act, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildLifecycleRefreshTargets,
   collectNewlyVisibleLiveSessionIds,
   shouldScheduleActiveTickRefresh,
+  useSessionContextLifecycle,
 } from './session-context-lifecycle';
 
 describe('session-context-lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('collects newly visible live pane sessions as reentry targets', () => {
     expect(collectNewlyVisibleLiveSessionIds(['s1'], ['s1', 's2'])).toEqual(['s2']);
     expect(collectNewlyVisibleLiveSessionIds(['s1', 's2'], ['s1', 's2'])).toEqual([]);
@@ -58,5 +66,77 @@ describe('session-context-lifecycle', () => {
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
+  });
+
+  it('triggers active-resume refresh exactly once when app foreground truth flips back to active', async () => {
+    vi.useFakeTimers();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+
+    function Harness({ appForegroundActive }: { appForegroundActive: boolean }) {
+      useSessionContextLifecycle({
+        appForegroundActive,
+        state: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+        scheduleStates: {},
+        refs: {
+          foregroundActiveRef: { current: appForegroundActive },
+          stateRef: {
+            current: {
+              sessions: [{ id: 's1', state: 'connected' } as any],
+              activeSessionId: 's1',
+              liveSessionIds: [],
+            } as any,
+          },
+          scheduleStatesRef: { current: {} },
+          sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+          sessionPullStateRef: { current: new Map() },
+          lastActivatedSessionIdRef: { current: 's1' },
+          lastActiveReentryAtRef: { current: new Map() },
+          lastConnectedBaselineAtRef: { current: new Map() },
+          lastServerActivityAtRef: { current: new Map() },
+          remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+          pingIntervalsRef: { current: new Map() },
+          handshakeTimeoutsRef: { current: new Map() },
+          reconnectRuntimesRef: { current: new Map() },
+          manualCloseRef: { current: new Set() },
+        },
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(<Harness appForegroundActive={false} />);
+    expect(ensureActiveSessionFresh).not.toHaveBeenCalled();
+
+    view.rerender(<Harness appForegroundActive />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+    expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
+      sessionId: 's1',
+      source: 'active-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
+    });
+
+    view.rerender(<Harness appForegroundActive />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
   });
 });

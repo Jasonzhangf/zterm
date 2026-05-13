@@ -1791,6 +1791,49 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
+  it('issues immediate active-resume head refresh when app foreground truth flips back to active', async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive={false}>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      ws.sent.length = 0;
+
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 
   it('does not stack multiple active-tick probe loops across provider rerenders', async () => {
     vi.useFakeTimers();

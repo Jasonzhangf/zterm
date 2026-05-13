@@ -240,6 +240,22 @@ describe('session sync helper refresh planner', () => {
       source: 'active-reentry',
     })).toEqual({ action: 'reconnect' });
   });
+
+  it('does not let stale reconnect bookkeeping block explicit foreground resume', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'reconnecting',
+      wsReadyState: null,
+      reconnectInFlight: true,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      staleReconnectInFlight: true,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
 });
 
 describe('session sync helper reconnect ownership', () => {

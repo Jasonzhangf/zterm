@@ -91,9 +91,29 @@ export function useSessionContextLifecycle(options: {
 }) {
   const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
   const lastLiveSessionIdsRef = useRef<string[]>(options.state.liveSessionIds);
+  const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
 
   useEffect(() => {
+    const nextForegroundActive = options.appForegroundActive !== false;
     options.refs.foregroundActiveRef.current = options.appForegroundActive !== false;
+    if (lastForegroundActiveRef.current === nextForegroundActive) {
+      return;
+    }
+    lastForegroundActiveRef.current = nextForegroundActive;
+    if (!nextForegroundActive) {
+      return;
+    }
+    const activeSessionId = options.refs.stateRef.current.activeSessionId;
+    if (!activeSessionId) {
+      return;
+    }
+    options.ensureActiveSessionFresh({
+      sessionId: activeSessionId,
+      source: 'active-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
+    });
   }, [options.appForegroundActive]);
 
   useEffect(() => {

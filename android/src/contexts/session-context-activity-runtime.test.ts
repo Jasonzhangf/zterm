@@ -42,6 +42,7 @@ describe('session-context-activity-runtime', () => {
         connectedBaselineBurstGuardRef: { current: new Set<string>() },
         lastServerActivityAtRef: { current: new Map<string, number>() },
         lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map() },
       },
       readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
@@ -86,6 +87,7 @@ describe('session-context-activity-runtime', () => {
         connectedBaselineBurstGuardRef: { current: new Set<string>() },
         lastServerActivityAtRef: { current: new Map<string, number>() },
         lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map() },
       },
       readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
@@ -130,6 +132,7 @@ describe('session-context-activity-runtime', () => {
         connectedBaselineBurstGuardRef: { current: new Set<string>() },
         lastServerActivityAtRef: { current: new Map<string, number>() },
         lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map() },
       },
       readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
@@ -174,6 +177,7 @@ describe('session-context-activity-runtime', () => {
         connectedBaselineBurstGuardRef: { current: new Set<string>() },
         lastServerActivityAtRef: { current: new Map<string, number>() },
         lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map() },
       },
       readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
@@ -218,6 +222,7 @@ describe('session-context-activity-runtime', () => {
         connectedBaselineBurstGuardRef: { current: new Set<string>() },
         lastServerActivityAtRef: { current: new Map<string, number>() },
         lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map() },
       },
       readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
@@ -259,6 +264,7 @@ describe('session-context-activity-runtime', () => {
       connectedBaselineBurstGuardRef: { current: new Set<string>(['session-2']) },
       lastServerActivityAtRef: { current: new Map<string, number>() },
       lastHeadRequestAtRef: { current: new Map<string, number>() },
+      reconnectRuntimesRef: { current: new Map() },
     };
 
     const refreshed = ensureActiveSessionFreshRuntime({

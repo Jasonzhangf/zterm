@@ -37,6 +37,7 @@ interface SessionLifecycleRuntimeOptions {
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
+    reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
       commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
@@ -254,6 +255,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
         lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
+        reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
