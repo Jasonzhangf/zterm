@@ -108,7 +108,7 @@ export function buildHostConfigMessage(
     sessionTransportToken: sessionTransportToken?.trim() || undefined,
     sessionName,
     cols: Number.isFinite(geometry?.cols) ? Math.max(1, Math.floor(geometry?.cols || 0)) : undefined,
-    rows: Number.isFinite(geometry?.rows) ? Math.max(1, Math.floor(geometry?.rows || 0)) : undefined,
+    rows: undefined,
     widthMode: geometry?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
     autoCommand: host.autoCommand,
   };

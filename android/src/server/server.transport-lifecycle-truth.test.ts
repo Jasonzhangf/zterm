@@ -178,9 +178,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(killBlock).not.toContain('requires an attached session transport');
   });
 
-  it('physically removes legacy resize and terminal-width-mode handlers from daemon message runtime', () => {
+  it('keeps only resize as the adaptive-width update entry and does not keep legacy terminal-width-mode handler', () => {
     const source = readMessageRuntimeSource();
-    expect(source).not.toContain("case 'resize':");
+    expect(source).toContain("case 'resize':");
     expect(source).not.toContain("case 'terminal-width-mode':");
   });
 

@@ -77,6 +77,10 @@
 - `mirror-fixed` 下横向查看只改 renderer horizontal window
 - `mirror-fixed` 下必须自动关闭左右滑切 tab
 - `adaptive-phone` 若要适配手机，最多只允许写 `cols`；不得因为手机容器高度去写 tmux rows
+- `adaptive-phone` upstream width 必须由 daemon 统一计算：
+  - 多连接时取最小 cols
+  - 连接断开后立刻重算
+  - tmux 高度不得跟随这条链路变化
 
 ### 2.4 UI shell / IME
 
@@ -155,6 +159,7 @@ tmux oracle
 10. `mirror-fixed` 开启后左右滑切 tab 自动关闭
 11. 混合 `ASCII + CJK double-width` 时，renderer 必须按实测像素列宽稳定对齐，不能因为 `1ch / 2ch` 假设导致整行错位
 12. `adaptive-phone` 只在 width truth / cols 变化时上报；纯高度变化不会重复触发上游 geometry write
+13. daemon 对 tmux 的 adaptive reconcile 只允许改 `cols`；任何场景都不得把 tmux `rows` 改窄/改宽
 
 ### Group D. Android IME / input loop
 

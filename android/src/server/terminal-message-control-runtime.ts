@@ -42,6 +42,7 @@ export interface TerminalMessageControlRuntimeDeps {
   ) => TerminalSession;
   getMirrorKey: (sessionName: string) => string;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  handleAdaptiveResize?: (session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) => void;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,

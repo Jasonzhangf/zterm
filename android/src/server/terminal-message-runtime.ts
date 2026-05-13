@@ -167,6 +167,21 @@ export function createTerminalMessageRuntime(
           });
         }
         break;
+      case 'resize':
+        if (!session) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'resize requires an attached session transport', code: 'session_required' },
+          });
+          break;
+        }
+        deps.controlRuntimeDeps.handleAdaptiveResize?.(session, {
+          cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
+            ? message.payload.cols
+            : undefined,
+          widthMode: message.payload?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
+        });
+        break;
       case 'buffer-head-request': {
         if (!session) {
           deps.sendTransportMessage(connection.transport, {

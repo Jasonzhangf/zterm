@@ -83,7 +83,6 @@ export function shouldOpenManagedSessionTransport(options: {
     !hasUsableTransport
     && !options.hasPendingOpenIntent
     && !isAlreadyOpening
-    && options.sessionState !== 'connected'
   );
 }
 

@@ -71,6 +71,7 @@ function createRuntime(options?: {
   const closeSession = vi.fn();
   const handleClientDebugLog = vi.fn();
   const handleClientDebugSnapshot = vi.fn();
+  const handleAdaptiveResize = vi.fn();
   const terminalFileTransferRuntime = createFileTransferRuntimeStub();
 
   const runtime = createTerminalMessageRuntime({
@@ -112,6 +113,7 @@ function createRuntime(options?: {
       bindConnectionToSession: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
       attachTmux: vi.fn(async () => {}),
+      handleAdaptiveResize,
       destroyMirror: vi.fn(),
     },
   });
@@ -127,6 +129,7 @@ function createRuntime(options?: {
     handleClientDebugSnapshot,
     handleInput,
     closeSession,
+    handleAdaptiveResize,
   };
 }
 
@@ -282,8 +285,8 @@ describe('terminal message runtime explicit error truth', () => {
     );
   });
 
-  it('ignores legacy resize frames so runtime geometry no longer becomes daemon truth', async () => {
-    const { runtime, sessions, sendTransportMessage, handleInput, closeSession } = createRuntime();
+  it('routes adaptive-phone resize frames to daemon width owner without terminal input fallback', async () => {
+    const { runtime, sessions, sendTransportMessage, handleInput, closeSession, handleAdaptiveResize } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);
     const connection = createConnection(session.id);
@@ -300,5 +303,9 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendTransportMessage).not.toHaveBeenCalled();
     expect(handleInput).not.toHaveBeenCalled();
     expect(closeSession).not.toHaveBeenCalled();
+    expect(handleAdaptiveResize).toHaveBeenCalledWith(session, {
+      cols: 72,
+      widthMode: 'adaptive-phone',
+    });
   });
 });

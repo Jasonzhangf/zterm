@@ -345,4 +345,75 @@ describe('active truth ownership gates', () => {
     expect(sessionId).toBe('session-existing');
     expect(connectSession).not.toHaveBeenCalled();
   });
+
+  it('reopens transport when reusing a managed session whose label is connected but transport truth is missing', () => {
+    const connectSession = vi.fn();
+
+    const existingSession: Session = {
+      id: 'session-existing',
+      hostId: 'host-1',
+      connectionName: 'conn',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: undefined,
+      sessionName: 'tmux-1',
+      authToken: undefined,
+      autoCommand: undefined,
+      title: 'tmux-1',
+      ws: null,
+      state: 'connected',
+      hasUnread: false,
+      customName: undefined,
+      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
+      reconnectAttempt: 0,
+      createdAt: 1,
+    };
+
+    const sessionId = createSessionRuntime({
+      host: {
+        id: 'host-1',
+        createdAt: 1,
+        name: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      createOptions: {
+        connect: true,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [existingSession],
+            activeSessionId: 'session-existing',
+          },
+        },
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(), setBuffer: vi.fn() } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn() } },
+      },
+      runtimeDebug: vi.fn(),
+      resolveSessionCacheLines: vi.fn(() => 1000),
+      createSessionSync: vi.fn(),
+      updateSessionSync: vi.fn(),
+      readSessionTransportSocket: vi.fn(() => null),
+      connectSession,
+      defaultViewport: { cols: 80, rows: 24 },
+    });
+
+    expect(sessionId).toBe('session-existing');
+    expect(connectSession).toHaveBeenCalledWith(
+      'session-existing',
+      expect.objectContaining({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+      }),
+    );
+  });
 });

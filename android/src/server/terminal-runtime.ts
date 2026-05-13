@@ -84,6 +84,7 @@ export interface TerminalRuntime {
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  handleAdaptiveResize: (session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) => void;
   handleInput: (session: TerminalSession, data: string) => void;
 }
 
@@ -271,6 +272,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     scheduleMirrorLiveSync: mirrorRuntime.scheduleMirrorLiveSync,
     startMirror: mirrorRuntime.startMirror,
     attachTmux: mirrorRuntime.attachTmux,
+    handleAdaptiveResize: mirrorRuntime.handleAdaptiveResize,
     handleInput: mirrorRuntime.handleInput,
   };
 }

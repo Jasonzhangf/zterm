@@ -3,6 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { extractApkSmokeBridgeDebugTargetFromStorageDump } from '../src/lib/android-apk-smoke-device-bridge-target';
+import { buildApkSmokeLevelDbListArgs, parseApkSmokeLevelDbFileList } from '../src/lib/android-apk-smoke-leveldb-files';
+import { extractApkSmokePrintableAsciiLines } from '../src/lib/android-apk-smoke-printable-dump';
+import { evaluateApkSmokeTerminalRuntime } from '../src/lib/android-apk-smoke-runtime-verifier';
+import { resolveApkSmokeWebViewLevelDbDirFromRunAsListing } from '../src/lib/android-apk-smoke-webview-leveldb-path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,6 +16,22 @@ const APK_PATH = resolve(ROOT_DIR, 'native/android/app/build/outputs/apk/debug/a
 const APP_ID = 'com.zterm.android';
 const ACTIVITY = 'com.zterm.android/.MainActivity';
 const TAG = 'ZTermMainActivity';
+const APK_SMOKE_RUNTIME_DEBUG_REASON = 'android-apk-smoke';
+const APK_SMOKE_RUNTIME_POLL_TIMEOUT_MS = 15_000;
+const APK_SMOKE_RUNTIME_POLL_INTERVAL_MS = 1_500;
+const APK_SMOKE_RUNTIME_LOG_LIMIT = 400;
+
+type BridgeDebugTarget = NonNullable<ReturnType<typeof extractApkSmokeBridgeDebugTargetFromStorageDump>['target']>;
+
+interface RuntimeCaptureArtifacts {
+  storageDump: string;
+  storageTarget: ReturnType<typeof extractApkSmokeBridgeDebugTargetFromStorageDump>;
+  health?: unknown;
+  control?: unknown;
+  snapshot?: unknown;
+  logs?: unknown;
+  verdict?: ReturnType<typeof evaluateApkSmokeTerminalRuntime>;
+}
 
 function run(command: string, args: string[], options?: { cwd?: string; encoding?: BufferEncoding | 'buffer' }) {
   return execFileSync(command, args, {
@@ -179,10 +200,124 @@ function waitForForeground(serial: string, timeoutMs: number) {
   throw new Error(`apk smoke app not in foreground within ${timeoutMs}ms\n${lastActivityDump}`);
 }
 
+function safeShellSingleQuote(value: string) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function readAppWebViewLevelDbDump(serial: string) {
+  const levelDbDirListing = adbText(serial, [
+    'exec-out',
+    'run-as',
+    APP_ID,
+    'sh',
+    '-lc',
+    'pwd; ls -la; find . -maxdepth 4 \\( -iname "*leveldb" -o -iname "*Local Storage" -o -iname "*app_webview" \\) 2>/dev/null | sed -n "1,200p"',
+  ]);
+  const levelDbDir = resolveApkSmokeWebViewLevelDbDirFromRunAsListing(levelDbDirListing);
+  if (!levelDbDir) {
+    throw new Error(`apk smoke could not discover Android WebView localStorage leveldb path\n${levelDbDirListing}`);
+  }
+  const filesOutput = adbText(serial, buildApkSmokeLevelDbListArgs(APP_ID, levelDbDir));
+  const files = parseApkSmokeLevelDbFileList(filesOutput);
+  if (files.length === 0) {
+    throw new Error(`no WebView localStorage files found under ${levelDbDir}`);
+  }
+
+  const dumpLines: string[] = [];
+  for (const file of files) {
+    const raw = adb(serial, ['exec-out', 'run-as', APP_ID, 'sh', '-lc', `cat ${safeShellSingleQuote(`${levelDbDir}/${file}`)}`], { encoding: 'buffer' }) as Buffer;
+    dumpLines.push(`__FILE__ ${file}`);
+    dumpLines.push(...extractApkSmokePrintableAsciiLines(raw));
+  }
+  return dumpLines.join('\n');
+}
+
+function addToken(url: URL, token: string | undefined) {
+  if (token?.trim()) {
+    url.searchParams.set('token', token.trim());
+  }
+}
+
+async function fetchJson(url: URL) {
+  const response = await fetch(url);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`request failed (${response.status}) ${url.pathname}: ${text}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`invalid json from ${url.pathname}: ${error instanceof Error ? error.message : String(error)}\n${text}`);
+  }
+}
+
+async function collectTerminalRuntimeEvidence(target: BridgeDebugTarget, evidenceDir: string) {
+  const baseUrl = new URL(`http://${target.bridgeHost}:${target.bridgePort}`);
+  const healthUrl = new URL('/health', baseUrl);
+  addToken(healthUrl, target.authToken);
+  const controlUrl = new URL('/debug/runtime/control', baseUrl);
+  addToken(controlUrl, target.authToken);
+  controlUrl.searchParams.set('enabled', '1');
+  controlUrl.searchParams.set('reason', APK_SMOKE_RUNTIME_DEBUG_REASON);
+  if (target.sessionId?.trim()) {
+    controlUrl.searchParams.set('sessionId', target.sessionId.trim());
+  }
+
+  const artifacts: RuntimeCaptureArtifacts = {
+    storageDump: '',
+    storageTarget: {
+      activeSessionId: target.sessionId || null,
+      parsedJsonCount: 0,
+      target,
+    },
+  };
+  artifacts.health = await fetchJson(healthUrl);
+  artifacts.control = await fetchJson(controlUrl);
+
+  const deadline = Date.now() + APK_SMOKE_RUNTIME_POLL_TIMEOUT_MS;
+  let lastVerdict = null as ReturnType<typeof evaluateApkSmokeTerminalRuntime> | null;
+  while (Date.now() <= deadline) {
+    const snapshotUrl = new URL('/debug/runtime', baseUrl);
+    addToken(snapshotUrl, target.authToken);
+    const snapshot = await fetchJson(snapshotUrl);
+    const activeSessionId = target.sessionId?.trim()
+      || (typeof snapshot === 'object' && snapshot && Array.isArray((snapshot as any).clientDebugSnapshots)
+        ? ''
+        : '');
+    const logsUrl = new URL('/debug/runtime/logs', baseUrl);
+    addToken(logsUrl, target.authToken);
+    logsUrl.searchParams.set('limit', String(APK_SMOKE_RUNTIME_LOG_LIMIT));
+    if (activeSessionId) {
+      logsUrl.searchParams.set('sessionId', activeSessionId);
+    }
+    const logs = await fetchJson(logsUrl);
+    const verdict = evaluateApkSmokeTerminalRuntime(snapshot, logs);
+
+    artifacts.snapshot = snapshot;
+    artifacts.logs = logs;
+    artifacts.verdict = verdict;
+    lastVerdict = verdict;
+
+    writeFileSync(resolve(evidenceDir, 'runtime-health.json'), `${JSON.stringify(artifacts.health, null, 2)}\n`);
+    writeFileSync(resolve(evidenceDir, 'runtime-debug-control.json'), `${JSON.stringify(artifacts.control, null, 2)}\n`);
+    writeFileSync(resolve(evidenceDir, 'runtime-snapshot.json'), `${JSON.stringify(snapshot, null, 2)}\n`);
+    writeFileSync(resolve(evidenceDir, 'runtime-logs.json'), `${JSON.stringify(logs, null, 2)}\n`);
+    writeFileSync(resolve(evidenceDir, 'terminal-runtime-verdict.json'), `${JSON.stringify(verdict, null, 2)}\n`);
+
+    if (verdict.ok) {
+      return artifacts;
+    }
+    sleep(APK_SMOKE_RUNTIME_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(`terminal runtime verification failed\n${JSON.stringify(lastVerdict, null, 2)}`);
+}
+
 let currentEvidenceDir = '';
 let currentSerial = '';
+let currentRuntimeArtifacts: RuntimeCaptureArtifacts | null = null;
 
-function main() {
+async function main() {
   ensureCommand('adb');
   ensureCommand('pnpm');
   const serial = resolveSerial();
@@ -247,9 +382,29 @@ function main() {
   writeFileSync(resolve(evidenceDir, 'pid.txt'), `${pidOutput}\n`);
   writeFileSync(resolve(evidenceDir, 'device.txt'), `serial=${serial}\nmodel=${deviceInfo}\nandroid=${androidRelease}\n${installPath}\n`);
   writeFileSync(resolve(evidenceDir, 'launch.png'), screenshot);
+
+  console.log('[android-apk-smoke] read WebView localStorage truth');
+  const storageDump = readAppWebViewLevelDbDump(serial);
+  const storageTarget = extractApkSmokeBridgeDebugTargetFromStorageDump(storageDump);
+  writeFileSync(resolve(evidenceDir, 'webview-local-storage-dump.txt'), `${storageDump}\n`);
+  writeFileSync(resolve(evidenceDir, 'webview-bridge-target.json'), `${JSON.stringify(storageTarget, null, 2)}\n`);
+  if (!storageTarget.target) {
+    throw new Error('apk smoke could not resolve bridge target from Android WebView localStorage truth');
+  }
+
+  console.log(`[android-apk-smoke] verify terminal runtime via daemon debug routes ${storageTarget.target.bridgeHost}:${storageTarget.target.bridgePort}`);
+  currentRuntimeArtifacts = {
+    storageDump,
+    storageTarget,
+  };
+  const runtimeArtifacts = await collectTerminalRuntimeEvidence(storageTarget.target, evidenceDir);
+  runtimeArtifacts.storageDump = storageDump;
+  runtimeArtifacts.storageTarget = storageTarget;
+  currentRuntimeArtifacts = runtimeArtifacts;
+
   writeFileSync(
     resolve(evidenceDir, 'summary.json'),
-    JSON.stringify(
+    `${JSON.stringify(
       {
         ok: true,
         serial,
@@ -259,19 +414,19 @@ function main() {
         installPath,
         pid: pidOutput,
         startupMarkers: startupLog.summary,
+        bridgeTarget: storageTarget.target,
+        terminalRuntimeVerdict: runtimeArtifacts.verdict,
         evidenceDir,
       },
       null,
       2,
-    ),
+    )}\n`,
   );
 
   console.log(`[android-apk-smoke] PASS evidence=${evidenceDir}`);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   if (currentEvidenceDir && currentSerial) {
     try {
       const startupLog = collectStartupLog(currentSerial);
@@ -280,14 +435,37 @@ try {
       writeFileSync(resolve(currentEvidenceDir, 'failure-window-dump.txt'), `${captureWindowDump(currentSerial)}\n`);
       writeFileSync(resolve(currentEvidenceDir, 'failure-policy-dump.txt'), `${capturePolicyDump(currentSerial)}\n`);
       writeFileSync(resolve(currentEvidenceDir, 'failure-power-dump.txt'), `${capturePowerDump(currentSerial)}\n`);
+      if (currentRuntimeArtifacts?.storageDump) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-webview-local-storage-dump.txt'), `${currentRuntimeArtifacts.storageDump}\n`);
+      }
+      if (currentRuntimeArtifacts?.storageTarget) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-webview-bridge-target.json'), `${JSON.stringify(currentRuntimeArtifacts.storageTarget, null, 2)}\n`);
+      }
+      if (currentRuntimeArtifacts?.health !== undefined) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-runtime-health.json'), `${JSON.stringify(currentRuntimeArtifacts.health, null, 2)}\n`);
+      }
+      if (currentRuntimeArtifacts?.control !== undefined) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-runtime-debug-control.json'), `${JSON.stringify(currentRuntimeArtifacts.control, null, 2)}\n`);
+      }
+      if (currentRuntimeArtifacts?.snapshot !== undefined) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-runtime-snapshot.json'), `${JSON.stringify(currentRuntimeArtifacts.snapshot, null, 2)}\n`);
+      }
+      if (currentRuntimeArtifacts?.logs !== undefined) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-runtime-logs.json'), `${JSON.stringify(currentRuntimeArtifacts.logs, null, 2)}\n`);
+      }
+      if (currentRuntimeArtifacts?.verdict !== undefined) {
+        writeFileSync(resolve(currentEvidenceDir, 'failure-terminal-runtime-verdict.json'), `${JSON.stringify(currentRuntimeArtifacts.verdict, null, 2)}\n`);
+      }
       writeFileSync(
         resolve(currentEvidenceDir, 'failure-summary.json'),
-        JSON.stringify({
+        `${JSON.stringify({
           ok: false,
           serial: currentSerial,
           error: error instanceof Error ? error.message : String(error),
           startupMarkers: startupLog.summary,
-        }, null, 2),
+          bridgeTarget: currentRuntimeArtifacts?.storageTarget?.target || null,
+          terminalRuntimeVerdict: currentRuntimeArtifacts?.verdict || null,
+        }, null, 2)}\n`,
       );
     } catch (artifactError) {
       console.error(`[android-apk-smoke] FAIL evidence capture: ${artifactError instanceof Error ? artifactError.message : String(artifactError)}`);
@@ -295,4 +473,4 @@ try {
   }
   console.error(`[android-apk-smoke] FAIL ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
-}
+});

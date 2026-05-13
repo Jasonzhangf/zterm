@@ -492,7 +492,10 @@ UI shell 只负责：
 - server 侧 geometry 写点也必须唯一：
   - `attach` 不得接受 client rows 改写 tmux rows
   - `resize` 不得再写 rows
-  - `width-mode reconcile` 只允许在 `adaptive-phone` 下改 cols
+  - `width-mode reconcile` 只允许在 `adaptive-phone` 下改 cols，且 **daemon 是唯一 owner**
+  - daemon 只允许在自己持有的 `adaptive-phone` 活连接集合上计算 **最小 cols**
+  - 连接断开 / attach 迁移 / 显式 close 后，daemon 必须立刻按剩余活连接重新计算最小 cols
+  - daemon upstream resize 只允许写 `-x cols`；**永远禁止写 `-y rows`**
   - `mirror-fixed` 下 upstream geometry write 必须是 0
 - `adaptive-phone` 的 attach / reconnect 几何真相也必须干净：
   - client 可以携带**最近一次已测得的 adaptive cols**

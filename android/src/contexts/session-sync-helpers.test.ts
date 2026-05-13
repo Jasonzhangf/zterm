@@ -914,6 +914,11 @@ describe('session sync helper managed session reuse truth', () => {
       hasPendingOpenIntent: true,
       sessionState: 'idle',
     })).toBe(false);
+    expect(shouldOpenManagedSessionTransport({
+      readyState: null,
+      hasPendingOpenIntent: false,
+      sessionState: 'connected',
+    })).toBe(true);
   });
 });
 

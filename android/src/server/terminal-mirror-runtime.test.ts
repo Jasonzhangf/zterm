@@ -29,6 +29,7 @@ function createRuntime() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const assertTmuxSessionExists = vi.fn();
+  const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
   const captureMirrorAuthoritativeBufferFromTmux = vi.fn(async (mirror: SessionMirror) => {
     mirror.bufferLines = [];
     mirror.bufferStartIndex = 0;
@@ -77,7 +78,7 @@ function createRuntime() {
     autoCommandDelayMs: 0,
     waitMs: async () => {},
     logTimePrefix: () => '2026-05-01 00:00:00',
-    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    runTmux,
     closeLogicalTerminalSession: vi.fn(),
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
@@ -86,6 +87,7 @@ function createRuntime() {
     runtime,
     sessions,
     mirrors,
+    runTmux,
     assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     sendMessage,
@@ -157,6 +159,76 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(sendMessage).not.toHaveBeenCalledWith(
       session,
       expect.objectContaining({ type: 'connected' }),
+    );
+  });
+
+  it('releases subscribers with tmux_session_unavailable when initial sync hits a dead pane target', async () => {
+    const { sessions, mirrors, sendMessage } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    const customRuntime = createTerminalMirrorRuntime({
+      defaultViewport: { cols: 120, rows: 40 },
+      sessions,
+      mirrors,
+      sendMessage,
+      sendScheduleStateToSession: vi.fn(),
+      buildConnectedPayload: (sessionId: string) => ({ sessionId }),
+      buildBufferHeadPayload: () => ({
+        sessionId: 'session-1',
+        revision: 1,
+        latestEndIndex: 0,
+        availableStartIndex: 0,
+        availableEndIndex: 0,
+        cursor: null,
+      }),
+      buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
+      sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      getMirrorKey: (sessionName: string) => sessionName,
+      normalizeTerminalCols: (cols?: number) => cols || 120,
+      normalizeTerminalRows: (rows?: number) => rows || 40,
+      resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
+        requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
+      readTmuxPaneMetrics: () => ({
+        paneId: '%3',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 56,
+        paneCols: 56,
+        alternateOn: false,
+      }),
+      assertTmuxSessionExists: vi.fn(),
+      captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => {
+        throw new Error('tmux returned invalid pane metrics for rcc-zterm: pane is dead');
+      }),
+      mirrorBufferChanged: () => [],
+      mirrorCursorEqual: () => true,
+      writeToLiveMirror: () => true,
+      writeToTmuxSession: vi.fn(),
+      autoCommandDelayMs: 0,
+      waitMs: async () => {},
+      logTimePrefix: () => '2026-05-13 00:30:00',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      closeLogicalTerminalSession: vi.fn(),
+      getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
+    });
+
+    await customRuntime.attachTmux(session, {
+      sessionName: 'rcc-zterm',
+      cols: 56,
+      rows: 56,
+    });
+
+    expect(mirrors.get('rcc-zterm')).toBeUndefined();
+    expect(session.mirrorKey).toBeNull();
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'error',
+        payload: expect.objectContaining({
+          code: 'tmux_session_unavailable',
+          message: expect.stringContaining('pane is dead'),
+        }),
+      }),
     );
   });
 
@@ -235,7 +307,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('uses min adaptive cols across concurrent adaptive-phone subscribers', async () => {
-    const { runtime, sessions, mirrors } = createRuntime();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const firstSession = createSession('session-1');
     const secondSession = createSession('session-2');
     secondSession.transportId = 'transport-2';
@@ -259,6 +331,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror?.adaptiveCols.get('session-1')?.cols).toBe(120);
     expect(mirror?.adaptiveCols.get('session-2')?.cols).toBe(80);
     expect(mirror?.cols).toBe(80);
+    expect(runTmux).toHaveBeenLastCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
   });
 
   it('accepts adaptive-phone attach payload with cols only and keeps baseline rows', async () => {
@@ -533,6 +606,101 @@ describe('terminal mirror runtime lifecycle truth', () => {
       session,
       expect.objectContaining({
         type: 'buffer-head',
+      }),
+    );
+  });
+
+  it('releases a ready mirror with tmux_session_unavailable when live sync later discovers a dead pane target', async () => {
+    const { sessions, sendMessage } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    const mirror: SessionMirror = {
+      key: 'rcc-zterm',
+      sessionName: 'rcc-zterm',
+      scratchBridge: null,
+      lifecycle: 'ready',
+      cols: 56,
+      rows: 56,
+      baselineCols: 56,
+      baselineRows: 56,
+      cursorKeysApp: false,
+      revision: 1,
+      lastScrollbackCount: 0,
+      bufferStartIndex: 0,
+      bufferLines: [],
+      cursor: null,
+      lastFlushStartedAt: 0,
+      lastFlushCompletedAt: 0,
+      flushInFlight: false,
+      flushPromise: null,
+      pendingStableCaptureSnapshot: null,
+      liveSyncTimer: null,
+      consecutiveFailures: 0,
+      adaptiveCols: new Map(),
+      subscribers: new Set([session.id]),
+    };
+    session.mirrorKey = mirror.key;
+    const mirrors = new Map<string, SessionMirror>([[mirror.key, mirror]]);
+
+    const customRuntime = createTerminalMirrorRuntime({
+      defaultViewport: { cols: 120, rows: 40 },
+      sessions,
+      mirrors,
+      sendMessage,
+      sendScheduleStateToSession: vi.fn(),
+      buildConnectedPayload: (sessionId: string) => ({ sessionId }),
+      buildBufferHeadPayload: () => ({
+        sessionId: 'session-1',
+        revision: 1,
+        latestEndIndex: 0,
+        availableStartIndex: 0,
+        availableEndIndex: 0,
+        cursor: null,
+      }),
+      buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
+      sanitizeSessionName: (input?: string) => input?.trim() || 'rcc-zterm',
+      getMirrorKey: (sessionName: string) => sessionName,
+      normalizeTerminalCols: (cols?: number) => cols || 120,
+      normalizeTerminalRows: (rows?: number) => rows || 40,
+      resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
+        requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
+      readTmuxPaneMetrics: () => ({
+        paneId: '%3',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 56,
+        paneCols: 56,
+        alternateOn: false,
+      }),
+      assertTmuxSessionExists: vi.fn(),
+      captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => {
+        throw new Error('tmux returned invalid pane metrics for rcc-zterm: pane is dead');
+      }),
+      mirrorBufferChanged: () => [],
+      mirrorCursorEqual: () => true,
+      writeToLiveMirror: () => true,
+      writeToTmuxSession: vi.fn(),
+      autoCommandDelayMs: 0,
+      waitMs: async () => {},
+      logTimePrefix: () => '2026-05-13 00:31:00',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      closeLogicalTerminalSession: vi.fn(),
+      getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
+    });
+
+    const ok = await customRuntime.syncMirrorCanonicalBuffer(mirror);
+
+    expect(ok).toBe(false);
+    expect(mirrors.get('rcc-zterm')).toBeUndefined();
+    expect(session.mirrorKey).toBeNull();
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'error',
+        payload: expect.objectContaining({
+          code: 'tmux_session_unavailable',
+          message: expect.stringContaining('pane is dead'),
+        }),
       }),
     );
   });

@@ -19,8 +19,8 @@ function row(text: string) {
 describe('terminal mirror capture runtime', () => {
   it('converts tmux history_size into total canonical rows in normal mode', () => {
     const runTmux = vi.fn((args: string[]) => {
-      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}')) {
-        return { ok: true as const, stdout: '%1\t29\t12\t80\t0\n' };
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%1\t29\t12\t80\t0\t0\n' };
       }
       throw new Error(`unexpected tmux args: ${args.join(' ')}`);
     });
@@ -42,8 +42,8 @@ describe('terminal mirror capture runtime', () => {
 
   it('keeps alternate-screen history continuous instead of resetting to pane height', () => {
     const runTmux = vi.fn((args: string[]) => {
-      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}')) {
-        return { ok: true as const, stdout: '%9\t777\t56\t80\t1\n' };
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%9\t777\t56\t80\t1\t0\n' };
       }
       throw new Error(`unexpected tmux args: ${args.join(' ')}`);
     });
@@ -61,6 +61,25 @@ describe('terminal mirror capture runtime', () => {
       paneCols: 80,
       alternateOn: true,
     });
+  });
+
+  it('fails explicitly when tmux pane is dead instead of treating empty geometry as a live baseline', () => {
+    const runTmux = vi.fn((args: string[]) => {
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%3\t0\t56\t56\t0\t1\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      runTmux,
+      logTimePrefix: () => '2026-05-12 23:55:00',
+    });
+
+    expect(() => runtime.readTmuxPaneMetrics('rcc-zterm')).toThrow(
+      'tmux returned invalid pane metrics for rcc-zterm: pane is dead',
+    );
   });
 
   it('anchors the mirror window only from tmux authoritative start, regardless of repeated tail content', () => {
@@ -203,8 +222,8 @@ describe('terminal mirror capture runtime', () => {
 
   it('publishes a changed snapshot immediately in live mode instead of waiting for a second identical tick', async () => {
     const runTmux = vi.fn((args: string[]) => {
-      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}')) {
-        return { ok: true as const, stdout: '%1\t0\t2\t80\t0\n' };
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%1\t0\t2\t80\t0\t0\n' };
       }
       if (args[0] === 'display-message' && args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
         return { ok: true as const, stdout: '0 1 1 0\n' };

@@ -66,7 +66,7 @@ describe('open-tab / history / connections truth gates', () => {
     expect(restoreRuntimeSource).toContain('createSession(');
     expect(restoreRuntimeSource).toContain("buildOpenTabSessionCreateOptions('cold-restore'");
     expect(sessionOpenActionsSource).toContain('createSession(');
-    expect(sessionOpenActionsSource).toContain('buildOpenTabSessionCreateOptions(openSource');
+    expect(openTabOpenPolicySource).toContain('buildOpenTabSessionCreateOptions(');
     expect(openTabRuntimeSource).toContain('createSession,');
     expect(openTabSessionActionsSource).not.toContain('createSession(');
     expect(openTabOpenPolicySource).toContain("'cold-restore': {");
@@ -86,9 +86,10 @@ describe('open-tab / history / connections truth gates', () => {
     expect(restoreRuntimeSource).not.toContain('closedOpenTabReuseKeysRef.current.delete(');
     expect(restoreRuntimeSource).not.toContain("source: 'saved-tab-import-revive'");
 
-    expect(sessionOpenActionsSource).toContain('reconcileImportedTabsWithClosedReuseKeys(');
-    expect(sessionOpenActionsSource).toContain("source: 'saved-tab-import-revive'");
+    expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
     expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
+    expect(openTabOpenPolicySource).toContain('reconcileImportedTabsWithClosedReuseKeys(');
+    expect(openTabOpenPolicySource).toContain("Extract<OpenTabOpenSource, 'saved-tab-import' | 'saved-tab-import-revive'>");
     expect(openTabOpenPolicySource).toContain('clearClosedTabReuseKeysForOwner(');
     expect(openTabOpenPolicySource).toContain('reviveClosedReuseOnImport: true');
   });

@@ -451,6 +451,12 @@ tmux truth
 - open-tab restore / runtime sync 允许为 persisted tabs **恢复 local runtime shell**：可 `createSession(connect:false)` 做 cold restore / sessionId remap，但**不得**自动打开 daemon session。真正的 daemon open 只能来自显式用户 open/import/resume 动作。
 - active re-entry / active tick / foreground resume 若遇到 `closed/error/unavailable` session，生命周期链只能 skip 或 probe 当前 live transport；**不得**自动 reconnect。只有显式 open / explicit resume 才允许重新打开 daemon session。
 - `adaptive-phone` 的 upstream geometry 真相只能是 **client-owned latest cols**；attach/reconnect 可带 cols，但**不得**带 runtime rows。daemon 只消费 cols，rows 继续取 tmux/mirror baseline。
+- `adaptive-phone` 的 upstream width owner 只能是 **daemon**：
+- `adaptive-phone` 做过 `resize-window -x` 之后，tmux 会把目标 window 置为 `window-size=manual`；当最后一个 adaptive subscriber 断开时，daemon 必须显式释放回 `window-size=latest` 并刷新 mirror baseline，否则 session 会永久卡在历史的 `80x24/56x24` 一类旧高度。
+  - client 只能上报自己最新实测 `cols`
+  - daemon 只允许在所有活着的 `adaptive-phone` 连接里取 **最小 cols**
+  - 连接断开 / attach 迁移 / close 后必须立刻重算
+  - daemon upstream resize **永远禁止写 rows**；tmux 高度不属于这条链路
 - 若 App 首帧就已经持有现存 `sessions[]`，也必须立刻持久化 `OPEN_TABS / ACTIVE_SESSION`；不能因为“这次不是 restore 分支”就跳过首次回写，否则下次冷启动恢复会拿到陈旧 tab 真相。
 - 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。

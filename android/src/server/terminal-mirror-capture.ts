@@ -214,13 +214,16 @@ export function createTerminalMirrorCaptureRuntime(
       '-p',
       '-t',
       sessionName,
-      '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}',
+      '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}',
     ]);
-    const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw] = result.stdout.trim().split('\t');
+    const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split('\t');
     const paneRows = Number.parseInt(rowsRaw ?? '', 10);
     const paneCols = Number.parseInt(colsRaw ?? '', 10);
     if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
       throw new Error(`tmux returned invalid pane metrics for ${sessionName}: rows=${rowsRaw ?? ''} cols=${colsRaw ?? ''}`);
+    }
+    if (paneDeadRaw === '1') {
+      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: pane is dead`);
     }
     const historySize = Math.max(0, Number.parseInt(tmuxHistorySizeRaw ?? '', 10) || 0);
     const alternateOn = alternateOnRaw === '1';

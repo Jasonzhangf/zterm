@@ -78,6 +78,10 @@ export interface TerminalMirrorRuntime {
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  handleAdaptiveResize: (
+    session: TerminalSession,
+    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+  ) => void;
   handleInput: (session: TerminalSession, data: string) => void;
   reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
 }
@@ -88,6 +92,11 @@ const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
+
+  function isTmuxTargetUnavailableError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('invalid pane metrics') || message.includes('pane is dead');
+  }
 
   function resolveMirrorBaselineCols(mirror: SessionMirror) {
     const baselineCols = mirror.baselineCols;
@@ -108,6 +117,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function writeMirrorBaselineGeometry(mirror: SessionMirror, geometry: { cols: number; rows: number }) {
     mirror.baselineCols = deps.normalizeTerminalCols(geometry.cols);
     mirror.baselineRows = deps.normalizeTerminalRows(geometry.rows);
+  }
+
+  function refreshMirrorGeometryFromTmux(mirror: SessionMirror) {
+    const metrics = deps.readTmuxPaneMetrics(mirror.sessionName);
+    const geometry = {
+      cols: metrics.paneCols,
+      rows: metrics.paneRows,
+    };
+    writeMirrorBaselineGeometry(mirror, geometry);
+    mirror.cols = deps.normalizeTerminalCols(geometry.cols);
+    mirror.rows = deps.normalizeTerminalRows(geometry.rows);
   }
 
   function stopMirrorLiveSync(mirror: SessionMirror) {
@@ -241,6 +261,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         }
       }
     }
+    if (minCols === 0) {
+      try {
+        deps.runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']);
+        refreshMirrorGeometryFromTmux(mirror);
+      } catch (error) {
+        console.warn(
+          `[${deps.logTimePrefix()}] failed to release tmux window-size ownership for ${mirror.sessionName}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return;
+    }
     const targetCols = minCols > 0
       ? Math.min(deps.normalizeTerminalCols(minCols), baselineCols)
       : baselineCols;
@@ -249,7 +280,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       return;
     }
     try {
-      deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(targetCols), '-y', String(targetRows)]);
+      deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(targetCols)]);
       mirror.cols = targetCols;
       mirror.rows = targetRows;
     } catch (error) {
@@ -406,11 +437,23 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       })
       .catch((error) => {
         mirror.consecutiveFailures += 1;
-        const isInvalidTarget = (error instanceof Error ? error.message : String(error)).includes('invalid pane metrics');
+        const isInvalidTarget = isTmuxTargetUnavailableError(error);
         const failureMsg = `[${deps.logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName} (streak=${mirror.consecutiveFailures}): ${
           error instanceof Error ? error.message : String(error)
         }`;
-        if (mirror.consecutiveFailures >= 10 || isInvalidTarget) {
+        if (isInvalidTarget) {
+          console.error(`${failureMsg} -> mirror released (code=tmux_session_unavailable)`);
+          destroyMirror(
+            mirror,
+            `Tmux session unavailable: ${error instanceof Error ? error.message : String(error)}`,
+            {
+              closeLogicalSessions: false,
+              releaseCode: 'tmux_session_unavailable',
+            },
+          );
+          return false;
+        }
+        if (mirror.consecutiveFailures >= 10) {
           mirror.lifecycle = 'failed';
           stopMirrorLiveSync(mirror);
           console.error(`${failureMsg} -> mirror isolated (lifecycle=failed)`);
@@ -499,11 +542,30 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       await deps.waitMs(80);
       const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
       if (!captured) {
+        if (!mirrors.has(mirror.key)) {
+          return;
+        }
         throw new Error('Failed to capture canonical tmux buffer during initial sync');
       }
       announceMirrorSubscribersReady(mirror);
       scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
     } catch (error) {
+      if (isTmuxTargetUnavailableError(error)) {
+        console.error(
+          `[${deps.logTimePrefix()}] initial buffer sync released unavailable tmux target for ${mirror.sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        destroyMirror(
+          mirror,
+          `Tmux session unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          {
+            closeLogicalSessions: false,
+            releaseCode: 'tmux_session_unavailable',
+          },
+        );
+        return;
+      }
       mirror.lifecycle = 'failed';
       console.error(
         `[${deps.logTimePrefix()}] initial buffer sync failed for ${mirror.sessionName}: ${
@@ -563,11 +625,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         && Number.isFinite(payload.cols)
           ? {
               cols: payload.cols,
-              rows: typeof payload.rows === 'number' && Number.isFinite(payload.rows)
-                ? payload.rows
-                : existingMirror?.rows
-                  || existingTmuxGeometry?.rows
-                  || deps.defaultViewport.rows,
+              rows: existingMirror?.rows
+                || existingTmuxGeometry?.rows
+                || deps.defaultViewport.rows,
             }
           : null,
       currentMirrorGeometry: existingMirror
@@ -628,6 +688,25 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     await startMirror(mirror, { cols: requestedCols, rows: requestedRows, autoCommand: payload.autoCommand });
   }
 
+  function handleAdaptiveResize(session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) {
+    const mirror = deps.getSessionMirror(session);
+    if (!mirror) {
+      return;
+    }
+    const nextWidthMode = payload.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+    session.widthMode = nextWidthMode;
+    if (nextWidthMode === 'adaptive-phone' && Number.isFinite(payload.cols) && (payload.cols || 0) > 0) {
+      mirror.adaptiveCols.set(session.id, {
+        cols: deps.normalizeTerminalCols(payload.cols),
+        widthMode: nextWidthMode,
+      });
+    } else {
+      mirror.adaptiveCols.delete(session.id);
+    }
+    reconcileMirrorAdaptiveWidth(mirror);
+    scheduleMirrorLiveSync(mirror, 0);
+  }
+
   function handleInput(session: TerminalSession, data: string) {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
@@ -655,6 +734,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     scheduleMirrorLiveSync,
     startMirror,
     attachTmux,
+    handleAdaptiveResize,
     handleInput,
     reconcileMirrorAdaptiveWidth,
   };

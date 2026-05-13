@@ -294,6 +294,11 @@ Android client -> daemon -> GUI screenshot helper -> macOS screenshot truth
 - terminal width mode 必须显式区分：
   - `adaptive-phone`：允许当前手机适配宽度路径
   - `mirror-fixed`：只读上游宽度真相；renderer 只做 horizontal crop / pan
+- `adaptive-phone` 的上游宽度 owner 只能是 daemon：
+  - client 只上报 latest measured cols
+  - daemon 只允许按活跃 `adaptive-phone` 连接集合计算最小 cols
+  - 断开连接后立即重算
+  - tmux 高度不在这条链路内，daemon 不得改写 rows
 - viewport / geometry 变化时不允许：
   - clear terminal
   - replay `outputHistory`

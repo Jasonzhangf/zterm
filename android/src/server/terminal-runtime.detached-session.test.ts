@@ -24,10 +24,23 @@ function createDeps() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
+  let paneMetrics = {
+    paneId: '%1',
+    tmuxAvailableLineCountHint: 0,
+    paneRows: 40,
+    paneCols: 120,
+    alternateOn: false,
+  };
   return {
     sessions,
     mirrors,
     runTmux,
+    setPaneMetrics: (next: Partial<typeof paneMetrics>) => {
+      paneMetrics = {
+        ...paneMetrics,
+        ...next,
+      };
+    },
     runtime: createTerminalRuntime({
       defaultSessionName: 'default',
       defaultViewport: { cols: 120, rows: 40 },
@@ -64,13 +77,7 @@ function createDeps() {
       resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) => (
         requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry
       ),
-      readTmuxPaneMetrics: () => ({
-        paneId: '%1',
-        tmuxAvailableLineCountHint: 0,
-        paneRows: 40,
-        paneCols: 120,
-        alternateOn: false,
-      }),
+      readTmuxPaneMetrics: () => ({ ...paneMetrics }),
       assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => true),
       mirrorBufferChanged: vi.fn(() => []),
@@ -129,19 +136,23 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(mirror.subscribers.has(session.id)).toBe(false);
   });
 
-  it('restores tmux baseline geometry after the last adaptive subscriber detaches', () => {
-    const { runtime, mirrors, runTmux } = createDeps();
+  it('releases tmux manual window-size and refreshes geometry after the last adaptive subscriber detaches', () => {
+    const { runtime, mirrors, runTmux, setPaneMetrics } = createDeps();
     const connection = createTransportConnection('transport-1');
     const session = runtime.createTransportBoundSession(connection);
+    setPaneMetrics({
+      paneCols: 99,
+      paneRows: 56,
+    });
     const mirror: SessionMirror = {
       key: 'demo',
       sessionName: 'demo',
       scratchBridge: null,
       lifecycle: 'ready',
-      cols: 88,
-      rows: 44,
-      baselineCols: 140,
-      baselineRows: 44,
+      cols: 56,
+      rows: 24,
+      baselineCols: 56,
+      baselineRows: 24,
       cursorKeysApp: false,
       revision: 1,
       lastScrollbackCount: 0,
@@ -154,7 +165,7 @@ describe('terminal runtime detached transport cleanup', () => {
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map([[session.id, { cols: 88, widthMode: 'adaptive-phone' }]]),
+      adaptiveCols: new Map([[session.id, { cols: 56, widthMode: 'adaptive-phone' }]]),
       subscribers: new Set([session.id]),
     };
 
@@ -165,9 +176,11 @@ describe('terminal runtime detached transport cleanup', () => {
 
     runtime.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '140', '-y', '44']);
-    expect(mirror.cols).toBe(140);
-    expect(mirror.rows).toBe(44);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-t', 'demo', 'window-size', 'latest']);
+    expect(mirror.cols).toBe(99);
+    expect(mirror.rows).toBe(56);
+    expect(mirror.baselineCols).toBe(99);
+    expect(mirror.baselineRows).toBe(56);
     expect(mirror.adaptiveCols.has(session.id)).toBe(false);
   });
 });

@@ -286,6 +286,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
       terminalRuntime.bindConnectionToSession(connection as DaemonTransportConnection, session),
     getMirrorKey,
     attachTmux: terminalRuntime.attachTmux,
+    handleAdaptiveResize: terminalRuntime.handleAdaptiveResize,
     destroyMirror: terminalRuntime.destroyMirror,
   },
 });

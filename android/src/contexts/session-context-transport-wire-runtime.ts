@@ -24,7 +24,7 @@ export function buildSessionResizePayload(options: {
 }) {
   return {
     cols: Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined,
-    rows: Number.isFinite(options.rows) ? Math.max(1, Math.floor(options.rows || 0)) : undefined,
+    rows: undefined,
     widthMode: options.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
   };
 }
