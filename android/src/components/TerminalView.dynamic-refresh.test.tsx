@@ -3917,4 +3917,55 @@ describe('TerminalView minimal mirror render', () => {
       });
     });
   });
+  it('each pane independently tracks scroll -- scrolling one pane does not move the other', async () => {
+    const onInput = vi.fn();
+    const sessionA = makeSession({ revision: 1, lines: buildRows(80), bufferTailEndIndex: 80 });
+    const sessionB = makeSession({ revision: 1, lines: buildRows(80), bufferTailEndIndex: 80 });
+
+    const { container: containerA } = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={sessionA.id}
+          initialBufferLines={sessionA.buffer.lines}
+          bufferStartIndex={sessionA.buffer.startIndex}
+          bufferEndIndex={sessionA.buffer.endIndex}
+          bufferTailEndIndex={sessionA.buffer.bufferTailEndIndex}
+          bufferGapRanges={sessionA.buffer.gapRanges}
+          cursorKeysApp={sessionA.buffer.cursorKeysApp}
+          active
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const { container: containerB } = render(
+      <div style={{ width: '320px', height: '204px' }}>
+        <TerminalView
+          sessionId={sessionB.id}
+          initialBufferLines={sessionB.buffer.lines}
+          bufferStartIndex={sessionB.buffer.startIndex}
+          bufferEndIndex={sessionB.buffer.endIndex}
+          bufferTailEndIndex={sessionB.buffer.bufferTailEndIndex}
+          bufferGapRanges={sessionB.buffer.gapRanges}
+          cursorKeysApp={sessionB.buffer.cursorKeysApp}
+          active
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(containerA)).toContain('row-080'));
+    await waitFor(() => expect(readRenderedRows(containerB)).toContain('row-080'));
+
+    // Pane A scrolls to middle -- user scroll, not programmatic
+    const paneA = containerA.querySelector('.wterm') as HTMLDivElement;
+    paneA.scrollTop = 300;
+    fireEvent.scroll(paneA);
+
+    // Pane B should still show bottom rows unchanged by pane A's scroll
+    expect(readRenderedRows(containerB)).toContain('row-080');
+    expect(readRenderedRows(containerB)).toContain('row-077');
+  });
 });
