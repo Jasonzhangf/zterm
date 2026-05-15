@@ -2149,33 +2149,6 @@ function TerminalQuickBarComponent({
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
-                <button
-                  onClick={() => {
-                    const trimmed = quickInputValueRef.current.trim();
-                    if (!trimmed) {
-                      return;
-                    }
-                    const nextAction: QuickAction = {
-                      id: createDraftActionId(),
-                      label: trimmed.slice(0, 12) || '新片段',
-                      sequence: quickInputValueRef.current.replace(/\r?\n/g, '\r'),
-                      order: sortedQuickActions.length,
-                    };
-                    onQuickActionsChange?.([...sortedQuickActions, nextAction]);
-                  }}
-                  style={{
-                    flex: 1,
-                    minHeight: '40px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '14px',
-                    backgroundColor: 'rgba(31, 38, 53, 0.82)',
-                    color: '#fff',
-                    fontWeight: 700,
-                  }}
-                >
-                  加为快捷输入
-                </button>
                 <button
                   onClick={() => {
                     setFloatingMenuOpen(false);
@@ -2214,7 +2187,7 @@ function TerminalQuickBarComponent({
                   </button>
               </div>
 
-              {splitAvailable && (
+              {splitAvailable && landscape && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' }}>
                   <div
                     style={{
@@ -2303,23 +2276,6 @@ function TerminalQuickBarComponent({
                       floatingPanelTab === 'quick-actions' ? mobileTheme.colors.accent : '#fff',
                     )}
                   >
-                    快捷列表
-                  </button>
-                  <button
-                    onClick={() => setFloatingPanelTab('clipboard')}
-                    style={floatingPillButton(
-                      floatingPanelTab === 'clipboard' ? 'rgba(31,214,122,0.18)' : 'rgba(31, 38, 53, 0.82)',
-                      floatingPanelTab === 'clipboard' ? mobileTheme.colors.accent : '#fff',
-                    )}
-                  >
-                    剪贴板
-                  </button>
-                </div>
-                <button
-                  onClick={() => openEditor('list')}
-                  style={floatingPillButton('rgba(22, 28, 41, 0.92)', '#fff')}
-                >
-                  管理
                 </button>
               </div>
             </div>
