@@ -2,6 +2,7 @@ import { detectRuntimeSequenceAnomalies, parseRuntimeSequenceEntries, type Runti
 
 export interface ApkSmokeDebugSnapshotRecord {
   sessionId?: string;
+  tmuxSessionName?: string;
   updatedAt?: string;
   snapshot?: unknown;
 }

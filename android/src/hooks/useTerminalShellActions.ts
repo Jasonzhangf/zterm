@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -54,27 +54,24 @@ export function useTerminalShellActions(options: UseTerminalShellActionsOptions)
 
   const { openTabStateRef, terminalActiveSessionIdRef } = runtimeRefs;
 
-  const [inputResetEpochBySession, setInputResetEpochBySession] = useState<Record<string, number>>({});
+  // inputResetEpochBySession — ref-based so mutations do NOT trigger re-renders.
+  // Only bump when a real session switch happens (handled by applySessionSwitchRenderReset
+  // in TerminalView), NOT on every keystroke.
+  const inputResetEpochRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     pruneDrafts(sessionIds);
   }, [pruneDrafts, sessionIds]);
 
-  const bumpInputResetEpoch = useCallback((sessionId: string) => {
-    const targetSessionId = sessionId.trim();
-    if (!targetSessionId) {
-      return;
-    }
-    setInputResetEpochBySession((current) => ({
-      ...current,
-      [targetSessionId]: (current[targetSessionId] || 0) + 1,
-    }));
-  }, []);
+  // Expose ref directly. TerminalView reads it via props; React never re-renders on write.
+  const inputResetEpochBySession = inputResetEpochRef.current;
 
   const handleTerminalInput = useCallback((sessionId: string, data: string) => {
-    bumpInputResetEpoch(sessionId);
+    // Do NOT bump inputResetEpoch here — that caused a React state update on every
+    // keystroke, cascading re-renders and input latency. inputResetEpoch only needs
+    // to change when a real session switch occurs (applySessionSwitchRenderReset).
     sendInput(sessionId, data);
-  }, [bumpInputResetEpoch, sendInput]);
+  }, [sendInput]);
 
   const handleTerminalViewportChange = useCallback((sessionId: string, viewportState: TerminalViewportState) => {
     updateSessionViewport(sessionId, viewportState);

@@ -155,7 +155,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="gruvbox-dark"
         />
       </div>,
@@ -189,7 +189,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="iterm2-light"
         />
       </div>,
@@ -222,7 +222,7 @@ describe('TerminalView terminal themes', () => {
           bufferTailEndIndex={1}
           cursor={{ rowIndex: 0, col: 0, visible: true }}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="catppuccin-mocha"
         />
       </div>,
@@ -253,7 +253,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="catppuccin-mocha"
         />
       </div>,
@@ -283,7 +283,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="tabby-encom"
         />
       </div>,
@@ -316,7 +316,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="classic-dark"
         />
       </div>,
@@ -345,7 +345,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="classic-dark"
         />
       </div>,
@@ -374,7 +374,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="classic-dark"
         />
       </div>,
@@ -400,7 +400,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="classic-dark"
         />
       </div>,
@@ -429,7 +429,7 @@ describe('TerminalView terminal themes', () => {
           bufferEndIndex={1}
           bufferTailEndIndex={1}
           active
-          fontSize={5}
+          fontSize={11}
           themeId="classic-dark"
         />
       </div>,
@@ -443,23 +443,6 @@ describe('TerminalView terminal themes', () => {
   });
 
   it('uses measured pixel cell widths for mixed ASCII/CJK rows instead of browser ch units', async () => {
-    const originalGetBoundingClientRectForTest = HTMLElement.prototype.getBoundingClientRect;
-    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
-      if (this.textContent === 'W') {
-        return {
-          x: 0, y: 0, top: 0, left: 0, right: 6, bottom: 17, width: 6, height: 17,
-          toJSON() { return {}; },
-        } as DOMRect;
-      }
-      if (this.textContent === '你') {
-        return {
-          x: 0, y: 0, top: 0, left: 0, right: 14, bottom: 17, width: 14, height: 17,
-          toJSON() { return {}; },
-        } as DOMRect;
-      }
-      return originalGetBoundingClientRectForTest.call(this);
-    };
-
     try {
       const asciiCell = {
         char: 'A'.codePointAt(0) || 65,
@@ -492,7 +475,7 @@ describe('TerminalView terminal themes', () => {
             bufferEndIndex={1}
             bufferTailEndIndex={1}
             active
-            fontSize={5}
+            fontSize={11}
             themeId="catppuccin-mocha"
           />
         </div>,
@@ -500,12 +483,12 @@ describe('TerminalView terminal themes', () => {
 
       await waitFor(() => {
         const spans = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
-        expect(spans[0]?.style.width).toBe('7px');
-        expect(spans[1]?.style.width).toBe('14px');
+        expect(spans[0]?.style.width).toBe('6.82px');
+        expect(spans[1]?.style.width).toBe('13.64px');
         expect(spans[2]?.style.width).toBe('0px');
       });
     } finally {
-      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRectForTest;
+      // no cleanup needed after removing DOM mock
     }
   });
 });

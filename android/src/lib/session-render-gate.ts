@@ -109,8 +109,11 @@ function projectRenderBuffer(options: {
   previousSourceRows: TerminalCell[][];
 }) {
   const { buffer, previousProjected } = options;
+  // Track which projected rows can be reused (same reference = unchanged content).
+  const reusedRowMask: boolean[] = [];
   const nextLines = buffer.lines.map((row, offset) => {
     if (!previousProjected) {
+      reusedRowMask.push(false);
       return cloneRenderRow(row);
     }
     const absoluteIndex = buffer.startIndex + offset;
@@ -118,6 +121,7 @@ function projectRenderBuffer(options: {
       absoluteIndex < options.previousSourceStartIndex
       || absoluteIndex >= options.previousSourceEndIndex
     ) {
+      reusedRowMask.push(false);
       return cloneRenderRow(row);
     }
     const previousOffset = absoluteIndex - options.previousSourceStartIndex;
@@ -128,8 +132,10 @@ function projectRenderBuffer(options: {
       && previousProjectedRow
       && rowsEqual(row, previousProjectedRow)
     ) {
+      reusedRowMask.push(true);
       return previousProjectedRow;
     }
+    reusedRowMask.push(false);
     return cloneRenderRow(row);
   });
 
@@ -159,7 +165,7 @@ function projectRenderBuffer(options: {
     && previousProjected.gapRanges === nextGapRanges
     && previousProjected.revision === buffer.revision
     && previousProjected.lines.length === nextLines.length
-    && previousProjected.lines.every((line, index) => line === nextLines[index])
+    && previousProjected.lines.every((line, index) => line === nextLines[index] || reusedRowMask[index])
   );
 
   return {
