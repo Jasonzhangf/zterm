@@ -59,12 +59,14 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
   TerminalQuickBar: ({
     onEditorDomFocusChange,
     onToggleKeyboard,
+    onToggleCopyMode,
     keyboardVisible,
     keyboardInsetPx,
     sessionDraft,
   }: {
     onEditorDomFocusChange?: (active: boolean) => void;
     onToggleKeyboard?: () => void;
+    onToggleCopyMode?: () => void;
     keyboardVisible?: boolean;
     keyboardInsetPx?: number;
     sessionDraft?: string;
@@ -78,6 +80,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
       <button onClick={() => onEditorDomFocusChange?.(true)}>focus-quick-editor</button>
       <button onClick={() => onEditorDomFocusChange?.(false)}>blur-quick-editor</button>
       <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
+      <button onClick={() => onToggleCopyMode?.()}>toggle-copy-mode</button>
       <div data-testid="terminal-quickbar-draft">{sessionDraft || ''}</div>
     </div>
   ),
@@ -88,6 +91,7 @@ vi.mock('../components/TerminalView', () => ({
     sessionId,
     allowDomFocus,
     onActivateInput,
+    onLongPressRow,
     onResize,
     onWidthModeChange,
     widthMode,
@@ -95,6 +99,7 @@ vi.mock('../components/TerminalView', () => ({
     sessionId: string;
     allowDomFocus?: boolean;
     onActivateInput?: () => void;
+    onLongPressRow?: (sessionId: string, rowIndex: number) => void;
     onResize?: (...args: any[]) => void;
     onWidthModeChange?: (...args: any[]) => void;
     widthMode?: string;
@@ -106,7 +111,10 @@ vi.mock('../components/TerminalView', () => ({
       data-has-onwidthmodechange={onWidthModeChange ? 'true' : 'false'}
       data-width-mode={widthMode || 'adaptive-phone'}
       onClick={() => onActivateInput?.()}
-    />
+    >
+      <button onClick={() => onLongPressRow?.(sessionId, 100)}>longpress-row-100</button>
+      <button onClick={() => onLongPressRow?.(sessionId, 102)}>longpress-row-102</button>
+    </div>
   ),
 }));
 

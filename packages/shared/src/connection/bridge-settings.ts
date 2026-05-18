@@ -51,6 +51,8 @@ export interface BridgeSettings {
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
   terminalWidthMode: TerminalWidthMode;
+  /** Working directory for new tmux sessions. Defaults to $HOME on the daemon. */
+  cwd?: string;
   shortcutSmartSort: boolean;
   servers: BridgeServerPreset[];
   defaultServerId?: string;
@@ -72,6 +74,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
   terminalWidthMode: 'mirror-fixed',
+  cwd: undefined,
   shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,

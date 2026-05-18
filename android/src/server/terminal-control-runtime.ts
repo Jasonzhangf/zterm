@@ -18,7 +18,7 @@ export interface TerminalControlRuntime {
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   listTmuxSessions: () => string[];
-  createDetachedTmuxSession: (input?: string) => string;
+  createDetachedTmuxSession: (input?: string, cwd?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
 }
 
@@ -117,9 +117,13 @@ export function createTerminalControlRuntime(
       .filter((line) => Boolean(line) && !deps.hiddenTmuxSessions.has(line));
   }
 
-  function createDetachedTmuxSession(input?: string) {
+  function createDetachedTmuxSession(input?: string, cwd?: string) {
     const sessionName = deps.sanitizeSessionName(input || deps.defaultSessionName);
-    runTmux(['new-session', '-d', '-s', sessionName]);
+    const args = ['new-session', '-d', '-s', sessionName];
+    if (cwd) {
+      args.push('-c', cwd);
+    }
+    runTmux(args);
     return sessionName;
   }
 

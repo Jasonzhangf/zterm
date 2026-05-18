@@ -31,7 +31,7 @@ export interface TerminalMessageControlRuntimeDeps {
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   listTmuxSessions: () => string[];
-  createDetachedTmuxSession: (sessionName?: string) => string;
+  createDetachedTmuxSession: (sessionName?: string, cwd?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
@@ -196,14 +196,14 @@ export function handleTmuxControlMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
   message:
-    | { type: 'tmux-create-session'; payload: { sessionName: string } }
+    | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
     | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
     | { type: 'tmux-kill-session'; payload: { sessionName: string } },
 ) {
   switch (message.type) {
     case 'tmux-create-session':
       try {
-        deps.createDetachedTmuxSession(message.payload.sessionName);
+        deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd);
         deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);

@@ -75,10 +75,8 @@ export function sendInputThroughSessionTransport(options: {
       ws,
       JSON.stringify({ type: 'input', payload: options.data }),
     );
-    options.requestSessionBufferHead(targetSessionId, ws, { force: true });
-    if (transportStale && isExplicitInputTarget && !reconnectInFlight) {
-      options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
-    }
+    // Input path: send only. Tail-refresh marker set above; head pull & transport health
+    // are owned by the dedicated heartbeat/refresh loop, not by each keystroke.
     return;
   }
 

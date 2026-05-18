@@ -225,6 +225,6 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
     expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName);');
     expect(startMirrorBlock).not.toContain('new-session');
-    expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName)');
+    expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd');
   });
 });

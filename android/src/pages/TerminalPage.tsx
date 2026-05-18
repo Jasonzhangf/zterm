@@ -167,10 +167,17 @@ export function resolveKeyboardLiftPx(
   const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
   const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
   const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
-  const layoutViewportHeight = Math.max(
+  const resolvedLayoutViewportHeight = Math.max(
     0,
     Math.round(layoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
   );
+  // IME truth: some Android WebView cases keep innerHeight as full layout height
+  // while visual viewport shrinks; others shrink both metrics.
+  // Without explicit override, keep the larger one to avoid under-estimating
+  // occluded bottom and over-lifting terminal chrome.
+  const layoutViewportHeight = layoutViewportHeightOverride == null
+    ? Math.max(resolvedLayoutViewportHeight, Math.max(0, Math.round(window.innerHeight || 0)))
+    : resolvedLayoutViewportHeight;
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {
@@ -356,6 +363,12 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   debugOverlayDragRef,
   onClose,
   onMove,
+  keyboardInset,
+  shellHeight,
+  visualViewportHeight,
+  terminalKeyboardRequested,
+  containerHeightPx,
+  viewportRows,
 }: {
   visible: boolean;
   session: Session | null;
@@ -371,6 +384,12 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   }>;
   onClose: () => void;
   onMove: (next: { x: number; y: number }) => void;
+  keyboardInset?: number;
+  shellHeight?: number;
+  visualViewportHeight?: number;
+  terminalKeyboardRequested?: boolean;
+  containerHeightPx?: number;
+  viewportRows?: number;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -505,6 +524,30 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         <span>P</span>
         <span>{formatDebugHz(metrics?.pullHz || 0)}</span>
       </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '2px' }}>
+        <span>KB</span>
+        <span style={{ color: (keyboardInset ?? 0) > 0 ? '#86efac' : '#fca5a5' }}>{keyboardInset ?? 0}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>IM</span>
+        <span style={{ color: terminalKeyboardRequested ? '#86efac' : '#fca5a5' }}>{terminalKeyboardRequested ? 'Y' : 'N'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>SH</span>
+        <span>{shellHeight ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>VV</span>
+        <span>{visualViewportHeight ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>CH</span>
+        <span>{containerHeightPx ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>VR</span>
+        <span>{viewportRows ?? '?'}</span>
+      </div>
       <div
         style={{
           marginTop: '2px',
@@ -548,6 +591,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalThemeId,
   terminalWidthMode,
   absoluteLineNumbersVisible,
+  copyModeActive,
+  handleTerminalLongPressRow,
 }: {
   interactiveSession: Session | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
@@ -574,6 +619,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalThemeId?: string;
   terminalWidthMode: TerminalWidthMode;
   absoluteLineNumbersVisible: boolean;
+  copyModeActive: boolean;
+  handleTerminalLongPressRow: (sessionId: string, rowIndex: number) => void;
 }) {
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, landscape }), [landscape, splitVisible]);
@@ -607,10 +654,13 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
         themeId={terminalThemeId || 'default'}
         widthMode={terminalWidthMode}
         showAbsoluteLineNumbers={absoluteLineNumbersVisible}
+        copyModeActive={copyModeActive}
+        onLongPressRow={handleTerminalLongPressRow}
       />
     </TerminalTabSwipeSurface>
   ), [
     absoluteLineNumbersVisible,
+    copyModeActive,
     focusNonce,
     followResetEpoch,
     handleActiveTerminalActivateInput,
@@ -621,6 +671,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     onResize,
     onTerminalInput,
     onTerminalWidthModeChange,
+    handleTerminalLongPressRow,
     sessionBufferStore,
     terminalFontSize,
     terminalKeyboardRequested,
@@ -977,6 +1028,8 @@ function TerminalPageComponent({
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
+  const [copyModeActive, setCopyModeActive] = useState(false);
+  const [copyStartRowIndex, setCopyStartRowIndex] = useState<number | null>(null);
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
   const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
@@ -1455,6 +1508,91 @@ function TerminalPageComponent({
     setAbsoluteLineNumbersVisible((v) => !v);
   }, []);
 
+  const normalizeTerminalRowText = useCallback((cells: Array<{ char: number; width: number }> | undefined) => {
+    if (!cells || cells.length === 0) {
+      return '';
+    }
+    let out = '';
+    for (const cell of cells) {
+      if (!cell || cell.width === 0) {
+        continue;
+      }
+      const code = Number(cell.char || 0);
+      out += code > 0 ? String.fromCodePoint(code) : ' ';
+    }
+    return out.replace(/\s+$/u, '');
+  }, []);
+
+  const resetCopyMode = useCallback(() => {
+    setCopyModeActive(false);
+    setCopyStartRowIndex(null);
+  }, []);
+
+  const handleQuickBarToggleCopyMode = useCallback(() => {
+    setCopyModeActive((current) => {
+      const next = !current;
+      if (!next) {
+        setCopyStartRowIndex(null);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTerminalLongPressRow = useCallback(async (sessionId: string, rowIndex: number) => {
+    if (!copyModeActive || !sessionBufferStore || !activeSession || activeSession.id !== sessionId) {
+      return;
+    }
+    if (copyStartRowIndex === null) {
+      setCopyStartRowIndex(rowIndex);
+      return;
+    }
+
+    const snapshot = sessionBufferStore.getSnapshot(sessionId);
+    const buffer = snapshot?.buffer;
+    if (!buffer || !Array.isArray(buffer.lines) || buffer.lines.length === 0) {
+      alert('复制失败：当前 buffer 为空');
+      resetCopyMode();
+      return;
+    }
+
+    const start = Math.min(copyStartRowIndex, rowIndex);
+    const end = Math.max(copyStartRowIndex, rowIndex);
+    const from = Math.max(buffer.startIndex, start);
+    const to = Math.min(Math.max(buffer.startIndex, buffer.endIndex - 1), end);
+    if (to < from) {
+      alert('复制失败：选区无有效内容');
+      resetCopyMode();
+      return;
+    }
+
+    const lines: string[] = [];
+    for (let index = from; index <= to; index += 1) {
+      const offset = index - buffer.startIndex;
+      const row = buffer.lines[offset];
+      lines.push(normalizeTerminalRowText(row as Array<{ char: number; width: number }>));
+    }
+    const text = lines.join('\n');
+    if (!text) {
+      alert('复制失败：选区文本为空');
+      resetCopyMode();
+      return;
+    }
+
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        throw new Error('当前环境不支持系统剪贴板写入');
+      }
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      alert(error instanceof Error ? `复制失败：${error.message}` : '复制失败：写入剪贴板异常');
+      resetCopyMode();
+      return;
+    }
+
+    alert(`已复制 ${to - from + 1} 行`);
+    resetCopyMode();
+  }, [activeSession, copyModeActive, copyStartRowIndex, normalizeTerminalRowText, resetCopyMode, sessionBufferStore]);
+
   const handleQuickBarRequestRemoteScreenshot = useCallback(() => {
     void handleRequestRemoteScreenshot();
   }, [handleRequestRemoteScreenshot]);
@@ -1686,6 +1824,15 @@ function TerminalPageComponent({
         keyboardStateListener = await ImeAnchor.addListener('keyboardState', (event) => {
           const visible = Boolean(event.visible);
           const height = Math.max(0, Math.round(event.height || 0));
+          // Capture a pre-IME stable layout height immediately to avoid a race
+          // where RAF-debounced viewport sync happens after Android shrinks all
+          // viewport metrics during keyboard popup.
+          if (visible && isAndroid) {
+            const layoutHeight = resolveLayoutViewportHeight();
+            if (layoutHeight > 0) {
+              stableLayoutViewportHeightRef.current = layoutHeight;
+            }
+          }
           updateKeyboardInset(height);
           if (!quickBarEditorFocusedRef.current) {
             updateTerminalKeyboardRequested(visible);
@@ -2035,6 +2182,8 @@ function TerminalPageComponent({
       onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
       onOpenFileTransfer={handleQuickBarOpenFileTransfer}
       onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
+      copyModeActive={copyModeActive}
+      onToggleCopyMode={handleQuickBarToggleCopyMode}
       onToggleAbsoluteLineNumbers={handleQuickBarToggleAbsoluteLineNumbers}
       onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
       debugOverlayVisible={debugOverlayVisible}
@@ -2058,6 +2207,7 @@ function TerminalPageComponent({
     handleQuickBarSendSequence,
     handleQuickBarSessionDraftChange,
     handleQuickBarSessionDraftSend,
+    handleQuickBarToggleCopyMode,
     handleQuickBarToggleAbsoluteLineNumbers,
     handleQuickBarToggleDebugOverlay,
     handleToggleKeyboard,
@@ -2071,6 +2221,7 @@ function TerminalPageComponent({
     quickActions,
     quickBarShellKeyboardLiftPx,
     remoteScreenshotPreview?.phase,
+    copyModeActive,
     shortcutActions,
     shortcutFrequencyMap,
     shortcutSmartSort,
@@ -2158,6 +2309,8 @@ function TerminalPageComponent({
           terminalThemeId={terminalThemeId}
           terminalWidthMode={terminalWidthMode}
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+          copyModeActive={copyModeActive}
+          handleTerminalLongPressRow={handleTerminalLongPressRow}
         />
         <TerminalDebugOverlay
           visible={debugOverlayVisible}
@@ -2168,6 +2321,12 @@ function TerminalPageComponent({
           debugOverlayDragRef={debugOverlayDragRef}
           onClose={() => setDebugOverlayVisible(false)}
           onMove={setDebugOverlayPos}
+          keyboardInset={keyboardInset}
+          shellHeight={shellHeight}
+          visualViewportHeight={typeof window !== 'undefined' ? Math.round(window.visualViewport?.height || 0) : 0}
+          terminalKeyboardRequested={terminalKeyboardRequested}
+          containerHeightPx={undefined}
+          viewportRows={undefined}
         />
         <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
           {quickBarNode}

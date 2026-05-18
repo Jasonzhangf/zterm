@@ -963,7 +963,11 @@ describe('App dynamic refresh matrix', () => {
     expect(openTerminalPageSpy).not.toHaveBeenCalled();
   });
 
-  it('bumps the active session input reset epoch before forwarding terminal input', async () => {
+  // NOTE: d505c65 changed inputResetEpoch from React state to a ref to eliminate
+  // keystroke-triggered React state cascades. Keystrokes no longer bump the epoch.
+  // The epoch only increments on real session switches (applySessionSwitchRenderReset
+  // in TerminalView).
+  it('forwards terminal input WITHOUT bumping input reset epoch on keystroke (ref-based)', async () => {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -972,9 +976,7 @@ describe('App dynamic refresh matrix', () => {
 
     fireEvent.click(screen.getByTestId('send-active-input'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('terminal-input-reset-epoch').textContent).toBe('1');
-    });
+    expect(screen.getByTestId('terminal-input-reset-epoch').textContent).toBe('0');
     expect(sessionHarness.sendInput).toHaveBeenCalledWith('s1', 'typed-from-terminal');
   });
 

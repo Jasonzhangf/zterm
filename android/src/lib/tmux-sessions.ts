@@ -84,11 +84,13 @@ export function fetchTmuxSessions(
 
 export function createTmuxSession(
   target: BridgeTarget,
-  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay' | 'cwd'>,
   sessionName: string,
   overrideUrl?: string,
 ) {
-  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-create-session', payload: { sessionName } }, overrideUrl);
+  const payload: { sessionName: string; cwd?: string } = { sessionName };
+  if (traversalSettings.cwd) payload.cwd = traversalSettings.cwd;
+  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-create-session', payload }, overrideUrl);
 }
 
 export function renameTmuxSession(

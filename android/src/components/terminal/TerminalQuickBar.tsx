@@ -94,6 +94,8 @@ interface TerminalQuickBarProps {
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
   absoluteLineNumbersVisible?: boolean;
+  copyModeActive?: boolean;
+  onToggleCopyMode?: () => void;
   remoteScreenshotStatus?: 'idle' | 'capturing' | 'transferring' | 'preview-ready' | 'saving' | 'failed';
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
@@ -132,6 +134,8 @@ function TerminalQuickBarComponent({
   debugOverlayVisible,
   onToggleAbsoluteLineNumbers,
   absoluteLineNumbersVisible,
+  copyModeActive = false,
+  onToggleCopyMode,
   remoteScreenshotStatus = 'idle',
   shortcutSmartSort = false,
   shortcutFrequencyMap,
@@ -377,6 +381,10 @@ function TerminalQuickBarComponent({
       onOpenFileTransfer?.();
       return;
     }
+    if (action.id === 'tmux-copy') {
+      onToggleCopyMode?.();
+      return;
+    }
     if (action.id === 'debug-overlay') {
       onToggleDebugOverlay?.();
       return;
@@ -432,6 +440,7 @@ function TerminalQuickBarComponent({
       || action.id === 'sync-settings'
       || action.id === 'remote-screenshot'
       || action.id === 'debug-overlay'
+      || action.id === 'tmux-copy'
       || action.id === 'paste'
     ) {
       return false;
@@ -582,10 +591,11 @@ function TerminalQuickBarComponent({
     { id: 'sync-settings', label: '同步', sequence: '' },
     { id: 'remote-screenshot', label: screenshotToolLabel, sequence: '' },
     { id: 'line-numbers', label: '行号', sequence: '' },
+    { id: 'debug-overlay', label: '状态', sequence: '' },
   ]), [screenshotToolLabel]);
 
   const topFixedActions = useMemo(() => ([
-    { id: 'debug-overlay', label: '状态', sequence: '' },
+    { id: 'tmux-copy', label: '拷贝', sequence: '' },
     { id: 'arrow-up', label: '↑', sequence: '\x1b[A' },
     { id: 'keyboard', label: '键盘', sequence: '' },
   ]), []);
@@ -1093,6 +1103,8 @@ function TerminalQuickBarComponent({
               ? 'rgba(113, 164, 255, 0.28)'
               : action.id === 'keyboard' && keyboardVisible
               ? 'rgba(31,214,122,0.18)'
+              : action.id === 'tmux-copy' && copyModeActive
+              ? 'rgba(113, 164, 255, 0.28)'
               : action.id === 'debug-overlay' && debugOverlayVisible
               ? 'rgba(31,214,122,0.18)'
               : action.id === 'line-numbers' && absoluteLineNumbersVisible
@@ -1107,6 +1119,8 @@ function TerminalQuickBarComponent({
               ? '#bcd3ff'
               : action.id === 'keyboard' && keyboardVisible
               ? mobileTheme.colors.accent
+              : action.id === 'tmux-copy' && copyModeActive
+              ? '#8db7ff'
               : action.id === 'debug-overlay' && debugOverlayVisible
               ? mobileTheme.colors.accent
               : action.id === 'line-numbers' && absoluteLineNumbersVisible

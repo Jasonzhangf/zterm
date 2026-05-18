@@ -9,6 +9,8 @@ export interface TerminalViewportMetrics {
   orientation: 'portrait' | 'landscape';
 }
 
+let maxStableLayoutHeightPx = 0;
+
 export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
   if (typeof window === 'undefined') {
     return {
@@ -39,14 +41,21 @@ export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
       ),
     ),
   );
+  const currentClientHeight = Math.max(
+    0,
+    Math.round(window.document?.documentElement?.clientHeight || 0),
+  );
+  if (currentClientHeight > maxStableLayoutHeightPx) {
+    maxStableLayoutHeightPx = currentClientHeight;
+  }
+  // Keyboard popup truth:
+  // - Android WebView may shrink both innerHeight/clientHeight during IME popup.
+  // - We keep a monotonic stable layout height (max seen clientHeight).
+  // - layoutHeight should stay on stable full-height truth while keyboard is visible.
   const layoutHeight = Math.max(
     0,
     Math.round(
-      Math.max(
-        window.innerHeight || 0,
-        window.document?.documentElement?.clientHeight || 0,
-        visualBottom,
-      ),
+      Math.max(currentClientHeight, maxStableLayoutHeightPx, visualBottom),
     ),
   );
 

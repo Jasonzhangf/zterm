@@ -49,9 +49,10 @@ describe('session-context-input-runtime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-2');
   });
 
-  it('probes stale-open transport after explicit input even when runtime active pointer is stale', () => {
+  it('sends input only — no force-head and no stale-probe even when transport is stale', () => {
     const probeOrReconnectStaleSessionTransport = vi.fn();
     const requestSessionBufferHead = vi.fn();
+    const sendSocketPayload = vi.fn();
     const ws = createSocket(WebSocket.OPEN);
 
     sendInputThroughSessionTransport({
@@ -72,7 +73,7 @@ describe('session-context-input-runtime', () => {
       readSessionTransportSocket: () => ws,
       isSessionTransportActivityStale: () => true,
       isReconnectInFlight: () => false,
-      sendSocketPayload: vi.fn(),
+      sendSocketPayload,
       markPendingInputTailRefresh: vi.fn(),
       readSessionBufferSnapshot: () => ({ revision: 3 }),
       requestSessionBufferHead,
@@ -82,11 +83,13 @@ describe('session-context-input-runtime', () => {
       reconnectSession: vi.fn(),
     });
 
-    expect(probeOrReconnectStaleSessionTransport).toHaveBeenCalledWith('session-2', ws, 'input');
-    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', ws, { force: true });
+    // Input is sent; no force-head and no stale-probe on an open transport.
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(probeOrReconnectStaleSessionTransport).not.toHaveBeenCalled();
   });
 
-  it('forces a head request immediately after explicit input on an open transport', () => {
+  it('sends input and marks tail-refresh — no force-head on healthy transport', () => {
     const requestSessionBufferHead = vi.fn();
     const markPendingInputTailRefresh = vi.fn();
     const sendSocketPayload = vi.fn();
@@ -121,6 +124,6 @@ describe('session-context-input-runtime', () => {
 
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(markPendingInputTailRefresh).toHaveBeenCalledWith('session-2', 3);
-    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', ws, { force: true });
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
   });
 });

@@ -364,6 +364,51 @@ npx cap sync android     # 同步到 Android
 npx cap run android      # 启动模拟器/真机
 ```
 
+#### 标准 APK 构建与发布流程（zterm Android，必须遵循）
+
+> 适用场景：需要给 Jason 交付可安装升级包、必须进入 update/release 渠道。
+
+```bash
+cd android
+./scripts/build-android-debug.sh
+```
+
+该命令是唯一标准入口，内部顺序固定：
+
+1. `pnpm build`
+   - 包含 prebuild 门禁：`test:terminal:regression`
+2. `npx cap sync android`
+3. `native/android/gradlew assembleDebug`
+4. `node ./scripts/prepare-update-bundle.mjs <app-debug.apk>`
+
+**发布目标目录（必须检查）：**
+
+- `android/update-dist/`
+- `android/release-dist/`
+- `~/.wterm/updates`
+
+**构建完成后最低验收（缺一不可）：**
+
+1. `update-dist/latest.json` 存在且字段完整：
+   - `versionName`
+   - `versionCode`
+   - `apkUrl`
+   - `sha256`
+   - `size`
+2. `release-dist/latest.json` 与 `update-dist/latest.json` 的 `versionCode/sha256/size` 一致。
+3. `update-dist/<apkUrl>` 文件存在，且 `sha256` 与 manifest 一致。
+4. 报告中必须给出：
+   - APK 绝对路径
+   - versionName/versionCode
+   - sha256
+   - 是否通过标准门禁（regression + type-check + gradle）
+
+**禁止事项：**
+
+- 禁止跳过 `build-android-debug.sh` 直接手工拷贝 APK 冒充发布。
+- 禁止只说“构建成功”但不核对 `latest.json` 与实际 APK hash。
+- 禁止使用旧版本 APK 复用旧 manifest。
+
 #### 证据记录模板
 
 每次验证后在 `android/evidence/<date-task>/` 保存：

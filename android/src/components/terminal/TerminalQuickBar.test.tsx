@@ -338,7 +338,7 @@ describe('TerminalQuickBar', () => {
     const topFixedClusterButtons = screen
       .getByTestId('quickbar-fixed-cluster-top')
       .querySelectorAll('button');
-    expect(Array.from(topFixedClusterButtons).map((node) => node.getAttribute('aria-label'))).toEqual(['状态', '↑', '键盘']);
+    expect(Array.from(topFixedClusterButtons).map((node) => node.getAttribute('aria-label'))).toEqual(['拷贝', '↑', '键盘']);
     const topClusterStyle = screen.getByTestId('quickbar-fixed-cluster-top').getAttribute('style') || '';
     expect(topClusterStyle).toContain('width: 158px');
   });
@@ -369,7 +369,7 @@ describe('TerminalQuickBar', () => {
 
   it('routes visible tool bar actions through explicit callbacks and keeps file/sync semantics correct', async () => {
     const onOpenFileTransfer = vi.fn();
-    const onToggleDebugOverlay = vi.fn();
+    const onToggleCopyMode = vi.fn();
     const onToggleAbsoluteLineNumbers = vi.fn();
     const onRequestRemoteScreenshot = vi.fn().mockResolvedValue(undefined);
     const onFileAttach = vi.fn();
@@ -377,12 +377,13 @@ describe('TerminalQuickBar', () => {
     renderQuickBar({
       onOpenFileTransfer,
       onFileAttach,
-      onToggleDebugOverlay,
+      onToggleCopyMode,
       onToggleAbsoluteLineNumbers,
       onRequestRemoteScreenshot,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+    // First fixed button is now "拷贝" (was "状态"), calls onToggleCopyMode
+    fireEvent.click(screen.getByRole('button', { name: '拷贝' }));
     fireEvent.click(screen.getByRole('button', { name: '文件' }));
     fireEvent.click(screen.getByRole('button', { name: '同步' }));
     fireEvent.click(screen.getByRole('button', { name: '截图' }));
@@ -390,7 +391,7 @@ describe('TerminalQuickBar', () => {
 
     await waitFor(() => {
       expect(onOpenFileTransfer).toHaveBeenCalledTimes(1);
-      expect(onToggleDebugOverlay).toHaveBeenCalledTimes(1);
+      expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
       expect(onToggleAbsoluteLineNumbers).toHaveBeenCalledTimes(1);
       expect(onRequestRemoteScreenshot).toHaveBeenCalledTimes(1);
     });
@@ -842,7 +843,7 @@ describe('TerminalQuickBar', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
-    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+    fireEvent.click(screen.getByLabelText('Edit ls'));
 
     await waitFor(() => {
       expect(screen.getByText('快捷输入设置')).not.toBeNull();

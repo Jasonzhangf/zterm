@@ -72,6 +72,8 @@ interface TerminalViewProps {
   themeId?: string;
   widthMode?: TerminalWidthMode;
   showAbsoluteLineNumbers?: boolean;
+  copyModeActive?: boolean;
+  onLongPressRow?: (sessionId: string, rowIndex: number) => void;
 }
 
 
@@ -135,9 +137,11 @@ function TerminalViewComponent({
   themeId,
   widthMode = 'adaptive-phone',
   showAbsoluteLineNumbers = false,
+  copyModeActive = false,
+  onLongPressRow,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
-  const refreshActive = Boolean(live);
+  const refreshActive = live ?? active;
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(sessionBufferStore, sessionBufferStore ? sessionId : null);
   const renderBuffer = renderBufferSnapshot
     || (sessionBufferStore && sessionId ? sessionBufferSnapshot.buffer : EMPTY_RENDER_BUFFER);
@@ -187,6 +191,9 @@ function TerminalViewComponent({
     clientHeightPx: number;
   } | null>(null);
   const previousPrePaintFollowRealignKeyRef = useRef<string | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const longPressStartYRef = useRef(0);
   const userScrollIntentDeadlineRef = useRef(0);
   const daemonHeadEndIndexRef = useRef(demandHeadEndIndex);
   const daemonHeadRevisionRef = useRef(Math.max(0, Math.floor(renderBuffer.daemonHeadRevision || 0)));
@@ -977,6 +984,29 @@ function TerminalViewComponent({
     }
   }, [cancelPendingFollowScrollSync]);
 
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const resolveRowIndexFromClientY = useCallback((clientY: number) => {
+    const host = containerRef.current;
+    if (!host) return null;
+    const rect = host.getBoundingClientRect();
+    const yInHost = (clientY - rect.top) + host.scrollTop - termGridPaddingTopPx;
+    const rowOffset = Math.floor(Math.max(0, yInHost) / Math.max(1, rowHeightPx));
+    const row = renderBuffer.startIndex + rowOffset;
+    const maxRow = Math.max(renderBuffer.startIndex, effectiveBufferEndIndex - 1);
+    return Math.max(renderBuffer.startIndex, Math.min(maxRow, row));
+  }, [effectiveBufferEndIndex, renderBuffer.startIndex, rowHeightPx, termGridPaddingTopPx]);
+
+  useEffect(() => () => {
+    clearLongPressTimer();
+  }, [clearLongPressTimer]);
+
   return (
     <div
       ref={containerRef}
@@ -1016,8 +1046,35 @@ function TerminalViewComponent({
       onWheel={() => {
         markUserScrollIntent(userScrollIntentDeadlineRef, 250);
       }}
-      onPointerDown={() => {
+      onPointerDown={(event) => {
         markUserScrollIntent(userScrollIntentDeadlineRef, 250);
+        if (!copyModeActive || !sessionId) {
+          return;
+        }
+        longPressTriggeredRef.current = false;
+        longPressStartYRef.current = event.clientY;
+        clearLongPressTimer();
+        longPressTimerRef.current = window.setTimeout(() => {
+          longPressTriggeredRef.current = true;
+          const rowIndex = resolveRowIndexFromClientY(event.clientY);
+          if (rowIndex !== null) {
+            onLongPressRow?.(sessionId, rowIndex);
+          }
+        }, 420);
+      }}
+      onPointerMove={(event) => {
+        if (Math.abs(event.clientY - longPressStartYRef.current) > Math.max(8, rowHeightPx * 0.35)) {
+          clearLongPressTimer();
+        }
+      }}
+      onPointerUp={() => {
+        clearLongPressTimer();
+      }}
+      onPointerCancel={() => {
+        clearLongPressTimer();
+      }}
+      onPointerLeave={() => {
+        clearLongPressTimer();
       }}
       style={{
         width: '100%',
