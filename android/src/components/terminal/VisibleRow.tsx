@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import {
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
@@ -18,6 +18,7 @@ export interface VisibleRowProps {
   cursorColumn: number;
   showAbsoluteLineNumbers?: boolean;
   discontinuousLineNumber?: boolean;
+  rowHighlightStyle?: CSSProperties;
 }
 
 export const VisibleRow = memo(function VisibleRow({
@@ -31,6 +32,7 @@ export const VisibleRow = memo(function VisibleRow({
   cursorColumn,
   showAbsoluteLineNumbers = false,
   discontinuousLineNumber = false,
+  rowHighlightStyle,
 }: VisibleRowProps) {
   const viewModel = buildTerminalVisibleRowViewModel({
     absoluteIndex,
@@ -60,7 +62,7 @@ export const VisibleRow = memo(function VisibleRow({
         data-terminal-row={viewModel.dataset.terminalRow}
         data-terminal-gap={viewModel.dataset.terminalGap}
         data-terminal-index={viewModel.dataset.terminalIndex}
-        style={viewModel.rowStyle}
+        style={rowHighlightStyle ? { ...viewModel.rowStyle, ...rowHighlightStyle } : viewModel.rowStyle}
       >
         {lineNumberCell}
         <span {...viewModel.gapFillProps} />
@@ -71,7 +73,7 @@ export const VisibleRow = memo(function VisibleRow({
     <div
       data-terminal-row={viewModel.dataset.terminalRow}
       data-terminal-index={viewModel.dataset.terminalIndex}
-      style={viewModel.rowStyle}
+      style={rowHighlightStyle ? { ...viewModel.rowStyle, ...rowHighlightStyle } : viewModel.rowStyle}
     >
       {lineNumberCell}
       <span {...viewModel.cellWrapProps}>
@@ -99,6 +101,7 @@ export const VisibleRow = memo(function VisibleRow({
   && prev.cursorColumn === next.cursorColumn
   && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
   && prev.discontinuousLineNumber === next.discontinuousLineNumber
+  && prev.rowHighlightStyle === next.rowHighlightStyle
 ));
 
 export { resolveCursorOverlay, hasDiscontinuousNeighbor };

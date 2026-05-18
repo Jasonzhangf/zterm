@@ -93,6 +93,7 @@ interface TerminalQuickBarProps {
   onToggleDebugOverlay?: () => void;
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
+  copyDebugLabel?: string;
   absoluteLineNumbersVisible?: boolean;
   copyModeActive?: boolean;
   onToggleCopyMode?: () => void;
@@ -133,6 +134,7 @@ function TerminalQuickBarComponent({
   onToggleDebugOverlay,
   debugOverlayVisible,
   onToggleAbsoluteLineNumbers,
+  copyDebugLabel,
   absoluteLineNumbersVisible,
   copyModeActive = false,
   onToggleCopyMode,
@@ -2104,6 +2106,11 @@ function TerminalQuickBarComponent({
                   <div style={{ marginTop: '2px', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
                     外点关闭，右侧可直接进入定时发送
                   </div>
+                  {copyDebugLabel ? (
+                    <div style={{ marginTop: '4px', fontSize: '11px', color: 'rgba(134,239,172,0.95)' }}>
+                      {copyDebugLabel}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"

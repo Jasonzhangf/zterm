@@ -369,6 +369,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   terminalKeyboardRequested,
   containerHeightPx,
   viewportRows,
+  copyModeActive,
+  copyStartRowIndex,
 }: {
   visible: boolean;
   session: Session | null;
@@ -390,6 +392,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   terminalKeyboardRequested?: boolean;
   containerHeightPx?: number;
   viewportRows?: number;
+  copyModeActive?: boolean;
+  copyStartRowIndex?: number | null;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -548,6 +552,14 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         <span>VR</span>
         <span>{viewportRows ?? '?'}</span>
       </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>CM</span>
+        <span style={{ color: copyModeActive ? '#86efac' : '#fca5a5' }}>{copyModeActive ? 'ON' : 'OFF'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>CS</span>
+        <span>{copyStartRowIndex ?? '-'}</span>
+      </div>
       <div
         style={{
           marginTop: '2px',
@@ -592,6 +604,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalWidthMode,
   absoluteLineNumbersVisible,
   copyModeActive,
+  copyStartRowIndex,
+  handleTerminalTapRow,
   handleTerminalLongPressRow,
 }: {
   interactiveSession: Session | null;
@@ -620,6 +634,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalWidthMode: TerminalWidthMode;
   absoluteLineNumbersVisible: boolean;
   copyModeActive: boolean;
+  copyStartRowIndex: number | null;
+  handleTerminalTapRow: (sessionId: string, rowIndex: number) => void;
   handleTerminalLongPressRow: (sessionId: string, rowIndex: number) => void;
 }) {
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
@@ -655,12 +671,16 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
         widthMode={terminalWidthMode}
         showAbsoluteLineNumbers={absoluteLineNumbersVisible}
         copyModeActive={copyModeActive}
+        copyStartRowIndex={copyStartRowIndex}
+        onTapRow={handleTerminalTapRow}
         onLongPressRow={handleTerminalLongPressRow}
       />
     </TerminalTabSwipeSurface>
   ), [
     absoluteLineNumbersVisible,
     copyModeActive,
+    copyStartRowIndex,
+    handleTerminalTapRow,
     focusNonce,
     followResetEpoch,
     handleActiveTerminalActivateInput,
@@ -671,6 +691,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     onResize,
     onTerminalInput,
     onTerminalWidthModeChange,
+    handleTerminalTapRow,
     handleTerminalLongPressRow,
     sessionBufferStore,
     terminalFontSize,
@@ -1538,6 +1559,13 @@ function TerminalPageComponent({
     });
   }, []);
 
+  const handleTerminalTapRow = useCallback((sessionId: string, rowIndex: number) => {
+    if (!copyModeActive || !activeSession || activeSession.id !== sessionId) {
+      return;
+    }
+    setCopyStartRowIndex(rowIndex);
+  }, [activeSession, copyModeActive]);
+
   const handleTerminalLongPressRow = useCallback(async (sessionId: string, rowIndex: number) => {
     if (!copyModeActive || !sessionBufferStore || !activeSession || activeSession.id !== sessionId) {
       return;
@@ -1546,7 +1574,6 @@ function TerminalPageComponent({
       setCopyStartRowIndex(rowIndex);
       return;
     }
-
     const snapshot = sessionBufferStore.getSnapshot(sessionId);
     const buffer = snapshot?.buffer;
     if (!buffer || !Array.isArray(buffer.lines) || buffer.lines.length === 0) {
@@ -1574,6 +1601,14 @@ function TerminalPageComponent({
     const text = lines.join('\n');
     if (!text) {
       alert('复制失败：选区文本为空');
+      resetCopyMode();
+      return;
+    }
+
+    const shouldCopy = typeof window !== 'undefined'
+      ? window.confirm(`已选中 ${to - from + 1} 行，是否拷贝到剪贴板？`)
+      : true;
+    if (!shouldCopy) {
       resetCopyMode();
       return;
     }
@@ -1981,6 +2016,8 @@ function TerminalPageComponent({
     connectionIssueVisible,
     isAndroid,
     widthMode: terminalWidthMode,
+    copyModeActive,
+    copyStartRowIndex,
   })), [
     uiSessionId,
     uiSession?.state,
@@ -2002,6 +2039,8 @@ function TerminalPageComponent({
     terminalImeLiftPx,
     terminalKeyboardRequested,
     terminalWidthMode,
+    copyModeActive,
+    copyStartRowIndex,
   ]);
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
@@ -2184,6 +2223,7 @@ function TerminalPageComponent({
       onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
       copyModeActive={copyModeActive}
       onToggleCopyMode={handleQuickBarToggleCopyMode}
+      copyDebugLabel={`COPY:${copyModeActive ? 'ON' : 'OFF'} START:${copyStartRowIndex ?? '-'} KB:${keyboardInset} IME:${terminalKeyboardRequested ? 'Y' : 'N'}`}
       onToggleAbsoluteLineNumbers={handleQuickBarToggleAbsoluteLineNumbers}
       onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
       debugOverlayVisible={debugOverlayVisible}
@@ -2223,6 +2263,8 @@ function TerminalPageComponent({
     remoteScreenshotPreview?.phase,
     copyModeActive,
     shortcutActions,
+    copyModeActive,
+    copyStartRowIndex,
     shortcutFrequencyMap,
     shortcutSmartSort,
     splitAvailable,
@@ -2230,6 +2272,8 @@ function TerminalPageComponent({
     currentMaxSplitCount,
     cycleSecondaryPane,
     terminalImeActive,
+    keyboardInset,
+    terminalKeyboardRequested,
     toggleSplitLayout,
     workspacePanes.length,
     layoutProfile.stage.containerRadius,
@@ -2310,6 +2354,8 @@ function TerminalPageComponent({
           terminalWidthMode={terminalWidthMode}
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
           copyModeActive={copyModeActive}
+          copyStartRowIndex={copyStartRowIndex}
+          handleTerminalTapRow={handleTerminalTapRow}
           handleTerminalLongPressRow={handleTerminalLongPressRow}
         />
         <TerminalDebugOverlay
@@ -2327,6 +2373,8 @@ function TerminalPageComponent({
           terminalKeyboardRequested={terminalKeyboardRequested}
           containerHeightPx={undefined}
           viewportRows={undefined}
+          copyModeActive={copyModeActive}
+          copyStartRowIndex={copyStartRowIndex}
         />
         <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
           {quickBarNode}

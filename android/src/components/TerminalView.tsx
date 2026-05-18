@@ -73,6 +73,8 @@ interface TerminalViewProps {
   widthMode?: TerminalWidthMode;
   showAbsoluteLineNumbers?: boolean;
   copyModeActive?: boolean;
+  copyStartRowIndex?: number | null;
+  onTapRow?: (sessionId: string, rowIndex: number) => void;
   onLongPressRow?: (sessionId: string, rowIndex: number) => void;
 }
 
@@ -138,6 +140,8 @@ function TerminalViewComponent({
   widthMode = 'adaptive-phone',
   showAbsoluteLineNumbers = false,
   copyModeActive = false,
+  copyStartRowIndex = null,
+  onTapRow,
   onLongPressRow,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
@@ -1027,6 +1031,15 @@ function TerminalViewComponent({
         }
         onActivateInput?.(sessionId);
       }}
+      onClickCapture={(event) => {
+        if (!copyModeActive || !sessionId) {
+          return;
+        }
+        const rowIndex = resolveRowIndexFromClientY(event.clientY);
+        if (rowIndex !== null) {
+          onTapRow?.(sessionId, rowIndex);
+        }
+      }}
       onScroll={(event) => {
         if (suppressProgrammaticScrollRef.current) {
           return;
@@ -1051,14 +1064,22 @@ function TerminalViewComponent({
         if (!copyModeActive || !sessionId) {
           return;
         }
+        // Immediately set start row on pointer down (tap)
+        (() => {
+          const rowIndex = resolveRowIndexFromClientY(event.clientY);
+          if (rowIndex !== null) {
+            onTapRow?.(sessionId, rowIndex);
+          }
+        })();
+        // Also start long press timer for end-row selection
         longPressTriggeredRef.current = false;
         longPressStartYRef.current = event.clientY;
         clearLongPressTimer();
         longPressTimerRef.current = window.setTimeout(() => {
           longPressTriggeredRef.current = true;
-          const rowIndex = resolveRowIndexFromClientY(event.clientY);
-          if (rowIndex !== null) {
-            onLongPressRow?.(sessionId, rowIndex);
+          const lprRowIndex = resolveRowIndexFromClientY(event.clientY);
+          if (lprRowIndex !== null) {
+            onLongPressRow?.(sessionId, lprRowIndex);
           }
         }, 420);
       }}
@@ -1067,7 +1088,13 @@ function TerminalViewComponent({
           clearLongPressTimer();
         }
       }}
-      onPointerUp={() => {
+      onPointerUp={(event) => {
+        if (copyModeActive && sessionId && !longPressTriggeredRef.current) {
+          const rowIndex = resolveRowIndexFromClientY(event.clientY);
+          if (rowIndex !== null) {
+            onTapRow?.(sessionId, rowIndex);
+          }
+        }
         clearLongPressTimer();
       }}
       onPointerCancel={() => {
@@ -1116,6 +1143,11 @@ function TerminalViewComponent({
             cursorColumn={cursorOverlay.cursorColumn}
             showAbsoluteLineNumbers={showAbsoluteLineNumbers}
             discontinuousLineNumber={isGap || hasDiscontinuousNeighbor(renderRows, rowIndex)}
+            rowHighlightStyle={copyModeActive && copyStartRowIndex === absoluteIndex ? {
+              background: 'rgba(31,214,122,0.24)',
+              outline: '1px solid rgba(31,214,122,0.7)',
+              borderRadius: '6px',
+            } : undefined}
           />
             );
           })()
