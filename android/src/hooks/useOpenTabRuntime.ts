@@ -203,9 +203,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     persistOptions?: { markExplicitTruth?: boolean },
   ) => {
     const nextState = normalizeOpenTabIntentState(tabs, activeSessionId);
-    if (!openTabIntentStatesEqual(openTabStateRef.current, nextState)) {
-      setOpenTabState(nextState);
-    }
+    setOpenTabState(nextState);
     openTabStateRef.current = nextState;
     if (persistOptions?.markExplicitTruth !== false) {
       hasPersistedOpenTabsTruthRef.current = true;

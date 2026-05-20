@@ -35,7 +35,10 @@
     "test:common-user-flows": "pnpm exec vitest run src/lib/tmux-sessions.test.ts src/pages/ConnectionPropertiesPage.test.tsx src/pages/ConnectionsPage.test.tsx src/server/schedule-store.test.ts src/server/schedule-dispatch.test.ts src/server/next-fire.test.ts src/server/schedule-engine.test.ts",
     "test:relay:smoke": "tsx scripts/traversal-relay-local-smoke.ts",
     "test:android:apk-smoke": "tsx scripts/android-apk-smoke.ts",
-    "check:no-source-js-pollution": "node ./scripts/check-no-source-js-pollution.mjs"
+    "check:no-source-js-pollution": "node ./scripts/check-no-source-js-pollution.mjs",
+    "test:redline": "pnpm exec vitest run src/lib/open-tab-persistence.test.ts src/lib/open-tab-restore.test.ts src/lib/open-tab-intent.test.ts src/contexts/session-context-transport-runtime.test.ts src/lib/terminal-buffer-replay.evidence.test.ts src/contexts/session-context-local-client-sim.test.ts",
+    "test:redline:fast": "pnpm exec vitest run src/lib/open-tab-persistence.test.ts src/lib/open-tab-restore.test.ts src/contexts/session-context-transport-runtime.test.ts",
+    "test:local-sim": "pnpm exec vitest run src/contexts/session-context-local-client-sim.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

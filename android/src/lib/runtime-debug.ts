@@ -37,6 +37,24 @@ export function isRuntimeDebugEnabled() {
   return safeReadStorageFlag();
 }
 
+// Always-mirror probe for critical latency path - bypasses localStorage gate
+export function runtimeDebugForce(scope: string, payload?: unknown) {
+  // Hard stop for production latency: disable force-debug collection by default.
+  // Keep test/runtime shape intact without enqueue/flush side effects.
+  if (typeof process === 'undefined' || !process.env.VITEST) {
+    return;
+  }
+  const now = Date.now();
+  const timestamp = new Date(now).toISOString();
+  enqueueRuntimeDebugEntry({
+    seq: ++runtimeDebugSequence,
+    ts: timestamp,
+    scope,
+    payload: payload === undefined ? undefined : normalizePayload(payload),
+  });
+  if (typeof process !== 'undefined' && process.env.VITEST) return;
+  console.debug(`[runtime:${scope}] ${timestamp}`, payload ?? '');
+}
 function shouldMirrorRuntimeDebugToConsole() {
   if (runtimeDebugConsoleEnabledCache !== null) {
     return runtimeDebugConsoleEnabledCache;

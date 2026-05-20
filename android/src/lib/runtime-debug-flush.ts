@@ -16,12 +16,16 @@ export function resetRuntimeDebugTransportFlushStateForTests() {
   lastSnapshotSentAtBySession.clear();
 }
 
+// Force flush is disabled by default in production runtime.
+// Enabling this continuously on hot paths can amplify input latency under weak network.
+function isForceFlushEnabled() { return false; }
+
 export function flushRuntimeDebugLogsToSessionTransport(input: {
   activeSessionId: string | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
-  if (!isRuntimeDebugEnabled()) {
+  if (!isRuntimeDebugEnabled() && !isForceFlushEnabled()) {
     return false;
   }
 

@@ -5,6 +5,8 @@ import { fetchTmuxSessions } from './tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from './tmux-session-list';
 import type { Host, PersistedOpenTab } from './types';
 
+const OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS = 2500;
+
 export interface RestoreTabAvailabilityResult {
   restorableTabs: PersistedOpenTab[];
   droppedTabs: PersistedOpenTab[];
@@ -30,6 +32,22 @@ interface RemoteSessionOwnerTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function buildTabTargetKey(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
@@ -117,22 +135,29 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
     });
-    const sessionNames = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(
-      {
-        bridgeHost: target.bridgeHost,
-        bridgePort: target.bridgePort,
-        daemonHostId: target.daemonHostId,
-        authToken: target.authToken,
-        relayHostId: target.daemonHostId,
-      },
-      traversalSettings,
-    ));
-    return [targetKey, sessionNames] as const;
+    try {
+      const sessionNames = normalizeRemoteTmuxSessionNames(await withTimeout(fetchTmuxSessions(
+        {
+          bridgeHost: target.bridgeHost,
+          bridgePort: target.bridgePort,
+          daemonHostId: target.daemonHostId,
+          authToken: target.authToken,
+          relayHostId: target.daemonHostId,
+        },
+        traversalSettings,
+      ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}`));
+      return { targetKey, sessionNames, ok: true as const };
+    } catch (_error) {
+      return { targetKey, sessionNames: [] as string[], ok: false as const };
+    }
   }));
 
-  for (const [targetKey, sessionNames] of fetchResults) {
-    if (!sessionNamesByTarget.has(targetKey)) {
-      sessionNamesByTarget.set(targetKey, sessionNames);
+  for (const result of fetchResults) {
+    if (!result.ok) {
+      continue;
+    }
+    if (!sessionNamesByTarget.has(result.targetKey)) {
+      sessionNamesByTarget.set(result.targetKey, result.sessionNames);
     }
   }
 
@@ -173,6 +198,10 @@ export function filterRestorableOpenTabsByRemoteSessionNames(options: {
   for (const tab of options.tabs) {
     const targetKey = buildTabTargetKey(tab);
     const rawSessionNames = options.sessionNamesByTarget.get(targetKey);
+    if (!rawSessionNames) {
+      restorableTabs.push(tab);
+      continue;
+    }
     const sessionNames = rawSessionNames instanceof Set
       ? rawSessionNames
       : new Set(rawSessionNames || []);

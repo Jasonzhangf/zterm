@@ -323,4 +323,37 @@ describe('open-tab restore truth', () => {
     expect(result.activeSessionId).toBe('tab-b');
     expect(result.droppedTabs.map((tab) => tab.sessionId)).toEqual(['tab-a']);
   });
+
+  it('keeps persisted tabs when remote tmux truth is unavailable (timeout/error)', async () => {
+    fetchTmuxSessionsMock.mockRejectedValueOnce(new Error('timeout'));
+
+    const { filterRestorableOpenTabsByRemoteTmuxSessions } = await import('./open-tab-restore');
+
+    const result = await filterRestorableOpenTabsByRemoteTmuxSessions({
+      tabs: [
+        {
+          sessionId: 'tab-a',
+          hostId: 'host-a',
+          connectionName: 'Conn A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          sessionName: 'alpha',
+          authToken: 'token-a',
+          createdAt: 1,
+        },
+      ],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-a']);
+    expect(result.droppedTabs).toEqual([]);
+  });
+
 });

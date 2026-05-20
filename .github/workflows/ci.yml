@@ -65,3 +65,6 @@ jobs:
 
       - name: E2E tests
         run: pnpm test:e2e
+
+      - name: Android redline regression gate
+        run: pnpm -C android test:redline
