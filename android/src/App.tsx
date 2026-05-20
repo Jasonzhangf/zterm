@@ -1,3 +1,4 @@
+import { DebugInput, isDebugInputSupported } from './plugins/DebugInputPlugin';
 /**
  * App - 主应用入口
  * 只负责页面级切换与跨页 orchestration。
@@ -294,7 +295,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     shortcutFrequencyStorage,
   });
-
   const {
     pickerMode,
     pickerTarget,

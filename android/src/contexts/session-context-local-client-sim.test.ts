@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
+import { bindSessionTransportSocketLifecycle } from './session-context-transport-runtime';
+import { filterRestorableOpenTabsByRemoteSessionNames } from '../lib/open-tab-restore';
 
 describe('local client simulation', () => {
   it('active tab receives buffer-sync and applies pipeline', () => {
@@ -45,5 +47,65 @@ describe('local client simulation', () => {
       updateSessionSync: vi.fn(),
     });
     expect(applyIncomingBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('reconnect path: stale socket events are ignored after lifecycle rebind', () => {
+    const runtimeDebug = vi.fn();
+    const socket = { readyState: 1 } as any;
+    const staleSocket = { readyState: 1 } as any;
+    const handleSocketServerMessage = vi.fn();
+
+    const access = {
+      value: socket,
+      read() { return this.value; },
+      write(v: any) { this.value = v; },
+    };
+
+    bindSessionTransportSocketLifecycle({
+      sessionId: 's1',
+      host: { id: 'h1' } as any,
+      ws: socket,
+      debugScope: 'reconnect',
+      refs: { stateRef: { current: { activeSessionId: 's1' } } } as any,
+      isSessionTransportActive: () => true,
+      shouldAcceptSessionLiveBuffer: () => true,
+      readSessionTransportSocket: () => access.read(),
+      writeSessionTransportSocket: (_sid, ws) => access.write(ws),
+      clearSessionTransportSocket: vi.fn(),
+      cleanupSocket: vi.fn(),
+      recordSessionRx: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      runtimeDebug,
+      finalizeFailure: vi.fn(),
+      onConnected: vi.fn(),
+      handleSocketServerMessage,
+      writeSessionTransportToken: vi.fn(),
+      onClosed: vi.fn(),
+    } as any);
+
+    // Simulate reconnect swap: active socket changed before stale event arrives
+    access.write(staleSocket);
+    if (typeof socket.onmessage === 'function') {
+      socket.onmessage({ data: JSON.stringify({ type: 'buffer-sync', payload: { revision: 1, startIndex: 1, endIndex: 1, lines: ['stale'] } }) });
+    }
+    expect(handleSocketServerMessage).not.toHaveBeenCalled();
+  });
+
+  it('tab-restore mismatch guard: keep tab when remote owner truth is missing', () => {
+    const result = filterRestorableOpenTabsByRemoteSessionNames({
+      tabs: [{
+        sessionId: 'tab-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 1,
+      } as any],
+      sessionNamesByTarget: new Map(),
+    });
+    expect(result.restorableTabs.map((t) => t.sessionId)).toEqual(['tab-a']);
+    expect(result.droppedTabs).toEqual([]);
   });
 });
