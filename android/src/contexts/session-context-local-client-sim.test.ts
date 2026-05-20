@@ -109,3 +109,103 @@ describe('local client simulation', () => {
     expect(result.droppedTabs).toEqual([]);
   });
 });
+
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { bindSessionTransportSocketLifecycle } from './session-context-transport-runtime';
+import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
+
+describe('local client simulation: full disconnect-reconnect lifecycle', () => {
+  let ws: any;
+  let onMessageCallback: (data: string) => void;
+  let activeSessionId: string;
+
+  beforeEach(() => {
+    activeSessionId = 's1';
+    onMessageCallback = vi.fn();
+    ws = {
+      readyState: WebSocket.CONNECTING,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+    };
+    // Capture the onmessage handler set by bind
+    const origWs = ws;
+    ws = new Proxy(origWs, {
+      set(target, prop, value) {
+        target[prop as string] = value;
+        if (prop === 'onmessage') onMessageCallback = value as any;
+        return true;
+      },
+      get(target, prop) {
+        return target[prop as string];
+      },
+    });
+  });
+
+  it('receives buffer-sync for active session and applies to local pipeline', () => {
+    const runtimeDebug = vi.fn();
+    const settleSessionPullState = vi.fn();
+    const applyIncomingBufferSync = vi.fn();
+
+    const refs = {
+      stateRef: { current: { activeSessionId: 's1', sessions: [{ id: 's1', state: 'connected' }], liveSessionIds: [] } },
+      scheduleStatesRef: { current: {} },
+      lastHeadRequestAtRef: { current: new Map() },
+      lastPongAtRef: { current: new Map() },
+    };
+
+    handleSocketServerMessageRuntime({
+      params: { sessionId: 's1', host: { id: 'h1' } as any, ws, debugScope: 'connect', onConnected: vi.fn(), onFailure: vi.fn(), onClosed: vi.fn() },
+      msg: { type: 'buffer-sync', payload: { revision: 5, startIndex: 3, endIndex: 4, lines: ['line-a', 'line-b'] } } as any,
+      refs: refs as any,
+      settleSessionPullState,
+      runtimeDebug,
+      isSessionTransportActive: () => true,
+      shouldAcceptSessionLiveBuffer: () => true,
+      summarizeBufferPayload: () => ({}),
+      applyIncomingBufferSync,
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: vi.fn() as any,
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(applyIncomingBufferSync).toHaveBeenCalledTimes(1);
+    expect(applyIncomingBufferSync).toHaveBeenCalledWith('s1', expect.objectContaining({ revision: 5 }));
+  });
+
+  it('receives buffer-head after reconnect and updates head state', () => {
+    const handleBufferHead = vi.fn();
+    const refs = {
+      stateRef: { current: { activeSessionId: 's1', sessions: [{ id: 's1', state: 'connected' }], liveSessionIds: [] } },
+      scheduleStatesRef: { current: {} },
+      lastHeadRequestAtRef: { current: new Map() },
+      lastPongAtRef: { current: new Map() },
+    };
+
+    handleSocketServerMessageRuntime({
+      params: { sessionId: 's1', host: { id: 'h1' } as any, ws, debugScope: 'reconnect', onConnected: vi.fn(), onFailure: vi.fn(), onClosed: vi.fn() },
+      msg: { type: 'buffer-head', payload: { revision: 10, latestEndIndex: 20, availableStartIndex: 5, availableEndIndex: 15, cursor: null } } as any,
+      refs: refs as any,
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: () => true,
+      shouldAcceptSessionLiveBuffer: () => true,
+      summarizeBufferPayload: () => ({}),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead,
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: vi.fn() as any,
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(handleBufferHead).toHaveBeenCalledTimes(1);
+    expect(handleBufferHead).toHaveBeenCalledWith('s1', 10, 20, 5, 15, null, undefined);
+  });
+});
+
