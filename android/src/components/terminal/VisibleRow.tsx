@@ -62,7 +62,7 @@ export const VisibleRow = memo(function VisibleRow({
         data-terminal-row={viewModel.dataset.terminalRow}
         data-terminal-gap={viewModel.dataset.terminalGap}
         data-terminal-index={viewModel.dataset.terminalIndex}
-        style={rowHighlightStyle ? { ...viewModel.rowStyle, ...rowHighlightStyle } : viewModel.rowStyle}
+        style={rowHighlightStyle ? { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text', ...rowHighlightStyle } : { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text' }}
       >
         {lineNumberCell}
         <span {...viewModel.gapFillProps} />
@@ -73,7 +73,7 @@ export const VisibleRow = memo(function VisibleRow({
     <div
       data-terminal-row={viewModel.dataset.terminalRow}
       data-terminal-index={viewModel.dataset.terminalIndex}
-      style={rowHighlightStyle ? { ...viewModel.rowStyle, ...rowHighlightStyle } : viewModel.rowStyle}
+      style={rowHighlightStyle ? { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text', ...rowHighlightStyle } : { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text' }}
     >
       {lineNumberCell}
       <span {...viewModel.cellWrapProps}>
