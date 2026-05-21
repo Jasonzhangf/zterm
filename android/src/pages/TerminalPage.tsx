@@ -1051,6 +1051,7 @@ function TerminalPageComponent({
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
   const [copyModeActive, setCopyModeActive] = useState(false);
   const [copyStartRowIndex, setCopyStartRowIndex] = useState<number | null>(null);
+  const [copyModeToast, setCopyModeToast] = useState<string | null>(null);
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
   const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
@@ -1060,6 +1061,7 @@ function TerminalPageComponent({
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
+  const copyToastTimerRef = useRef<number | null>(null);
   const terminalFocusRetryTimeoutsRef = useRef<number[]>([]);
   const remoteScreenshotPreviewRuntimeRef = useRef(createRemoteScreenshotPreviewRuntime());
   const stableLayoutViewportHeightRef = useRef(resolveLayoutViewportHeight());
@@ -1544,6 +1546,24 @@ function TerminalPageComponent({
     return out.replace(/\s+$/u, '');
   }, []);
 
+  const showCopyToast = useCallback((message: string) => {
+    setCopyModeToast(message);
+    if (copyToastTimerRef.current !== null) {
+      window.clearTimeout(copyToastTimerRef.current);
+    }
+    copyToastTimerRef.current = window.setTimeout(() => {
+      copyToastTimerRef.current = null;
+      setCopyModeToast(null);
+    }, 2500);
+  }, []);
+
+  useEffect(() => () => {
+    if (copyToastTimerRef.current !== null) {
+      window.clearTimeout(copyToastTimerRef.current);
+      copyToastTimerRef.current = null;
+    }
+  }, []);
+
   const resetCopyMode = useCallback(() => {
     setCopyModeActive(false);
     setCopyStartRowIndex(null);
@@ -1554,17 +1574,21 @@ function TerminalPageComponent({
       const next = !current;
       if (!next) {
         setCopyStartRowIndex(null);
+        showCopyToast('已退出复制模式');
+      } else {
+        showCopyToast('复制模式：先点起点，再长按终点完成复制');
       }
       return next;
     });
-  }, []);
+  }, [showCopyToast]);
 
   const handleTerminalTapRow = useCallback((sessionId: string, rowIndex: number) => {
     if (!copyModeActive || !activeSession || activeSession.id !== sessionId) {
       return;
     }
     setCopyStartRowIndex(rowIndex);
-  }, [activeSession, copyModeActive]);
+    showCopyToast(`已设置起点：第 ${rowIndex + 1} 行`);
+  }, [activeSession, copyModeActive, showCopyToast]);
 
   const handleTerminalLongPressRow = useCallback(async (sessionId: string, rowIndex: number) => {
     if (!copyModeActive || !sessionBufferStore || !activeSession || activeSession.id !== sessionId) {
@@ -1572,12 +1596,13 @@ function TerminalPageComponent({
     }
     if (copyStartRowIndex === null) {
       setCopyStartRowIndex(rowIndex);
+      showCopyToast(`已设置起点：第 ${rowIndex + 1} 行`);
       return;
     }
     const snapshot = sessionBufferStore.getSnapshot(sessionId);
     const buffer = snapshot?.buffer;
     if (!buffer || !Array.isArray(buffer.lines) || buffer.lines.length === 0) {
-      alert('复制失败：当前 buffer 为空');
+      showCopyToast('复制失败：当前 buffer 为空');
       resetCopyMode();
       return;
     }
@@ -1587,7 +1612,7 @@ function TerminalPageComponent({
     const from = Math.max(buffer.startIndex, start);
     const to = Math.min(Math.max(buffer.startIndex, buffer.endIndex - 1), end);
     if (to < from) {
-      alert('复制失败：选区无有效内容');
+      showCopyToast('复制失败：选区无有效内容');
       resetCopyMode();
       return;
     }
@@ -1600,15 +1625,7 @@ function TerminalPageComponent({
     }
     const text = lines.join('\n');
     if (!text) {
-      alert('复制失败：选区文本为空');
-      resetCopyMode();
-      return;
-    }
-
-    const shouldCopy = typeof window !== 'undefined'
-      ? window.confirm(`已选中 ${to - from + 1} 行，是否拷贝到剪贴板？`)
-      : true;
-    if (!shouldCopy) {
+      showCopyToast('复制失败：选区文本为空');
       resetCopyMode();
       return;
     }
@@ -1619,14 +1636,14 @@ function TerminalPageComponent({
       }
       await navigator.clipboard.writeText(text);
     } catch (error) {
-      alert(error instanceof Error ? `复制失败：${error.message}` : '复制失败：写入剪贴板异常');
+      showCopyToast(error instanceof Error ? `复制失败：${error.message}` : '复制失败：写入剪贴板异常');
       resetCopyMode();
       return;
     }
 
-    alert(`已复制 ${to - from + 1} 行`);
+    showCopyToast(`已复制 ${to - from + 1} 行`);
     resetCopyMode();
-  }, [activeSession, copyModeActive, copyStartRowIndex, normalizeTerminalRowText, resetCopyMode, sessionBufferStore]);
+  }, [activeSession, copyModeActive, copyStartRowIndex, normalizeTerminalRowText, resetCopyMode, sessionBufferStore, showCopyToast]);
 
   const handleQuickBarRequestRemoteScreenshot = useCallback(() => {
     void handleRequestRemoteScreenshot();
@@ -2440,6 +2457,29 @@ function TerminalPageComponent({
           sendJson={sendFileTransferMessage}
           onFileTransferMessage={onFileTransferMessage}
         />
+      ) : null}
+      {copyModeToast ? (
+        <div
+          style={{
+            position: 'fixed',
+            left: '50%',
+            bottom: Math.max(18, keyboardInset + 14),
+            transform: 'translateX(-50%)',
+            background: 'rgba(15, 23, 42, 0.92)',
+            color: '#e2e8f0',
+            border: '1px solid rgba(148, 163, 184, 0.45)',
+            borderRadius: 12,
+            padding: '8px 12px',
+            fontSize: 13,
+            zIndex: 1200,
+            pointerEvents: 'none',
+            maxWidth: '88vw',
+            textAlign: 'center',
+            boxShadow: '0 8px 24px rgba(2,6,23,0.35)',
+          }}
+        >
+          {copyModeToast}
+        </div>
       ) : null}
       <RemoteScreenshotSheet
         state={remoteScreenshotPreview}
