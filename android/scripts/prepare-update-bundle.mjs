@@ -16,7 +16,9 @@ const DEFAULT_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/
 const apkPath = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : DEFAULT_APK_PATH;
 const outputDir = resolve(projectRoot, 'update-dist');
 const releaseDistDir = resolve(projectRoot, 'release-dist');
-const daemonUpdatesDir = resolve(homedir(), '.wterm/updates');
+const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
+  ? resolve(process.env.WTERM_UPDATES_DIR)
+  : resolve(homedir(), '.wterm/updates');
 const latestAliasName = 'zterm-latest-debug.apk';
 
 function computeVersionCode(version, buildNumber) {
