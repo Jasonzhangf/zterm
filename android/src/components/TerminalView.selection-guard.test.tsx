@@ -12,6 +12,19 @@ class ResizeObserverMock {
 
 beforeAll(() => {
   (globalThis as any).ResizeObserver = ResizeObserverMock;
+
+  it('copy-mode pointer handlers run only when copy mode is enabled', () => {
+    const onTapRow = vi.fn();
+    const onLongPressRow = vi.fn();
+    const { container } = render(
+      <TerminalView {...baseProps} copyModeActive onTapRow={onTapRow} onLongPressRow={onLongPressRow} />,
+    );
+    const host = container.querySelector('.wterm') as HTMLDivElement;
+    host.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientY: 20 }));
+    host.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 20 }));
+    expect(onTapRow).toHaveBeenCalled();
+  });
+
 });
 
 describe('TerminalView selection guard', () => {
@@ -56,4 +69,17 @@ describe('TerminalView selection guard', () => {
     expect(onTapRow).not.toHaveBeenCalled();
     expect(onLongPressRow).not.toHaveBeenCalled();
   });
+
+  it('copy-mode pointer handlers run only when copy mode is enabled', () => {
+    const onTapRow = vi.fn();
+    const onLongPressRow = vi.fn();
+    const { container } = render(
+      <TerminalView {...baseProps} copyModeActive onTapRow={onTapRow} onLongPressRow={onLongPressRow} />,
+    );
+    const host = container.querySelector('.wterm') as HTMLDivElement;
+    host.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientY: 20 }));
+    host.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 20 }));
+    expect(onTapRow).toHaveBeenCalled();
+  });
+
 });
