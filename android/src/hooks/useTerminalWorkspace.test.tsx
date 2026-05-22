@@ -147,7 +147,7 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     expect(result.current.activePaneSessionId).toBe('s2');
   });
 
-  it('caps pane count so each averaged pane keeps width/height above one half', () => {
+  it('caps pane count so each averaged pane stays close to phone width/height', () => {
     localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
       panes: [
         { id: 'pane-1', size: 0.25, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
@@ -168,14 +168,14 @@ describe('useTerminalWorkspace explicit pane truth', () => {
       initialProps: { viewportHeight: 900 },
     });
 
-    expect(result.current.currentMaxSplitCount).toBe(2);
-    expect(result.current.workspace.panes).toHaveLength(2);
+    expect(result.current.currentMaxSplitCount).toBe(3);
+    expect(result.current.workspace.panes).toHaveLength(3);
 
     rerender({ viewportHeight: 620 });
 
-    expect(result.current.currentMaxSplitCount).toBe(2);
-    expect(result.current.workspace.panes).toHaveLength(2);
-    expect(result.current.workspace.panes.map((pane) => pane.size)).toEqual([0.5, 0.5]);
+    expect(result.current.currentMaxSplitCount).toBe(3);
+    expect(result.current.workspace.panes).toHaveLength(3);
+    expect(result.current.workspace.panes.map((pane) => pane.size)).toEqual([1 / 3, 1 / 3, 1 / 3]);
   });
 
   it('hides split control and keeps one pane when width is not greater than 70% of height', () => {
@@ -197,7 +197,7 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     expect(result.current.workspace.panes).toHaveLength(1);
   });
 
-  it('shows split control when width is greater than 70% of height while still capping count by pane aspect', () => {
+  it('shows split control when width is greater than 70% of height while still capping count by phone-like pane aspect', () => {
     const { result } = renderHook(() => useTerminalWorkspace({
       sessions: [makeSession('s1'), makeSession('s2'), makeSession('s3')],
       activeSessionId: 's1',

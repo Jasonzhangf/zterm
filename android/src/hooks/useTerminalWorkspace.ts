@@ -228,7 +228,7 @@ export interface UseTerminalWorkspaceResult {
   cycleTabInPane: (paneId: string, direction: 'next' | 'previous') => void;
 }
 
-const MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO = 0.5;
+const MOBILE_SPLIT_TARGET_PHONE_WIDTH_HEIGHT_RATIO = 0.42;
 const MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO = 0.7;
 
 export function useTerminalWorkspace({
@@ -245,7 +245,7 @@ export function useTerminalWorkspace({
   const layoutSnapshotRef = useRef(resolveStaticPaneLayout({
     viewportWidth,
     viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-    minAspect: MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO,
+    minAspect: MOBILE_SPLIT_TARGET_PHONE_WIDTH_HEIGHT_RATIO,
     hardCap: maxSplitCount,
     paneCount: workspace.panes.length,
   }));
@@ -264,7 +264,7 @@ export function useTerminalWorkspace({
     const nextLayout = resolveStaticPaneLayout({
       viewportWidth,
       viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-      minAspect: MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO,
+      minAspect: MOBILE_SPLIT_TARGET_PHONE_WIDTH_HEIGHT_RATIO,
       hardCap: maxSplitCount,
       paneCount: workspace.panes.length,
       previousLayout: layoutSnapshotRef.current,

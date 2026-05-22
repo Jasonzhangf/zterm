@@ -248,6 +248,6 @@ export function resolveMaxSplitCount(
 ): number {
   const safeWidth = Math.max(0, Number.isFinite(availableWidth) ? availableWidth : 0);
   const safeHeight = Math.max(1, Number.isFinite(availableHeight) ? availableHeight : 1);
-  const computed = Math.max(1, Math.ceil((safeWidth / (safeHeight * minAspect)) - 1));
+  const computed = Math.max(1, Math.floor(safeWidth / (safeHeight * minAspect)));
   return Math.max(1, Math.min(hardCap, computed));
 }

@@ -2,26 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { resolveStaticPaneLayout } from './workspace-model';
 
 describe('pane-layout static split truth', () => {
-  it('keeps two-pane landscape capacity stable across IME-like height changes', () => {
+  it('keeps phone-like three-pane landscape capacity stable across IME-like height changes', () => {
     const initial = resolveStaticPaneLayout({
       viewportWidth: 1200,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.5,
-      paneCount: 2,
+      minAspect: 0.42,
+      paneCount: 3,
     });
     const imeLift = resolveStaticPaneLayout({
       viewportWidth: 1200,
       viewportHeight: 620,
       hardCap: 4,
-      minAspect: 0.5,
-      paneCount: 2,
+      minAspect: 0.42,
+      paneCount: 3,
       previousLayout: initial,
     });
 
-    expect(initial.maxSplitCount).toBe(2);
-    expect(imeLift.maxSplitCount).toBe(2);
-    expect(imeLift.paneRatios).toEqual([0.5, 0.5]);
+    expect(initial.maxSplitCount).toBe(3);
+    expect(imeLift.maxSplitCount).toBe(3);
+    expect(imeLift.paneRatios).toEqual([1 / 3, 1 / 3, 1 / 3]);
   });
 
   it('resets baseline only when orientation changes', () => {
@@ -29,7 +29,7 @@ describe('pane-layout static split truth', () => {
       viewportWidth: 1200,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.5,
+      minAspect: 0.42,
       paneCount: 2,
     });
     const portrait = resolveStaticPaneLayout({
@@ -46,15 +46,16 @@ describe('pane-layout static split truth', () => {
     expect(portrait.baselineHeightPx).toBe(1200);
   });
 
-  it('keeps pane ratios aligned with explicit pane count truth within the aspect cap', () => {
+  it('keeps pane ratios aligned with explicit pane count truth within the phone-like aspect cap', () => {
     const threePane = resolveStaticPaneLayout({
-      viewportWidth: 1800,
+      viewportWidth: 1200,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.5,
+      minAspect: 0.42,
       paneCount: 3,
     });
 
+    expect(threePane.maxSplitCount).toBe(3);
     expect(threePane.paneRatios).toEqual([1 / 3, 1 / 3, 1 / 3]);
   });
 });

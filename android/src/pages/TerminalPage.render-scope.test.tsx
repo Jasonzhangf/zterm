@@ -313,12 +313,13 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1, session2, session3], session1);
 
     const panes = screen.getAllByTestId('terminal-pane-shell');
-    expect(panes).toHaveLength(2);
+    expect(panes).toHaveLength(3);
     expect(panes.map((pane) => pane.style.flex)).toEqual([
-      '0.5 1 0%',
-      '0.5 1 0%',
+      '0.3333333333333333 1 0%',
+      '0.3333333333333333 1 0%',
+      '0.3333333333333333 1 0%',
     ]);
-    expect(panes.map((pane) => pane.style.height)).toEqual(['100%', '100%']);
+    expect(panes.map((pane) => pane.style.height)).toEqual(['100%', '100%', '100%']);
   });
 
   it('gives the split pane strip full height so each visible renderer can measure and scroll independently', () => {
