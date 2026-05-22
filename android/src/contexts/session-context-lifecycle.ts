@@ -33,7 +33,7 @@ export function buildLifecycleRefreshTargets(state: Pick<SessionManagerState, 'a
 }
 
 export function shouldScheduleActiveTickRefresh(options: {
-  state: Pick<SessionManagerState, 'sessions'>;
+  state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
   sessionId: string;
   lastServerActivityAtRef: { current: Map<string, number> };
   headStalePingMs: number;
@@ -48,7 +48,8 @@ export function shouldScheduleActiveTickRefresh(options: {
   }
   const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
   if (lastServerActivityAt <= 0) {
-    return false;
+    return options.state.activeSessionId === options.sessionId
+      || (Array.isArray(options.state.liveSessionIds) && options.state.liveSessionIds.includes(options.sessionId));
   }
   const now = options.now ?? Date.now();
   return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));

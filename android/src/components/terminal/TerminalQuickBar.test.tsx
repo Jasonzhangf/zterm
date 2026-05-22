@@ -366,6 +366,10 @@ describe('TerminalQuickBar', () => {
       onCollapsedChange,
     });
 
+    const toolRow = screen.getByTestId('quickbar-tool-row');
+    expect(toolRow.textContent).not.toContain('收起');
+    expect(screen.getAllByRole('button', { name: '收起' })).toHaveLength(1);
+
     fireEvent.click(screen.getByRole('button', { name: '收起' }));
     expect(onCollapsedChange).toHaveBeenCalledWith(true);
 
@@ -390,10 +394,8 @@ describe('TerminalQuickBar', () => {
     );
 
     expect(screen.queryByTestId('terminal-quickbar-shell-rows')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
-    await waitFor(() => {
-      expect(screen.getByText('快捷输入')).not.toBeNull();
-    });
+    fireEvent.click(screen.getByRole('button', { name: '展开快捷栏' }));
+    expect(onCollapsedChange).toHaveBeenCalledWith(false);
   });
 
   it('shows floating quick menu content after tapping the toggle in floating-collapsed shell mode', async () => {

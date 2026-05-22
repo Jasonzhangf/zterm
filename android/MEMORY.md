@@ -185,3 +185,7 @@
 - [2026-05-22] split header 也必须保留 status-bar touch-safe 顶部保护区；不能为了横屏压缩把 tab 放到系统状态栏下沿。`terminal-layout-profile` 是唯一布局真源，split/default/single 的 header padding 都应在这里统一计算。
 - [2026-05-22] QuickBar 横屏利用率真源：折叠态必须由 `TerminalPage` UI shell 持有并影响 `terminalChromeBottomPx`，`TerminalQuickBar` 只负责渲染 inline rows / floating bubble / floating panel。禁止只把按钮视觉隐藏但继续保留底部高度；折叠后 root measured height 应释放为 0，点击贴边小球再展开浮动面板。
 - [2026-05-22] 文件同步权限真源：Android app 启动不得在 `MainActivity.onCreate()` 反复拉起存储权限页；文件同步页只检查权限并显式提示。Mac daemon 文件同步权限预检属于 `zterm-daemon.sh install-service`，通过一次性读写 `~/.wterm` 与 `~/Downloads/zterm` 触发/验证权限，后续同步操作不得再隐式申请权限。
+
+## 2026-05-22 QuickBar collapse affordance
+- QuickBar 折叠/展开的唯一真源在 `TerminalQuickBar`：展开态只能有一个边角 `收起` 控件，不得放入可滚动工具行；折叠态必须保留右下角小球 `展开快捷栏`，点击直接恢复 inline quick bar。
+- [2026-05-23] 多 pane 非焦点刷新唯一真源在 `SessionContext lifecycle` 的 live target tick 门禁：visible pane 进入 `liveSessionIds` 后，即使 connected 且尚无 `lastServerActivityAt`，也必须允许 active tick 请求 head；否则非焦点 pane 会等到点击/激活后才刷新。禁止在 daemon/renderer 做补偿。

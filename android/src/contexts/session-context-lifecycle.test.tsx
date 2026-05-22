@@ -68,6 +68,21 @@ describe('session-context-lifecycle', () => {
     })).toBe(true);
   });
 
+  it('keeps visible live pane sessions refreshing before first server activity', () => {
+    const state = {
+      sessions: [{ id: 'passive-pane', state: 'connected' }],
+      liveSessionIds: ['passive-pane'],
+    } as any;
+
+    expect(shouldScheduleActiveTickRefresh({
+      state,
+      sessionId: 'passive-pane',
+      lastServerActivityAtRef: { current: new Map() },
+      headStalePingMs: 200,
+      now: 10_000,
+    })).toBe(true);
+  });
+
   it('triggers active-resume refresh exactly once when app foreground truth flips back to active', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);

@@ -614,14 +614,14 @@ function TerminalQuickBarComponent({
   }, [remoteScreenshotStatus]);
 
   const toolRowActions = useMemo(() => ([
-    ...(collapseAvailable ? [{ id: 'quickbar-collapse', label: '收起', sequence: '' }] : []),
     { id: 'file-transfer', label: '文件', sequence: '' },
     { id: 'image-attach', label: '图片', sequence: '' },
     { id: 'sync-settings', label: '同步', sequence: '' },
     { id: 'remote-screenshot', label: screenshotToolLabel, sequence: '' },
     { id: 'line-numbers', label: '行号', sequence: '' },
     { id: 'debug-overlay', label: '状态', sequence: '' },
-  ]), [collapseAvailable, screenshotToolLabel]);
+  ]), [screenshotToolLabel]);
+  const collapseToolAction = useMemo(() => ({ id: 'quickbar-collapse', label: '收起', sequence: '' }), []);
 
   const splitToolActions = useMemo(() => {
     if (!splitAvailable) {
@@ -2568,6 +2568,10 @@ function TerminalQuickBarComponent({
             if (suppressBubbleClickRef.current) {
               return;
             }
+            if (collapsed && !floatingMenuOpen) {
+              onCollapsedChange?.(false);
+              return;
+            }
             setFloatingMenuOpen((current) => !current);
           }}
           onTouchStart={(event) => {
@@ -2631,12 +2635,14 @@ function TerminalQuickBarComponent({
           }}
           style={{
             position: 'fixed',
-            right: floatingBubblePosition.x === null ? `${FLOATING_BUBBLE_MARGIN}px` : 'auto',
-            bottom: floatingBubblePosition.y === null
+            right: collapsed ? `${FLOATING_BUBBLE_MARGIN}px` : floatingBubblePosition.x === null ? `${FLOATING_BUBBLE_MARGIN}px` : 'auto',
+            bottom: collapsed
+              ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
+              : floatingBubblePosition.y === null
               ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
               : 'auto',
-            left: floatingBubblePosition.x === null ? 'auto' : `${floatingBubblePosition.x}px`,
-            top: floatingBubblePosition.y === null ? 'auto' : `${floatingBubblePosition.y}px`,
+            left: collapsed || floatingBubblePosition.x === null ? 'auto' : `${floatingBubblePosition.x}px`,
+            top: collapsed || floatingBubblePosition.y === null ? 'auto' : `${floatingBubblePosition.y}px`,
             zIndex: 128,
             width: `${FLOATING_BUBBLE_SIZE}px`,
             height: `${FLOATING_BUBBLE_SIZE}px`,
@@ -2650,14 +2656,20 @@ function TerminalQuickBarComponent({
             transform: 'none',
             touchAction: 'none',
           }}
-          aria-label="Toggle floating quick menu"
+          aria-label={collapsed ? '展开快捷栏' : 'Toggle floating quick menu'}
         >
-          ⌘
+          {collapsed ? '⌃' : '⌘'}
         </button>
       )}
 
       {shellMode === 'inline' && !shellCollapsed && !floatingMenuOpen && (
-        <div data-testid="terminal-quickbar-shell-rows">
+        <div
+          data-testid="terminal-quickbar-shell-rows"
+          style={{
+            position: 'relative',
+            paddingRight: collapseAvailable ? `${FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING}px` : undefined,
+          }}
+        >
           {landscape ? (
             <>
               <div
@@ -2766,6 +2778,19 @@ function TerminalQuickBarComponent({
               </div>
             </>
           )}
+          {collapseAvailable ? (
+            <div
+              style={{
+                position: 'absolute',
+                right: `${QUICK_BAR_SIDE_PADDING}px`,
+                bottom: '4px',
+                width: `${FLOATING_BUBBLE_SIZE}px`,
+                height: '34px',
+              }}
+            >
+              {renderBaseActionButton(collapseToolAction, { fixed: true, compact: true })}
+            </div>
+          ) : null}
         </div>
       )}
       {toastMessage && (
