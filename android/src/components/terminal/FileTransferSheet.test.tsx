@@ -3,6 +3,7 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileTransferSheet } from './FileTransferSheet';
+import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 
 vi.mock('@capacitor/filesystem', () => ({
   Directory: {
@@ -16,8 +17,17 @@ vi.mock('@capacitor/filesystem', () => ({
   },
 }));
 
+vi.mock('../../plugins/StoragePermissionPlugin', () => ({
+  StoragePermissionPlugin: {
+    check: vi.fn().mockResolvedValue({ granted: true, mode: 'manage-external-storage' }),
+    request: vi.fn().mockResolvedValue({ granted: true, mode: 'manage-external-storage' }),
+  },
+}));
+
 afterEach(() => {
   cleanup();
+  vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({ granted: true, mode: 'manage-external-storage' });
+  vi.mocked(StoragePermissionPlugin.request).mockClear();
 });
 
 describe('FileTransferSheet', () => {
@@ -85,5 +95,25 @@ describe('FileTransferSheet', () => {
 
     expect(sendJsonA).toHaveBeenCalledTimes(initialCalls);
     expect(sendJsonB).not.toHaveBeenCalled();
+  });
+
+  it('does not request storage permission when local sync lacks install-time authorization', async () => {
+    vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({ granted: false, mode: 'manage-external-storage' });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.check).toHaveBeenCalled();
+      expect(StoragePermissionPlugin.request).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain('本地文件同步需要存储权限');
+    });
   });
 });

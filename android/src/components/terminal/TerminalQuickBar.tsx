@@ -82,6 +82,9 @@ interface TerminalQuickBarProps {
   splitAvailable?: boolean;
   splitVisible?: boolean;
   shellMode?: 'inline' | 'floating-collapsed';
+  collapseAvailable?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
   currentSplitCount?: number;
   splitCountOptions?: number[];
   onSetSplitCount?: (count: number) => void;
@@ -123,6 +126,9 @@ function TerminalQuickBarComponent({
   splitAvailable = false,
   splitVisible = false,
   shellMode = 'inline',
+  collapseAvailable = false,
+  collapsed = false,
+  onCollapsedChange,
   currentSplitCount = splitVisible ? 2 : 1,
   splitCountOptions = [],
   onSetSplitCount,
@@ -371,6 +377,11 @@ function TerminalQuickBarComponent({
   }, [clearRepeatLongPressTimer]);
 
   const triggerActionSequence = useCallback((action: { id: string; label: string; sequence: string }) => {
+    if (action.id === 'quickbar-collapse') {
+      onCollapsedChange?.(true);
+      setFloatingMenuOpen(false);
+      return;
+    }
     if (action.id === 'keyboard') {
       onToggleKeyboard?.();
       return;
@@ -433,6 +444,7 @@ function TerminalQuickBarComponent({
   }, [
     activeSessionId,
     onOpenFileTransfer,
+    onCollapsedChange,
     onRequestRemoteScreenshot,
     onSendSequence,
     onShortcutUse,
@@ -602,13 +614,14 @@ function TerminalQuickBarComponent({
   }, [remoteScreenshotStatus]);
 
   const toolRowActions = useMemo(() => ([
+    ...(collapseAvailable ? [{ id: 'quickbar-collapse', label: '收起', sequence: '' }] : []),
     { id: 'file-transfer', label: '文件', sequence: '' },
     { id: 'image-attach', label: '图片', sequence: '' },
     { id: 'sync-settings', label: '同步', sequence: '' },
     { id: 'remote-screenshot', label: screenshotToolLabel, sequence: '' },
     { id: 'line-numbers', label: '行号', sequence: '' },
     { id: 'debug-overlay', label: '状态', sequence: '' },
-  ]), [screenshotToolLabel]);
+  ]), [collapseAvailable, screenshotToolLabel]);
 
   const splitToolActions = useMemo(() => {
     if (!splitAvailable) {
@@ -1212,7 +1225,7 @@ function TerminalQuickBarComponent({
     return Boolean(target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label'));
   };
 
-  const shellCollapsed = shellMode === 'floating-collapsed'
+  const shellCollapsed = (shellMode === 'floating-collapsed' || collapsed)
     && !floatingMenuOpen
     && !editorOpen
     && !shortcutEditorOpen;
@@ -2643,7 +2656,7 @@ function TerminalQuickBarComponent({
         </button>
       )}
 
-      {shellMode === 'inline' && !floatingMenuOpen && (
+      {shellMode === 'inline' && !shellCollapsed && !floatingMenuOpen && (
         <div data-testid="terminal-quickbar-shell-rows">
           {landscape ? (
             <>

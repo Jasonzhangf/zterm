@@ -47,6 +47,13 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
   },
 }));
 
+vi.mock('../plugins/StoragePermissionPlugin', () => ({
+  StoragePermissionPlugin: {
+    check: vi.fn(async () => ({ granted: true, mode: 'manage-external-storage' })),
+    request: vi.fn(async () => ({ granted: true, mode: 'manage-external-storage' })),
+  },
+}));
+
 vi.mock('../components/terminal/TerminalHeader', () => ({
   TerminalHeader: ({ topInsetPx }: { topInsetPx?: number }) => <div data-testid="terminal-header" data-top-inset={String(topInsetPx || 0)} />,
 }));

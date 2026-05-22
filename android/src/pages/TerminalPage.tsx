@@ -1016,6 +1016,7 @@ function TerminalPageComponent({
   const [connectionIssueVisible, setConnectionIssueVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [quickBarHeight, setQuickBarHeight] = useState(TERMINAL_QUICK_BAR_RENDER_LIFT_PX);
+  const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
@@ -1876,6 +1877,11 @@ function TerminalPageComponent({
   }, [updateKeyboardInset]);
 
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
+  useEffect(() => {
+    if (!landscape && quickBarCollapsed) {
+      setQuickBarCollapsed(false);
+    }
+  }, [landscape, quickBarCollapsed]);
   const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({
     splitVisible,
     topInsetPx: headerTopInsetPx,
@@ -2122,6 +2128,9 @@ function TerminalPageComponent({
       splitAvailable={splitAvailable}
       splitVisible={splitVisible}
       shellMode={layoutProfile.quickBar.shellMode}
+      collapseAvailable={landscape}
+      collapsed={quickBarCollapsed}
+      onCollapsedChange={setQuickBarCollapsed}
       currentSplitCount={workspacePanes.length}
       splitCountOptions={
         splitAvailable
@@ -2165,6 +2174,7 @@ function TerminalPageComponent({
     handleQuickBarToggleAbsoluteLineNumbers,
     handleQuickBarToggleDebugOverlay,
     handleToggleKeyboard,
+    landscape,
     handleQuickBarEditorDomFocusChange,
     keyboardInset,
     onFileAttach,
@@ -2180,6 +2190,7 @@ function TerminalPageComponent({
     shortcutSmartSort,
     splitAvailable,
     splitVisible,
+    quickBarCollapsed,
     currentMaxSplitCount,
     cycleSecondaryPane,
     terminalImeActive,

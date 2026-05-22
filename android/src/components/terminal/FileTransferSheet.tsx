@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { createFileTransferSessionRuntime } from '../../lib/file-transfer-session-runtime';
+import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 import type {
   FileEntry,
   FileListRequestPayload,
@@ -196,6 +197,8 @@ export function FileTransferSheet({
   const [localPath, setLocalPath] = useState('/storage/emulated/0/Download/zterm');
   const [localEntries, setLocalEntries] = useState<LocalFileEntry[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
+  const [localPermissionGranted, setLocalPermissionGranted] = useState<boolean | null>(null);
+  const [localPermissionError, setLocalPermissionError] = useState<string | null>(null);
   const [showHiddenLocal, setShowHiddenLocal] = useState(false);
   const [selectedLocal, setSelectedLocal] = useState<Set<string>>(new Set());
 
@@ -226,10 +229,28 @@ export function FileTransferSheet({
     requestRemoteList(initialRemotePath, showHiddenRemote);
   }, [open, remoteCwd, requestRemoteList, showHiddenRemote]);
 
+  const checkLocalStoragePermission = useCallback(async () => {
+    try {
+      const status = await StoragePermissionPlugin.check();
+      setLocalPermissionGranted(status.granted);
+      setLocalPermissionError(status.granted ? null : '本地文件同步需要存储权限；请在 daemon/应用安装设置中一次性授权。');
+      return status.granted;
+    } catch (error) {
+      setLocalPermissionGranted(false);
+      setLocalPermissionError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }, []);
+
   // Load local directory
   const loadLocalDir = useCallback(async (path: string, showHidden: boolean) => {
     setLocalLoading(true);
     try {
+      const permissionGranted = await checkLocalStoragePermission();
+      if (!permissionGranted) {
+        setLocalEntries([]);
+        return;
+      }
       const result = await Filesystem.readdir({ path, directory: Directory.ExternalStorage });
       const entries: LocalFileEntry[] = [];
       for (const entry of result.files) {
@@ -252,9 +273,10 @@ export function FileTransferSheet({
     } catch (err) {
       console.warn('[FileTransferSheet] local readdir failed:', err);
       setLocalEntries([]);
+    } finally {
+      setLocalLoading(false);
     }
-    setLocalLoading(false);
-  }, []);
+  }, [checkLocalStoragePermission]);
 
   useEffect(() => {
     if (open && localPath) {
@@ -317,6 +339,9 @@ export function FileTransferSheet({
       setSelectedRemote(new Set());
     } else {
       // Upload selected local files
+      if (!(await checkLocalStoragePermission())) {
+        return;
+      }
       for (const name of selectedLocal) {
         const entry = localEntries.find(e => e.name === name);
         if (!entry || entry.type !== 'file') continue;
@@ -361,7 +386,7 @@ export function FileTransferSheet({
       // Refresh remote list
       requestRemoteList(remotePath, showHiddenRemote);
     }
-  }, [direction, selectedRemote, selectedLocal, remoteEntries, localEntries, remotePath, localPath, sendJson, requestRemoteList, showHiddenRemote]);
+  }, [checkLocalStoragePermission, direction, selectedRemote, selectedLocal, remoteEntries, localEntries, remotePath, localPath, sendJson, requestRemoteList, showHiddenRemote]);
 
   if (!open) return null;
 
@@ -462,6 +487,10 @@ export function FileTransferSheet({
         <div style={{ ...fileListContainerStyle, maxHeight: '22vh', flex: 'none' }}>
           {localLoading ? (
             <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>加载中…</div>
+          ) : localPermissionGranted === false ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted, lineHeight: 1.5 }}>
+              {localPermissionError || '本地文件同步需要先授权存储权限。'}
+            </div>
           ) : localEntries.length === 0 ? (
             <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>空目录</div>
           ) : localEntries.map(entry => (

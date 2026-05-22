@@ -30,6 +30,13 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
   },
 }));
 
+vi.mock('../plugins/StoragePermissionPlugin', () => ({
+  StoragePermissionPlugin: {
+    check: vi.fn(async () => ({ granted: true, mode: 'manage-external-storage' })),
+    request: vi.fn(async () => ({ granted: true, mode: 'manage-external-storage' })),
+  },
+}));
+
 const renderCounts = new Map<string, number>();
 
 function bumpRenderCount(key: string) {

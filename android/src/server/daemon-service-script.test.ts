@@ -41,6 +41,19 @@ describe('zterm daemon service script truth gates', () => {
     expect(restartBody).not.toContain('start_tmux');
   });
 
+  it('primes file-sync permissions during daemon service install before launchd bootstrap', () => {
+    const script = readDaemonScript();
+    const installBody = extractBlock(script, 'install_service() {', 900);
+    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 1600);
+    expect(script).toContain('prime_daemon_install_permissions()');
+    expect(installBody).toContain('write_launch_agent');
+    expect(installBody).toContain('prime_daemon_install_permissions');
+    expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
+    expect(preflightBody).toContain('Downloads');
+    expect(preflightBody).toContain('.wterm');
+    expect(preflightBody).toContain('.zterm-permission-preflight');
+  });
+
   it('only emits package-resolve error after both require.resolve and filesystem fallback fail', () => {
     const script = readDaemonScript();
     const body = extractBlock(script, 'resolve_node_package_dir() {', 1600);

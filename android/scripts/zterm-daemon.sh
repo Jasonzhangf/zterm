@@ -503,6 +503,37 @@ bootstrap_service() {
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
 }
 
+prime_daemon_install_permissions() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+
+  echo "zterm daemon install permission preflight"
+  echo "- macOS file sync uses this daemon process to read/write user-selected paths."
+  echo "- Grant file access to Terminal/iTerm or the installed daemon runner when macOS prompts."
+  echo "- Remote screenshot permission belongs to the GUI screenshot helper, not the daemon."
+
+  mkdir -p "$WTERM_HOME_DIR" "$UPLOAD_DIR" "$DOWNLOADS_DIR"
+  "$NODE_BIN" - <<'EOF'
+const { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } = require('node:fs');
+const { join } = require('node:path');
+const { homedir } = require('node:os');
+
+const dirs = [
+  join(homedir(), '.wterm'),
+  join(homedir(), 'Downloads', 'zterm'),
+];
+
+for (const dir of dirs) {
+  mkdirSync(dir, { recursive: true });
+  accessSync(dir, constants.R_OK | constants.W_OK);
+  const probe = join(dir, '.zterm-permission-preflight');
+  writeFileSync(probe, 'ok\n');
+  unlinkSync(probe);
+}
+EOF
+}
+
 start_service() {
   if ! service_installed; then
     echo "zterm autostart service not installed"
@@ -579,6 +610,7 @@ install_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
+  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {

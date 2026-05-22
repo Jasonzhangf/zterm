@@ -354,6 +354,48 @@ describe('TerminalQuickBar', () => {
     expect(screen.queryByRole('button', { name: '文件' })).toBeNull();
   });
 
+  it('lets landscape users collapse inline rows into the floating bubble', async () => {
+    const onCollapsedChange = vi.fn();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1200 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 700 });
+    stubVisualViewport({ width: 1200, height: 700, offsetTop: 0, offsetLeft: 0 });
+
+    const view = renderQuickBar({
+      collapseAvailable: true,
+      collapsed: false,
+      onCollapsedChange,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    expect(onCollapsedChange).toHaveBeenCalledWith(true);
+
+    view.rerender(
+      <TerminalQuickBar
+        activeSessionId="session-1"
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onSendSequence={vi.fn()}
+        onSessionDraftChange={vi.fn()}
+        onSessionDraftSend={vi.fn()}
+        onQuickActionsChange={vi.fn()}
+        onShortcutActionsChange={vi.fn()}
+        onOpenScheduleComposer={vi.fn()}
+        onMeasuredHeightChange={vi.fn()}
+        shellMode="inline"
+        collapseAvailable
+        collapsed
+        onCollapsedChange={onCollapsedChange}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-quickbar-shell-rows')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+    await waitFor(() => {
+      expect(screen.getByText('快捷输入')).not.toBeNull();
+    });
+  });
+
   it('shows floating quick menu content after tapping the toggle in floating-collapsed shell mode', async () => {
     renderQuickBar({
       shellMode: 'floating-collapsed',

@@ -183,3 +183,5 @@
 - [2026-05-22] split tab 点击必须由 UI shell 同步 pane ownership：Header 只发 session intent，TerminalPage 是唯一桥接点；split 模式下必须先 `findPaneForSession -> switchTabInPane` 更新 pane `activeTabId`，再切全局 active session。只调用 `onSwitchSession` 会造成“tab 点了但 pane 内容不变”。
 - [2026-05-22] QuickBar 分屏数量不能只按屏幕容量显示，还必须按当前 session/tab 数封顶；否则两 tab 时会显示不可用的 3 分屏。Android terminal 默认键盘请求属于 TerminalPage UI shell 状态，session 切换/进入页不得把它清成 false。
 - [2026-05-22] split header 也必须保留 status-bar touch-safe 顶部保护区；不能为了横屏压缩把 tab 放到系统状态栏下沿。`terminal-layout-profile` 是唯一布局真源，split/default/single 的 header padding 都应在这里统一计算。
+- [2026-05-22] QuickBar 横屏利用率真源：折叠态必须由 `TerminalPage` UI shell 持有并影响 `terminalChromeBottomPx`，`TerminalQuickBar` 只负责渲染 inline rows / floating bubble / floating panel。禁止只把按钮视觉隐藏但继续保留底部高度；折叠后 root measured height 应释放为 0，点击贴边小球再展开浮动面板。
+- [2026-05-22] 文件同步权限真源：Android app 启动不得在 `MainActivity.onCreate()` 反复拉起存储权限页；文件同步页只检查权限并显式提示。Mac daemon 文件同步权限预检属于 `zterm-daemon.sh install-service`，通过一次性读写 `~/.wterm` 与 `~/Downloads/zterm` 触发/验证权限，后续同步操作不得再隐式申请权限。
