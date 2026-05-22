@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView as BaseTerminalView } from './TerminalView';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
-import { createSessionHeadStore } from '../lib/session-head-store';
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
 
 class ResizeObserverMock {
@@ -542,12 +541,11 @@ describe('TerminalView minimal mirror render', () => {
     expect(onInput).toHaveBeenLastCalledWith(nextSession.id, '\x1bOA');
   });
 
-  it('does not realign follow scroll when only daemon head metadata advances without a body repaint', async () => {
+  it('does not let renderer subscribe to daemon head metadata without a body repaint', async () => {
     vi.useFakeTimers();
     try {
       const onViewportChange = vi.fn();
       const renderStore = createSessionRenderBufferStore();
-      const headStore = createSessionHeadStore();
       const session = makeSession({
         revision: 1,
         lines: buildRows(80),
@@ -562,17 +560,11 @@ describe('TerminalView minimal mirror render', () => {
         bufferGapRanges: session.buffer.gapRanges,
         revision: session.buffer.revision,
       }));
-      headStore.setHead(session.id, {
-        daemonHeadRevision: 1,
-        daemonHeadEndIndex: 80,
-      });
-
       const view = render(
         <div style={{ width: '640px', height: '408px' }}>
           <BaseTerminalView
             sessionId={session.id}
             sessionBufferStore={renderStore}
-            sessionHeadStore={headStore}
             active
             onResize={vi.fn()}
             onInput={vi.fn()}
@@ -614,13 +606,6 @@ describe('TerminalView minimal mirror render', () => {
         viewportRows: 24,
       });
 
-      act(() => {
-        headStore.setHead(session.id, {
-          daemonHeadRevision: 2,
-          daemonHeadEndIndex: 120,
-        });
-      });
-
       await act(async () => {
         vi.advanceTimersByTime(120);
       });
@@ -630,7 +615,7 @@ describe('TerminalView minimal mirror render', () => {
       expect(scrollTopWriteCount).toBe(initialScrollTopWriteCount);
       expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
         mode: 'follow',
-        viewportEndIndex: 120,
+        viewportEndIndex: 80,
         viewportRows: 24,
       });
     } finally {
@@ -1225,8 +1210,6 @@ describe('TerminalView minimal mirror render', () => {
           bufferEndIndex={nextSession.buffer.endIndex}
           bufferHeadStartIndex={nextSession.buffer.bufferHeadStartIndex}
           bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
-          daemonHeadRevision={2}
-          daemonHeadEndIndex={121}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -1321,8 +1304,6 @@ describe('TerminalView minimal mirror render', () => {
           bufferEndIndex={narrowedSession.buffer.endIndex}
           bufferHeadStartIndex={narrowedSession.buffer.bufferHeadStartIndex}
           bufferTailEndIndex={narrowedSession.buffer.bufferTailEndIndex}
-          daemonHeadRevision={2}
-          daemonHeadEndIndex={121}
           bufferGapRanges={narrowedSession.buffer.gapRanges}
           cursorKeysApp={narrowedSession.buffer.cursorKeysApp}
           active
@@ -1713,7 +1694,6 @@ describe('TerminalView minimal mirror render', () => {
           bufferStartIndex={nextSession.buffer.startIndex}
           bufferEndIndex={nextSession.buffer.endIndex}
           bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
-          daemonHeadEndIndex={100}
           bufferGapRanges={nextSession.buffer.gapRanges}
           cursorKeysApp={nextSession.buffer.cursorKeysApp}
           active
@@ -1967,7 +1947,7 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
-  it('keeps rendering the last local tail while follow demand points at a newer daemon head', async () => {
+  it('keeps follow demand anchored to the last local tail instead of daemon head metadata', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({
       revision: 1,
@@ -1983,7 +1963,6 @@ describe('TerminalView minimal mirror render', () => {
           bufferStartIndex={session.buffer.startIndex}
           bufferEndIndex={session.buffer.endIndex}
           bufferTailEndIndex={session.buffer.bufferTailEndIndex}
-          daemonHeadEndIndex={120}
           bufferGapRanges={session.buffer.gapRanges}
           cursorKeysApp={session.buffer.cursorKeysApp}
           active
@@ -1998,7 +1977,7 @@ describe('TerminalView minimal mirror render', () => {
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
       expect(lastCall?.mode).toBe('follow');
-      expect(lastCall?.viewportEndIndex).toBe(120);
+      expect(lastCall?.viewportEndIndex).toBe(80);
     });
     expect(readRenderedRows(view.container)).toContain('row-080');
     expect(readRenderedRows(view.container)).not.toContain('');

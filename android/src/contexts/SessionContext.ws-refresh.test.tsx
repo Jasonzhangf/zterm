@@ -1448,7 +1448,7 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
 
-  it('probes a stale-open active transport after immediate input instead of silently idling', async () => {
+  it('drops input on a stale-open active transport and reconnects instead of socket-buffering it', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1477,16 +1477,16 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
-        expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
-        expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+        expect(sentMessages.some((item) => item.type === 'input')).toBe(false);
+        expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
       });
-      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+      expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
     } finally {
       nowSpy.mockRestore();
     }
   });
 
-  it('sends input immediately on an open session transport even when activity audit is stale', async () => {
+  it('does not send input on an open transport after the activity audit marks it stale', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1515,11 +1515,10 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
-        expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
-        expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+        expect(sentMessages.some((item) => item.type === 'input')).toBe(false);
+        expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
       });
-      expect(screen.getByTestId('session-state').textContent).toBe('connected');
-      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
     } finally {
       nowSpy.mockRestore();
     }

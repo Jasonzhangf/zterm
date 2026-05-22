@@ -225,14 +225,15 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 
 ## 3. renderer
 
-renderer 只看两件事：
-1. `buffer head`：内容池最新底部
+renderer 只看三件事：
+1. `local render buffer tail`：buffer manager 已提交给 renderer 的本地内容底部
 2. `renderBottomIndex`：当前要显示窗口的底部
 3. `visible range`：当前要画的 absolute rows
 
 额外门禁：
 - renderer body repaint 只允许来自 `buffer-sync apply`
-- head metadata / cursor metadata 可以被 renderer 读取
+- daemon head metadata 只属于 buffer manager / planner 输入；renderer 不订阅 daemon head store，不用 daemon head 推进 follow demand
+- cursor metadata 可以被 renderer 读取
 - 但 head/cursor metadata 不得作为正文 repaint 触发源
 
 ### 3.1 block/shade glyph 真相

@@ -121,7 +121,44 @@ describe('TerminalHeader', () => {
     );
 
     const root = container.firstElementChild as HTMLElement | null;
-    expect(root?.style.padding).toBe('1px 4px 2px');
+    expect(root?.style.padding).toBe('21px 4px 2px');
+  });
+
+  it('keeps a touch-safe status-bar gap above split tabs', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1200,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+    const session = makeSession();
+    const { container } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={16}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        paneGroups={[{
+          paneId: 'pane-1',
+          size: 1,
+          sessions: [toHeaderSession(session)],
+          activeSessionId: session.id,
+          isActivePane: true,
+        }]}
+      />,
+    );
+
+    const root = container.firstElementChild as HTMLElement | null;
+    expect(root?.style.padding).toBe('37px 4px 2px');
   });
 
   it('renders a close button on the active tab and closes on single tap', () => {

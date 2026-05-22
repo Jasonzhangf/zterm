@@ -947,4 +947,70 @@ describe('TerminalQuickBar', () => {
 
     expect(document.querySelectorAll('[data-quickbar-shell-row="true"]').length).toBe(2);
   });
+
+  it('shows split controls in the always-visible tool row when the workspace marks split available', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 800 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 1200 });
+    stubVisualViewport({ width: 800, height: 1200, offsetTop: 0, offsetLeft: 0 });
+
+    renderQuickBar({
+      splitAvailable: true,
+      splitVisible: false,
+      splitCountOptions: [2],
+      onSetSplitCount: vi.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: '2 分屏' })).not.toBeNull();
+  });
+
+  it('hides split controls when the workspace marks split unavailable', async () => {
+    renderQuickBar({
+      splitAvailable: false,
+      splitVisible: false,
+      splitCountOptions: [2],
+      onSetSplitCount: vi.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: '2 分屏' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '开启分屏' })).toBeNull();
+  });
+
+  it('routes visible split controls to explicit split count changes', () => {
+    const onSetSplitCount = vi.fn();
+    renderQuickBar({
+      splitAvailable: true,
+      splitVisible: false,
+      splitCountOptions: [2],
+      onSetSplitCount,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '2 分屏' }));
+
+    expect(onSetSplitCount).toHaveBeenCalledWith(2);
+  });
+
+  it('does not invent unsupported split counts beyond the workspace provided options', () => {
+    renderQuickBar({
+      splitAvailable: true,
+      splitVisible: true,
+      currentSplitCount: 2,
+      splitCountOptions: [1, 2],
+      onSetSplitCount: vi.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: '1 分屏' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '2 分屏 ✓' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '3 分屏' })).toBeNull();
+  });
+
+  it('renders only one visible Paste shortcut when defaults and saved shortcuts overlap', () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: 'saved-paste', label: 'Paste', sequence: '\x16', order: 0, row: 'bottom-scroll' },
+      ],
+    });
+
+    expect(screen.getAllByRole('button', { name: 'Paste' })).toHaveLength(1);
+  });
+
 });

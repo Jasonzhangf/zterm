@@ -25,7 +25,12 @@ import type {
 } from './session-context-provider-assembly-types';
 
 const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
-const ACTIVE_TRANSPORT_PROBE_WAIT_MS = 1500;
+function resolveActiveTransportProbeWaitMs() {
+  const cadence = resolveTerminalRefreshCadence();
+  if (cadence.headTickMs >= 120) { return 500; }
+  if (cadence.headTickMs >= 66) { return 900; }
+  return 1500;
+}
 const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   cols: 80,
   rows: 24,
@@ -75,7 +80,7 @@ export function useSessionProviderFacadeAssemblies(
     },
     runtimeDebug,
     defaultViewport: DEFAULT_TERMINAL_SESSION_VIEWPORT,
-    activeTransportProbeWaitMs: ACTIVE_TRANSPORT_PROBE_WAIT_MS,
+    activeTransportProbeWaitMs: resolveActiveTransportProbeWaitMs(),
     resolveSessionCacheLines: core.resolveSessionCacheLines,
     createSessionSync: core.createSessionSync,
     deleteSessionSync: core.deleteSessionSync,
@@ -135,7 +140,14 @@ export function useSessionProviderFacadeAssemblies(
     probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
   } = sessionLifecycleRuntime;
-  const switchSession = core.setActiveSessionSync;
+  const switchSession = (id: string) => {
+    const prev = options.stateRef.current.activeSessionId;
+    if (prev && prev !== id) {
+      core.resetSessionTransportPullBookkeeping(prev, 'tab-switch-out');
+    }
+    core.setActiveSessionSync(id);
+    core.resetSessionTransportPullBookkeeping(id, 'tab-switch-in');
+  };
 
   const sessionPublicFacadeRuntime = useMemo(() => createSessionPublicFacadeRuntime({
     stateRef: options.stateRef,

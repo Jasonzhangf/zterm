@@ -32,32 +32,56 @@ export interface TerminalRefreshCadence {
 
 const TERMINAL_RENDER_COMMIT_MS = ACTIVE_HEAD_REFRESH_TICK_MS;
 
-function readEffectiveNetworkProfile() {
+function readEffectiveNetworkProfile(): { effectiveType: string; saveData: boolean; rttMs: number } {
   if (typeof navigator === 'undefined') {
     return {
       effectiveType: '',
       saveData: false,
+      rttMs: 0,
     };
   }
 
   const connection =
     (navigator as Navigator & {
-      connection?: { effectiveType?: string; saveData?: boolean };
-      mozConnection?: { effectiveType?: string; saveData?: boolean };
-      webkitConnection?: { effectiveType?: string; saveData?: boolean };
+      connection?: { effectiveType?: string; saveData?: boolean; rtt?: number };
+      mozConnection?: { effectiveType?: string; saveData?: boolean; rtt?: number };
+      webkitConnection?: { effectiveType?: string; saveData?: boolean; rtt?: number };
     }).connection
-    || (navigator as Navigator & { mozConnection?: { effectiveType?: string; saveData?: boolean } }).mozConnection
-    || (navigator as Navigator & { webkitConnection?: { effectiveType?: string; saveData?: boolean } }).webkitConnection
+    || (navigator as Navigator & { mozConnection?: { effectiveType?: string; saveData?: boolean; rtt?: number } }).mozConnection
+    || (navigator as Navigator & { webkitConnection?: { effectiveType?: string; saveData?: boolean; rtt?: number } }).webkitConnection
     || null;
 
   return {
     effectiveType: String(connection?.effectiveType || '').toLowerCase(),
     saveData: Boolean(connection?.saveData),
+    rttMs: Number.isFinite(connection?.rtt) ? Math.max(0, Math.floor(connection?.rtt || 0)) : 0,
   };
 }
 
 export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
   const network = readEffectiveNetworkProfile();
+
+  if (network.rttMs >= 800) {
+    return {
+      headTickMs: 120,
+      minTailRefreshGapMs: 120,
+      headStalePingMs: 520,
+      pullRequestStaleMs: 2500,
+      readingSyncDelayMs: 72,
+      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
+    };
+  }
+
+  if (network.rttMs >= 300) {
+    return {
+      headTickMs: 66,
+      minTailRefreshGapMs: 66,
+      headStalePingMs: 360,
+      pullRequestStaleMs: 2000,
+      readingSyncDelayMs: 48,
+      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
+    };
+  }
 
   if (network.saveData || network.effectiveType === 'slow-2g' || network.effectiveType === '2g') {
     return {

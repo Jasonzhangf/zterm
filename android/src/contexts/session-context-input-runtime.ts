@@ -59,7 +59,7 @@ export function sendInputThroughSessionTransport(options: {
   const isExplicitInputTarget = true;
   const reconnectInFlight = options.isReconnectInFlight(targetSessionId);
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (ws && ws.readyState === WebSocket.OPEN && !transportStale) {
     options.runtimeDebug('session.input.send', {
       sessionId: targetSessionId,
       size: options.data.length,
@@ -80,6 +80,20 @@ export function sendInputThroughSessionTransport(options: {
     return;
   }
 
+  if (ws && ws.readyState === WebSocket.OPEN && transportStale) {
+    options.runtimeDebug('session.input.drop.stale-open-transport', {
+      sessionId: targetSessionId,
+      size: options.data.length,
+      preview: options.data.slice(0, 32),
+      runtimeActiveSessionId,
+      reconnectInFlight,
+    });
+    if (!reconnectInFlight) {
+      options.reconnectSession(targetSessionId);
+    }
+    return;
+  }
+
   options.runtimeDebug('session.input.transport-unavailable', {
     sessionId: targetSessionId,
     why: transportStale ? 'stale-open-transport' : 'transport-unavailable',
@@ -91,9 +105,6 @@ export function sendInputThroughSessionTransport(options: {
     reconnectInFlight,
     wsReadyState: ws?.readyState ?? null,
   });
-  if (options.hasPendingSessionTransportOpen(targetSessionId)) {
-    return;
-  }
   const shouldForceReconnect = transportStale
     ? isExplicitInputTarget && !reconnectInFlight
     : options.shouldReconnectQueuedActiveInput({
@@ -101,6 +112,17 @@ export function sendInputThroughSessionTransport(options: {
         wsReadyState: ws?.readyState ?? null,
         reconnectInFlight,
       });
+  const pendingTransportOpen = options.hasPendingSessionTransportOpen(targetSessionId);
+  if (pendingTransportOpen && !shouldForceReconnect) {
+    options.runtimeDebug('session.input.drop.pending-transport-open', {
+      sessionId: targetSessionId,
+      size: options.data.length,
+      preview: options.data.slice(0, 32),
+      wsReadyState: ws?.readyState ?? null,
+      reconnectInFlight,
+    });
+    return;
+  }
   if (shouldForceReconnect) {
     options.reconnectSession(targetSessionId);
   }

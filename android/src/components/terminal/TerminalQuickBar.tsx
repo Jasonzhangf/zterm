@@ -395,6 +395,17 @@ function TerminalQuickBarComponent({
       onToggleAbsoluteLineNumbers?.();
       return;
     }
+    if (action.id.startsWith('split-count-')) {
+      const count = Number.parseInt(action.id.slice('split-count-'.length), 10);
+      if (Number.isFinite(count)) {
+        onSetSplitCount?.(count);
+      }
+      return;
+    }
+    if (action.id === 'split-toggle') {
+      onToggleSplitLayout?.();
+      return;
+    }
     if (action.id === 'remote-screenshot') {
       if (!activeSessionId) {
         alert('当前没有可用的目标 session');
@@ -425,9 +436,12 @@ function TerminalQuickBarComponent({
     onRequestRemoteScreenshot,
     onSendSequence,
     onShortcutUse,
+    onSetSplitCount,
     onToggleAbsoluteLineNumbers,
+    onToggleCopyMode,
     onToggleDebugOverlay,
     onToggleKeyboard,
+    onToggleSplitLayout,
   ]);
 
   const isRepeatableAction = useCallback((action: { id: string; label: string; sequence: string }) => {
@@ -596,6 +610,20 @@ function TerminalQuickBarComponent({
     { id: 'debug-overlay', label: '状态', sequence: '' },
   ]), [screenshotToolLabel]);
 
+  const splitToolActions = useMemo(() => {
+    if (!splitAvailable) {
+      return [];
+    }
+    if (normalizedSplitCountOptions.length > 0) {
+      return normalizedSplitCountOptions.map((count) => ({
+        id: `split-count-${count}`,
+        label: count === currentSplitCount ? `${count} 分屏 ✓` : `${count} 分屏`,
+        sequence: '',
+      }));
+    }
+    return [{ id: 'split-toggle', label: splitVisible ? '关闭分屏' : '开启分屏', sequence: '' }];
+  }, [currentSplitCount, normalizedSplitCountOptions, splitAvailable, splitVisible]);
+
   const topFixedActions = useMemo(() => ([
     { id: 'tmux-copy', label: '拷贝', sequence: '' },
     { id: 'arrow-up', label: '↑', sequence: '\x1b[A' },
@@ -608,18 +636,20 @@ function TerminalQuickBarComponent({
     { id: 'arrow-right', label: '→', sequence: '\x1b[C' },
   ]), []);
 
-  const topScrollActions = useMemo(
-    () => buildVisibleShortcutRowActions('top-scroll', sortedShortcutActions),
-    [sortedShortcutActions],
-  );
-
-  const bottomScrollActions = useMemo(
-    () => buildVisibleShortcutRowActions('bottom-scroll', sortedShortcutActions),
-    [sortedShortcutActions],
-  );
+  const [topScrollActions, bottomScrollActions] = useMemo(() => {
+    const consumedSequences = new Set<string>();
+    return [
+      buildVisibleShortcutRowActions('top-scroll', sortedShortcutActions, consumedSequences),
+      buildVisibleShortcutRowActions('bottom-scroll', sortedShortcutActions, consumedSequences),
+    ];
+  }, [sortedShortcutActions]);
   const mergedScrollActions = useMemo(
     () => [...topScrollActions, ...bottomScrollActions],
     [bottomScrollActions, topScrollActions],
+  );
+  const visibleToolRowActions = useMemo(
+    () => [...splitToolActions, ...toolRowActions],
+    [splitToolActions, toolRowActions],
   );
 
   const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
@@ -2208,7 +2238,7 @@ function TerminalQuickBarComponent({
                   </button>
               </div>
 
-              {splitAvailable && landscape && (
+              {splitAvailable && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' }}>
                   <div
                     style={{
@@ -2656,7 +2686,7 @@ function TerminalQuickBarComponent({
                 </div>
                 <div style={scrollTrackShellStyle}>
                   <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {toolRowActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                    {visibleToolRowActions.map((action) => renderBaseActionButton(action, { compact: true }))}
                   </div>
                 </div>
               </div>
@@ -2717,7 +2747,7 @@ function TerminalQuickBarComponent({
               >
                 <div style={scrollTrackShellStyle}>
                   <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {toolRowActions.map((action) => renderBaseActionButton(action))}
+                    {visibleToolRowActions.map((action) => renderBaseActionButton(action))}
                   </div>
                 </div>
               </div>

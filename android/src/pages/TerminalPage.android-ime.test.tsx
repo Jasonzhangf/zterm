@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../lib/types';
+import { STORAGE_KEYS, type Session } from '../lib/types';
 import { TerminalPage, resolveKeyboardLiftPx, resolveLayoutViewportHeight, resolveTerminalHeaderTopInsetPx } from './TerminalPage';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 
@@ -148,14 +148,42 @@ function makeSession(id: string): Session {
   };
 }
 
+async function flushAndroidImeFocusTimer() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe('TerminalPage Android IME bridge', () => {
   beforeEach(() => {
     imeListeners.clear();
     keyboardListeners.clear();
+    const storageBacking = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      get length() {
+        return storageBacking.size;
+      },
+      clear() {
+        storageBacking.clear();
+      },
+      getItem(key: string) {
+        return storageBacking.has(key) ? storageBacking.get(key)! : null;
+      },
+      key(index: number) {
+        return Array.from(storageBacking.keys())[index] ?? null;
+      },
+      removeItem(key: string) {
+        storageBacking.delete(key);
+      },
+      setItem(key: string, value: string) {
+        storageBacking.set(key, String(value));
+      },
+    } as Storage);
   });
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     imeListeners.clear();
     keyboardListeners.clear();
   });
@@ -185,6 +213,18 @@ describe('TerminalPage Android IME bridge', () => {
     );
 
     await waitFor(() => {
+      expect(imeListeners.has('keyboardState')).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    imeListeners.get('keyboardState')?.({ visible: true, height: 320 });
+
+    await waitFor(() => {
+      expect(imeListeners.has('keyboardState')).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    imeListeners.get('keyboardState')?.({ visible: true, height: 320 });
+
+    await waitFor(() => {
       expect(imeListeners.has('input')).toBe(true);
       expect(imeListeners.has('backspace')).toBe(true);
     });
@@ -197,6 +237,58 @@ describe('TerminalPage Android IME bridge', () => {
 
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '语音输入\r下一行');
     expect(onTerminalInput).toHaveBeenCalledWith('s1', '\x7f\x7f');
+  });
+
+  it('routes Android IME input to the focused split pane session instead of the old runtime active session', async () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const onTerminalInput = vi.fn();
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('input')).toBe(true);
+      expect(screen.getByTestId('terminal-view-s2')).toBeTruthy();
+    });
+
+    const paneShell = screen
+      .getAllByTestId('terminal-pane-shell')
+      .find((element) => element.getAttribute('data-pane-id') === 'pane-2');
+    expect(paneShell).toBeTruthy();
+
+    fireEvent.pointerDown(paneShell!);
+    await waitFor(() => expect(onSwitchSession).toHaveBeenCalledWith('s2'));
+
+    imeListeners.get('input')?.({ text: 'pane2' });
+
+    expect(onTerminalInput).toHaveBeenCalledWith('s2', 'pane2');
+    expect(onTerminalInput).not.toHaveBeenCalledWith('s1', 'pane2');
   });
 
   it('keeps editor overlay draft outside terminal body truth on Android', async () => {
@@ -457,7 +549,7 @@ describe('TerminalPage Android IME bridge', () => {
     expect(calls[calls.length - 1]).toBe(false);
   });
 
-  it('only shows ImeAnchor once when explicitly toggling the Android keyboard', async () => {
+  it('hides ImeAnchor when toggling the already-requested Android keyboard off', async () => {
     const session = makeSession('s1');
 
     try {
@@ -485,17 +577,13 @@ describe('TerminalPage Android IME bridge', () => {
         expect(keyboardListeners.has('keyboardDidShow')).toBe(true);
       });
 
-      vi.useFakeTimers();
-      vi.mocked(ImeAnchor.show).mockClear();
+      vi.mocked(ImeAnchor.hide).mockClear();
       fireEvent.click(screen.getByRole('button', { name: 'toggle-keyboard' }));
 
-      expect(ImeAnchor.show).not.toHaveBeenCalled();
+      await flushAndroidImeFocusTimer();
 
-      await act(async () => {
-        vi.advanceTimersByTime(1);
-      });
-
-      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(ImeAnchor.hide)).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('false');
     } finally {
       vi.useRealTimers();
     }
@@ -596,6 +684,8 @@ describe('TerminalPage Android IME bridge', () => {
       />,
     );
 
+    await flushAndroidImeFocusTimer();
+
     await waitFor(() => {
       expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({ active: false });
@@ -625,6 +715,8 @@ describe('TerminalPage Android IME bridge', () => {
       />,
     );
 
+    await flushAndroidImeFocusTimer();
+
     await waitFor(() => {
       expect(imeListeners.has('keyboardState')).toBe(true);
     });
@@ -635,6 +727,41 @@ describe('TerminalPage Android IME bridge', () => {
     await waitFor(() => {
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-inset')).toBe('320');
+    });
+  });
+
+  it('requests the Android terminal keyboard on initial terminal entry without waiting for the keyboard button', async () => {
+    const session = makeSession('s1');
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has('keyboardState')).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    imeListeners.get('keyboardState')?.({ visible: true, height: 320 });
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalled();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-keyboard-visible')).toBe('true');
     });
   });
 

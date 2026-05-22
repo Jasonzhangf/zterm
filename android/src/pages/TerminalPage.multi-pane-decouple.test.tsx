@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../lib/types';
-import { STORAGE_KEYS } from '../lib/types';
+import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
@@ -58,7 +57,7 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({ RemoteScreensho
 // Track TerminalView renders to verify decoupling
 const terminalViewCalls: {sessionId: string; active: boolean}[] = [];
 vi.mock('../components/TerminalView', () => ({
-  TerminalView: ({ sessionId, active, ...rest }: { sessionId: string; active?: boolean }) => {
+  TerminalView: ({ sessionId, active }: { sessionId: string; active?: boolean }) => {
     terminalViewCalls.push({ sessionId, active: !!active });
     return (
       <div
@@ -99,7 +98,7 @@ function s(id: string, title = id): Session {
 }
 
 const base = {
-  getSessionDebugMetrics: () => ({
+  getSessionDebugMetrics: (): SessionDebugOverlayMetrics => ({
     uplinkBps: 0, downlinkBps: 0, renderHz: 0, pullHz: 0,
     bufferPullActive: false, status: 'waiting', active: false, updatedAt: 1,
   }),
@@ -127,7 +126,7 @@ describe('multi-pane input isolation', () => {
   it('onTerminalInput receives the active pane sessionId only', () => {
     const sessions = [s('s1'), s('s2')];
     const onTerminalInput = vi.fn();
-    const { getByTestId } = render(
+    render(
       <TerminalPage
         {...base}
         sessions={sessions}

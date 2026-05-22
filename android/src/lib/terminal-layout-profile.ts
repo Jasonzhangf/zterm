@@ -45,7 +45,7 @@ function buildSplitLandscapeProfile(safeTopInsetPx: number): TerminalLayoutProfi
   return {
     mode: 'split-landscape',
     header: {
-      outerPadding: `${safeTopInsetPx + 1}px 4px 2px`,
+      outerPadding: `${safeTopInsetPx + PHONE_HEADER_TOUCH_SAFE_OFFSET_PX + 1}px 4px 2px`,
       rowGap: '3px',
       paneGap: '3px',
       backButtonSize: '22px',
@@ -88,7 +88,7 @@ function buildSplitDefaultProfile(safeTopInsetPx: number): TerminalLayoutProfile
   return {
     mode: 'split-default',
     header: {
-      outerPadding: `${safeTopInsetPx + 2}px 4px 4px`,
+      outerPadding: `${safeTopInsetPx + PHONE_HEADER_TOUCH_SAFE_OFFSET_PX + 2}px 4px 4px`,
       rowGap: '4px',
       paneGap: '4px',
       backButtonSize: '24px',

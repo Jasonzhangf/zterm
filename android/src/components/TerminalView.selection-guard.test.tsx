@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { render } from '@testing-library/react';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { TerminalView } from './TerminalView';
-
 
 class ResizeObserverMock {
   observe() {}
@@ -12,22 +11,9 @@ class ResizeObserverMock {
 
 beforeAll(() => {
   (globalThis as any).ResizeObserver = ResizeObserverMock;
-
-  it('copy-mode pointer handlers run only when copy mode is enabled', () => {
-    const onTapRow = vi.fn();
-    const onLongPressRow = vi.fn();
-    const { container } = render(
-      <TerminalView {...baseProps} copyModeActive onTapRow={onTapRow} onLongPressRow={onLongPressRow} />,
-    );
-    const host = container.querySelector('.wterm') as HTMLDivElement;
-    host.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientY: 20 }));
-    host.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 20 }));
-    expect(onTapRow).toHaveBeenCalled();
-  });
-
 });
 
-describe('TerminalView selection guard', () => {
+describe('TerminalView system selection mode', () => {
   const baseProps = {
     sessionId: 's1',
     active: true,
@@ -46,40 +32,18 @@ describe('TerminalView selection guard', () => {
       cursor: null,
       revision: 1,
     },
-    onTapRow: vi.fn(),
-    onLongPressRow: vi.fn(),
   } as any;
 
-  it('normal mode keeps terminal rows selectable for system copy', () => {
-    const { container } = render(<TerminalView {...baseProps} copyModeActive={false} />);
+  it('keeps terminal rows selectable for system copy', () => {
+    const { container } = render(<TerminalView {...baseProps} />);
     const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
     expect(row).toBeTruthy();
     expect(row.style.userSelect).toBe('text');
   });
 
-  it('copy-mode pointer handlers do not run in normal mode', () => {
-    const onTapRow = vi.fn();
-    const onLongPressRow = vi.fn();
-    const { container } = render(
-      <TerminalView {...baseProps} copyModeActive={false} onTapRow={onTapRow} onLongPressRow={onLongPressRow} />,
-    );
+  it('does not register custom copy mode pointer handlers', () => {
+    const { container } = render(<TerminalView {...baseProps} />);
     const host = container.querySelector('.wterm') as HTMLDivElement;
-    host.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientY: 20 }));
-    host.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 20 }));
-    expect(onTapRow).not.toHaveBeenCalled();
-    expect(onLongPressRow).not.toHaveBeenCalled();
+    expect(host.getAttribute('onpointerdown')).toBeNull();
   });
-
-  it('copy-mode pointer handlers run only when copy mode is enabled', () => {
-    const onTapRow = vi.fn();
-    const onLongPressRow = vi.fn();
-    const { container } = render(
-      <TerminalView {...baseProps} copyModeActive onTapRow={onTapRow} onLongPressRow={onLongPressRow} />,
-    );
-    const host = container.querySelector('.wterm') as HTMLDivElement;
-    host.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientY: 20 }));
-    host.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 20 }));
-    expect(onTapRow).toHaveBeenCalled();
-  });
-
 });

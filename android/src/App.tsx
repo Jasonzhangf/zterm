@@ -1,4 +1,3 @@
-import { DebugInput, isDebugInputSupported } from './plugins/DebugInputPlugin';
 /**
  * App - 主应用入口
  * 只负责页面级切换与跨页 orchestration。
@@ -41,6 +40,7 @@ interface AppContentProps {
   setBridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['setSettings'];
   onForegroundActiveChange?: (active: boolean) => void;
 }
+
 
 export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActiveChange }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
@@ -89,7 +89,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     toggleScheduleJob,
     runScheduleJobNow,
     getSessionRenderBufferStore,
-    getSessionHeadStore,
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
@@ -434,7 +433,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
             sessionBufferStore={sessionRenderBufferStore}
-            sessionHeadStore={getSessionHeadStore()}
             onSwitchSession={handleSwitchSession}
             onMoveSession={handleMoveSession}
             onRenameSession={handleRenameSession}

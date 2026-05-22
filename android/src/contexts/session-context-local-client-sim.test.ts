@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
 import { bindSessionTransportSocketLifecycle } from './session-context-transport-runtime';
 import { filterRestorableOpenTabsByRemoteSessionNames } from '../lib/open-tab-restore';
@@ -70,7 +70,7 @@ describe('local client simulation', () => {
       isSessionTransportActive: () => true,
       shouldAcceptSessionLiveBuffer: () => true,
       readSessionTransportSocket: () => access.read(),
-      writeSessionTransportSocket: (_sid, ws) => access.write(ws),
+      writeSessionTransportSocket: (_sid: string, ws: any) => access.write(ws),
       clearSessionTransportSocket: vi.fn(),
       cleanupSocket: vi.fn(),
       recordSessionRx: vi.fn(),
@@ -110,20 +110,10 @@ describe('local client simulation', () => {
   });
 });
 
-// @vitest-environment jsdom
-
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { bindSessionTransportSocketLifecycle } from './session-context-transport-runtime';
-import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
-
 describe('local client simulation: full disconnect-reconnect lifecycle', () => {
   let ws: any;
-  let onMessageCallback: (data: string) => void;
-  let activeSessionId: string;
 
   beforeEach(() => {
-    activeSessionId = 's1';
-    onMessageCallback = vi.fn();
     ws = {
       readyState: WebSocket.CONNECTING,
       onopen: null,
@@ -136,7 +126,6 @@ describe('local client simulation: full disconnect-reconnect lifecycle', () => {
     ws = new Proxy(origWs, {
       set(target, prop, value) {
         target[prop as string] = value;
-        if (prop === 'onmessage') onMessageCallback = value as any;
         return true;
       },
       get(target, prop) {

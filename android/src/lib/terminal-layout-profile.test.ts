@@ -11,7 +11,7 @@ describe('terminal-layout-profile', () => {
 
     expect(profile.mode).toBe('split-landscape');
     expect(profile.header.tabMinHeight).toBe('22px');
-    expect(profile.header.outerPadding).toBe('1px 4px 2px');
+    expect(profile.header.outerPadding).toBe('21px 4px 2px');
     expect(profile.stage.paneGap).toBe('6px');
     expect(profile.quickBar.shellMode).toBe('inline');
   });
@@ -25,6 +25,7 @@ describe('terminal-layout-profile', () => {
 
     expect(profile.mode).toBe('split-default');
     expect(profile.header.tabMinHeight).toBe('28px');
+    expect(profile.header.outerPadding).toBe('22px 4px 4px');
     expect(profile.quickBar.shellMode).toBe('inline');
   });
 

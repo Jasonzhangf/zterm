@@ -2,26 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { resolveStaticPaneLayout } from './workspace-model';
 
 describe('pane-layout static split truth', () => {
-  it('keeps four-pane landscape capacity stable across IME-like height changes', () => {
+  it('keeps two-pane landscape capacity stable across IME-like height changes', () => {
     const initial = resolveStaticPaneLayout({
       viewportWidth: 1200,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.22,
-      paneCount: 4,
+      minAspect: 0.5,
+      paneCount: 2,
     });
     const imeLift = resolveStaticPaneLayout({
       viewportWidth: 1200,
       viewportHeight: 620,
       hardCap: 4,
-      minAspect: 0.22,
-      paneCount: 4,
+      minAspect: 0.5,
+      paneCount: 2,
       previousLayout: initial,
     });
 
-    expect(initial.maxSplitCount).toBe(4);
-    expect(imeLift.maxSplitCount).toBe(4);
-    expect(imeLift.paneRatios).toEqual([0.25, 0.25, 0.25, 0.25]);
+    expect(initial.maxSplitCount).toBe(2);
+    expect(imeLift.maxSplitCount).toBe(2);
+    expect(imeLift.paneRatios).toEqual([0.5, 0.5]);
   });
 
   it('resets baseline only when orientation changes', () => {
@@ -29,14 +29,14 @@ describe('pane-layout static split truth', () => {
       viewportWidth: 1200,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.22,
-      paneCount: 4,
+      minAspect: 0.5,
+      paneCount: 2,
     });
     const portrait = resolveStaticPaneLayout({
       viewportWidth: 700,
       viewportHeight: 1200,
       hardCap: 4,
-      minAspect: 0.22,
+      minAspect: 0.5,
       paneCount: 1,
       previousLayout: landscape,
     });
@@ -46,12 +46,12 @@ describe('pane-layout static split truth', () => {
     expect(portrait.baselineHeightPx).toBe(1200);
   });
 
-  it('keeps pane ratios aligned with explicit pane count truth', () => {
+  it('keeps pane ratios aligned with explicit pane count truth within the aspect cap', () => {
     const threePane = resolveStaticPaneLayout({
-      viewportWidth: 1200,
+      viewportWidth: 1800,
       viewportHeight: 900,
       hardCap: 4,
-      minAspect: 0.22,
+      minAspect: 0.5,
       paneCount: 3,
     });
 

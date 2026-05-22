@@ -9,7 +9,10 @@ export interface TerminalViewportMetrics {
   orientation: 'portrait' | 'landscape';
 }
 
-let maxStableLayoutHeightPx = 0;
+const maxStableLayoutHeightByOrientation: Record<TerminalViewportMetrics['orientation'], number> = {
+  portrait: 0,
+  landscape: 0,
+};
 
 export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
   if (typeof window === 'undefined') {
@@ -45,8 +48,15 @@ export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
     0,
     Math.round(window.document?.documentElement?.clientHeight || 0),
   );
-  if (currentClientHeight > maxStableLayoutHeightPx) {
-    maxStableLayoutHeightPx = currentClientHeight;
+  const orientationHeight = Math.max(
+    0,
+    Math.round(
+      Math.max(currentClientHeight, visualBottom),
+    ),
+  );
+  const orientation: TerminalViewportMetrics['orientation'] = layoutWidth > orientationHeight ? 'landscape' : 'portrait';
+  if (currentClientHeight > maxStableLayoutHeightByOrientation[orientation]) {
+    maxStableLayoutHeightByOrientation[orientation] = currentClientHeight;
   }
   // Keyboard popup truth:
   // - Android WebView may shrink both innerHeight/clientHeight during IME popup.
@@ -55,7 +65,7 @@ export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
   const layoutHeight = Math.max(
     0,
     Math.round(
-      Math.max(currentClientHeight, maxStableLayoutHeightPx, visualBottom),
+      Math.max(currentClientHeight, maxStableLayoutHeightByOrientation[orientation], visualBottom),
     ),
   );
 
@@ -67,7 +77,7 @@ export function resolveTerminalViewportMetrics(): TerminalViewportMetrics {
     visualOffsetTop,
     visualOffsetLeft,
     visualBottom,
-    orientation: layoutWidth > layoutHeight ? 'landscape' : 'portrait',
+    orientation,
   };
 }
 

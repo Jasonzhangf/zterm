@@ -49,10 +49,12 @@ describe('session-context-input-runtime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-2');
   });
 
-  it('sends input only — no force-head and no stale-probe even when transport is stale', () => {
+  it('drops input on a stale-open transport and reconnects instead of letting socket buffers delay it', () => {
     const probeOrReconnectStaleSessionTransport = vi.fn();
     const requestSessionBufferHead = vi.fn();
     const sendSocketPayload = vi.fn();
+    const reconnectSession = vi.fn();
+    const runtimeDebug = vi.fn();
     const ws = createSocket(WebSocket.OPEN);
 
     sendInputThroughSessionTransport({
@@ -69,7 +71,7 @@ describe('session-context-input-runtime', () => {
           current: { activeSessionId: 'session-1' },
         },
       },
-      runtimeDebug: vi.fn(),
+      runtimeDebug,
       readSessionTransportSocket: () => ws,
       isSessionTransportActivityStale: () => true,
       isReconnectInFlight: () => false,
@@ -80,13 +82,51 @@ describe('session-context-input-runtime', () => {
       probeOrReconnectStaleSessionTransport,
       hasPendingSessionTransportOpen: () => false,
       shouldReconnectQueuedActiveInput: () => false,
-      reconnectSession: vi.fn(),
+      reconnectSession,
     });
 
-    // Input is sent; no force-head and no stale-probe on an open transport.
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(sendSocketPayload).not.toHaveBeenCalled();
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
     expect(probeOrReconnectStaleSessionTransport).not.toHaveBeenCalled();
+    expect(reconnectSession).toHaveBeenCalledWith('session-2');
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.input.drop.stale-open-transport',
+      expect.objectContaining({ sessionId: 'session-2', size: 4 }),
+    );
+  });
+
+  it('does not reconnect repeatedly when stale-open input already has reconnect in flight', () => {
+    const reconnectSession = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const ws = createSocket(WebSocket.OPEN);
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'x',
+      refs: {
+        sessionsRef: {
+          current: [{ id: 'session-2' } as any],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-2' },
+        },
+      },
+      runtimeDebug: vi.fn(),
+      readSessionTransportSocket: () => ws,
+      isSessionTransportActivityStale: () => true,
+      isReconnectInFlight: () => true,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead: vi.fn(),
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession,
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
   });
 
   it('sends input and marks tail-refresh — no force-head on healthy transport', () => {
@@ -125,5 +165,82 @@ describe('session-context-input-runtime', () => {
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(markPendingInputTailRefresh).toHaveBeenCalledWith('session-2', 3);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
+  });
+
+  it('does not cache input behind a pending transport open when the target transport is unavailable', () => {
+    const runtimeDebug = vi.fn();
+    const reconnectSession = vi.fn();
+    const sendSocketPayload = vi.fn();
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'date\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-1' } as any,
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-1' },
+        },
+      },
+      runtimeDebug,
+      readSessionTransportSocket: () => null,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => true,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 0 }),
+      requestSessionBufferHead: vi.fn(),
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => true,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession,
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.input.drop.pending-transport-open',
+      expect.objectContaining({ sessionId: 'session-2', size: 5 }),
+    );
+  });
+
+  it('keeps explicit input reconnect scoped to its own session even when another session is active', () => {
+    const reconnectSession = vi.fn();
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'whoami\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-1' } as any,
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-1' },
+        },
+      },
+      runtimeDebug: vi.fn(),
+      readSessionTransportSocket: () => null,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload: vi.fn(),
+      markPendingInputTailRefresh: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 0 }),
+      requestSessionBufferHead: vi.fn(),
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => true,
+      shouldReconnectQueuedActiveInput: ({ isActiveTarget, reconnectInFlight }) => isActiveTarget && !reconnectInFlight,
+      reconnectSession,
+    });
+
+    expect(reconnectSession).toHaveBeenCalledTimes(1);
+    expect(reconnectSession).toHaveBeenCalledWith('session-2');
+    expect(reconnectSession).not.toHaveBeenCalledWith('session-1');
   });
 });

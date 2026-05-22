@@ -228,7 +228,8 @@ export interface UseTerminalWorkspaceResult {
   cycleTabInPane: (paneId: string, direction: 'next' | 'previous') => void;
 }
 
-const MOBILE_MANUAL_SPLIT_MIN_ASPECT = 0.2;
+const MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO = 0.5;
+const MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO = 0.7;
 
 export function useTerminalWorkspace({
   sessions,
@@ -244,7 +245,7 @@ export function useTerminalWorkspace({
   const layoutSnapshotRef = useRef(resolveStaticPaneLayout({
     viewportWidth,
     viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-    minAspect: MOBILE_MANUAL_SPLIT_MIN_ASPECT,
+    minAspect: MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO,
     hardCap: maxSplitCount,
     paneCount: workspace.panes.length,
   }));
@@ -263,7 +264,7 @@ export function useTerminalWorkspace({
     const nextLayout = resolveStaticPaneLayout({
       viewportWidth,
       viewportHeight: viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-      minAspect: MOBILE_MANUAL_SPLIT_MIN_ASPECT,
+      minAspect: MOBILE_SPLIT_MIN_WIDTH_HEIGHT_RATIO,
       hardCap: maxSplitCount,
       paneCount: workspace.panes.length,
       previousLayout: layoutSnapshotRef.current,
@@ -317,7 +318,7 @@ export function useTerminalWorkspace({
     });
   }, [currentMaxSplitCount, layoutSnapshot.paneRatios, workspace.panes.length]);
 
-  const splitAvailable = sessions.length > 1;
+  const splitAvailable = sessions.length > 1 && viewportWidth > (layoutSnapshot.baselineHeightPx * MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO);
   const splitVisible = workspace.panes.length >= 2 && workspace.panes.every((pane) => pane.tabs.length >= 1);
   const activePane = resolveActivePane(workspace) as AndroidWorkspacePane | null;
   const activeTab = resolveActiveTab(workspace) as AndroidWorkspaceTab | null;
@@ -390,9 +391,9 @@ export function useTerminalWorkspace({
           activePaneId: next.activePaneId === removedPane.id ? keptPane.id : next.activePaneId,
         };
       }
-      next.panes = distributeEvenPaneSizes(next.panes).map((pane, index) => ({
+      next.panes = distributeEvenPaneSizes(next.panes).map((pane) => ({
         ...pane,
-        size: layoutSnapshotRef.current.paneRatios[index] ?? pane.size,
+        size: 1 / next.panes.length,
       }));
       return next;
     });

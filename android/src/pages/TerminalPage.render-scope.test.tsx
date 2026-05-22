@@ -41,9 +41,30 @@ function readRenderCount(key: string) {
 }
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
-  TerminalHeader: ({ showBackButton }: { showBackButton?: boolean }) => {
+  TerminalHeader: ({
+    showBackButton,
+    sessions = [],
+    paneGroups = [],
+    splitVisible,
+    onSwitchSession,
+  }: {
+    showBackButton?: boolean;
+    sessions?: Array<{ id: string; sessionName: string }>;
+    paneGroups?: Array<{ paneId: string; sessions: Array<{ id: string; sessionName: string }> }>;
+    splitVisible?: boolean;
+    onSwitchSession?: (sessionId: string) => void;
+  }) => {
     bumpRenderCount('terminal-header');
-    return <div data-testid="terminal-header" data-show-back-button={showBackButton ? 'true' : 'false'} />;
+    const visibleSessions = splitVisible ? paneGroups.flatMap((group) => group.sessions) : sessions;
+    return (
+      <div data-testid="terminal-header" data-show-back-button={showBackButton ? 'true' : 'false'}>
+        {visibleSessions.map((session) => (
+          <button key={session.id} type="button" onClick={() => onSwitchSession?.(session.id)}>
+            {session.sessionName}
+          </button>
+        ))}
+      </div>
+    );
   },
 }));
 
@@ -292,12 +313,83 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1, session2, session3], session1);
 
     const panes = screen.getAllByTestId('terminal-pane-shell');
-    expect(panes).toHaveLength(3);
+    expect(panes).toHaveLength(2);
     expect(panes.map((pane) => pane.style.flex)).toEqual([
-      '0.3333333333333333 1 0%',
-      '0.3333333333333333 1 0%',
-      '0.3333333333333333 1 0%',
+      '0.5 1 0%',
+      '0.5 1 0%',
     ]);
+    expect(panes.map((pane) => pane.style.height)).toEqual(['100%', '100%']);
+  });
+
+  it('gives the split pane strip full height so each visible renderer can measure and scroll independently', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+
+    renderTerminalPage([session1, session2], session1);
+
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-live')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s2').getAttribute('data-live')).toBe('true');
+    expect(screen.getAllByTestId('terminal-pane-shell').map((pane) => pane.style.height)).toEqual(['100%', '100%']);
+  });
+
+  it('switches the tapped split tab inside its owning pane instead of only changing global active session', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        {
+          id: 'pane-2',
+          size: 0.5,
+          activeTabId: 'tab-s2',
+          tabs: [
+            { id: 'tab-s2', sessionId: 's2' },
+            { id: 'tab-s3', sessionId: 's3' },
+          ],
+        },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const session1 = makeSession('s1');
+    const session2 = makeSession('s2');
+    const session3 = makeSession('s3');
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session1, session2, session3]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-view-s3')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'tmux-s3' }));
+
+    expect(onSwitchSession).toHaveBeenCalledWith('s3');
+    expect(screen.getByTestId('terminal-view-s3').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-live')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s3').getAttribute('data-live')).toBe('true');
+    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
   });
 
   it('does not rerender header when only debug overlay polling ticks', () => {

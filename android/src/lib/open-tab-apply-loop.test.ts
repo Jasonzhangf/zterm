@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('applyOpenTabState renders stably without loops', () => {
   it('persistExplicitOpenTabs skips setState when normalized state is unchanged', async () => {
     const { normalizeOpenTabIntentState, openTabIntentStatesEqual } = await import('../lib/open-tab-intent');
-    const { persistOpenTabsState } = await import('../lib/open-tab-persistence');
 
     // Same tabs + activeId → normalized state is equal
     const tabA = { sessionId: 'tab-a', hostId: 'h1', connectionName: 'C1', bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 's1', authToken: 'tok', createdAt: 1 };

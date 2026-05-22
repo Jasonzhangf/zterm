@@ -458,6 +458,7 @@ export function normalizeShortcutActions(actions: DraftShortcutAction[]): Termin
 export function buildVisibleShortcutRowActions(
   row: ShortcutRow,
   shortcutActions: TerminalShortcutAction[],
+  globalConsumedSequences?: Set<string>,
 ) {
   const customRowActions = shortcutActions.filter((action) => action.row === row);
   const customBySequence = new Map<string, { id: string; label: string; sequence: string }>();
@@ -467,23 +468,29 @@ export function buildVisibleShortcutRowActions(
     }
   });
   const visibleActions: Array<{ id: string; label: string; sequence: string }> = [];
-  const consumedSequences = new Set<string>();
+  const rowConsumedSequences = new Set<string>();
   SHORTCUT_PRESETS.filter((preset) => preset.row === row).forEach((preset) => {
+    if (globalConsumedSequences?.has(preset.sequence)) {
+      return;
+    }
     const customAction = customBySequence.get(preset.sequence);
     if (customAction) {
       visibleActions.push({ id: customAction.id, label: customAction.label, sequence: customAction.sequence });
-      consumedSequences.add(customAction.sequence);
+      rowConsumedSequences.add(customAction.sequence);
+      globalConsumedSequences?.add(customAction.sequence);
       return;
     }
     visibleActions.push({ id: `preset-${row}-${preset.label}-${preset.sequence}`, label: preset.label, sequence: preset.sequence });
-    consumedSequences.add(preset.sequence);
+    rowConsumedSequences.add(preset.sequence);
+    globalConsumedSequences?.add(preset.sequence);
   });
   customRowActions.forEach((action) => {
-    if (consumedSequences.has(action.sequence)) {
+    if (rowConsumedSequences.has(action.sequence) || globalConsumedSequences?.has(action.sequence)) {
       return;
     }
     visibleActions.push({ id: action.id, label: action.label, sequence: action.sequence });
-    consumedSequences.add(action.sequence);
+    rowConsumedSequences.add(action.sequence);
+    globalConsumedSequences?.add(action.sequence);
   });
   return visibleActions;
 }
