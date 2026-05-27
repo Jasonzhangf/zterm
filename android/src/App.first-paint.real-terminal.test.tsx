@@ -126,6 +126,20 @@ class ResizeObserverMock {
   }
 }
 
+function readSentMessages(ws: MockWebSocket) {
+  return ws.sent
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => JSON.parse(item));
+}
+
+function connectSessionSocket(ws: MockWebSocket, sessionId: string) {
+  ws.triggerOpen();
+  ws.triggerMessage({
+    type: 'connected',
+    payload: { sessionId },
+  } as ServerMessage);
+}
+
 vi.mock('@capacitor/app', () => ({
   App: {
     addListener: vi.fn(async () => ({ remove: vi.fn() })),
@@ -454,6 +468,54 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     fireEvent.click(screen.getByText('switch-session-2'));
 
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+  });
+
+  it('cold-start split layout immediately marks non-active panes live and requests their head', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'session-2',
+        hostId: 'host-2',
+        connectionName: 'local-test-2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab_2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-session-1', tabs: [{ id: 'tab-session-1', sessionId: 'session-1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-session-2', tabs: [{ id: 'tab-session-2', sessionId: 'session-2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    connectSessionSocket(ws1, 'session-1');
+    connectSessionSocket(ws2, 'session-2');
+    ws1.sent.length = 0;
+    ws2.sent.length = 0;
+
+    ResizeObserverMock.triggerAll();
+
+    await waitFor(() => {
+      expect(readSentMessages(ws2).some((message) => message.type === 'buffer-head-request')).toBe(true);
+    });
   });
 
   it('foreground resume on the active restored tab does not open a second transport after the initial explicit resume', async () => {

@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from 'react';
+import { memo, type CSSProperties, type PointerEventHandler } from 'react';
 import {
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
@@ -19,6 +19,12 @@ export interface VisibleRowProps {
   showAbsoluteLineNumbers?: boolean;
   discontinuousLineNumber?: boolean;
   rowHighlightStyle?: CSSProperties;
+  copyModeActive?: boolean;
+  plainText?: string;
+  onPointerDown?: PointerEventHandler<HTMLDivElement>;
+  onPointerMove?: PointerEventHandler<HTMLDivElement>;
+  onPointerUp?: PointerEventHandler<HTMLDivElement>;
+  onPointerCancel?: PointerEventHandler<HTMLDivElement>;
 }
 
 export const VisibleRow = memo(function VisibleRow({
@@ -33,6 +39,12 @@ export const VisibleRow = memo(function VisibleRow({
   showAbsoluteLineNumbers = false,
   discontinuousLineNumber = false,
   rowHighlightStyle,
+  copyModeActive = false,
+  plainText,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
 }: VisibleRowProps) {
   const viewModel = buildTerminalVisibleRowViewModel({
     absoluteIndex,
@@ -62,7 +74,22 @@ export const VisibleRow = memo(function VisibleRow({
         data-terminal-row={viewModel.dataset.terminalRow}
         data-terminal-gap={viewModel.dataset.terminalGap}
         data-terminal-index={viewModel.dataset.terminalIndex}
-        style={rowHighlightStyle ? { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text', ...rowHighlightStyle } : { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text' }}
+        data-terminal-copy-mode={copyModeActive ? 'true' : undefined}
+        data-terminal-row-text={plainText}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onContextMenu={copyModeActive ? (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        } : undefined}
+        style={{
+          ...viewModel.rowStyle,
+          userSelect: copyModeActive ? 'none' : 'text',
+          WebkitUserSelect: copyModeActive ? 'none' : 'text',
+          ...rowHighlightStyle,
+        }}
       >
         {lineNumberCell}
         <span {...viewModel.gapFillProps} />
@@ -73,7 +100,22 @@ export const VisibleRow = memo(function VisibleRow({
     <div
       data-terminal-row={viewModel.dataset.terminalRow}
       data-terminal-index={viewModel.dataset.terminalIndex}
-      style={rowHighlightStyle ? { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text', ...rowHighlightStyle } : { ...viewModel.rowStyle, userSelect: 'text', WebkitUserSelect: 'text' }}
+      data-terminal-copy-mode={copyModeActive ? 'true' : undefined}
+      data-terminal-row-text={plainText}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onContextMenu={copyModeActive ? (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      } : undefined}
+      style={{
+        ...viewModel.rowStyle,
+        userSelect: copyModeActive ? 'none' : 'text',
+        WebkitUserSelect: copyModeActive ? 'none' : 'text',
+        ...rowHighlightStyle,
+      }}
     >
       {lineNumberCell}
       <span {...viewModel.cellWrapProps}>
@@ -102,6 +144,12 @@ export const VisibleRow = memo(function VisibleRow({
   && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers
   && prev.discontinuousLineNumber === next.discontinuousLineNumber
   && prev.rowHighlightStyle === next.rowHighlightStyle
+  && prev.copyModeActive === next.copyModeActive
+  && prev.plainText === next.plainText
+  && prev.onPointerDown === next.onPointerDown
+  && prev.onPointerMove === next.onPointerMove
+  && prev.onPointerUp === next.onPointerUp
+  && prev.onPointerCancel === next.onPointerCancel
 ));
 
 export { resolveCursorOverlay, hasDiscontinuousNeighbor };

@@ -3947,4 +3947,58 @@ describe('TerminalView minimal mirror render', () => {
     expect(readRenderedRows(containerB)).toContain('row-080');
     expect(readRenderedRows(containerB)).toContain('row-077');
   });
+
+  it('resets follow viewport before paint when switching sessions on the same terminal surface', async () => {
+    const sessionA = makeSession({ revision: 1, lines: buildRows(120, 'old'), bufferTailEndIndex: 120 });
+    const sessionB = makeSession({ revision: 1, lines: buildRows(30, 'new'), bufferTailEndIndex: 30 });
+    const onViewportChange = vi.fn();
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="old-session"
+          initialBufferLines={sessionA.buffer.lines}
+          bufferStartIndex={sessionA.buffer.startIndex}
+          bufferEndIndex={sessionA.buffer.endIndex}
+          bufferTailEndIndex={sessionA.buffer.bufferTailEndIndex}
+          bufferGapRanges={sessionA.buffer.gapRanges}
+          cursorKeysApp={sessionA.buffer.cursorKeysApp}
+          active
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('old-120'));
+    scrollFromBottomIntoReading(view.container.querySelector('.wterm') as HTMLDivElement, 1632);
+    expect(readRenderedRows(view.container)).toContain('old-001');
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="new-session"
+          initialBufferLines={sessionB.buffer.lines}
+          bufferStartIndex={sessionB.buffer.startIndex}
+          bufferEndIndex={sessionB.buffer.endIndex}
+          bufferTailEndIndex={sessionB.buffer.bufferTailEndIndex}
+          bufferGapRanges={sessionB.buffer.gapRanges}
+          cursorKeysApp={sessionB.buffer.cursorKeysApp}
+          active
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('new-030'));
+    expect(readRenderedRows(view.container)).not.toContain('new-001');
+    const lastViewportCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1];
+    expect(lastViewportCall?.[1]).toMatchObject({
+      mode: 'follow',
+      viewportEndIndex: 30,
+    });
+  });
 });

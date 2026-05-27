@@ -145,8 +145,15 @@ export function useSessionProviderFacadeAssemblies(
     if (prev && prev !== id) {
       core.resetSessionTransportPullBookkeeping(prev, 'tab-switch-out');
     }
+    lastActivatedSessionIdRef.current = id;
     core.setActiveSessionSync(id);
     core.resetSessionTransportPullBookkeeping(id, 'tab-switch-in');
+    ensureActiveSessionFresh({
+      sessionId: id,
+      source: 'active-reentry',
+      forceHead: true,
+      allowReconnectIfUnavailable: true,
+    });
   };
 
   const sessionPublicFacadeRuntime = useMemo(() => createSessionPublicFacadeRuntime({
@@ -208,6 +215,7 @@ export function useSessionProviderFacadeAssemblies(
     isReconnectInFlight: core.isReconnectInFlight,
     probeOrReconnectStaleSessionTransport,
     hasPendingSessionTransportOpen: core.hasPendingSessionTransportOpen,
+    isPendingSessionTransportOpenStale: core.isPendingSessionTransportOpenStale,
     shouldReconnectQueuedActiveInput,
     reconnectSession,
   }), [

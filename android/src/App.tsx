@@ -63,6 +63,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     ignoreUntilManualCheck,
     resetIgnorePolicy,
     startUpdate,
+    rollbackBackup,
+    isRollingBack,
+    rollbackToPreviousVersion,
   } = useAppUpdate();
   const {
     state,
@@ -417,6 +420,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
               void startUpdate();
             }}
             onResetUpdateIgnorePolicy={resetIgnorePolicy}
+            rollbackBackup={rollbackBackup}
+            isRollingBack={isRollingBack}
+            onRollback={() => {
+              void rollbackToPreviousVersion();
+            }}
             onTerminalThemeChange={(themeId) => {
               setBridgeSettings((current) => ({
                 ...current,

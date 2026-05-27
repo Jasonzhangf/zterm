@@ -5,7 +5,7 @@ import {
   sortBridgeServers,
   type BridgeSettings,
 } from '../lib/bridge-settings';
-import { type AppUpdateManifest, type AppUpdatePreferences } from '../lib/app-update';
+import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
@@ -36,6 +36,9 @@ interface SettingsPageProps {
   onCheckForUpdate: (next: AppUpdatePreferences) => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
+  rollbackBackup?: AppUpdateRollbackBackup | null;
+  isRollingBack?: boolean;
+  onRollback?: () => void;
   onTerminalThemeChange?: (themeId: BridgeSettings['terminalThemeId']) => void;
   onBack: () => void;
 }
@@ -73,6 +76,9 @@ export function SettingsPage({
   onCheckForUpdate,
   onInstallUpdate,
   onResetUpdateIgnorePolicy,
+  rollbackBackup,
+  isRollingBack = false,
+  onRollback,
   onTerminalThemeChange,
   onBack,
 }: SettingsPageProps) {
@@ -221,6 +227,9 @@ export function SettingsPage({
           onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
           onInstallUpdate={onInstallUpdate}
           onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
+          rollbackBackup={rollbackBackup}
+          isRollingBack={isRollingBack}
+          onRollback={onRollback}
         />
 
         <div style={settingsSectionStyle()}>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render } from '@testing-library/react';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { act, fireEvent, render } from '@testing-library/react';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from '../TerminalView';
 
 class ResizeObserverMock {
@@ -34,16 +34,24 @@ const baseProps: any = {
 };
 
 describe('system copy state machine guards', () => {
-  it('entry: long-press relies on native selection menu (no custom pointer handler)', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
+  it('entry: copy mode long-press opens app row menu instead of native selection', () => {
+    vi.useFakeTimers();
+    const onLongPressRow = vi.fn();
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={onLongPressRow} />);
     const host = container.querySelector('.wterm') as HTMLDivElement;
-    expect(host.getAttribute('onpointerdown')).toBeNull();
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    fireEvent.pointerDown(row, { clientX: 12, clientY: 16 });
+    act(() => vi.advanceTimersByTime(430));
+    expect(host.style.userSelect).toBe('none');
+    expect(onLongPressRow).toHaveBeenCalledWith('s1', 0, 12, 16);
+    vi.useRealTimers();
   });
 
-  it('expand-selection: row remains text-selectable', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
+  it('expand-selection: row is app-selectable in copy mode and blocks system selection', () => {
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
     const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
-    expect(row.style.userSelect).toBe('text');
+    expect(row.style.userSelect).toBe('none');
+    expect(row.getAttribute('data-terminal-copy-mode')).toBe('true');
   });
 
   it('scroll-expand: terminal host keeps vertical scroll enabled', () => {
@@ -52,14 +60,10 @@ describe('system copy state machine guards', () => {
     expect(host.style.overflowY).toBe('auto');
   });
 
-  it('confirm-copy: no app-layer confirm modal path exists on TerminalView', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
-    expect(container.textContent || '').not.toContain('是否拷贝到剪贴板');
-  });
-
-  it('cancel-selection: no app-layer copy selection state is rendered', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
-    expect(container.innerHTML).not.toContain('COPY:ON');
+  it('highlight-selection: selected buffer rows are highlighted by absolute row index', () => {
+    const { container } = render(<TerminalView {...baseProps} copyModeActive copyStartRowIndex={0} copyEndRowIndex={0} />);
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    expect(row.style.backgroundColor).toBe('rgba(83, 139, 255, 0.18)');
   });
 
   it('retry-after-failure: no custom copy failure toast path in TerminalView', () => {

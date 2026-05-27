@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render } from '@testing-library/react';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from './TerminalView';
 
 class ResizeObserverMock {
@@ -13,7 +13,7 @@ beforeAll(() => {
   (globalThis as any).ResizeObserver = ResizeObserverMock;
 });
 
-describe('TerminalView system selection mode', () => {
+describe('TerminalView app copy selection mode', () => {
   const baseProps = {
     sessionId: 's1',
     active: true,
@@ -34,16 +34,17 @@ describe('TerminalView system selection mode', () => {
     },
   } as any;
 
-  it('keeps terminal rows selectable for system copy', () => {
+  it('keeps normal terminal rows selectable only outside copy mode', () => {
     const { container } = render(<TerminalView {...baseProps} />);
     const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
     expect(row).toBeTruthy();
     expect(row.style.userSelect).toBe('text');
   });
 
-  it('does not register custom copy mode pointer handlers', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
-    const host = container.querySelector('.wterm') as HTMLDivElement;
-    expect(host.getAttribute('onpointerdown')).toBeNull();
+  it('copy mode makes terminal rows owned by app selection', () => {
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    expect(row.style.userSelect).toBe('none');
+    expect(row.getAttribute('data-terminal-copy-mode')).toBe('true');
   });
 });

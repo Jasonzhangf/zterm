@@ -50,6 +50,7 @@ export function createSessionInteractionRuntime(options: {
     reason: 'input' | 'active-tick' | 'active-reentry',
   ) => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   shouldReconnectQueuedActiveInput: (options: {
     isActiveTarget: boolean;
     wsReadyState: number | null;
@@ -74,6 +75,7 @@ export function createSessionInteractionRuntime(options: {
       requestSessionBufferHead: options.requestSessionBufferHead,
       probeOrReconnectStaleSessionTransport: options.probeOrReconnectStaleSessionTransport,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
+      isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       shouldReconnectQueuedActiveInput: options.shouldReconnectQueuedActiveInput,
       reconnectSession: options.reconnectSession,
     });

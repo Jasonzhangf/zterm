@@ -180,7 +180,7 @@ export function useSessionContextLifecycle(options: {
       }
       options.ensureActiveSessionFresh({
         sessionId,
-        source: 'active-reentry',
+        source: 'explicit-resume',
         forceHead: true,
         allowReconnectIfUnavailable: true,
       });

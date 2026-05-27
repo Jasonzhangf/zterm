@@ -193,8 +193,8 @@ describe('TerminalPage real quickbar split integration', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens split from the real floating quickbar menu on a normal phone viewport', async () => {
-    setViewport(390, 844);
+  it('opens split from the real floating quickbar menu when viewport satisfies the split gate', async () => {
+    setViewport(800, 844);
     const sessions = [makeSession('s1'), makeSession('s2')];
 
     render(
@@ -225,7 +225,37 @@ describe('TerminalPage real quickbar split integration', () => {
     });
   });
 
-  it('still exposes a usable split action on a narrow phone viewport', async () => {
+  it('shows four-pane choice when landscape layout already qualifies for three panes', async () => {
+    setViewport(1200, 900);
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3'), makeSession('s4')];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
+
+    expect(screen.getByRole('button', { name: '3 分屏' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '4 分屏' })).not.toBeNull();
+  });
+
+  it('hides split actions on a narrow phone viewport below the split gate', async () => {
     setViewport(320, 800);
     const sessions = [makeSession('s1'), makeSession('s2')];
 
@@ -251,6 +281,6 @@ describe('TerminalPage real quickbar split integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
 
-    expect(screen.queryByRole('button', { name: '2 分屏' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '2 分屏' })).toBeNull();
   });
 });

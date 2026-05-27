@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render } from '@testing-library/react';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from '../TerminalView';
 
 class ResizeObserverMock {
@@ -34,10 +34,12 @@ const baseProps: any = {
 };
 
 describe('system copy long-press regression', () => {
-  it('RED: terminal row should allow native long-press menu by not forcing touch-action pan-x pan-y', () => {
-    const { container } = render(<TerminalView {...baseProps} />);
+  it('copy mode disables native callout so app long-press menu owns selection', () => {
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
     const host = container.querySelector('.wterm') as HTMLDivElement;
-    // 当前实现是 pan-x pan-y，会拦截/竞争长按系统菜单，本用例先红
-    expect(host.style.touchAction).not.toBe('pan-x pan-y');
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    expect(host.getAttribute('data-copy-mode')).toBe('true');
+    expect(row.getAttribute('data-terminal-copy-mode')).toBe('true');
+    expect(container.querySelector('style')?.textContent || '').toContain('-webkit-touch-callout:none');
   });
 });

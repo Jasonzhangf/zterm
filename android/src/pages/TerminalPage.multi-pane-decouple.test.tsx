@@ -29,6 +29,10 @@ beforeEach(() => {
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
+  registerPlugin: () => ({
+    readText: vi.fn(async () => ({ value: '' })),
+    writeText: vi.fn(async () => undefined),
+  }),
 }));
 
 vi.mock('@capacitor/keyboard', () => ({
@@ -55,14 +59,15 @@ vi.mock('../components/terminal/FileTransferSheet', () => ({ FileTransferSheet: 
 vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({ RemoteScreenshotSheet: () => null }));
 
 // Track TerminalView renders to verify decoupling
-const terminalViewCalls: {sessionId: string; active: boolean}[] = [];
+const terminalViewCalls: {sessionId: string; active: boolean; live: boolean}[] = [];
 vi.mock('../components/TerminalView', () => ({
-  TerminalView: ({ sessionId, active }: { sessionId: string; active?: boolean }) => {
-    terminalViewCalls.push({ sessionId, active: !!active });
+  TerminalView: ({ sessionId, active, live }: { sessionId: string; active?: boolean; live?: boolean }) => {
+    terminalViewCalls.push({ sessionId, active: !!active, live: !!live });
     return (
       <div
         data-testid={`terminal-view-${sessionId}`}
         data-active={active ? 'true' : 'false'}
+        data-live={live ? 'true' : 'false'}
         data-session-id={sessionId}
       >
         <textarea
@@ -168,15 +173,22 @@ describe('multi-pane input isolation', () => {
 describe('multi-pane refresh decoupling', () => {
   beforeEach(() => { terminalViewCalls.length = 0; });
 
-  it('active pane is rendered; inactive pane is NOT rendered', () => {
+  it('all split-visible panes render immediately and only focus pane is active', () => {
+    localStorage.setItem('zterm:terminal-layout', JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
     const sessions = [s('s1'), s('s2')];
     const { queryByTestId } = render(
       <TerminalPage {...base} sessions={sessions} activeSession={sessions[0]} />,
     );
-    // s1 (active) must render
     expect(queryByTestId('terminal-view-s1')).not.toBeNull();
-    // s2 (inactive) must NOT be in DOM
-    expect(queryByTestId('terminal-view-s2')).toBeNull();
+    expect(queryByTestId('terminal-view-s2')).not.toBeNull();
+    expect(queryByTestId('terminal-view-s1')?.getAttribute('data-active')).toBe('true');
+    expect(queryByTestId('terminal-view-s2')?.getAttribute('data-active')).toBe('false');
   });
 
   it('switching active session re-renders the new active only', () => {
@@ -202,16 +214,54 @@ describe('multi-pane refresh decoupling', () => {
 describe('multi-pane pull decoupling', () => {
   beforeEach(() => { terminalViewCalls.length = 0; });
 
-  it('inactive pane TerminalView receives active=false', () => {
+  it('inactive pane TerminalView receives active=false but still mounts', () => {
+    localStorage.setItem('zterm:terminal-layout', JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
     const sessions = [s('s1'), s('s2')];
     render(
       <TerminalPage {...base} sessions={sessions} activeSession={sessions[0]} />,
     );
-    // Only s1 should have been rendered (active)
     const s1Calls = terminalViewCalls.filter(c => c.sessionId === 's1');
     const s2Calls = terminalViewCalls.filter(c => c.sessionId === 's2');
     expect(s1Calls.length).toBeGreaterThan(0);
-    expect(s2Calls.length).toBe(0);
+    expect(s2Calls.length).toBeGreaterThan(0);
+    expect(s2Calls.every(c => c.active === false)).toBe(true);
+  });
+
+  it('announces every split-visible pane as live and emits first-frame viewport demand for inactive panes', () => {
+    localStorage.setItem('zterm:terminal-layout', JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const sessions = [s('s1'), s('s2')];
+    const onLiveSessionIdsChange = vi.fn();
+    const onTerminalViewportChange = vi.fn();
+
+    render(
+      <TerminalPage
+        {...base}
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        onTerminalViewportChange={onTerminalViewportChange}
+      />,
+    );
+
+    expect(onLiveSessionIdsChange).toHaveBeenCalledWith(['s1', 's2']);
+    expect(terminalViewCalls.filter(c => c.sessionId === 's2').every(c => c.live)).toBe(true);
+    expect(onTerminalViewportChange).toHaveBeenCalledWith('s2', {
+      mode: 'follow',
+      viewportEndIndex: 0,
+      viewportRows: 24,
+    });
   });
 });
 
@@ -222,14 +272,20 @@ describe('system copy does not cross panes', () => {
   beforeEach(() => { terminalViewCalls.length = 0; });
 
   it('each pane TerminalView carries its own data-session-id', () => {
+    localStorage.setItem('zterm:terminal-layout', JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
     const sessions = [s('s1'), s('s2')];
     render(
       <TerminalPage {...base} sessions={sessions} activeSession={sessions[0]} />,
     );
     const views = document.querySelectorAll('[data-session-id]');
     const sessionIds = Array.from(views).map(el => el.getAttribute('data-session-id'));
-    // Only the active pane should be in DOM with a session id
     expect(sessionIds.filter(id => id === 's1').length).toBeGreaterThan(0);
-    expect(sessionIds.filter(id => id === 's2').length).toBe(0);
+    expect(sessionIds.filter(id => id === 's2').length).toBeGreaterThan(0);
   });
 });

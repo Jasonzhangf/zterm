@@ -11,6 +11,10 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
   },
+  registerPlugin: () => ({
+    readText: vi.fn(async () => ({ value: '' })),
+    writeText: vi.fn(async () => undefined),
+  }),
 }));
 
 vi.mock('@capacitor/keyboard', () => ({

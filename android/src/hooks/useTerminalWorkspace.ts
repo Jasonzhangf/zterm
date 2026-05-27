@@ -196,6 +196,7 @@ export interface UseTerminalWorkspaceOptions {
   viewportWidth: number;
   viewportHeight?: number;
   maxSplitCount?: number;
+  onActivatePaneSession?: (paneId: string, sessionId: string | null) => void;
 }
 
 export interface UseTerminalWorkspaceResult {
@@ -211,6 +212,7 @@ export interface UseTerminalWorkspaceResult {
   toggleSplit: () => void;
   setSplitCount: (count: number) => void;
   moveSessionToOtherPane: (sessionId: string) => void;
+  cycleSecondaryPane: () => void;
   assignSessionToPane: (sessionId: string, paneId: string) => void;
   attachSessionsToPane: (
     sessionIds: string[],
@@ -224,6 +226,7 @@ export interface UseTerminalWorkspaceResult {
   ) => void;
   setActivePane: (paneId: string) => void;
   switchTabInPane: (paneId: string, tabId: string) => void;
+  activatePaneAndSession: (paneId: string) => void;
   closeTabInPane: (paneId: string, tabId: string) => void;
   cycleTabInPane: (paneId: string, direction: 'next' | 'previous') => void;
 }
@@ -237,6 +240,7 @@ export function useTerminalWorkspace({
   viewportWidth,
   viewportHeight,
   maxSplitCount = DEFAULT_MAX_SPLIT_COUNT,
+  onActivatePaneSession,
 }: UseTerminalWorkspaceOptions): UseTerminalWorkspaceResult {
   const sessionIds = sessions.map((session) => session.id);
   const [workspace, setWorkspace] = useState<AndroidWorkspaceState>(() => (
@@ -414,6 +418,33 @@ export function useTerminalWorkspace({
     });
   }, [layoutSnapshot.paneRatios]);
 
+
+  const cycleSecondaryPane = useCallback(() => {
+    setWorkspace((current) => {
+      if (current.panes.length < 2) {
+        return current;
+      }
+      const activePaneId = current.activePaneId;
+      const passivePane = current.panes.find((pane) => pane.id !== activePaneId) || null;
+      if (!passivePane || passivePane.tabs.length <= 1) {
+        return current;
+      }
+      const currentIndex = passivePane.tabs.findIndex((tab) => tab.id === passivePane.activeTabId);
+      const nextIndex = (currentIndex + 1) % passivePane.tabs.length;
+      const nextTab = passivePane.tabs[nextIndex];
+      if (!nextTab) {
+        return current;
+      }
+      return {
+        ...updateWorkspacePane(current, passivePane.id, (pane) => ({
+          ...pane,
+          activeTabId: nextTab.id,
+        })),
+        activePaneId,
+      };
+    });
+  }, []);
+
   const assignSessionToPane = useCallback((sessionId: string, paneId: string) => {
     setWorkspace((current) => {
       const tabId = `tab-${sessionId}`;
@@ -520,6 +551,30 @@ export function useTerminalWorkspace({
     });
   }, [layoutSnapshot.paneRatios]);
 
+  const activatePaneAndSession = useCallback((paneId: string) => {
+    setWorkspace((current) => {
+      const normalized = paneId.trim();
+      if (!normalized) {
+        return current;
+      }
+      const targetPane = current.panes.find((p) => p.id === normalized) || null;
+      if (!targetPane) {
+        console.error("[useTerminalWorkspace] Refused to activate missing pane.", {
+          paneId: normalized,
+          workspacePaneIds: current.panes.map((p) => p.id),
+        });
+        return current;
+      }
+      const newActivePaneId = normalized;
+      const targetSessionId =
+        targetPane.tabs.find((tab) => tab.id === targetPane.activeTabId)?.sessionId || null;
+      const nextState = { ...current, activePaneId: newActivePaneId };
+      onActivatePaneSession?.(normalized, targetSessionId);
+      return nextState;
+    });
+  }, [onActivatePaneSession]);
+
+
   const switchTabInPane = useCallback((paneId: string, tabId: string) => {
     setWorkspace((current) => ({
       ...updateWorkspacePane(current, paneId, (pane) => ({
@@ -590,9 +645,11 @@ export function useTerminalWorkspace({
     toggleSplit,
     setSplitCount,
     moveSessionToOtherPane,
+    cycleSecondaryPane,
     assignSessionToPane,
     attachSessionsToPane,
     attachSessionToPane,
+    activatePaneAndSession,
     setActivePane,
     switchTabInPane,
     closeTabInPane,

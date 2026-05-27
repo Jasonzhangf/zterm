@@ -51,6 +51,7 @@ export function sendInputRuntime(options: {
     reason: 'input' | 'active-tick' | 'active-reentry',
   ) => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   shouldReconnectQueuedActiveInput: (options: {
     isActiveTarget: boolean;
     wsReadyState: number | null;
@@ -80,6 +81,7 @@ export function sendInputRuntime(options: {
     requestSessionBufferHead: options.requestSessionBufferHead,
     probeOrReconnectStaleSessionTransport: options.probeOrReconnectStaleSessionTransport,
     hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
+    isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
     shouldReconnectQueuedActiveInput: options.shouldReconnectQueuedActiveInput,
     reconnectSession: options.reconnectSession,
   });
