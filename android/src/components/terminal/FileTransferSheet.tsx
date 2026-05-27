@@ -1,30 +1,37 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { mobileTheme } from '../../lib/mobile-ui';
-import { createFileTransferSessionRuntime } from '../../lib/file-transfer-session-runtime';
-import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { mobileTheme } from "../../lib/mobile-ui";
+import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
+import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
+import {
+  buildTransferSheetContainerStyle,
+  buildTransferSheetOverlayStyle,
+} from "./transfer-sheet-layout";
 import type {
   FileEntry,
   FileListRequestPayload,
   TransferProgress,
-} from '../../lib/types';
+} from "../../lib/types";
 
 const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk (must match daemon)
+const BASE64_CHUNK_SIZE = Math.floor(FILE_CHUNK_SIZE / 3) * 4;
 
 interface FileTransferSheetProps {
   open: boolean;
   remoteCwd: string;
   onClose: () => void;
-  sendJson: (msg: unknown) => void;
+  sendJson?: (msg: unknown) => void;
   onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
+  avoidSide?: "left" | "right" | null;
 }
 
 interface RemoteFileEntry extends FileEntry {}
 interface LocalFileEntry {
   name: string;
-  type: 'file' | 'directory';
+  type: "file" | "directory";
   size: number;
   modified: number;
+  mimeType?: string;
   uri?: string;
 }
 
@@ -36,114 +43,148 @@ function formatBytes(bytes: number): string {
 
 function truncateName(name: string, max: number): string {
   if (name.length <= max) return name;
-  return name.slice(0, max - 2) + '…';
+  return name.slice(0, max - 2) + "…";
 }
 
-const sheetOverlayStyle = {
-  position: 'fixed' as const,
-  inset: 0,
-  zIndex: 92,
-  background: 'rgba(5, 8, 14, 0.82)',
-  display: 'flex',
-  alignItems: 'flex-end',
-  justifyContent: 'stretch',
-};
+function isMarkdownFileName(name: string) {
+  return /\.(md|markdown|mdown|mkdn)$/i.test(name.trim());
+}
 
-const sheetContainerStyle = {
-  width: '100%',
-  height: '88vh',
-  display: 'flex',
-  flexDirection: 'column' as const,
-  borderTopLeftRadius: '20px',
-  borderTopRightRadius: '20px',
-  border: `1px solid ${mobileTheme.colors.cardBorder}`,
-  background: mobileTheme.colors.shell,
-  boxShadow: '0 -16px 40px rgba(0,0,0,0.32)',
-  overflow: 'hidden',
-};
+function renderMarkdownPreview(text: string) {
+  return text.split("\n").map((line, index) => {
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      const level = heading[1]?.length || 1;
+      return (
+        <div
+          key={index}
+          style={{
+            fontWeight: 800,
+            fontSize: `${Math.max(13, 22 - level * 2)}px`,
+            margin: "10px 0 4px",
+            color: mobileTheme.colors.textPrimary,
+          }}
+        >
+          {heading[2]}
+        </div>
+      );
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      return (
+        <div key={index} style={{ paddingLeft: "14px" }}>
+          • {line.replace(/^\s*[-*+]\s+/, "")}
+        </div>
+      );
+    }
+    if (!line.trim()) {
+      return <div key={index} style={{ height: "8px" }} />;
+    }
+    return <div key={index}>{line}</div>;
+  });
+}
+
+function decodeBase64Utf8(data: string) {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function resolvePrimaryTransferLabel(
+  direction: "upload" | "download",
+  selectedCount: number,
+) {
+  return direction === "download"
+    ? `下载 ${selectedCount} 项`
+    : `上传 ${selectedCount} 项`;
+}
 
 const headerStyle = {
-  padding: '12px 14px 8px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
+  padding: "12px 14px 8px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
   flexShrink: 0,
 };
 
 const fileListContainerStyle = {
   flex: 1,
   minHeight: 0,
-  overflowY: 'auto' as const,
-  WebkitOverflowScrolling: 'touch' as const,
-  padding: '4px 10px',
+  overflowY: "auto" as const,
+  WebkitOverflowScrolling: "touch" as const,
+  padding: "4px 10px",
 };
 
 const fileRowStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '8px 10px',
-  borderRadius: '10px',
-  cursor: 'pointer',
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  padding: "8px 10px",
+  borderRadius: "10px",
+  cursor: "pointer",
 };
 
 const fileCheckboxStyle = (checked: boolean) => ({
-  width: '18px',
-  height: '18px',
-  borderRadius: '4px',
-  border: checked ? `2px solid ${mobileTheme.colors.accent}` : '2px solid rgba(255,255,255,0.25)',
-  background: checked ? mobileTheme.colors.accent : 'transparent',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  width: "18px",
+  height: "18px",
+  borderRadius: "4px",
+  border: checked
+    ? `2px solid ${mobileTheme.colors.accent}`
+    : "2px solid rgba(255,255,255,0.25)",
+  background: checked ? mobileTheme.colors.accent : "transparent",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   flexShrink: 0,
-  color: '#000',
-  fontSize: '12px',
+  color: "#000",
+  fontSize: "12px",
   fontWeight: 800,
 });
 
 const pathBreadcrumbStyle = {
-  fontSize: '12px',
+  fontSize: "12px",
   color: mobileTheme.colors.textSecondary,
-  padding: '2px 10px 6px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
+  padding: "2px 10px 6px",
+  display: "flex",
+  alignItems: "center",
+  gap: "4px",
   flexShrink: 0,
-  overflowX: 'auto' as const,
-  whiteSpace: 'nowrap' as const,
+  overflowX: "auto" as const,
+  whiteSpace: "nowrap" as const,
 };
 
 const actionButtonStyle = (bg: string, color: string) => ({
-  minHeight: '36px',
-  padding: '0 14px',
-  borderRadius: '12px',
-  border: 'none',
+  minHeight: "36px",
+  padding: "0 14px",
+  borderRadius: "12px",
+  border: "none",
   background: bg,
   color,
   fontWeight: 700,
-  fontSize: '14px',
-  cursor: 'pointer',
+  fontSize: "14px",
+  cursor: "pointer",
   flexShrink: 0,
 });
 
 const sectionLabelStyle = {
-  fontSize: '13px',
+  fontSize: "13px",
   fontWeight: 700,
   color: mobileTheme.colors.textPrimary,
-  padding: '6px 10px 2px',
+  padding: "6px 10px 2px",
   flexShrink: 0,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
 };
 
 const progressRowStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '4px 10px',
-  fontSize: '12px',
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  padding: "4px 10px",
+  fontSize: "12px",
   color: mobileTheme.colors.textSecondary,
 };
 
@@ -153,6 +194,7 @@ export function FileTransferSheet({
   onClose,
   sendJson,
   onFileTransferMessage,
+  avoidSide = null,
 }: FileTransferSheetProps) {
   const sendJsonRef = useRef(sendJson);
   useEffect(() => {
@@ -160,30 +202,41 @@ export function FileTransferSheet({
   }, [sendJson]);
 
   // Remote state
-  const fileTransferRuntimeRef = useRef(createFileTransferSessionRuntime({
-    onDownloadComplete: async (payload, orderedChunksBase64) => {
-      try {
-        const combined = orderedChunksBase64.join('');
-        const downloadDir = localPath || '/storage/emulated/0/Download/zterm';
+  const fileTransferRuntimeRef = useRef(
+    createFileTransferSessionRuntime({
+      onDownloadComplete: async (payload, orderedChunksBase64) => {
         try {
-          await Filesystem.mkdir({ path: downloadDir, directory: Directory.ExternalStorage, recursive: true });
-        } catch (mkdirError) { console.warn('[FileTransferSheet] mkdir failed (may already exist):', mkdirError); }
+          const combined = orderedChunksBase64.join("");
+          const downloadDir = localPath || "/storage/emulated/0/Download/zterm";
+          try {
+            await Filesystem.mkdir({
+              path: downloadDir,
+              directory: Directory.ExternalStorage,
+              recursive: true,
+            });
+          } catch (mkdirError) {
+            console.warn(
+              "[FileTransferSheet] mkdir failed (may already exist):",
+              mkdirError,
+            );
+          }
 
-        await Filesystem.writeFile({
-          path: `${downloadDir}/${payload.fileName}`,
-          data: combined,
-          directory: Directory.ExternalStorage,
-        });
-        loadLocalDir(downloadDir, showHiddenLocal);
-      } catch (error) {
-        fileTransferRuntimeRef.current.markDownloadWriteError(
-          payload.requestId,
-          error instanceof Error ? error.message : String(error),
-        );
-        forceRuntimeTick((value) => value + 1);
-      }
-    },
-  }));
+          await Filesystem.writeFile({
+            path: `${downloadDir}/${payload.fileName}`,
+            data: combined,
+            directory: Directory.ExternalStorage,
+          });
+          loadLocalDir(downloadDir, showHiddenLocal);
+        } catch (error) {
+          fileTransferRuntimeRef.current.markDownloadWriteError(
+            payload.requestId,
+            error instanceof Error ? error.message : String(error),
+          );
+          forceRuntimeTick((value) => value + 1);
+        }
+      },
+    }),
+  );
   const [, forceRuntimeTick] = useState(0);
   const runtimeState = fileTransferRuntimeRef.current.getState();
   const remotePath = runtimeState.remotePath;
@@ -194,25 +247,36 @@ export function FileTransferSheet({
   const [selectedRemote, setSelectedRemote] = useState<Set<string>>(new Set());
 
   // Local state
-  const [localPath, setLocalPath] = useState('/storage/emulated/0/Download/zterm');
+  const [localPath, setLocalPath] = useState(
+    "/storage/emulated/0/Download/zterm",
+  );
   const [localEntries, setLocalEntries] = useState<LocalFileEntry[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
-  const [localPermissionGranted, setLocalPermissionGranted] = useState<boolean | null>(null);
-  const [localPermissionError, setLocalPermissionError] = useState<string | null>(null);
+  const [localPermissionGranted, setLocalPermissionGranted] = useState<
+    boolean | null
+  >(null);
+  const [localPermissionError, setLocalPermissionError] = useState<
+    string | null
+  >(null);
   const [showHiddenLocal, setShowHiddenLocal] = useState(false);
   const [selectedLocal, setSelectedLocal] = useState<Set<string>>(new Set());
 
   // Direction
-  const [direction, setDirection] = useState<'upload' | 'download'>('download');
+  const [direction, setDirection] = useState<"upload" | "download">("download");
 
   // Transfers
   const transfers = runtimeState.transfers as TransferProgress[];
+  const preview = runtimeState.preview;
+  const visibleLocalEntries = localEntries;
 
   // Request remote file list
   const requestRemoteList = useCallback((path: string, showHidden: boolean) => {
-    const request = fileTransferRuntimeRef.current.requestRemoteList(path, showHidden);
+    const request = fileTransferRuntimeRef.current.requestRemoteList(
+      path,
+      showHidden,
+    );
     const payload: FileListRequestPayload = request.message.payload;
-    sendJsonRef.current({ type: 'file-list-request', payload });
+    sendJsonRef.current?.({ type: "file-list-request", payload });
     forceRuntimeTick((value) => value + 1);
   }, []);
 
@@ -225,6 +289,7 @@ export function FileTransferSheet({
     fileTransferRuntimeRef.current.open(initialRemotePath);
     setSelectedRemote(new Set());
     setSelectedLocal(new Set());
+    setDirection("download");
     forceRuntimeTick((value) => value + 1);
     requestRemoteList(initialRemotePath, showHiddenRemote);
   }, [open, remoteCwd, requestRemoteList, showHiddenRemote]);
@@ -233,50 +298,78 @@ export function FileTransferSheet({
     try {
       const status = await StoragePermissionPlugin.check();
       setLocalPermissionGranted(status.granted);
-      setLocalPermissionError(status.granted ? null : '本地文件同步需要存储权限；请在 daemon/应用安装设置中一次性授权。');
+      setLocalPermissionError(
+        status.granted
+          ? null
+          : "本地文件同步需要存储权限；请在 daemon/应用安装设置中一次性授权。",
+      );
       return status.granted;
     } catch (error) {
       setLocalPermissionGranted(false);
-      setLocalPermissionError(error instanceof Error ? error.message : String(error));
+      setLocalPermissionError(
+        error instanceof Error ? error.message : String(error),
+      );
       return false;
     }
   }, []);
 
   // Load local directory
-  const loadLocalDir = useCallback(async (path: string, showHidden: boolean) => {
-    setLocalLoading(true);
-    try {
-      const permissionGranted = await checkLocalStoragePermission();
-      if (!permissionGranted) {
-        setLocalEntries([]);
-        return;
-      }
-      const result = await Filesystem.readdir({ path, directory: Directory.ExternalStorage });
-      const entries: LocalFileEntry[] = [];
-      for (const entry of result.files) {
-        if (!showHidden && entry.name.startsWith('.')) continue;
-        const type = entry.type === 'directory' ? 'directory' : 'file';
-        let size = 0;
-        if (type === 'file') {
-          try {
-            const stat = await Filesystem.stat({ path: `${path}/${entry.name}`, directory: Directory.ExternalStorage });
-            size = stat.size;
-          } catch (statError) { console.warn('[FileTransferSheet] stat failed for', entry.name, statError); }
+  const loadLocalDir = useCallback(
+    async (path: string, showHidden: boolean) => {
+      setLocalLoading(true);
+      try {
+        const permissionGranted = await checkLocalStoragePermission();
+        if (!permissionGranted) {
+          setLocalEntries([]);
+          return;
         }
-        entries.push({ name: entry.name, type, size, modified: 0, uri: entry.uri });
+        const result = await Filesystem.readdir({
+          path,
+          directory: Directory.ExternalStorage,
+        });
+        const entries: LocalFileEntry[] = [];
+        for (const entry of result.files) {
+          if (!showHidden && entry.name.startsWith(".")) continue;
+          const type = entry.type === "directory" ? "directory" : "file";
+          let size = 0;
+          if (type === "file") {
+            try {
+              const stat = await Filesystem.stat({
+                path: `${path}/${entry.name}`,
+                directory: Directory.ExternalStorage,
+              });
+              size = stat.size;
+            } catch (statError) {
+              console.warn(
+                "[FileTransferSheet] stat failed for",
+                entry.name,
+                statError,
+              );
+            }
+          }
+          entries.push({
+            name: entry.name,
+            type,
+            size,
+            modified: 0,
+            mimeType: (entry as any).mimeType,
+            uri: entry.uri,
+          });
+        }
+        entries.sort((a, b) => {
+          if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        setLocalEntries(entries);
+      } catch (err) {
+        console.warn("[FileTransferSheet] local readdir failed:", err);
+        setLocalEntries([]);
+      } finally {
+        setLocalLoading(false);
       }
-      entries.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-      setLocalEntries(entries);
-    } catch (err) {
-      console.warn('[FileTransferSheet] local readdir failed:', err);
-      setLocalEntries([]);
-    } finally {
-      setLocalLoading(false);
-    }
-  }, [checkLocalStoragePermission]);
+    },
+    [checkLocalStoragePermission],
+  );
 
   useEffect(() => {
     if (open && localPath) {
@@ -298,7 +391,7 @@ export function FileTransferSheet({
 
   // Toggle selection
   const toggleRemote = useCallback((name: string) => {
-    setSelectedRemote(prev => {
+    setSelectedRemote((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -307,7 +400,7 @@ export function FileTransferSheet({
   }, []);
 
   const toggleLocal = useCallback((name: string) => {
-    setSelectedLocal(prev => {
+    setSelectedLocal((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -315,22 +408,73 @@ export function FileTransferSheet({
     });
   }, []);
 
-  const navigateRemotePath = useCallback((path: string) => {
-    setSelectedRemote(new Set());
-    requestRemoteList(path, showHiddenRemote);
-  }, [requestRemoteList, showHiddenRemote]);
+  const navigateRemotePath = useCallback(
+    (path: string) => {
+      setSelectedRemote(new Set());
+      requestRemoteList(path, showHiddenRemote);
+    },
+    [requestRemoteList, showHiddenRemote],
+  );
+
+  const previewRemoteMarkdown = useCallback(
+    (entry: RemoteFileEntry) => {
+      if (entry.type !== "file" || !isMarkdownFileName(entry.name)) {
+        return false;
+      }
+      const request = fileTransferRuntimeRef.current.startPreview(
+        { name: entry.name, size: entry.size },
+        remotePath,
+      );
+      forceRuntimeTick((value) => value + 1);
+      sendJsonRef.current?.(request.message);
+      return true;
+    },
+    [remotePath],
+  );
+
+  const previewLocalMarkdown = useCallback(
+    async (entry: LocalFileEntry) => {
+      if (entry.type !== "file" || !isMarkdownFileName(entry.name)) {
+        return false;
+      }
+      try {
+        const permissionGranted = await checkLocalStoragePermission();
+        if (!permissionGranted) {
+          return true;
+        }
+        const readResult = await Filesystem.readFile({
+          path: `${localPath}/${entry.name}`,
+          directory: Directory.ExternalStorage,
+        });
+        const data = typeof readResult.data === "string" ? readResult.data : "";
+        const text = decodeBase64Utf8(data);
+        fileTransferRuntimeRef.current.setPreviewText(entry.name, text);
+        forceRuntimeTick((value) => value + 1);
+      } catch (error) {
+        fileTransferRuntimeRef.current.setPreviewError(
+          entry.name,
+          error instanceof Error ? error.message : String(error),
+        );
+        forceRuntimeTick((value) => value + 1);
+      }
+      return true;
+    },
+    [checkLocalStoragePermission, localPath],
+  );
 
   // Start transfer
   const startTransfer = useCallback(async () => {
-    console.log('[FileTransferSheet] startTransfer called', { direction, selectedRemote: [...selectedRemote], selectedLocal: [...selectedLocal], remotePath, localPath });
-    if (direction === 'download') {
+    if (direction === "download") {
       // Download selected remote files
       for (const name of selectedRemote) {
-        const entry = remoteEntries.find(e => e.name === name);
-        if (!entry || entry.type !== 'file') continue;
-        const request = fileTransferRuntimeRef.current.startDownload({ name, size: entry.size }, remotePath);
+        const entry = remoteEntries.find((e) => e.name === name);
+        if (!entry || entry.type !== "file") continue;
+        const request = fileTransferRuntimeRef.current.startDownload(
+          { name, size: entry.size },
+          remotePath,
+        );
         forceRuntimeTick((value) => value + 1);
-        sendJson(request.message);
+        sendJson?.(request.message);
         await Promise.race([
           request.waitForDone(),
           new Promise<void>((resolve) => setTimeout(resolve, 60000)),
@@ -343,40 +487,48 @@ export function FileTransferSheet({
         return;
       }
       for (const name of selectedLocal) {
-        const entry = localEntries.find(e => e.name === name);
-        if (!entry || entry.type !== 'file') continue;
+        const entry = localEntries.find((e) => e.name === name);
+        if (!entry || entry.type !== "file") continue;
         try {
           const readResult = await Filesystem.readFile({
             path: `${localPath}/${name}`,
             directory: Directory.ExternalStorage,
           });
-          const base64 = typeof readResult.data === 'string' ? readResult.data : '';
-          const chunkCount = Math.ceil(base64.length / (FILE_CHUNK_SIZE * 4 / 3)); // base64 overhead
+          const base64 =
+            typeof readResult.data === "string" ? readResult.data : "";
+          const chunkCount = Math.max(
+            1,
+            Math.ceil(base64.length / BASE64_CHUNK_SIZE),
+          );
           const targetDir = remotePath.trim();
           if (!targetDir) {
-            throw new Error('remote path unavailable');
+            throw new Error("remote path unavailable");
           }
-          const request = fileTransferRuntimeRef.current.startUpload({ name, size: entry.size }, targetDir, chunkCount);
+          const request = fileTransferRuntimeRef.current.startUpload(
+            { name, size: entry.size },
+            targetDir,
+            chunkCount,
+          );
           forceRuntimeTick((value) => value + 1);
-          sendJson(request.startMessage);
+          sendJson?.(request.startMessage);
 
           // Split base64 into chunks and send
           for (let i = 0; i < chunkCount; i++) {
-            const start = i * FILE_CHUNK_SIZE;
-            const end = Math.min(start + FILE_CHUNK_SIZE, base64.length);
+            const start = i * BASE64_CHUNK_SIZE;
+            const end = Math.min(start + BASE64_CHUNK_SIZE, base64.length);
             const chunk = base64.slice(start, end);
-            sendJson(request.buildChunkMessage(i, chunk));
+            sendJson?.(request.buildChunkMessage(i, chunk));
           }
-          sendJson(request.endMessage);
+          sendJson?.(request.endMessage);
         } catch (err) {
           const requestId = `ful-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           fileTransferRuntimeRef.current.appendTransferError({
             id: requestId,
             fileName: name,
-            direction: 'upload',
+            direction: "upload",
             totalBytes: entry.size,
             transferredBytes: 0,
-            status: 'error',
+            status: "error",
             error: String(err),
           });
           forceRuntimeTick((value) => value + 1);
@@ -386,80 +538,316 @@ export function FileTransferSheet({
       // Refresh remote list
       requestRemoteList(remotePath, showHiddenRemote);
     }
-  }, [checkLocalStoragePermission, direction, selectedRemote, selectedLocal, remoteEntries, localEntries, remotePath, localPath, sendJson, requestRemoteList, showHiddenRemote]);
+  }, [
+    checkLocalStoragePermission,
+    direction,
+    selectedRemote,
+    selectedLocal,
+    remoteEntries,
+    localEntries,
+    remotePath,
+    localPath,
+    sendJson,
+    requestRemoteList,
+    showHiddenRemote,
+  ]);
 
   if (!open) return null;
 
   return (
-    <div style={sheetOverlayStyle} onClick={onClose}>
-      <div style={sheetContainerStyle} onClick={e => e.stopPropagation()}>
+    <div
+      data-testid="file-transfer-overlay"
+      data-avoid-side={avoidSide || undefined}
+      style={buildTransferSheetOverlayStyle(avoidSide)}
+      onClick={onClose}
+    >
+      <div
+        data-testid="file-transfer-sheet"
+        data-layout={avoidSide ? "side" : "bottom"}
+        style={buildTransferSheetContainerStyle(avoidSide)}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div style={headerStyle}>
-          <div style={{ fontSize: '17px', fontWeight: 800, color: mobileTheme.colors.textPrimary }}>文件传输</div>
-          <button type="button" onClick={onClose} style={actionButtonStyle(mobileTheme.colors.shellMuted, '#fff')}>✕</button>
+          <div
+            style={{
+              fontSize: "17px",
+              fontWeight: 800,
+              color: mobileTheme.colors.textPrimary,
+            }}
+          >
+            文件同步
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={actionButtonStyle(mobileTheme.colors.shellMuted, "#fff")}
+          >
+            ✕
+          </button>
         </div>
 
         {/* Remote panel */}
-        <div style={sectionLabelStyle}>
-          <span>🖥 远程: {truncateName(remotePath, 40)}</span>
-          <button
-            type="button"
-            onClick={() => setShowHiddenRemote(v => !v)}
-            style={{ ...actionButtonStyle('transparent', mobileTheme.colors.textSecondary), minHeight: '24px', padding: '0 8px', fontSize: '11px' }}
+        {!sendJson || !onFileTransferMessage ? (
+          <div
+            data-testid="file-transfer-unavailable"
+            style={{
+              margin: "0 10px 8px",
+              padding: "10px 12px",
+              borderRadius: "12px",
+              border: `1px solid ${mobileTheme.colors.cardBorder}`,
+              color: mobileTheme.colors.textSecondary,
+              background: "rgba(255,255,255,0.04)",
+              fontSize: "13px",
+              lineHeight: 1.45,
+            }}
           >
-            {showHiddenRemote ? '隐藏' : '显示'} .文件
-          </button>
-        </div>
-        <div style={pathBreadcrumbStyle}>
-          <button type="button" onClick={() => remoteParentPath && navigateRemotePath(remoteParentPath)}
-            style={{ ...actionButtonStyle('transparent', mobileTheme.colors.accent), minHeight: '24px', padding: '0 6px', fontSize: '12px' }}>
-            ← 上级
-          </button>
-          <span style={{ color: mobileTheme.colors.textMuted }}>{remotePath}</span>
-        </div>
-        <div style={{ ...fileListContainerStyle, maxHeight: '28vh', flex: 'none' }}>
-          {remoteLoading ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>加载中…</div>
-          ) : remoteEntries.length === 0 ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>空目录</div>
-          ) : remoteEntries.map(entry => (
-            <div key={entry.name} style={fileRowStyle} onClick={() => {
-              if (entry.type === 'directory') {
-                navigateRemotePath(remotePath === '/' ? `/${entry.name}` : `${remotePath}/${entry.name}`);
-              } else {
-                toggleRemote(entry.name);
+            文件同步通道未就绪，请先等待当前 session 连接完成。
+          </div>
+        ) : null}
+
+        <>
+          <div style={sectionLabelStyle}>
+            <span>🖥 远程: {truncateName(remotePath, 40)}</span>
+            <button
+              type="button"
+              onClick={() => setShowHiddenRemote((v) => !v)}
+              style={{
+                ...actionButtonStyle(
+                  "transparent",
+                  mobileTheme.colors.textSecondary,
+                ),
+                minHeight: "24px",
+                padding: "0 8px",
+                fontSize: "11px",
+              }}
+            >
+              {showHiddenRemote ? "隐藏" : "显示"} .文件
+            </button>
+          </div>
+          <div style={pathBreadcrumbStyle}>
+            <button
+              type="button"
+              onClick={() =>
+                remoteParentPath && navigateRemotePath(remoteParentPath)
               }
-            }}>
-              <div style={fileCheckboxStyle(selectedRemote.has(entry.name))}>
-                {selectedRemote.has(entry.name) ? '✓' : ''}
+              style={{
+                ...actionButtonStyle("transparent", mobileTheme.colors.accent),
+                minHeight: "24px",
+                padding: "0 6px",
+                fontSize: "12px",
+              }}
+            >
+              ← 上级
+            </button>
+            <span style={{ color: mobileTheme.colors.textMuted }}>
+              {remotePath}
+            </span>
+          </div>
+          <div
+            style={{
+              ...fileListContainerStyle,
+              maxHeight: "28vh",
+              flex: "none",
+            }}
+          >
+            {remoteLoading ? (
+              <div
+                style={{
+                  padding: "20px",
+                  textAlign: "center",
+                  color: mobileTheme.colors.textMuted,
+                }}
+              >
+                加载中…
               </div>
-              <span style={{ fontSize: '16px', flexShrink: 0 }}>{entry.type === 'directory' ? '📁' : '📄'}</span>
-              <span style={{ flex: 1, fontSize: '13px', color: mobileTheme.colors.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {entry.name}
+            ) : remoteEntries.length === 0 ? (
+              <div
+                style={{
+                  padding: "20px",
+                  textAlign: "center",
+                  color: mobileTheme.colors.textMuted,
+                }}
+              >
+                空目录
+              </div>
+            ) : (
+              remoteEntries.map((entry) => (
+                <div
+                  key={entry.name}
+                  style={fileRowStyle}
+                  onClick={() => {
+                    if (entry.type === "directory") {
+                      navigateRemotePath(
+                        remotePath === "/"
+                          ? `/${entry.name}`
+                          : `${remotePath}/${entry.name}`,
+                      );
+                    } else if (previewRemoteMarkdown(entry)) {
+                      return;
+                    } else {
+                      toggleRemote(entry.name);
+                    }
+                  }}
+                >
+                  <div
+                    style={fileCheckboxStyle(selectedRemote.has(entry.name))}
+                  >
+                    {selectedRemote.has(entry.name) ? "✓" : ""}
+                  </div>
+                  <span style={{ fontSize: "16px", flexShrink: 0 }}>
+                    {entry.type === "directory" ? "📁" : "📄"}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      fontSize: "13px",
+                      color: mobileTheme.colors.textPrimary,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {entry.name}
+                  </span>
+                  {entry.type === "file" && (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color: mobileTheme.colors.textMuted,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatBytes(entry.size)}
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+
+        {preview.fileName ? (
+          <div
+            data-testid="file-transfer-md-preview"
+            style={{
+              flexShrink: 0,
+              maxHeight: avoidSide ? "32vh" : "24vh",
+              margin: "6px 10px",
+              borderRadius: "14px",
+              border: `1px solid ${mobileTheme.colors.cardBorder}`,
+              background: "rgba(10, 16, 26, 0.84)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                padding: "8px 10px",
+                borderBottom: `1px solid ${mobileTheme.colors.cardBorder}`,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  color: mobileTheme.colors.textPrimary,
+                }}
+              >
+                Markdown 预览：{truncateName(preview.fileName, 28)}
               </span>
-              {entry.type === 'file' && (
-                <span style={{ fontSize: '11px', color: mobileTheme.colors.textMuted, flexShrink: 0 }}>{formatBytes(entry.size)}</span>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  fileTransferRuntimeRef.current.clearPreview();
+                  forceRuntimeTick((value) => value + 1);
+                }}
+                style={{
+                  ...actionButtonStyle(
+                    "transparent",
+                    mobileTheme.colors.textSecondary,
+                  ),
+                  minHeight: "24px",
+                  padding: "0 8px",
+                  fontSize: "12px",
+                }}
+              >
+                关闭
+              </button>
             </div>
-          ))}
-        </div>
+            <div
+              style={{
+                maxHeight: avoidSide ? "26vh" : "18vh",
+                overflowY: "auto",
+                padding: "10px 12px",
+                color: mobileTheme.colors.textSecondary,
+                fontSize: "13px",
+                lineHeight: 1.55,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {preview.loading
+                ? "加载预览中…"
+                : preview.error
+                  ? `预览失败：${preview.error}`
+                  : renderMarkdownPreview(preview.text || "")}
+            </div>
+          </div>
+        ) : null}
 
         {/* Direction controls */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '8px 10px', flexShrink: 0 }}>
-          <button type="button" onClick={() => setDirection('download')} style={actionButtonStyle(
-            direction === 'download' ? 'rgba(31,214,122,0.22)' : mobileTheme.colors.shellMuted,
-            direction === 'download' ? mobileTheme.colors.accent : '#fff'
-          )}>⬇ 下载到本地</button>
-          <button type="button" onClick={startTransfer} style={actionButtonStyle(
-            'linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))',
-            '#fff'
-          )}>
-            {direction === 'download' ? `传输 ${selectedRemote.size} 项` : `传输 ${selectedLocal.size} 项`}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "12px",
+            padding: "8px 10px",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDirection("download")}
+            style={actionButtonStyle(
+              direction === "download"
+                ? "rgba(31,214,122,0.22)"
+                : mobileTheme.colors.shellMuted,
+              direction === "download" ? mobileTheme.colors.accent : "#fff",
+            )}
+          >
+            ⬇ 下载到本地
           </button>
-          <button type="button" onClick={() => setDirection('upload')} style={actionButtonStyle(
-            direction === 'upload' ? 'rgba(31,214,122,0.22)' : mobileTheme.colors.shellMuted,
-            direction === 'upload' ? mobileTheme.colors.accent : '#fff'
-          )}>⬆ 上传到远程</button>
+          <button
+            type="button"
+            onClick={startTransfer}
+            style={actionButtonStyle(
+              "linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))",
+              "#fff",
+            )}
+          >
+            {resolvePrimaryTransferLabel(
+              direction,
+              direction === "download"
+                ? selectedRemote.size
+                : selectedLocal.size,
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirection("upload")}
+            style={actionButtonStyle(
+              direction === "upload"
+                ? "rgba(31,214,122,0.22)"
+                : mobileTheme.colors.shellMuted,
+              direction === "upload" ? mobileTheme.colors.accent : "#fff",
+            )}
+          >
+            ⬆ 上传到远程
+          </button>
         </div>
 
         {/* Local panel */}
@@ -467,65 +855,180 @@ export function FileTransferSheet({
           <span>📱 本地: {truncateName(localPath, 40)}</span>
           <button
             type="button"
-            onClick={() => setShowHiddenLocal(v => !v)}
-            style={{ ...actionButtonStyle('transparent', mobileTheme.colors.textSecondary), minHeight: '24px', padding: '0 8px', fontSize: '11px' }}
+            onClick={() => setShowHiddenLocal((v) => !v)}
+            style={{
+              ...actionButtonStyle(
+                "transparent",
+                mobileTheme.colors.textSecondary,
+              ),
+              minHeight: "24px",
+              padding: "0 8px",
+              fontSize: "11px",
+            }}
           >
-            {showHiddenLocal ? '隐藏' : '显示'} .文件
+            {showHiddenLocal ? "隐藏" : "显示"} .文件
           </button>
         </div>
         <div style={pathBreadcrumbStyle}>
-          <button type="button" onClick={() => {
-            const parts = localPath.split('/');
-            parts.pop();
-            setLocalPath(parts.join('/') || '/');
-            setSelectedLocal(new Set());
-          }} style={{ ...actionButtonStyle('transparent', mobileTheme.colors.accent), minHeight: '24px', padding: '0 6px', fontSize: '12px' }}>
+          <button
+            type="button"
+            onClick={() => {
+              const parts = localPath.split("/");
+              parts.pop();
+              setLocalPath(parts.join("/") || "/");
+              setSelectedLocal(new Set());
+            }}
+            style={{
+              ...actionButtonStyle("transparent", mobileTheme.colors.accent),
+              minHeight: "24px",
+              padding: "0 6px",
+              fontSize: "12px",
+            }}
+          >
             ← 上级
           </button>
-          <span style={{ color: mobileTheme.colors.textMuted }}>{localPath}</span>
+          <span style={{ color: mobileTheme.colors.textMuted }}>
+            {localPath}
+          </span>
         </div>
-        <div style={{ ...fileListContainerStyle, maxHeight: '22vh', flex: 'none' }}>
+        <div
+          style={{ ...fileListContainerStyle, maxHeight: "22vh", flex: "none" }}
+        >
           {localLoading ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>加载中…</div>
+            <div
+              style={{
+                padding: "20px",
+                textAlign: "center",
+                color: mobileTheme.colors.textMuted,
+              }}
+            >
+              加载中…
+            </div>
           ) : localPermissionGranted === false ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted, lineHeight: 1.5 }}>
-              {localPermissionError || '本地文件同步需要先授权存储权限。'}
+            <div
+              style={{
+                padding: "20px",
+                textAlign: "center",
+                color: mobileTheme.colors.textMuted,
+                lineHeight: 1.5,
+              }}
+            >
+              {localPermissionError || "本地文件同步需要先授权存储权限。"}
             </div>
-          ) : localEntries.length === 0 ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: mobileTheme.colors.textMuted }}>空目录</div>
-          ) : localEntries.map(entry => (
-            <div key={entry.name} style={fileRowStyle} onClick={() => {
-              if (entry.type === 'directory') {
-                setLocalPath(localPath === '/' ? `/${entry.name}` : `${localPath}/${entry.name}`);
-                setSelectedLocal(new Set());
-              } else {
-                toggleLocal(entry.name);
-              }
-            }}>
-              <div style={fileCheckboxStyle(selectedLocal.has(entry.name))}>
-                {selectedLocal.has(entry.name) ? '✓' : ''}
+          ) : visibleLocalEntries.length === 0 ? (
+            <div
+              style={{
+                padding: "20px",
+                textAlign: "center",
+                color: mobileTheme.colors.textMuted,
+              }}
+            >
+              空目录
+            </div>
+          ) : (
+            visibleLocalEntries.map((entry) => (
+              <div
+                key={entry.name}
+                style={fileRowStyle}
+                onClick={() => {
+                  if (entry.type === "directory") {
+                    setLocalPath(
+                      localPath === "/"
+                        ? `/${entry.name}`
+                        : `${localPath}/${entry.name}`,
+                    );
+                    setSelectedLocal(new Set());
+                  } else if (isMarkdownFileName(entry.name)) {
+                    void previewLocalMarkdown(entry);
+                  } else {
+                    toggleLocal(entry.name);
+                  }
+                }}
+              >
+                <div style={fileCheckboxStyle(selectedLocal.has(entry.name))}>
+                  {selectedLocal.has(entry.name) ? "✓" : ""}
+                </div>
+                <span style={{ fontSize: "16px", flexShrink: 0 }}>
+                  {entry.type === "directory" ? "📁" : "📄"}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    fontSize: "13px",
+                    color: mobileTheme.colors.textPrimary,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {entry.name}
+                </span>
+                {entry.type === "file" && (
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: mobileTheme.colors.textMuted,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {formatBytes(entry.size)}
+                  </span>
+                )}
               </div>
-              <span style={{ fontSize: '16px', flexShrink: 0 }}>{entry.type === 'directory' ? '📁' : '📄'}</span>
-              <span style={{ flex: 1, fontSize: '13px', color: mobileTheme.colors.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {entry.name}
-              </span>
-              {entry.type === 'file' && (
-                <span style={{ fontSize: '11px', color: mobileTheme.colors.textMuted, flexShrink: 0 }}>{formatBytes(entry.size)}</span>
-              )}
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* Transfer progress */}
         {transfers.length > 0 && (
-          <div style={{ flexShrink: 0, padding: '6px 0', borderTop: `1px solid ${mobileTheme.colors.cardBorder}` }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: mobileTheme.colors.textSecondary, padding: '2px 10px 4px' }}>传输进度</div>
-            {transfers.map(t => (
+          <div
+            style={{
+              flexShrink: 0,
+              padding: "6px 0",
+              borderTop: `1px solid ${mobileTheme.colors.cardBorder}`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: 700,
+                color: mobileTheme.colors.textSecondary,
+                padding: "2px 10px 4px",
+              }}
+            >
+              传输进度
+            </div>
+            {transfers.map((t) => (
               <div key={t.id} style={progressRowStyle}>
-                <span style={{ fontSize: '14px', flexShrink: 0 }}>{t.direction === 'download' ? '⬇' : '⬆'}</span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.fileName}</span>
-                <span style={{ flexShrink: 0, color: t.status === 'done' ? mobileTheme.colors.accent : t.status === 'error' ? mobileTheme.colors.danger : mobileTheme.colors.textMuted }}>
-                  {t.status === 'done' ? '✓ 完成' : t.status === 'error' ? `✗ ${t.error || '错误'}` : `${formatBytes(t.transferredBytes * FILE_CHUNK_SIZE)} / ${formatBytes(t.totalBytes)}`}
+                <span style={{ fontSize: "14px", flexShrink: 0 }}>
+                  {t.direction === "download" ? "⬇" : "⬆"}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {t.fileName}
+                </span>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    color:
+                      t.status === "done"
+                        ? mobileTheme.colors.accent
+                        : t.status === "error"
+                          ? mobileTheme.colors.danger
+                          : mobileTheme.colors.textMuted,
+                  }}
+                >
+                  {t.status === "done"
+                    ? "✓ 完成"
+                    : t.status === "error"
+                      ? `✗ ${t.error || "错误"}`
+                      : `${formatBytes(t.transferredBytes * FILE_CHUNK_SIZE)} / ${formatBytes(t.totalBytes)}`}
                 </span>
               </div>
             ))}

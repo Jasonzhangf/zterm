@@ -12,6 +12,14 @@ export interface AppUpdateManifest {
   channel?: string;
 }
 
+export interface AppUpdateRollbackBackup {
+  versionCode: number;
+  versionName: string;
+  filePath: string;
+  sha256: string;
+  backedUpAt: number;
+}
+
 export interface AppUpdatePreferences {
   manifestUrl: string;
   autoCheckOnLaunch: boolean;
@@ -19,6 +27,7 @@ export interface AppUpdatePreferences {
   ignoreUntilManualCheck: boolean;
   lastCheckedAt?: number;
   lastSeenVersionCode?: number;
+  rollbackBackup?: AppUpdateRollbackBackup | null;
 }
 
 export interface AppUpdateCheckResult {
@@ -58,6 +67,21 @@ export function normalizeAppUpdatePreferences(input: unknown): AppUpdatePreferen
   const lastCheckedAt = toFiniteNumber(candidate.lastCheckedAt);
   const lastSeenVersionCode = toFiniteNumber(candidate.lastSeenVersionCode);
 
+  const rollbackBackup = candidate.rollbackBackup && typeof candidate.rollbackBackup === 'object'
+    ? (() => {
+        const rollbackCandidate = candidate.rollbackBackup as unknown as Record<string, unknown>;
+        const versionCode = toFiniteNumber(rollbackCandidate.versionCode);
+        const versionName = typeof rollbackCandidate.versionName === 'string' ? rollbackCandidate.versionName.trim() : '';
+        const filePath = typeof rollbackCandidate.filePath === 'string' ? rollbackCandidate.filePath.trim() : '';
+        const sha256 = typeof rollbackCandidate.sha256 === 'string' ? rollbackCandidate.sha256.trim().toLowerCase() : '';
+        const backedUpAt = toFiniteNumber(rollbackCandidate.backedUpAt);
+        if (!versionCode || versionCode <= 0 || !versionName || !filePath || !sha256 || !backedUpAt || backedUpAt <= 0) {
+          return null;
+        }
+        return { versionCode, versionName, filePath, sha256, backedUpAt };
+      })()
+    : null;
+
   return {
     manifestUrl,
     autoCheckOnLaunch: candidate.autoCheckOnLaunch !== false,
@@ -65,6 +89,7 @@ export function normalizeAppUpdatePreferences(input: unknown): AppUpdatePreferen
     ignoreUntilManualCheck: candidate.ignoreUntilManualCheck === true,
     lastCheckedAt: lastCheckedAt && lastCheckedAt > 0 ? lastCheckedAt : undefined,
     lastSeenVersionCode: lastSeenVersionCode && lastSeenVersionCode > 0 ? lastSeenVersionCode : undefined,
+    rollbackBackup,
   };
 }
 

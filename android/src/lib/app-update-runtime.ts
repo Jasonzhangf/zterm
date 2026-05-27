@@ -8,6 +8,7 @@ import {
   type AppUpdateCheckResult,
   type AppUpdateManifest,
   type AppUpdatePreferences,
+  type AppUpdateRollbackBackup,
 } from './app-update';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
 
@@ -31,6 +32,9 @@ export interface AppUpdateRuntimeSnapshot {
   lastError: string | null;
   updateStage: AppUpdateStage;
   runtimeVersionCode: number;
+  rollbackBackup: AppUpdateRollbackBackup | null;
+  isBackingUp: boolean;
+  isRollingBack: boolean;
 }
 
 export interface AppUpdateRuntimeDeps {
@@ -43,6 +47,9 @@ export interface AppUpdateRuntimeDeps {
   canRequestPackageInstalls: () => Promise<{ allowed: boolean }>;
   openInstallPermissionSettings: () => Promise<void>;
   downloadAndInstall: (options: DownloadAndInstallOptions) => Promise<unknown>;
+  backupCurrentApk: () => Promise<AppUpdateRollbackBackup>;
+  rollbackToBackup: (options: { filePath: string; sha256?: string }) => Promise<void>;
+  getRollbackBackupInfo: () => Promise<AppUpdateRollbackBackup | null>;
   onError?: (phase: 'restore-preferences' | 'persist-preferences', error: unknown) => void;
 }
 
@@ -56,6 +63,9 @@ function createDefaultSnapshot(runtimeVersionCode: number): AppUpdateRuntimeSnap
     lastError: null,
     updateStage: 'idle',
     runtimeVersionCode,
+    rollbackBackup: null,
+    isBackingUp: false,
+    isRollingBack: false,
   };
 }
 
@@ -95,6 +105,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
     setSnapshot((current) => ({
       ...current,
       preferences: resolved,
+      rollbackBackup: resolved.rollbackBackup || null,
     }));
     persistPreferences(deps.storage, resolved, deps.onError);
     return snapshot;
@@ -117,6 +128,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         return setSnapshot((current) => ({
           ...current,
           preferences: normalizeAppUpdatePreferences(JSON.parse(raw)),
+          rollbackBackup: normalizeAppUpdatePreferences(JSON.parse(raw)).rollbackBackup || null,
         }));
       } catch (error) {
         deps.onError?.('restore-preferences', error);
@@ -255,6 +267,54 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       }));
     },
 
+    async rollbackToPreviousVersion() {
+      const backup = snapshot.rollbackBackup;
+      if (!backup) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: '没有可回退的旧版本备份',
+          updateStage: 'failed',
+        }));
+        return false;
+      }
+
+      setSnapshot((current) => ({
+        ...current,
+        isRollingBack: true,
+        lastError: null,
+      }));
+
+      try {
+        await deps.rollbackToBackup({
+          filePath: backup.filePath,
+          sha256: backup.sha256,
+        });
+
+        const nextPreferences = normalizeAppUpdatePreferences({
+          ...snapshot.preferences,
+          rollbackBackup: null,
+        });
+        persistPreferences(deps.storage, nextPreferences, deps.onError);
+
+        setSnapshot((current) => ({
+          ...current,
+          preferences: nextPreferences,
+          rollbackBackup: null,
+          isRollingBack: false,
+          updateStage: 'completed',
+        }));
+        return true;
+      } catch (error) {
+        setSnapshot((current) => ({
+          ...current,
+          isRollingBack: false,
+          lastError: error instanceof Error ? error.message : '回滚失败',
+          updateStage: 'failed',
+        }));
+        return false;
+      }
+    },
+
     async startUpdate(manifest?: AppUpdateManifest | null) {
       setSnapshot((current) => ({
         ...current,
@@ -287,10 +347,23 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       setSnapshot((current) => ({
         ...current,
         installing: true,
+        isBackingUp: true,
         lastError: null,
       }));
 
       try {
+        const rollbackBackup = await deps.backupCurrentApk();
+        const backupPreferences = normalizeAppUpdatePreferences({
+          ...snapshot.preferences,
+          rollbackBackup,
+        });
+        persistPreferences(deps.storage, backupPreferences, deps.onError);
+        setSnapshot((current) => ({
+          ...current,
+          preferences: backupPreferences,
+          rollbackBackup,
+          isBackingUp: false,
+        }));
         setSnapshot((current) => ({
           ...current,
           updateStage: 'checking-install-permission',
@@ -327,6 +400,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           preferences: nextPreferences,
           availableManifest: null,
           installing: false,
+          isBackingUp: false,
           updateStage: 'completed',
         }));
         return true;
@@ -334,6 +408,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         setSnapshot((current) => ({
           ...current,
           installing: false,
+          isBackingUp: false,
           lastError: error instanceof Error ? error.message : '下载或安装升级包失败',
           updateStage: 'failed',
         }));

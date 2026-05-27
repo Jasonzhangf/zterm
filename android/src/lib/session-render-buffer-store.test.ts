@@ -63,6 +63,22 @@ describe('session-render-buffer-store', () => {
     const second = makeSnapshot([[makeCell('a')], [expensiveCell]], 2);
     expect(store.setBuffer('s1', second)).toBe(true);
     expect(charReads).toBe(0);
-    expect(store.getSnapshot('s1').buffer).toBe(second);
+    expect(store.getSnapshot('s1').buffer).not.toBe(second);
+  });
+
+  it('keeps an immutable render snapshot after publish even if the source snapshot mutates later', () => {
+    const store = createSessionRenderBufferStore();
+    const snapshot = makeSnapshot([[makeCell('a')], [makeCell('b')]], 1);
+
+    expect(store.setBuffer('s1', snapshot)).toBe(true);
+
+    snapshot.lines[0]![0]!.char = 'z'.codePointAt(0) || 32;
+    snapshot.gapRanges.push({ startIndex: 1, endIndex: 2 });
+    snapshot.cursor = { rowIndex: 3, col: 4, visible: true };
+
+    const stored = store.getSnapshot('s1').buffer;
+    expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('a');
+    expect(stored.gapRanges).toHaveLength(0);
+    expect(stored.cursor).toBeNull();
   });
 });

@@ -102,6 +102,34 @@ describe('buildTraversalPlan', () => {
     }));
   });
 
+  it('keeps local/LAN direct websocket candidates independent from tailscale', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '192.168.1.20',
+        bridgePort: 40807,
+        authToken: 'token',
+        transportMode: 'websocket',
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'websocket',
+        traversalRelay: undefined,
+      },
+    );
+
+    expect(plan.candidates).toEqual([
+      expect.objectContaining({
+        kind: 'ws',
+        path: 'ipv4',
+        endpoint: '192.168.1.20:40807',
+        url: 'ws://192.168.1.20:40807/?token=token',
+      }),
+    ]);
+  });
+
   it('requires explicit signal url in webrtc mode', () => {
     expect(() =>
       buildTraversalPlan(

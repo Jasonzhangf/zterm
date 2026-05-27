@@ -66,23 +66,20 @@ describe('server transport/session lifecycle truth gates', () => {
 
   it('documents session-ticket/sessionTransportToken as attach-only compatibility wire material', () => {
     const source = readMessageControlRuntimeSource();
-    expect(source).toContain('Compatibility-only attach handshake:');
+    expect(source).toContain('Attach handshake:');
     expect(source).toContain('session-ticket / sessionTransportToken remain attach-only wire material');
-    expect(source).toContain('daemon must not promote either into daemon-owned long-lived business truth');
-    expect(source).toContain('openRequestId remains client-local request correlation');
+    expect(source).toContain('openRequestId is wire correlation only and is not daemon-owned state');
     expect(source).toContain('daemon does not keep openRequestId as token owner');
   });
 
-  it('keeps legacy clientSessionId only as wire-echo compatibility instead of restoring daemon ownership', () => {
+  it('does not keep or echo legacy clientSessionId in daemon wire ownership', () => {
     const controlSource = readMessageControlRuntimeSource();
     const messageRuntimeSource = readMessageRuntimeSource();
     const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
 
-    expect(controlSource).toContain('clientSessionId: payload.clientSessionId?.trim() || undefined');
-    expect(messageRuntimeSource).toContain('clientSessionId: message.payload?.clientSessionId?.trim() || undefined');
+    expect(controlSource).not.toContain('clientSessionId');
+    expect(messageRuntimeSource).not.toContain('clientSessionId');
     expect(attachTokenRuntimeSource).not.toContain('clientSessionId');
-    expect(controlSource).not.toContain('payload.clientSessionId) =>');
-    expect(controlSource).not.toContain('clientSessionId, sessionTransportToken');
   });
 
   it('does not keep websocket-close grace timers that auto-close bound sessions', () => {

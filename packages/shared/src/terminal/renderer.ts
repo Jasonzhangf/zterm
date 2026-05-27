@@ -358,16 +358,31 @@ export function applySessionSwitchRenderReset(options: {
 // ─── Keyboard input ─────────────────────────────────────────
 
 export function resolveTerminalCtrlChord(event: KeyboardEvent) {
+  if (event.altKey || event.metaKey) return null;
   if (!event.ctrlKey || event.key.length !== 1) return null;
   const code = event.key.toUpperCase().charCodeAt(0);
   if (code < 64 || code > 95) return null;
   return String.fromCharCode(code - 64);
 }
 
+function resolveModifiedPrintableKeyboardInput(event: KeyboardEvent) {
+  if (event.ctrlKey && event.altKey && event.key.length === 1) {
+    return `\x1b${event.key}`;
+  }
+  if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.length === 1) {
+    return `\x1b${event.key}`;
+  }
+  return null;
+}
+
 export function resolveTerminalKeyboardInput(
   event: KeyboardEvent,
   cursorKeysApp: boolean,
 ) {
+  const modifiedPrintable = resolveModifiedPrintableKeyboardInput(event);
+  if (modifiedPrintable) {
+    return modifiedPrintable;
+  }
   const arrows = cursorKeysApp ? APP_CURSOR_KEYS : NORMAL_CURSOR_KEYS;
   if (event.key in arrows) {
     return arrows[event.key as keyof typeof arrows];
@@ -376,6 +391,12 @@ export function resolveTerminalKeyboardInput(
     case 'Enter': return '\r';
     case 'Backspace': return '\x7f';
     case 'Tab': return '\t';
+    case 'Home': return '\x1b[H';
+    case 'End': return '\x1b[F';
+    case 'PageUp': return '\x1b[5~';
+    case 'PageDown': return '\x1b[6~';
+    case 'Delete': return '\x1b[3~';
+    case 'Insert': return '\x1b[2~';
     case 'Escape': return '\x1b';
     default: return null;
   }

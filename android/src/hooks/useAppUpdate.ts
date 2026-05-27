@@ -39,6 +39,9 @@ export function useAppUpdate() {
     canRequestPackageInstalls: () => AppUpdatePlugin.canRequestPackageInstalls(),
     openInstallPermissionSettings: () => AppUpdatePlugin.openInstallPermissionSettings(),
     downloadAndInstall: (options) => AppUpdatePlugin.downloadAndInstall(options),
+    backupCurrentApk: () => AppUpdatePlugin.backupCurrentApk(),
+    rollbackToBackup: (options) => AppUpdatePlugin.rollbackToBackup(options),
+    getRollbackBackupInfo: () => AppUpdatePlugin.getRollbackBackupInfo(),
     onError: (phase, error) => {
       const prefix = phase === 'restore-preferences'
         ? '[useAppUpdate] Failed to restore preferences:'
@@ -94,6 +97,12 @@ export function useAppUpdate() {
     return result;
   }, [syncSnapshot]);
 
+  const rollbackToPreviousVersion = useCallback(async () => {
+    const result = await runtimeRef.current.rollbackToPreviousVersion();
+    syncSnapshot();
+    return result;
+  }, [syncSnapshot]);
+
   const projection = deriveAppUpdateProjection({
     preferences: snapshot.preferences,
     latestManifest: snapshot.latestManifest,
@@ -126,6 +135,9 @@ export function useAppUpdate() {
     installing: projection.installing,
     lastError: projection.lastError,
     updateStage: projection.updateStage,
+    rollbackBackup: snapshot.rollbackBackup,
+    isBackingUp: snapshot.isBackingUp,
+    isRollingBack: snapshot.isRollingBack,
     hasNewVersion: projection.hasNewVersion,
     hasUpdateIgnorePolicy: projection.hasUpdateIgnorePolicy,
     updateManifestUrlConfigured: projection.updateManifestUrlConfigured,
@@ -136,6 +148,7 @@ export function useAppUpdate() {
     ignoreUntilManualCheck,
     resetIgnorePolicy,
     startUpdate,
+    rollbackToPreviousVersion,
   }), [
     projection.preferences,
     projection.runtimeVersionCode,
@@ -155,5 +168,9 @@ export function useAppUpdate() {
     ignoreUntilManualCheck,
     resetIgnorePolicy,
     startUpdate,
+    snapshot.rollbackBackup,
+    snapshot.isBackingUp,
+    snapshot.isRollingBack,
+    rollbackToPreviousVersion,
   ]);
 }

@@ -9,6 +9,9 @@ vi.mock('../plugins/AppUpdatePlugin', () => ({
     canRequestPackageInstalls: vi.fn(),
     openInstallPermissionSettings: vi.fn(),
     downloadAndInstall: vi.fn(),
+    backupCurrentApk: vi.fn(),
+    rollbackToBackup: vi.fn(),
+    getRollbackBackupInfo: vi.fn(),
   },
   isNativeAppUpdateSupported: () => true,
 }));

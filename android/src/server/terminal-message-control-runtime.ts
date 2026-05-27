@@ -60,18 +60,16 @@ export function handleSessionOpenMessageRuntime(
   const sessionName = deps.sanitizeSessionName(payload.sessionName);
   const sessionTransportToken = deps.issueSessionTransportToken();
   console.log(
-    `[server] session-open transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${sessionName} clientSessionId=${payload.clientSessionId?.trim() || 'n/a'}`,
+    `[server] session-open transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${sessionName}`,
   );
-  // Compatibility-only attach handshake:
-  // - openRequestId remains client-local request correlation
+  // Attach handshake:
+  // - openRequestId is wire correlation only and is not daemon-owned state
   // - session-ticket / sessionTransportToken remain attach-only wire material
-  // - daemon must not promote either into daemon-owned long-lived business truth
   // - daemon does not keep openRequestId as token owner; token is one-shot attach proof only
   deps.sendTransportMessage(connection.transport, {
     type: 'session-ticket',
     payload: {
       openRequestId: payload.openRequestId,
-      clientSessionId: payload.clientSessionId?.trim() || undefined,
       sessionTransportToken,
       sessionName,
     },

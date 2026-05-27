@@ -13,6 +13,19 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "DeviceClipboard")
 public class DeviceClipboardPlugin extends Plugin {
     @PluginMethod
+    public void writeText(PluginCall call) {
+        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            call.reject("系统剪贴板服务不可用");
+            return;
+        }
+
+        String value = call.getString("value", "");
+        clipboard.setPrimaryClip(ClipData.newPlainText("zterm-copy", value));
+        call.resolve();
+    }
+
+    @PluginMethod
     public void readText(PluginCall call) {
         ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard == null) {

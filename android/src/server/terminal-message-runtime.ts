@@ -126,7 +126,6 @@ export function createTerminalMessageRuntime(
             type: 'session-open-failed',
             payload: {
               openRequestId: message.payload?.openRequestId || '',
-              clientSessionId: message.payload?.clientSessionId?.trim() || undefined,
               message: error instanceof Error ? error.message : 'Invalid session-open payload',
               code: 'session_open_invalid',
             },

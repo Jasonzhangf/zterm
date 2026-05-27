@@ -134,7 +134,7 @@ function createRuntime(options?: {
 }
 
 describe('terminal message runtime explicit error truth', () => {
-  it('echoes legacy clientSessionId in session-ticket for backward wire compatibility', async () => {
+  it('does not echo legacy clientSessionId in session-ticket because daemon owns no client state', async () => {
     const { runtime, sendTransportMessage } = createRuntime();
     const connection = createConnection(null);
 
@@ -149,8 +149,8 @@ describe('terminal message runtime explicit error truth', () => {
       connection.transport,
       expect.objectContaining({
         type: 'session-ticket',
-        payload: expect.objectContaining({
-          clientSessionId: 'session-legacy',
+        payload: expect.not.objectContaining({
+          clientSessionId: expect.anything(),
         }),
       }),
     );

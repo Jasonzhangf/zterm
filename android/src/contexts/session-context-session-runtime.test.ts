@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { closeSessionRuntime, connectSessionRuntime, createSessionRuntime, scheduleReconnectRuntime } from './session-context-session-runtime';
+import {
+  closeSessionRuntime,
+  connectSessionRuntime,
+  createSessionRuntime,
+  scheduleReconnectRuntime,
+} from './session-context-session-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session } from '../lib/types';
 

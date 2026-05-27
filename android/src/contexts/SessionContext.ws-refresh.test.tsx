@@ -1422,6 +1422,32 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(3));
   });
 
+  it('reconnects the switched-to tab immediately when its websocket is already closed before the first input', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+    ws2.readyState = MockWebSocket.CLOSED;
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(3));
+  });
+
   it('reconnects the active session immediately when input is queued against a closed websocket', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -1447,8 +1473,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2));
   });
 
-
-  it('drops input on a stale-open active transport and reconnects instead of socket-buffering it', async () => {
+  it('sends input on an open active transport even after a long quiet period', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1477,16 +1502,16 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
-        expect(sentMessages.some((item) => item.type === 'input')).toBe(false);
-        expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+        expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
       });
-      expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
     } finally {
       nowSpy.mockRestore();
     }
   });
 
-  it('does not send input on an open transport after the activity audit marks it stale', async () => {
+  it('does not treat quiet open transport as stale for explicit input', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1515,10 +1540,10 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws1);
-        expect(sentMessages.some((item) => item.type === 'input')).toBe(false);
-        expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+        expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
       });
-      expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
     } finally {
       nowSpy.mockRestore();
     }
@@ -1942,6 +1967,41 @@ describe('SessionContext websocket dynamic refresh', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('requests head immediately when a non-active pane first becomes visible live', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+    ws1.sent.length = 0;
+    ws2.sent.length = 0;
+
+    fireEvent.click(screen.getByText('live-both'));
+
+    await waitFor(() => {
+      expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+    });
+    expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
   });
 
   it('active tick does not multiply requests when live session order changes without semantic change', async () => {

@@ -20,6 +20,9 @@ describe('app-update-runtime', () => {
   const canRequestPackageInstalls = vi.fn();
   const openInstallPermissionSettings = vi.fn();
   const downloadAndInstall = vi.fn();
+  const backupCurrentApk = vi.fn();
+  const rollbackToBackup = vi.fn();
+  const getRollbackBackupInfo = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,6 +39,9 @@ describe('app-update-runtime', () => {
       canRequestPackageInstalls,
       openInstallPermissionSettings,
       downloadAndInstall,
+      backupCurrentApk,
+      rollbackToBackup,
+      getRollbackBackupInfo,
     });
   }
 
@@ -87,6 +93,7 @@ describe('app-update-runtime', () => {
     const runtime = createRuntime();
 
     canRequestPackageInstalls.mockResolvedValue({ allowed: true });
+    backupCurrentApk.mockResolvedValue({ versionCode: 1011491, versionName: '0.1.1.1491', filePath: '/tmp/rollback.apk', sha256: 'rollbacksha', backedUpAt: 123456789 });
     downloadAndInstall.mockResolvedValue({
       filePath: '/tmp/zterm.apk',
       sha256: 'abc123',
@@ -108,4 +115,83 @@ describe('app-update-runtime', () => {
     expect(canRequestPackageInstalls).toHaveBeenCalledTimes(1);
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
   });
+
+  it('backs up current apk before download/install and stores rollback backup', async () => {
+    const runtime = createRuntime();
+
+    canRequestPackageInstalls.mockResolvedValue({ allowed: true });
+    backupCurrentApk.mockResolvedValue({
+      versionCode: 1011491,
+      versionName: '0.1.1.1491',
+      filePath: '/tmp/rollback.apk',
+      sha256: 'rollbacksha',
+      backedUpAt: 123456789,
+    });
+    downloadAndInstall.mockResolvedValue({
+      filePath: '/tmp/zterm.apk',
+      sha256: 'abc123',
+      packageName: 'com.zterm.android',
+    });
+
+    const installed = await runtime.startUpdate({
+      versionName: '0.1.1.1493',
+      versionCode: 1011493,
+      buildNumber: 1493,
+      apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
+      sha256: 'abc123',
+      notes: [],
+    });
+
+    expect(installed).toBe(true);
+    expect(backupCurrentApk).toHaveBeenCalledTimes(1);
+    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect(runtime.getSnapshot().rollbackBackup?.filePath).toBe('/tmp/rollback.apk');
+  });
+
+  it('aborts update when backup current apk fails', async () => {
+    const runtime = createRuntime();
+
+    backupCurrentApk.mockRejectedValue(new Error('backup failed'));
+
+    const installed = await runtime.startUpdate({
+      versionName: '0.1.1.1493',
+      versionCode: 1011493,
+      buildNumber: 1493,
+      apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
+      sha256: 'abc123',
+      notes: [],
+    });
+
+    expect(installed).toBe(false);
+    expect(downloadAndInstall).not.toHaveBeenCalled();
+    expect(runtime.getSnapshot().lastError).toContain('backup failed');
+  });
+
+  it('rolls back to previous version and clears rollback backup', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'https://example.com/updates/latest.json',
+        autoCheckOnLaunch: false,
+        rollbackBackup: {
+          versionCode: 1011491,
+          versionName: '0.1.1.1491',
+          filePath: '/tmp/rollback.apk',
+          sha256: 'rollbacksha',
+          backedUpAt: 123456789,
+        },
+      }),
+    }));
+    runtime.restorePreferences();
+    rollbackToBackup.mockResolvedValue(undefined);
+
+    const rolledBack = await runtime.rollbackToPreviousVersion();
+
+    expect(rolledBack).toBe(true);
+    expect(rollbackToBackup).toHaveBeenCalledWith({
+      filePath: '/tmp/rollback.apk',
+      sha256: 'rollbacksha',
+    });
+    expect(runtime.getSnapshot().rollbackBackup).toBeNull();
+  });
+
 });

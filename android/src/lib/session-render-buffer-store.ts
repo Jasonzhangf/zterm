@@ -37,6 +37,34 @@ const EMPTY_SNAPSHOT: SessionRenderStoreSnapshot = {
   buffer: EMPTY_BUFFER,
 };
 
+function cloneRenderLines(lines: SessionRenderBufferSnapshot['lines']) {
+  return lines.map((row) => row.map((cell) => ({ ...cell })));
+}
+
+function cloneRenderGapRanges(gapRanges: SessionRenderBufferSnapshot['gapRanges']) {
+  return gapRanges.map((range) => ({ ...range }));
+}
+
+function cloneRenderCursor(cursor: SessionRenderBufferSnapshot['cursor']) {
+  if (!cursor) {
+    return null;
+  }
+  return {
+    rowIndex: cursor.rowIndex,
+    col: cursor.col,
+    visible: cursor.visible,
+  };
+}
+
+function cloneRenderBuffer(buffer: SessionRenderBufferSnapshot): SessionRenderBufferSnapshot {
+  return {
+    ...buffer,
+    lines: cloneRenderLines(buffer.lines),
+    gapRanges: cloneRenderGapRanges(buffer.gapRanges),
+    cursor: cloneRenderCursor(buffer.cursor),
+  };
+}
+
 function cursorEqual(left: TerminalCursorState | null, right: TerminalCursorState | null) {
   if (left === right) {
     return true;
@@ -163,7 +191,7 @@ export function createSessionRenderBufferStore(): SessionRenderBufferStore {
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer,
+      buffer: cloneRenderBuffer(buffer),
     });
     notify(sessionId);
     return true;

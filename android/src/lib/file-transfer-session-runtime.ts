@@ -18,6 +18,13 @@ export interface FileTransferSessionRuntimeState {
   remoteEntries: FileEntry[];
   remoteLoading: boolean;
   transfers: TransferProgress[];
+  preview: {
+    requestId: string | null;
+    fileName: string | null;
+    loading: boolean;
+    text: string | null;
+    error: string | null;
+  };
 }
 
 export type FileTransferSessionRuntimeMessage =
@@ -27,7 +34,7 @@ export type FileTransferSessionRuntimeMessage =
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
   | { type: 'file-download-error'; payload: FileDownloadErrorPayload }
   | { type: 'file-upload-progress'; payload: FileUploadProgressPayload }
-  | { type: 'file-upload-complete'; payload: { requestId: string } }
+  | { type: 'file-upload-complete'; payload: { requestId: string; filePath?: string; bytes?: number } }
   | { type: 'file-upload-error'; payload: { requestId: string; error: string } };
 
 export interface FileTransferSessionRuntimeDeps {
@@ -43,7 +50,23 @@ function createDefaultState(): FileTransferSessionRuntimeState {
     remoteEntries: [],
     remoteLoading: false,
     transfers: [],
+    preview: {
+      requestId: null,
+      fileName: null,
+      loading: false,
+      text: null,
+      error: null,
+    },
   };
+}
+
+function decodeBase64Text(chunks: string[]) {
+  const binary = atob(chunks.join(''));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function updateTransfer(
@@ -58,7 +81,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
   let state = createDefaultState();
   let activeListRequestId: string | null = null;
   let activeDownloadRequestId: string | null = null;
+  let activePreviewRequestId: string | null = null;
   let downloadChunks = new Map<number, string>();
+  let previewChunks = new Map<number, string>();
   const waiters = new Map<string, () => void>();
   const now = deps?.now ?? (() => Date.now());
   const randomId = deps?.randomId ?? (() => Math.random().toString(36).slice(2, 6));
@@ -76,7 +101,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     open(initialRemotePath: string) {
       activeListRequestId = null;
       activeDownloadRequestId = null;
+      activePreviewRequestId = null;
       downloadChunks = new Map();
+      previewChunks = new Map();
       waiters.clear();
       state = {
         ...createDefaultState(),
@@ -133,6 +160,34 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
         waitForDone: () => new Promise<void>((resolve) => {
           waiters.set(requestId, resolve);
         }),
+      };
+    },
+
+    startPreview(entry: Pick<FileEntry, 'name' | 'size'>, remotePath: string) {
+      const requestId = `fpv-${now()}-${randomId()}`;
+      activePreviewRequestId = requestId;
+      previewChunks = new Map();
+      state = {
+        ...state,
+        preview: {
+          requestId,
+          fileName: entry.name,
+          loading: true,
+          text: null,
+          error: null,
+        },
+      };
+      return {
+        requestId,
+        message: {
+          type: 'file-download-request' as const,
+          payload: {
+            requestId,
+            remotePath: remotePath === '/' ? `/${entry.name}` : `${remotePath}/${entry.name}`,
+            fileName: entry.name,
+            totalBytes: entry.size,
+          },
+        },
       };
     },
 
@@ -202,6 +257,10 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           };
           return true;
         case 'file-download-chunk':
+          if (activePreviewRequestId === msg.payload.requestId) {
+            previewChunks.set(msg.payload.chunkIndex, msg.payload.dataBase64);
+            return true;
+          }
           if (activeDownloadRequestId !== msg.payload.requestId) {
             return false;
           }
@@ -216,6 +275,35 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           };
           return true;
         case 'file-download-complete':
+          if (activePreviewRequestId === msg.payload.requestId) {
+            activePreviewRequestId = null;
+            const orderedChunks = Array.from({ length: previewChunks.size }, (_, index) => previewChunks.get(index) || '').filter(Boolean);
+            try {
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: decodeBase64Text(orderedChunks),
+                  error: null,
+                },
+              };
+            } catch (error) {
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: null,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              };
+            }
+            previewChunks = new Map();
+            return true;
+          }
           if (activeDownloadRequestId !== msg.payload.requestId) {
             return false;
           }
@@ -236,6 +324,21 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           };
           return true;
         case 'file-download-error':
+          if (activePreviewRequestId === msg.payload.requestId) {
+            activePreviewRequestId = null;
+            previewChunks = new Map();
+            state = {
+              ...state,
+              preview: {
+                requestId: msg.payload.requestId,
+                fileName: state.preview.fileName,
+                loading: false,
+                text: null,
+                error: msg.payload.error,
+              },
+            };
+            return true;
+          }
           activeDownloadRequestId = null;
           settleWaiter(msg.payload.requestId);
           state = {
@@ -298,6 +401,42 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       state = {
         ...state,
         transfers: [...state.transfers, transfer],
+      };
+      return state;
+    },
+
+    setPreviewText(fileName: string, text: string) {
+      state = {
+        ...state,
+        preview: {
+          requestId: null,
+          fileName,
+          loading: false,
+          text,
+          error: null,
+        },
+      };
+      return state;
+    },
+
+    setPreviewError(fileName: string, error: string) {
+      state = {
+        ...state,
+        preview: {
+          requestId: null,
+          fileName,
+          loading: false,
+          text: null,
+          error,
+        },
+      };
+      return state;
+    },
+
+    clearPreview() {
+      state = {
+        ...state,
+        preview: createDefaultState().preview,
       };
       return state;
     },

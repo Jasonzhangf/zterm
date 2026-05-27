@@ -94,8 +94,52 @@ describe('file-transfer-session-runtime', () => {
 
     await runtime.applyMessage({
       type: 'file-upload-complete',
-      payload: { requestId: upload.requestId },
+      payload: { requestId: upload.requestId, filePath: '/remote/home/c.txt', bytes: 8192 },
     });
     expect(runtime.getState().transfers[0]?.status).toBe('done');
+  });
+
+  it('owns markdown preview download independently from normal transfer progress', async () => {
+    const onDownloadComplete = vi.fn();
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 400,
+      randomId: () => 'prev',
+      onDownloadComplete,
+    });
+
+    runtime.open('/remote/home');
+    const preview = runtime.startPreview({ name: 'README.md', size: 7 }, '/remote/home');
+
+    expect(preview.requestId).toBe('fpv-400-prev');
+    expect(runtime.getState().preview.loading).toBe(true);
+    expect(runtime.getState().transfers).toHaveLength(0);
+
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: preview.requestId,
+        fileName: 'README.md',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'IyBUaXRsZQ==',
+      },
+    });
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: preview.requestId,
+        fileName: 'README.md',
+        totalBytes: 7,
+      },
+    });
+
+    expect(onDownloadComplete).not.toHaveBeenCalled();
+    expect(runtime.getState().preview).toMatchObject({
+      fileName: 'README.md',
+      loading: false,
+      text: '# Title',
+      error: null,
+    });
+    expect(runtime.getState().transfers).toHaveLength(0);
   });
 });
