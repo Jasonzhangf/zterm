@@ -1395,12 +1395,11 @@ function TerminalPageComponent({
       if (quickBarEditorFocusedRef.current) {
         return;
       }
-      setAndroidEditorActive(false);
       void ImeAnchor.show().catch((error) => {
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });
     }, 0);
-  }, [clearPendingAndroidImeFocus, isAndroid, setAndroidEditorActive, uiSessionId]);
+  }, [clearPendingAndroidImeFocus, isAndroid, uiSessionId]);
 
   const restoreAndroidTerminalImeRoute = useCallback(() => {
     if (!isAndroid || quickBarEditorFocusedRef.current) {
@@ -1582,7 +1581,11 @@ function TerminalPageComponent({
       if (activeElement instanceof HTMLElement) {
         activeElement.blur();
       }
+      quickBarEditorFocusedRef.current = false;
       setQuickBarEditorFocused(false);
+      if (isAndroid) {
+        setAndroidEditorActive(false);
+      }
     }
 
     if (terminalKeyboardRequested || keyboardInset > 0) {
@@ -1622,12 +1625,13 @@ function TerminalPageComponent({
     }
 
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
-  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, terminalKeyboardRequested, uiSessionId]);
+  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarEditorDomFocusChange = useCallback((active: boolean) => {
     quickBarEditorFocusedRef.current = active;
     setQuickBarEditorFocused(active);
     setAndroidEditorActive(active);
+
     if (active) {
       clearTerminalFocusRetries();
       androidImeFocusRouteKeyRef.current = null;
@@ -1638,7 +1642,7 @@ function TerminalPageComponent({
     if (terminalKeyboardRequested || keyboardInset > 0) {
       requestAndroidImeFocus({ force: true });
     }
-  }, [clearTerminalFocusRetries, isAndroid, keyboardInset, requestAndroidImeFocus, setAndroidEditorActive, terminalKeyboardRequested]);
+  }, [clearTerminalFocusRetries, isAndroid, keyboardInset, requestAndroidImeFocus, terminalKeyboardRequested]);
 
   useEffect(() => {
     if (!isAndroid || quickBarEditorFocused || !uiSessionId) {
@@ -1716,6 +1720,7 @@ function TerminalPageComponent({
     let disposed = false;
     let inputListener: { remove: () => Promise<void> } | null = null;
     let backspaceListener: { remove: () => Promise<void> } | null = null;
+    let keyListener: { remove: () => Promise<void> } | null = null;
     let keyboardStateListener: { remove: () => Promise<void> } | null = null;
 
     const emitToActiveSession = (data: string) => {
@@ -1747,6 +1752,35 @@ function TerminalPageComponent({
             logAsyncCleanupFailure('ImeAnchor backspace listener remove after dispose', error);
           });
           backspaceListener = null;
+          return;
+        }
+        keyListener = await ImeAnchor.addListener('key', (event) => {
+          if (disposed) return;
+          const sessionId = activeSessionIdRef.current;
+          if (!sessionId || quickBarEditorFocusedRef.current) {
+            return;
+          }
+          const input = querySessionInput(sessionId);
+          if (!input) {
+            return;
+          }
+          const keyboardEvent = new KeyboardEvent('keydown', {
+            key: event.key || '',
+            code: event.code || '',
+            ctrlKey: Boolean(event.ctrlKey),
+            altKey: Boolean(event.altKey),
+            metaKey: Boolean(event.metaKey),
+            shiftKey: Boolean(event.shiftKey),
+            bubbles: true,
+            cancelable: true,
+          });
+          input.dispatchEvent(keyboardEvent);
+        });
+        if (disposed) {
+          void keyListener.remove().catch((error) => {
+            logAsyncCleanupFailure('ImeAnchor key listener remove after dispose', error);
+          });
+          keyListener = null;
           return;
         }
         keyboardStateListener = await ImeAnchor.addListener('keyboardState', (event) => {
@@ -1789,6 +1823,11 @@ function TerminalPageComponent({
       if (backspaceListener) {
         void backspaceListener.remove().catch((error) => {
           logAsyncCleanupFailure('ImeAnchor backspace listener remove', error);
+        });
+      }
+      if (keyListener) {
+        void keyListener.remove().catch((error) => {
+          logAsyncCleanupFailure('ImeAnchor key listener remove', error);
         });
       }
       if (keyboardStateListener) {

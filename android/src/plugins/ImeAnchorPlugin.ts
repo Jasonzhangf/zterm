@@ -16,6 +16,17 @@ export interface ImeAnchorPlugin {
     listenerFunc: (event: { count?: number }) => void,
   ): Promise<{ remove: () => Promise<void> }>;
   addListener(
+    eventName: 'key',
+    listenerFunc: (event: {
+      key?: string;
+      code?: string;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
+      shiftKey?: boolean;
+    }) => void,
+  ): Promise<{ remove: () => Promise<void> }>;
+  addListener(
     eventName: 'keyboardState',
     listenerFunc: (event: { visible?: boolean; height?: number }) => void,
   ): Promise<{ remove: () => Promise<void> }>;

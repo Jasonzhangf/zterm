@@ -1,7 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { mobileTheme } from '../../lib/mobile-ui';
-import { DeviceClipboardPlugin, isNativeClipboardSupported } from '../../plugins/DeviceClipboardPlugin';
-import type { QuickAction, TerminalShortcutAction } from '../../lib/types';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { mobileTheme } from "../../lib/mobile-ui";
+import {
+  DeviceClipboardPlugin,
+  isNativeClipboardSupported,
+} from "../../plugins/DeviceClipboardPlugin";
+import type { QuickAction, TerminalShortcutAction } from "../../lib/types";
 import {
   CLIPBOARD_HISTORY_STORAGE_KEY,
   FIXED_BUTTON_MIN_WIDTH,
@@ -58,9 +61,9 @@ import {
   type ShortcutEditorTab,
   type ShortcutRow,
   type ShortcutToken,
-} from './terminal-quickbar-helpers';
-import { buildTerminalShortcutSequence } from '../../../../packages/shared/src/shortcuts/terminal-shortcut-composer';
-import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics';
+} from "./terminal-quickbar-helpers";
+import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
+import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
 
 interface TerminalQuickBarProps {
   activeSessionId?: string | null;
@@ -81,7 +84,7 @@ interface TerminalQuickBarProps {
   onOpenScheduleComposer?: (text: string) => void;
   splitAvailable?: boolean;
   splitVisible?: boolean;
-  shellMode?: 'inline' | 'floating-collapsed';
+  shellMode?: "inline" | "floating-collapsed";
   collapseAvailable?: boolean;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -92,7 +95,7 @@ interface TerminalQuickBarProps {
   onCycleSplitPane?: () => void;
   onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
-  onOpenFileTransfer?: () => void;
+  onOpenFileTransfer?: (mode?: "sync") => void;
   onToggleDebugOverlay?: () => void;
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
@@ -100,7 +103,13 @@ interface TerminalQuickBarProps {
   absoluteLineNumbersVisible?: boolean;
   copyModeActive?: boolean;
   onToggleCopyMode?: () => void;
-  remoteScreenshotStatus?: 'idle' | 'capturing' | 'transferring' | 'preview-ready' | 'saving' | 'failed';
+  remoteScreenshotStatus?:
+    | "idle"
+    | "capturing"
+    | "transferring"
+    | "preview-ready"
+    | "saving"
+    | "failed";
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
@@ -125,7 +134,7 @@ function TerminalQuickBarComponent({
   onOpenScheduleComposer,
   splitAvailable = false,
   splitVisible = false,
-  shellMode = 'inline',
+  shellMode = "inline",
   collapseAvailable = false,
   collapsed = false,
   onCollapsedChange,
@@ -144,33 +153,50 @@ function TerminalQuickBarComponent({
   absoluteLineNumbersVisible,
   copyModeActive = false,
   onToggleCopyMode,
-  remoteScreenshotStatus = 'idle',
+  remoteScreenshotStatus = "idle",
   shortcutSmartSort = false,
   shortcutFrequencyMap,
   onShortcutUse,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
-  const [shortcutEditorMode, setShortcutEditorMode] = useState<ShortcutEditorMode>('list');
+  const [shortcutEditorMode, setShortcutEditorMode] =
+    useState<ShortcutEditorMode>("list");
   const [floatingMenuOpen, setFloatingMenuOpen] = useState(false);
-  const [floatingPanelTab, setFloatingPanelTab] = useState<FloatingPanelTab>('quick-actions');
-  const [draftActions, setDraftActions] = useState<DraftQuickAction[]>(() => toDraftActions(quickActions));
-  const [draftShortcutActions, setDraftShortcutActions] = useState<DraftShortcutAction[]>(() => sortShortcutActions(shortcutActions));
+  const [floatingPanelTab, setFloatingPanelTab] =
+    useState<FloatingPanelTab>("quick-actions");
+  const [draftActions, setDraftActions] = useState<DraftQuickAction[]>(() =>
+    toDraftActions(quickActions),
+  );
+  const [draftShortcutActions, setDraftShortcutActions] = useState<
+    DraftShortcutAction[]
+  >(() => sortShortcutActions(shortcutActions));
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draftLabel, setDraftLabel] = useState('');
-  const [draftTextInput, setDraftTextInput] = useState('');
-  const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
-  const [draftShortcutLabel, setDraftShortcutLabel] = useState('');
-  const [draftShortcutSequence, setDraftShortcutSequence] = useState('');
-  const [draftShortcutRow, setDraftShortcutRow] = useState<ShortcutRow>('top-scroll');
-  const [draftShortcutTokens, setDraftShortcutTokens] = useState<ShortcutToken[]>([]);
-  const [shortcutEditorTab, setShortcutEditorTab] = useState<ShortcutEditorTab>('keyboard');
-  const [draftShortcutTextInput, setDraftShortcutTextInput] = useState('');
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftTextInput, setDraftTextInput] = useState("");
+  const [editingShortcutId, setEditingShortcutId] = useState<string | null>(
+    null,
+  );
+  const [draftShortcutLabel, setDraftShortcutLabel] = useState("");
+  const [draftShortcutSequence, setDraftShortcutSequence] = useState("");
+  const [draftShortcutRow, setDraftShortcutRow] =
+    useState<ShortcutRow>("top-scroll");
+  const [draftShortcutTokens, setDraftShortcutTokens] = useState<
+    ShortcutToken[]
+  >([]);
+  const [shortcutEditorTab, setShortcutEditorTab] =
+    useState<ShortcutEditorTab>("keyboard");
+  const [draftShortcutTextInput, setDraftShortcutTextInput] = useState("");
   const [clipboardHistory, setClipboardHistory] = useState<string[]>([]);
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
-  const [floatingBubblePosition, setFloatingBubblePosition] = useState<{ x: number | null; y: number | null }>(() => readStoredBubblePosition());
-  const [repeatingActionId, setRepeatingActionId] = useState<string | null>(null);
+  const [floatingBubblePosition, setFloatingBubblePosition] = useState<{
+    x: number | null;
+    y: number | null;
+  }>(() => readStoredBubblePosition());
+  const [repeatingActionId, setRepeatingActionId] = useState<string | null>(
+    null,
+  );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const doubleTapRef = useRef<{ id: string; timer: number } | null>(null);
@@ -201,7 +227,14 @@ function TerminalQuickBarComponent({
     height: FLOATING_BUBBLE_SIZE,
   });
   const normalizedSplitCountOptions = useMemo(
-    () => Array.from(new Set(splitCountOptions.filter((count) => Number.isFinite(count) && count >= 1))).sort((a, b) => a - b),
+    () =>
+      Array.from(
+        new Set(
+          splitCountOptions.filter(
+            (count) => Number.isFinite(count) && count >= 1,
+          ),
+        ),
+      ).sort((a, b) => a - b),
     [splitCountOptions],
   );
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -214,17 +247,26 @@ function TerminalQuickBarComponent({
   const quickInputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const quickInputSessionIdRef = useRef<string | null>(activeSessionId || null);
   const quickInputDirtyRef = useRef(false);
-  const quickInputValueRef = useRef(sessionDraft || '');
-  const [quickInputValue, setQuickInputValue] = useState(sessionDraft || '');
-  const [landscape, setLandscape] = useState(() => resolveTerminalOrientation() === 'landscape');
+  const quickInputValueRef = useRef(sessionDraft || "");
+  const [quickInputValue, setQuickInputValue] = useState(sessionDraft || "");
+  const [landscape, setLandscape] = useState(
+    () => resolveTerminalOrientation() === "landscape",
+  );
 
-  const sortedQuickActions = useMemo(() => quickActions.slice().sort((a, b) => a.order - b.order), [quickActions]);
+  const sortedQuickActions = useMemo(
+    () => quickActions.slice().sort((a, b) => a.order - b.order),
+    [quickActions],
+  );
   const sortedShortcutActions = useMemo(() => {
-    if (!shortcutSmartSort || !shortcutFrequencyMap) return sortShortcutActions(shortcutActions);
+    if (!shortcutSmartSort || !shortcutFrequencyMap)
+      return sortShortcutActions(shortcutActions);
     const freq = shortcutFrequencyMap;
     return [...shortcutActions].sort((left, right) => {
       if (left.row !== right.row) {
-        return SHORTCUT_ROW_ORDER.indexOf(left.row) - SHORTCUT_ROW_ORDER.indexOf(right.row);
+        return (
+          SHORTCUT_ROW_ORDER.indexOf(left.row) -
+          SHORTCUT_ROW_ORDER.indexOf(right.row)
+        );
       }
       const lf = freq[left.id] || 0;
       const rf = freq[right.id] || 0;
@@ -232,52 +274,79 @@ function TerminalQuickBarComponent({
       return left.order - right.order; // fallback to manual order
     });
   }, [shortcutActions, shortcutSmartSort, shortcutFrequencyMap]);
-  const draftShortcutBuild = useMemo(() => buildTerminalShortcutSequence(draftShortcutTokens), [draftShortcutTokens]);
+  const draftShortcutBuild = useMemo(
+    () => buildTerminalShortcutSequence(draftShortcutTokens),
+    [draftShortcutTokens],
+  );
   const draftShortcutRowError = useMemo(
-    () => validateShortcutTokensForRow(draftShortcutRow, draftShortcutTokens, draftShortcutBuild),
+    () =>
+      validateShortcutTokensForRow(
+        draftShortcutRow,
+        draftShortcutTokens,
+        draftShortcutBuild,
+      ),
     [draftShortcutBuild, draftShortcutRow, draftShortcutTokens],
   );
-  const draftShortcutEffectiveError = draftShortcutBuild.error || draftShortcutRowError;
+  const draftShortcutEffectiveError =
+    draftShortcutBuild.error || draftShortcutRowError;
   const floatingPanelBottomPx = 124;
   const floatingBubbleBottomPx = 72;
-  const editingIndex = editingId ? draftActions.findIndex((action) => action.id === editingId) : -1;
-  const editingShortcutIndex = editingShortcutId ? draftShortcutActions.findIndex((action) => action.id === editingShortcutId) : -1;
+  const editingIndex = editingId
+    ? draftActions.findIndex((action) => action.id === editingId)
+    : -1;
+  const editingShortcutIndex = editingShortcutId
+    ? draftShortcutActions.findIndex(
+        (action) => action.id === editingShortcutId,
+      )
+    : -1;
   const draftShortcutRowMeta = SHORTCUT_ROW_META[draftShortcutRow];
   const availableKeyboardShortcutTokens = useMemo(
-    () => (draftShortcutRow === 'top-scroll' ? SHORTCUT_KEYBOARD_TOKENS.filter((token) => token.kind !== 'modifier') : SHORTCUT_KEYBOARD_TOKENS),
+    () =>
+      draftShortcutRow === "top-scroll"
+        ? SHORTCUT_KEYBOARD_TOKENS.filter((token) => token.kind !== "modifier")
+        : SHORTCUT_KEYBOARD_TOKENS,
     [draftShortcutRow],
   );
   const availableCommonShortcutTokens = useMemo(
-    () => (draftShortcutRow === 'top-scroll' ? SHORTCUT_COMMON_TOKENS.filter(isSingleShortcutToken) : SHORTCUT_COMMON_TOKENS),
+    () =>
+      draftShortcutRow === "top-scroll"
+        ? SHORTCUT_COMMON_TOKENS.filter(isSingleShortcutToken)
+        : SHORTCUT_COMMON_TOKENS,
     [draftShortcutRow],
   );
-  const [overlayViewportMetrics, setOverlayViewportMetrics] = useState(() => resolveOverlayViewportMetrics(keyboardInsetPx));
-  const overlaySheetHeightStyle = overlayViewportMetrics.sheetHeightPx !== null
-    ? `${overlayViewportMetrics.sheetHeightPx}px`
-    : 'calc(100dvh - 16px)';
+  const [overlayViewportMetrics, setOverlayViewportMetrics] = useState(() =>
+    resolveOverlayViewportMetrics(keyboardInsetPx),
+  );
+  const overlaySheetHeightStyle =
+    overlayViewportMetrics.sheetHeightPx !== null
+      ? `${overlayViewportMetrics.sheetHeightPx}px`
+      : "calc(100dvh - 16px)";
   const overlayBottomInsetStyle = `${overlayViewportMetrics.bottomInsetPx}px`;
-  const persistQuickInputValue = useCallback((nextValue: string) => {
-    quickInputDirtyRef.current = true;
-    quickInputValueRef.current = nextValue;
-    setQuickInputValue(nextValue);
-    onSessionDraftChange?.(nextValue);
-  }, [onSessionDraftChange]);
+  const persistQuickInputValue = useCallback(
+    (nextValue: string) => {
+      quickInputDirtyRef.current = true;
+      quickInputValueRef.current = nextValue;
+      setQuickInputValue(nextValue);
+      onSessionDraftChange?.(nextValue);
+    },
+    [onSessionDraftChange],
+  );
 
   useEffect(() => {
     quickInputValueRef.current = quickInputValue;
-    if ((sessionDraft || '') === quickInputValue) {
+    if ((sessionDraft || "") === quickInputValue) {
       quickInputDirtyRef.current = false;
     }
   }, [quickInputValue, sessionDraft]);
 
   useEffect(() => {
     const nextSessionId = activeSessionId || null;
-    const nextPersistedValue = sessionDraft || '';
+    const nextPersistedValue = sessionDraft || "";
     const sessionChanged = quickInputSessionIdRef.current !== nextSessionId;
     quickInputSessionIdRef.current = nextSessionId;
     const quickInputFocused =
-      typeof document !== 'undefined'
-      && document.activeElement === quickInputTextareaRef.current;
+      typeof document !== "undefined" &&
+      document.activeElement === quickInputTextareaRef.current;
 
     if (sessionChanged) {
       quickInputDirtyRef.current = false;
@@ -286,9 +355,15 @@ function TerminalQuickBarComponent({
       return;
     }
 
-    if (!quickInputFocused || !quickInputDirtyRef.current || nextPersistedValue === quickInputValueRef.current) {
+    if (
+      !quickInputFocused ||
+      !quickInputDirtyRef.current ||
+      nextPersistedValue === quickInputValueRef.current
+    ) {
       quickInputValueRef.current = nextPersistedValue;
-      setQuickInputValue((current) => (current === nextPersistedValue ? current : nextPersistedValue));
+      setQuickInputValue((current) =>
+        current === nextPersistedValue ? current : nextPersistedValue,
+      );
       if (nextPersistedValue === quickInputValueRef.current) {
         quickInputDirtyRef.current = false;
       }
@@ -296,14 +371,16 @@ function TerminalQuickBarComponent({
   }, [activeSessionId, sessionDraft]);
 
   const sendSessionDraft = () => {
-    const payload = normalizeSequenceForImmediateSend(quickInputValueRef.current);
+    const payload = normalizeSequenceForImmediateSend(
+      quickInputValueRef.current,
+    );
     if (!payload) {
       return;
     }
     quickInputDirtyRef.current = false;
-    quickInputValueRef.current = '';
-    setQuickInputValue('');
-    onSessionDraftChange?.('');
+    quickInputValueRef.current = "";
+    setQuickInputValue("");
+    onSessionDraftChange?.("");
     onSessionDraftSend?.(payload);
   };
 
@@ -318,46 +395,52 @@ function TerminalQuickBarComponent({
     }, 1500);
   }, []);
 
-  const handleQuickActionDoubleTap = useCallback((actionId: string, sequence: string) => {
-    const now = Date.now();
-    const prev = doubleTapRef.current;
-    if (prev && prev.id === actionId && now - prev.timer < 400) {
-      doubleTapRef.current = null;
-      const payload = normalizeSequenceForImmediateSend(sequence);
-      if (payload) {
-        onSendSequence?.(payload);
-        showToast('已发送');
-      }
-    } else {
-      doubleTapRef.current = { id: actionId, timer: now };
-      window.setTimeout(() => {
-        if (doubleTapRef.current?.id === actionId) {
-          doubleTapRef.current = null;
+  const handleQuickActionDoubleTap = useCallback(
+    (actionId: string, sequence: string) => {
+      const now = Date.now();
+      const prev = doubleTapRef.current;
+      if (prev && prev.id === actionId && now - prev.timer < 400) {
+        doubleTapRef.current = null;
+        const payload = normalizeSequenceForImmediateSend(sequence);
+        if (payload) {
+          onSendSequence?.(payload);
+          showToast("已发送");
         }
-      }, 420);
-    }
-  }, [onSendSequence, showToast]);
+      } else {
+        doubleTapRef.current = { id: actionId, timer: now };
+        window.setTimeout(() => {
+          if (doubleTapRef.current?.id === actionId) {
+            doubleTapRef.current = null;
+          }
+        }, 420);
+      }
+    },
+    [onSendSequence, showToast],
+  );
 
-  const handleClipboardDoubleTap = useCallback((entry: string, index: number) => {
-    const key = `clip-${index}`;
-    const now = Date.now();
-    const prev = doubleTapRef.current;
-    if (prev && prev.id === key && now - prev.timer < 400) {
-      doubleTapRef.current = null;
-      const payload = normalizeSequenceForImmediateSend(entry);
-      if (payload) {
-        onSendSequence?.(payload);
-        showToast('已发送');
-      }
-    } else {
-      doubleTapRef.current = { id: key, timer: now };
-      window.setTimeout(() => {
-        if (doubleTapRef.current?.id === key) {
-          doubleTapRef.current = null;
+  const handleClipboardDoubleTap = useCallback(
+    (entry: string, index: number) => {
+      const key = `clip-${index}`;
+      const now = Date.now();
+      const prev = doubleTapRef.current;
+      if (prev && prev.id === key && now - prev.timer < 400) {
+        doubleTapRef.current = null;
+        const payload = normalizeSequenceForImmediateSend(entry);
+        if (payload) {
+          onSendSequence?.(payload);
+          showToast("已发送");
         }
-      }, 420);
-    }
-  }, [onSendSequence, showToast]);
+      } else {
+        doubleTapRef.current = { id: key, timer: now };
+        window.setTimeout(() => {
+          if (doubleTapRef.current?.id === key) {
+            doubleTapRef.current = null;
+          }
+        }, 420);
+      }
+    },
+    [onSendSequence, showToast],
+  );
 
   const clearRepeatLongPressTimer = useCallback(() => {
     if (repeatLongPressTimerRef.current !== null) {
@@ -376,118 +459,118 @@ function TerminalQuickBarComponent({
     setRepeatingActionId(null);
   }, [clearRepeatLongPressTimer]);
 
-  const triggerActionSequence = useCallback((action: { id: string; label: string; sequence: string }) => {
-    if (action.id === 'quickbar-collapse') {
-      onCollapsedChange?.(true);
-      setFloatingMenuOpen(false);
-      return;
-    }
-    if (action.id === 'keyboard') {
-      onToggleKeyboard?.();
-      return;
-    }
-    if (action.id === 'image-attach') {
-      imageInputRef.current?.click();
-      return;
-    }
-    if (action.id === 'sync-settings') {
-      onOpenFileTransfer?.();
-      return;
-    }
-    if (action.id === 'tmux-copy') {
-      onToggleCopyMode?.();
-      return;
-    }
-    if (action.id === 'debug-overlay') {
-      onToggleDebugOverlay?.();
-      return;
-    }
-    if (action.id === 'line-numbers') {
-      onToggleAbsoluteLineNumbers?.();
-      return;
-    }
-    if (action.id.startsWith('split-count-')) {
-      const count = Number.parseInt(action.id.slice('split-count-'.length), 10);
-      if (Number.isFinite(count)) {
-        onSetSplitCount?.(count);
-      }
-      return;
-    }
-    if (action.id === 'split-toggle') {
-      onToggleSplitLayout?.();
-      return;
-    }
-    if (action.id === 'remote-screenshot') {
-      if (!activeSessionId) {
-        alert('当前没有可用的目标 session');
+  const triggerActionSequence = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (action.id === "quickbar-collapse") {
+        onCollapsedChange?.(true);
+        setFloatingMenuOpen(false);
         return;
       }
-      void Promise.resolve(onRequestRemoteScreenshot?.(activeSessionId)).catch((error) => {
-        alert(error instanceof Error ? error.message : '远程截图失败');
-      });
-      return;
-    }
-    if (action.id === 'file-transfer') {
-      fileInputRef.current?.click();
-      return;
-    }
-    if (action.id === 'paste' || (action.label === 'Paste' && action.sequence === '\x16')) {
-      void handleClipboardPaste();
-      return;
-    }
-    if (action.id.startsWith('shortcut-editor')) {
-      openShortcutEditor();
-      return;
-    }
-    onSendSequence?.(action.sequence);
-    onShortcutUse?.(action.id);
-  }, [
-    activeSessionId,
-    onOpenFileTransfer,
-    onCollapsedChange,
-    onRequestRemoteScreenshot,
-    onSendSequence,
-    onShortcutUse,
-    onSetSplitCount,
-    onToggleAbsoluteLineNumbers,
-    onToggleCopyMode,
-    onToggleDebugOverlay,
-    onToggleKeyboard,
-    onToggleSplitLayout,
-  ]);
+      if (action.id === "keyboard") {
+        onToggleKeyboard?.();
+        return;
+      }
+      if (action.id === "tmux-copy") {
+        onToggleCopyMode?.();
+        return;
+      }
+      if (action.id === "debug-overlay") {
+        onToggleDebugOverlay?.();
+        return;
+      }
+      if (action.id === "line-numbers") {
+        onToggleAbsoluteLineNumbers?.();
+        return;
+      }
+      if (action.id.startsWith("split-count-")) {
+        const count = Number.parseInt(
+          action.id.slice("split-count-".length),
+          10,
+        );
+        if (Number.isFinite(count)) {
+          onSetSplitCount?.(count);
+        }
+        return;
+      }
+      if (action.id === "split-toggle") {
+        onToggleSplitLayout?.();
+        return;
+      }
+      if (action.id === "remote-screenshot") {
+        if (!activeSessionId) {
+          alert("当前没有可用的目标 session");
+          return;
+        }
+        void Promise.resolve(
+          onRequestRemoteScreenshot?.(activeSessionId),
+        ).catch((error) => {
+          alert(error instanceof Error ? error.message : "远程截图失败");
+        });
+        return;
+      }
+      if (
+        action.id === "paste" ||
+        (action.label === "Paste" && action.sequence === "\x16")
+      ) {
+        void handleClipboardPaste();
+        return;
+      }
+      if (action.id.startsWith("shortcut-editor")) {
+        openShortcutEditor();
+        return;
+      }
+      onSendSequence?.(action.sequence);
+      onShortcutUse?.(action.id);
+    },
+    [
+      activeSessionId,
+      onCollapsedChange,
+      onRequestRemoteScreenshot,
+      onSendSequence,
+      onShortcutUse,
+      onSetSplitCount,
+      onToggleAbsoluteLineNumbers,
+      onToggleCopyMode,
+      onToggleDebugOverlay,
+      onToggleKeyboard,
+      onToggleSplitLayout,
+    ],
+  );
 
-  const isRepeatableAction = useCallback((action: { id: string; label: string; sequence: string }) => {
-    if (!action.sequence) {
-      return false;
-    }
-    if (
-      action.id === 'keyboard'
-      || action.id === 'image-attach'
-      || action.id === 'file-attach'
-      || action.id === 'file-transfer'
-      || action.id === 'sync-settings'
-      || action.id === 'remote-screenshot'
-      || action.id === 'debug-overlay'
-      || action.id === 'tmux-copy'
-      || action.id === 'paste'
-    ) {
-      return false;
-    }
-    if (action.id.startsWith('shortcut-editor')) {
-      return false;
-    }
-    return true;
-  }, []);
+  const isRepeatableAction = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (!action.sequence) {
+        return false;
+      }
+      if (
+        action.id === "keyboard" ||
+        action.id === "remote-screenshot" ||
+        action.id === "debug-overlay" ||
+        action.id === "tmux-copy" ||
+        action.id === "paste"
+      ) {
+        return false;
+      }
+      if (action.id.startsWith("shortcut-editor")) {
+        return false;
+      }
+      return true;
+    },
+    [],
+  );
 
-  const startRepeatingAction = useCallback((action: { id: string; label: string; sequence: string }) => {
-    stopRepeatingAction();
-    suppressActionClickRef.current = action.id;
-    setRepeatingActionId(action.id);
-    triggerActionSequence(action);
-    repeatIntervalTimerRef.current = window.setInterval(() => {
+  const startRepeatingAction = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      stopRepeatingAction();
+      suppressActionClickRef.current = action.id;
+      setRepeatingActionId(action.id);
       triggerActionSequence(action);
-    }, REPEATABLE_ACTION_REPEAT_MS);
-  }, [stopRepeatingAction, triggerActionSequence]);
+      repeatIntervalTimerRef.current = window.setInterval(() => {
+        triggerActionSequence(action);
+      }, REPEATABLE_ACTION_REPEAT_MS);
+    },
+    [stopRepeatingAction, triggerActionSequence],
+  );
 
   const persistDraftActions = (nextActions: DraftQuickAction[]) => {
     const normalized = normalizeDraftActions(nextActions);
@@ -504,42 +587,51 @@ function TerminalQuickBarComponent({
   const persistClipboardHistory = (nextItems: string[]) => {
     const normalized = dedupeClipboardHistory(nextItems);
     setClipboardHistory(normalized);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(CLIPBOARD_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+    if (typeof window !== "undefined") {
+      localStorage.setItem(
+        CLIPBOARD_HISTORY_STORAGE_KEY,
+        JSON.stringify(normalized),
+      );
     }
   };
 
   const cleanupEmptyDraftActions = (actions: DraftQuickAction[]) =>
-    actions.filter((action) => action.label.trim().length > 0 || action.textInput.trim().length > 0);
+    actions.filter(
+      (action) =>
+        action.label.trim().length > 0 || action.textInput.trim().length > 0,
+    );
 
-  const openEditor = (mode: 'list' | 'create' | 'edit' = 'list', action?: DraftQuickAction) => {
+  const openEditor = (
+    mode: "list" | "create" | "edit" = "list",
+    action?: DraftQuickAction,
+  ) => {
     setDraftActions(toDraftActions(sortedQuickActions));
     setFloatingMenuOpen(false);
-    if (mode === 'edit' && action) {
+    if (mode === "edit" && action) {
       setEditingId(action.id);
       setDraftLabel(action.label);
       setDraftTextInput(action.textInput);
-    } else if (mode === 'create') {
+    } else if (mode === "create") {
       const nextId = createDraftActionId();
       const nextActions = [
         ...toDraftActions(sortedQuickActions),
         {
           id: nextId,
-          label: '',
-          textInput: '',
-          sequence: '',
+          label: "",
+          textInput: "",
+          sequence: "",
           order: sortedQuickActions.length,
         },
       ];
       persistDraftActions(nextActions);
       setDraftActions(nextActions);
       setEditingId(nextId);
-      setDraftLabel('');
-      setDraftTextInput('');
+      setDraftLabel("");
+      setDraftTextInput("");
     } else {
       setEditingId(null);
-      setDraftLabel('');
-      setDraftTextInput('');
+      setDraftLabel("");
+      setDraftTextInput("");
     }
     setEditorOpen(true);
   };
@@ -551,8 +643,8 @@ function TerminalQuickBarComponent({
     }
     setEditorOpen(false);
     setEditingId(null);
-    setDraftLabel('');
-    setDraftTextInput('');
+    setDraftLabel("");
+    setDraftTextInput("");
   };
 
   const openDraftForm = (action?: DraftQuickAction) => {
@@ -566,16 +658,16 @@ function TerminalQuickBarComponent({
     const nextId = createDraftActionId();
     const nextAction: DraftQuickAction = {
       id: nextId,
-      label: '',
-      textInput: '',
-      sequence: '',
+      label: "",
+      textInput: "",
+      sequence: "",
       order: draftActions.length,
     };
     const nextActions = [...draftActions, nextAction];
     persistDraftActions(nextActions);
     setEditingId(nextId);
-    setDraftLabel('');
-    setDraftTextInput('');
+    setDraftLabel("");
+    setDraftTextInput("");
   };
 
   const updateEditingAction = (nextLabel: string, nextTextInput: string) => {
@@ -589,7 +681,7 @@ function TerminalQuickBarComponent({
             ...action,
             label: nextLabel,
             textInput: nextTextInput,
-            sequence: nextTextInput.replace(/\r?\n/g, '\r'),
+            sequence: nextTextInput.replace(/\r?\n/g, "\r"),
           }
         : action,
     );
@@ -598,30 +690,71 @@ function TerminalQuickBarComponent({
 
   const screenshotToolLabel = useMemo(() => {
     switch (remoteScreenshotStatus) {
-      case 'capturing':
-        return '截图中';
-      case 'transferring':
-        return '传图中';
-      case 'preview-ready':
-        return '预览中';
-      case 'saving':
-        return '保存中';
-      case 'failed':
-        return '截图失败';
+      case "capturing":
+        return "截图中";
+      case "transferring":
+        return "传图中";
+      case "preview-ready":
+        return "预览中";
+      case "saving":
+        return "保存中";
+      case "failed":
+        return "截图失败";
       default:
-        return '截图';
+        return "截图";
     }
   }, [remoteScreenshotStatus]);
 
-  const toolRowActions = useMemo(() => ([
-    { id: 'file-transfer', label: '文件', sequence: '' },
-    { id: 'image-attach', label: '图片', sequence: '' },
-    { id: 'sync-settings', label: '同步', sequence: '' },
-    { id: 'remote-screenshot', label: screenshotToolLabel, sequence: '' },
-    { id: 'line-numbers', label: '行号', sequence: '' },
-    { id: 'debug-overlay', label: '状态', sequence: '' },
-  ]), [screenshotToolLabel]);
-  const collapseToolAction = useMemo(() => ({ id: 'quickbar-collapse', label: '收起', sequence: '' }), []);
+  const handleImagePickerButtonClick = useCallback(() => {
+    imageInputRef.current?.click();
+  }, []);
+
+  const handleFilePickerButtonClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+
+  const handleSyncSheetButtonClick = useCallback(() => {
+    onOpenFileTransfer?.("sync");
+  }, [onOpenFileTransfer]);
+
+  const transferToolActions = useMemo(
+    () => [
+      {
+        id: "file-picker-button",
+        label: "文件",
+        onClick: handleFilePickerButtonClick,
+      },
+      {
+        id: "image-picker-button",
+        label: "图片",
+        onClick: handleImagePickerButtonClick,
+      },
+      {
+        id: "sync-sheet-button",
+        label: "同步",
+        onClick: handleSyncSheetButtonClick,
+      },
+    ],
+    [
+      handleFilePickerButtonClick,
+      handleImagePickerButtonClick,
+      handleSyncSheetButtonClick,
+    ],
+  );
+
+  const toolRowActions = useMemo(
+    () => [
+      { id: "remote-screenshot", label: screenshotToolLabel, sequence: "" },
+      { id: "line-numbers", label: "行号", sequence: "" },
+      { id: "debug-overlay", label: "状态", sequence: "" },
+    ],
+    [screenshotToolLabel],
+  );
+  const collapseToolAction = useMemo(
+    () => ({ id: "quickbar-collapse", label: "收起", sequence: "" }),
+    [],
+  );
 
   const splitToolActions = useMemo(() => {
     if (!splitAvailable) {
@@ -630,48 +763,86 @@ function TerminalQuickBarComponent({
     if (normalizedSplitCountOptions.length > 0) {
       return normalizedSplitCountOptions.map((count) => ({
         id: `split-count-${count}`,
-        label: count === currentSplitCount ? `${count} 分屏 ✓` : `${count} 分屏`,
-        sequence: '',
+        label:
+          count === currentSplitCount ? `${count} 分屏 ✓` : `${count} 分屏`,
+        sequence: "",
       }));
     }
-    return [{ id: 'split-toggle', label: splitVisible ? '关闭分屏' : '开启分屏', sequence: '' }];
-  }, [currentSplitCount, normalizedSplitCountOptions, splitAvailable, splitVisible]);
+    return [
+      {
+        id: "split-toggle",
+        label: splitVisible ? "关闭分屏" : "开启分屏",
+        sequence: "",
+      },
+    ];
+  }, [
+    currentSplitCount,
+    normalizedSplitCountOptions,
+    splitAvailable,
+    splitVisible,
+  ]);
 
-  const topFixedActions = useMemo(() => ([
-    { id: 'tmux-copy', label: '拷贝', sequence: '' },
-    { id: 'arrow-up', label: '↑', sequence: '\x1b[A' },
-    { id: 'keyboard', label: '键盘', sequence: '' },
-  ]), []);
+  const topFixedActions = useMemo(
+    () => [
+      { id: "tmux-copy", label: "拷贝", sequence: "" },
+      { id: "arrow-up", label: "↑", sequence: "\x1b[A" },
+      { id: "keyboard", label: "键盘", sequence: "" },
+    ],
+    [],
+  );
 
-  const bottomFixedActions = useMemo(() => ([
-    { id: 'arrow-left', label: '←', sequence: '\x1b[D' },
-    { id: 'arrow-down', label: '↓', sequence: '\x1b[B' },
-    { id: 'arrow-right', label: '→', sequence: '\x1b[C' },
-  ]), []);
+  const bottomFixedActions = useMemo(
+    () => [
+      { id: "arrow-left", label: "←", sequence: "\x1b[D" },
+      { id: "arrow-down", label: "↓", sequence: "\x1b[B" },
+      { id: "arrow-right", label: "→", sequence: "\x1b[C" },
+    ],
+    [],
+  );
 
   const [topScrollActions, bottomScrollActions] = useMemo(() => {
     const consumedSequences = new Set<string>();
     return [
-      buildVisibleShortcutRowActions('top-scroll', sortedShortcutActions, consumedSequences),
-      buildVisibleShortcutRowActions('bottom-scroll', sortedShortcutActions, consumedSequences),
+      buildVisibleShortcutRowActions(
+        "top-scroll",
+        sortedShortcutActions,
+        consumedSequences,
+      ),
+      buildVisibleShortcutRowActions(
+        "bottom-scroll",
+        sortedShortcutActions,
+        consumedSequences,
+      ),
     ];
   }, [sortedShortcutActions]);
   const mergedScrollActions = useMemo(
     () => [...topScrollActions, ...bottomScrollActions],
     [bottomScrollActions, topScrollActions],
   );
-  const visibleToolRowActions = useMemo(
-    () => [...splitToolActions, ...toolRowActions],
-    [splitToolActions, toolRowActions],
+  const topShortcutEditorEntry = useMemo(
+    () => ({ id: "shortcut-editor-top", label: "+", sequence: "" }),
+    [],
+  );
+  const bottomShortcutEditorEntry = useMemo(
+    () => ({ id: "shortcut-editor-bottom", label: "+", sequence: "" }),
+    [],
   );
 
-  const topShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-top', label: '+', sequence: '' }), []);
-  const bottomShortcutEditorEntry = useMemo(() => ({ id: 'shortcut-editor-bottom', label: '+', sequence: '' }), []);
-
-  const clampFloatingBubblePosition = (nextX: number, nextY: number, width: number, height: number) => {
+  const clampFloatingBubblePosition = (
+    nextX: number,
+    nextY: number,
+    width: number,
+    height: number,
+  ) => {
     const viewport = bubbleViewportRectWithInset(keyboardInsetPx);
-    const maxX = Math.max(FLOATING_BUBBLE_MARGIN, viewport.width - width - FLOATING_BUBBLE_MARGIN);
-    const maxY = Math.max(FLOATING_BUBBLE_MARGIN, viewport.height - height - FLOATING_BUBBLE_MARGIN);
+    const maxX = Math.max(
+      FLOATING_BUBBLE_MARGIN,
+      viewport.width - width - FLOATING_BUBBLE_MARGIN,
+    );
+    const maxY = Math.max(
+      FLOATING_BUBBLE_MARGIN,
+      viewport.height - height - FLOATING_BUBBLE_MARGIN,
+    );
     return {
       x: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextX), maxX),
       y: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextY), maxY),
@@ -679,7 +850,7 @@ function TerminalQuickBarComponent({
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -689,9 +860,16 @@ function TerminalQuickBarComponent({
           return current;
         }
 
-        const bubbleWidth = floatingBubbleRef.current?.offsetWidth || FLOATING_BUBBLE_SIZE;
-        const bubbleHeight = floatingBubbleRef.current?.offsetHeight || FLOATING_BUBBLE_SIZE;
-        const clamped = clampFloatingBubblePosition(current.x, current.y, bubbleWidth, bubbleHeight);
+        const bubbleWidth =
+          floatingBubbleRef.current?.offsetWidth || FLOATING_BUBBLE_SIZE;
+        const bubbleHeight =
+          floatingBubbleRef.current?.offsetHeight || FLOATING_BUBBLE_SIZE;
+        const clamped = clampFloatingBubblePosition(
+          current.x,
+          current.y,
+          bubbleWidth,
+          bubbleHeight,
+        );
         if (clamped.x === current.x && clamped.y === current.y) {
           return current;
         }
@@ -700,17 +878,20 @@ function TerminalQuickBarComponent({
     };
 
     rescueBubblePosition();
-    window.addEventListener('resize', rescueBubblePosition);
-    window.visualViewport?.addEventListener('resize', rescueBubblePosition);
+    window.addEventListener("resize", rescueBubblePosition);
+    window.visualViewport?.addEventListener("resize", rescueBubblePosition);
 
     return () => {
-      window.removeEventListener('resize', rescueBubblePosition);
-      window.visualViewport?.removeEventListener('resize', rescueBubblePosition);
+      window.removeEventListener("resize", rescueBubblePosition);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        rescueBubblePosition,
+      );
     };
   }, [keyboardInsetPx]);
 
   useEffect(() => {
-    if (shellMode !== 'floating-collapsed') {
+    if (shellMode !== "floating-collapsed") {
       return;
     }
     setFloatingMenuOpen(false);
@@ -719,43 +900,43 @@ function TerminalQuickBarComponent({
   const scrollTrackShellStyle = {
     flex: 1,
     minWidth: 0,
-    display: 'flex',
-    alignItems: 'center',
-    overflow: 'hidden',
-    borderRadius: '12px',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    display: "flex",
+    alignItems: "center",
+    overflow: "hidden",
+    borderRadius: "12px",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
   } as const;
 
   const fixedClusterStyle = {
-    display: 'grid',
+    display: "grid",
     gridTemplateColumns: `repeat(${QUICK_BAR_FIXED_COLUMNS}, minmax(${FIXED_BUTTON_MIN_WIDTH}px, 1fr))`,
     gap: `${QUICK_BAR_ROW_GAP}px`,
     flexShrink: 0,
-    alignItems: 'center',
+    alignItems: "center",
     padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
-    borderRadius: '12px',
-    backgroundColor: 'rgba(59, 74, 108, 0.95)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+    borderRadius: "12px",
+    backgroundColor: "rgba(59, 74, 108, 0.95)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.03)",
     width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
   } as const;
 
   const scrollTrackStyle = {
-    width: '100%',
+    width: "100%",
     minWidth: 0,
-    display: 'flex',
+    display: "flex",
     gap: `${QUICK_BAR_ROW_GAP}px`,
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    WebkitOverflowScrolling: 'touch',
-    touchAction: 'pan-x',
-    scrollbarWidth: 'none',
-    padding: '3px 4px',
+    overflowX: "auto",
+    overflowY: "hidden",
+    WebkitOverflowScrolling: "touch",
+    touchAction: "pan-x",
+    scrollbarWidth: "none",
+    padding: "3px 4px",
   } as const;
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -766,28 +947,40 @@ function TerminalQuickBarComponent({
       }
       setClipboardHistory(normalizeClipboardHistory(JSON.parse(stored)));
     } catch (error) {
-      console.error('[TerminalQuickBar] Failed to load clipboard history:', error);
+      console.error(
+        "[TerminalQuickBar] Failed to load clipboard history:",
+        error,
+      );
     }
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
     try {
-      if (floatingBubblePosition.x === null || floatingBubblePosition.y === null) {
+      if (
+        floatingBubblePosition.x === null ||
+        floatingBubblePosition.y === null
+      ) {
         localStorage.removeItem(FLOATING_BUBBLE_POSITION_STORAGE_KEY);
         return;
       }
-      localStorage.setItem(FLOATING_BUBBLE_POSITION_STORAGE_KEY, JSON.stringify(floatingBubblePosition));
+      localStorage.setItem(
+        FLOATING_BUBBLE_POSITION_STORAGE_KEY,
+        JSON.stringify(floatingBubblePosition),
+      );
     } catch (error) {
-      console.error('[TerminalQuickBar] Failed to persist floating bubble position:', error);
+      console.error(
+        "[TerminalQuickBar] Failed to persist floating bubble position:",
+        error,
+      );
     }
   }, [floatingBubblePosition]);
 
   useEffect(() => {
-    if (!floatingMenuOpen || typeof document === 'undefined') {
+    if (!floatingMenuOpen || typeof document === "undefined") {
       return;
     }
 
@@ -796,15 +989,18 @@ function TerminalQuickBarComponent({
       if (!target) {
         return;
       }
-      if (floatingPanelRef.current?.contains(target) || floatingBubbleRef.current?.contains(target)) {
+      if (
+        floatingPanelRef.current?.contains(target) ||
+        floatingBubbleRef.current?.contains(target)
+      ) {
         return;
       }
       setFloatingMenuOpen(false);
     };
 
-    document.addEventListener('pointerdown', closeIfOutside, true);
+    document.addEventListener("pointerdown", closeIfOutside, true);
     return () => {
-      document.removeEventListener('pointerdown', closeIfOutside, true);
+      document.removeEventListener("pointerdown", closeIfOutside, true);
     };
   }, [floatingMenuOpen]);
 
@@ -826,54 +1022,69 @@ function TerminalQuickBarComponent({
   }, [editingShortcutId, shortcutEditorMode, shortcutEditorOpen]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
     const syncLandscape = () => {
-      setLandscape(resolveTerminalOrientation() === 'landscape');
+      setLandscape(resolveTerminalOrientation() === "landscape");
     };
     syncLandscape();
-    window.addEventListener('resize', syncLandscape);
-    window.visualViewport?.addEventListener('resize', syncLandscape);
+    window.addEventListener("resize", syncLandscape);
+    window.visualViewport?.addEventListener("resize", syncLandscape);
     return () => {
-      window.removeEventListener('resize', syncLandscape);
-      window.visualViewport?.removeEventListener('resize', syncLandscape);
+      window.removeEventListener("resize", syncLandscape);
+      window.visualViewport?.removeEventListener("resize", syncLandscape);
     };
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
 
     const syncOverlayViewportMetrics = () => {
       const nextMetrics = resolveOverlayViewportMetrics(keyboardInsetPx);
-      setOverlayViewportMetrics((current) => (
-        current.sheetHeightPx === nextMetrics.sheetHeightPx
-        && current.bottomInsetPx === nextMetrics.bottomInsetPx
+      setOverlayViewportMetrics((current) =>
+        current.sheetHeightPx === nextMetrics.sheetHeightPx &&
+        current.bottomInsetPx === nextMetrics.bottomInsetPx
           ? current
-          : nextMetrics
-      ));
+          : nextMetrics,
+      );
     };
 
     syncOverlayViewportMetrics();
-    window.addEventListener('resize', syncOverlayViewportMetrics);
-    window.visualViewport?.addEventListener('resize', syncOverlayViewportMetrics);
-    window.visualViewport?.addEventListener('scroll', syncOverlayViewportMetrics);
+    window.addEventListener("resize", syncOverlayViewportMetrics);
+    window.visualViewport?.addEventListener(
+      "resize",
+      syncOverlayViewportMetrics,
+    );
+    window.visualViewport?.addEventListener(
+      "scroll",
+      syncOverlayViewportMetrics,
+    );
 
     return () => {
-      window.removeEventListener('resize', syncOverlayViewportMetrics);
-      window.visualViewport?.removeEventListener('resize', syncOverlayViewportMetrics);
-      window.visualViewport?.removeEventListener('scroll', syncOverlayViewportMetrics);
+      window.removeEventListener("resize", syncOverlayViewportMetrics);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        syncOverlayViewportMetrics,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        syncOverlayViewportMetrics,
+      );
     };
   }, [keyboardInsetPx]);
 
-  useEffect(() => () => {
-    if (domEditorFocusTimerRef.current !== null) {
-      window.clearTimeout(domEditorFocusTimerRef.current);
-      domEditorFocusTimerRef.current = null;
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (domEditorFocusTimerRef.current !== null) {
+        window.clearTimeout(domEditorFocusTimerRef.current);
+        domEditorFocusTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   const captureSystemClipboard = async () => {
     try {
@@ -882,20 +1093,25 @@ function TerminalQuickBarComponent({
       const text = await (async () => {
         if (isNativeClipboardSupported()) {
           const result = await DeviceClipboardPlugin.readText();
-          return typeof result.value === 'string' ? result.value : '';
+          return typeof result.value === "string" ? result.value : "";
         }
-        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-          throw new Error('当前环境不支持读取系统剪贴板');
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.clipboard?.readText
+        ) {
+          throw new Error("当前环境不支持读取系统剪贴板");
         }
         return navigator.clipboard.readText();
       })();
       if (text.length === 0) {
-        setClipboardError('系统剪贴板当前为空');
+        setClipboardError("系统剪贴板当前为空");
         return;
       }
       persistClipboardHistory([text, ...clipboardHistory]);
     } catch (error) {
-      setClipboardError(error instanceof Error ? error.message : '读取系统剪贴板失败');
+      setClipboardError(
+        error instanceof Error ? error.message : "读取系统剪贴板失败",
+      );
     } finally {
       setClipboardBusy(false);
     }
@@ -908,27 +1124,35 @@ function TerminalQuickBarComponent({
       const text = await (async () => {
         if (isNativeClipboardSupported()) {
           const result = await DeviceClipboardPlugin.readText();
-          return typeof result.value === 'string' ? result.value : '';
+          return typeof result.value === "string" ? result.value : "";
         }
-        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-          throw new Error('当前环境不支持读取系统剪贴板');
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.clipboard?.readText
+        ) {
+          throw new Error("当前环境不支持读取系统剪贴板");
         }
         return navigator.clipboard.readText();
       })();
       if (text.length === 0) {
-        setClipboardError('系统剪贴板当前为空');
+        setClipboardError("系统剪贴板当前为空");
         return;
       }
       persistClipboardHistory([text, ...clipboardHistory]);
       onSendSequence?.(text);
     } catch (error) {
-      setClipboardError(error instanceof Error ? error.message : '读取系统剪贴板失败');
+      setClipboardError(
+        error instanceof Error ? error.message : "读取系统剪贴板失败",
+      );
     } finally {
       setClipboardBusy(false);
     }
   };
 
-  const buildShortcutTokensFromSequence = (label: string, sequence: string): ShortcutToken[] => {
+  const buildShortcutTokensFromSequence = (
+    label: string,
+    sequence: string,
+  ): ShortcutToken[] => {
     return resolvePresetShortcutTokens(label, sequence);
   };
 
@@ -940,54 +1164,59 @@ function TerminalQuickBarComponent({
 
   const resetShortcutForm = () => {
     setEditingShortcutId(null);
-    setDraftShortcutLabel('');
-    setDraftShortcutSequence('');
-    setDraftShortcutRow('top-scroll');
+    setDraftShortcutLabel("");
+    setDraftShortcutSequence("");
+    setDraftShortcutRow("top-scroll");
     setDraftShortcutTokens([]);
-    setShortcutEditorTab('keyboard');
-    setDraftShortcutTextInput('');
+    setShortcutEditorTab("keyboard");
+    setDraftShortcutTextInput("");
   };
 
   const openShortcutEditor = () => {
     setDraftShortcutActions(sortShortcutActions(shortcutActions));
     setFloatingMenuOpen(false);
     resetShortcutForm();
-    setShortcutEditorMode('list');
+    setShortcutEditorMode("list");
     setShortcutEditorOpen(true);
   };
 
   const openShortcutForm = (row: ShortcutRow, action?: DraftShortcutAction) => {
     setDraftShortcutActions(sortShortcutActions(shortcutActions));
     setFloatingMenuOpen(false);
-    setShortcutEditorTab('keyboard');
-    setDraftShortcutTextInput('');
+    setShortcutEditorTab("keyboard");
+    setDraftShortcutTextInput("");
     if (action) {
       setEditingShortcutId(action.id);
       setDraftShortcutLabel(action.label);
       setDraftShortcutRow(action.row);
-      syncDraftShortcutTokens(buildShortcutTokensFromSequence(action.label, action.sequence));
+      syncDraftShortcutTokens(
+        buildShortcutTokensFromSequence(action.label, action.sequence),
+      );
     } else {
       setEditingShortcutId(null);
-      setDraftShortcutLabel('');
+      setDraftShortcutLabel("");
       setDraftShortcutRow(row);
       syncDraftShortcutTokens([]);
     }
-    setShortcutEditorMode('form');
+    setShortcutEditorMode("form");
     setShortcutEditorOpen(true);
   };
 
   const backToShortcutList = () => {
     resetShortcutForm();
-    setShortcutEditorMode('list');
+    setShortcutEditorMode("list");
   };
 
   const closeShortcutEditor = () => {
     setShortcutEditorOpen(false);
-    setShortcutEditorMode('list');
+    setShortcutEditorMode("list");
     resetShortcutForm();
   };
 
-  const appendShortcutToken = (token: ShortcutToken, row?: 'top-scroll' | 'bottom-scroll') => {
+  const appendShortcutToken = (
+    token: ShortcutToken,
+    row?: "top-scroll" | "bottom-scroll",
+  ) => {
     setDraftShortcutTokens((current) => {
       const next = [...current, token];
       const built = buildTerminalShortcutSequence(next);
@@ -1010,7 +1239,7 @@ function TerminalQuickBarComponent({
 
   const clearShortcutTokens = () => {
     setDraftShortcutTokens([]);
-    setDraftShortcutSequence('');
+    setDraftShortcutSequence("");
   };
 
   const saveShortcutForm = () => {
@@ -1019,12 +1248,19 @@ function TerminalQuickBarComponent({
       return;
     }
 
-    const nextLabel = resolveShortcutComposerLabelFromSequence(draftShortcutLabel.trim() || draftShortcutBuild.preview);
+    const nextLabel = resolveShortcutComposerLabelFromSequence(
+      draftShortcutLabel.trim() || draftShortcutBuild.preview,
+    );
 
     const nextActions = editingShortcutId
       ? draftShortcutActions.map((action) =>
           action.id === editingShortcutId
-            ? { ...action, label: nextLabel, sequence: nextSequence, row: draftShortcutRow }
+            ? {
+                ...action,
+                label: nextLabel,
+                sequence: nextSequence,
+                row: draftShortcutRow,
+              }
             : action,
         )
       : [
@@ -1034,7 +1270,9 @@ function TerminalQuickBarComponent({
             label: nextLabel,
             sequence: nextSequence,
             row: draftShortcutRow,
-            order: draftShortcutActions.filter((action) => action.row === draftShortcutRow).length,
+            order: draftShortcutActions.filter(
+              (action) => action.row === draftShortcutRow,
+            ).length,
           },
         ];
 
@@ -1050,12 +1288,15 @@ function TerminalQuickBarComponent({
     appendShortcutToken({
       label: value,
       sequence: value,
-      kind: 'text',
+      kind: "text",
     });
-    setDraftShortcutTextInput('');
+    setDraftShortcutTextInput("");
   };
 
-  const renderBaseActionButton = (action: { id: string; label: string; sequence: string }, options?: { fixed?: boolean; compact?: boolean }) => {
+  const renderBaseActionButton = (
+    action: { id: string; label: string; sequence: string },
+    options?: { fixed?: boolean; compact?: boolean },
+  ) => {
     const compact = options?.compact ?? false;
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
@@ -1070,7 +1311,7 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
-          if (action.id !== 'keyboard') {
+          if (action.id !== "keyboard") {
             if (!repeatable) {
               return;
             }
@@ -1116,7 +1357,7 @@ function TerminalQuickBarComponent({
             suppressActionClickRef.current = null;
             return;
           }
-          if (action.id === 'keyboard') {
+          if (action.id === "keyboard") {
             if (suppressKeyboardClickRef.current) {
               return;
             }
@@ -1130,76 +1371,137 @@ function TerminalQuickBarComponent({
         aria-label={action.label}
         aria-pressed={repeatActive}
         style={{
-          minHeight: compact ? '32px' : '34px',
-          width: fixed ? '100%' : undefined,
+          minHeight: compact ? "32px" : "34px",
+          width: fixed ? "100%" : undefined,
           minWidth: actionUsesSpaceBarVisual
-            ? '58px'
+            ? "58px"
             : actionDisplayLabel.length > 3
-              ? '58px'
+              ? "58px"
               : actionDisplayLabel.length > 1
-                ? '48px'
-                : '34px',
-          padding: fixed ? '0 6px' : '0 10px',
-          border: 'none',
-          outline: 'none',
-          borderRadius: '10px',
-          backgroundColor:
-            repeatActive
-              ? 'rgba(113, 164, 255, 0.28)'
-              : action.id === 'keyboard' && keyboardVisible
-              ? 'rgba(31,214,122,0.18)'
-              : action.id === 'tmux-copy' && copyModeActive
-              ? 'rgba(113, 164, 255, 0.28)'
-              : action.id === 'debug-overlay' && debugOverlayVisible
-              ? 'rgba(31,214,122,0.18)'
-              : action.id === 'line-numbers' && absoluteLineNumbersVisible
-              ? 'rgba(31,214,122,0.18)'
-              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
-              ? 'rgba(113, 164, 255, 0.18)'
-              : fixed
-                ? 'rgba(22, 28, 41, 0.92)'
-                : 'rgba(31, 38, 53, 0.82)',
-          color:
-            repeatActive
-              ? '#bcd3ff'
-              : action.id === 'keyboard' && keyboardVisible
+                ? "48px"
+                : "34px",
+          padding: fixed ? "0 6px" : "0 10px",
+          border: "none",
+          outline: "none",
+          borderRadius: "10px",
+          backgroundColor: repeatActive
+            ? "rgba(113, 164, 255, 0.28)"
+            : action.id === "keyboard" && keyboardVisible
+              ? "rgba(31,214,122,0.18)"
+              : action.id === "tmux-copy" && copyModeActive
+                ? "rgba(113, 164, 255, 0.28)"
+                : action.id === "debug-overlay" && debugOverlayVisible
+                  ? "rgba(31,214,122,0.18)"
+                  : action.id === "line-numbers" && absoluteLineNumbersVisible
+                    ? "rgba(31,214,122,0.18)"
+                    : action.id === "remote-screenshot" &&
+                        remoteScreenshotStatus !== "idle"
+                      ? "rgba(113, 164, 255, 0.18)"
+                      : fixed
+                        ? "rgba(22, 28, 41, 0.92)"
+                        : "rgba(31, 38, 53, 0.82)",
+          color: repeatActive
+            ? "#bcd3ff"
+            : action.id === "keyboard" && keyboardVisible
               ? mobileTheme.colors.accent
-              : action.id === 'tmux-copy' && copyModeActive
-              ? '#8db7ff'
-              : action.id === 'debug-overlay' && debugOverlayVisible
-              ? mobileTheme.colors.accent
-              : action.id === 'line-numbers' && absoluteLineNumbersVisible
-              ? mobileTheme.colors.accent
-              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
-              ? '#8db7ff'
-              : '#fff',
-          fontSize: fixed ? '13px' : action.id === 'continue' ? '11px' : actionDisplayLabel.length > 3 ? '11px' : '14px',
+              : action.id === "tmux-copy" && copyModeActive
+                ? "#8db7ff"
+                : action.id === "debug-overlay" && debugOverlayVisible
+                  ? mobileTheme.colors.accent
+                  : action.id === "line-numbers" && absoluteLineNumbersVisible
+                    ? mobileTheme.colors.accent
+                    : action.id === "remote-screenshot" &&
+                        remoteScreenshotStatus !== "idle"
+                      ? "#8db7ff"
+                      : "#fff",
+          fontSize: fixed
+            ? "13px"
+            : action.id === "continue"
+              ? "11px"
+              : actionDisplayLabel.length > 3
+                ? "11px"
+                : "14px",
           fontWeight: 700,
-          cursor: 'pointer',
+          cursor: "pointer",
           flexShrink: 0,
-          appearance: 'none',
-          WebkitTapHighlightColor: 'transparent',
-          touchAction: 'manipulation',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          boxShadow:
-            repeatActive
-              ? 'inset 0 0 0 1px rgba(141,183,255,0.55)'
-              : action.id === 'remote-screenshot' && remoteScreenshotStatus !== 'idle'
-              ? 'inset 0 0 0 1px rgba(141,183,255,0.42)'
-              : 'none',
+          appearance: "none",
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          boxShadow: repeatActive
+            ? "inset 0 0 0 1px rgba(141,183,255,0.55)"
+            : action.id === "remote-screenshot" &&
+                remoteScreenshotStatus !== "idle"
+              ? "inset 0 0 0 1px rgba(141,183,255,0.42)"
+              : "none",
         }}
       >
-        {renderShortcutVisualNode(action.label, 'button')}
+        {renderShortcutVisualNode(action.label, "button")}
       </button>
     );
   };
 
-  useEffect(() => () => {
-    stopRepeatingAction();
-    suppressActionClickRef.current = null;
-  }, [stopRepeatingAction]);
+  const renderTransferToolButton = (
+    action: { id: string; label: string; onClick: () => void },
+    options?: { compact?: boolean },
+  ) => {
+    const compact = options?.compact ?? false;
+    const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
+    return (
+      <button
+        key={action.id}
+        tabIndex={-1}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          action.onClick();
+        }}
+        onFocus={(event) => event.currentTarget.blur()}
+        aria-label={action.label}
+        data-transfer-tool-button={action.id}
+        style={{
+          minHeight: compact ? "32px" : "34px",
+          minWidth:
+            actionDisplayLabel.length > 3
+              ? "58px"
+              : actionDisplayLabel.length > 1
+                ? "48px"
+                : "34px",
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: "12px",
+          backgroundColor: "rgba(31, 38, 53, 0.92)",
+          color: "#fff",
+          fontSize: compact ? "12px" : "13px",
+          fontWeight: 800,
+          cursor: "pointer",
+          touchAction: "manipulation",
+          flexShrink: 0,
+          padding: actionDisplayLabel.length > 1 ? "0 10px" : "0",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {actionDisplayLabel}
+      </button>
+    );
+  };
+
+  useEffect(
+    () => () => {
+      stopRepeatingAction();
+      suppressActionClickRef.current = null;
+    },
+    [stopRepeatingAction],
+  );
 
   useEffect(() => {
     const host = rootRef.current;
@@ -1208,27 +1510,39 @@ function TerminalQuickBarComponent({
     }
 
     const syncHeight = () => {
-      onMeasuredHeightChange?.(Math.max(0, Math.round(host.getBoundingClientRect().height || host.offsetHeight || 0)));
+      onMeasuredHeightChange?.(
+        Math.max(
+          0,
+          Math.round(
+            host.getBoundingClientRect().height || host.offsetHeight || 0,
+          ),
+        ),
+      );
     };
 
     syncHeight();
     const observer = new ResizeObserver(syncHeight);
     observer.observe(host);
-    window.addEventListener('resize', syncHeight);
+    window.addEventListener("resize", syncHeight);
     return () => {
       observer.disconnect();
-      window.removeEventListener('resize', syncHeight);
+      window.removeEventListener("resize", syncHeight);
     };
   }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
 
   const quickBarAllowsTarget = (target: HTMLElement | null) => {
-    return Boolean(target?.closest('[data-quickbar-allow-pointer="true"],input,textarea,button,select,label'));
+    return Boolean(
+      target?.closest(
+        '[data-quickbar-allow-pointer="true"],input,textarea,button,select,label',
+      ),
+    );
   };
 
-  const shellCollapsed = (shellMode === 'floating-collapsed' || collapsed)
-    && !floatingMenuOpen
-    && !editorOpen
-    && !shortcutEditorOpen;
+  const shellCollapsed =
+    (shellMode === "floating-collapsed" || collapsed) &&
+    !floatingMenuOpen &&
+    !editorOpen &&
+    !shortcutEditorOpen;
 
   const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
@@ -1247,10 +1561,13 @@ function TerminalQuickBarComponent({
         if (!target) {
           return;
         }
-        if (target instanceof HTMLInputElement && target.type === 'file') {
+        if (target instanceof HTMLInputElement && target.type === "file") {
           return;
         }
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement
+        ) {
           onEditorDomFocusChange?.(true);
         }
       }}
@@ -1262,9 +1579,13 @@ function TerminalQuickBarComponent({
           domEditorFocusTimerRef.current = null;
           const activeElement = document.activeElement;
           const stillFocused =
-            rootRef.current?.contains(activeElement)
-            && (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement)
-            && !(activeElement instanceof HTMLInputElement && activeElement.type === 'file');
+            rootRef.current?.contains(activeElement) &&
+            (activeElement instanceof HTMLInputElement ||
+              activeElement instanceof HTMLTextAreaElement) &&
+            !(
+              activeElement instanceof HTMLInputElement &&
+              activeElement.type === "file"
+            );
           onEditorDomFocusChange?.(Boolean(stillFocused));
         }, 0);
       }}
@@ -1281,54 +1602,64 @@ function TerminalQuickBarComponent({
         blockShellEvent(event);
       }}
       style={{
-        padding: shellCollapsed ? '0' : floatingMenuOpen ? '0' : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
-        position: 'relative',
-        backgroundColor: shellCollapsed || floatingMenuOpen ? 'transparent' : 'rgba(11, 15, 24, 0.88)',
-        borderTop: shellCollapsed || floatingMenuOpen ? 'none' : '1px solid rgba(255,255,255,0.08)',
+        padding: shellCollapsed
+          ? "0"
+          : floatingMenuOpen
+            ? "0"
+            : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
+        position: "relative",
+        backgroundColor:
+          shellCollapsed || floatingMenuOpen
+            ? "transparent"
+            : "rgba(11, 15, 24, 0.88)",
+        borderTop:
+          shellCollapsed || floatingMenuOpen
+            ? "none"
+            : "1px solid rgba(255,255,255,0.08)",
       }}
     >
       <input
         ref={imageInputRef}
         type="file"
         accept="image/*"
-        style={{ display: 'none' }}
+        style={{ display: "none" }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
-          event.currentTarget.value = '';
+          event.currentTarget.value = "";
           if (!file) {
             return;
           }
           const targetSessionId = activeSessionId || null;
           if (!targetSessionId) {
-            alert('当前没有可用的目标 session');
+            alert("当前没有可用的目标 session");
             return;
           }
           try {
             await onImagePaste?.(targetSessionId, file);
           } catch (error) {
-            alert(error instanceof Error ? error.message : '传图片失败');
+            alert(error instanceof Error ? error.message : "传图片失败");
           }
         }}
       />
       <input
         ref={fileInputRef}
         type="file"
-        style={{ display: 'none' }}
+        style={{ display: "none" }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
-          event.currentTarget.value = '';
+          event.currentTarget.value = "";
           if (!file) {
             return;
           }
           const targetSessionId = activeSessionId || null;
           if (!targetSessionId) {
-            alert('当前没有可用的目标 session');
+            alert("当前没有可用的目标 session");
             return;
           }
           try {
             await onFileAttach?.(targetSessionId, file);
           } catch (error) {
-            alert(error instanceof Error ? error.message : '传文件失败');
+            alert(error instanceof Error ? error.message : "传文件失败");
           }
         }}
       />
@@ -1336,59 +1667,61 @@ function TerminalQuickBarComponent({
         <div
           data-quickbar-allow-pointer="true"
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
             zIndex: 120,
-            backgroundColor: 'rgba(8, 10, 18, 0.78)',
-            backdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'flex-end',
+            backgroundColor: "rgba(8, 10, 18, 0.78)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            alignItems: "flex-end",
             paddingBottom: overlayBottomInsetStyle,
           }}
         >
           <div
             style={{
-              width: '100%',
+              width: "100%",
               height: overlaySheetHeightStyle,
               maxHeight: overlaySheetHeightStyle,
-              borderRadius: '26px 26px 0 0',
-              backgroundColor: '#f7f8fb',
+              borderRadius: "26px 26px 0 0",
+              backgroundColor: "#f7f8fb",
               color: mobileTheme.colors.lightText,
-              boxShadow: '0 -20px 50px rgba(0,0,0,0.28)',
-              display: 'flex',
-              flexDirection: 'column',
+              boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+              display: "flex",
+              flexDirection: "column",
               minHeight: 0,
-              overflow: 'hidden',
+              overflow: "hidden",
             }}
           >
             <div
               style={{
-                padding: '10px 18px 12px',
-                borderBottom: '1px solid rgba(23, 27, 45, 0.08)',
-                backgroundColor: '#fff',
+                padding: "10px 18px 12px",
+                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
+                backgroundColor: "#fff",
               }}
             >
               <div
                 style={{
-                  width: '42px',
-                  height: '5px',
-                  borderRadius: '999px',
-                  backgroundColor: 'rgba(23, 27, 45, 0.15)',
-                  margin: '0 auto 12px',
+                  width: "42px",
+                  height: "5px",
+                  borderRadius: "999px",
+                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  margin: "0 auto 12px",
                 }}
               />
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px" }}
+              >
                 <button
                   onClick={closeEditor}
                   style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '999px',
-                    border: 'none',
-                    backgroundColor: '#eef2f8',
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "#eef2f8",
                     color: mobileTheme.colors.lightText,
-                    fontSize: '20px',
-                    cursor: 'pointer',
+                    fontSize: "20px",
+                    cursor: "pointer",
                     flexShrink: 0,
                   }}
                   aria-label="Close shortcut editor"
@@ -1396,7 +1729,9 @@ function TerminalQuickBarComponent({
                   ×
                 </button>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '20px', fontWeight: 800 }}>快捷输入设置</div>
+                  <div style={{ fontSize: "20px", fontWeight: 800 }}>
+                    快捷输入设置
+                  </div>
                 </div>
               </div>
             </div>
@@ -1406,39 +1741,41 @@ function TerminalQuickBarComponent({
               style={{
                 flex: 1,
                 minHeight: 0,
-                padding: '16px',
-                overflowY: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                touchAction: 'pan-y',
-                overscrollBehaviorY: 'contain',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-                paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+                padding: "16px",
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
+                overscrollBehaviorY: "contain",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px",
+                paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
               }}
             >
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '14px', fontWeight: 700 }}>当前快捷输入</div>
+                  <div style={{ fontSize: "14px", fontWeight: 700 }}>
+                    当前快捷输入
+                  </div>
                 </div>
                 <button
                   onClick={() => openDraftForm()}
                   style={{
-                    minHeight: '38px',
-                    padding: '0 14px',
-                    borderRadius: '999px',
-                    border: 'none',
-                    backgroundColor: 'rgba(22, 119, 255, 0.12)',
-                    color: '#1677ff',
+                    minHeight: "38px",
+                    padding: "0 14px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "rgba(22, 119, 255, 0.12)",
+                    color: "#1677ff",
                     fontWeight: 800,
-                    cursor: 'pointer',
+                    cursor: "pointer",
                     flexShrink: 0,
                   }}
                 >
@@ -1448,44 +1785,60 @@ function TerminalQuickBarComponent({
 
               <div
                 style={{
-                  borderRadius: '20px',
-                  backgroundColor: '#fff',
-                  border: '1px solid rgba(23, 27, 45, 0.08)',
-                  overflow: 'hidden',
+                  borderRadius: "20px",
+                  backgroundColor: "#fff",
+                  border: "1px solid rgba(23, 27, 45, 0.08)",
+                  overflow: "hidden",
                 }}
               >
                 {draftActions.length === 0 ? (
-                  <div style={{ height: '12px' }} />
+                  <div style={{ height: "12px" }} />
                 ) : (
                   draftActions.map((action, index) => (
                     <div
                       key={action.id}
                       style={{
-                        padding: '14px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        borderTop: index === 0 ? 'none' : '1px solid rgba(23, 27, 45, 0.08)',
+                        padding: "14px 16px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        borderTop:
+                          index === 0
+                            ? "none"
+                            : "1px solid rgba(23, 27, 45, 0.08)",
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '17px', fontWeight: 600 }}>{action.label || '未命名'}</div>
+                        <div style={{ fontSize: "17px", fontWeight: 600 }}>
+                          {action.label || "未命名"}
+                        </div>
                         <div
                           style={{
-                            fontSize: '12px',
+                            fontSize: "12px",
                             color: mobileTheme.colors.lightMuted,
-                            marginTop: '4px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            marginTop: "4px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
                           }}
                         >
-                          {formatSnippetPreview(action.textInput) || '(空文本)'}
+                          {formatSnippetPreview(action.textInput) || "(空文本)"}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexShrink: 0,
+                        }}
+                      >
                         <button
-                          onClick={() => persistDraftActions(moveItem(draftActions, index, index - 1))}
+                          onClick={() =>
+                            persistDraftActions(
+                              moveItem(draftActions, index, index - 1),
+                            )
+                          }
                           disabled={index === 0}
                           style={overlayIconButton(index === 0)}
                           aria-label={`Move ${action.label} up`}
@@ -1493,29 +1846,45 @@ function TerminalQuickBarComponent({
                           ↑
                         </button>
                         <button
-                          onClick={() => persistDraftActions(moveItem(draftActions, index, index + 1))}
+                          onClick={() =>
+                            persistDraftActions(
+                              moveItem(draftActions, index, index + 1),
+                            )
+                          }
                           disabled={index === draftActions.length - 1}
-                          style={overlayIconButton(index === draftActions.length - 1)}
+                          style={overlayIconButton(
+                            index === draftActions.length - 1,
+                          )}
                           aria-label={`Move ${action.label} down`}
                         >
                           ↓
                         </button>
                         <button
                           onClick={() => openDraftForm(action)}
-                          style={overlayTextButton('#eef2f8', mobileTheme.colors.lightText)}
+                          style={overlayTextButton(
+                            "#eef2f8",
+                            mobileTheme.colors.lightText,
+                          )}
                         >
                           编辑
                         </button>
                         <button
                           onClick={() => {
-                            persistDraftActions(draftActions.filter((item) => item.id !== action.id));
+                            persistDraftActions(
+                              draftActions.filter(
+                                (item) => item.id !== action.id,
+                              ),
+                            );
                             if (editingId === action.id) {
                               setEditingId(null);
-                              setDraftLabel('');
-                              setDraftTextInput('');
+                              setDraftLabel("");
+                              setDraftTextInput("");
                             }
                           }}
-                          style={overlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
+                          style={overlayTextButton(
+                            "rgba(255, 124, 146, 0.12)",
+                            mobileTheme.colors.danger,
+                          )}
                         >
                           删除
                         </button>
@@ -1528,18 +1897,18 @@ function TerminalQuickBarComponent({
               {(editingId !== null || draftActions.length === 0) && (
                 <div
                   style={{
-                    borderRadius: '20px',
-                    backgroundColor: '#fff',
-                    border: '1px solid rgba(23, 27, 45, 0.08)',
-                    padding: '16px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
+                    borderRadius: "20px",
+                    backgroundColor: "#fff",
+                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    padding: "16px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: '16px', fontWeight: 700 }}>
-                      {editingIndex >= 0 ? '编辑快捷输入' : '新增快捷输入'}
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {editingIndex >= 0 ? "编辑快捷输入" : "新增快捷输入"}
                     </div>
                   </div>
 
@@ -1563,24 +1932,24 @@ function TerminalQuickBarComponent({
                     placeholder="保存好的字符串，例如：git status"
                     style={{
                       ...lightEditorInputStyle(),
-                      minHeight: '96px',
-                      resize: 'vertical',
-                      whiteSpace: 'pre-wrap',
+                      minHeight: "96px",
+                      resize: "vertical",
+                      whiteSpace: "pre-wrap",
                     }}
                   />
 
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                  <div style={{ display: "flex", gap: "10px" }}>
                     <button
                       onClick={closeEditor}
                       style={{
-                        width: '100%',
-                        minHeight: '44px',
-                        border: 'none',
-                        borderRadius: '14px',
-                        backgroundColor: '#eef2f8',
+                        width: "100%",
+                        minHeight: "44px",
+                        border: "none",
+                        borderRadius: "14px",
+                        backgroundColor: "#eef2f8",
                         color: mobileTheme.colors.lightText,
                         fontWeight: 700,
-                        cursor: 'pointer',
+                        cursor: "pointer",
                       }}
                     >
                       完成
@@ -1597,60 +1966,62 @@ function TerminalQuickBarComponent({
         <div
           data-quickbar-allow-pointer="true"
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
             zIndex: 121,
-            backgroundColor: 'rgba(8, 10, 18, 0.78)',
-            backdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'flex-end',
+            backgroundColor: "rgba(8, 10, 18, 0.78)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            alignItems: "flex-end",
             paddingBottom: overlayBottomInsetStyle,
           }}
         >
           <div
             style={{
-              width: '100%',
+              width: "100%",
               height: overlaySheetHeightStyle,
               maxHeight: overlaySheetHeightStyle,
-              borderRadius: '26px 26px 0 0',
-              backgroundColor: '#f7f8fb',
+              borderRadius: "26px 26px 0 0",
+              backgroundColor: "#f7f8fb",
               color: mobileTheme.colors.lightText,
-              boxShadow: '0 -20px 50px rgba(0,0,0,0.28)',
-              display: 'flex',
-              flexDirection: 'column',
+              boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+              display: "flex",
+              flexDirection: "column",
               minHeight: 0,
-              overflow: 'hidden',
+              overflow: "hidden",
             }}
           >
             <div
               style={{
-                padding: '10px 18px 12px',
-                borderBottom: '1px solid rgba(23, 27, 45, 0.08)',
-                backgroundColor: '#fff',
+                padding: "10px 18px 12px",
+                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
+                backgroundColor: "#fff",
               }}
             >
               <div
                 style={{
-                  width: '42px',
-                  height: '5px',
-                  borderRadius: '999px',
-                  backgroundColor: 'rgba(23, 27, 45, 0.15)',
-                  margin: '0 auto 12px',
+                  width: "42px",
+                  height: "5px",
+                  borderRadius: "999px",
+                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  margin: "0 auto 12px",
                 }}
               />
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {shortcutEditorMode === 'form' ? (
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px" }}
+              >
+                {shortcutEditorMode === "form" ? (
                   <button
                     onClick={backToShortcutList}
                     style={{
-                      width: '34px',
-                      height: '34px',
-                      borderRadius: '999px',
-                      border: 'none',
-                      backgroundColor: '#eef2f8',
+                      width: "34px",
+                      height: "34px",
+                      borderRadius: "999px",
+                      border: "none",
+                      backgroundColor: "#eef2f8",
                       color: mobileTheme.colors.lightText,
-                      fontSize: '20px',
-                      cursor: 'pointer',
+                      fontSize: "20px",
+                      cursor: "pointer",
                       flexShrink: 0,
                     }}
                     aria-label="返回快捷键列表"
@@ -1658,26 +2029,36 @@ function TerminalQuickBarComponent({
                     ‹
                   </button>
                 ) : (
-                  <div style={{ width: '34px', height: '34px', flexShrink: 0 }} />
+                  <div
+                    style={{ width: "34px", height: "34px", flexShrink: 0 }}
+                  />
                 )}
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '20px', fontWeight: 800, textAlign: 'center' }}>
-                    {shortcutEditorMode === 'form'
-                      ? (editingShortcutIndex >= 0 ? '编辑快捷键' : '添加快捷键')
-                      : '快捷按键设置'}
+                  <div
+                    style={{
+                      fontSize: "20px",
+                      fontWeight: 800,
+                      textAlign: "center",
+                    }}
+                  >
+                    {shortcutEditorMode === "form"
+                      ? editingShortcutIndex >= 0
+                        ? "编辑快捷键"
+                        : "添加快捷键"
+                      : "快捷按键设置"}
                   </div>
                 </div>
                 <button
                   onClick={closeShortcutEditor}
                   style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '999px',
-                    border: 'none',
-                    backgroundColor: '#eef2f8',
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "#eef2f8",
                     color: mobileTheme.colors.lightText,
-                    fontSize: '20px',
-                    cursor: 'pointer',
+                    fontSize: "20px",
+                    cursor: "pointer",
                     flexShrink: 0,
                   }}
                   aria-label="关闭快捷键设置"
@@ -1693,72 +2074,91 @@ function TerminalQuickBarComponent({
               style={{
                 flex: 1,
                 minHeight: 0,
-                padding: '16px',
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                WebkitOverflowScrolling: 'touch',
-                touchAction: 'pan-y',
-                overscrollBehaviorY: 'contain',
-                paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+                padding: "16px",
+                overflowY: "auto",
+                overflowX: "hidden",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
+                overscrollBehaviorY: "contain",
+                paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
               }}
             >
-              {shortcutEditorMode === 'list' ? (
+              {shortcutEditorMode === "list" ? (
                 <div
                   data-testid="shortcut-editor-list"
                   style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '14px',
-                    minHeight: 'max-content',
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                    minHeight: "max-content",
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: '14px', fontWeight: 700 }}>当前滚动快捷键</div>
-                    <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                      三行分开管理：第一行工具栏，第二行只放单按键，第三行只放组合键 / 复合动作。
+                    <div style={{ fontSize: "14px", fontWeight: 700 }}>
+                      当前滚动快捷键
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.lightMuted,
+                        marginTop: "4px",
+                      }}
+                    >
+                      三行分开管理：第一行工具栏，第二行只放单按键，第三行只放组合键
+                      / 复合动作。
                     </div>
                   </div>
 
                   {SHORTCUT_ROW_ORDER.map((row) => {
                     const rowMeta = SHORTCUT_ROW_META[row];
-                    const rowActions = draftShortcutActions.filter((action) => action.row === row);
+                    const rowActions = draftShortcutActions.filter(
+                      (action) => action.row === row,
+                    );
                     return (
                       <div
                         key={row}
                         style={{
-                          borderRadius: '20px',
-                          backgroundColor: '#fff',
-                          border: '1px solid rgba(23, 27, 45, 0.08)',
-                          overflow: 'hidden',
+                          borderRadius: "20px",
+                          backgroundColor: "#fff",
+                          border: "1px solid rgba(23, 27, 45, 0.08)",
+                          overflow: "hidden",
                         }}
                       >
                         <div
                           style={{
-                            padding: '16px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '12px',
-                            backgroundColor: '#fff',
+                            padding: "16px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            backgroundColor: "#fff",
                           }}
                         >
                           <div>
-                            <div style={{ fontSize: '16px', fontWeight: 800 }}>{rowMeta.title}</div>
-                            <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                            <div style={{ fontSize: "16px", fontWeight: 800 }}>
+                              {rowMeta.title}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: mobileTheme.colors.lightMuted,
+                                marginTop: "4px",
+                              }}
+                            >
                               {rowMeta.summary}
                             </div>
                           </div>
                           <button
                             onClick={() => openShortcutForm(row)}
                             style={{
-                              minHeight: '38px',
-                              padding: '0 14px',
-                              borderRadius: '999px',
-                              border: 'none',
-                              backgroundColor: 'rgba(22, 119, 255, 0.12)',
-                              color: '#1677ff',
+                              minHeight: "38px",
+                              padding: "0 14px",
+                              borderRadius: "999px",
+                              border: "none",
+                              backgroundColor: "rgba(22, 119, 255, 0.12)",
+                              color: "#1677ff",
                               fontWeight: 800,
-                              cursor: 'pointer',
+                              cursor: "pointer",
                               flexShrink: 0,
                             }}
                           >
@@ -1769,8 +2169,8 @@ function TerminalQuickBarComponent({
                         {rowActions.length === 0 ? (
                           <div
                             style={{
-                              padding: '0 16px 18px',
-                              fontSize: '13px',
+                              padding: "0 16px 18px",
+                              fontSize: "13px",
                               color: mobileTheme.colors.lightMuted,
                             }}
                           >
@@ -1778,49 +2178,63 @@ function TerminalQuickBarComponent({
                           </div>
                         ) : (
                           rowActions.map((action, index) => {
-                            const displayMeta = resolveShortcutDisplayMeta(action.label, action.sequence);
+                            const displayMeta = resolveShortcutDisplayMeta(
+                              action.label,
+                              action.sequence,
+                            );
                             return (
                               <div
                                 key={action.id}
                                 style={{
-                                  padding: '12px 14px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '10px',
-                                  borderTop: '1px solid rgba(23, 27, 45, 0.08)',
+                                  padding: "12px 14px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "10px",
+                                  borderTop: "1px solid rgba(23, 27, 45, 0.08)",
                                 }}
                               >
                                 <button
                                   onClick={() => openShortcutForm(row, action)}
-                                  aria-label={`查看 ${action.label || '未命名快捷键'} 详情`}
+                                  aria-label={`查看 ${action.label || "未命名快捷键"} 详情`}
                                   style={{
                                     flex: 1,
                                     minWidth: 0,
-                                    border: 'none',
-                                    background: 'transparent',
+                                    border: "none",
+                                    background: "transparent",
                                     padding: 0,
-                                    textAlign: 'left',
-                                    cursor: 'pointer',
+                                    textAlign: "left",
+                                    cursor: "pointer",
                                   }}
                                 >
                                   <div
                                     style={{
-                                      fontSize: displayMeta.titleUsesKeycap ? '28px' : '16px',
-                                      lineHeight: displayMeta.titleUsesKeycap ? 1 : 1.2,
-                                      fontWeight: displayMeta.titleUsesKeycap ? 700 : 600,
+                                      fontSize: displayMeta.titleUsesKeycap
+                                        ? "28px"
+                                        : "16px",
+                                      lineHeight: displayMeta.titleUsesKeycap
+                                        ? 1
+                                        : 1.2,
+                                      fontWeight: displayMeta.titleUsesKeycap
+                                        ? 700
+                                        : 600,
                                       color: mobileTheme.colors.lightText,
                                     }}
                                   >
                                     {displayMeta.titleUsesKeycap
-                                      ? renderShortcutVisualNode(displayMeta.titleSourceLabel, 'list')
+                                      ? renderShortcutVisualNode(
+                                          displayMeta.titleSourceLabel,
+                                          "list",
+                                        )
                                       : displayMeta.title}
                                   </div>
                                   {displayMeta.subtitle ? (
                                     <div
                                       style={{
-                                        fontSize: '12px',
+                                        fontSize: "12px",
                                         color: mobileTheme.colors.lightMuted,
-                                        marginTop: displayMeta.titleUsesKeycap ? '4px' : '3px',
+                                        marginTop: displayMeta.titleUsesKeycap
+                                          ? "4px"
+                                          : "3px",
                                         lineHeight: 1.2,
                                       }}
                                     >
@@ -1830,40 +2244,76 @@ function TerminalQuickBarComponent({
                                 </button>
                                 <div
                                   style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'flex-end',
-                                    gap: '6px',
-                                    flexWrap: 'wrap',
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "flex-end",
+                                    gap: "6px",
+                                    flexWrap: "wrap",
                                     flexShrink: 0,
                                   }}
                                 >
                                   <button
-                                    onClick={() => openShortcutForm(row, action)}
-                                    style={compactOverlayTextButton('rgba(22, 119, 255, 0.12)', '#1677ff')}
-                                    aria-label={`编辑 ${action.label || '未命名快捷键'}`}
+                                    onClick={() =>
+                                      openShortcutForm(row, action)
+                                    }
+                                    style={compactOverlayTextButton(
+                                      "rgba(22, 119, 255, 0.12)",
+                                      "#1677ff",
+                                    )}
+                                    aria-label={`编辑 ${action.label || "未命名快捷键"}`}
                                   >
                                     编辑
                                   </button>
                                   <button
-                                    onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index - 1))}
+                                    onClick={() =>
+                                      persistShortcutActions(
+                                        moveShortcutActionWithinRow(
+                                          draftShortcutActions,
+                                          row,
+                                          index,
+                                          index - 1,
+                                        ),
+                                      )
+                                    }
                                     disabled={index === 0}
-                                    style={compactOverlayIconButton(index === 0)}
+                                    style={compactOverlayIconButton(
+                                      index === 0,
+                                    )}
                                     aria-label={`上移 ${action.label}`}
                                   >
                                     ↑
                                   </button>
                                   <button
-                                    onClick={() => persistShortcutActions(moveShortcutActionWithinRow(draftShortcutActions, row, index, index + 1))}
+                                    onClick={() =>
+                                      persistShortcutActions(
+                                        moveShortcutActionWithinRow(
+                                          draftShortcutActions,
+                                          row,
+                                          index,
+                                          index + 1,
+                                        ),
+                                      )
+                                    }
                                     disabled={index === rowActions.length - 1}
-                                    style={compactOverlayIconButton(index === rowActions.length - 1)}
+                                    style={compactOverlayIconButton(
+                                      index === rowActions.length - 1,
+                                    )}
                                     aria-label={`下移 ${action.label}`}
                                   >
                                     ↓
                                   </button>
                                   <button
-                                    onClick={() => persistShortcutActions(draftShortcutActions.filter((item) => item.id !== action.id))}
-                                    style={compactOverlayTextButton('rgba(255, 124, 146, 0.12)', mobileTheme.colors.danger)}
+                                    onClick={() =>
+                                      persistShortcutActions(
+                                        draftShortcutActions.filter(
+                                          (item) => item.id !== action.id,
+                                        ),
+                                      )
+                                    }
+                                    style={compactOverlayTextButton(
+                                      "rgba(255, 124, 146, 0.12)",
+                                      mobileTheme.colors.danger,
+                                    )}
                                     aria-label={`删除 ${action.label}`}
                                   >
                                     删除
@@ -1880,72 +2330,106 @@ function TerminalQuickBarComponent({
               ) : (
                 <div
                   style={{
-                    borderRadius: '24px',
-                    backgroundColor: '#fff',
-                    border: '1px solid rgba(23, 27, 45, 0.08)',
-                    padding: '18px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '14px',
+                    borderRadius: "24px",
+                    backgroundColor: "#fff",
+                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    padding: "18px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
                   }}
                 >
                   <input
                     value={draftShortcutLabel}
-                    onChange={(event) => setDraftShortcutLabel(event.target.value)}
+                    onChange={(event) =>
+                      setDraftShortcutLabel(event.target.value)
+                    }
                     placeholder="快捷键名称 / 显示名称"
                     style={lightEditorInputStyle()}
                   />
                   <div
                     style={{
-                      borderRadius: '16px',
-                      backgroundColor: '#eef2f8',
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
+                      borderRadius: "16px",
+                      backgroundColor: "#eef2f8",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
                     }}
                   >
-                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#1677ff' }}>{draftShortcutRowMeta.formTag}</div>
-                    <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 800,
+                        color: "#1677ff",
+                      }}
+                    >
+                      {draftShortcutRowMeta.formTag}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.lightMuted,
+                        lineHeight: 1.5,
+                      }}
+                    >
                       {draftShortcutRowMeta.formHint}
                     </div>
                   </div>
                   <div
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '8px',
-                      borderRadius: '18px',
-                      backgroundColor: '#eef2f5',
-                      padding: '6px',
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "8px",
+                      borderRadius: "18px",
+                      backgroundColor: "#eef2f5",
+                      padding: "6px",
                     }}
                   >
                     <button
-                      onClick={() => setShortcutEditorTab('keyboard')}
+                      onClick={() => setShortcutEditorTab("keyboard")}
                       style={{
-                        minHeight: '44px',
-                        borderRadius: '14px',
-                        border: 'none',
-                        backgroundColor: shortcutEditorTab === 'keyboard' ? '#ffffff' : 'transparent',
-                        color: shortcutEditorTab === 'keyboard' ? '#1677ff' : mobileTheme.colors.lightText,
+                        minHeight: "44px",
+                        borderRadius: "14px",
+                        border: "none",
+                        backgroundColor:
+                          shortcutEditorTab === "keyboard"
+                            ? "#ffffff"
+                            : "transparent",
+                        color:
+                          shortcutEditorTab === "keyboard"
+                            ? "#1677ff"
+                            : mobileTheme.colors.lightText,
                         fontWeight: 800,
-                        cursor: 'pointer',
-                        boxShadow: shortcutEditorTab === 'keyboard' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                        cursor: "pointer",
+                        boxShadow:
+                          shortcutEditorTab === "keyboard"
+                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            : "none",
                       }}
                     >
                       键盘按键
                     </button>
                     <button
-                      onClick={() => setShortcutEditorTab('common')}
+                      onClick={() => setShortcutEditorTab("common")}
                       style={{
-                        minHeight: '44px',
-                        borderRadius: '14px',
-                        border: 'none',
-                        backgroundColor: shortcutEditorTab === 'common' ? '#ffffff' : 'transparent',
-                        color: shortcutEditorTab === 'common' ? '#1677ff' : mobileTheme.colors.lightText,
+                        minHeight: "44px",
+                        borderRadius: "14px",
+                        border: "none",
+                        backgroundColor:
+                          shortcutEditorTab === "common"
+                            ? "#ffffff"
+                            : "transparent",
+                        color:
+                          shortcutEditorTab === "common"
+                            ? "#1677ff"
+                            : mobileTheme.colors.lightText,
                         fontWeight: 800,
-                        cursor: 'pointer',
-                        boxShadow: shortcutEditorTab === 'common' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                        cursor: "pointer",
+                        boxShadow:
+                          shortcutEditorTab === "common"
+                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            : "none",
                       }}
                     >
                       系统操作
@@ -1954,23 +2438,44 @@ function TerminalQuickBarComponent({
                   <textarea
                     value={draftShortcutBuild.preview || draftShortcutSequence}
                     readOnly
-                    placeholder={draftShortcutRow === 'top-scroll' ? '点击下方按钮选择单个按键' : '点击下方按钮组合快捷键'}
+                    placeholder={
+                      draftShortcutRow === "top-scroll"
+                        ? "点击下方按钮选择单个按键"
+                        : "点击下方按钮组合快捷键"
+                    }
                     style={{
                       ...lightEditorInputStyle(),
-                      minHeight: '74px',
-                      whiteSpace: 'pre-wrap',
+                      minHeight: "74px",
+                      whiteSpace: "pre-wrap",
                     }}
                   />
 
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      alignItems: "center",
+                    }}
+                  >
                     {draftShortcutTokens.length === 0 ? (
-                      <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>当前还没有加入特殊键</div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: mobileTheme.colors.lightMuted,
+                        }}
+                      >
+                        当前还没有加入特殊键
+                      </div>
                     ) : (
                       draftShortcutTokens.map((token, index) => (
                         <button
                           key={`${token.label}-${index}`}
                           onClick={() => removeShortcutToken(index)}
-                          style={floatingPillButton('rgba(22, 119, 255, 0.08)', '#1677ff')}
+                          style={floatingPillButton(
+                            "rgba(22, 119, 255, 0.08)",
+                            "#1677ff",
+                          )}
                         >
                           {token.label} ×
                         </button>
@@ -1979,42 +2484,57 @@ function TerminalQuickBarComponent({
                     <button
                       onClick={clearShortcutTokens}
                       disabled={draftShortcutTokens.length === 0}
-                      style={floatingPillButton(draftShortcutTokens.length === 0 ? '#f3f5f9' : '#eef2f8', draftShortcutTokens.length === 0 ? '#c3cad7' : mobileTheme.colors.lightText)}
+                      style={floatingPillButton(
+                        draftShortcutTokens.length === 0
+                          ? "#f3f5f9"
+                          : "#eef2f8",
+                        draftShortcutTokens.length === 0
+                          ? "#c3cad7"
+                          : mobileTheme.colors.lightText,
+                      )}
                     >
                       清空
                     </button>
                   </div>
 
                   {draftShortcutEffectiveError ? (
-                    <div style={{ fontSize: '12px', color: mobileTheme.colors.danger, lineHeight: 1.5 }}>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.danger,
+                        lineHeight: 1.5,
+                      }}
+                    >
                       {draftShortcutEffectiveError}
                     </div>
                   ) : null}
 
-                  {shortcutEditorTab === 'keyboard' ? (
+                  {shortcutEditorTab === "keyboard" ? (
                     <>
-                      <div style={{ display: 'flex', gap: '8px' }}>
+                      <div style={{ display: "flex", gap: "8px" }}>
                         <input
                           value={draftShortcutTextInput}
-                          onChange={(event) => setDraftShortcutTextInput(event.target.value)}
+                          onChange={(event) =>
+                            setDraftShortcutTextInput(event.target.value)
+                          }
                           placeholder={draftShortcutRowMeta.inputPlaceholder}
                           style={{
                             ...lightEditorInputStyle(),
-                            minHeight: '40px',
+                            minHeight: "40px",
                             flex: 1,
                           }}
                         />
                         <button
                           onClick={appendShortcutTextInput}
                           style={{
-                            minWidth: '84px',
-                            minHeight: '40px',
-                            border: 'none',
-                            borderRadius: '14px',
-                            backgroundColor: 'rgba(22, 119, 255, 0.12)',
-                            color: '#1677ff',
+                            minWidth: "84px",
+                            minHeight: "40px",
+                            border: "none",
+                            borderRadius: "14px",
+                            backgroundColor: "rgba(22, 119, 255, 0.12)",
+                            color: "#1677ff",
                             fontWeight: 800,
-                            cursor: 'pointer',
+                            cursor: "pointer",
                           }}
                         >
                           加入
@@ -2023,9 +2543,9 @@ function TerminalQuickBarComponent({
 
                       <div
                         style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-                          gap: '6px',
+                          display: "grid",
+                          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+                          gap: "6px",
                         }}
                       >
                         {availableKeyboardShortcutTokens.map((token) => (
@@ -2034,19 +2554,23 @@ function TerminalQuickBarComponent({
                             onClick={() => appendShortcutToken(token)}
                             aria-label={token.label}
                             style={shortcutTokenGridButton(
-                              token.kind === 'modifier',
-                              draftShortcutTokens.some((current) => current.label === token.label && current.sequence === token.sequence),
+                              token.kind === "modifier",
+                              draftShortcutTokens.some(
+                                (current) =>
+                                  current.label === token.label &&
+                                  current.sequence === token.sequence,
+                              ),
                             )}
                           >
                             <span
                               style={{
-                                display: 'block',
-                                width: '100%',
+                                display: "block",
+                                width: "100%",
                                 lineHeight: 1.1,
-                                textAlign: 'center',
+                                textAlign: "center",
                               }}
                             >
-                              {renderShortcutVisualNode(token.label, 'token')}
+                              {renderShortcutVisualNode(token.label, "token")}
                             </span>
                           </button>
                         ))}
@@ -2055,9 +2579,9 @@ function TerminalQuickBarComponent({
                   ) : (
                     <div
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                        gap: '6px',
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: "6px",
                       }}
                     >
                       {availableCommonShortcutTokens.map((token) => (
@@ -2066,7 +2590,11 @@ function TerminalQuickBarComponent({
                           onClick={() => appendShortcutToken(token)}
                           style={shortcutTokenGridButton(
                             false,
-                            draftShortcutTokens.some((current) => current.label === token.label && current.sequence === token.sequence),
+                            draftShortcutTokens.some(
+                              (current) =>
+                                current.label === token.label &&
+                                current.sequence === token.sequence,
+                            ),
                           )}
                         >
                           {token.label}
@@ -2077,22 +2605,33 @@ function TerminalQuickBarComponent({
 
                   <button
                     onClick={saveShortcutForm}
-                    disabled={!draftShortcutBuild.sequence || Boolean(draftShortcutEffectiveError)}
+                    disabled={
+                      !draftShortcutBuild.sequence ||
+                      Boolean(draftShortcutEffectiveError)
+                    }
                     style={{
-                      width: '100%',
-                      minHeight: '52px',
-                      border: 'none',
-                      borderRadius: '16px',
-                      backgroundColor: '#1677ff',
-                      color: '#fff',
+                      width: "100%",
+                      minHeight: "52px",
+                      border: "none",
+                      borderRadius: "16px",
+                      backgroundColor: "#1677ff",
+                      color: "#fff",
                       fontWeight: 800,
-                      fontSize: '18px',
-                      cursor: !draftShortcutBuild.sequence || draftShortcutEffectiveError ? 'not-allowed' : 'pointer',
-                      opacity: !draftShortcutBuild.sequence || draftShortcutEffectiveError ? 0.55 : 1,
-                      marginTop: '6px',
+                      fontSize: "18px",
+                      cursor:
+                        !draftShortcutBuild.sequence ||
+                        draftShortcutEffectiveError
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity:
+                        !draftShortcutBuild.sequence ||
+                        draftShortcutEffectiveError
+                          ? 0.55
+                          : 1,
+                      marginTop: "6px",
                     }}
                   >
-                    {editingShortcutIndex >= 0 ? '保存快捷键' : '添加快捷键'}
+                    {editingShortcutIndex >= 0 ? "保存快捷键" : "添加快捷键"}
                   </button>
                 </div>
               )}
@@ -2107,50 +2646,71 @@ function TerminalQuickBarComponent({
             data-quickbar-allow-pointer="true"
             onClick={() => setFloatingMenuOpen(false)}
             style={{
-              position: 'fixed',
+              position: "fixed",
               inset: 0,
               zIndex: 129,
-              backgroundColor: 'rgba(5, 8, 14, 0.18)',
+              backgroundColor: "rgba(5, 8, 14, 0.18)",
             }}
           />
           <div
             ref={floatingPanelRef}
             data-quickbar-allow-pointer="true"
             style={{
-              position: 'fixed',
-              right: '12px',
+              position: "fixed",
+              right: "12px",
               bottom: `calc(${floatingPanelBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`,
               zIndex: 130,
-              width: 'min(320px, calc(100vw - 24px))',
+              width: "min(320px, calc(100vw - 24px))",
               maxHeight: `min(560px, calc(100dvh - ${Math.max(180, keyboardInsetPx + 72)}px))`,
-              borderRadius: '22px',
-              backgroundColor: 'rgba(23, 27, 45, 0.96)',
-              color: '#fff',
-              boxShadow: '0 20px 50px rgba(0,0,0,0.32)',
-              display: 'flex',
-              flexDirection: 'column',
+              borderRadius: "22px",
+              backgroundColor: "rgba(23, 27, 45, 0.96)",
+              color: "#fff",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.32)",
+              display: "flex",
+              flexDirection: "column",
               minHeight: 0,
-              overflow: 'hidden',
-              border: '1px solid rgba(255,255,255,0.08)',
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.08)",
             }}
           >
             <div
               style={{
-                padding: '14px 14px 10px',
-                borderBottom: '1px solid rgba(255,255,255,0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                padding: "14px 14px 10px",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 800 }}>快捷输入</div>
-                  <div style={{ marginTop: '2px', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                  <div style={{ fontSize: "15px", fontWeight: 800 }}>
+                    快捷输入
+                  </div>
+                  <div
+                    style={{
+                      marginTop: "2px",
+                      fontSize: "11px",
+                      color: "rgba(255,255,255,0.5)",
+                    }}
+                  >
                     外点关闭，右侧可直接进入定时发送
                   </div>
                   {copyDebugLabel ? (
-                    <div style={{ marginTop: '4px', fontSize: '11px', color: 'rgba(134,239,172,0.95)' }}>
+                    <div
+                      style={{
+                        marginTop: "4px",
+                        fontSize: "11px",
+                        color: "rgba(134,239,172,0.95)",
+                      }}
+                    >
                       {copyDebugLabel}
                     </div>
                   ) : null}
@@ -2159,15 +2719,15 @@ function TerminalQuickBarComponent({
                   type="button"
                   onClick={() => setFloatingMenuOpen(false)}
                   style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '999px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: 'rgba(255,255,255,0.08)',
-                    color: '#fff',
-                    fontSize: '18px',
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    backgroundColor: "rgba(255,255,255,0.08)",
+                    color: "#fff",
+                    fontSize: "18px",
                     fontWeight: 800,
-                    cursor: 'pointer',
+                    cursor: "pointer",
                     flexShrink: 0,
                   }}
                   aria-label="关闭快捷输入"
@@ -2178,169 +2738,187 @@ function TerminalQuickBarComponent({
 
               <div
                 style={{
-                  borderRadius: '18px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  backgroundColor: 'rgba(14, 19, 31, 0.88)',
-                  boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.02)',
-                  padding: '8px',
+                  borderRadius: "18px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  backgroundColor: "rgba(14, 19, 31, 0.88)",
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                  padding: "8px",
                 }}
               >
                 <textarea
                   ref={quickInputTextareaRef}
                   value={quickInputValue}
-                  onChange={(event) => persistQuickInputValue(event.target.value)}
+                  onChange={(event) =>
+                    persistQuickInputValue(event.target.value)
+                  }
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
+                    if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault();
                       sendSessionDraft();
                     }
                   }}
                   placeholder="预输入内容，按 session 持久化"
                   style={{
-                    width: '100%',
-                    minHeight: '148px',
-                    maxHeight: '220px',
-                    resize: 'vertical',
-                    padding: '12px 14px',
-                    borderRadius: '14px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: 'rgba(255,255,255,0.04)',
-                    color: '#fff',
-                    fontSize: '14px',
-                    whiteSpace: 'pre-wrap',
+                    width: "100%",
+                    minHeight: "148px",
+                    maxHeight: "220px",
+                    resize: "vertical",
+                    padding: "12px 14px",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    color: "#fff",
+                    fontSize: "14px",
+                    whiteSpace: "pre-wrap",
                     lineHeight: 1.5,
                   }}
                 />
               </div>
 
-                <button
-                  onClick={() => {
-                    setFloatingMenuOpen(false);
-                    onOpenScheduleComposer?.(quickInputValueRef.current);
-                  }}
-                  disabled={!activeSessionId}
+              <button
+                onClick={() => {
+                  setFloatingMenuOpen(false);
+                  onOpenScheduleComposer?.(quickInputValueRef.current);
+                }}
+                disabled={!activeSessionId}
+                style={{
+                  width: "88px",
+                  minHeight: "40px",
+                  border: "1px solid rgba(113, 164, 255, 0.24)",
+                  borderRadius: "14px",
+                  backgroundColor: "rgba(113, 164, 255, 0.12)",
+                  color: "#8db7ff",
+                  fontWeight: 800,
+                  opacity: !activeSessionId ? 0.45 : 1,
+                  cursor: !activeSessionId ? "not-allowed" : "pointer",
+                }}
+              >
+                定时
+              </button>
+              <button
+                onClick={() => {
+                  sendSessionDraft();
+                }}
+                style={{
+                  width: "88px",
+                  minHeight: "40px",
+                  border: "1px solid rgba(31,214,122,0.18)",
+                  borderRadius: "14px",
+                  backgroundColor: "rgba(31,214,122,0.18)",
+                  color: mobileTheme.colors.accent,
+                  fontWeight: 800,
+                }}
+              >
+                发送
+              </button>
+            </div>
+
+            {splitAvailable && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  alignItems: "stretch",
+                }}
+              >
+                <div
                   style={{
-                    width: '88px',
-                    minHeight: '40px',
-                    border: '1px solid rgba(113, 164, 255, 0.24)',
-                    borderRadius: '14px',
-                    backgroundColor: 'rgba(113, 164, 255, 0.12)',
-                    color: '#8db7ff',
-                    fontWeight: 800,
-                    opacity: !activeSessionId ? 0.45 : 1,
-                    cursor: !activeSessionId ? 'not-allowed' : 'pointer',
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                    alignItems: "center",
                   }}
                 >
-                  定时
-                </button>
-                <button
-                  onClick={() => {
-                    sendSessionDraft();
-                  }}
-                  style={{
-                    width: '88px',
-                    minHeight: '40px',
-                    border: '1px solid rgba(31,214,122,0.18)',
-                    borderRadius: '14px',
-                    backgroundColor: 'rgba(31,214,122,0.18)',
-                    color: mobileTheme.colors.accent,
-                    fontWeight: 800,
-                  }}
-                  >
-                    发送
-                  </button>
-              </div>
-
-              {splitAvailable && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '8px',
-                      alignItems: 'center',
-                    }}
-                  >
-                    {normalizedSplitCountOptions.map((count) => {
-                      const active = count === currentSplitCount;
-                      return (
-                        <button
-                          key={`split-count-${count}`}
-                          type="button"
-                          onClick={() => {
-                            onSetSplitCount?.(count);
-                            setFloatingMenuOpen(false);
-                          }}
-                          aria-label={`${count} 分屏`}
-                          style={{
-                            minWidth: '72px',
-                            minHeight: '40px',
-                            padding: '0 12px',
-                            border: `1px solid ${active ? 'rgba(113, 164, 255, 0.28)' : 'rgba(255,255,255,0.08)'}`,
-                            borderRadius: '14px',
-                            backgroundColor: active ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
-                            color: active ? '#8db7ff' : '#fff',
-                            fontWeight: 800,
-                          }}
-                        >
-                          {count} 分屏
-                        </button>
-                      );
-                    })}
-                    {normalizedSplitCountOptions.length === 0 ? (
+                  {normalizedSplitCountOptions.map((count) => {
+                    const active = count === currentSplitCount;
+                    return (
                       <button
+                        key={`split-count-${count}`}
                         type="button"
                         onClick={() => {
-                          onToggleSplitLayout?.();
+                          onSetSplitCount?.(count);
                           setFloatingMenuOpen(false);
                         }}
+                        aria-label={`${count} 分屏`}
                         style={{
-                          flex: 1,
-                          minHeight: '40px',
-                          border: '1px solid rgba(113, 164, 255, 0.24)',
-                          borderRadius: '14px',
-                          backgroundColor: splitVisible ? 'rgba(113, 164, 255, 0.18)' : 'rgba(31, 38, 53, 0.82)',
-                          color: splitVisible ? '#8db7ff' : '#fff',
+                          minWidth: "72px",
+                          minHeight: "40px",
+                          padding: "0 12px",
+                          border: `1px solid ${active ? "rgba(113, 164, 255, 0.28)" : "rgba(255,255,255,0.08)"}`,
+                          borderRadius: "14px",
+                          backgroundColor: active
+                            ? "rgba(113, 164, 255, 0.18)"
+                            : "rgba(31, 38, 53, 0.82)",
+                          color: active ? "#8db7ff" : "#fff",
                           fontWeight: 800,
                         }}
                       >
-                        {splitVisible ? '关闭分屏' : '开启分屏'}
+                        {count} 分屏
                       </button>
-                    ) : null}
-                  </div>
-                  {splitVisible && onCycleSplitPane ? (
+                    );
+                  })}
+                  {normalizedSplitCountOptions.length === 0 ? (
                     <button
                       type="button"
                       onClick={() => {
-                        onCycleSplitPane();
+                        onToggleSplitLayout?.();
                         setFloatingMenuOpen(false);
                       }}
                       style={{
-                        width: '110px',
-                        minHeight: '40px',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: '14px',
-                        backgroundColor: 'rgba(22, 28, 41, 0.92)',
-                        color: '#fff',
-                        fontWeight: 700,
+                        flex: 1,
+                        minHeight: "40px",
+                        border: "1px solid rgba(113, 164, 255, 0.24)",
+                        borderRadius: "14px",
+                        backgroundColor: splitVisible
+                          ? "rgba(113, 164, 255, 0.18)"
+                          : "rgba(31, 38, 53, 0.82)",
+                        color: splitVisible ? "#8db7ff" : "#fff",
+                        fontWeight: 800,
                       }}
                     >
-                      切换副屏
+                      {splitVisible ? "关闭分屏" : "开启分屏"}
                     </button>
                   ) : null}
                 </div>
-              )}
-
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '8px', flex: 1, minWidth: 0 }}>
+                {splitVisible && onCycleSplitPane ? (
                   <button
-                    onClick={() => setFloatingPanelTab('quick-actions')}
-                    style={floatingPillButton(
-                      floatingPanelTab === 'quick-actions' ? 'rgba(31,214,122,0.18)' : 'rgba(31, 38, 53, 0.82)',
-                      floatingPanelTab === 'quick-actions' ? mobileTheme.colors.accent : '#fff',
-                    )}
+                    type="button"
+                    onClick={() => {
+                      onCycleSplitPane();
+                      setFloatingMenuOpen(false);
+                    }}
+                    style={{
+                      width: "110px",
+                      minHeight: "40px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: "14px",
+                      backgroundColor: "rgba(22, 28, 41, 0.92)",
+                      color: "#fff",
+                      fontWeight: 700,
+                    }}
                   >
-                </button>
+                    切换副屏
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div
+                style={{ display: "flex", gap: "8px", flex: 1, minWidth: 0 }}
+              >
+                <button
+                  onClick={() => setFloatingPanelTab("quick-actions")}
+                  style={floatingPillButton(
+                    floatingPanelTab === "quick-actions"
+                      ? "rgba(31,214,122,0.18)"
+                      : "rgba(31, 38, 53, 0.82)",
+                    floatingPanelTab === "quick-actions"
+                      ? mobileTheme.colors.accent
+                      : "#fff",
+                  )}
+                ></button>
               </div>
             </div>
 
@@ -2349,19 +2927,19 @@ function TerminalQuickBarComponent({
               style={{
                 flex: 1,
                 minHeight: 0,
-                padding: '10px',
-                overflowY: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                touchAction: 'pan-y',
+                padding: "10px",
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
                 maxHeight: `${10 * 50}px`,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
               }}
             >
-              {floatingPanelTab === 'quick-actions' ? (
+              {floatingPanelTab === "quick-actions" ? (
                 sortedQuickActions.length === 0 ? (
-                  <div style={{ height: '8px' }} />
+                  <div style={{ height: "8px" }} />
                 ) : (
                   sortedQuickActions.map((action) => {
                     const draftAction = {
@@ -2372,52 +2950,69 @@ function TerminalQuickBarComponent({
                       <div
                         key={action.id}
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
                         }}
                       >
                         <button
                           onClick={() => {
-                            handleQuickActionDoubleTap(action.id, action.sequence);
+                            handleQuickActionDoubleTap(
+                              action.id,
+                              action.sequence,
+                            );
                           }}
                           style={{
                             flex: 1,
                             minWidth: 0,
-                            minHeight: '42px',
-                            border: 'none',
-                            borderRadius: '14px',
-                            backgroundColor: 'rgba(255,255,255,0.08)',
-                            color: '#fff',
-                            padding: '0 14px',
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '10px',
+                            minHeight: "42px",
+                            border: "none",
+                            borderRadius: "14px",
+                            backgroundColor: "rgba(255,255,255,0.08)",
+                            color: "#fff",
+                            padding: "0 14px",
+                            textAlign: "left",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "10px",
                             fontWeight: 700,
-                            cursor: 'pointer',
+                            cursor: "pointer",
                           }}
                         >
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label || '未命名'}</span>
-                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.55)', flexShrink: 0 }}>
-                            {formatSnippetPreview(action.sequence) || '(空)'}
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {action.label || "未命名"}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color: "rgba(255,255,255,0.55)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatSnippetPreview(action.sequence) || "(空)"}
                           </span>
                         </button>
                         <button
-                          onClick={() => openEditor('edit', draftAction)}
+                          onClick={() => openEditor("edit", draftAction)}
                           style={{
-                            width: '40px',
-                            height: '40px',
-                            borderRadius: '12px',
-                            border: 'none',
-                            backgroundColor: 'rgba(255,255,255,0.1)',
-                            color: '#fff',
-                            fontSize: '16px',
-                            cursor: 'pointer',
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "12px",
+                            border: "none",
+                            backgroundColor: "rgba(255,255,255,0.1)",
+                            color: "#fff",
+                            fontSize: "16px",
+                            cursor: "pointer",
                             flexShrink: 0,
                           }}
-                          aria-label={`Edit ${action.label || 'quick action'}`}
+                          aria-label={`Edit ${action.label || "quick action"}`}
                         >
                           ✎
                         </button>
@@ -2432,45 +3027,62 @@ function TerminalQuickBarComponent({
                       void captureSystemClipboard();
                     }}
                     style={{
-                      minHeight: '40px',
-                      border: 'none',
-                      borderRadius: '14px',
-                      backgroundColor: 'rgba(255,255,255,0.12)',
-                      color: '#fff',
+                      minHeight: "40px",
+                      border: "none",
+                      borderRadius: "14px",
+                      backgroundColor: "rgba(255,255,255,0.12)",
+                      color: "#fff",
                       fontWeight: 800,
                     }}
                   >
-                    {clipboardBusy ? '读取中…' : '读取系统剪贴板'}
+                    {clipboardBusy ? "读取中…" : "读取系统剪贴板"}
                   </button>
                   {clipboardError && (
-                    <div style={{ fontSize: '12px', color: 'rgba(255, 173, 96, 0.92)', lineHeight: 1.4 }}>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "rgba(255, 173, 96, 0.92)",
+                        lineHeight: 1.4,
+                      }}
+                    >
                       {clipboardError}
                     </div>
                   )}
                   {clipboardHistory.length === 0 ? (
-                    <div style={{ height: '8px' }} />
+                    <div style={{ height: "8px" }} />
                   ) : (
                     clipboardHistory.map((entry, index) => (
                       <button
                         key={`${index}-${entry.slice(0, 12)}`}
                         onClick={() => handleClipboardDoubleTap(entry, index)}
                         style={{
-                          width: '100%',
-                          minHeight: '46px',
-                          border: 'none',
-                          borderRadius: '14px',
-                          backgroundColor: 'rgba(255,255,255,0.08)',
-                          color: '#fff',
-                          padding: '10px 14px',
-                          textAlign: 'left',
+                          width: "100%",
+                          minHeight: "46px",
+                          border: "none",
+                          borderRadius: "14px",
+                          backgroundColor: "rgba(255,255,255,0.08)",
+                          color: "#fff",
+                          padding: "10px 14px",
+                          textAlign: "left",
                           fontWeight: 600,
                           lineHeight: 1.35,
                         }}
                       >
-                        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '4px' }}>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "rgba(255,255,255,0.5)",
+                            marginBottom: "4px",
+                          }}
+                        >
                           Clipboard #{index + 1}
                         </div>
-                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        <div
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
                           {entry}
                         </div>
                       </button>
@@ -2491,7 +3103,7 @@ function TerminalQuickBarComponent({
           tabIndex={-1}
           onFocus={(event) => event.currentTarget.blur()}
           onPointerDown={(event) => {
-            if (event.pointerType === 'touch') {
+            if (event.pointerType === "touch") {
               return;
             }
             event.preventDefault();
@@ -2510,7 +3122,7 @@ function TerminalQuickBarComponent({
             };
           }}
           onPointerMove={(event) => {
-            if (event.pointerType === 'touch') {
+            if (event.pointerType === "touch") {
               return;
             }
             const drag = floatingBubbleDragRef.current;
@@ -2519,7 +3131,10 @@ function TerminalQuickBarComponent({
             }
             const deltaX = event.clientX - drag.startX;
             const deltaY = event.clientY - drag.startY;
-            if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX) {
+            if (
+              !drag.active &&
+              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+            ) {
               drag.active = true;
               suppressBubbleClickRef.current = true;
             }
@@ -2537,7 +3152,7 @@ function TerminalQuickBarComponent({
             );
           }}
           onPointerUp={(event) => {
-            if (event.pointerType === 'touch') {
+            if (event.pointerType === "touch") {
               return;
             }
             if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
@@ -2553,7 +3168,7 @@ function TerminalQuickBarComponent({
             event.currentTarget.releasePointerCapture(event.pointerId);
           }}
           onPointerCancel={(event) => {
-            if (event.pointerType === 'touch') {
+            if (event.pointerType === "touch") {
               return;
             }
             floatingBubbleDragRef.current.active = false;
@@ -2561,7 +3176,10 @@ function TerminalQuickBarComponent({
             try {
               event.currentTarget.releasePointerCapture(event.pointerId);
             } catch (error) {
-              console.warn('[TerminalQuickBar] Failed to release floating bubble pointer capture:', error);
+              console.warn(
+                "[TerminalQuickBar] Failed to release floating bubble pointer capture:",
+                error,
+              );
             }
           }}
           onClick={() => {
@@ -2600,7 +3218,10 @@ function TerminalQuickBarComponent({
             }
             const deltaX = touch.clientX - drag.startX;
             const deltaY = touch.clientY - drag.startY;
-            if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX) {
+            if (
+              !drag.active &&
+              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+            ) {
               drag.active = true;
               suppressBubbleClickRef.current = true;
             }
@@ -2634,63 +3255,89 @@ function TerminalQuickBarComponent({
             floatingBubbleTouchDragRef.current.moved = false;
           }}
           style={{
-            position: 'fixed',
-            right: collapsed ? `${FLOATING_BUBBLE_MARGIN}px` : floatingBubblePosition.x === null ? `${FLOATING_BUBBLE_MARGIN}px` : 'auto',
+            position: "fixed",
+            right: collapsed
+              ? `${FLOATING_BUBBLE_MARGIN}px`
+              : floatingBubblePosition.x === null
+                ? `${FLOATING_BUBBLE_MARGIN}px`
+                : "auto",
             bottom: collapsed
               ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
               : floatingBubblePosition.y === null
-              ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
-              : 'auto',
-            left: collapsed || floatingBubblePosition.x === null ? 'auto' : `${floatingBubblePosition.x}px`,
-            top: collapsed || floatingBubblePosition.y === null ? 'auto' : `${floatingBubblePosition.y}px`,
+                ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+                : "auto",
+            left:
+              collapsed || floatingBubblePosition.x === null
+                ? "auto"
+                : `${floatingBubblePosition.x}px`,
+            top:
+              collapsed || floatingBubblePosition.y === null
+                ? "auto"
+                : `${floatingBubblePosition.y}px`,
             zIndex: 128,
             width: `${FLOATING_BUBBLE_SIZE}px`,
             height: `${FLOATING_BUBBLE_SIZE}px`,
-            borderRadius: '999px',
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: floatingMenuOpen ? 'rgba(31,214,122,0.18)' : 'rgba(18, 24, 38, 0.72)',
-            color: floatingMenuOpen ? mobileTheme.colors.accent : '#fff',
-            fontSize: '20px',
+            borderRadius: "999px",
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: floatingMenuOpen
+              ? "rgba(31,214,122,0.18)"
+              : "rgba(18, 24, 38, 0.72)",
+            color: floatingMenuOpen ? mobileTheme.colors.accent : "#fff",
+            fontSize: "20px",
             fontWeight: 800,
-            boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
-            transform: 'none',
-            touchAction: 'none',
+            boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
+            transform: "none",
+            touchAction: "none",
           }}
-          aria-label={collapsed ? '展开快捷栏' : 'Toggle floating quick menu'}
+          aria-label={collapsed ? "展开快捷栏" : "Toggle floating quick menu"}
         >
-          {collapsed ? '⌃' : '⌘'}
+          {collapsed ? "⌃" : "⌘"}
         </button>
       )}
 
-      {shellMode === 'inline' && !shellCollapsed && !floatingMenuOpen && (
+      {shellMode === "inline" && !shellCollapsed && !floatingMenuOpen && (
         <div
           data-testid="terminal-quickbar-shell-rows"
-          style={{
-            position: 'relative',
-            paddingRight: collapseAvailable ? `${FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING}px` : undefined,
-          }}
+          style={{ position: "relative" }}
         >
           {landscape ? (
             <>
               <div
                 data-quickbar-shell-row="true"
                 style={{
-                  minHeight: '40px',
-                  display: 'flex',
-                  alignItems: 'stretch',
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
                   marginBottom: `${QUICK_BAR_ROW_GAP}px`,
                 }}
               >
-                <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
-                  {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                <div
+                  data-testid="quickbar-fixed-cluster-top"
+                  style={fixedClusterStyle}
+                >
+                  {topFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
                 </div>
                 <div style={scrollTrackShellStyle}>
-                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {mergedScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-                    {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
-                    {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {mergedScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(topShortcutEditorEntry, {
+                      compact: true,
+                    })}
+                    {renderBaseActionButton(bottomShortcutEditorEntry, {
+                      compact: true,
+                    })}
                   </div>
                 </div>
               </div>
@@ -2698,20 +3345,44 @@ function TerminalQuickBarComponent({
               <div
                 data-quickbar-shell-row="true"
                 style={{
-                  minHeight: '40px',
-                  display: 'flex',
-                  alignItems: 'stretch',
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
-                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: 'rgba(255,255,255,0.02)',
+                  padding: `2px ${
+                    collapseAvailable
+                      ? FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING * 2
+                      : QUICK_BAR_SIDE_PADDING
+                  }px 4px ${QUICK_BAR_SIDE_PADDING}px`,
+                  backgroundColor: "rgba(255,255,255,0.02)",
                 }}
               >
-                <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
-                  {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                <div
+                  data-testid="quickbar-fixed-cluster-bottom"
+                  style={fixedClusterStyle}
+                >
+                  {bottomFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
                 </div>
                 <div style={scrollTrackShellStyle}>
-                  <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {visibleToolRowActions.map((action) => renderBaseActionButton(action, { compact: true }))}
+                  <div
+                    data-testid="quickbar-tool-row"
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {splitToolActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {transferToolActions.map((action) =>
+                      renderTransferToolButton(action, { compact: true }),
+                    )}
+                    {toolRowActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
                   </div>
                 </div>
               </div>
@@ -2721,21 +3392,36 @@ function TerminalQuickBarComponent({
               <div
                 data-quickbar-shell-row="true"
                 style={{
-                  minHeight: '40px',
-                  display: 'flex',
-                  alignItems: 'stretch',
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
                   marginBottom: `${QUICK_BAR_ROW_GAP}px`,
                 }}
               >
-                <div data-testid="quickbar-fixed-cluster-top" style={fixedClusterStyle}>
-                  {topFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                <div
+                  data-testid="quickbar-fixed-cluster-top"
+                  style={fixedClusterStyle}
+                >
+                  {topFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
                 </div>
                 <div style={scrollTrackShellStyle}>
-                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {topScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-                    {renderBaseActionButton(topShortcutEditorEntry, { compact: true })}
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {topScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(topShortcutEditorEntry, {
+                      compact: true,
+                    })}
                   </div>
                 </div>
               </div>
@@ -2743,21 +3429,36 @@ function TerminalQuickBarComponent({
               <div
                 data-quickbar-shell-row="true"
                 style={{
-                  minHeight: '40px',
-                  display: 'flex',
-                  alignItems: 'stretch',
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: 'rgba(255,255,255,0.02)',
+                  backgroundColor: "rgba(255,255,255,0.02)",
                 }}
               >
-                <div data-testid="quickbar-fixed-cluster-bottom" style={fixedClusterStyle}>
-                  {bottomFixedActions.map((action) => renderBaseActionButton(action, { fixed: true, compact: true }))}
+                <div
+                  data-testid="quickbar-fixed-cluster-bottom"
+                  style={fixedClusterStyle}
+                >
+                  {bottomFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
                 </div>
                 <div style={scrollTrackShellStyle}>
-                  <div data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {bottomScrollActions.map((action) => renderBaseActionButton(action, { compact: true }))}
-                    {renderBaseActionButton(bottomShortcutEditorEntry, { compact: true })}
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {bottomScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(bottomShortcutEditorEntry, {
+                      compact: true,
+                    })}
                   </div>
                 </div>
               </div>
@@ -2765,14 +3466,30 @@ function TerminalQuickBarComponent({
               <div
                 data-quickbar-shell-row="true"
                 style={{
-                  display: 'flex',
-                  alignItems: 'stretch',
-                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                  display: "flex",
+                  alignItems: "stretch",
+                  padding: `2px ${
+                    collapseAvailable
+                      ? FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING * 2
+                      : QUICK_BAR_SIDE_PADDING
+                  }px 4px ${QUICK_BAR_SIDE_PADDING}px`,
                 }}
               >
                 <div style={scrollTrackShellStyle}>
-                  <div data-testid="quickbar-tool-row" data-quickbar-scroll-track="true" style={scrollTrackStyle}>
-                    {visibleToolRowActions.map((action) => renderBaseActionButton(action))}
+                  <div
+                    data-testid="quickbar-tool-row"
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {splitToolActions.map((action) =>
+                      renderBaseActionButton(action),
+                    )}
+                    {transferToolActions.map((action) =>
+                      renderTransferToolButton(action),
+                    )}
+                    {toolRowActions.map((action) =>
+                      renderBaseActionButton(action),
+                    )}
                   </div>
                 </div>
               </div>
@@ -2781,34 +3498,55 @@ function TerminalQuickBarComponent({
           {collapseAvailable ? (
             <div
               style={{
-                position: 'absolute',
+                position: "absolute",
                 right: `${QUICK_BAR_SIDE_PADDING}px`,
-                bottom: '4px',
+                bottom: "4px",
                 width: `${FLOATING_BUBBLE_SIZE}px`,
-                height: '34px',
+                height: "34px",
               }}
             >
-              {renderBaseActionButton(collapseToolAction, { fixed: true, compact: true })}
+              {renderBaseActionButton(collapseToolAction, {
+                fixed: true,
+                compact: true,
+              })}
             </div>
           ) : null}
         </div>
       )}
+      {shellMode === "inline" && shellCollapsed && !floatingMenuOpen ? (
+        <div
+          data-testid="terminal-quickbar-collapsed-keyboard"
+          style={{
+            position: "fixed",
+            right: `calc(${FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN + 8}px + env(safe-area-inset-right, 0px))`,
+            bottom: `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+            zIndex: 128,
+            width: "78px",
+            height: `${FLOATING_BUBBLE_SIZE}px`,
+          }}
+        >
+          {renderBaseActionButton(
+            { id: "keyboard", label: "键盘", sequence: "" },
+            { fixed: true, compact: true },
+          )}
+        </div>
+      ) : null}
       {toastMessage && (
         <div
           style={{
-            position: 'fixed',
-            top: '40%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
+            position: "fixed",
+            top: "40%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
             zIndex: 200,
-            backgroundColor: 'rgba(23, 27, 45, 0.92)',
-            color: '#fff',
-            padding: '12px 24px',
-            borderRadius: '16px',
-            fontSize: '15px',
+            backgroundColor: "rgba(23, 27, 45, 0.92)",
+            color: "#fff",
+            padding: "12px 24px",
+            borderRadius: "16px",
+            fontSize: "15px",
             fontWeight: 700,
-            pointerEvents: 'none',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.32)',
+            pointerEvents: "none",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.32)",
           }}
         >
           {toastMessage}
@@ -2819,4 +3557,4 @@ function TerminalQuickBarComponent({
 }
 
 export const TerminalQuickBar = memo(TerminalQuickBarComponent);
-TerminalQuickBar.displayName = 'TerminalQuickBar';
+TerminalQuickBar.displayName = "TerminalQuickBar";

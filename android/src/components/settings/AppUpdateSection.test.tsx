@@ -35,6 +35,9 @@ describe('AppUpdateSection', () => {
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
+        rollbackBackup={null}
+        isRollingBack={false}
+        onRollback={vi.fn()}
       />,
     );
 
@@ -68,10 +71,57 @@ describe('AppUpdateSection', () => {
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
+        rollbackBackup={null}
+        isRollingBack={false}
+        onRollback={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: '使用当前 daemon 地址' }));
     expect(onUpdateDraftChange).toHaveBeenCalledTimes(1);
   });
+
+  it('shows rollback button when rollback backup exists and triggers onRollback', () => {
+    const onRollback = vi.fn();
+
+    render(
+      <AppUpdateSection
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updateDraft={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+          rollbackBackup: null,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        suggestedManifestUrl=""
+        onUpdateDraftChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        rollbackBackup={{
+          versionCode: 1011589,
+          versionName: '0.1.1.1589',
+          filePath: '/tmp/rollback.apk',
+          sha256: 'abc',
+          backedUpAt: 123456789,
+        }}
+        isRollingBack={false}
+        onRollback={onRollback}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '回退到 0.1.1.1589' }));
+    expect(onRollback).toHaveBeenCalledTimes(1);
+  });
+
 });

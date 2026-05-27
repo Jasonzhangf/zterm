@@ -6,6 +6,14 @@ export interface DownloadAndInstallOptions {
   expectedPackageName?: string;
 }
 
+export interface RollbackBackupInfo {
+  versionCode: number;
+  versionName: string;
+  filePath: string;
+  sha256: string;
+  backedUpAt: number;
+}
+
 export interface AppUpdatePlugin {
   canRequestPackageInstalls(): Promise<{ allowed: boolean }>;
   openInstallPermissionSettings(): Promise<void>;
@@ -14,6 +22,9 @@ export interface AppUpdatePlugin {
     sha256: string;
     packageName?: string;
   }>;
+  backupCurrentApk(): Promise<RollbackBackupInfo>;
+  rollbackToBackup(options: { filePath: string; sha256?: string }): Promise<void>;
+  getRollbackBackupInfo(): Promise<RollbackBackupInfo | null>;
 }
 
 const AppUpdateNative = registerPlugin<AppUpdatePlugin>('AppUpdate');

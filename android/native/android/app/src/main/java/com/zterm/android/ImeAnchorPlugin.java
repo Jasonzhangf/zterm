@@ -291,6 +291,74 @@ public class ImeAnchorPlugin extends Plugin {
         clearImeEditText();
     }
 
+    void emitHardwareKey(
+        String key,
+        String code,
+        boolean ctrlKey,
+        boolean altKey,
+        boolean metaKey,
+        boolean shiftKey
+    ) {
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+
+        Log.i(TAG, "emitHardwareKey(): key=" + key + " code=" + code);
+        JSObject payload = new JSObject();
+        payload.put("key", key);
+        payload.put("code", code == null ? "" : code);
+        payload.put("ctrlKey", ctrlKey);
+        payload.put("altKey", altKey);
+        payload.put("metaKey", metaKey);
+        payload.put("shiftKey", shiftKey);
+        notifyListeners("key", payload);
+    }
+
+    private static String mapKeyCodeToKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_ESCAPE:
+                return "Escape";
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return "ArrowUp";
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return "ArrowDown";
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return "ArrowLeft";
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return "ArrowRight";
+            case KeyEvent.KEYCODE_TAB:
+                return "Tab";
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                return "Enter";
+            default:
+                return null;
+        }
+    }
+
+    private static String mapKeyCodeToCode(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_ESCAPE:
+                return "Escape";
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return "ArrowUp";
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return "ArrowDown";
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return "ArrowLeft";
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return "ArrowRight";
+            case KeyEvent.KEYCODE_TAB:
+                return "Tab";
+            case KeyEvent.KEYCODE_ENTER:
+                return "Enter";
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                return "NumpadEnter";
+            default:
+                return null;
+        }
+    }
+
     private void dispatchInputLogicEvents(List<ImeAnchorInputLogic.Event> events, String source) {
         for (ImeAnchorInputLogic.Event event : events) {
             if (event.type == ImeAnchorInputLogic.EventType.EMIT_INPUT && event.text != null && !event.text.isEmpty()) {
@@ -443,6 +511,25 @@ public class ImeAnchorPlugin extends Plugin {
 
         void setPlugin(ImeAnchorPlugin plugin) {
             this.plugin = plugin;
+        }
+
+        @Override
+        public boolean onKeyDown(int keyCode, KeyEvent event) {
+            if (plugin != null) {
+                String key = mapKeyCodeToKey(keyCode);
+                if (key != null) {
+                    plugin.emitHardwareKey(
+                        key,
+                        mapKeyCodeToCode(keyCode),
+                        event.isCtrlPressed(),
+                        event.isAltPressed(),
+                        event.isMetaPressed(),
+                        event.isShiftPressed()
+                    );
+                    return true;
+                }
+            }
+            return super.onKeyDown(keyCode, event);
         }
 
         @Override

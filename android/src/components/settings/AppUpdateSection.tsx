@@ -1,5 +1,5 @@
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { AppUpdateManifest, AppUpdatePreferences } from '../../lib/app-update';
+import type { AppUpdateManifest, AppUpdatePreferences, AppUpdateRollbackBackup } from '../../lib/app-update';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
 
 interface AppUpdateSectionProps {
@@ -17,6 +17,9 @@ interface AppUpdateSectionProps {
   onCheckForUpdate: () => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
+  rollbackBackup?: AppUpdateRollbackBackup | null;
+  isRollingBack?: boolean;
+  onRollback?: () => void;
 }
 
 export function AppUpdateSection({
@@ -34,6 +37,9 @@ export function AppUpdateSection({
   onCheckForUpdate,
   onInstallUpdate,
   onResetUpdateIgnorePolicy,
+  rollbackBackup,
+  isRollingBack = false,
+  onRollback,
 }: AppUpdateSectionProps) {
   return (
     <div style={settingsSectionStyle()}>
@@ -151,6 +157,25 @@ export function AppUpdateSection({
         >
           {updateInstalling ? '准备安装…' : '下载并安装'}
         </button>
+        {rollbackBackup ? (
+          <button
+            onClick={onRollback}
+            disabled={isRollingBack}
+            style={{
+              minHeight: '44px',
+              padding: '0 16px',
+              borderRadius: '14px',
+              border: 'none',
+              backgroundColor: 'rgba(245,158,11,0.18)',
+              color: '#b45309',
+              fontWeight: 800,
+              cursor: isRollingBack ? 'wait' : 'pointer',
+              opacity: isRollingBack ? 0.55 : 1,
+            }}
+          >
+            {isRollingBack ? '正在回滚…' : `回退到 ${rollbackBackup.versionName}`}
+          </button>
+        ) : null}
         {hasUpdateIgnorePolicy ? (
           <button
             onClick={onResetUpdateIgnorePolicy}

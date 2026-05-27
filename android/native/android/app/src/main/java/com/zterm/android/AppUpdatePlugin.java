@@ -1,6 +1,7 @@
 package com.zterm.android;
 
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -14,6 +15,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -42,6 +44,70 @@ public class AppUpdatePlugin extends Plugin {
             call.resolve();
         } catch (Exception error) {
             call.reject("无法打开安装权限设置", error);
+        }
+    }
+
+    @PluginMethod
+    public void backupCurrentApk(PluginCall call) {
+        new Thread(() -> {
+            try {
+                JSObject result = backupCurrentApkInternal();
+                call.resolve(result);
+            } catch (Exception error) {
+                Log.e(TAG, "backupCurrentApk failed", error);
+                call.reject(error.getMessage(), error);
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void rollbackToBackup(PluginCall call) {
+        String filePath = call.getString("filePath", "").trim();
+        String sha256 = call.getString("sha256", "").trim().toLowerCase(Locale.US);
+        if (filePath.isEmpty()) {
+            call.reject("回滚备份 filePath 不能为空");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                File backupFile = new File(filePath);
+                if (!backupFile.exists() || !backupFile.isFile()) {
+                    throw new IllegalStateException("回滚备份文件不存在");
+                }
+                if (!sha256.isEmpty()) {
+                    String actualSha256 = computeSha256(backupFile);
+                    if (!sha256.equals(actualSha256)) {
+                        throw new IllegalStateException("回滚备份校验失败：SHA-256 不匹配");
+                    }
+                }
+
+                getActivity().runOnUiThread(() -> {
+                    try {
+                        installApk(backupFile);
+                        call.resolve();
+                    } catch (Exception error) {
+                        call.reject("调起回滚安装失败", error);
+                    }
+                });
+            } catch (Exception error) {
+                Log.e(TAG, "rollbackToBackup failed", error);
+                call.reject(error.getMessage(), error);
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void getRollbackBackupInfo(PluginCall call) {
+        try {
+            JSObject result = resolveLatestRollbackBackup();
+            if (result == null) {
+                call.resolve();
+                return;
+            }
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("读取回滚备份信息失败", error);
         }
     }
 
@@ -169,6 +235,135 @@ public class AppUpdatePlugin extends Plugin {
             }
             if (connection != null) {
                 connection.disconnect();
+            }
+        }
+    }
+
+
+    private JSObject backupCurrentApkInternal() throws Exception {
+        File rollbackDir = getRollbackDir();
+        deleteRollbackBackups(rollbackDir);
+
+        ApplicationInfo applicationInfo = getContext().getApplicationInfo();
+        String sourceApkPath = applicationInfo != null ? applicationInfo.sourceDir : null;
+        if (sourceApkPath == null || sourceApkPath.isEmpty()) {
+            throw new IllegalStateException("无法定位当前安装包路径");
+        }
+
+        PackageManager packageManager = getContext().getPackageManager();
+        PackageInfo packageInfo;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageInfo = packageManager.getPackageInfo(
+                getContext().getPackageName(),
+                PackageManager.PackageInfoFlags.of(0)
+            );
+        } else {
+            //noinspection deprecation
+            packageInfo = packageManager.getPackageInfo(getContext().getPackageName(), 0);
+        }
+
+        long versionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? packageInfo.getLongVersionCode()
+            : packageInfo.versionCode;
+        String versionName = packageInfo.versionName != null ? packageInfo.versionName : String.valueOf(versionCode);
+        long backedUpAt = System.currentTimeMillis();
+        File sourceFile = new File(sourceApkPath);
+        File backupFile = new File(rollbackDir, "rollback-" + versionCode + "-" + backedUpAt + ".apk");
+        copyFile(sourceFile, backupFile);
+        String sha256 = computeSha256(backupFile);
+
+        JSObject result = new JSObject();
+        result.put("versionCode", versionCode);
+        result.put("versionName", versionName);
+        result.put("filePath", backupFile.getAbsolutePath());
+        result.put("sha256", sha256);
+        result.put("backedUpAt", backedUpAt);
+        return result;
+    }
+
+    private File getRollbackDir() throws Exception {
+        File rollbackDir = new File(getContext().getFilesDir(), "rollback");
+        if (!rollbackDir.exists() && !rollbackDir.mkdirs()) {
+            throw new IllegalStateException("无法创建回滚备份目录");
+        }
+        return rollbackDir;
+    }
+
+    private void deleteRollbackBackups(File rollbackDir) {
+        File[] files = rollbackDir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            if (file != null && file.isFile()) {
+                //noinspection ResultOfMethodCallIgnored
+                file.delete();
+            }
+        }
+    }
+
+    private JSObject resolveLatestRollbackBackup() throws Exception {
+        File rollbackDir = getRollbackDir();
+        File[] files = rollbackDir.listFiles((dir, name) -> name.endsWith(".apk"));
+        if (files == null || files.length == 0) {
+            return null;
+        }
+        File latest = files[0];
+        for (File file : files) {
+            if (file.lastModified() > latest.lastModified()) {
+                latest = file;
+            }
+        }
+
+        PackageManager packageManager = getContext().getPackageManager();
+        PackageInfo packageInfo;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageInfo = packageManager.getPackageArchiveInfo(
+                latest.getAbsolutePath(),
+                PackageManager.PackageInfoFlags.of(0)
+            );
+        } else {
+            //noinspection deprecation
+            packageInfo = packageManager.getPackageArchiveInfo(latest.getAbsolutePath(), 0);
+        }
+        if (packageInfo == null) {
+            return null;
+        }
+        long versionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? packageInfo.getLongVersionCode()
+            : packageInfo.versionCode;
+        String versionName = packageInfo.versionName != null ? packageInfo.versionName : String.valueOf(versionCode);
+
+        JSObject result = new JSObject();
+        result.put("versionCode", versionCode);
+        result.put("versionName", versionName);
+        result.put("filePath", latest.getAbsolutePath());
+        result.put("sha256", computeSha256(latest));
+        result.put("backedUpAt", latest.lastModified());
+        return result;
+    }
+
+    private void copyFile(File source, File target) throws Exception {
+        InputStream inputStream = null;
+        FileOutputStream outputStream = null;
+        try {
+            inputStream = new FileInputStream(source);
+            outputStream = new FileOutputStream(target);
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = inputStream.read(buffer)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
+                outputStream.write(buffer, 0, read);
+            }
+            outputStream.flush();
+        } finally {
+            if (outputStream != null) {
+                try { outputStream.close(); } catch (Exception ignored) {}
+            }
+            if (inputStream != null) {
+                try { inputStream.close(); } catch (Exception ignored) {}
             }
         }
     }
