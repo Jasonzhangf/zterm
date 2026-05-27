@@ -38,6 +38,7 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead: vi.fn(),
       probeOrReconnectStaleSessionTransport: vi.fn(),
       hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: ({ isActiveTarget, wsReadyState, reconnectInFlight }) => (
         isActiveTarget
         && (wsReadyState === WebSocket.CLOSED || wsReadyState === WebSocket.CLOSING || wsReadyState === null)
@@ -49,7 +50,7 @@ describe('session-context-input-runtime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-2');
   });
 
-  it('drops input on a stale-open transport and reconnects instead of letting socket buffers delay it', () => {
+  it('sends explicit input on an open transport even when refresh activity is stale', () => {
     const probeOrReconnectStaleSessionTransport = vi.fn();
     const requestSessionBufferHead = vi.fn();
     const sendSocketPayload = vi.fn();
@@ -81,21 +82,22 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead,
       probeOrReconnectStaleSessionTransport,
       hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: () => false,
       reconnectSession,
     });
 
-    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(probeOrReconnectStaleSessionTransport).not.toHaveBeenCalled();
-    expect(reconnectSession).toHaveBeenCalledWith('session-2');
+    expect(probeOrReconnectStaleSessionTransport).toHaveBeenCalledWith('session-2', ws, 'input');
+    expect(reconnectSession).not.toHaveBeenCalled();
     expect(runtimeDebug).toHaveBeenCalledWith(
-      'session.input.drop.stale-open-transport',
-      expect.objectContaining({ sessionId: 'session-2', size: 4 }),
+      'session.input.send',
+      expect.objectContaining({ sessionId: 'session-2', size: 4, transportStale: true }),
     );
   });
 
-  it('does not reconnect repeatedly when stale-open input already has reconnect in flight', () => {
+  it('sends explicit input on an open transport even when stale reconnect is already in flight', () => {
     const reconnectSession = vi.fn();
     const sendSocketPayload = vi.fn();
     const ws = createSocket(WebSocket.OPEN);
@@ -121,11 +123,12 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead: vi.fn(),
       probeOrReconnectStaleSessionTransport: vi.fn(),
       hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: () => false,
       reconnectSession,
     });
 
-    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
@@ -158,6 +161,7 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead,
       probeOrReconnectStaleSessionTransport: vi.fn(),
       hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: () => false,
       reconnectSession: vi.fn(),
     });
@@ -196,6 +200,7 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead: vi.fn(),
       probeOrReconnectStaleSessionTransport: vi.fn(),
       hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: () => false,
       reconnectSession,
     });
@@ -235,6 +240,7 @@ describe('session-context-input-runtime', () => {
       requestSessionBufferHead: vi.fn(),
       probeOrReconnectStaleSessionTransport: vi.fn(),
       hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
       shouldReconnectQueuedActiveInput: ({ isActiveTarget, reconnectInFlight }) => isActiveTarget && !reconnectInFlight,
       reconnectSession,
     });
@@ -243,4 +249,81 @@ describe('session-context-input-runtime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-2');
     expect(reconnectSession).not.toHaveBeenCalledWith('session-1');
   });
+
+  it('reconnects explicit input immediately when a pending transport open intent is stale', () => {
+    const runtimeDebug = vi.fn();
+    const reconnectSession = vi.fn();
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'hostname\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-1' } as any,
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-1' },
+        },
+      },
+      runtimeDebug,
+      readSessionTransportSocket: () => null,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload: vi.fn(),
+      markPendingInputTailRefresh: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 0 }),
+      requestSessionBufferHead: vi.fn(),
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => true,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession,
+    });
+
+    expect(reconnectSession).toHaveBeenCalledWith('session-2');
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.input.reconnect.stale-pending-transport-open',
+      expect.objectContaining({ sessionId: 'session-2', size: 9 }),
+    );
+  });
+});
+
+it('anchors stale-open explicit input to an immediate probe instead of passively waiting for lifecycle tick', () => {
+  const probeOrReconnectStaleSessionTransport = vi.fn();
+  const sendSocketPayload = vi.fn();
+  const ws = createSocket(WebSocket.OPEN);
+
+  sendInputThroughSessionTransport({
+    sessionId: 'session-2',
+    data: 'pwd\r',
+    refs: {
+      sessionsRef: {
+        current: [
+          { id: 'session-2' } as any,
+        ],
+      },
+      stateRef: {
+        current: { activeSessionId: 'session-2' },
+      },
+    },
+    runtimeDebug: vi.fn(),
+    readSessionTransportSocket: () => ws,
+    isSessionTransportActivityStale: () => true,
+    isReconnectInFlight: () => false,
+    sendSocketPayload,
+    markPendingInputTailRefresh: vi.fn(),
+    readSessionBufferSnapshot: () => ({ revision: 3 }),
+    requestSessionBufferHead: vi.fn(),
+    probeOrReconnectStaleSessionTransport,
+    hasPendingSessionTransportOpen: () => false,
+    isPendingSessionTransportOpenStale: () => false,
+    shouldReconnectQueuedActiveInput: () => false,
+    reconnectSession: vi.fn(),
+  });
+
+  expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+  expect(probeOrReconnectStaleSessionTransport).toHaveBeenCalledWith('session-2', ws, 'input');
 });

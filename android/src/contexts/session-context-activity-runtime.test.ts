@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ensureActiveSessionFreshRuntime } from './session-context-activity-runtime';
+import {
+  ensureActiveSessionFreshRuntime,
+  probeOrReconnectStaleSessionTransportRuntime,
+} from './session-context-activity-runtime';
 
 function buildSession(id: string, state: 'connected' | 'connecting' | 'reconnecting' | 'closed' = 'connected') {
   return {
@@ -294,5 +297,40 @@ describe('session-context-activity-runtime', () => {
     expect(refreshed).toBe(true);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
     expect(refs.connectedBaselineBurstGuardRef.current.has('session-2')).toBe(false);
+  });
+});
+
+describe('probeOrReconnectStaleSessionTransportRuntime', () => {
+  it('stops waiting once probe has an activity anchor newer than the probe timestamp', () => {
+    const reconnectSession = vi.fn();
+    const requestSessionBufferHead = vi.fn();
+    const resetSessionTransportPullBookkeeping = vi.fn();
+    const runtimeDebug = vi.fn();
+    const now = Date.now();
+
+    const result = probeOrReconnectStaleSessionTransportRuntime({
+      sessionId: 'session-1',
+      ws: createSocket(WebSocket.OPEN),
+      reason: 'active-reentry',
+      refs: {
+        lastServerActivityAtRef: { current: new Map([['session-1', now]]) },
+        staleTransportProbeAtRef: { current: new Map([['session-1', now - 10]]) },
+        stateRef: { current: { activeSessionId: 'session-1' } },
+      },
+      runtimeDebug,
+      resetSessionTransportPullBookkeeping,
+      requestSessionBufferHead,
+      reconnectSession,
+      activeTransportProbeWaitMs: 1500,
+    });
+
+    expect(result).toBe('recovered');
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(resetSessionTransportPullBookkeeping).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.transport.active-reentry.probe-recovered',
+      expect.objectContaining({ sessionId: 'session-1' }),
+    );
   });
 });

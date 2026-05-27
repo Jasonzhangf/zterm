@@ -37,7 +37,16 @@ export function probeOrReconnectStaleSessionTransportRuntime(options: {
 }) {
   const lastActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
   const lastProbeAt = options.refs.staleTransportProbeAtRef.current.get(options.sessionId) || 0;
-  if (lastProbeAt <= 0 || lastProbeAt <= lastActivityAt) {
+  if (lastProbeAt > 0 && lastActivityAt > lastProbeAt) {
+    options.runtimeDebug(`session.transport.${options.reason}.probe-recovered`, {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      lastServerActivityAt: lastActivityAt,
+      lastProbeAt,
+    });
+    return 'recovered' as const;
+  }
+  if (lastProbeAt <= 0) {
     options.runtimeDebug(`session.transport.${options.reason}.probe`, {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -103,7 +112,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     sessionId: string,
     ws: BridgeTransportSocket,
     reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input',
-  ) => 'probed' | 'waiting' | 'reconnecting';
+  ) => 'probed' | 'waiting' | 'recovered' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };

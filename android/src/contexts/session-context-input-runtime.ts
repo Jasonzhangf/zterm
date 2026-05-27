@@ -26,6 +26,7 @@ export function sendInputThroughSessionTransport(options: {
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   probeOrReconnectStaleSessionTransport: (sessionId: string, ws: BridgeTransportSocket, reason: 'input' | 'active-tick' | 'active-reentry') => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   shouldReconnectQueuedActiveInput: (options: {
     isActiveTarget: boolean;
     wsReadyState: number | null;
@@ -59,7 +60,7 @@ export function sendInputThroughSessionTransport(options: {
   const isExplicitInputTarget = true;
   const reconnectInFlight = options.isReconnectInFlight(targetSessionId);
 
-  if (ws && ws.readyState === WebSocket.OPEN && !transportStale) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
     options.runtimeDebug('session.input.send', {
       sessionId: targetSessionId,
       size: options.data.length,
@@ -75,22 +76,12 @@ export function sendInputThroughSessionTransport(options: {
       ws,
       JSON.stringify({ type: 'input', payload: options.data }),
     );
-    // Input path: send only. Tail-refresh marker set above; head pull & transport health
-    // are owned by the dedicated heartbeat/refresh loop, not by each keystroke.
-    return;
-  }
-
-  if (ws && ws.readyState === WebSocket.OPEN && transportStale) {
-    options.runtimeDebug('session.input.drop.stale-open-transport', {
-      sessionId: targetSessionId,
-      size: options.data.length,
-      preview: options.data.slice(0, 32),
-      runtimeActiveSessionId,
-      reconnectInFlight,
-    });
-    if (!reconnectInFlight) {
-      options.reconnectSession(targetSessionId);
+    if (transportStale && !reconnectInFlight) {
+      options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
     }
+    // Input path: explicit input may proactively probe a stale-open transport, but
+    // tail-refresh marker remains the single write-side anchor; per-keystroke force-head
+    // is still forbidden.
     return;
   }
 
@@ -113,7 +104,14 @@ export function sendInputThroughSessionTransport(options: {
         reconnectInFlight,
       });
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(targetSessionId);
-  if (pendingTransportOpen && !shouldForceReconnect) {
+  const pendingTransportOpenStale = pendingTransportOpen
+    ? options.isPendingSessionTransportOpenStale(targetSessionId)
+    : false;
+  const shouldReconnectPastStalePendingOpen =
+    pendingTransportOpenStale && isExplicitInputTarget;
+  const shouldReconnectNow =
+    shouldForceReconnect || shouldReconnectPastStalePendingOpen;
+  if (pendingTransportOpen && !pendingTransportOpenStale && !shouldReconnectNow) {
     options.runtimeDebug('session.input.drop.pending-transport-open', {
       sessionId: targetSessionId,
       size: options.data.length,
@@ -123,7 +121,16 @@ export function sendInputThroughSessionTransport(options: {
     });
     return;
   }
-  if (shouldForceReconnect) {
+  if (shouldReconnectNow) {
+    if (pendingTransportOpenStale) {
+      options.runtimeDebug('session.input.reconnect.stale-pending-transport-open', {
+        sessionId: targetSessionId,
+        size: options.data.length,
+        preview: options.data.slice(0, 32),
+        wsReadyState: ws?.readyState ?? null,
+        reconnectInFlight,
+      });
+    }
     options.reconnectSession(targetSessionId);
   }
 }
