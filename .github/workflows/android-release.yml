@@ -1,0 +1,78 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag. Defaults to v<latest.json versionName>.
+        required: false
+        type: string
+      publish_npm:
+        description: Publish zterm-daemon to npm. Requires NPM_TOKEN secret.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org/
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install tmux
+        run: brew install tmux
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check published wterm runtime versions
+        run: pnpm --dir android run deps:check-wterm-published
+
+      - name: Build Android update package
+        run: ./scripts/build-android-debug.sh
+        working-directory: android
+
+      - name: Prepare daemon standalone release
+        run: pnpm --dir android run daemon:prepare-release
+
+      - name: Prepare daemon npm package
+        run: pnpm --dir android run daemon:prepare-npm
+
+      - name: Verify release assets
+        run: pnpm --dir android run release:verify
+
+      - name: Publish daemon to npm
+        if: ${{ inputs.publish_npm }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish android/release-dist/npm/@jsonstudio__zterm-daemon --access public
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            pnpm --dir android run release:github -- "${{ inputs.tag }}"
+          else
+            pnpm --dir android run release:github
+          fi

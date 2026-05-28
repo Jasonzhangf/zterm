@@ -10,6 +10,8 @@ UPDATES_DIR="${WTERM_UPDATES_DIR:-$UPDATES_DIR_DEFAULT}"
 source "$SCRIPT_DIR/setup-android-java.sh"
 
 cd "$ROOT_DIR"
+"$SCRIPT_DIR/ensure-pnpm-install.sh"
+pnpm run deps:check-wterm-published
 pnpm build
 npx cap sync android
 

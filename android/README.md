@@ -21,6 +21,8 @@ zterm 的 Android 客户端，基于 Capacitor + @jsonstudio/wtermmod-react。
 
 ```bash
 # 可选：先在 ~/.wterm/config.json 配 daemon 鉴权
+pnpm --filter @zterm/android deps:ensure
+pnpm --filter @zterm/android deps:check-wterm-published
 pnpm --filter @zterm/android dev
 pnpm --filter @zterm/android type-check
 pnpm --filter @zterm/android build
@@ -28,6 +30,23 @@ cd android && npx cap sync android
 ```
 
 `dev` 使用 portless，访问命令输出里的 `*.localhost` 地址，不写死端口。
+
+### wterm runtime 发布真源
+
+zterm Android 依赖已发布到 npm 的修改版 wterm 包：
+
+- `@jsonstudio/wtermmod-core`
+- `@jsonstudio/wtermmod-dom`
+- `@jsonstudio/wtermmod-react`
+
+当前 Android 依赖版本必须和 npm latest 一致。发布 Android 包前，标准构建入口会自动执行：
+
+```bash
+pnpm run deps:ensure
+pnpm run deps:check-wterm-published
+```
+
+如果修改了 `../wterm`，必须先发布上述三个 npm 包，再构建 zterm Android；不能用本地 workspace 或 alias 冒充已发布 runtime。
 
 ### daemon 鉴权真源
 
@@ -56,7 +75,26 @@ cd android && npx cap sync android
 - `~/.wterm/logs/`
 - `~/.wterm/uploads/`
 
-全局安装 daemon CLI：
+### 安装 macOS daemon
+
+推荐使用 npm 安装已发布的 daemon：
+
+```bash
+npm install -g @jsonstudio/zterm-daemon
+zterm-daemon install-service
+zterm-daemon service-status
+```
+
+兼容命令：
+
+```bash
+wterm daemon restart
+wterm daemon status
+```
+
+远程截图权限主体是安装后的原生 `zterm-daemon`，不是 Node.js，也不是额外 GUI helper。首次从 Android 触发截图时，macOS 如果弹出 Screen Recording 权限，请授权 `zterm-daemon`。
+
+本地开发时也可以从源码安装 daemon CLI：
 
 ```bash
 pnpm --filter @zterm/android daemon:install-global
@@ -64,6 +102,28 @@ wterm daemon restart
 # 或
 wterm daemon status
 ```
+
+### 发布 Android 升级包
+
+标准入口：
+
+```bash
+cd android
+./scripts/build-android-debug.sh
+pnpm run daemon:prepare-release
+pnpm run daemon:prepare-npm
+pnpm run deps:check-wterm-published
+pnpm run release:verify
+pnpm run release:github -- v0.1.1.<build>
+```
+
+发布产物：
+
+- `release-dist/zterm-<version>.apk`
+- `release-dist/latest.json`
+- `release-dist/zterm-daemon-<base-version>-darwin-arm64.tar.gz`
+- `release-dist/jsonstudio-zterm-daemon-<base-version>.tgz`
+- `~/.wterm/updates/latest.json` 与 APK，用于 daemon update channel
 
 ## 当前终端增强能力
 

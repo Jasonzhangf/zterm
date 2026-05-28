@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
-    "prebuild": "pnpm run test:terminal:regression",
+    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:terminal:regression",
     "dev": "portless android.zterm vite",
     "build": "node ./scripts/bump-build-version.mjs && pnpm run type-check && vite build",
     "preview": "vite preview",
@@ -39,7 +39,11 @@
     "test:redline": "pnpm exec vitest run src/lib/open-tab-persistence.test.ts src/lib/open-tab-restore.test.ts src/lib/open-tab-intent.test.ts src/contexts/session-context-transport-runtime.test.ts src/lib/terminal-buffer-replay.evidence.test.ts src/contexts/session-context-local-client-sim.test.ts src/components/TerminalView.selection-guard.test.tsx src/pages/TerminalPage.multi-pane-decouple.test.tsx",
     "test:redline:fast": "pnpm exec vitest run src/lib/open-tab-persistence.test.ts src/lib/open-tab-restore.test.ts src/contexts/session-context-transport-runtime.test.ts",
     "test:local-sim": "pnpm exec vitest run src/contexts/session-context-local-client-sim.test.ts",
-    "daemon:prepare-npm": "node ./scripts/prepare-daemon-npm-package.mjs"
+    "daemon:prepare-npm": "node ./scripts/prepare-daemon-npm-package.mjs",
+    "release:verify": "node ./scripts/verify-release-assets.mjs",
+    "release:github": "bash ./scripts/publish-github-release.sh",
+    "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
+    "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

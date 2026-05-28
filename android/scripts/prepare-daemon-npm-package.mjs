@@ -25,7 +25,7 @@ const targetOs = platform();
 const targetArch = arch();
 const releaseName = `zterm-daemon-${version}-${targetOs}-${targetArch}`;
 const releaseDir = resolve(releaseDistDir, releaseName);
-const npmPackageName = process.env.ZTERM_DAEMON_NPM_NAME || 'zterm-daemon';
+const npmPackageName = process.env.ZTERM_DAEMON_NPM_NAME || '@jsonstudio/zterm-daemon';
 const npmRoot = resolve(releaseDistDir, 'npm');
 const npmPackageDir = resolve(npmRoot, npmPackageName.replace('/', '__'));
 
