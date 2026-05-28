@@ -1510,14 +1510,17 @@ function TerminalQuickBarComponent({
     }
 
     const syncHeight = () => {
-      onMeasuredHeightChange?.(
-        Math.max(
-          0,
-          Math.round(
-            host.getBoundingClientRect().height || host.offsetHeight || 0,
-          ),
+      const measuredPx = Math.max(
+        0,
+        Math.round(
+          host.getBoundingClientRect().height || host.offsetHeight || 0,
         ),
       );
+      // Exclude keyboard inset padding from the measured height to avoid a
+      // positive feedback loop: keyboard inset → taller quickbar → stage
+      // pushes up further → quickbar gets even taller.
+      const contentPx = Math.max(0, measuredPx - Math.max(0, Math.round(keyboardInsetPx || 0)));
+      onMeasuredHeightChange?.(contentPx);
     };
 
     syncHeight();
