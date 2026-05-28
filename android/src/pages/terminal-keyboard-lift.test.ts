@@ -25,7 +25,7 @@ describe("terminal-keyboard-lift", () => {
   });
 
 
-  it("caps lift by portrait safety ratio when visual viewport does not expose occlusion", () => {
+  it("returns zero portrait lift when layout viewport already excludes IME area", () => {
     vi.stubGlobal("window", {
       innerWidth: 1080,
       innerHeight: 2000,
@@ -40,10 +40,10 @@ describe("terminal-keyboard-lift", () => {
       },
     });
     // 2000 * 0.6 = 1200
-    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(1200);
+    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(0);
   });
 
-  it("caps lift by landscape safety ratio when visual viewport does not expose occlusion", () => {
+  it("returns zero landscape lift when layout viewport already excludes IME area", () => {
     vi.stubGlobal("window", {
       innerWidth: 2000,
       innerHeight: 1000,
@@ -58,7 +58,7 @@ describe("terminal-keyboard-lift", () => {
       },
     });
     // 1000 * 0.5 = 500
-    expect(resolveKeyboardLiftPx(900, 1000)).toBe(500);
+    expect(resolveKeyboardLiftPx(900, 1000)).toBe(0);
   });
   it("uses reported inset when visualViewport is absent", () => {
     vi.stubGlobal("window", {

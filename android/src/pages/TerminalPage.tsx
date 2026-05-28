@@ -191,6 +191,25 @@ export function resolveKeyboardLiftPx(
   const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
   const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
   const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
+  const currentLayoutViewportHeight = Math.max(
+    0,
+    Math.round(
+      Math.max(window.innerHeight || 0, window.document?.documentElement?.clientHeight || 0),
+    ),
+  );
+
+  // Resize-mode truth: on some Android devices the WebView already shrinks the
+  // whole layout viewport above the IME (adjustResize-like behavior). In this
+  // mode, applying an extra lift causes double-count over-lift for quickbar.
+  const viewportAlreadyResizedByIme =
+    currentLayoutViewportHeight > 0
+    && Math.abs(layoutViewportHeight - currentLayoutViewportHeight) <= 2
+    && Math.abs(currentLayoutViewportHeight - visualViewportBottom) <= 2
+    && safeCappedInset >= 24;
+  if (viewportAlreadyResizedByIme) {
+    return 0;
+  }
+
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {
@@ -383,6 +402,9 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   viewportRows,
   copyModeActive,
   copyStartRowIndex,
+  effectiveKeyboardLiftPx,
+  quickBarHeight,
+  terminalChromeBottomPx,
 }: {
   visible: boolean;
   session: Session | null;
@@ -406,6 +428,9 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   viewportRows?: number;
   copyModeActive?: boolean;
   copyStartRowIndex?: number | null;
+  effectiveKeyboardLiftPx?: number;
+  quickBarHeight?: number;
+  terminalChromeBottomPx?: number;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -555,6 +580,18 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>VV</span>
         <span>{visualViewportHeight ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '2px' }}>
+        <span>LIFT</span>
+        <span style={{ color: (effectiveKeyboardLiftPx ?? 0) > 0 ? '#fbbf24' : '#93c5fd' }}>{effectiveKeyboardLiftPx ?? 0}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>QB</span>
+        <span>{quickBarHeight ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>TB</span>
+        <span>{terminalChromeBottomPx ?? '?'}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>CH</span>
@@ -1064,7 +1101,13 @@ function TerminalPageComponent({
     }
     const layoutHeight = resolveLayoutViewportHeight();
     if (layoutHeight > 0) {
-      stableLayoutViewportHeightRef.current = layoutHeight;
+      // Keyboard popup race on some devices can report a post-shrink layout
+      // height at the time keyboardState(visible=true) arrives. Never let that
+      // transient value pull the stable anchor downward during IME-active flow.
+      stableLayoutViewportHeightRef.current = Math.max(
+        stableLayoutViewportHeightRef.current,
+        layoutHeight,
+      );
     }
   }, [isAndroid]);
 
@@ -2354,6 +2397,9 @@ function TerminalPageComponent({
           terminalKeyboardRequested={terminalKeyboardRequested}
           containerHeightPx={undefined}
           viewportRows={undefined}
+          effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
+          quickBarHeight={quickBarHeight}
+          terminalChromeBottomPx={terminalChromeBottomPx}
         />
         <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
           {quickBarNode}

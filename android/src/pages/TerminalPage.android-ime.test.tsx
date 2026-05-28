@@ -1508,7 +1508,7 @@ describe("TerminalPage Android IME bridge", () => {
 });
 
 describe("resolveKeyboardLiftPx", () => {
-  it("keeps the reported keyboard lift when WebView does not expose viewport occlusion", () => {
+  it("returns zero lift when WebView viewport is already resized above the keyboard", () => {
     const originalInnerHeight = window.innerHeight;
     const originalVisualViewport = window.visualViewport;
 
@@ -1524,7 +1524,7 @@ describe("resolveKeyboardLiftPx", () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320)).toBe(320);
+    expect(resolveKeyboardLiftPx(320)).toBe(0);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
@@ -1536,6 +1536,42 @@ describe("resolveKeyboardLiftPx", () => {
     });
   });
 
+  it("returns zero lift when Android adjustResize already shrunk layout viewport to match visual viewport", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 598,
+        offsetTop: 2,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320, 600)).toBe(0);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
   it("caps the lift to the actual occluded bottom height when the keyboard overlays content", () => {
     const originalInnerHeight = window.innerHeight;
     const originalVisualViewport = window.visualViewport;
