@@ -152,6 +152,7 @@ export function useSessionProviderFacadeAssemblies(
       sessionId: id,
       source: 'active-reentry',
       forceHead: true,
+      markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
   };
