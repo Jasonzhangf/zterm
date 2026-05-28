@@ -1538,8 +1538,13 @@ function TerminalPageComponent({
   }, [onRequestRemoteScreenshot, uiSessionId]);
 
   const handleQuickBarMeasuredHeightChange = useCallback((height: number) => {
-    setQuickBarHeight((current) => (current === height ? current : height));
-  }, []);
+    runtimeDebug('terminal.quickbar.measure', {
+      measuredHeight: height,
+      keyboardInset,
+      timestamp: Date.now(),
+    });
+    setQuickBarHeight((current) => (height > 0 ? height : current));
+  }, [keyboardInset]);
 
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
     onQuickActionInput?.(sequence, uiSessionId || undefined);
