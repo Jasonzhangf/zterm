@@ -24,6 +24,42 @@ describe("terminal-keyboard-lift", () => {
     expect(resolveKeyboardLiftPx(500, 1000)).toBe(300);
   });
 
+
+  it("caps lift by portrait safety ratio when visual viewport does not expose occlusion", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 1080,
+      innerHeight: 2000,
+      document: {
+        documentElement: {
+          clientWidth: 1080,
+        },
+      },
+      visualViewport: {
+        height: 2000,
+        offsetTop: 0,
+      },
+    });
+    // 2000 * 0.6 = 1200
+    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(1200);
+  });
+
+  it("caps lift by landscape safety ratio when visual viewport does not expose occlusion", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 2000,
+      innerHeight: 1000,
+      document: {
+        documentElement: {
+          clientWidth: 2000,
+        },
+      },
+      visualViewport: {
+        height: 1000,
+        offsetTop: 0,
+      },
+    });
+    // 1000 * 0.5 = 500
+    expect(resolveKeyboardLiftPx(900, 1000)).toBe(500);
+  });
   it("uses reported inset when visualViewport is absent", () => {
     vi.stubGlobal("window", {
       innerHeight: 1000,

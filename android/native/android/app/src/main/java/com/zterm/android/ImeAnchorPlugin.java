@@ -146,17 +146,16 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setIncludeFontPadding(false);
         imeEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         imeEditText.setImeOptions(
-            EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            EditorInfo.IME_ACTION_UNSPECIFIED
+                | EditorInfo.IME_FLAG_NO_EXTRACT_UI
                 | EditorInfo.IME_FLAG_NO_FULLSCREEN
-                | EditorInfo.IME_FLAG_NAVIGATE_NEXT
                 | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
         );
         imeEditText.setInputType(
             InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
         );
-        imeEditText.setSingleLine(false);
+        imeEditText.setSingleLine(true);
         imeEditText.setMinLines(1);
         imeEditText.setMaxLines(1);
         imeEditText.setAlpha(0.01f);
@@ -603,6 +602,27 @@ public class ImeAnchorPlugin extends Plugin {
                         return handled;
                     }
                     return super.finishComposingText();
+                }
+
+                @Override
+                public boolean performEditorAction(int actionCode) {
+                    if (plugin != null) {
+                        switch (actionCode) {
+                            case EditorInfo.IME_ACTION_UNSPECIFIED:
+                            case EditorInfo.IME_ACTION_DONE:
+                            case EditorInfo.IME_ACTION_SEND:
+                            case EditorInfo.IME_ACTION_GO:
+                            case EditorInfo.IME_ACTION_NEXT:
+                                plugin.dispatchInputLogicEvents(
+                                    plugin.inputLogic.onCommitText("\r"),
+                                    "performEditorAction"
+                                );
+                                return true;
+                            default:
+                                break;
+                        }
+                    }
+                    return super.performEditorAction(actionCode);
                 }
 
             };

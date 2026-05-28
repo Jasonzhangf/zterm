@@ -159,14 +159,6 @@ export function resolveKeyboardLiftPx(
     return 0;
   }
 
-  const visualViewport = window.visualViewport;
-  if (!visualViewport) {
-    return safeReportedInset;
-  }
-
-  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
-  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
-  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
   const resolvedLayoutViewportHeight = Math.max(
     0,
     Math.round(layoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
@@ -178,13 +170,34 @@ export function resolveKeyboardLiftPx(
   const layoutViewportHeight = layoutViewportHeightOverride == null
     ? Math.max(resolvedLayoutViewportHeight, Math.max(0, Math.round(window.innerHeight || 0)))
     : resolvedLayoutViewportHeight;
+
+  const layoutViewportWidth = Math.max(
+    0,
+    Math.round(
+      Math.max(window.innerWidth || 0, window.document?.documentElement?.clientWidth || 0),
+    ),
+  );
+  const keyboardLiftCapRatio = layoutViewportWidth > layoutViewportHeight ? 0.5 : 0.6;
+  const keyboardLiftCapPx = Math.max(0, Math.round(layoutViewportHeight * keyboardLiftCapRatio));
+  const safeCappedInset = keyboardLiftCapPx > 0
+    ? Math.min(safeReportedInset, keyboardLiftCapPx)
+    : safeReportedInset;
+
+  const visualViewport = window.visualViewport;
+  if (!visualViewport) {
+    return safeCappedInset;
+  }
+
+  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
+  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
+  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {
-    return safeReportedInset;
+    return safeCappedInset;
   }
 
-  return Math.min(safeReportedInset, occludedBottom);
+  return Math.min(safeCappedInset, occludedBottom);
 }
 
 export function resolveLayoutViewportHeight() {
@@ -1045,6 +1058,16 @@ function TerminalPageComponent({
   const stableLayoutViewportHeightRef = useRef(resolveLayoutViewportHeight());
 
 
+  const captureStableLayoutViewportHeight = useCallback(() => {
+    if (!isAndroid) {
+      return;
+    }
+    const layoutHeight = resolveLayoutViewportHeight();
+    if (layoutHeight > 0) {
+      stableLayoutViewportHeightRef.current = layoutHeight;
+    }
+  }, [isAndroid]);
+
   const sendFileTransferMessage = useCallback((msg: any) => {
     const sessionId = activeSessionIdRef.current;
     if (!sessionId || !onSendMessage) {
@@ -1384,6 +1407,7 @@ function TerminalPageComponent({
     if (!isAndroid || quickBarEditorFocusedRef.current) {
       return;
     }
+    captureStableLayoutViewportHeight();
     const routeKey = uiSessionId || '__no-session__';
     if (!options?.force && androidImeFocusRouteKeyRef.current === routeKey) {
       return;
@@ -1399,7 +1423,7 @@ function TerminalPageComponent({
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });
     }, 0);
-  }, [clearPendingAndroidImeFocus, isAndroid, uiSessionId]);
+  }, [captureStableLayoutViewportHeight, clearPendingAndroidImeFocus, isAndroid, uiSessionId]);
 
   const restoreAndroidTerminalImeRoute = useCallback(() => {
     if (!isAndroid || quickBarEditorFocusedRef.current) {
@@ -1786,18 +1810,19 @@ function TerminalPageComponent({
         keyboardStateListener = await ImeAnchor.addListener('keyboardState', (event) => {
           const visible = Boolean(event.visible);
           const height = Math.max(0, Math.round(event.height || 0));
-          // Capture a pre-IME stable layout height immediately to avoid a race
-          // where RAF-debounced viewport sync happens after Android shrinks all
-          // viewport metrics during keyboard popup.
+          // Keep stable layout height anchored before IME show, and refresh once
+          // after hide so future popup anchor remains accurate per-device.
           if (visible && isAndroid) {
-            const layoutHeight = resolveLayoutViewportHeight();
-            if (layoutHeight > 0) {
-              stableLayoutViewportHeightRef.current = layoutHeight;
-            }
+            captureStableLayoutViewportHeight();
           }
           updateKeyboardInset(height);
           if (!quickBarEditorFocusedRef.current) {
             updateTerminalKeyboardRequested(visible);
+          }
+          if (!visible && isAndroid) {
+            window.setTimeout(() => {
+              captureStableLayoutViewportHeight();
+            }, 0);
           }
         });
         if (disposed) {
@@ -1836,7 +1861,7 @@ function TerminalPageComponent({
         });
       }
     };
-  }, [isAndroid]);
+  }, [captureStableLayoutViewportHeight, isAndroid]);
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {

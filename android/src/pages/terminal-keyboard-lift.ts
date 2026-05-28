@@ -29,14 +29,6 @@ export function resolveKeyboardLiftPx(
     return 0;
   }
 
-  const visualViewport = window.visualViewport;
-  if (!visualViewport) {
-    return safeReportedInset;
-  }
-
-  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
-  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
-  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
   const resolvedLayoutViewportHeight = Math.max(
     0,
     Math.round(layoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
@@ -48,11 +40,32 @@ export function resolveKeyboardLiftPx(
           Math.max(0, Math.round(window.innerHeight || 0)),
         )
       : resolvedLayoutViewportHeight;
+
+  const layoutViewportWidth = Math.max(
+    0,
+    Math.round(
+      Math.max(window.innerWidth || 0, window.document?.documentElement?.clientWidth || 0),
+    ),
+  );
+  const keyboardLiftCapRatio = layoutViewportWidth > layoutViewportHeight ? 0.5 : 0.6;
+  const keyboardLiftCapPx = Math.max(0, Math.round(layoutViewportHeight * keyboardLiftCapRatio));
+  const safeCappedInset = keyboardLiftCapPx > 0
+    ? Math.min(safeReportedInset, keyboardLiftCapPx)
+    : safeReportedInset;
+
+  const visualViewport = window.visualViewport;
+  if (!visualViewport) {
+    return safeCappedInset;
+  }
+
+  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
+  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
+  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {
-    return safeReportedInset;
+    return safeCappedInset;
   }
 
-  return Math.min(safeReportedInset, occludedBottom);
+  return Math.min(safeCappedInset, occludedBottom);
 }

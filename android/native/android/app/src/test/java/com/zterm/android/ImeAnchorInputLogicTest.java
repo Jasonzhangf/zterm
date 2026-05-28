@@ -83,4 +83,16 @@ public class ImeAnchorInputLogicTest {
         assertEquals("abc", events.get(0).text);
         assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
     }
+
+    @Test
+    public void editorActionEnterMapsToCarriageReturnInput() {
+        ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
+
+        List<ImeAnchorInputLogic.Event> events = logic.onCommitText("\r");
+
+        assertEquals(2, events.size());
+        assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, events.get(0).type);
+        assertEquals("\r", events.get(0).text);
+        assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
+    }
 }

@@ -203,7 +203,7 @@ describe('TerminalPage lifecycle cleanup', () => {
       expect(vi.mocked(Keyboard.addListener).mock.calls.length).toBe(2);
     });
     expect(visualViewportAdd).toHaveBeenCalledTimes(1);
-    expect(virtualKeyboardAdd).toHaveBeenCalledTimes(0);
+    expect(virtualKeyboardAdd).toHaveBeenCalledTimes(1);
 
     view.rerender(
       <TerminalPage
@@ -228,7 +228,7 @@ describe('TerminalPage lifecycle cleanup', () => {
     expect(vi.mocked(ImeAnchor.addListener).mock.calls.length).toBe(4);
     expect(vi.mocked(Keyboard.addListener).mock.calls.length).toBe(2);
     expect(visualViewportAdd).toHaveBeenCalledTimes(1);
-    expect(virtualKeyboardAdd).toHaveBeenCalledTimes(0);
+    expect(virtualKeyboardAdd).toHaveBeenCalledTimes(1);
   });
 
   it('removes listeners from the original visualViewport instance on unmount', async () => {
@@ -258,7 +258,7 @@ describe('TerminalPage lifecycle cleanup', () => {
     expect(visualViewportRemove).toHaveBeenCalledTimes(1);
     expect(visualViewportRemove).toHaveBeenCalledWith('resize', expect.any(Function));
     expect(replacementVisualViewportRemove).not.toHaveBeenCalled();
-    expect(virtualKeyboardRemove).toHaveBeenCalledTimes(0);
+    expect(virtualKeyboardRemove).toHaveBeenCalledTimes(1);
     expect(windowRemoveSpy).toHaveBeenCalledWith('resize', expect.any(Function));
     expect(imeRemoveMocks).toHaveLength(4);
     imeRemoveMocks.forEach((remove) => expect(remove).toHaveBeenCalledTimes(1));
