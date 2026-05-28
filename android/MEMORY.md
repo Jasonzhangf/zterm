@@ -189,3 +189,5 @@
 ## 2026-05-22 QuickBar collapse affordance
 - QuickBar 折叠/展开的唯一真源在 `TerminalQuickBar`：展开态只能有一个边角 `收起` 控件，不得放入可滚动工具行；折叠态必须保留右下角小球 `展开快捷栏`，点击直接恢复 inline quick bar。
 - [2026-05-23] 多 pane 非焦点刷新唯一真源在 `SessionContext lifecycle` 的 live target tick 门禁：visible pane 进入 `liveSessionIds` 后，即使 connected 且尚无 `lastServerActivityAt`，也必须允许 active tick 请求 head；否则非焦点 pane 会等到点击/激活后才刷新。禁止在 daemon/renderer 做补偿。
+- [2026-05-28] Remote screenshot 权限主体唯一真源：macOS TCC 不能由 Node 进程直接触发；安装态必须生成稳定的原生 `zterm-daemon` Mach-O 作为截图主体，Node daemon 只能通过 `ZTERM_DAEMON_NATIVE ... capture-screen` 调用它。`install-service` 只在原生二进制缺失或源码更新时重建，避免每次安装被系统当成新主体反复授权；禁止恢复 helper socket / Codex Mac app / GUI helper 路径。
+- [2026-05-28] Remote screenshot 传输保存真源：file-transfer 每个 chunk 是独立 base64，客户端不能直接拼接 chunk 字符串；必须逐 chunk decode 为 bytes，按 chunkIndex 合并 bytes 后重新编码成单一 base64 给 Android Filesystem.writeFile。预览使用 bytes 能成功不代表保存 payload 合法。

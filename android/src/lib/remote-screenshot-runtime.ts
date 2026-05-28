@@ -22,12 +22,21 @@ export interface PendingRemoteScreenshotRequest {
 
 export const REMOTE_SCREENSHOT_REQUEST_TIMEOUT_MS = 15000;
 
+function encodeBytesToBase64(bytes: Uint8Array): string {
+  const batchSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += batchSize) {
+    const chunk = bytes.subarray(offset, offset + batchSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 export function buildRemoteScreenshotCapture(
   fileName: string,
   chunks: Map<number, string>,
   totalBytes: number,
 ): RemoteScreenshotCapture {
-  const ordered: string[] = [];
   const binaryParts: Uint8Array[] = [];
   let totalBinaryLength = 0;
   for (let index = 0; index < chunks.size; index += 1) {
@@ -35,7 +44,6 @@ export function buildRemoteScreenshotCapture(
     if (!chunk) {
       throw new Error(`Remote screenshot missing chunk ${index}`);
     }
-    ordered.push(chunk);
     try {
       const decoded = atob(chunk);
       const bytes = new Uint8Array(decoded.length);
@@ -51,19 +59,20 @@ export function buildRemoteScreenshotCapture(
     }
   }
 
+  const combined = new Uint8Array(totalBinaryLength);
+  let offset = 0;
+  for (const part of binaryParts) {
+    combined.set(part, offset);
+    offset += part.length;
+  }
+
   const result: RemoteScreenshotCapture = {
     fileName,
     mimeType: 'image/png',
-    dataBase64: ordered.join(''),
+    dataBase64: encodeBytesToBase64(combined),
     totalBytes,
   };
-  if (totalBinaryLength > 0) {
-    const combined = new Uint8Array(totalBinaryLength);
-    let offset = 0;
-    for (const part of binaryParts) {
-      combined.set(part, offset);
-      offset += part.length;
-    }
+  if (combined.length > 0) {
     result.dataBytes = combined;
   }
 

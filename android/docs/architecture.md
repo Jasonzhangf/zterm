@@ -8,7 +8,7 @@
 4. `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 唯一真源
 5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport 生命周期真源（daemon 不持有客户端逻辑）
 6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
-7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot helper 唯一真源
+7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot daemon 唯一真源（文件名沿用历史编号）
 8. `dev-workflow.md`：执行门禁
 9. `task.md`：当前任务
 10. `CACHE.md`：短期上下文
@@ -255,16 +255,16 @@ mobile file picker -> websocket paste-image -> daemon temp file
 ## Remote screenshot 链路
 
 ```text
-Android client -> daemon -> GUI screenshot helper -> macOS screenshot truth
+Android client -> zterm-daemon -> macOS screenshot truth
                -> daemon file-download stream -> Android preview/save
 ```
 
 规则：
 
-- daemon 不得再直接执行 `screencapture`
-- GUI screenshot helper 是截图能力的唯一执行主体
-- helper 与 daemon 只通过本机 IPC 通信
-- helper 不关心 tmux / terminal / renderer
+- daemon 安装态 / 运行态是截图权限预检与截图能力的唯一执行主体
+- `zterm-daemon install-service` 必须在 service bootstrap 前触发 / 验证截图权限
+- daemon 直接产出截图文件并通过既有 file-download stream 回传
+- daemon 不关心 Android preview/save UI
 - client 只消费 `capturing / transferring / preview-ready / failed`
 
 ## Session schedule / timed send 真源

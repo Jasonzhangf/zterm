@@ -391,4 +391,54 @@ describe('TerminalPage remote screenshot preview', () => {
       expect(screen.getByTestId('remote-screenshot-sheet')).toBeTruthy();
     });
   });
+
+  it('returns to preview-ready after save failure so discard can close the sheet', async () => {
+    vi.mocked(Filesystem.writeFile).mockRejectedValueOnce(new Error('The supplied data is not valid base64 content.'));
+    const session = makeSession('s1');
+    const onRequestRemoteScreenshot = vi.fn(async (): Promise<RemoteScreenshotCapture> => ({
+      fileName: 'remote-shot.png',
+      mimeType: 'image/png',
+      dataBase64: 'Zm9vYmFy',
+      totalBytes: 6,
+    }));
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('request-remote-screenshot'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-screenshot-preview-image')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText('保存到下载'));
+
+    await waitFor(() => {
+      expect(alert).toHaveBeenCalledWith('The supplied data is not valid base64 content.');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-screenshot-status')).toBe('preview-ready');
+    });
+
+    fireEvent.click(screen.getByText('丢弃'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-screenshot-sheet')).toBeNull();
+    });
+  });
 });

@@ -35,6 +35,7 @@ export interface TerminalFileTransferRuntimeDeps {
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   readTmuxPaneCurrentPath: (sessionName: string) => string;
   runCommand: (command: string, args: string[]) => void;
+  captureRemoteScreenshot: (options: { outputPath: string; timeoutMs: number }) => Promise<{ outputPath: string }>;
   logTimePrefix: () => string;
 }
 

@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard } from "@capacitor/keyboard";
 import { mobileTheme } from "../../lib/mobile-ui";
 import {
   DeviceClipboardPlugin,
@@ -705,13 +707,25 @@ function TerminalQuickBarComponent({
     }
   }, [remoteScreenshotStatus]);
 
-  const handleImagePickerButtonClick = useCallback(() => {
+  const handleImagePickerButtonClick = useCallback(async () => {
+    const isNativePlatform = Capacitor.isNativePlatform();
+    if (isNativePlatform && keyboardVisible) {
+      try { await Keyboard.hide(); } catch {}
+      window.setTimeout(() => { imageInputRef.current?.click(); }, 350);
+      return;
+    }
     imageInputRef.current?.click();
-  }, []);
+  }, [keyboardVisible]);
 
-  const handleFilePickerButtonClick = useCallback(() => {
+  const handleFilePickerButtonClick = useCallback(async () => {
+    const isNativePlatform = Capacitor.isNativePlatform();
+    if (isNativePlatform && keyboardVisible) {
+      try { await Keyboard.hide(); } catch {}
+      window.setTimeout(() => { fileInputRef.current?.click(); }, 350);
+      return;
+    }
     fileInputRef.current?.click();
-  }, []);
+  }, [keyboardVisible]);
 
 
   const handleSyncSheetButtonClick = useCallback(() => {

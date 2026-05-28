@@ -877,6 +877,13 @@ android/
 - **触发信号**: UI 能列出 tmux sessions，但用户仍反馈“无法连接”
 - **动作**: 检查客户端是否真的走了 Android 同构协议：`ws open -> send connect(payload) -> recv connected -> send buffer-head-request`；仅有 `list-sessions` 只能证明 bridge 可达，不能证明 session 已 attach
 
+### 模式: 远程截图保存必须按 bytes 真源合并
+- **触发信号**: 手机端截图预览能显示，但保存到下载失败，Android 报 `The supplied data is not valid base64 content.`
+- **红测方法**: 先写黑盒回归证明多 chunk padding 不能直接拼接，例如 chunk bytes `[0xff] -> /w==`、`[0xee] -> 7g==`；错误拼接是 `/w==7g==`，正确结果必须是合并 bytes `[0xff, 0xee]` 后重新编码的 `/+4=`
+- **动作**: 客户端按 `chunkIndex` 逐 chunk `atob` 解码为 `Uint8Array`，合并 bytes 后重新 `btoa` 生成唯一 `dataBase64`；预览可继续使用 `dataBytes`，保存必须消费重新编码后的完整 base64
+- **UI 回归**: 同时覆盖保存失败后状态必须恢复到 `preview-ready`，`丢弃/关闭` 能退出 sheet；不要只验证预览成功
+- **反模式**: 1) 直接 `ordered.join('')` 拼接每块 base64 2) 把真实 payload 裁成单 chunk 规避问题 3) 只改 UI alert/按钮状态而不修传输 payload 真源
+
 ### 模式: 悬浮球拖动与点击分离
 - **适用场景**: terminal 悬浮球 / 浮动入口既要支持点按开关，又要支持拖动 reposition
 - **动作**: 用 `pointer/touch move threshold` 区分 click 和 drag；超过阈值后进入拖动态并 suppress click，位置持久化到 localStorage

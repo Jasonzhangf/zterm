@@ -58,6 +58,7 @@ import {
 } from './terminal-daemon-runtime';
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
+import { captureRemoteScreenshotWithDaemon } from './remote-screenshot-daemon';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -183,6 +184,7 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   runCommand: (command, args) => {
     terminalControlRuntime.runCommand(command, args);
   },
+  captureRemoteScreenshot: captureRemoteScreenshotWithDaemon,
   logTimePrefix,
 });
 

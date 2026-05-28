@@ -94,7 +94,8 @@ describe('server file-transfer truth gates', () => {
     expect(block).toContain("type: 'remote-screenshot-status'");
     expect(block).toContain("phase: 'capturing'");
     expect(block).toContain("phase: 'transferring'");
-    expect(block).toContain('requestRemoteScreenshotViaHelper');
+    expect(block).toContain('deps.captureRemoteScreenshot');
+    expect(block).not.toContain('requestRemoteScreenshotViaHelper');
     expect(block).toContain("type: 'file-download-error'");
     expect(block).toContain("logFileTransferRuntimeError('remote screenshot cleanup failed'");
   });

@@ -20,6 +20,8 @@ BIN_DIR="${RELEASE_DIR}/bin"
 ARCHIVE_PATH="${RELEASE_DIST_DIR}/${RELEASE_NAME}.tar.gz"
 SHA_PATH="${ARCHIVE_PATH}.sha256"
 NODE_PTY_SOURCE="${ROOT_DIR}/node_modules/node-pty"
+NATIVE_DAEMON_SOURCE="${ROOT_DIR}/scripts/native/zterm-daemon.swift"
+NATIVE_DAEMON_BIN="${SUPPORT_DIR}/zterm-daemon"
 
 resolve_esbuild_bin() {
   local candidate
@@ -52,6 +54,22 @@ stage_runtime() {
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 }
 
+stage_native_daemon_binary() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+  if [[ -x "${NATIVE_DAEMON_BIN}" && "${NATIVE_DAEMON_BIN}" -nt "${NATIVE_DAEMON_SOURCE}" ]]; then
+    return 0
+  fi
+  if ! command -v swiftc >/dev/null 2>&1; then
+    echo "zterm-daemon native screenshot binary requires swiftc; install Xcode command line tools" >&2
+    return 1
+  fi
+  mkdir -p "${SUPPORT_DIR}"
+  swiftc "${NATIVE_DAEMON_SOURCE}" -o "${NATIVE_DAEMON_BIN}"
+  chmod +x "${NATIVE_DAEMON_BIN}"
+}
+
 write_support_script() {
   cat > "${SUPPORT_DIR}/zterm-daemon.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -68,6 +86,8 @@ LOG_DIR="${HOME}/.wterm/logs"
 WTERM_HOME="${HOME}/.wterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 RUNTIME_STATE_DIR="${WTERM_HOME}/run"
+UPLOAD_DIR="${WTERM_HOME}/uploads"
+DOWNLOADS_DIR="${HOME}/Downloads/zterm"
 RUNTIME_DIR="${PACKAGE_ROOT}/runtime"
 DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
@@ -80,6 +100,7 @@ LEGACY_LAUNCH_AGENT_LABEL="com.wterm.mobile.daemon"
 LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LABEL}.plist"
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
+NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
 
 read_config() {
   "$NODE_BIN" <<'NODE'
@@ -351,7 +372,7 @@ write_launch_agent() {
 set -euo pipefail
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$DIRECT_RUNNER"
 
@@ -396,7 +417,7 @@ if [[ "\${RECENT_LAUNCHES:-0}" -ge 5 ]]; then
 fi
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$LAUNCH_RUNNER"
 
@@ -449,6 +470,56 @@ bootstrap_service() {
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PATH"
 }
 
+prime_daemon_install_permissions() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+
+  echo "zterm daemon install permission preflight"
+  echo "- macOS file sync uses this daemon process to read/write user-selected paths."
+  echo "- Grant file access to Terminal/iTerm or the installed daemon runner when macOS prompts."
+  echo "- Remote screenshot uses zterm-daemon directly; grant Screen & System Audio Recording when macOS prompts."
+
+  mkdir -p "$WTERM_HOME" "$UPLOAD_DIR" "$DOWNLOADS_DIR"
+  ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" - <<'NODE'
+const { accessSync, constants, mkdirSync, rmSync, writeFileSync, unlinkSync } = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { join } = require('node:path');
+const { homedir } = require('node:os');
+
+const dirs = [
+  join(homedir(), '.wterm'),
+  join(homedir(), 'Downloads', 'zterm'),
+];
+
+for (const dir of dirs) {
+  mkdirSync(dir, { recursive: true });
+  accessSync(dir, constants.R_OK | constants.W_OK);
+  const probe = join(dir, '.zterm-permission-preflight');
+  writeFileSync(probe, 'ok\n');
+  unlinkSync(probe);
+}
+
+const screenshotProbe = join(homedir(), '.wterm', '.zterm-screenshot-permission-preflight.png');
+try {
+  execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['capture-screen', screenshotProbe], {
+    stdio: 'pipe',
+    timeout: 15000,
+  });
+  rmSync(screenshotProbe, { force: true });
+} catch (error) {
+  rmSync(screenshotProbe, { force: true });
+  const stderr = error && error.stderr ? String(error.stderr) : '';
+  const message = error && error.message ? String(error.message) : String(error);
+  console.error('zterm-daemon screenshot permission preflight failed.');
+  console.error('Open macOS System Settings -> Privacy & Security -> Screen & System Audio Recording, allow zterm-daemon/Terminal, then rerun zterm-daemon install-service.');
+  if (stderr.trim()) console.error(stderr.trim());
+  if (message.trim()) console.error(message.trim());
+  process.exit(1);
+}
+NODE
+}
+
 start_service() {
   if ! service_installed; then
     echo "zterm autostart service not installed"
@@ -458,6 +529,7 @@ start_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
+  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
     wait_for_service_unloaded || {
@@ -495,6 +567,7 @@ restart_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
+  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {
@@ -516,6 +589,7 @@ install_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
+  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {
@@ -651,6 +725,7 @@ rm -rf "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${SHA_PATH}"
 mkdir -p "${RUNTIME_DIR}" "${SUPPORT_DIR}" "${BIN_DIR}"
 
 stage_runtime
+stage_native_daemon_binary
 write_support_script
 write_installer
 write_readme

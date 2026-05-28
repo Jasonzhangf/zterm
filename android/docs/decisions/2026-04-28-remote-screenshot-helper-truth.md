@@ -1,96 +1,51 @@
-# 2026-04-28 remote screenshot helper truth
+# 2026-04-28 remote screenshot daemon truth
 
-## 背景
+## 索引概要
+- L1-L7 `purpose`：废弃旧 helper 方案，冻结 daemon 安装态/运行态为唯一真源。
+- L9-L25 `superseded`：旧 helper 方案为什么不再成立。
+- L27-L51 `truth`：daemon/client/macOS 职责边界。
+- L53-L70 `errors`：错误边界与禁止 fallback。
 
-Android client 的 remote screenshot 链路原本是：
+## 废弃说明
 
-```text
-client -> daemon -> screencapture -> daemon -> client
-```
+旧方案曾把 remote screenshot 拆到独立 GUI 截图进程。
 
-现场实证表明这条链路不成立：
-
-- 交互 shell 里直接执行 `screencapture` 成功
-- shell 里 `launchctl asuser ... screencapture` 成功
-- daemon launchd job / bootstrap 上下文里直接执行 `screencapture` 失败
-- `bsexec` 到 daemon 当前进程 bootstrap 后依旧失败
-
-结论：
-
-> 问题不在命令本身，而在 **launchd daemon job 不是正确的截图执行主体**。
+该方案已废弃。原因：产品契约要求用户只安装并授权 `zterm-daemon`；安装完成后 Android remote screenshot 必须长期可用，不得依赖 Codex Mac app、ZTerm Mac GUI app、独立后台截图进程或本机 IPC socket。
 
 ## 唯一真源
 
-### 职责边界
+### daemon
 
-#### daemon
+- 是 remote screenshot 权限预检与截图执行的唯一 owner。
+- `zterm-daemon install-service` 必须在 service bootstrap 前触发/验证 macOS 截图权限。
+- remote screenshot request 到达后，daemon 直接执行本机截图，并通过既有 file-download stream 回传。
+- daemon 只关心本机截图文件、显式错误和传输分块；不关心 Android preview/save UI。
 
-- 只负责：
-  - 接收 client screenshot request
-  - 转发给本机 GUI screenshot helper
-  - 读取 helper 产出的文件
-  - 通过既有 `file-download-*` 链路回传给 client
-- **不得**再直接执行 `screencapture`
+### client
 
-#### GUI screenshot helper
+- 只发送 `remote-screenshot-request`。
+- 只消费 `capturing -> transferring -> preview-ready | failed`。
+- 不关心 macOS 权限细节、截图命令或 daemon 内部执行方式。
 
-- 必须是运行在 macOS GUI session 的独立 app 进程
-- 是截图能力的唯一执行主体
-- 只负责：
-  - 接受本机 daemon 的 capture request
-  - 执行系统截图
-  - 返回 started / completed / failed
-- **不得**关心 tmux / session / renderer / client buffer
+### macOS
 
-#### client
-
-- 只消费 `capturing -> transferring -> preview-ready | failed`
-- 不关心 helper 细节
+- macOS TCC 权限授予对象必须是安装态 daemon runtime 对应的进程身份。
+- 权限拒绝、无显示器、非 macOS 平台都必须显式返回错误。
 
 ## 运行模型
 
 ```text
 Android client
-  -> daemon
-  -> GUI screenshot helper (local IPC)
+  -> zterm-daemon
   -> macOS screenshot truth
   -> daemon file-download stream
   -> Android preview/save
 ```
 
-## IPC 真相
-
-- daemon 与 helper 通过 **本机单一 IPC 真源** 通信
-- 第一版使用 Unix domain socket
-- socket 只允许本机访问
-- 一次 capture request 只对应一个 response lifecycle：
-  - `capture-started`
-  - `capture-completed`
-  - `capture-failed`
-
 ## 错误边界
 
-- helper 未运行：显式错误
-- helper capture 失败：显式错误
-- daemon 不允许 fallback 到直接 `screencapture`
-- client 不允许继续伪 loading
-
-## 第一版实现冻结
-
-1. daemon 改为 **只走 helper**
-2. helper 第一版内部仍可调用 `/usr/sbin/screencapture`
-3. 先跑通最小闭环，再决定是否升级到 ScreenCaptureKit
-
-## helper 产品化启动真源
-
-- helper 不是“临时命令”，而是 **独立 GUI 常驻进程**
-- 第一版产品化启动方式冻结为：
-  - 通过 mac 本机 `launchd LaunchAgent` 自启动 helper
-  - helper 进程主体仍是 **Electron app 的 `--screenshot-helper` 模式**
-  - LaunchAgent 只负责拉起 helper，不承载截图语义
-- helper 必须保留**可观测入口**
-  - 至少能 `status / start / stop / restart`
-  - helper-only 模式下要有明确的 app 身份与退出入口，不能变成纯黑盒后台进程
-- daemon 不负责拉起 helper
-  - helper 未运行时，daemon 只能回显式错误
-  - 正确修复方式是启动 helper，不是回退到 daemon direct screenshot
+- daemon 截图权限未授权：显式返回 daemon 截图权限错误。
+- 当前显示器不可截图：显式返回 daemon 显示器截图错误。
+- 非 macOS：显式返回 unsupported platform。
+- 禁止 fallback 到本机 IPC socket、第二进程或静默 loading。
+- 禁止提示用户启动 Codex Mac app、ZTerm Mac GUI app 或独立截图进程。

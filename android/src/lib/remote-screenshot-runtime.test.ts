@@ -7,13 +7,23 @@ import type {
   FileDownloadErrorPayload,
   RemoteScreenshotStatusPayload,
 } from './types';
-import { createRemoteScreenshotRuntime } from './remote-screenshot-runtime';
+import { buildRemoteScreenshotCapture, createRemoteScreenshotRuntime } from './remote-screenshot-runtime';
 
 function createMockSocket() {
   return { readyState: WebSocket.OPEN } as any;
 }
 
 describe('remote screenshot runtime', () => {
+  it('re-encodes merged bytes as one valid base64 payload for padded chunks', () => {
+    const capture = buildRemoteScreenshotCapture('shot.png', new Map([
+      [0, '/w=='],
+      [1, '7g=='],
+    ]), 2);
+
+    expect(capture.dataBytes).toEqual(new Uint8Array([0xff, 0xee]));
+    expect(capture.dataBase64).toBe('/+4=');
+  });
+
   it('streams status and chunks into final screenshot capture', async () => {
     const runtime = createRemoteScreenshotRuntime({
       now: () => 123,

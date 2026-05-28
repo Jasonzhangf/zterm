@@ -55,7 +55,7 @@ type VirtualKeyboardApi = {
 };
 
 const NETWORK_BANNER_GRACE_MS = 3000;
-const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 64;
+const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 30;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
@@ -1934,9 +1934,18 @@ function TerminalPageComponent({
 
   useEffect(() => {
     let disposed = false;
+    let hideTimer: number | null = null;
+
+    const cancelPendingHide = () => {
+      if (hideTimer !== null) {
+        window.clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    };
 
     const showListenerPromise = Keyboard.addListener('keyboardDidShow', (info) => {
       if (!disposed) {
+        cancelPendingHide();
         updateKeyboardInset(info.keyboardHeight || 0);
         if (isAndroid && !quickBarEditorFocusedRef.current) {
           updateTerminalKeyboardRequested(true);
@@ -1945,13 +1954,27 @@ function TerminalPageComponent({
     });
     const hideListenerPromise = Keyboard.addListener('keyboardDidHide', () => {
       if (!disposed) {
-        updateTerminalKeyboardRequested(false);
-        updateKeyboardInset(0);
+        if (isAndroid) {
+          // Debounce hide on Android to survive fold/unfold display-change
+          // transitions that fire keyboardDidHide then keyboardDidShow in rapid succession.
+          cancelPendingHide();
+          hideTimer = window.setTimeout(() => {
+            hideTimer = null;
+            if (!disposed) {
+              updateTerminalKeyboardRequested(false);
+              updateKeyboardInset(0);
+            }
+          }, 400);
+        } else {
+          updateTerminalKeyboardRequested(false);
+          updateKeyboardInset(0);
+        }
       }
     });
 
     return () => {
       disposed = true;
+      cancelPendingHide();
       void showListenerPromise
         .then((listener) => listener.remove())
         .catch((error) => {

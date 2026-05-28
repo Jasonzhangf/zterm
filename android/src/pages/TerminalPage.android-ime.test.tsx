@@ -1206,7 +1206,7 @@ describe("TerminalPage Android IME bridge", () => {
     const terminalStage = screen.getByTestId("terminal-stage-shell");
     const quickBarShell = screen.getByTestId("terminal-quickbar-shell");
     expect(terminalStage.getAttribute("style") || "").toContain(
-      "bottom: 64px;",
+      "bottom: 30px;",
     );
     expect(terminalStage.getAttribute("style") || "").not.toContain(
       "transform: translateY",
@@ -1222,7 +1222,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute("style") || "";
-      expect(style).toContain("bottom: 384px;");
+      expect(style).toContain("bottom: 350px;");
       expect(style).not.toContain("transform: translateY");
       expect(quickBarShell.getAttribute("style") || "").toContain(
         "bottom: 320px;",

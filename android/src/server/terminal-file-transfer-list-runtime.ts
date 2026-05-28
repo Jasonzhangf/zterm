@@ -14,7 +14,6 @@ import type {
   RemoteScreenshotRequestPayload,
 } from '../lib/types';
 import { resolveFileTransferListPath } from './file-transfer-path';
-import { requestRemoteScreenshotViaHelper } from './remote-screenshot-helper-client';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
 import type { TerminalSession } from './terminal-runtime-types';
 import {
@@ -211,7 +210,7 @@ export function createTerminalFileTransferListRuntime(
     mkdirSync(deps.wtermHomeDir, { recursive: true });
 
     try {
-      const captureResult = await requestRemoteScreenshotViaHelper({
+      const captureResult = await deps.captureRemoteScreenshot({
         outputPath: tempPath,
         timeoutMs: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS,
       });
