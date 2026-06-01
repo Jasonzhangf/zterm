@@ -2568,3 +2568,10 @@ Validation evidence:
 - `pnpm --filter @zterm/mac type-check` -> pass.
 - `pnpm --filter @zterm/mac package` -> pass; package at `mac/out/mac-arm64/ZTerm.app`; output includes `skipped macOS code signing  reason=identity explicitly is set to null`.
 - `pnpm --filter @zterm/android build && pnpm --filter @zterm/android build:android` -> pass; APK `android/update-dist/zterm-0.1.3.1744.apk`, sha256 `0687eb4ca05cc5bfb9bd48d286a78a193609c4e169250a9037dbd1d6c343e66e`.
+
+### 2026-06-01 Mac pane move target affordance
+
+- User feedback from live screenshot: move-tab menu says `Pane 1/2/3/4` but panes themselves had no visible numbers, so target identity was unclear.
+- Fix: every `ShellWorkspace` pane now shows persistent `Pane N` badge, and hovering a move-menu target sets `data-move-target-hover=true` plus blue border/glow on that target pane.
+- Red test: `ShellWorkspace.split-tree.test.tsx` covers pane labels and hover-target blue highlight state.
+- Validation: `pnpm exec vitest run mac/src/pages/ShellWorkspace.split-tree.test.tsx --reporter=verbose` -> 7/7 pass; `pnpm --filter @zterm/mac type-check` -> pass; `pnpm --filter @zterm/mac package` -> pass; global install updated `/Applications/ZTerm.app` and launched PID from `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.

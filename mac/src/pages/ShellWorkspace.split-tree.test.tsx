@@ -101,6 +101,21 @@ describe('ShellWorkspace iTerm2-style split tree', () => {
     expect(container.querySelectorAll('[data-pane-id]').length).toBe(2);
   });
 
+  it('labels panes and highlights the hovered move target pane', () => {
+    const { container } = renderShell();
+    fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Split →')!);
+    expect(container.querySelector('[aria-label="Pane 1"]')).toBeTruthy();
+    expect(container.querySelector('[aria-label="Pane 2"]')).toBeTruthy();
+    const firstTab = container.querySelector('[data-pane-number="1"] .shell-pane-tab')!;
+    fireEvent.contextMenu(firstTab);
+    const pane2MenuItem = Array.from(container.querySelectorAll('.shell-context-item')).find((button) => button.textContent === 'Pane 2')!;
+    fireEvent.mouseEnter(pane2MenuItem);
+    expect(container.querySelector('[data-pane-number="2"]')?.getAttribute('data-move-target-hover')).toBe('true');
+    expect(container.querySelector('[data-pane-number="2"]')?.className).toContain('move-target-hover');
+    fireEvent.mouseLeave(pane2MenuItem);
+    expect(container.querySelector('[data-pane-number="2"]')?.getAttribute('data-move-target-hover')).toBe('false');
+  });
+
   it('can nest vertical split inside an existing horizontal split', () => {
     const { container } = renderShell();
     fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Split')!);

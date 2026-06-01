@@ -386,6 +386,7 @@ interface ShellSplitTreeRendererProps {
   closePane: (paneId: string) => void;
   splitPaneRight: (paneId: string) => void;
   splitPaneDown: (paneId: string) => void;
+  hoveredMoveTargetPaneId: string | null;
   handleDividerPointerDown: (splitNodeId: string, direction: 'row' | 'column', ratio: number, client: number) => void;
 }
 
@@ -405,6 +406,7 @@ function ShellSplitTreeRenderer({
   closePane,
   splitPaneRight,
   splitPaneDown,
+  hoveredMoveTargetPaneId,
   handleDividerPointerDown,
 }: ShellSplitTreeRendererProps) {
   if (node.type === 'split') {
@@ -432,6 +434,7 @@ function ShellSplitTreeRenderer({
             closePane={closePane}
             splitPaneRight={splitPaneRight}
             splitPaneDown={splitPaneDown}
+            hoveredMoveTargetPaneId={hoveredMoveTargetPaneId}
             handleDividerPointerDown={handleDividerPointerDown}
           />
         </div>
@@ -466,6 +469,7 @@ function ShellSplitTreeRenderer({
             closePane={closePane}
             splitPaneRight={splitPaneRight}
             splitPaneDown={splitPaneDown}
+            hoveredMoveTargetPaneId={hoveredMoveTargetPaneId}
             handleDividerPointerDown={handleDividerPointerDown}
           />
         </div>
@@ -485,10 +489,21 @@ function ShellSplitTreeRenderer({
   const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
   const paneRuntimeResourceKey = resolveRuntimeResourceKey(paneActiveTab, hosts);
   const paneRuntime = paneRuntimeResourceKey ? getRuntimeForResource(paneRuntimeResourceKey) : null;
+  const paneIndex = workspace.panes.findIndex((candidate) => candidate.id === pane.id);
+  const paneNumber = paneIndex === -1 ? '?' : String(paneIndex + 1);
 
   return (
-    <div className={`shell-pane ${pane.id === workspace.activePaneId ? 'active' : ''}`} data-pane-id={pane.id} data-pane-active={pane.id === workspace.activePaneId ? 'true' : 'false'}>
+    <div
+      className={`shell-pane ${pane.id === workspace.activePaneId ? 'active' : ''} ${pane.id === hoveredMoveTargetPaneId ? 'move-target-hover' : ''}`}
+      data-pane-id={pane.id}
+      data-pane-active={pane.id === workspace.activePaneId ? 'true' : 'false'}
+      data-pane-number={paneNumber}
+      data-move-target-hover={pane.id === hoveredMoveTargetPaneId ? 'true' : 'false'}
+    >
       <div className="shell-pane-tabs">
+        <div className="shell-pane-number" aria-label={`Pane ${paneNumber}`}>
+          Pane {paneNumber}
+        </div>
         <div className="shell-pane-tablist">
           {pane.tabs.map((tab) => {
             const tabRuntimeResourceKey = resolveRuntimeResourceKey(tab, hosts);
@@ -581,6 +596,7 @@ export function ShellWorkspace({
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<{ paneId: string; tabId: string; x: number; y: number } | null>(null);
+  const [hoveredMoveTargetPaneId, setHoveredMoveTargetPaneId] = useState<string | null>(null);
   const fileTransferSendJsonRef = useRef<(msg: unknown) => void>(() => {});
   const fileTransferOnMessageRef = useRef<((handler: (msg: unknown) => void) => () => void) | undefined>(undefined);
   const [clipboardText, setClipboardText] = useState('');
@@ -1469,6 +1485,7 @@ export function ShellWorkspace({
           closePane={closePane}
           splitPaneRight={splitPaneRight}
           splitPaneDown={splitPaneDown}
+          hoveredMoveTargetPaneId={hoveredMoveTargetPaneId}
           handleDividerPointerDown={handleDividerPointerDown}
         />
       </div>
@@ -1585,8 +1602,8 @@ export function ShellWorkspace({
       {tabContextMenu ? (
         <div
           className="shell-context-backdrop"
-          onClick={() => setTabContextMenu(null)}
-          onContextMenu={(e) => { e.preventDefault(); setTabContextMenu(null); }}
+          onClick={() => { setHoveredMoveTargetPaneId(null); setTabContextMenu(null); }}
+          onContextMenu={(e) => { e.preventDefault(); setHoveredMoveTargetPaneId(null); setTabContextMenu(null); }}
         >
           <div
             className="shell-context-menu"
@@ -1600,8 +1617,11 @@ export function ShellWorkspace({
                 className="shell-context-item"
                 type="button"
                 disabled={targetPane.id === tabContextMenu.paneId}
+                onMouseEnter={() => setHoveredMoveTargetPaneId(targetPane.id)}
+                onMouseLeave={() => setHoveredMoveTargetPaneId(null)}
                 onClick={() => {
                   moveTabToPane(tabContextMenu.paneId, tabContextMenu.tabId, targetPane.id);
+                  setHoveredMoveTargetPaneId(null);
                   setTabContextMenu(null);
                 }}
               >
