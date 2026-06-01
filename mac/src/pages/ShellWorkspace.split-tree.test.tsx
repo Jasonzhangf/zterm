@@ -76,6 +76,12 @@ function renderShell() {
 }
 
 describe('ShellWorkspace iTerm2-style split tree', () => {
+  it('does not render fake in-app macOS traffic light buttons', () => {
+    const { container } = renderShell();
+    expect(container.querySelector('.traffic-light')).toBeNull();
+    expect(container.querySelector('.shell-topbar-leading')).toBeNull();
+  });
+
   it('creates a horizontal row split via Split', () => {
     const { container } = renderShell();
     fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Split')!);

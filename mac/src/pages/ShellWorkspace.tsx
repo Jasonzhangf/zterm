@@ -1331,12 +1331,6 @@ export function ShellWorkspace({
   return (
     <div className="shell-workspace-root">
       <header className="shell-topbar">
-        <div className="shell-topbar-leading" aria-hidden="true">
-          <span className="traffic-light red" />
-          <span className="traffic-light yellow" />
-          <span className="traffic-light green" />
-        </div>
-
         <div className="shell-topbar-title">
           <strong>ZTerm</strong>
           <span>

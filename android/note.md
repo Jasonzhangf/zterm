@@ -2583,3 +2583,12 @@ Validation evidence:
 - Fix: `MacTerminalView` now converts projection cells to text and writes `\x1b[H\x1b[2J...` to wterm on new projection revision, including pending write flush on terminal ready.
 - Red test added: `packages/shared/src/terminal/mac-terminal-view.test.tsx` locks projection -> wterm.write behavior.
 - Validation: shared mac terminal + split tree tests 6/6 pass; Mac ShellWorkspace split tests 7/7 pass; `pnpm --filter @zterm/mac type-check` pass; `pnpm --filter @zterm/mac package` pass; global install updated `/Applications/ZTerm.app`, launched PID `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
+
+### 2026-06-01 Mac render correction: no snapshot, keep color/scroll/live DOM
+
+- User correction: previous `wterm.write` fix rendered content but it was a non-scrollable, non-color, snapshot-like view.
+- Correct fix: `MacTerminalView` now renders `TerminalRenderBufferProjection` directly as DOM rows using shared renderer truth (`buildTerminalVisibleRowViewModel`, theme colors, row/cell styles). The hidden wterm component remains only as input/resize proxy.
+- Red tests now assert: projection renders as scrollable colored DOM rows, no write-only snapshot call is used, and rerender with a new revision updates visible daemon content.
+- Also removed fake in-app macOS traffic lights from `ShellWorkspace` topbar; real titlebar already has native window controls.
+- Layout fix: shell root/stage/split node now carry `width:100%` and min-size guards so maximized windows use the full viewport instead of shrinking to content width.
+- Validation: shared Mac terminal + split-tree tests 7/7 pass; ShellWorkspace split tests 8/8 pass; `pnpm --filter @zterm/mac type-check` pass; package pass and global install launched `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.

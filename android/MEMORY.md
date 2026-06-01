@@ -295,3 +295,6 @@
 
 ## 2026-06-01 Mac terminal projection render truth
 - `MacTerminalView` must actively bridge `TerminalRenderBufferProjection.lines` into wtermmod via `TerminalHandle.write`; merely mounting `@jsonstudio/wtermmod-react` with cols/rows creates a black terminal with input plumbing but no daemon content. Red tests must assert projection changes call `write()`.
+
+## 2026-06-01 Mac render anti-regression
+- Never fix Mac terminal black screen by `TerminalHandle.write` snapshotting projection text. Mac render must consume canonical `TerminalRenderBufferProjection` as DOM rows via shared renderer helpers so scrollback, colors, and live revisions remain true. Keep wtermmod only as input/resize proxy unless it can consume canonical buffer semantics directly.
