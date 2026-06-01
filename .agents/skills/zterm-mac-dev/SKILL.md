@@ -150,3 +150,8 @@ Jason，已完成本轮自闭环：
 5. 结论：哪些已验证通过，哪些仍未覆盖
 6. 现在才轮到你手测的部分：
 ```
+
+### 3.4 本地 package 签名授权规则
+- 本地 `pnpm --filter @zterm/mac package` 必须默认跳过 macOS code signing：`CSC_IDENTITY_AUTO_DISCOVERY=false` + `build.mac.identity=null`。
+- 禁止让 `electron-builder` 自动发现 distribution identity；否则每次 package 都可能触发 Keychain 授权弹窗。
+- 只有正式发布/分发签名任务才允许显式启用签名 identity，并必须单独说明签名和 notarization 验证。

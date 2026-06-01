@@ -1,3 +1,4 @@
+import { type SplitTreeNode } from '@zterm/shared';
 import type { EditableHost } from '@zterm/shared';
 
 export const SHELL_WORKSPACE_STORAGE_KEY = 'zterm:mac:shell-workspace:v1';
@@ -24,6 +25,7 @@ export interface ShellWorkspacePane {
 export interface ShellWorkspaceState {
   panes: ShellWorkspacePane[];
   activePaneId: string;
+  layout: SplitTreeNode<{ id: string }>;
 }
 
 export interface ShellProfileRecord {
@@ -107,7 +109,64 @@ export function createDefaultWorkspaceState(): ShellWorkspaceState {
   return {
     panes: [pane],
     activePaneId: pane.id,
+    layout: createLayoutLeaf(pane.id),
   };
+}
+
+function createLayoutLeaf(paneId: string): SplitTreeNode<{ id: string }> {
+  return {
+    id: generateId('leaf'),
+    type: 'leaf',
+    pane: {
+      id: paneId,
+      tabs: [{ id: `layout-tab-${paneId}` }],
+      activeTabId: `layout-tab-${paneId}`,
+    },
+  };
+}
+
+function createFlatLayoutFromPanes(panes: ShellWorkspacePane[]): SplitTreeNode<{ id: string }> {
+  if (panes.length === 0) {
+    return createLayoutLeaf(generateId('pane'));
+  }
+  return panes.slice(1).reduce<SplitTreeNode<{ id: string }>>(
+    (tree, pane) => ({
+      id: generateId('split'),
+      type: 'split',
+      direction: 'row',
+      ratio: 1 / 2,
+      first: tree,
+      second: createLayoutLeaf(pane.id),
+    }),
+    createLayoutLeaf(panes[0].id),
+  );
+}
+
+function normalizeLayoutNode(input: unknown, paneIds: Set<string>): SplitTreeNode<{ id: string }> | null {
+  if (!input || typeof input !== 'object') return null;
+  const candidate = input as Partial<SplitTreeNode<{ id: string }>>;
+  if (candidate.type === 'leaf') {
+    const paneId = typeof candidate.pane?.id === 'string' ? candidate.pane.id : '';
+    return paneIds.has(paneId) ? createLayoutLeaf(paneId) : null;
+  }
+  if (candidate.type === 'split') {
+    const first = normalizeLayoutNode(candidate.first, paneIds);
+    const second = normalizeLayoutNode(candidate.second, paneIds);
+    if (!first && !second) return null;
+    if (!first) return second;
+    if (!second) return first;
+    return {
+      id: typeof candidate.id === 'string' ? candidate.id : generateId('split'),
+      type: 'split',
+      direction: candidate.direction === 'column' ? 'column' : 'row',
+      ratio: typeof candidate.ratio === 'number' && Number.isFinite(candidate.ratio)
+        ? Math.max(0.18, Math.min(0.82, candidate.ratio))
+        : 0.5,
+      first,
+      second,
+    };
+  }
+  return null;
 }
 
 export function cloneWorkspaceState(state: ShellWorkspaceState): ShellWorkspaceState {
@@ -194,6 +253,8 @@ export function normalizeWorkspaceState(input: unknown): ShellWorkspaceState {
   return {
     panes: normalizedPanes,
     activePaneId,
+    layout: normalizeLayoutNode((candidate as { layout?: unknown }).layout, new Set(normalizedPanes.map((pane) => pane.id)))
+      ?? createFlatLayoutFromPanes(normalizedPanes),
   };
 }
 

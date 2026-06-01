@@ -1,6 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
-  TerminalView,
+  MacTerminalView,
+  closeSplitTreePane,
+  resizeSplitTreeNode,
+  splitTreePane,
   buildBridgeServerPresetIdentityId,
   formatBridgeEndpoint,
   formatBridgeSessionTarget,
@@ -10,6 +13,7 @@ import {
   type BridgeSettings,
   type EditableHost,
   type Host,
+  type SplitTreeNode,
 } from '@zterm/shared';
 import {
   createTerminalRuntime,
@@ -83,8 +87,15 @@ type ConnectionRequest =
       connectSignature: string;
     };
 
-const MAX_PANES = 3;
 const MIN_PANE_RATIO = 0.18;
+
+function workspaceSplitTree(workspace: ShellWorkspaceState) {
+  return {
+    tree: workspace.layout,
+    activePaneId: workspace.activePaneId,
+  };
+}
+
 const QUICK_SHORTCUTS: QuickPaletteItem[] = [
   {
     id: 'attach-main',
@@ -324,7 +335,7 @@ function PaneSurface({
         </span>
       </div>
       <div className="shell-terminal-canvas">
-        <TerminalView
+        <MacTerminalView
           sessionId={
             runtimeState.connection.connectedSessionId
             || (tab.kind === 'local-tmux' ? localSessionName : getResolvedSessionName(target!))
@@ -350,9 +361,198 @@ function PaneSurface({
               : undefined
           }
           onResize={(cols, rows) => runtime?.resizeTerminal(cols, rows)}
-          onViewportChange={(viewState) => runtime?.updateViewport(viewState)}
+          onViewportChange={(viewState) => runtime?.updateViewport(viewState as Parameters<NonNullable<typeof runtime>["updateViewport"]>[0])}
           themeId={terminalThemeId}
           showAbsoluteLineNumbers={showAbsoluteLineNumbers}
+        />
+      </div>
+    </div>
+  );
+}
+
+interface ShellSplitTreeRendererProps {
+  node: SplitTreeNode<{ id: string }>;
+  workspace: ShellWorkspaceState;
+  hosts: Host[];
+  bridgeSettings: BridgeSettings;
+  absoluteLineNumbersVisible: boolean;
+  getRuntimeForResource: (resourceKey: string) => TerminalRuntimeController | null;
+  setTabContextMenu: Dispatch<SetStateAction<{ paneId: string; tabId: string; x: number; y: number } | null>>;
+  setConnectionPicker: Dispatch<SetStateAction<ConnectionPickerState | null>>;
+  setWorkspace: Dispatch<SetStateAction<ShellWorkspaceState>>;
+  setActivePaneTab: (paneId: string, tabId: string) => void;
+  createEmptyTabInPane: (paneId: string) => void;
+  closeTab: (paneId: string, tabId: string) => void;
+  closePane: (paneId: string) => void;
+  splitPaneRight: (paneId: string) => void;
+  splitPaneDown: (paneId: string) => void;
+  handleDividerPointerDown: (splitNodeId: string, direction: 'row' | 'column', ratio: number, client: number) => void;
+}
+
+function ShellSplitTreeRenderer({
+  node,
+  workspace,
+  hosts,
+  bridgeSettings,
+  absoluteLineNumbersVisible,
+  getRuntimeForResource,
+  setTabContextMenu,
+  setConnectionPicker,
+  setWorkspace,
+  setActivePaneTab,
+  createEmptyTabInPane,
+  closeTab,
+  closePane,
+  splitPaneRight,
+  splitPaneDown,
+  handleDividerPointerDown,
+}: ShellSplitTreeRendererProps) {
+  if (node.type === 'split') {
+    return (
+      <div
+        className={`shell-split-node ${node.direction}`}
+        data-testid="shell-split-node"
+        data-split-id={node.id}
+        data-split-direction={node.direction}
+      >
+        <div className="shell-split-child" style={{ flex: `${node.ratio} 1 0%` }}>
+          <ShellSplitTreeRenderer
+            node={node.first}
+            workspace={workspace}
+            hosts={hosts}
+            bridgeSettings={bridgeSettings}
+            absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+            getRuntimeForResource={getRuntimeForResource}
+            setTabContextMenu={setTabContextMenu}
+            setConnectionPicker={setConnectionPicker}
+            setWorkspace={setWorkspace}
+            setActivePaneTab={setActivePaneTab}
+            createEmptyTabInPane={createEmptyTabInPane}
+            closeTab={closeTab}
+            closePane={closePane}
+            splitPaneRight={splitPaneRight}
+            splitPaneDown={splitPaneDown}
+            handleDividerPointerDown={handleDividerPointerDown}
+          />
+        </div>
+        <div
+          className={`shell-pane-divider ${node.direction}`}
+          onPointerDown={(event) => handleDividerPointerDown(
+            node.id,
+            node.direction,
+            node.ratio,
+            node.direction === 'row' ? event.clientX : event.clientY,
+          )}
+          role="separator"
+          aria-orientation={node.direction === 'row' ? 'vertical' : 'horizontal'}
+          data-testid={node.direction === 'row' ? 'shell-divider-vertical' : 'shell-divider-horizontal'}
+        >
+          <span />
+        </div>
+        <div className="shell-split-child" style={{ flex: `${1 - node.ratio} 1 0%` }}>
+          <ShellSplitTreeRenderer
+            node={node.second}
+            workspace={workspace}
+            hosts={hosts}
+            bridgeSettings={bridgeSettings}
+            absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+            getRuntimeForResource={getRuntimeForResource}
+            setTabContextMenu={setTabContextMenu}
+            setConnectionPicker={setConnectionPicker}
+            setWorkspace={setWorkspace}
+            setActivePaneTab={setActivePaneTab}
+            createEmptyTabInPane={createEmptyTabInPane}
+            closeTab={closeTab}
+            closePane={closePane}
+            splitPaneRight={splitPaneRight}
+            splitPaneDown={splitPaneDown}
+            handleDividerPointerDown={handleDividerPointerDown}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const pane = workspace.panes.find((candidate) => candidate.id === node.pane.id) ?? workspace.panes[0];
+  if (!pane) return null;
+  const paneTarget = resolveTabTarget(
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
+    hosts,
+  );
+  const paneLocalSessionName = resolveLocalSessionName(
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
+  );
+  const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
+  const paneRuntimeResourceKey = resolveRuntimeResourceKey(paneActiveTab, hosts);
+  const paneRuntime = paneRuntimeResourceKey ? getRuntimeForResource(paneRuntimeResourceKey) : null;
+
+  return (
+    <div className={`shell-pane ${pane.id === workspace.activePaneId ? 'active' : ''}`} data-pane-id={pane.id} data-pane-active={pane.id === workspace.activePaneId ? 'true' : 'false'}>
+      <div className="shell-pane-tabs">
+        <div className="shell-pane-tablist">
+          {pane.tabs.map((tab) => {
+            const tabRuntimeResourceKey = resolveRuntimeResourceKey(tab, hosts);
+            const tabRuntime = tabRuntimeResourceKey ? getRuntimeForResource(tabRuntimeResourceKey) : null;
+            return (
+              <div
+                className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}
+                key={tab.id}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setTabContextMenu({ paneId: pane.id, tabId: tab.id, x: event.clientX, y: event.clientY });
+                }}
+              >
+                <button type="button" onClick={() => setActivePaneTab(pane.id, tab.id)}>
+                  <PaneTabStatus tab={tab} runtime={tabRuntime} />
+                  <span>{tab.kind === 'empty' ? '+' : tab.title}</span>
+                </button>
+                {pane.tabs.length > 1 || tab.kind !== 'empty' ? (
+                  <button
+                    className="shell-pane-tab-close"
+                    type="button"
+                    onClick={() => closeTab(pane.id, tab.id)}
+                    aria-label={`Close ${tab.title}`}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="shell-pane-actions">
+          <button className="shell-pane-text-button" type="button" onClick={() => splitPaneRight(pane.id)}>
+            Split →
+          </button>
+          <button className="shell-pane-text-button" type="button" onClick={() => splitPaneDown(pane.id)}>
+            Split ↓
+          </button>
+          <button className="shell-pane-icon-button" type="button" onClick={() => createEmptyTabInPane(pane.id)}>
+            +
+          </button>
+          <button className="shell-pane-icon-button" type="button" onClick={() => setConnectionPicker({ paneId: pane.id, mode: 'append-tab' })}>
+            ⌁
+          </button>
+          {workspace.panes.length > 1 ? (
+            <button className="shell-pane-icon-button" type="button" onClick={() => closePane(pane.id)}>
+              −
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="shell-pane-body" onClick={() => setWorkspace((current) => ({ ...current, activePaneId: pane.id }))}>
+        <PaneSurface
+          tab={paneActiveTab}
+          target={paneTarget}
+          localSessionName={paneLocalSessionName}
+          runtime={paneRuntime}
+          isVisible
+          isInputFocused={pane.id === workspace.activePaneId}
+          onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
+          terminalThemeId={bridgeSettings.terminalThemeId}
+          showAbsoluteLineNumbers={absoluteLineNumbersVisible}
         />
       </div>
     </div>
@@ -385,7 +585,12 @@ export function ShellWorkspace({
   const fileTransferOnMessageRef = useRef<((handler: (msg: unknown) => void) => () => void) | undefined>(undefined);
   const [clipboardText, setClipboardText] = useState('');
   const [clipboardError, setClipboardError] = useState('');
-  const dragStateRef = useRef<{ index: number; startX: number; sizes: number[] } | null>(null);
+  const dragStateRef = useRef<{
+    splitNodeId: string;
+    direction: 'row' | 'column';
+    startClient: number;
+    startRatio: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -886,19 +1091,41 @@ export function ShellWorkspace({
     [addHost, assignHostToPane, connectionEditor, hosts, persistBridgeServer, updateHost],
   );
 
-  const splitActivePane = useCallback(() => {
+  const splitPaneRight = useCallback((paneId: string) => {
     setWorkspace((current) => {
-      if (current.panes.length >= MAX_PANES) {
+      const newPane = createWorkspacePane(1);
+      const split = splitTreePane(workspaceSplitTree(current), paneId, 'right', { id: `layout-tab-${newPane.id}` }, newPane.id);
+      if (split.tree === current.layout) {
         return current;
       }
-      const next = cloneWorkspaceState(current);
-      const index = Math.max(0, next.panes.findIndex((pane) => pane.id === next.activePaneId));
-      next.panes.splice(index + 1, 0, createWorkspacePane(1));
-      next.panes = normalizePaneSizes(next.panes);
-      next.activePaneId = next.panes[index + 1].id;
-      return next;
+      return normalizeWorkspaceState({
+        ...current,
+        panes: normalizePaneSizes([...current.panes, newPane]),
+        activePaneId: newPane.id,
+        layout: split.tree,
+      });
     });
   }, []);
+
+  const splitPaneDown = useCallback((paneId: string) => {
+    setWorkspace((current) => {
+      const newPane = createWorkspacePane(1);
+      const split = splitTreePane(workspaceSplitTree(current), paneId, 'down', { id: `layout-tab-${newPane.id}` }, newPane.id);
+      if (split.tree === current.layout) {
+        return current;
+      }
+      return normalizeWorkspaceState({
+        ...current,
+        panes: normalizePaneSizes([...current.panes, newPane]),
+        activePaneId: newPane.id,
+        layout: split.tree,
+      });
+    });
+  }, []);
+
+  const splitActivePane = useCallback(() => splitPaneRight(workspace.activePaneId), [splitPaneRight, workspace.activePaneId]);
+
+  const splitActivePaneDown = useCallback(() => splitPaneDown(workspace.activePaneId), [splitPaneDown, workspace.activePaneId]);
 
   const closePane = useCallback((paneId: string) => {
     setWorkspace((current) => {
@@ -912,6 +1139,8 @@ export function ShellWorkspace({
       }
       next.panes.splice(index, 1);
       next.panes = normalizePaneSizes(next.panes);
+      const collapsed = closeSplitTreePane(workspaceSplitTree(current), paneId);
+      next.layout = collapsed.tree;
       if (next.activePaneId === paneId) {
         next.activePaneId = next.panes[Math.max(0, index - 1)]?.id || next.panes[0].id;
       }
@@ -991,31 +1220,31 @@ export function ShellWorkspace({
     });
   }, []);
 
-  const handleDividerPointerDown = useCallback((index: number, clientX: number) => {
+  const handleDividerPointerDown = useCallback((splitNodeId: string, direction: 'row' | 'column', ratio: number, client: number) => {
     dragStateRef.current = {
-      index,
-      startX: clientX,
-      sizes: workspace.panes.map((pane) => pane.size),
+      splitNodeId,
+      direction,
+      startClient: client,
+      startRatio: ratio,
     };
-  }, [workspace.panes]);
+  }, []);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       if (!dragStateRef.current || !stageRef.current) {
         return;
       }
-      const { index, startX, sizes } = dragStateRef.current;
+      const { splitNodeId, direction, startClient, startRatio } = dragStateRef.current;
       const bounds = stageRef.current.getBoundingClientRect();
-      if (!bounds.width) {
+      const axisSize = direction === 'row' ? bounds.width : bounds.height;
+      if (!axisSize) {
         return;
       }
-      const deltaRatio = (event.clientX - startX) / bounds.width;
+      const pointer = direction === 'row' ? event.clientX : event.clientY;
+      const deltaRatio = (pointer - startClient) / axisSize;
       setWorkspace((current) => {
-        const base = current.panes.map((pane, paneIndex) => ({ ...pane, size: sizes[paneIndex] ?? pane.size }));
-        return {
-          ...current,
-          panes: normalizeSizesWithDelta(base, index, deltaRatio),
-        };
+        const resized = resizeSplitTreeNode(workspaceSplitTree(current), splitNodeId, startRatio + deltaRatio);
+        return normalizeWorkspaceState({ ...current, layout: resized.tree });
       });
     };
 
@@ -1107,8 +1336,11 @@ export function ShellWorkspace({
           <button className="shell-action-button" type="button" onClick={() => setQuickPaletteOpen(true)}>
             ⌘K
           </button>
-          <button className="shell-action-button" type="button" onClick={splitActivePane} disabled={workspace.panes.length >= MAX_PANES}>
+          <button className="shell-action-button" type="button" onClick={splitActivePane}>
             Split
+          </button>
+          <button className="shell-action-button" type="button" onClick={splitActivePaneDown}>
+            Split ↓
           </button>
           <button
             className="shell-action-button"
@@ -1221,97 +1453,24 @@ export function ShellWorkspace({
       </header>
 
       <div className="shell-stage" ref={stageRef}>
-        {workspace.panes.map((pane, paneIndex) => {
-          const paneTarget = resolveTabTarget(
-            pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
-            hosts,
-          );
-          const paneLocalSessionName = resolveLocalSessionName(
-            pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
-          );
-          const paneActiveTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? createEmptyWorkspaceTab();
-          const paneRuntimeResourceKey = resolveRuntimeResourceKey(paneActiveTab, hosts);
-          const paneRuntime = paneRuntimeResourceKey ? getRuntimeForResource(paneRuntimeResourceKey) : null;
-
-          return (
-            <Fragment key={pane.id}>
-              <div className={`shell-pane ${pane.id === workspace.activePaneId ? 'active' : ''}`} style={{ flexGrow: pane.size, flexBasis: 0 }}>
-                <div className="shell-pane-tabs">
-                  <div className="shell-pane-tablist">
-                    {pane.tabs.map((tab) => {
-                      const tabRuntimeResourceKey = resolveRuntimeResourceKey(tab, hosts);
-                      const tabRuntime = tabRuntimeResourceKey ? getRuntimeForResource(tabRuntimeResourceKey) : null;
-                      return (
-                        <div
-                          className={`shell-pane-tab ${pane.activeTabId === tab.id ? 'active' : ''}`}
-                          key={tab.id}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            setTabContextMenu({ paneId: pane.id, tabId: tab.id, x: e.clientX, y: e.clientY });
-                          }}
-                        >
-                          <button type="button" onClick={() => setActivePaneTab(pane.id, tab.id)}>
-                            <PaneTabStatus tab={tab} runtime={tabRuntime} />
-                            <span>{tab.kind === 'empty' ? '+' : tab.title}</span>
-                          </button>
-                          {pane.tabs.length > 1 || tab.kind !== 'empty' ? (
-                            <button
-                              className="shell-pane-tab-close"
-                              type="button"
-                              onClick={() => closeTab(pane.id, tab.id)}
-                              aria-label={`Close ${tab.title}`}
-                            >
-                              ×
-                            </button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="shell-pane-actions">
-                    <button className="shell-pane-icon-button" type="button" onClick={() => createEmptyTabInPane(pane.id)}>
-                      +
-                    </button>
-                    <button className="shell-pane-icon-button" type="button" onClick={() => setConnectionPicker({ paneId: pane.id, mode: 'append-tab' })}>
-                      ⌁
-                    </button>
-                    {workspace.panes.length > 1 ? (
-                      <button className="shell-pane-icon-button" type="button" onClick={() => closePane(pane.id)}>
-                        −
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="shell-pane-body" onClick={() => setWorkspace((current) => ({ ...current, activePaneId: pane.id }))}>
-                  <PaneSurface
-                    tab={paneActiveTab}
-                    target={paneTarget}
-                    localSessionName={paneLocalSessionName}
-                    runtime={paneRuntime}
-                    isVisible
-                    isInputFocused={pane.id === workspace.activePaneId}
-                    onOpenConnection={() => setConnectionPicker({ paneId: pane.id, mode: 'replace-active' })}
-                    terminalThemeId={bridgeSettings.terminalThemeId}
-                    showAbsoluteLineNumbers={absoluteLineNumbersVisible}
-                  />
-                </div>
-              </div>
-
-              {paneIndex < workspace.panes.length - 1 ? (
-                <div
-                  className="shell-pane-divider"
-                  onPointerDown={(event) => handleDividerPointerDown(paneIndex, event.clientX)}
-                  role="separator"
-                  aria-orientation="vertical"
-                >
-                  <span />
-                </div>
-              ) : null}
-            </Fragment>
-          );
-        })}
+        <ShellSplitTreeRenderer
+          node={workspace.layout}
+          workspace={workspace}
+          hosts={hosts}
+          bridgeSettings={bridgeSettings}
+          absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+          getRuntimeForResource={getRuntimeForResource}
+          setTabContextMenu={setTabContextMenu}
+          setConnectionPicker={setConnectionPicker}
+          setWorkspace={setWorkspace}
+          setActivePaneTab={setActivePaneTab}
+          createEmptyTabInPane={createEmptyTabInPane}
+          closeTab={closeTab}
+          closePane={closePane}
+          splitPaneRight={splitPaneRight}
+          splitPaneDown={splitPaneDown}
+          handleDividerPointerDown={handleDividerPointerDown}
+        />
       </div>
 
       {connectionPicker ? (

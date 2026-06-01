@@ -214,3 +214,81 @@
 - [2026-05-31] `connectTraversalRelayDevicesStream` 已增加 `onOpen`/`onClose` 回调；App 级 relay device stream 有独立 auto-reconnect loop（`300ms → 5000ms` backoff），generation-based cancel，不改 session context。
 - [2026-05-31] Direct WebRTC over ipv6/ipv4 当前不实现：`buildTraversalPlan` 的 RTC candidate 仅当 `relaySignalUrl` 存在时生成，且需要 `relayHostId` 做 peer identity；`rtc-bridge.ts` server 仅处理 relay signal websocket 上的 signaling，无 direct peer-to-peer signaling 协议。
 - 证据：`android/evidence/relay-reconnect/README.md`
+
+## 2026-06-01 Cross-platform pane/split 真源沉到 shared
+
+- Android 多 pane 的核心算法（workspace state machine / split / activate / move tab / ratio resize / profile token / 触控 vs 指针 gesture）已沉到 `packages/shared/src/{react/pane-profile,react/pane-stage,react/pane-tabs,workspace/workspace-model}`。
+- 平台差异隔离在 profile + gesture token，不在 UI 渲染逻辑：
+  - `phone`: long-press 唤起 pane-menu、horizontal swipe 切 tab、divider 透明、drag-resize 禁用
+  - `tablet`: long-press + right-click 皆支持、drag-resize 启用
+  - `desktop`: right-click 唤起 pane-menu、ctrl+pageup/pagedown 切 tab、divider 可见 + drag handle
+- `workspace-model` 新增 `setActivePane / resizePaneRatio`；`addPaneToWorkspace / removePaneFromWorkspace / moveTabBetweenPanes / setActivePane` 同源同住，pane 状态机不再有第二套实现。
+- Android 端 `android/src/lib/terminal-layout-profile.ts` 仍保留作 phone-only 短期桥；后续切片把 `TerminalHeader` / `TerminalPageStageShell` 切到 shared `PaneTabs` / `PaneStage`（mobileTheme token 通过 render prop 注入或新建 android `pane-theme-adapter`）。
+- Mac 端 `MacAppShell` / `ShellWorkspace` 后续切片切到 shared `PaneStage` + `PaneTabs`，可直接使用 desktop profile。
+- shared 验证基线：26 test files / 235 tests pass（pre-existing 27 个 harness 错与本切片无关）。
+
+## 2026-06-01 Mac-2 PaneStage/PaneTabs 接入 MacAppShell
+
+- `mac/src/app/workbench.ts` 升级为 `WorkspaceState<MacWorkbenchTab>`，pane 状态机改走 shared `addPaneToWorkspace / removePaneFromWorkspace / moveTabBetweenPanes / setActivePane / resizePaneRatio`，旧 `tabs[]/activeTabId` flat 结构废弃。
+- `mac/src/app/MacAppShell.tsx` 切到 `PaneStage` + `PaneTabs` 真源，desktop profile 走 `resolvePaneProfile({ platform: 'desktop' })`；新增 `MacPaneWorkbench` 组件承载 pane 内 tab 行 + terminal surface。
+- `packages/shared/src/terminal/mac-terminal-view.tsx` 补上 `MacTerminalView` + `TerminalView` (compatibility alias) 包装 `@jsonstudio/wtermmod-react`，pre-existing `@zterm/shared has no exported member 'TerminalView'` 阻断解除。
+- Mac 端 `pnpm type-check` 增量错：0（6 pre-existing 与本切片无关，集中在 ShellWorkspace / TerminalSlot / bridge-transport）。
+- 新增 `mac/src/app/workbench.test.ts` (12 tests)，通过 copy 到 `packages/shared/src/_mac_workbench.test.ts` 跑，验证 pane 状态机全部行为正确。Mac workspace 暂未装 vitest devDep。
+- `mac/tsconfig.json` 排除 `src/**/*.test.ts*` 避免 vitest types 阻断 type-check。
+- 平台差异：Mac pane 行为走 desktop profile（right-click 唤 menu / ctrl-page 切 tab / drag-resize 启用 / divider 可见）。
+
+## 2026-06-01 Mac-3 旧 tsc 错一并消除
+
+- `packages/shared/src/terminal/mac-terminal-view.tsx` 扩 Mac 端 native render 旧 contract 全部 props (`projection / active / allowDomFocus / themeId / showAbsoluteLineNumbers / onInput / onResize / onViewportChange / onImagePaste / onWidthModeChange`)。wtermmod 只接受 `cols/rows/autoResize/theme/onData/onResize`，其它 props 在 wrapper 内 void 占位，语义真实工作属于后续切片 (mac-4 wtermmod native render 接入)。
+- `mac/src/pages/ShellWorkspace.tsx` + `mac/src/pages/TerminalSlot.tsx` import 改 `@zterm/shared` 中 `MacTerminalView` (wtermmod wrapper)，不再用裸 `TerminalView` 拒收 Mac 扩展 props。
+- `mac/src/lib/bridge-transport.ts` `buildHostConfig` 收口为 HostConfigMessage 真实字段 (`openRequestId / clientSessionId / sessionName / cols / rows / autoCommand`)，删除 pre-existing 多余字段 (`name / bridgeHost / bridgePort / authToken / authType / password / privateKey`)。
+- bridge target 信息 (bridgeHost/bridgePort/authToken) 走 `BridgeTarget` 通过 `openBridgeConnection` URL 路径，不再走 HostConfigMessage payload。
+- `openRequestId` 用 `crypto.randomUUID` 生成，确保每个 open intent 唯一。
+- `mac/src/pages/ShellWorkspace.tsx` onViewportChange callback 强转 `viewState as Parameters<NonNullable<typeof runtime>["updateViewport"]>[0]`，消除 unknown → TerminalRuntimeViewState 不匹配。
+- `mac/pnpm type-check` 0 错（pre-existing 6 错全清）。
+- shared 26 files / 235 tests pass 保持不变。
+
+## 2026-06-01 mobile-2.0 红测基线建立
+
+- Android 端 4 个黑盒红测文件落地，全部跑前**会红**（mobile-2 接入后才转绿）：
+  - `android/src/components/terminal/pane-android-adapter.test.ts` (11 tests)：验证 `mobileTheme → shared PaneProfile` 适配器
+  - `android/src/components/terminal/TerminalHeader.pane-tabs.test.tsx` (11 tests)：验证 TerminalHeader 切到 shared PaneTabs 后期望行为
+  - `android/src/components/terminal/shared-pane-tabs.test.tsx` (8 tests)：shared PaneTabs 在 Android jsdom 下真源基线（防止"接入后回归"），7/8 当前 pass；1 红暴露 shared PaneTabs plus button **缺 long-press 路径**——mobile-2 接入时需补
+  - `android/src/pages/TerminalPageStageShell.pane-stage.test.tsx` (4 tests)：验证 TerminalStageShell 切到 shared PaneStage 后期望行为
+- 23 个新测 7 pass / 16 fail（红测基线就位）
+- 既有 android 测零回归：TerminalHeader.test.tsx 13/13 pass，TerminalPage.render-scope.test.tsx 13/13 pass，TerminalPage.multi-pane-decouple.test.tsx 6/7 pass（1 pre-existing 失败）
+- shared 26/235 仍过，mac 0 错。
+- mobile-2 切片需解决的红：
+  1. 建 `android/src/components/terminal/pane-android-adapter.ts` 提供 `resolveAndroidPaneProfile / buildAndroidPaneTabDescriptor / splitAndroidWorkbench`
+  2. shared PaneTabs plus button 加 mouseDown long-press 路径
+  3. TerminalHeader 整文件切到 shared PaneTabs（保留 mobileTheme 颜色 token 通过 render prop 注入）
+  4. TerminalStageShell 切到 shared PaneStage
+
+## 2026-06-01 mobile-2.1.a pane-android-adapter 落地
+
+- 新增 `android/src/components/terminal/pane-android-adapter.ts` (122 行)
+  - `resolveAndroidPaneProfile({ splitVisible, landscape, topInsetPx })` → 等价 shared `resolvePaneProfile(phone)` + theme overlay
+  - `buildAndroidPaneTabDescriptor(session)` → shared `PaneTabDescriptor` (active/customName/resolvedPath → isResolvedRelay)
+  - `splitAndroidWorkbench(panes)` → shared `PaneSlotDefinition[]` (size / tabIds / activeTabId / isActive 全保真)
+  - `AndroidPaneContext` 接口继承 `PaneProfile` 加 `theme: { colors: mobileTheme.colors }`
+- 验证：`vitest run src/components/terminal/pane-android-adapter.test.ts` → **12/12 全绿**
+- 零回归：android 全测 1203 pass / 27 fail（27 fail 全部 pre-existing 或后续切片红测），shared 26/235 pass，mac 0 tsc 错
+- mobile-2.1.a 0 副作用，已是纯函数 + 零 native 依赖
+
+## 2026-06-01 input echo after multi-tab switch
+
+- Verified root cause: successful `sendInput` had been changed to only send the input and wait for lifecycle/heartbeat head refresh. After multi-tab switching this can delay echo because local renderer sees remote output only after a later `buffer-head` -> `buffer-sync` cascade.
+- Durable rule: explicit terminal input must request fresh head truth immediately, but only for the first unresolved input tail refresh; burst keystrokes must coalesce under `pendingInputTailRefresh` until `buffer-sync` clears it.
+
+
+## 2026-06-01 multi-pane alignment lessons
+- Android 多 pane UI 必须直接使用 shared `PaneTabs` / `PaneStage`，同时保留旧 Header 合约（top padding、关闭按钮 aria、relay badge button、touch-scroll 抑制）作为回归门禁。
+- Mac packaged smoke 不能只看 package 成功；必须以明确 `mac/out/mac-arm64/ZTerm.app` 进程路径 + 窗口/截图/可访问树验证。生产包禁止无条件 `openDevTools`。
+
+## 2026-06-01 iTerm2-style split correction
+- “多 pane”验收不能等同于横向 flat pane 列表。Mac/iTerm2 目标必须是 split tree：leaf=pane，split node={direction: row|column, ratio, first, second}；支持任意横/竖递归分屏、局部分隔线拖拽宽高、关闭 pane 后 tree collapse。红测必须覆盖 nested split 和 horizontal divider，不能只验证 pane 数量。
+
+## 2026-06-01 iTerm2 split-tree + build auth
+- Mac production split truth is now `ShellWorkspaceState.layout` as shared split tree (`row|column`, ratio, recursive first/second). Mac callers must adapt to shared `{ tree, activePaneId }` and pass explicit `newPaneId` so layout leaf ids equal real pane ids.
+- iTerm2-style split has no fixed 3-pane cap in `ShellWorkspace`; red tests must cover right split, down split, nested row+column, divider orientation, and >3 panes.
+- Mac local packaging must not auto-discover signing identities. Use `CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir` plus `build.mac.identity=null`; otherwise electron-builder may hit Keychain authorization on every build.

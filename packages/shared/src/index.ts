@@ -1,5 +1,8 @@
 export * from './layout/profile';
+export * from './react/pane-profile';
 export * from './react/pane-stage';
+export * from './react/pane-tabs';
+export * from './react/pane-column-grid';
 export * from './types';
 export * from './connection/mobile-config';
 export * from './connection/types';
@@ -21,6 +24,7 @@ export * from './schedule/types';
 export * from './schedule/next-fire';
 export * from './shortcuts/terminal-shortcut-composer';
 export * from './workspace/workspace-model';
+export * from './workspace/split-tree-workspace';
 
 export * from './terminal/renderer/index';
 export * from './interaction/operation';
@@ -30,3 +34,4 @@ export * from './harness/event-bus';
 export * from './harness/harness';
 export * from './harness/update-check-block';
 export * from './terminal/gap-utils';
+export * from "./terminal/mac-terminal-view";

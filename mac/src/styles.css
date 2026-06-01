@@ -231,10 +231,32 @@ button {
   min-height: 0;
   display: flex;
   align-items: stretch;
-  gap: 8px;
+}
+
+.shell-split-node {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.shell-split-node.row {
+  flex-direction: row;
+}
+
+.shell-split-node.column {
+  flex-direction: column;
+}
+
+.shell-split-child {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
 .shell-pane {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -330,6 +352,24 @@ button {
   flex-shrink: 0;
 }
 
+.shell-pane-text-button {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+  border-radius: 8px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.shell-pane-text-button:hover {
+  color: #f8fafc;
+  border-color: rgba(125, 211, 252, 0.55);
+  background: rgba(14, 116, 144, 0.2);
+}
+
 .shell-tab-dot {
   width: 7px;
   height: 7px;
@@ -361,17 +401,32 @@ button {
 }
 
 .shell-pane-divider {
-  width: 8px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.shell-pane-divider.row {
+  width: 8px;
   cursor: col-resize;
 }
 
-.shell-pane-divider span {
+.shell-pane-divider.column {
+  height: 8px;
+  cursor: row-resize;
+}
+
+.shell-pane-divider.row span {
   width: 2px;
   height: 58px;
+  border-radius: 999px;
+  background: rgba(176, 195, 222, 0.18);
+}
+
+.shell-pane-divider.column span {
+  width: 58px;
+  height: 2px;
   border-radius: 999px;
   background: rgba(176, 195, 222, 0.18);
 }

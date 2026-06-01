@@ -6,4 +6,6 @@ export default defineWorkspace([
   "packages/@wterm/dom",
   "packages/@wterm/react",
   "packages/@wterm/just-bash",
+  "packages/shared",
+  "mac",
 ]);

@@ -2270,3 +2270,301 @@ user open
 - 假设：用户期望截图权限与截图能力归属 daemon 安装态；`zterm-daemon install-service` 安装完成后一次授权即可长期使用，不依赖额外 Codex/Mac GUI helper。
 - 验证线索：`terminal-file-transfer-list-runtime.ts` 调 `requestRemoteScreenshotViaHelper`；`remote-screenshot.ts` 错误文案要求“先启动 Mac 端截图 helper”；`zterm-daemon.sh` preflight 明确写“Remote screenshot permission belongs to the GUI screenshot helper, not the daemon”；release 脚本未同步该 preflight；目前仓库未发现 helper 实现，只发现 helper socket client。
 - 初步结论：设计真源放错。截图 capability/permission 应从 helper socket 双进程模型收敛到 daemon install/runtime；当前需要先改文档与红测，再删除 helper client/文案/测试残留，最后实现 daemon 单一路径并做安装态 smoke。
+## 2026-05-28 relay/account server config review
+
+- 目标：同一账号多客户端登录后看到该账号下全部 client/daemon 设备，并验证 relay signaling + TURN relay 能力。
+- 代码真源：relay 控制面在 `android/src/traversal-relay/server.ts`，持久 store 在 `android/src/traversal-relay/store.ts`，客户端账号接线在 `android/src/lib/traversal-relay-client.ts` + `android/src/hooks/useTraversalRelayAccount.ts`，daemon host 接线在 `android/src/server/relay-client.ts` + `android/src/server/daemon-config.ts`。
+- 账号设备链路现状：同一 token/userId 下 `/api/devices` 返回该用户所有 devices；`/ws/devices` 负责 client presence 和实时 broadcast；`/ws/host` 负责 daemon deviceId+hostId 上线；`/ws/client?hostId=` 只允许连接同 userId 的在线 daemon host。
+- TURN 下发现状：控制面只透传 `ZTERM_TURN_URL / ZTERM_TURN_USERNAME / ZTERM_TURN_CREDENTIAL` 到 login/me payload；真实 relay-only 验证依赖 `iceTransportPolicy: relay` 的 `traversal-relay-remote-smoke.ts` 或 `zterm-rtc-remote-verify.ts`。
+- 远端只读探测：`https://coder2.codewhisper.cc/relay/health`、`https://coder2.codewhisper.cc/health`、`http://coder2.codewhisper.cc/relay/health` 均超时；DNS `coder2.codewhisper.cc -> 154.40.36.9`。TCP 探测 `154.40.36.9:{443,80,19090,3478,3479}` 均 closed/filtered；`claw.codewhisper.cc -> 159.75.134.56`，TCP `3478/3479` closed/filtered。当前不能确认 claw relay 已可公网访问。
+- 风险：`android/scripts/zterm-rtc-remote-verify.ts` 存在硬编码验证账号和密码，应迁移到环境变量/本地 secret，并轮换该账号密码。
+
+### 2026-05-29 follow-up
+
+- 已移除远端验证脚本中的硬编码 relay 地址/账号/密码：`traversal-relay-remote-smoke.ts` 与 `zterm-rtc-remote-verify.ts` 现在都要求 `RELAY_BASE_URL / RELAY_USERNAME / RELAY_PASSWORD`。
+- 已新增 `android/docs/relay-account-turn-verification-plan.md`，明确测试账号配置契约、claw/relay server gates、同账号多设备验证、TURN relay-only 验证与 evidence 落盘标准。
+- 验证：硬编码 grep 无命中；`pnpm --dir android exec tsc --noEmit --pretty false` 通过。
+
+### 2026-05-29 execution
+
+- 远端 claw：DNS `claw.codewhisper.cc -> 159.75.134.56`；Tailscale `100.124.49.106` ping 通；`https://claw.codewhisper.cc:8445/derp/probe` 返回 200，说明 DERP 服务可达。
+- 远端 relay：`https://claw.codewhisper.cc/relay/health` 仍 connection reset；`http://claw.codewhisper.cc/relay/health` 被腾讯云备案拦截；当前不能证明 zterm relay 已部署。
+- 远端登录阻断：公网 SSH `root@159.75.134.56` publickey/password denied；Tailscale SSH `root@vm-0-8-ubuntu` host key/auth 未接入，无法登录服务器部署/检查 systemd/nginx/coturn。
+- 本地 relay smoke：修复 `traversal-relay-local-smoke.ts` / `traversal-relay-remote-smoke.ts` 子进程启动方式，不能用 `node <tsx shell script>`，必须直接执行 `tsx`；本地 smoke 已通过并落盘 `android/evidence/relay-turn/2026-05-29/local-smoke/result.json`。
+- 远端阻断证据已落盘：`android/evidence/relay-turn/2026-05-29/remote-preflight/blockers.json`。
+
+## 2026-05-29 fixed bottom row refresh regression
+
+- 用户纠正：此类问题必须先红测，再修复，绿测后纳入回归；已把“固定底部行上移/旧内容不替换”红测门禁写入 `.agents/skills/terminal-buffer-truth/SKILL.md`。
+- 现象假设：同一 visible absolute row / 同一 lines 容器下，底部固定行内容被替换但 `TerminalView` 的 `renderRows` memo 只依赖 `bufferLines` / `gapRanges` 容器引用，revision 变了也可能复用旧 render row，导致旧行继续显示并像向上漂移。
+- 红测：新增 `TerminalView.dynamic-refresh.test.tsx` case `rebuilds render rows when a fixed bottom row is replaced inside the same lines container`；首次运行失败，DOM 仍只有 `fixed-bottom-old`，未出现 `fixed-bottom-new`。
+- 修复：`TerminalView.tsx` 的 `renderRows` memo 依赖加入 `renderBuffer.revision`，让同容器 row replacement 在新 revision 下重建 render rows。
+- 绿测：目标红测通过；`TerminalView.dynamic-refresh.test.tsx` 全 57 条通过；`pnpm --dir android exec tsc --noEmit --pretty false` 通过。
+
+## 2026-05-29 temporary error must not auto-close tab
+
+- 现象：某些临时错误会导致 tab 自动关闭。
+- 初步真源线索：`session-context-socket-message-runtime.ts` 把 `tmux_session_unavailable` 和 `tmux_session_killed` 都归入 `onClosed`；App 只对 `SESSION_STATUS_EVENT(type='closed')` 启动远端审计并可能 `applyClosedOpenTabIntent(closeRuntimeSession=true)`，因此临时 session unavailable 会越权进入 tab close 链。
+- 红测计划：在 socket message runtime 层证明 `tmux_session_unavailable` 必须走 retryable `onFailure`，不能触发 `onClosed`，也不能清空 ws lifecycle handler 成 closed 语义。
+- 红测结果：`pnpm --dir android exec vitest run src/contexts/session-context-socket-message-runtime.test.ts -t 'tmux_session_unavailable' --reporter verbose` 首次失败，`onClosed` 被调用 1 次。
+- 修复：`session-context-socket-message-runtime.ts` 将 closed code 收窄为 `tmux_session_killed`；`tmux_session_unavailable` 现在走 `onFailure(message, true)`，不清空 socket lifecycle handler，不发 closed。
+- Skill 沉淀：`.agents/skills/terminal-buffer-truth/SKILL.md` 增加“临时错误不得自动关闭 tab”的红测门禁。
+- 绿测：目标红测通过；`session-context-socket-message-runtime.test.ts + SessionContext.ws-refresh.test.tsx + App.dynamic-refresh.test.tsx` 共 203 条通过；`pnpm --dir android exec tsc --noEmit --pretty false` 通过。
+
+## 2026-05-29 claw relay/TURN public verification
+
+- 授权后通过 Tencent Lighthouse API 给 claw 实例 `lhins-0hnaybyb` 追加 TCP 18443 / TCP 18080 / TCP 3479 / UDP 3479 入站规则。
+- 公网 relay health 已通：`https://claw.codewhisper.cc:18443/relay/health` 返回 200；测试账号配置在本地 secret，不进入仓库。
+- `traversal-relay-remote-smoke.ts` 通过：daemon presence 可见，普通 RTC 通过，relay-only RTC 通过且 local candidate type 为 `relay`。
+- Evidence: `android/evidence/relay-turn/2026-05-29/20260529T015229Z-claw-relay`
+
+### 2026-05-29 relay continued verification
+
+- 同账号多设备验证新增独立 run：`android/evidence/relay-turn/2026-05-29/20260529T020619Z-multi-device`，同一测试账号下 1 个 daemon + 2 个 client 同时在线可见；关闭 client A 后 API 反映 client A offline，同时 daemon 与 client B 仍 online。
+- 公网 RTC/TURN 复跑新增 run：`android/evidence/relay-turn/2026-05-29/20260529T020703Z-rtc-rerun`，普通 RTC 通过，relay-only 通过，relay-only local candidate type=`relay`。
+
+### 2026-05-29 global release relay config + real dual-daemon TURN
+- 用户约束：relay/config 必须走全局安装/发行路径；daemon 保持简单，只读配置；升级尽量由客户端/发行包驱动，禁止继续手改零散 daemon 配置作为最终方案。
+- 红测：`daemon-service-script.test.ts` 先失败，证明缺少 `zterm-daemon configure-relay`；真实重启又暴露 release support 缺 `wait_for_service_unloaded`、release 包漏带 `@roamhq/wrtc-darwin-arm64/wrtc.node`、release start/restart 误跑 screenshot preflight。
+- 修复：`scripts/zterm-daemon.sh` 增加全局 `configure-relay`，写 `~/.wterm/config.json -> mobile.relay` 并保留 `mobile.daemon`；`prepare-global-daemon-release.sh` 同步生成该命令，打包 wrtc native，start/restart 不再做权限 preflight。
+- 真实验证：Mac Studio + MacBook Air 均通过 `release-dist/zterm-daemon-0.1.1-darwin-arm64/bin/install-global.sh` 安装；使用测试账号 secret 经 `configure-relay` 配置，relay health `liveDaemonDevices=2`。
+- TURN 验证：对 `mac-studio` 与 `macbook-air` 分别强制 `iceTransportPolicy=relay`，data channel open，selected local candidate type 均为 `relay`。
+- Evidence: `android/evidence/relay-turn/2026-05-29/20260529T0238*global-release-real-dual-daemon/summary.json`。
+
+### 2026-05-29 daemon npm global release audit
+- 线上 `@jsonstudio/zterm-daemon@0.1.1` 已核验为旧坏包：tarball 只有 9 个文件，缺 `runtime/node_modules/node-pty`、`@roamhq/wrtc`、`@roamhq/wrtc-darwin-arm64/wrtc.node`，也缺 `configure-relay`。
+- 红测：`daemon-service-script.test.ts` 增加 npm packaging gates，先失败证明 `prepare-daemon-npm-package.mjs` 删除 `runtime/node_modules` 且 `verify-release-assets.mjs` 不检查 tarball 内容。
+- 修复：`prepare-daemon-npm-package.mjs` 保留 native runtime deps、要求 staged deps 存在、README 增加 `configure-relay --password-stdin`；`verify-release-assets.mjs` 检查 npm tarball native deps 与 support script；GitHub release note 增加 configure-relay。
+- 因 0.1.1 已发布且 npm 不允许覆盖，准备 `@jsonstudio/zterm-daemon@0.1.2`；`pnpm run release:verify` 通过，tarball sha256=`2e81ea6ba7da99880095501f7053f21167758295cedeb3726962f1677f3e992c`。
+- 真实验证：Mac Studio + MacBook Air 均用本地 `jsonstudio-zterm-daemon-0.1.2.tgz` 执行 `npm install -g`，再 `configure-relay`，relay health `liveDaemonDevices=2`，两台 relay-only RTC 均通过 local candidate type=`relay`。
+- Evidence: `android/evidence/relay-turn/2026-05-29/20260529T0302* npm-0.1.2-tarball-dual-daemon/summary.json`。
+- 当前按 Jason 门禁暂停在 `npm publish` 前；发布后必须从 registry 安装 `@jsonstudio/zterm-daemon@0.1.2` 继续双机 relay/TURN 验证，不能用本地 tarball 代替最终验证。
+
+### 2026-05-29 daemon npm registry 0.1.2 final verification
+- Jason 已发布 `@jsonstudio/zterm-daemon@0.1.2`；registry tarball sha256=`2e81ea6ba7da99880095501f7053f21167758295cedeb3726962f1677f3e992c`，内容包含 `configure-relay`、`node-pty`、`@roamhq/wrtc`、`@roamhq/wrtc-darwin-arm64/wrtc.node`。
+- Mac Studio 与 MacBook Air 均从 npm registry 执行 `npm install -g @jsonstudio/zterm-daemon@0.1.2`，`npm ls -g` 两端均显示 `@jsonstudio/zterm-daemon@0.1.2`。
+- 两端使用 `zterm-daemon configure-relay --password-stdin` 写入同一测试账号 relay 配置，未输出密码；两端 service 均 running。
+- 终验证据：relay health `liveDaemonDevices=2`；同账号设备列表包含 `mac-studio` 与 `macbook-air` 且均 connected；强制 `iceTransportPolicy=relay` 下两端 data channel open，selected local candidate type 均为 `relay`。
+- Evidence: `android/evidence/relay-turn/2026-05-29/20260529T042120Z-npm-registry-0.1.2-dual-daemon-rerun/summary.json`。
+
+## 2026-05-29 relay server npm first release prepublish gate
+- Package candidate: `@jsonstudio/zterm-relay-server@0.1.2` built at `release-dist/jsonstudio-zterm-relay-server-0.1.2.tgz`.
+- SHA256: `a020966dd3279802bedcb1cbf725d8cba4a71f851f9826d9ab77cbba4a53f699`.
+- Red/green gate rerun: `pnpm exec vitest run src/traversal-relay/relay-server-release-package.test.ts src/server/daemon-service-script.test.ts` -> 2 files / 14 tests passed.
+- Package gate rerun: `pnpm run relay:prepare-npm && pnpm run relay:verify-package` -> ok true; tarball contains only bin/runtime/smoke/docs/license/package metadata.
+- Registry gate: `npm view @jsonstudio/zterm-relay-server@0.1.2 version --registry https://registry.npmjs.org/` -> E404, so publish is the next required manual gate.
+- Evidence: `evidence/relay-server-release/2026-05-29/20260529T043200Z-prepublish-package-gate.json`.
+
+## 2026-05-29 relay server 0.1.3 security prepublish gate
+- After publishing `@jsonstudio/zterm-relay-server@0.1.2`, registry install worked, but real `/relay/health` exposed TURN credential because `buildHealthSnapshot` returned `TURN_CONFIG` directly.
+- Added red gate in `src/traversal-relay/relay-server-release-package.test.ts`; fixed unique source `buildHealthSnapshot` by using `buildHealthTurnSnapshot()` to redact public health TURN username/credential to `configured` while leaving authenticated login TURN payload unchanged.
+- Bumped relay release candidate to `0.1.3`; tarball `release-dist/jsonstudio-zterm-relay-server-0.1.3.tgz`, sha256 `0f49e6342a5fbb7ed3851d0b7d0a1746b8647722e1d5219d8ae151a67fedbbca`.
+- Verification: 15 focused tests passed; package verify passed; Claw temporarily installed local 0.1.3 tarball and health now returns `turn.username=configured`, `turn.credential=configured`, `liveDaemonDevices=2`.
+- Evidence: `evidence/relay-server-release/2026-05-29/20260529T044600Z-0.1.3-security-prepublish-gate.json`.
+
+## 2026-05-29 relay server 0.1.3 registry + Claw final verification
+- Jason published `@jsonstudio/zterm-relay-server@0.1.3`; registry tarball sha256 matches local prepublish package: `0f49e6342a5fbb7ed3851d0b7d0a1746b8647722e1d5219d8ae151a67fedbbca`.
+- Claw switched from local tarball mitigation to registry install: `npm install -g @jsonstudio/zterm-relay-server@0.1.3`; systemd `zterm-traversal-relay.service` ExecStart is `/root/.nvm/versions/node/v22.22.0/bin/zterm-relay-server`.
+- Public health verified redacted: `turn.username=configured`, `turn.credential=configured`; authenticated smoke still returns TURN config with credential redacted in CLI output.
+- Relay health after daemon service restarts: `liveDaemonDevices=2`; `/api/devices` shows `mac-studio` and `macbook-air` both connected under same smoke account.
+- Forced relay-only RTC verified against both installed daemons: `mac-studio` local candidate type `relay`; `macbook-air` local candidate type `relay`.
+- Evidence: `evidence/relay-server-release/2026-05-29/20260529T050200Z-registry-0.1.3-claw-dual-turn-summary.json`.
+
+## 2026-05-29 mobile relay priority + TURN diagnostic UI
+- Added mobile Settings Remote Access path priority controls: default remains `Tailscale -> IPv6 -> IPv4 -> Relay`, but user can move Relay/IPv4/IPv6/Tailscale and Save; `buildTraversalPlan` now orders Auto candidates from `traversalPathPriority`.
+- Added phone-side TURN relay-only diagnostic button per online relay daemon device in the relay device list. It opens RTC with `iceTransportPolicy=relay` via relay `ws/client`, then shows selected candidate types such as `local=relay`.
+- Red/green: added traversal priority test and RelayControlSection diagnostic UI test; focused 3-file test passed; `tsc --noEmit` passed; `pnpm run build:android` succeeded.
+- APK: `update-dist/zterm-0.1.3.1722.apk`; latest aliases `update-dist/zterm-latest-debug.apk` and `release-dist/zterm-latest-debug.apk`; versionCode `1031722`.
+- Evidence: `evidence/mobile-relay-ui/2026-05-29/20260529T052600Z-priority-turn-diagnostic-summary.json`.
+
+## 2026-05-29 phone adb target relay/rtc diagnosis
+- Jason asked to keep Tailscale logged in and test phone at `100.127.23.27:1234 (adb)` after direct testing failed.
+- Evidence: adb serial `100.127.23.27:1234` is connected; phone Tailscale IP is `100.127.23.27/32` on `tun0`; app version is `0.1.3.1722`.
+- Phone -> Mac daemon direct is healthy: `100.66.1.82:3333` and `100.86.84.63:3333` TCP connect and `/health` both OK. Phone -> Claw relay is healthy: `https://claw.codewhisper.cc:18443/relay/health` OK, liveDaemonDevices=2.
+- `100.127.23.27:1234` is the phone's own adb endpoint; `/health` returns empty reply, so it is not a zterm daemon endpoint and must fail for direct/WS/RTC zterm connection.
+- Phone stored config still has `traversalRelay.relayBaseUrl=https://coder2.codewhisper.cc/relay/` and `transportMode=websocket`; phone probe to coder2 relay timed out. Therefore relay/RTC UI will fail until Remote Access logs into `https://claw.codewhisper.cc:18443/relay/` and mode is Auto/RTC First.
+- Evidence: `evidence/mobile-relay-ui/2026-05-29/20260529T053600Z-phone-adb-relay-diagnosis.json`.
+
+## 2026-05-29 phone Claw relay config applied + option verification
+- Updated phone WebView localStorage via DevTools from old `coder2` relay to `https://claw.codewhisper.cc:18443/relay/` using configured test account; app version on phone is `0.1.3.1722`.
+- Final phone config: `transportMode=auto`, `traversalPathPriority=[rtc-relay,tailscale,ipv6,ipv4]`, relay devices include `mac-studio` and `macbook-air`.
+- Claw health after phone reload: `liveDaemonDevices=2`, `liveClientDevices=1`.
+- Phone WebView WS verification: `ws://100.66.1.82:3333` OK, `ws://100.86.84.63:3333` OK, `ws://100.127.23.27:1234` fails because it is phone adb, not zterm daemon.
+- Phone WebView RTC relay-only verification: `mac-studio` and `macbook-air` both OK with selected local candidate type `relay`.
+- Evidence: `evidence/mobile-relay-ui/2026-05-29/20260529T054000Z-phone-claw-options-verification.json`.
+
+## 2026-05-29 relay offline/false-positive investigation
+- User report: after turning off Tailscale, TURN diagnostic still passes, but real terminal connectivity fails and Settings shows ZTerm Android OFFLINE.
+- Hypothesis A: relay server still has live client WS, but UI local device list/status snapshot is stale or derives current client status from persisted devices instead of stream truth.
+- Hypothesis B: diagnostic exercises raw TURN/RTC only, while real connection plan still selects stale direct Tailscale/IPv4 host because saved connection lacks relayHostId/relay device binding.
+- Verification target: prove server health/device API, phone WebView state, and connection planning behavior before any code change.
+
+## 2026-05-29 relay offline/false-positive result
+- Verified relay server API: zterm-android can be online as client while screenshot/UI may show stale/offline before app launch or refresh.
+- Root cause for diagnostic-pass/real-connect-fail: real session traversal plan only used `relayHostId`; restored/current sessions often only carry stable `daemonHostId`, so no rtc-relay candidate was created and Auto fell back to Tailscale/direct paths.
+- Red test added in `android/src/lib/traversal/config.test.ts`: daemonHostId-only restored tab must produce rtc-relay first and inject `hostId=daemon-host-a`.
+- Fix: `buildTraversalPlan` now resolves relay identity from `target.relayHostId || target.daemonHostId`; `TraversalTargetSource` includes daemonHostId; `resolveTraversalConfigFromHost` passes host.daemonHostId.
+- UI copy fixed: Settings/Connection form no longer claims path order is fixed; Settings notes Save is required after changing Auto priority.
+- Built and installed `android/update-dist/zterm-0.1.3.1724.apk`; phone config verified relay-first with claw relay; relay API shows zterm-android client online after app launch.
+
+## 2026-05-29 relay label but blank render investigation
+- User report: tab header shows Relay, but terminal viewport stays blank; do not rely on disabling Tailscale, instead force Relay path for test.
+- Hypothesis A: RTC data channel opens and header marks resolvedPath=rtc-relay, but session-open/connect handshake or first buffer request is not completing over relay.
+- Hypothesis B: session transport is connected, but active session buffer head/sync is not requested/applied after RTC connect.
+- Verification target: phone runtime diagnostics + red regression for relay transport open promoting connected and applying first buffer sync.
+
+## 2026-05-29 relay transfer + foreground reconnect fix
+- Red test: `session-context-transfer-runtime.test.ts` proved image paste/file attach sent one oversized `ArrayBuffer`; RTC relay DataChannel should use <=16KiB chunks because daemon already consumes multiple binary frames under one pending transfer.
+- Fix: `session-context-transfer-runtime.ts` chunks image/file binary payloads at the single client transfer send point; server semantics unchanged.
+- Red test: `session-sync-helpers.test.ts` proved foreground `active-resume` skipped closed/error sessions as `closed-session-requires-explicit-open`; this caused app background -> foreground reconnect failure.
+- Fix: `session-transport-open-helpers.ts` treats `active-resume` as an explicit foreground recovery source for closed/error active sessions.
+- UI fix: compact path badge is a standalone small button next to the tab, not a nested button, and toggles Relay <-> Auto through `App.tsx` handlers.
+- Validation: focused vitest 82 passed; type-check passed; `build:android` passed and produced `android/update-dist/zterm-0.1.3.1727.apk`. First full build hit transient daemon mirror `external-input-echo`; single rerun passed, then full build passed.
+
+## 2026-05-29 tab badge + unified server list fix
+- User screenshot showed active path badge (`TS`) rendered as a second-row chip under the active tab. Red test added to require the path badge to be absolute-positioned; fix keeps the badge as a sibling button (no nested `<button>`) but removes it from flex layout so it no longer consumes header height.
+- Connections page now treats the server list as the single selection surface: `All servers` selects all visible groups and expands them; `Clear` clears selection; sticky `Open selected groups` appears for one or more selected groups.
+- Existing live tabs are unique truth for already-open sessions: tapping a live server card resumes the first live session instead of opening duplicates; selected live sessions are skipped when opening selected groups, and if all selected sessions are live the first live tab is resumed.
+- Validation: focused TerminalHeader/ConnectionsPage tests passed; type-check passed; full Android build passed and installed `0.1.3.1728` on `100.127.23.27:1234`.
+
+## 2026-05-29 Connections account daemon list 1729
+- User-visible issue: Connections must list daemon devices under the current relay account, then show child sessions under each daemon; legacy daemon ids should not appear as separate messy server cards.
+- Root truth: `readTraversalRelayAccountState().devices` / relay device stream is the parent daemon list; saved hosts, history groups, and live sessions are child session evidence folded into that parent by canonical daemon host id.
+- Fix: `buildConnectionsServerGroups` now seeds relay device parent rows, canonicalizes aliases including legacy `daemon-*.local-*`, keeps account daemon devices visible before sessions are known, and preserves host-only suppression unless the row came from relay account truth.
+- App wiring: `AppContent` now stores relay device snapshots from account state/device stream and passes them into `ConnectionsPage`.
+- Evidence: `android/evidence/mobile-relay-ui/2026-05-29/account-daemon-list-1729.json`; APK installed on `100.127.23.27:1234` as `0.1.3.1729`.
+
+## 2026-05-29 Connections group lifecycle / zombie daemon / Vault placeholder 1730
+- User screenshot showed stale offline `remote-smoke-daemon` / `multi-device-daemon` rows with `0 sessions` and last seen 6h ago; these are zombie daemon rows for list UX when they have no child session evidence.
+- Fix: account daemon rows are still parent truth, but stale offline rows with no child sessions are filtered after 30 minutes; recently disconnected offline daemons remain visible to avoid hiding transient disconnects.
+- Group lifecycle: entering manage/expanded mode now has an explicit `Done` exit; global `Clear` clears selection and collapses expanded groups; per-group `Clear` also collapses that group. The group action row wraps to avoid keyboard/narrow-screen overflow.
+- Vaults: bottom nav no longer silently routes Vaults back to Connections; it invokes the placeholder handler and shows `Vaults are not available yet`.
+- Evidence: `android/evidence/mobile-relay-ui/2026-05-29/group-lifecycle-zombie-vault-1730.json`; installed on `100.127.23.27:1234` as `0.1.3.1730`.
+
+## 2026-05-29 Connections group card enter regression 1731
+- Regression: group card body tap no longer entered/expanded the group because `ConnectionCard` reused one primary callback for both card body and `Open` button.
+- Fix: `ConnectionCard` now has separate card-body primary action and action-button callback; `ConnectionsPage` uses card-body tap to enter/expand group, while `Open/Enter` remains the explicit session-open action. Non-openable history-only groups show `Details` and expand instead of presenting a dead `Open` button.
+- Evidence: `android/evidence/mobile-relay-ui/2026-05-29/group-card-enter-1731.json`; installed on `100.127.23.27:1234` as `0.1.3.1731`.
+
+## 2026-05-29 Connections group card opens all tabs 1732
+- User correction: "enter group" means tapping an openable group card directly opens all tabs in that group, not just expanding/details. Previous 1731 interpretation was wrong.
+- Fix: `ConnectionsPage` now routes card-body tap and `Open` through `openGroupSessions`; openable groups call `onOpenServerGroups` with default/selected session names. Only non-openable groups use `Details` and expand.
+- Evidence: `android/evidence/mobile-relay-ui/2026-05-29/group-card-open-all-1732.json`; installed on `100.127.23.27:1234` as `0.1.3.1732`.
+
+## 2026-05-31 relay vs ts reconnect audit
+
+**TS reconnect fast, relay slow — read-only audit findings:**
+
+### TS 快速重连根因
+- 直接 WebSocket，无 relay / ICE 层
+- `session-context-transport-orchestration-runtime.ts` 有完整 exponential backoff：`RECONNECT_BASE_DELAY_MS=1200`, `RECONNECT_MAX_DELAY_MS=30000`
+- `scheduleReconnectRuntime` + `startReconnectAttemptRuntime` 组合：定时器触发后直接 queue 新 intent
+- `shouldOpenManagedSessionTransport` 阻止重复 open（`CONNECTING` 状态 check）
+- `immediate` option 允许零延迟重连
+
+### Relay 慢的根因（按层）
+
+**1. TraversalSocket（无 reconnect 机制）**
+- `TraversalSocket` 是**一次性**连接管理器，不是长连接管理器
+- `connectNext()` 只在连接失败时**按顺序尝试下一个 candidate**，没有重连逻辑
+- 没有 exponential backoff，没有 timer，没有 retry schedule
+- 所有 candidate 都失败才 `finishFailure`，之后没有恢复路径
+
+**2. WebRtcBackend（无 reconnect）**
+- ICE 协商失败：`setTimeout` 触发后直接 `close()` + `connectNext()`
+- Signal WebSocket 断开：`signalSocket.onclose` 直接调 `handlers.onclose`，整个 backend 关闭
+- `iceConnectionState === 'disconnected'` 时直接关闭，没有 retry
+- 没有 `iceConnectionState === 'failed'` 后的重新协商逻辑
+
+**3. Relay Devices Stream（无 auto-reconnect）**
+- `App.tsx` `useEffect` 只在 `bridgeSettings.traversalRelay` 变化时执行
+- socket close 后没有任何机制重新触发 `connectTraversalRelayDevicesStream`
+- 用户手动改 relay 设置才会重建 stream
+
+**4. Session reconnect scheduling（relay transport 断开后）**
+- `scheduleReconnect` 会调度新的 `PendingSessionTransportOpenIntent`
+- 但 `TraversalSocket` 没有 auto-reconnect 机制，所以新 intent 会走 `TraversalSocket` 重新 `connectNext()`
+- `TraversalSocket` 没有 backoff，直接按顺序试 candidates
+
+**5. Signal WebSocket 无 reconnect**
+- `WebRtcBackend` 的 `signalSocket` 是 `new WebSocket(url)` 后直连，无 backoff
+- signal ws close 直接导致整个 RTC backend 关闭
+
+### 关键差异总结
+
+| 维度 | TS 直接连接 | Relay (TraversalSocket) |
+|---|---|---|
+| 重连机制 | `scheduleReconnectRuntime` + backoff timer | `connectNext()` 顺序试下一个 candidate，无 timer |
+| backoff delay | 1200ms base，2^n 增长，上限 30s | 无 |
+| WebSocket 断开处理 | 走 `scheduleReconnect` 重试 | `connectNext()` 立即试下一个，无 delay |
+| ICE 失败处理 | N/A | 8s timeout 后 `close()` + `connectNext()` 下一个 candidate |
+| Signal WS 断开 | N/A | 直接 `handlers.onclose`，整个 backend 关闭，无 retry |
+| 零延迟重连 | `reconnectOptions.immediate` | 无此选项 |
+
+### 优化空间（relay 链路）
+1. `TraversalSocket.connectNext()` 增加指数退避（从当前 candidate index 开始）
+2. `WebRtcBackend` signal socket 断开后增加 reconnect（带 backoff）
+3. `WebRtcBackend` ICE `failed` 后增加重新协商（带 backoff）
+4. `App.tsx` relay device stream 增加 auto-reconnect on close
+5. Relay devices stream close 后 session reconnect 也应该受 backoff 保护
+
+
+## 2026-06-01 tab-switch slow echo audit
+
+- Symptom from user: after switching multiple tabs, input reaches remote quickly but echo/render appears much later; closing app and reopening fixes immediately.
+- Initial audit target: client tab active/inactive lifecycle, session transport runtime, buffer sync in-flight bookkeeping, renderer follow/visible range updates.
+
+
+### 2026-06-01 audit finding
+
+- Verified code path: `sendInputThroughSessionTransport` sends `input` to the active session socket and only marks `pendingInputTailRefresh`; before this fix it did not request `buffer-head` on successful input.
+- Existing tests had contradictory history: older test expected input to request head, later tests explicitly asserted "input only sends; head refresh is owned by heartbeat". That later design matches the user symptom: remote receives input, but local echo waits for the next lifecycle/head tick and follow pull, which can be delayed after multi-tab switching and queued pull bookkeeping.
+- Fix applied: first input while no pending input tail refresh exists now sends a forced `buffer-head-request` immediately after the input payload; further burst input coalesces under the same pending marker until buffer-sync catches up.
+- Validation: `pnpm exec vitest run src/contexts/session-context-pull-runtime.test.ts src/contexts/session-context-infra-runtime.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx` passed 144 tests. `pnpm run type-check` still fails only on pre-existing pane test/type errors unrelated to this change.
+
+
+### 2026-06-01 build/update result after input echo fix
+
+- Fixed pre-existing pane TypeScript blockers enough for build: `pane-android-adapter` slot now satisfies `PaneSlotDefinition.render`, `TerminalHeaderProps` exported for pane-tabs test, pane stage shell accepts null session entries in tests/empty panes.
+- Build command: `cd android && ./scripts/build-android-debug.sh` passed all prebuild gates and Gradle assembleDebug.
+- Generated update: versionName `0.1.3.1741`, versionCode `1031741`, sha256 `95df46177425cee159e1408ffe0dcfa0780209d7677c90577db7a5c9048680c7`.
+- APK/update files verified present: `native/android/app/build/outputs/apk/debug/app-debug.apk`, `update-dist/zterm-0.1.3.1741.apk`, `update-dist/zterm-latest-debug.apk`, `release-dist/zterm-latest-debug.apk`, `/Users/fanzhang/.wterm/updates/latest.json`, `/Users/fanzhang/.wterm/updates/zterm-0.1.3.1741.apk`.
+- `scripts/verify-release-assets.mjs` still fails because daemon release asset `release-dist/zterm-daemon-0.1.3-darwin-arm64.tar.gz` is missing; APK/update manifest hash was verified directly with `shasum -a 256`.
+
+
+### 2026-06-01 Mac vs Android multi-pane audit
+
+- Shared pane truth exists in `packages/shared/src/react/pane-profile.ts`, `pane-stage.tsx`, `pane-tabs.tsx`, and `workspace/workspace-model.ts`.
+- Mac implementation status: `mac/src/app/MacPaneWorkbench.tsx` uses shared `PaneStage` + `PaneTabs`; `MacAppShell` packages and builds successfully. Mac pane tests passed: `workbench.test.ts` + `MacAppShell.layout.test.tsx` + `MacPaneWorkbench*.test.tsx` = 31 tests passed.
+- Android implementation status: adapter exists (`pane-android-adapter.ts`) and adapter tests pass, but production `TerminalHeader.tsx` and `TerminalPageStageShell.tsx` still render their own pane/tab/stage DOM rather than shared `PaneTabs` / `PaneStage`.
+- Android red coverage exists and is not green: `TerminalHeader.pane-tabs.test.tsx` (11 failures), `TerminalPageStageShell.pane-stage.test.tsx` (4 failures), `shared-pane-tabs.test.tsx` (1 failure), `TerminalPage.multi-pane-decouple.test.tsx` (1 failure), `useTerminalWorkspace.split-pane.test.tsx` (2 jsdom env failures). Total observed Android pane-focused run: 19 failures / 29 passes. This is real red baseline for unfinished shared-pane alignment.
+- Static/build evidence: `pnpm --filter @zterm/mac type-check`, `pnpm --filter @zterm/mac build`, `pnpm --filter @zterm/mac package`, and `cd android && pnpm run type-check` passed. Mac app package exists at `mac/out/mac-arm64/ZTerm.app` (233M). Android APK/update exists at `android/update-dist/zterm-0.1.3.1741.apk`.
+- Gap: Mac has package build but no packaged runtime smoke in this audit; Android has APK build from prior step but pane shared red tests remain unresolved, so APK is not proof of multi-pane alignment completion.
+- Additional Mac risk found by code audit: `MacTerminalPane` uses `const lastSignatureRef = { current: '' }` inside render, so any render with an active target re-calls `runtime.connectRemote(activeTarget)`. Existing Mac tests do not cover “same active target must not reconnect on rerender”.
+
+
+## 2026-06-01 multi-pane Mac/Android closeout
+- Android Header/Stage 已接 shared PaneTabs/PaneStage；新增/修复红测覆盖 Header shared selectors、Stage shared frame、inactive pane first-frame viewport demand、workspace split isolation。
+- Android APK 升级包已生成：update-dist/zterm-0.1.3.1742.apk，versionCode 1031742，sha256 2b5b4ebe3bf9645a780683c5581a6396ad663c39030c61cb73c66a9702e12fb5。
+- Mac packaged smoke 初次发现生产 main 无条件 openDevTools，导致误判/遮挡；已移除生产 DevTools 自动打开并重包。
+- Mac packaged app 真实启动证据：mac/evidence/2026-06-01-multi-pane-smoke/final-packaged-multipane-visible.png；Computer Use accessibility tree 看到 empty/flowy/zterm 三 pane。
+
+## 2026-06-01 correction: iTerm2-style split requirement
+- 用户纠正：分屏不是 flat 多列 pane；应像 iTerm2 一样支持任意横/竖递归分屏，并可拖拽控制宽度/高度。
+- 当前代码差距：`packages/shared/src/workspace/workspace-model.ts` 与 `mac/src/lib/shell-workspace.ts` 都是 `panes[] + size` flat list；`PaneStage` / `ShellWorkspace` 只渲染横向 row 和 vertical divider，无法表达 nested split tree、horizontal divider、局部 resize。
+- 下一步必须先补红测：split right / split down / nested split / resize vertical divider / resize horizontal divider / close pane tree collapse。
+
+### 2026-06-01 iTerm2 split-tree implementation continuation
+
+- Fixed Mac ShellWorkspace split-tree integration bug: shared `splitTreePane` expects `{ tree, activePaneId }`, while Mac state owns `layout`; calls now adapt via `workspaceSplitTree()`.
+- Fixed pane id truth mismatch: shared `splitTreePane` now accepts optional explicit `newPaneId`, so Mac layout leaf ids match real `ShellWorkspacePane.id` instead of generating unrelated pane ids.
+- Removed Mac ShellWorkspace split cap (`MAX_PANES=3`) for iTerm2-style recursive splits; added red test proving 4 panes can be created and Split remains enabled.
+- Added shared package to `vitest.workspace.ts`; removed `packages/shared` local Vitest devDependency because Vitest 1.6.1 inside shared plus root 1.6.0 caused workspace "No test suite found" failures.
+- Mac package authorization root cause: `electron-builder --mac dir` auto-discovered a distribution signing identity and invoked keychain-backed signing every build. Fix: `mac/package.json` package script sets `CSC_IDENTITY_AUTO_DISCOVERY=false` and build config `mac.identity=null`, verified output says `skipped macOS code signing`.
+
+Validation evidence:
+- `pnpm exec vitest run --project @zterm/shared src/workspace/split-tree-workspace.test.ts --reporter=verbose` -> 5/5 pass.
+- `pnpm exec vitest run mac/src/pages/ShellWorkspace.split-tree.test.tsx mac/src/app/MacPaneWorkbench.test.tsx mac/src/app/MacPaneWorkbench.split.test.tsx mac/src/app/MacPaneWorkbench.pane-ratios.test.tsx --reporter=verbose` -> 20/20 pass.
+- `pnpm --filter @zterm/mac type-check` -> pass.
+- `pnpm --filter @zterm/mac package` -> pass; package at `mac/out/mac-arm64/ZTerm.app`; output includes `skipped macOS code signing  reason=identity explicitly is set to null`.
+- `pnpm --filter @zterm/android build && pnpm --filter @zterm/android build:android` -> pass; APK `android/update-dist/zterm-0.1.3.1744.apk`, sha256 `0687eb4ca05cc5bfb9bd48d286a78a193609c4e169250a9037dbd1d6c343e66e`.

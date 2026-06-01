@@ -27,8 +27,7 @@
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "vitest": "^1.6.0"
+    "@types/react": "^19.0.0"
   },
   "dependencies": {
     "@jsonstudio/wtermmod-react": "^0.1.9"
