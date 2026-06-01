@@ -298,3 +298,6 @@
 
 ## 2026-06-01 Mac render anti-regression
 - Never fix Mac terminal black screen by `TerminalHandle.write` snapshotting projection text. Mac render must consume canonical `TerminalRenderBufferProjection` as DOM rows via shared renderer helpers so scrollback, colors, and live revisions remain true. Keep wtermmod only as input/resize proxy unless it can consume canonical buffer semantics directly.
+
+## 2026-06-01 Mac render must not resize tmux
+- Mac projection render must not include hidden/1px wterm proxies or call `onResize` from render geometry. Hidden autoResize can shrink tmux cols to 1 and produce vertical text. Follow Android: renderer consumes projection; tmux resize only comes from explicit viewport/width owner paths.

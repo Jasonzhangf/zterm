@@ -2592,3 +2592,11 @@ Validation evidence:
 - Also removed fake in-app macOS traffic lights from `ShellWorkspace` topbar; real titlebar already has native window controls.
 - Layout fix: shell root/stage/split node now carry `width:100%` and min-size guards so maximized windows use the full viewport instead of shrinking to content width.
 - Validation: shared Mac terminal + split-tree tests 7/7 pass; ShellWorkspace split tests 8/8 pass; `pnpm --filter @zterm/mac type-check` pass; package pass and global install launched `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
+
+### 2026-06-01 Mac projection input/resize correction
+
+- User correction: render must not change tmux; Mac should follow Android's current model where rendering consumes projection and does not resize tmux from hidden/proxy geometry.
+- Confirmed bad path: hidden/1px wterm proxy could behave like a mask and its autoResize could emit tiny cols/rows, corrupting tmux layout into vertical text.
+- Fix: removed hidden wterm proxy entirely. `MacTerminalView` visible DOM now owns focus/keyboard/paste input; render remains projection DOM rows; no automatic `onResize` from render layer.
+- Red test locks: no legacy wterm proxy, no aria-hidden layer, visible DOM input emits `onInput`, and rendering does not call `onResize`.
+- Validation: shared Mac terminal + split-tree tests 8/8 pass; ShellWorkspace split tests 8/8 pass; `pnpm --filter @zterm/mac type-check` pass; package pass; global install launched `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
