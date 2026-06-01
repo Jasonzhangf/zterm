@@ -191,3 +191,26 @@
 - [2026-05-23] 多 pane 非焦点刷新唯一真源在 `SessionContext lifecycle` 的 live target tick 门禁：visible pane 进入 `liveSessionIds` 后，即使 connected 且尚无 `lastServerActivityAt`，也必须允许 active tick 请求 head；否则非焦点 pane 会等到点击/激活后才刷新。禁止在 daemon/renderer 做补偿。
 - [2026-05-28] Remote screenshot 权限主体唯一真源：macOS TCC 不能由 Node 进程直接触发；安装态必须生成稳定的原生 `zterm-daemon` Mach-O 作为截图主体，Node daemon 只能通过 `ZTERM_DAEMON_NATIVE ... capture-screen` 调用它。`install-service` 只在原生二进制缺失或源码更新时重建，避免每次安装被系统当成新主体反复授权；禁止恢复 helper socket / Codex Mac app / GUI helper 路径。
 - [2026-05-28] Remote screenshot 传输保存真源：file-transfer 每个 chunk 是独立 base64，客户端不能直接拼接 chunk 字符串；必须逐 chunk decode 为 bytes，按 chunkIndex 合并 bytes 后重新编码成单一 base64 给 Android Filesystem.writeFile。预览使用 bytes 能成功不代表保存 payload 合法。
+- [2026-05-29] `tmux_session_unavailable` 是临时不可用错误，只能走 retryable `onFailure` / reconnect，禁止映射成 `SESSION_STATUS_EVENT(type='closed')`；否则 App 的 remote open-tab audit 会把临时错误放大成 tab prune。只有明确终止语义（如当前 `tmux_session_killed` 分支）才允许进入 closed/tab close 链。
+
+- [2026-05-29] Relay/TURN daemon 配置的唯一交付路径必须是全局发行包：`install-global.sh` 安装 `~/.local/bin/zterm-daemon`，再用 `zterm-daemon configure-relay` 写 `~/.wterm/config.json -> mobile.relay`；daemon 只读取配置，不承担账号/配置 UX。release staging 必须打包 `@roamhq/wrtc` 与当前平台 `@roamhq/wrtc-<platform>-<arch>/wrtc.node`，否则安装态 daemon 会因 RTC native module 缺失无法启动。
+
+- [2026-05-29] `@jsonstudio/zterm-daemon@0.1.1` registry 包已确认缺 native runtime deps 与 `configure-relay`，不能作为全局安装真源；修复版必须用新 npm 版本发布（当前候选 `0.1.2`）。daemon npm tarball verify 必须检查 `runtime/node_modules/node-pty`、`runtime/node_modules/@roamhq/wrtc`、`runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node` 与 `support/zterm-daemon.sh` 中的 `configure-relay`。
+
+- [2026-05-29] `@jsonstudio/zterm-daemon@0.1.2` 已完成 registry 全局安装闭环验证：Mac Studio 与 MacBook Air 均从 npm registry 安装，使用 `zterm-daemon configure-relay --password-stdin` 配置同一测试账号，relay health 显示 `liveDaemonDevices=2`，两端强制 TURN relay-only RTC 均 data channel open 且 local candidate type=`relay`。最终证据在 `android/evidence/relay-turn/2026-05-29/20260529T042120Z-npm-registry-0.1.2-dual-daemon-rerun/summary.json`。
+
+- 2026-05-29: Relay server first production npm release is `@jsonstudio/zterm-relay-server@0.1.3` (not 0.1.2). `0.1.2` published successfully but public `/relay/health` exposed TURN credential; unique fix was `buildHealthSnapshot -> buildHealthTurnSnapshot()` so public health only reports configured status while authenticated login still returns TURN credentials. Claw runs registry-installed `0.1.3` via `zterm-traversal-relay.service` ExecStart `/root/.nvm/versions/node/v22.22.0/bin/zterm-relay-server`; verified health redaction, smoke login, same-account `mac-studio` + `macbook-air` daemon visibility, and forced relay-only RTC with local candidate type `relay` on both hosts. Evidence: `android/evidence/relay-server-release/2026-05-29/20260529T050200Z-registry-0.1.3-claw-dual-turn-summary.json`.
+
+## 2026-05-29 Connections relay account daemon truth
+- Connections 的 server 列表真源是当前 relay account 下的 daemon devices；saved host/history/live session 只能作为该 daemon 的子 session 证据折叠进去，不能反过来用 legacy daemon id 或 bridge endpoint 生成重复父卡片。
+
+## 2026-05-29 Connections group lifecycle and zombie daemon rule
+- Relay account daemon 父列表不能展示长期离线且没有任何子 session 证据的 zombie 行；当前规则是 offline + 0 sessions + lastSeen 超过 30 分钟才从 Connections UI 过滤，短暂离线仍保留。Connections group 管理态必须有显式 `Done` 出口，`Clear` 必须同时清 selection 和 expanded state，避免用户长按/展开后卡在管理态。
+
+## 2026-05-31 Relay reconnect optimization
+
+- [2026-05-31] 默认 traversal path priority 已改为 `[ipv6, tailscale, ipv4, rtc-relay]`；user-selected `traversalPathPriority` 仍然最高优先。直连路径（ipv6/tailscale/ipv4）使用 WebSocket，relay 使用 WebRTC。
+- [2026-05-31] `TraversalSocket` 已增加 reconnect runtime：`RECONNECT_BASE_DELAY_MS=300`，`RECONNECT_MAX_DELAY_MS=5000`，exponential backoff；成功 open 后重置 attempt，client close 取消 timer。candidate 仍按 priority 顺序重试，从 `nextIndex=0` 重新开始。
+- [2026-05-31] `connectTraversalRelayDevicesStream` 已增加 `onOpen`/`onClose` 回调；App 级 relay device stream 有独立 auto-reconnect loop（`300ms → 5000ms` backoff），generation-based cancel，不改 session context。
+- [2026-05-31] Direct WebRTC over ipv6/ipv4 当前不实现：`buildTraversalPlan` 的 RTC candidate 仅当 `relaySignalUrl` 存在时生成，且需要 `relayHostId` 做 peer identity；`rtc-bridge.ts` server 仅处理 relay signal websocket 上的 signaling，无 direct peer-to-peer signaling 协议。
+- 证据：`android/evidence/relay-reconnect/README.md`

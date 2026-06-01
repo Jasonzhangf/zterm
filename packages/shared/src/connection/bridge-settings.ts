@@ -57,6 +57,7 @@ export interface BridgeSettings {
   servers: BridgeServerPreset[];
   defaultServerId?: string;
   traversalRelay?: TraversalRelayClientSettings;
+  traversalPathPriority?: ('tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay')[];
 }
 
 const MIN_TERMINAL_CACHE_LINES = 200;

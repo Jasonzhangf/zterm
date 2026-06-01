@@ -17,10 +17,16 @@ const CLOSED = 3;
 
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
 const RTC_CANDIDATE_TIMEOUT_MS = 8000;
+const RECONNECT_BASE_DELAY_MS = 300;
+const RECONNECT_MAX_DELAY_MS = 5000;
 
 type IceCandidateStatsLike = {
   candidateType?: string;
 };
+
+function computeTraversalReconnectDelay(attempt: number) {
+  return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
+}
 
 type Backend = {
   readonly readyState: number;
@@ -297,6 +303,10 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private closedByClient = false;
 
+  private reconnectAttempt = 0;
+
+  private reconnectTimer: number | null = null;
+
   public constructor(
     target: TraversalTargetSource,
     settings: TraversalSettingsSource,
@@ -350,6 +360,32 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.onclose?.({ code: 1006, reason });
   }
 
+  private clearReconnectTimer() {
+    if (this.reconnectTimer === null) {
+      return;
+    }
+    window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  private scheduleReconnect(reason: string) {
+    if (this.closedByClient || this.reconnectTimer !== null) {
+      return;
+    }
+    this.diagnostics.stage = 'connecting';
+    this.diagnostics.reason = reason;
+    const delay = computeTraversalReconnectDelay(this.reconnectAttempt);
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.closedByClient) {
+        return;
+      }
+      this.nextIndex = 0;
+      this.connectNext();
+    }, delay);
+  }
+
   private connectNext() {
     if (this.closedByClient) {
       return;
@@ -392,6 +428,8 @@ export class TraversalSocket implements BridgeTransportSocket {
         settled = true;
         advanced = true;
         window.clearTimeout(timer);
+        this.clearReconnectTimer();
+        this.reconnectAttempt = 0;
         this.markAttempt(candidate, 'open', true);
         this.diagnostics.stage = 'open';
         this.diagnostics.reason = undefined;
@@ -422,6 +460,17 @@ export class TraversalSocket implements BridgeTransportSocket {
           this.connectNext();
           return;
         }
+        if (settled && !this.closedByClient) {
+          const reason = event?.reason || `${candidate.kind} closed`;
+          this.markAttempt(candidate, 'closed', true, reason);
+          this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
+          if (event?.reason) {
+            this.diagnostics.reason = event.reason;
+          }
+          this.onclose?.(event);
+          this.scheduleReconnect(reason);
+          return;
+        }
         this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
         if (event?.reason) {
           this.diagnostics.reason = event.reason;
@@ -443,6 +492,7 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   public close(code?: number, reason?: string) {
     this.closedByClient = true;
+    this.clearReconnectTimer();
     this.diagnostics.stage = 'closed';
     this.backend?.close(code, reason);
   }

@@ -359,7 +359,9 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
 export function connectTraversalRelayDevicesStream(options: {
   account: TraversalRelayAccountState;
   onDevices: (devices: TraversalRelayDeviceSnapshot[]) => void;
+  onOpen?: () => void;
   onError?: (message: string) => void;
+  onClose?: (event: CloseEvent) => void;
   onDebugRequest?: (payload: RelayDebugRequestPayload, socket: WebSocket) => void;
 }) {
   const relay = options.account.relaySettings;
@@ -376,6 +378,7 @@ export function connectTraversalRelayDevicesStream(options: {
 
   const socket = new WebSocket(url.toString());
   socket.onopen = () => {
+    options.onOpen?.();
     socket.send(JSON.stringify({
       type: 'device-meta',
       payload: {
@@ -412,6 +415,9 @@ export function connectTraversalRelayDevicesStream(options: {
   };
   socket.onerror = () => {
     options.onError?.('relay device stream websocket error');
+  };
+  socket.onclose = (event) => {
+    options.onClose?.(event);
   };
   return socket;
 }

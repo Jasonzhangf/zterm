@@ -35,6 +35,7 @@ export interface TraversalSettingsSource {
   turnCredential?: BridgeSettings['turnCredential'];
   transportMode?: BridgeSettings['transportMode'];
   traversalRelay?: BridgeSettings['traversalRelay'];
+  traversalPathPriority?: import('../bridge-settings').TraversalPath[];
 }
 
 export interface TraversalTargetSource {
@@ -42,6 +43,7 @@ export interface TraversalTargetSource {
   bridgePort: Host['bridgePort'];
   authToken?: Host['authToken'];
   relayHostId?: Host['relayHostId'];
+  daemonHostId?: Host['daemonHostId'];
   tailscaleHost?: Host['tailscaleHost'];
   ipv6Host?: Host['ipv6Host'];
   ipv4Host?: Host['ipv4Host'];

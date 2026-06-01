@@ -31,6 +31,30 @@ export {
   upsertBridgeServer,
 };
 export type { BridgeServerPreset, BridgeSettings, TraversalRelayClientSettings };
+export type TraversalPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+
+export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['ipv6', 'tailscale', 'ipv4', 'rtc-relay'];
+
+export function normalizeTraversalPathPriority(input: unknown): TraversalPath[] {
+  const seen = new Set<TraversalPath>();
+  const next: TraversalPath[] = [];
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (item === 'tailscale' || item === 'ipv6' || item === 'ipv4' || item === 'rtc-relay') {
+        if (!seen.has(item)) {
+          seen.add(item);
+          next.push(item);
+        }
+      }
+    }
+  }
+  for (const item of DEFAULT_TRAVERSAL_PATH_PRIORITY) {
+    if (!seen.has(item)) {
+      next.push(item);
+    }
+  }
+  return next;
+}
 
 export function removeBridgeServer(settings: BridgeSettings, serverId: string): BridgeSettings {
   const servers = sortBridgeServers(settings.servers.filter((server) => server.id !== serverId));

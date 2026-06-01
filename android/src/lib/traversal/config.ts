@@ -1,4 +1,4 @@
-import type { BridgeSettings } from '../bridge-settings';
+import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority, type BridgeSettings } from '../bridge-settings';
 import { resolveBridgeEndpoint } from '@zterm/shared';
 import { buildBridgeUrlFromTarget } from '../bridge-url';
 import { isLikelyTailscaleHost } from '../network-target';
@@ -148,10 +148,17 @@ export function buildTraversalPlan(
   const seenWsUrls = new Set<string>();
 
   if (mode !== 'webrtc') {
-    addDirectCandidate(wsCandidates, seenWsUrls, 'tailscale', target.tailscaleHost || '', target.bridgePort, target.authToken);
-    addDirectCandidate(wsCandidates, seenWsUrls, 'ipv6', target.ipv6Host || '', target.bridgePort, target.authToken);
-    addDirectCandidate(wsCandidates, seenWsUrls, 'ipv4', target.ipv4Host || '', target.bridgePort, target.authToken);
-
+    const directCandidates = {
+      tailscale: target.tailscaleHost || '',
+      ipv6: target.ipv6Host || '',
+      ipv4: target.ipv4Host || '',
+    };
+    for (const path of normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY)) {
+      if (path === 'rtc-relay') {
+        continue;
+      }
+      addDirectCandidate(wsCandidates, seenWsUrls, path, directCandidates[path], target.bridgePort, target.authToken);
+    }
     const legacyPath = inferDirectPath(target.bridgeHost);
     if (legacyPath) {
       addDirectCandidate(wsCandidates, seenWsUrls, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
@@ -162,7 +169,7 @@ export function buildTraversalPlan(
   if (mode !== 'websocket') {
     const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
-    const relayHostId = target.relayHostId?.trim() || '';
+    const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || '';
     const iceServers = buildIceServers(settings);
     const signalUrl = normalizeSignalUrl(
       relaySignalUrl || target.signalUrl?.trim() || settings.signalUrl?.trim() || '',
@@ -191,7 +198,8 @@ export function buildTraversalPlan(
 
   return {
     mode,
-    candidates: [...wsCandidates, ...rtcCandidates],
+    candidates: normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY)
+      .flatMap((path) => [...wsCandidates, ...rtcCandidates].filter((candidate) => candidate.path === path)),
   };
 }
 
@@ -217,6 +225,7 @@ export function resolveTraversalConfigFromHost(
       turnUsername: settings.turnUsername,
       turnCredential: settings.turnCredential,
       transportMode: settings.transportMode,
+      traversalPathPriority: settings.traversalPathPriority,
       traversalRelay: settings.traversalRelay,
     } satisfies TraversalSettingsSource,
   };

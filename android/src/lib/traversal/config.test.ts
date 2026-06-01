@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTraversalPlan } from './config';
 
 describe('buildTraversalPlan', () => {
-  it('orders auto paths as tailscale -> ipv6 -> ipv4 -> relay', () => {
+  it('orders auto paths as ipv6 -> tailscale -> ipv4 -> relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -25,10 +25,56 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'tailscale',
       'ipv6',
+      'tailscale',
       'ipv4',
       'rtc-relay',
+    ]);
+  });
+
+  it('orders auto paths from the user selected traversal priority', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '203.0.113.10',
+        bridgePort: 3333,
+        authToken: 'token',
+        tailscaleHost: 'mac.tailnet.ts.net',
+        ipv6Host: '240e:1234::10',
+        ipv4Host: '203.0.113.10',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalPathPriority: ['rtc-relay', 'tailscale', 'ipv4', 'ipv6'],
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'rtc-relay',
+      'tailscale',
+      'ipv4',
+      'ipv6',
     ]);
   });
 
@@ -193,6 +239,48 @@ describe('buildTraversalPlan', () => {
         credential: 'turn-pass',
       }],
     }));
+  });
+
+  it('uses daemonHostId as the relay host identity for restored open tabs', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        authToken: 'token-a',
+        daemonHostId: 'daemon-host-a',
+        transportMode: 'auto',
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalPathPriority: ['rtc-relay', 'tailscale', 'ipv6', 'ipv4'],
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates[0]).toMatchObject({
+      kind: 'rtc',
+      path: 'rtc-relay',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+    });
   });
 
   it('fails fast in webrtc relay mode when no relay daemon device is selected', () => {
