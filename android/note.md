@@ -2575,3 +2575,11 @@ Validation evidence:
 - Fix: every `ShellWorkspace` pane now shows persistent `Pane N` badge, and hovering a move-menu target sets `data-move-target-hover=true` plus blue border/glow on that target pane.
 - Red test: `ShellWorkspace.split-tree.test.tsx` covers pane labels and hover-target blue highlight state.
 - Validation: `pnpm exec vitest run mac/src/pages/ShellWorkspace.split-tree.test.tsx --reporter=verbose` -> 7/7 pass; `pnpm --filter @zterm/mac type-check` -> pass; `pnpm --filter @zterm/mac package` -> pass; global install updated `/Applications/ZTerm.app` and launched PID from `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
+
+### 2026-06-01 Mac daemon content black screen fix
+
+- User feedback: split pane UI rendered, but daemon/tmux terminal content stayed black.
+- Root cause verified with red test: `MacTerminalView` accepted `TerminalRenderBufferProjection` but never wrote `projection.lines` into the underlying wtermmod `Terminal` instance, so runtime render truth arrived but was not painted.
+- Fix: `MacTerminalView` now converts projection cells to text and writes `\x1b[H\x1b[2J...` to wterm on new projection revision, including pending write flush on terminal ready.
+- Red test added: `packages/shared/src/terminal/mac-terminal-view.test.tsx` locks projection -> wterm.write behavior.
+- Validation: shared mac terminal + split tree tests 6/6 pass; Mac ShellWorkspace split tests 7/7 pass; `pnpm --filter @zterm/mac type-check` pass; `pnpm --filter @zterm/mac package` pass; global install updated `/Applications/ZTerm.app`, launched PID `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.

@@ -292,3 +292,6 @@
 - Mac production split truth is now `ShellWorkspaceState.layout` as shared split tree (`row|column`, ratio, recursive first/second). Mac callers must adapt to shared `{ tree, activePaneId }` and pass explicit `newPaneId` so layout leaf ids equal real pane ids.
 - iTerm2-style split has no fixed 3-pane cap in `ShellWorkspace`; red tests must cover right split, down split, nested row+column, divider orientation, and >3 panes.
 - Mac local packaging must not auto-discover signing identities. Use `CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir` plus `build.mac.identity=null`; otherwise electron-builder may hit Keychain authorization on every build.
+
+## 2026-06-01 Mac terminal projection render truth
+- `MacTerminalView` must actively bridge `TerminalRenderBufferProjection.lines` into wtermmod via `TerminalHandle.write`; merely mounting `@jsonstudio/wtermmod-react` with cols/rows creates a black terminal with input plumbing but no daemon content. Red tests must assert projection changes call `write()`.
