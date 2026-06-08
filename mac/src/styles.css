@@ -1926,3 +1926,174 @@ button {
 .shell-context-item:disabled:hover {
   background: transparent;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * TerminalSlot — Mac terminal-first workbench surface.
+ * These classes previously rendered with no CSS, which collapsed the terminal
+ * surface height and clipped the last row. Keep this block as the single
+ * source of truth for `.terminal-slot-shell` + `.terminal-surface-shell`.
+ * ──────────────────────────────────────────────────────────────────────── */
+.slot-stack.terminal-slot-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  background: linear-gradient(180deg, #0a0e15 0%, #0b0f17 100%);
+  border-radius: 14px;
+  border: 1px solid rgba(170, 188, 214, 0.08);
+  box-sizing: border-box;
+}
+
+.terminal-meta-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(15, 20, 30, 0.78);
+  border: 1px solid rgba(170, 188, 214, 0.08);
+  color: #c5d3eb;
+  font-size: 12px;
+}
+
+.terminal-meta-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.terminal-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #edf2fa;
+  background: rgba(140, 160, 200, 0.18);
+  border: 1px solid rgba(170, 188, 214, 0.2);
+  text-transform: uppercase;
+}
+
+.terminal-status-pill.connected {
+  background: rgba(46, 160, 110, 0.22);
+  border-color: rgba(74, 222, 158, 0.4);
+  color: #b8f5d8;
+}
+
+.terminal-status-pill.connecting,
+.terminal-status-pill.idle {
+  background: rgba(96, 138, 220, 0.2);
+  border-color: rgba(122, 160, 220, 0.36);
+  color: #cfe0ff;
+}
+
+.terminal-status-pill.error {
+  background: rgba(170, 50, 64, 0.28);
+  border-color: rgba(220, 90, 110, 0.4);
+  color: #fbd0d6;
+}
+
+.terminal-target-label {
+  color: #dbe6f8;
+  font-weight: 700;
+}
+
+.terminal-error-banner {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: rgba(153, 45, 58, 0.22);
+  color: #ffd0d6;
+  border: 1px solid rgba(219, 88, 103, 0.34);
+  font-size: 12px;
+}
+
+.terminal-surface-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #05070c;
+  border: 1px solid rgba(170, 188, 214, 0.08);
+}
+
+.terminal-surface.live {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-surface.live > .mac-terminal-projection {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terminal-empty-state {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: #d7e2f2;
+  text-align: center;
+}
+
+.terminal-empty-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.terminal-empty-copy {
+  font-size: 12px;
+  color: #93a3bb;
+  max-width: 420px;
+  line-height: 1.55;
+}
+
+.terminal-empty-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #96abc7;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.ghost-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  border: 1px solid rgba(170, 188, 214, 0.18);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.ghost-button:hover {
+  color: #f8fafc;
+  border-color: rgba(125, 211, 252, 0.55);
+  background: rgba(14, 116, 144, 0.18);
+}

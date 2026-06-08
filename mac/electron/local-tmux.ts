@@ -7,6 +7,23 @@ const LOCAL_TMUX_EVENT = 'zterm:local-tmux-event';
 const ACTIVE_POLL_INTERVAL_MS = 33;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
+const DEFAULT_TERMINAL_COLOR = 256;
+const TRUECOLOR_COLOR_FLAG = 0x01000000;
+const FLAG_BOLD = 0x01;
+const FLAG_DIM = 0x02;
+const FLAG_ITALIC = 0x04;
+const FLAG_UNDERLINE = 0x08;
+const FLAG_REVERSE = 0x20;
+const FLAG_INVISIBLE = 0x40;
+const FLAG_STRIKETHROUGH = 0x80;
+
+interface LocalTerminalCell {
+  char: number;
+  fg: number;
+  bg: number;
+  flags: number;
+  width: number;
+}
 
 interface LocalBufferSyncRequestPayload {
   knownRevision: number;
@@ -26,7 +43,7 @@ interface LocalTerminalBufferPayload {
   cols: number;
   rows: number;
   cursorKeysApp: boolean;
-  lines: Array<{ index: number; cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> }>;
+  lines: Array<{ index: number; cells: LocalTerminalCell[] }>;
 }
 
 interface LocalBufferHeadPayload {
@@ -40,10 +57,10 @@ interface LocalBufferHeadPayload {
 interface LocalTmuxCapturePayload {
   cols: number;
   rows: number;
-  viewport: Array<Array<{ char: number; fg: number; bg: number; flags: number; width: number }>>;
+  viewport: LocalTerminalCell[][];
   cursor: { row: number; col: number; visible: boolean };
   cursorKeysApp: boolean;
-  scrollbackLines?: string[];
+  scrollbackLines?: LocalTerminalCell[][];
   scrollbackStartIndex?: number;
 }
 
@@ -122,7 +139,13 @@ function fingerprintCapture(snapshot: LocalTmuxCapturePayload) {
   hash = updateHash(hash, snapshot.cursorKeysApp ? 1 : 0);
   hash = updateHash(hash, snapshot.scrollbackStartIndex ?? -1);
   for (const line of snapshot.scrollbackLines || []) {
-    hash = updateHashWithString(hash, line);
+    for (const cell of line) {
+      hash = updateHash(hash, cell.char);
+      hash = updateHash(hash, cell.fg);
+      hash = updateHash(hash, cell.bg);
+      hash = updateHash(hash, cell.flags);
+      hash = updateHash(hash, cell.width);
+    }
     hash = updateHash(hash, 10);
   }
   for (const row of snapshot.viewport) {
@@ -161,80 +184,157 @@ function isWideCodePoint(codePoint: number) {
 function createBlankCell() {
   return {
     char: 32,
-    fg: 256,
-    bg: 256,
+    fg: DEFAULT_TERMINAL_COLOR,
+    bg: DEFAULT_TERMINAL_COLOR,
     flags: 0,
     width: 1,
   };
 }
 
-function lineToCells(line: string, cols: number) {
-  const cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> = [];
-
-  for (const char of Array.from(line)) {
-    const codePoint = char.codePointAt(0) || 32;
-    const width = isWideCodePoint(codePoint) ? 2 : 1;
-    if (width === 2 && cells.length <= cols - 2) {
-      cells.push({
-        char: codePoint,
-        fg: 256,
-        bg: 256,
-        flags: 0,
-        width: 2,
-      });
-      cells.push({
-        char: 32,
-        fg: 256,
-        bg: 256,
-        flags: 0,
-        width: 0,
-      });
-      continue;
-    }
-
-    if (cells.length >= cols) {
-      break;
-    }
-
-    cells.push({
-      char: codePoint,
-      fg: 256,
-      bg: 256,
-      flags: 0,
-      width: 1,
-    });
-  }
-
-  while (cells.length < cols) {
-    cells.push(createBlankCell());
-  }
-
-  return cells.slice(0, cols);
+interface AnsiStyleState {
+  fg: number;
+  bg: number;
+  flags: number;
 }
 
-interface WrappedLineResult {
-  segments: string[];
+interface WrappedCellResult {
+  segments: LocalTerminalCell[][];
   cursorSegmentIndex?: number;
   cursorSegmentCol?: number;
 }
 
-function wrapLineToSegments(line: string, cols: number, cursorCol?: number): WrappedLineResult {
+function encodePackedTruecolorColor(red: number, green: number, blue: number) {
+  const r = Math.max(0, Math.min(255, Math.floor(red || 0)));
+  const g = Math.max(0, Math.min(255, Math.floor(green || 0)));
+  const b = Math.max(0, Math.min(255, Math.floor(blue || 0)));
+  return TRUECOLOR_COLOR_FLAG | (r << 16) | (g << 8) | b;
+}
+
+function createDefaultAnsiStyle(): AnsiStyleState {
+  return { fg: DEFAULT_TERMINAL_COLOR, bg: DEFAULT_TERMINAL_COLOR, flags: 0 };
+}
+
+function applyAnsiSgr(style: AnsiStyleState, rawParams: string) {
+  const params = rawParams.length === 0
+    ? [0]
+    : rawParams.split(';').map((part) => Number.parseInt(part || '0', 10));
+  for (let index = 0; index < params.length; index += 1) {
+    const code = Number.isFinite(params[index]) ? params[index]! : 0;
+    if (code === 0) {
+      style.fg = DEFAULT_TERMINAL_COLOR;
+      style.bg = DEFAULT_TERMINAL_COLOR;
+      style.flags = 0;
+    } else if (code === 1) {
+      style.flags |= FLAG_BOLD;
+    } else if (code === 2) {
+      style.flags |= FLAG_DIM;
+    } else if (code === 3) {
+      style.flags |= FLAG_ITALIC;
+    } else if (code === 4) {
+      style.flags |= FLAG_UNDERLINE;
+    } else if (code === 7) {
+      style.flags |= FLAG_REVERSE;
+    } else if (code === 8) {
+      style.flags |= FLAG_INVISIBLE;
+    } else if (code === 9) {
+      style.flags |= FLAG_STRIKETHROUGH;
+    } else if (code === 22) {
+      style.flags &= ~(FLAG_BOLD | FLAG_DIM);
+    } else if (code === 23) {
+      style.flags &= ~FLAG_ITALIC;
+    } else if (code === 24) {
+      style.flags &= ~FLAG_UNDERLINE;
+    } else if (code === 27) {
+      style.flags &= ~FLAG_REVERSE;
+    } else if (code === 28) {
+      style.flags &= ~FLAG_INVISIBLE;
+    } else if (code === 29) {
+      style.flags &= ~FLAG_STRIKETHROUGH;
+    } else if (code >= 30 && code <= 37) {
+      style.fg = code - 30;
+    } else if (code === 39) {
+      style.fg = DEFAULT_TERMINAL_COLOR;
+    } else if (code >= 40 && code <= 47) {
+      style.bg = code - 40;
+    } else if (code === 49) {
+      style.bg = DEFAULT_TERMINAL_COLOR;
+    } else if (code >= 90 && code <= 97) {
+      style.fg = code - 90 + 8;
+    } else if (code >= 100 && code <= 107) {
+      style.bg = code - 100 + 8;
+    } else if (code === 38 || code === 48) {
+      const target = code === 38 ? 'fg' : 'bg';
+      const mode = params[index + 1];
+      if (mode === 5 && Number.isFinite(params[index + 2])) {
+        style[target] = Math.max(0, Math.min(255, params[index + 2]!));
+        index += 2;
+      } else if (
+        mode === 2
+        && Number.isFinite(params[index + 2])
+        && Number.isFinite(params[index + 3])
+        && Number.isFinite(params[index + 4])
+      ) {
+        style[target] = encodePackedTruecolorColor(params[index + 2]!, params[index + 3]!, params[index + 4]!);
+        index += 4;
+      }
+    }
+  }
+}
+
+function cloneAnsiCell(codePoint: number, width: number, style: AnsiStyleState): LocalTerminalCell {
+  return {
+    char: codePoint,
+    fg: style.fg,
+    bg: style.bg,
+    flags: style.flags,
+    width,
+  };
+}
+
+function padCells(cells: LocalTerminalCell[], cols: number) {
+  const padded = cells.slice(0, cols);
+  while (padded.length < cols) {
+    padded.push(createBlankCell());
+  }
+  return padded;
+}
+
+function wrapAnsiLineToCellSegments(line: string, cols: number, cursorCol?: number): WrappedCellResult {
   const safeCols = Math.max(1, cols);
-  const segments: string[] = [];
-  let current = '';
+  const segments: LocalTerminalCell[][] = [];
+  const style = createDefaultAnsiStyle();
+  let current: LocalTerminalCell[] = [];
   let currentWidth = 0;
+  let consumedWidth = 0;
   let cursorSegmentIndex: number | undefined;
   let cursorSegmentCol: number | undefined;
-  let consumedWidth = 0;
 
   const flush = () => {
-    segments.push(current);
-    current = '';
+    segments.push(padCells(current, safeCols));
+    current = [];
     currentWidth = 0;
   };
 
-  for (const char of Array.from(line)) {
-    const codePoint = char.codePointAt(0) || 32;
+  for (let index = 0; index < line.length;) {
+    if (line.charCodeAt(index) === 0x1b && line[index + 1] === '[') {
+      const match = line.slice(index).match(/^\x1b\[([0-9;]*)m/u);
+      if (match) {
+        applyAnsiSgr(style, match[1] || '');
+        index += match[0].length;
+        continue;
+      }
+      const csiMatch = line.slice(index).match(/^\x1b\[[0-9;?]*[ -/]*[@-~]/u);
+      if (csiMatch) {
+        index += csiMatch[0].length;
+        continue;
+      }
+    }
+
+    const codePoint = line.codePointAt(index);
+    if (codePoint === undefined) {
+      break;
+    }
+    const char = String.fromCodePoint(codePoint);
     const charWidth = isWideCodePoint(codePoint) ? 2 : 1;
 
     if (currentWidth > 0 && currentWidth + charWidth > safeCols) {
@@ -246,13 +346,21 @@ function wrapLineToSegments(line: string, cols: number, cursorCol?: number): Wra
       cursorSegmentCol = currentWidth;
     }
 
-    current += char;
-    currentWidth += charWidth;
-    consumedWidth += charWidth;
+    if (charWidth === 2 && currentWidth <= safeCols - 2) {
+      current.push(cloneAnsiCell(codePoint, 2, style));
+      current.push(cloneAnsiCell(32, 0, style));
+      currentWidth += 2;
+      consumedWidth += 2;
+    } else if (charWidth === 1 && currentWidth < safeCols) {
+      current.push(cloneAnsiCell(codePoint, 1, style));
+      currentWidth += 1;
+      consumedWidth += 1;
+    }
 
     if (currentWidth >= safeCols) {
       flush();
     }
+    index += char.length;
   }
 
   if (cursorCol !== undefined && cursorSegmentIndex === undefined) {
@@ -271,6 +379,7 @@ function wrapLineToSegments(line: string, cols: number, cursorCol?: number): Wra
 
   return { segments, cursorSegmentIndex, cursorSegmentCol };
 }
+
 
 async function runTmux(args: string[]) {
   const { stdout } = await execFileAsync('tmux', args, {
@@ -323,19 +432,19 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
   const title = [resolvedSessionName, windowName, paneTitle].filter(Boolean).join(' · ') || sessionName;
 
   const captureStart = options?.visibleOnly ? `-${paneRows}` : `-${historySize}`;
-  const captureRaw = await runTmux(['capture-pane', '-p', '-t', target, '-S', captureStart, '-E', '-1']);
+  const captureRaw = await runTmux(['capture-pane', '-e', '-p', '-t', target, '-S', captureStart, '-E', '-1']);
   const normalized = captureRaw.replace(/\r\n/g, '\n');
   const capturedLines = normalized.length === 0 ? [] : normalized.split('\n');
-  const wrappedLines: string[] = [];
+  const wrappedLines: LocalTerminalCell[][] = [];
   const visibleLineStart = Math.max(0, capturedLines.length - paneRows);
   let cursorWrappedIndex = 0;
   let cursorWrappedCol = Math.max(0, Math.min(cols - 1, cursorCol));
 
   if (capturedLines.length === 0) {
-    wrappedLines.push('');
+    wrappedLines.push(padCells([], cols));
   } else {
     capturedLines.forEach((line, index) => {
-      const wrapped = wrapLineToSegments(
+      const wrapped = wrapAnsiLineToCellSegments(
         line,
         cols,
         index === visibleLineStart + Math.min(Math.max(cursorRow, 0), Math.max(0, paneRows - 1)) ? cursorCol : undefined,
@@ -354,7 +463,7 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
 
   const totalLines = Math.max(rows, wrappedLines.length);
   const viewportTextLines = wrappedLines.slice(-rows);
-  const viewportLines = Array.from({ length: rows }, (_, index) => viewportTextLines[index] || '');
+  const viewportLines = Array.from({ length: rows }, (_, index) => viewportTextLines[index] || padCells([], cols));
   const scrollbackLines = wrappedLines.slice(0, Math.max(0, wrappedLines.length - rows));
   const viewportStartIndex = Math.max(0, wrappedLines.length - rows);
   const viewportCursorRow = Math.max(0, Math.min(rows - 1, cursorWrappedIndex - viewportStartIndex));
@@ -364,7 +473,7 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
     snapshot: {
       cols,
       rows,
-      viewport: viewportLines.map((line) => lineToCells(line, cols)),
+      viewport: viewportLines,
       cursor: {
         row: viewportCursorRow,
         col: Math.max(0, Math.min(cols - 1, cursorWrappedCol)),
@@ -415,7 +524,7 @@ function captureToBufferPayload(snapshot: LocalTmuxCapturePayload, revision: num
   const indexedLines = [
     ...(snapshot.scrollbackLines || []).map((line, offset) => ({
       index: scrollbackStartIndex + offset,
-      cells: lineToCells(line, snapshot.cols),
+      cells: line,
     })),
     ...snapshot.viewport.map((cells, offset) => ({
       index: scrollbackStartIndex + (snapshot.scrollbackLines?.length || 0) + offset,
@@ -622,6 +731,13 @@ export class LocalTmuxManager {
 
   async connect(clientId: string, sessionName: string, cols: number, rows: number, mode: LocalTmuxActivityMode = 'active') {
     await this.disconnect(clientId);
+    // Disconnect any other client bound to the same session so the manager never
+    // emits stale events from a previous clientId at the same time.
+    for (const [existingId, existing] of this.clients) {
+      if (existing.sessionName === sessionName) {
+        await this.disconnect(existingId);
+      }
+    }
 
     const available = await this.listSessions();
     if (!available.includes(sessionName)) {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MacTerminalView } from './mac-terminal-view';
 import type { TerminalCell, TerminalRenderBufferProjection } from '../connection/types';
@@ -78,7 +78,8 @@ describe('MacTerminalView render projection bridge', () => {
     );
     const viewport = container.querySelector('[data-mac-terminal-scroll="true"]') as HTMLElement;
     expect(viewport.getAttribute('data-follow-bottom')).toBe('true');
-    expect(container.querySelector('[data-terminal-row="true"]:last-child')?.textContent).toContain('line 80');
+    const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
+    expect(terminalRows.at(-1)?.textContent).toContain('line 80');
     const terminal = container.querySelector('[data-mac-terminal-input="visible-dom"]') as HTMLElement;
     expect(terminal).toBeTruthy();
     expect(container.querySelector('[data-testid="legacy-wterm-should-not-render"]')).toBeNull();
@@ -90,5 +91,24 @@ describe('MacTerminalView render projection bridge', () => {
     Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
     fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
     expect(onViewportChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'reading' }));
+  });
+
+  it('does not add an extra bottom row outside Android render geometry', () => {
+    const { container } = render(<MacTerminalView projection={projection(['prompt $'], 4)} allowDomFocus />);
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    expect(container.querySelector('[data-mac-terminal-bottom-sentinel="true"]')).toBeNull();
+    expect(grid.lastElementChild?.getAttribute('data-terminal-row')).toBe('true');
+    expect(grid.lastElementChild?.textContent).toContain('prompt $');
+  });
+
+  it('uses measured Mac viewport rows with Android follow geometry to keep the prompt at the bottom', async () => {
+    const lines = Array.from({ length: 80 }, (_, index) => `line ${index + 1}`);
+    const { container } = render(<MacTerminalView projection={projection(lines, 5)} allowDomFocus />);
+    const viewport = container.querySelector('[data-mac-terminal-scroll="true"]') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 170 });
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => expect(viewport.scrollTop).toBe((80 - 10) * 17));
+    const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
+    expect(terminalRows.at(-1)?.textContent).toContain('line 80');
   });
 });

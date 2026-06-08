@@ -1,4 +1,4 @@
-import { TerminalView, formatBridgeSessionTarget, type Host, type TerminalRenderBufferProjection } from '@zterm/shared';
+import { MacTerminalView, formatBridgeSessionTarget, type Host, type TerminalRenderBufferProjection } from '@zterm/shared';
 import type { TerminalConnectionState } from '../lib/terminal-runtime';
 
 interface TerminalSlotProps {
@@ -60,10 +60,11 @@ export function TerminalSlot({
           <>
             {session.error ? <div className="terminal-error-banner">{session.error}</div> : null}
             <div className="terminal-surface live">
-              <TerminalView
+              <MacTerminalView
                 sessionId={liveSessionId}
                 projection={projection}
                 active
+                allowDomFocus
                 onInput={onInput}
                 onResize={onResize}
                 themeId={terminalThemeId}

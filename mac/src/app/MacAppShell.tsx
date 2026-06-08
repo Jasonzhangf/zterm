@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
-  TerminalView,
   buildBridgeServerPresetIdentityId,
   formatBridgeEndpoint,
   formatBridgeSessionTarget,
-  getResolvedSessionName,
   setDefaultBridgeServer,
   upsertBridgeServer,
   type BridgeSettings,
   type EditableHost,
   type Host,
+  type PanePlatform,
 } from '@zterm/shared';
 import { ConnectionLauncher } from '../components/ConnectionLauncher';
 import {
@@ -17,14 +16,16 @@ import {
   useTerminalRuntimeState,
   type TerminalRuntimeController,
 } from '../lib/terminal-runtime';
+import { MacPaneWorkbench } from './MacPaneWorkbench';
 import {
-  activateTab,
   appendEmptyTab,
-  closeTab,
   createInitialWorkbenchState,
   openConnectionInWorkbench,
+  resolveActiveTab,
   resolveTabTarget,
   setLauncherOpen,
+  splitActivePaneRight,
+  type MacWorkbenchState,
 } from './workbench';
 
 interface MacAppShellProps {
@@ -34,6 +35,16 @@ interface MacAppShellProps {
   setBridgeSettings: Dispatch<SetStateAction<BridgeSettings>>;
   addHost: (host: EditableHost) => Host;
   updateHost: (id: string, updates: Partial<EditableHost>) => void;
+  /**
+   * test-only: 注入初始 workbench 状态（让测试可驱动 layout state）
+   * 生产代码不传（默认 createInitialWorkbenchState）
+   */
+  __initialWorkbench?: MacWorkbenchState;
+  /**
+   * test-only: 外部 observer 拿 setWorkbench 引用
+   * 生产代码不传
+   */
+  __workbenchSetter?: (setter: Dispatch<SetStateAction<MacWorkbenchState>>) => void;
 }
 
 function toEditableHost(host: Host): EditableHost {
@@ -70,15 +81,28 @@ function buildTargetSignature(target: EditableHost | null) {
   });
 }
 
-export function MacAppShell({
-  hosts,
-  isLoaded,
-  bridgeSettings,
-  setBridgeSettings,
-  addHost,
-  updateHost,
-}: MacAppShellProps) {
-  const [workbench, setWorkbench] = useState(createInitialWorkbenchState);
+export function MacAppShell(props: MacAppShellProps) {
+  const {
+    hosts,
+    isLoaded,
+    bridgeSettings,
+    setBridgeSettings,
+    addHost,
+    updateHost,
+  } = props;
+  const [workbench, setWorkbench] = useState<MacWorkbenchState>(() => {
+    if (props.__initialWorkbench) {
+      return props.__initialWorkbench;
+    }
+    return createInitialWorkbenchState();
+  });
+  // notify test observer of setWorkbench ref
+  useEffect(() => {
+    if (props.__workbenchSetter) {
+      props.__workbenchSetter(setWorkbench);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const runtimeRef = useRef<TerminalRuntimeController | null>(null);
   if (!runtimeRef.current) {
     runtimeRef.current = createTerminalRuntime();
@@ -86,10 +110,9 @@ export function MacAppShell({
   const runtime = runtimeRef.current;
   const runtimeState = useTerminalRuntimeState(runtime);
 
-  const activeTab = useMemo(
-    () => workbench.tabs.find((tab) => tab.id === workbench.activeTabId) ?? workbench.tabs[0] ?? null,
-    [workbench],
-  );
+  const activeTab = useMemo(() => resolveActiveTab(workbench), [workbench]);
+  const splitVisible = workbench.workspace.panes.length > 1;
+  const platform: PanePlatform = 'desktop';
   const activeTarget = useMemo(() => resolveTabTarget(activeTab, hosts), [activeTab, hosts]);
   const activeTargetSignature = useMemo(() => buildTargetSignature(activeTarget), [activeTarget]);
   const lastConnectedSignatureRef = useRef('');
@@ -193,54 +216,29 @@ export function MacAppShell({
         </div>
       </header>
 
-      <div className="mac-tab-strip">
-        {workbench.tabs.map((tab) => {
-          const selected = tab.id === workbench.activeTabId;
-          return (
-            <div className={`mac-tab ${selected ? 'active' : ''}`} key={tab.id}>
-              <button type="button" className="mac-tab-button" onClick={() => setWorkbench((current) => activateTab(current, tab.id))}>
-                <span className={`mac-tab-dot ${selected ? runtimeState.connection.status : 'idle'}`} />
-                <span>{tab.title}</span>
-              </button>
-              {workbench.tabs.length > 1 ? (
-                <button className="mac-tab-close" type="button" onClick={() => setWorkbench((current) => closeTab(current, tab.id))}>
-                  ×
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
+      <div className="mac-tab-strip" data-split-visible={splitVisible ? 'true' : 'false'}>
+        <button
+          className="mac-secondary-button"
+          type="button"
+          onClick={() => setWorkbench((current) => splitActivePaneRight(current))}
+          disabled={workbench.workspace.panes.length >= 4}
+          title="Split pane right"
+        >
+          ⎘ Split
+        </button>
       </div>
 
       <main className="mac-terminal-stage">
-        {activeTarget ? (
-          <>
-            <div className="mac-terminal-meta">
-              <span className={`mac-runtime-pill ${runtimeState.connection.status}`}>{runtimeState.connection.status}</span>
-              <span>{formatBridgeSessionTarget(activeTarget)}</span>
-              <span>{runtimeState.connection.connectedSessionId || getResolvedSessionName(activeTarget)}</span>
-            </div>
-            {runtimeState.connection.error ? <div className="mac-terminal-error">{runtimeState.connection.error}</div> : null}
-            <div className="mac-terminal-surface">
-              <TerminalView
-                sessionId={runtimeState.connection.connectedSessionId || getResolvedSessionName(activeTarget)}
-                projection={runtimeState.render}
-                active
-                allowDomFocus
-                themeId={bridgeSettings.terminalThemeId}
-                onInput={(data) => runtime.sendInput(data)}
-                onResize={(cols, rows) => runtime.resizeTerminal(cols, rows)}
-                onViewportChange={(viewState) => runtime.updateViewport(viewState)}
-              />
-            </div>
-          </>
-        ) : (
-          <button className="mac-empty-stage" type="button" onClick={() => setWorkbench((current) => setLauncherOpen(current, true))}>
-            <span className="mac-empty-plus">+</span>
-            <strong>Open connection</strong>
-            <span>先建立新的 app shell，再继续往下切 buffer worker / split。</span>
-          </button>
-        )}
+        <MacPaneWorkbench
+          workbench={workbench}
+          setWorkbench={setWorkbench}
+          hosts={hosts}
+          platform={platform}
+          splitVisible={splitVisible}
+          runtime={runtime}
+          runtimeState={runtimeState}
+          bridgeSettings={bridgeSettings}
+        />
       </main>
 
       <ConnectionLauncher

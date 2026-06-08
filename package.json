@@ -16,5 +16,11 @@
     "daemon:status": "pnpm --filter @zterm/android daemon:status",
     "daemon:stop": "pnpm --filter @zterm/android daemon:stop"
   },
-  "packageManager": "pnpm@9.15.9"
+  "packageManager": "pnpm@9.15.9",
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "jsdom": "29.0.2",
+    "vitest": "1.6.0"
+  }
 }

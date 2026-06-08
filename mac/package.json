@@ -46,7 +46,7 @@
     "vite": "^5.2.0",
     "vitest": "1.6.0",
     "wait-on": "^8.0.1",
-    "ws": "^8.18.0"
+    "ws": "^8.20.0"
   },
   "build": {
     "appId": "com.zterm.mac",

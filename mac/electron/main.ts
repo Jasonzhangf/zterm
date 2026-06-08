@@ -61,11 +61,9 @@ function createWindow() {
   const devServerUrl = getDevServerUrl();
   if (devServerUrl) {
     void win.loadURL(devServerUrl);
-    win.webContents.openDevTools({ mode: 'detach' });
     return;
   }
 
-  win.webContents.openDevTools({ mode: 'detach' });
   void win.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 

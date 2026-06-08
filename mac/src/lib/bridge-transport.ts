@@ -98,21 +98,22 @@ function normalizeTarget(host: EditableHost | Host): ActiveBridgeTargetState {
   };
 }
 
+function generateOpenRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `open-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 function buildHostConfig(host: EditableHost | Host, cols = 80, rows = 24): HostConfigMessage {
   const target = normalizeTarget(host);
   return {
+    openRequestId: generateOpenRequestId(),
     clientSessionId: buildBridgeTargetKey(target),
-    name: target.name,
-    bridgeHost: target.bridgeHost,
-    bridgePort: target.bridgePort,
     sessionName: target.sessionName,
     cols,
     rows,
-    authToken: target.authToken,
     autoCommand: target.autoCommand,
-    authType: host.authType,
-    password: host.authType === 'password' ? host.password || undefined : undefined,
-    privateKey: host.authType === 'key' ? host.privateKey || undefined : undefined,
   };
 }
 

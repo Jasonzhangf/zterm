@@ -6,13 +6,21 @@
  * focus, keyboard input, scrollback and viewport demand.
  */
 
-import { useEffect, useMemo, useRef, type KeyboardEvent, type ClipboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { Terminal } from '@jsonstudio/wtermmod-react';
 import type { TerminalProps as WTermTerminalProps } from '@jsonstudio/wtermmod-react';
 import type { TerminalCell, TerminalRenderBufferProjection } from '../connection/types';
 import { getTerminalThemePreset } from './theme';
-import { NORMAL_CURSOR_KEYS, TERMINAL_FONT_STACK } from './renderer';
-import { buildTerminalVisibleRowViewModel, hasDiscontinuousNeighbor } from './renderer/row';
+import { DEFAULT_ROWS, measureTerminalViewport, NORMAL_CURSOR_KEYS, TERMINAL_FONT_STACK } from './renderer';
+import {
+  buildTerminalGridPadding,
+  buildTerminalRenderFrame,
+  buildTerminalRenderRows,
+  buildTerminalViewportDemand,
+  buildTerminalVisibleRowViewModel,
+  hasDiscontinuousNeighbor,
+  resolveScrollTopForRenderBottomIndex,
+} from './renderer/row';
 
 export type { WTermTerminalProps as TerminalProps };
 
@@ -39,9 +47,6 @@ function terminalRowToText(row: TerminalCell[]) {
   return row.map(terminalCellToText).join('').replace(/\s+$/u, '');
 }
 
-function isGapIndex(projection: TerminalRenderBufferProjection, absoluteIndex: number) {
-  return projection.gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
-}
 
 function resolveKeyInput(event: KeyboardEvent<HTMLDivElement>, cursorKeysApp: boolean) {
   if (event.metaKey) return '';
@@ -70,41 +75,110 @@ export function MacTerminalView(props: MacTerminalViewProps) {
     themeId,
     showAbsoluteLineNumbers = false,
     onInput,
-    onResize,
+    onResize: _onResize,
     onViewportChange,
     onImagePaste,
     onWidthModeChange: _onWidthModeChange,
   } = props;
 
-  const cols = projection?.cols ?? 80;
-  const rows = projection?.rows ?? 24;
   const theme = getTerminalThemePreset(themeId);
   const rowHeight = '17px';
+  const rowHeightPx = 17;
   const cellWidthPx = 8.4;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [readingMode, setReadingMode] = useState(false);
+  const [renderBottomIndex, setRenderBottomIndex] = useState(projection?.endIndex ?? 0);
+  const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   void active;
 
-  const renderRows = useMemo(() => {
-    if (!projection) return [];
-    return projection.lines.map((row, index) => ({
-      row,
-      absoluteIndex: projection.startIndex + index,
-      isGap: isGapIndex(projection, projection.startIndex + index),
-    }));
-  }, [projection]);
+  const refreshMeasuredViewport = () => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measured = measureTerminalViewport(viewport, 14, rowHeight);
+    setViewportRows((current) => (current === measured.rows ? current : measured.rows));
+  };
 
-  useEffect(() => {
+  const renderGeometry = useMemo(() => {
+    const startIndex = projection?.startIndex ?? 0;
+    const endIndex = projection?.endIndex ?? 0;
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: startIndex,
+      effectiveBufferEndIndex: endIndex,
+      bufferLinesLength: projection?.lines.length ?? 0,
+      viewportRows,
+      rowHeightPx,
+      renderBottomIndex,
+      followDemandAnchorEndIndex: endIndex,
+      readingMode,
+      overscanRows: 4,
+    });
+    const rowsToRender = projection
+      ? buildTerminalRenderRows({
+          bufferLines: projection.lines,
+          gapRanges: projection.gapRanges,
+          startIndex,
+          leadingBlankRows: frame.leadingBlankRows,
+          renderStartOffset: frame.renderStartOffset,
+          renderEndOffset: frame.renderEndOffset,
+        })
+      : [];
+    const padding = buildTerminalGridPadding({
+      renderRows: rowsToRender,
+      rowHeightPx,
+      totalRows: frame.totalRows,
+    });
+    return { frame, rowsToRender, padding };
+  }, [projection, readingMode, renderBottomIndex, viewportRows]);
+
+  const syncScrollHostToRenderBottom = (nextRenderBottomIndex: number) => {
     const viewport = viewportRef.current;
     if (!viewport || !projection) return;
-    viewport.scrollTop = viewport.scrollHeight;
-    onViewportChange?.({
-      mode: 'follow',
-      viewportEndIndex: projection.endIndex,
-      viewportRows: projection.rows,
-      missingRanges: [],
+    viewport.scrollTop = resolveScrollTopForRenderBottomIndex({
+      nextRenderBottomIndex,
+      totalRows: renderGeometry.frame.totalRows,
+      viewportRows,
+      bufferStartIndex: projection.startIndex,
+      rowHeightPx,
+      maxScrollTop: renderGeometry.frame.maxScrollTop,
     });
-  }, [onViewportChange, projection?.endIndex, projection?.revision, projection?.rows]);
+  };
+
+  useLayoutEffect(() => {
+    refreshMeasuredViewport();
+    const viewport = viewportRef.current;
+    const handleWindowResize = () => refreshMeasuredViewport();
+    window.addEventListener('resize', handleWindowResize);
+    if (!viewport || typeof ResizeObserver === 'undefined') {
+      return () => window.removeEventListener('resize', handleWindowResize);
+    }
+    const observer = new ResizeObserver(() => refreshMeasuredViewport());
+    observer.observe(viewport);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !projection) return;
+    if (readingMode) return;
+    setRenderBottomIndex(renderGeometry.frame.followVisualBottomIndex);
+    requestAnimationFrame(() => {
+      syncScrollHostToRenderBottom(renderGeometry.frame.followVisualBottomIndex);
+      onViewportChange?.({
+        ...buildTerminalViewportDemand({
+          nextMode: 'follow',
+          nextRenderBottomIndex: renderGeometry.frame.followVisualBottomIndex,
+          viewportRows,
+          bufferStartIndex: projection.startIndex,
+          followDemandAnchorEndIndex: projection.endIndex,
+        }),
+        missingRanges: [],
+      });
+    });
+  }, [onViewportChange, projection?.endIndex, projection?.revision, readingMode, renderGeometry.frame.followVisualBottomIndex, viewportRows]);
 
   useEffect(() => {
     if (allowDomFocus && active) {
@@ -115,11 +189,21 @@ export function MacTerminalView(props: MacTerminalViewProps) {
   const handleScroll = () => {
     const viewport = viewportRef.current;
     if (!viewport || !projection) return;
-    const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 2;
+    const isAtBottom = viewport.scrollTop >= renderGeometry.frame.maxScrollTop - 1;
+    const nextMode = isAtBottom ? 'follow' : 'reading';
+    const nextRenderBottomIndex = isAtBottom
+      ? renderGeometry.frame.followVisualBottomIndex
+      : Math.max(projection.startIndex + viewportRows, projection.startIndex + Math.ceil(viewport.scrollTop / rowHeightPx) + viewportRows);
+    setReadingMode(nextMode === 'reading');
+    setRenderBottomIndex(nextRenderBottomIndex);
     onViewportChange?.({
-      mode: atBottom ? 'follow' : 'reading',
-      viewportEndIndex: atBottom ? projection.endIndex : Math.max(projection.startIndex, projection.endIndex - projection.rows),
-      viewportRows: projection.rows,
+      ...buildTerminalViewportDemand({
+        nextMode,
+        nextRenderBottomIndex,
+        viewportRows,
+        bufferStartIndex: projection.startIndex,
+        followDemandAnchorEndIndex: projection.endIndex,
+      }),
       missingRanges: [],
     });
   };
@@ -157,7 +241,10 @@ export function MacTerminalView(props: MacTerminalViewProps) {
       style={{
         width: '100%',
         height: '100%',
+        minHeight: 0,
         position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
         backgroundColor: theme.background,
         color: theme.foreground,
         overflow: 'hidden',
@@ -173,15 +260,24 @@ export function MacTerminalView(props: MacTerminalViewProps) {
         onScroll={handleScroll}
         style={{
           width: '100%',
-          height: '100%',
+          flex: '1 1 auto',
+          minHeight: 0,
           overflowY: 'auto',
           overflowX: 'hidden',
           overscrollBehavior: 'contain',
           padding: 0,
         }}
       >
-        <div className="term-grid" data-cursor-source="projection">
-          {renderRows.map(({ row, absoluteIndex, isGap }, rowIndex) => {
+        <div
+          className="term-grid"
+          data-cursor-source="projection"
+          style={{
+            minHeight: '100%',
+            paddingTop: `${renderGeometry.padding.termGridPaddingTopPx}px`,
+            paddingBottom: `${renderGeometry.padding.termGridPaddingBottomPx}px`,
+          }}
+        >
+          {renderGeometry.rowsToRender.map(({ row, absoluteIndex, isGap }, rowIndex) => {
             const viewModel = buildTerminalVisibleRowViewModel({
               absoluteIndex,
               row,
@@ -191,7 +287,7 @@ export function MacTerminalView(props: MacTerminalViewProps) {
               theme,
               cursorColumn: -1,
               showAbsoluteLineNumbers,
-              discontinuousLineNumber: isGap || hasDiscontinuousNeighbor(renderRows, rowIndex),
+              discontinuousLineNumber: isGap || hasDiscontinuousNeighbor(renderGeometry.rowsToRender, rowIndex),
             });
             const lineNumber = viewModel.lineNumber ? (
               <span
