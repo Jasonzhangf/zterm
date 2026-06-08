@@ -349,6 +349,8 @@ export function SettingsPage({
         <RelayControlSection
           transportMode={draft.transportMode}
           onTransportModeChange={(transportMode) => setDraft((current) => ({ ...current, transportMode }))}
+          traversalPathPriority={draft.traversalPathPriority}
+          onTraversalPathPriorityChange={(traversalPathPriority) => setDraft((current) => ({ ...current, traversalPathPriority }))}
           relayBaseUrl={relayBaseUrl}
           onRelayBaseUrlChange={setRelayBaseUrl}
           relayUsername={relayUsername}

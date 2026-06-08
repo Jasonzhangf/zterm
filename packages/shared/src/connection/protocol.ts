@@ -3,7 +3,7 @@ import type {
   BufferSyncRequestPayload,
   TerminalBufferPayload,
 } from './types';
-import type { ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
+import type { ScheduleErrorPayload, ScheduleEventPayload, ScheduleJobDraft, ScheduleStatePayload } from '../schedule/types';
 import type { TerminalWidthMode } from './bridge-settings';
 
 // ─── Remote screenshot / file transfer types ───
@@ -250,6 +250,7 @@ export type BridgeServerControlMessage =
   | { type: 'sessions'; payload: { sessions: string[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
+  | { type: 'schedule-error'; payload: ScheduleErrorPayload }
   | { type: 'debug-control'; payload: { enabled: boolean; reason?: string } }
   | { type: 'image-pasted'; payload: { name: string; mimeType: string; bytes: number } }
   | { type: 'file-attached'; payload: { name: string; path: string; bytes: number } }

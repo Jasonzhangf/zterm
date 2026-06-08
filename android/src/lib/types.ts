@@ -21,7 +21,7 @@ import type {
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
-export type { ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared/schedule-types';
+export type { ScheduleErrorPayload, ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared/schedule-types';
 
 // ============================================
 // Host 配置

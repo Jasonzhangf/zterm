@@ -16,6 +16,8 @@ import {
   resolveTerminalCtrlChord,
   resolveTerminalKeyboardInput,
 } from '@zterm/shared/terminal/renderer';
+import { TerminalPageCopyMenu } from './TerminalPageCopyMenu';
+import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -254,6 +256,8 @@ interface TerminalPageProps {
   onMoveSession: (id: string, toIndex: number) => void;
   onRenameSession: (id: string, name: string) => void;
   onCloseSession: (id: string, source?: string) => void;
+  onForceRelaySession?: (id: string) => void;
+  onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string) => void;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
@@ -279,6 +283,7 @@ interface TerminalPageProps {
   onSessionDraftSend?: (value: string, sessionId?: string) => void;
   onLoadSavedTabList: (tabs: PersistedOpenTab[], activeSessionId?: string) => void;
   scheduleState?: SessionScheduleState | null;
+  getScheduleState?: (sessionId: string) => SessionScheduleState;
   onRequestScheduleList?: (sessionId: string) => void;
   onUpsertScheduleJob?: (sessionId: string, job: ScheduleJobDraft) => void;
   onDeleteScheduleJob?: (sessionId: string, jobId: string) => void;
@@ -294,9 +299,11 @@ interface TerminalPageProps {
   onShortcutUse?: (shortcutId: string) => void;
 }
 
-interface ScheduleComposerSeed {
+interface ScheduleComposerTarget {
+  sessionId: string;
+  sessionName: string;
   nonce: number;
-  text: string;
+  seedText: string;
 }
 
 interface TerminalTabChromeItem {
@@ -655,6 +662,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalThemeId,
   terminalWidthMode,
   absoluteLineNumbersVisible,
+  copySelection,
+  onLongPressRow,
 }: {
   interactiveSession: Session | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
@@ -680,6 +689,14 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalThemeId?: string;
   terminalWidthMode: TerminalWidthMode;
   absoluteLineNumbersVisible: boolean;
+  copySelection: {
+    active: boolean;
+    sessionId: string | null;
+    startRowIndex: number | null;
+    endRowIndex: number | null;
+    menu: { x: number; y: number; rowIndex: number } | null;
+  };
+  onLongPressRow: (sessionId: string, rowIndex: number, clientX: number, clientY: number) => void;
 }) {
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, landscape }), [landscape, splitVisible]);
@@ -712,6 +729,23 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
         themeId={terminalThemeId || 'default'}
         widthMode={terminalWidthMode}
         showAbsoluteLineNumbers={absoluteLineNumbersVisible}
+        copyModeActive={
+          copySelection.active &&
+          (copySelection.sessionId === null ||
+            copySelection.sessionId === session.id)
+        }
+        copyStartRowIndex={
+          copySelection.sessionId === session.id ? copySelection.startRowIndex : null
+        }
+        copyEndRowIndex={
+          copySelection.sessionId === session.id ? copySelection.endRowIndex : null
+        }
+        copyPreviewRowIndex={
+          copySelection.sessionId === session.id
+            ? (copySelection.menu?.rowIndex ?? null)
+            : null
+        }
+        onLongPressRow={onLongPressRow}
       />
     </TerminalTabSwipeSurface>
   ), [
@@ -736,6 +770,8 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     layoutProfile.stage.paneGap,
     layoutProfile.stage.paneRadius,
     layoutProfile.stage.rowBottomPadding,
+    copySelection,
+    onLongPressRow,
   ]);
 
   return (
@@ -1024,6 +1060,8 @@ function TerminalPageComponent({
   onMoveSession,
   onRenameSession,
   onCloseSession,
+  onForceRelaySession,
+  onUseAutoSession,
   onOpenConnections,
   onOpenQuickTabPicker,
   pendingPaneAttachIntent = null,
@@ -1046,6 +1084,7 @@ function TerminalPageComponent({
   onSessionDraftSend,
   onLoadSavedTabList,
   scheduleState,
+  getScheduleState,
   onRequestScheduleList,
   onUpsertScheduleJob,
   onDeleteScheduleJob,
@@ -1074,12 +1113,11 @@ function TerminalPageComponent({
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [headerTopInsetPx, setHeaderTopInsetPx] = useState(() => resolveTerminalHeaderTopInsetPx(isAndroid));
-  const [scheduleComposerSeed, setScheduleComposerSeed] = useState<ScheduleComposerSeed>({ nonce: 0, text: '' });
   const viewportMetricsFrameRef = useRef<number | null>(null);
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
@@ -1278,6 +1316,28 @@ function TerminalPageComponent({
     ? sessions.find((session) => session.id === interactiveSessionId) || activeSession || null
     : activeSession || null;
   const uiSession = interactiveSession || activeSession || null;
+
+  const keepTerminalInputFocusedRef = useRef<() => void>(() => {});
+  const copyRuntime = useTerminalPageCopyRuntime({
+    uiSessionId: uiSession?.id || null,
+    activeSessionId: activeSession?.id || null,
+    splitVisible,
+    findPaneForSession,
+    onSwitchSession: (sessionId) => onSwitchSession?.(sessionId),
+    setActivePane: (paneId) => setActivePane(paneId),
+    keepTerminalInputFocused: keepTerminalInputFocusedRef.current,
+    sessionBufferStore,
+    sessions,
+  });
+  const {
+    copySelection,
+    handleLongPressCopyRow,
+    handleCopySelectionStart,
+    handleCopySelectionEnd,
+    handleCopySelectedText,
+    handleCloseCopyMenu,
+    handleQuickBarToggleCopyMode,
+  } = copyRuntime;
   const uiSessionId = uiSession?.id || null;
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
@@ -1298,6 +1358,11 @@ function TerminalPageComponent({
   ), [activeHeaderSessionUiKey, interactiveSession]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
+  const scheduleOpen = scheduleComposerTarget !== null;
+  const frozenScheduleState = scheduleComposerTarget
+    ? getScheduleState?.(scheduleComposerTarget.sessionId)
+      || (activeScheduleState?.sessionName === scheduleComposerTarget.sessionName ? activeScheduleState : null)
+    : null;
   const activeSessionRef = useRef(activeSession);
   const sessionsRef = useRef(sessions);
   const splitVisibleRef = useRef(splitVisible);
@@ -1359,6 +1424,22 @@ function TerminalPageComponent({
     previousLivePaneSessionIdsKeyRef.current = livePaneSessionIdsKey;
     onLiveSessionIdsChange(livePaneSessionIds);
   }, [livePaneSessionIds, livePaneSessionIdsKey, onLiveSessionIdsChange]);
+
+  useLayoutEffect(() => {
+    if (!splitVisible || !onTerminalViewportChange) {
+      return;
+    }
+    renderedPaneSessions.forEach((session) => {
+      if (session.id === interactiveSession?.id) {
+        return;
+      }
+      onTerminalViewportChange(session.id, {
+        mode: 'follow',
+        viewportEndIndex: session.buffer?.endIndex ?? 0,
+        viewportRows: session.buffer?.rows ?? 24,
+      });
+    });
+  }, [interactiveSession?.id, livePaneSessionIdsKey, onTerminalViewportChange, renderedPaneSessions, splitVisible]);
 
   useEffect(() => {
     return () => {
@@ -1496,6 +1577,10 @@ function TerminalPageComponent({
     scheduleTerminalFocusRetries();
   }, [clearTerminalFocusRetries, isAndroid, quickBarEditorFocused, restoreAndroidTerminalImeRoute, scheduleTerminalFocusRetries]);
 
+  useEffect(() => {
+    keepTerminalInputFocusedRef.current = keepTerminalInputFocused;
+  }, [keepTerminalInputFocused]);
+
   const closeRemoteScreenshotPreview = useCallback(() => {
     setRemoteScreenshotPreview(remoteScreenshotPreviewRuntimeRef.current.closePreview());
   }, []);
@@ -1573,13 +1658,18 @@ function TerminalPageComponent({
     if (!targetSessionId) {
       return;
     }
+    const targetSession = sessions.find((session) => session.id === targetSessionId);
+    if (!targetSession) {
+      return;
+    }
     onRequestScheduleList?.(targetSessionId);
-    setScheduleComposerSeed({
+    setScheduleComposerTarget({
+      sessionId: targetSession.id,
+      sessionName: targetSession.sessionName,
       nonce: Date.now(),
-      text,
+      seedText: text,
     });
-    setScheduleOpen(true);
-  }, [onRequestScheduleList, uiSessionId]);
+  }, [onRequestScheduleList, sessions, uiSessionId]);
 
   const handleQuickBarOpenFileTransfer = useCallback(() => {
     setFileTransferOpen(true);
@@ -2295,10 +2385,8 @@ function TerminalPageComponent({
       onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
       onOpenFileTransfer={handleQuickBarOpenFileTransfer}
       onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
-      copyModeActive={false}
-      onToggleCopyMode={() => {
-        runtimeDebug('terminal.copy.toggle', { sessionId: uiSessionId || null, timestamp: Date.now() });
-      }}
+      copyModeActive={copySelection.active}
+      onToggleCopyMode={handleQuickBarToggleCopyMode}
       copyDebugLabel={`COPY:SYSTEM KB:${keyboardInset} IME:${terminalKeyboardRequested ? 'Y' : 'N'}`}
       onToggleAbsoluteLineNumbers={handleQuickBarToggleAbsoluteLineNumbers}
       onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
@@ -2380,6 +2468,8 @@ function TerminalPageComponent({
           onSwitchSession={handleSwitchSessionFromChrome}
           onRenameSession={onRenameSession}
           onCloseSession={onCloseSession}
+          onForceRelaySession={onForceRelaySession}
+          onUseAutoSession={onUseAutoSession}
           splitVisible={splitVisible}
           paneGroups={paneGroups}
           onAssignSessionToPane={assignSessionToPane}
@@ -2426,7 +2516,21 @@ function TerminalPageComponent({
           terminalThemeId={terminalThemeId}
           terminalWidthMode={terminalWidthMode}
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
+          copySelection={copySelection}
+          onLongPressRow={handleLongPressCopyRow}
         />
+        {copySelection.menu ? (
+          <TerminalPageCopyMenu
+            menu={copySelection.menu}
+            viewportWidth={viewportWidth}
+            headerTopInsetPx={headerTopInsetPx}
+            startRowIndex={copySelection.startRowIndex}
+            onSetStart={handleCopySelectionStart}
+            onSetEnd={handleCopySelectionEnd}
+            onCopy={handleCopySelectedText}
+            onClose={handleCloseCopyMenu}
+          />
+        ) : null}
         <TerminalDebugOverlay
           visible={debugOverlayVisible}
           session={interactiveSession}
@@ -2483,23 +2587,22 @@ function TerminalPageComponent({
         onExportSavedTabList={exportSavedTabList}
         onImportSavedTabLists={importSavedTabLists}
       />
-      {interactiveSession ? (
+      {scheduleComposerTarget ? (
         <SessionScheduleSheet
           open={scheduleOpen}
-          sessionName={interactiveSession.sessionName}
-          scheduleState={activeScheduleState || { sessionName: interactiveSession.sessionName, jobs: [], loading: false }}
-          composerSeedText={scheduleComposerSeed.text}
-          composerSeedNonce={scheduleComposerSeed.nonce}
+          sessionName={scheduleComposerTarget.sessionName}
+          scheduleState={frozenScheduleState || { sessionName: scheduleComposerTarget.sessionName, jobs: [], loading: false }}
+          composerSeedText={scheduleComposerTarget.seedText}
+          composerSeedNonce={scheduleComposerTarget.nonce}
           keyboardInset={keyboardInset}
           onClose={() => {
-            setScheduleOpen(false);
-            setScheduleComposerSeed((current) => (current.text ? { ...current, text: '' } : current));
+            setScheduleComposerTarget(null);
           }}
-          onRefresh={() => onRequestScheduleList?.(interactiveSession.id)}
-          onSave={(job) => onUpsertScheduleJob?.(interactiveSession.id, job)}
-          onDelete={(jobId) => onDeleteScheduleJob?.(interactiveSession.id, jobId)}
-          onToggle={(jobId, enabled) => onToggleScheduleJob?.(interactiveSession.id, jobId, enabled)}
-          onRunNow={(jobId) => onRunScheduleJobNow?.(interactiveSession.id, jobId)}
+          onRefresh={() => onRequestScheduleList?.(scheduleComposerTarget.sessionId)}
+          onSave={(job) => onUpsertScheduleJob?.(scheduleComposerTarget.sessionId, job)}
+          onDelete={(jobId) => onDeleteScheduleJob?.(scheduleComposerTarget.sessionId, jobId)}
+          onToggle={(jobId, enabled) => onToggleScheduleJob?.(scheduleComposerTarget.sessionId, jobId, enabled)}
+          onRunNow={(jobId) => onRunScheduleJobNow?.(scheduleComposerTarget.sessionId, jobId)}
         />
       ) : null}
       {interactiveSession && onSendMessage && onFileTransferMessage ? (
@@ -2559,6 +2662,7 @@ function terminalPagePropsEqual(
     && prev.onSessionDraftSend === next.onSessionDraftSend
     && prev.onLoadSavedTabList === next.onLoadSavedTabList
     && prev.scheduleState === next.scheduleState
+    && prev.getScheduleState === next.getScheduleState
     && prev.onRequestScheduleList === next.onRequestScheduleList
     && prev.onUpsertScheduleJob === next.onUpsertScheduleJob
     && prev.onDeleteScheduleJob === next.onDeleteScheduleJob

@@ -170,7 +170,49 @@ describe('SettingsPage terminal theme selection', () => {
       terminalWidthMode: 'adaptive-phone',
     }));
   });
-});
+
+  it('persists relay path priority from the remote access controls', () => {
+    const onSave = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={onSave}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      traversalPathPriority: ['rtc-relay', 'ipv6', 'tailscale', 'ipv4'],
+    }));
+  });
+
   it('toggles daemon debug through the runtime debug storage truth', () => {
     render(
       <SettingsPage
@@ -210,4 +252,4 @@ describe('SettingsPage terminal theme selection', () => {
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
     expect(screen.getByRole('button', { name: '○Daemon Debug 已关闭' })).toBeTruthy();
   });
-
+});

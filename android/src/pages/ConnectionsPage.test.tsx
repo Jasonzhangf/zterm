@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Host, Session, SessionGroupHistory } from '../lib/types';
+import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { ConnectionsPage } from './ConnectionsPage';
 
 function makeHost(overrides: Partial<Host> = {}): Host {
@@ -75,6 +75,23 @@ function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHi
   };
 }
 
+function makeRelayDevice(overrides: Partial<TraversalRelayDeviceSnapshot> = {}): TraversalRelayDeviceSnapshot {
+  return {
+    deviceId: overrides.deviceId || 'mac-studio-device',
+    deviceName: overrides.deviceName || 'mac-studio',
+    platform: overrides.platform || 'mac',
+    appVersion: overrides.appVersion || '0.1.2',
+    updatedAt: overrides.updatedAt || '2026-05-29T00:00:00.000Z',
+    client: overrides.client || { connected: false, lastSeenAt: '' },
+    daemon: overrides.daemon || {
+      connected: true,
+      lastSeenAt: '2026-05-29T00:00:00.000Z',
+      hostId: 'mac-studio',
+      version: '0.1.2',
+    },
+  };
+}
+
 describe('ConnectionsPage', () => {
   afterEach(() => {
     cleanup();
@@ -110,13 +127,8 @@ describe('ConnectionsPage', () => {
     );
 
     fireEvent.click(screen.getAllByText('Enter')[0]);
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
-      expect.objectContaining({
-        bridgeHost: '100.64.0.10',
-        bridgePort: 3333,
-        sessionNames: expect.arrayContaining(['main', 'logs']),
-      }),
-    ]);
+    expect(onResumeSession).toHaveBeenCalledWith('live-logs');
+    expect(onOpenServerGroups).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getAllByText('+')[0]);
 
@@ -154,6 +166,138 @@ describe('ConnectionsPage', () => {
 
     fireEvent.click(screen.getAllByText('Del')[1]);
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'host-main' }));
+  });
+
+  it('can select all visible server groups from the same list and open them together', () => {
+    const onOpenServerGroups = vi.fn();
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({ id: 'host-a', bridgeHost: '100.64.0.10', daemonHostId: 'daemon-a', sessionName: 'main' }),
+          makeHost({ id: 'host-b', bridgeHost: '100.64.0.20', daemonHostId: 'daemon-b', sessionName: 'work' }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({ id: 'group-a', bridgeHost: '100.64.0.10', daemonHostId: 'daemon-a', sessionNames: ['main'] }),
+          makeGroup({ id: 'group-b', bridgeHost: '100.64.0.20', daemonHostId: 'daemon-b', sessionNames: ['work'] }),
+        ]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={onOpenServerGroups}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('All servers'));
+    expect(screen.getByText('Open selected groups')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Open selected groups'));
+    expect(onOpenServerGroups).toHaveBeenCalledWith([
+      expect.objectContaining({ daemonHostId: 'daemon-a', sessionNames: ['main'] }),
+      expect.objectContaining({ daemonHostId: 'daemon-b', sessionNames: ['work'] }),
+    ]);
+  });
+
+  it('renders account daemon devices as concise parent rows with child sessions', () => {
+    render(
+      <ConnectionsPage
+        relayDevices={[makeRelayDevice()]}
+        hosts={[makeHost({ daemonHostId: 'mac-studio', sessionName: 'main' })]}
+        sessions={[makeSession({ id: 'live-rcc', daemonHostId: 'daemon-Macstudio.local-128564413166185f', sessionName: 'rcc' })]}
+        sessionGroups={[makeGroup({ daemonHostId: 'mac-studio', sessionNames: ['main'] })]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('mac-studio · 2 sessions')).toBeTruthy();
+    expect(screen.queryByText(/daemon-Macstudio\.local/)).toBeNull();
+    fireEvent.click(screen.getByLabelText('Expand mac-studio sessions'));
+    expect(screen.getByText('main')).toBeTruthy();
+    expect(screen.getByText('rcc')).toBeTruthy();
+  });
+
+  it('exits group management after clearing selection and exposes vault placeholder feedback', () => {
+    const onOpenVaults = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[makeHost({ daemonHostId: 'daemon-host-1', sessionName: 'main' })]}
+        sessions={[]}
+        sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] })]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenVaults={onOpenVaults}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Expand daemon-host-1 sessions'));
+    expect(screen.getByText('main')).toBeTruthy();
+    expect(screen.queryByLabelText('新建连接')).toBeNull();
+
+    fireEvent.click(screen.getByText('Done'));
+    expect(screen.queryByText('main')).toBeNull();
+    expect(screen.getByLabelText('新建连接')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Vaults'));
+    expect(onOpenVaults).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Vaults are not available yet')).toBeTruthy();
+  });
+
+  it('uses card tap to open an openable group and Details only for non-openable groups', () => {
+    const onOpenServerGroups = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[makeHost({ daemonHostId: 'daemon-host-1', sessionName: 'main' })]}
+        sessions={[]}
+        sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] })]}
+        onResumeSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={onOpenServerGroups}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('daemon-host-1 · 1 session'));
+    expect(onOpenServerGroups).toHaveBeenCalledWith([
+      expect.objectContaining({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] }),
+    ]);
+    expect(screen.queryByText('main')).toBeNull();
+
+    onOpenServerGroups.mockClear();
+    fireEvent.click(screen.getAllByText('Open')[0]);
+    expect(onOpenServerGroups).toHaveBeenCalledWith([
+      expect.objectContaining({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] }),
+    ]);
   });
 
   it('covers empty-state entry actions: add new connection and open settings', () => {
@@ -236,7 +380,7 @@ describe('ConnectionsPage', () => {
     );
 
     expect(screen.getByText('daemon-host-1 · 2 sessions')).toBeTruthy();
-    expect(screen.getByText('daemon-host-1')).toBeTruthy();
+    expect(screen.getByText('saved · 100.64.0.10:3333')).toBeTruthy();
 
     fireEvent.click(screen.getAllByText('Open')[0]);
     expect(onOpenServerGroups).toHaveBeenCalledWith([
@@ -407,7 +551,7 @@ describe('ConnectionsPage', () => {
         sessionGroups={[
           makeGroup({
             id: 'bridge:100.66.1.82::3333',
-            name: '100.66.1.82 · 1 sessions',
+            name: '100.66.1.82 · 1 session',
             bridgeHost: '100.66.1.82',
             bridgePort: 3333,
             sessionNames: ['zterm'],
@@ -426,8 +570,8 @@ describe('ConnectionsPage', () => {
       />,
     );
 
-    expect(screen.getAllByText(/· 1 sessions$/)).toHaveLength(1);
-    expect(screen.getByText('daemon-Macstudio.local-128564413166185f · 1 sessions')).toBeTruthy();
+    expect(screen.getAllByText(/· 1 session$/)).toHaveLength(1);
+    expect(screen.getByText('daemon-Macstudio.local-128564413166185f · 1 session')).toBeTruthy();
   });
 
 
@@ -510,7 +654,7 @@ describe('ConnectionsPage', () => {
         sessionGroups={[
           makeGroup({
             id: 'bridge:100.66.1.82::3333',
-            name: '100.66.1.82 · 1 sessions',
+            name: '100.66.1.82 · 1 session',
             bridgeHost: '100.66.1.82',
             bridgePort: 3333,
             sessionNames: ['zterm'],
@@ -559,7 +703,7 @@ describe('ConnectionsPage', () => {
         sessionGroups={[
           makeGroup({
             id: 'bridge:100.66.1.82::3333',
-            name: '100.66.1.82 · 1 sessions',
+            name: '100.66.1.82 · 1 session',
             bridgeHost: '100.66.1.82',
             bridgePort: 3333,
             sessionNames: ['zterm'],
@@ -616,10 +760,10 @@ describe('ConnectionsPage', () => {
     expect(screen.getByText('History only · last active 1 min ago')).toBeTruthy();
     expect(screen.getByText('2 default · history-only')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByText('Open')[0]);
+    fireEvent.click(screen.getAllByText('Details')[0]);
     expect(onOpenServerGroups).not.toHaveBeenCalled();
+    expect(screen.getByText('gone-a')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByText('+')[0]);
     fireEvent.click(screen.getByText('Open checked'));
     expect(onOpenServerGroups).not.toHaveBeenCalled();
     expect(onOpenGroupSession).not.toHaveBeenCalled();
@@ -665,7 +809,7 @@ describe('ConnectionsPage', () => {
     );
 
     expect(screen.getAllByText('Open')).toHaveLength(1);
-    expect(screen.getByText('daemon-host-1 · 1 sessions')).toBeTruthy();
-    expect(screen.queryByText('100.64.0.10 · 1 sessions')).toBeNull();
+    expect(screen.getByText('daemon-host-1 · 1 session')).toBeTruthy();
+    expect(screen.queryByText('100.64.0.10 · 1 session')).toBeNull();
   });
 });

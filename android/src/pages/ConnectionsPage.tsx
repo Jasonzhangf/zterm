@@ -7,12 +7,13 @@ import { buildConnectionsServerGroups, type ServerGroupView } from '../lib/conne
 import { mobileTheme } from '../lib/mobile-ui';
 import { getServerColorTone } from '../lib/server-color';
 import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
-import type { Host, Session, SessionGroupHistory } from '../lib/types';
+import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 
 interface ConnectionsPageProps {
   hosts: Host[];
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   onResumeSession: (sessionId: string) => void;
   onOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
   onEditServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
@@ -29,11 +30,29 @@ interface ConnectionsPageProps {
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
   onAddNew: () => void;
+  onOpenVaults?: () => void;
   onOpenSettings: () => void;
 }
 
 function getGroupDisplayName(group: Pick<ServerGroupView, 'daemonHostId' | 'bridgeHost'>) {
   return group.daemonHostId?.trim() || group.bridgeHost;
+}
+
+function getGroupTitleName(group: ServerGroupView) {
+  return group.relayDeviceTruth && group.name.trim() ? group.name : getGroupDisplayName(group);
+}
+
+function getSessionCountLabel(count: number) {
+  return count === 1 ? '1 session' : `${count} sessions`;
+}
+
+function getDaemonSubtitle(group: ServerGroupView) {
+  const status = group.daemonConnected === false ? 'offline' : group.daemonConnected ? 'online' : 'saved';
+  const version = group.daemonVersion?.trim() ? ` · daemon ${group.daemonVersion.trim()}` : '';
+  if (group.bridgeHost && group.bridgePort) {
+    return `${status}${version} · ${group.bridgeHost}:${group.bridgePort}`;
+  }
+  return `${status}${version}`;
 }
 
 function formatRelative(ts?: number) {
@@ -51,6 +70,7 @@ export function ConnectionsPage({
   hosts,
   sessions,
   sessionGroups,
+  relayDevices = [],
   onResumeSession,
   onOpenGroupSession,
   onEditServerGroup,
@@ -60,15 +80,18 @@ export function ConnectionsPage({
   onEdit,
   onDelete,
   onAddNew,
+  onOpenVaults,
   onOpenSettings,
 }: ConnectionsPageProps) {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [selectedSessionsByGroup, setSelectedSessionsByGroup] = useState<Record<string, string[]>>({});
+  const [vaultNoticeVisible, setVaultNoticeVisible] = useState(false);
   const serverGroups = useMemo(() => buildConnectionsServerGroups({
     hosts,
     sessions,
     sessionGroups,
-  }), [hosts, sessionGroups, sessions]);
+    relayDevices,
+  }), [hosts, relayDevices, sessionGroups, sessions]);
   const previousServerGroupsRef = useRef<ServerGroupView[]>(serverGroups);
 
   useEffect(() => {
@@ -175,6 +198,114 @@ export function ConnectionsPage({
   const selectedSessionCount = selectedServerGroups.reduce((sum, entry) => sum + entry.sessionNames.length, 0);
   const managementMode = expandedGroupIds.length > 0 || selectedGroupCount > 0;
 
+  const selectAllServerGroups = () => {
+    const nextSelection: Record<string, string[]> = {};
+    const nextExpanded: string[] = [];
+    serverGroups.forEach((group) => {
+      const sessionNames = group.openableSessions.length > 0
+        ? group.openableSessions
+        : group.defaultSessionNames;
+      nextSelection[group.id] = [...sessionNames];
+      nextExpanded.push(group.id);
+      onSaveServerGroupSelection(group, sessionNames);
+    });
+    setSelectedSessionsByGroup(nextSelection);
+    setExpandedGroupIds(nextExpanded);
+  };
+
+  const clearAllServerGroups = () => {
+    serverGroups.forEach((group) => onSaveServerGroupSelection(group, []));
+    setSelectedSessionsByGroup({});
+    setExpandedGroupIds([]);
+  };
+
+  const exitManagementMode = () => {
+    setExpandedGroupIds([]);
+    setSelectedSessionsByGroup({});
+  };
+
+  const handleOpenVaults = () => {
+    onOpenVaults?.();
+    setVaultNoticeVisible(true);
+  };
+
+  const openSelectedServerGroups = () => {
+    const groupsToOpen: Array<{
+      name: string;
+      bridgeHost: string;
+      bridgePort: number;
+      daemonHostId?: string;
+      authToken?: string;
+      sessionNames: string[];
+    }> = [];
+    let firstLiveSessionId: string | null = null;
+
+    selectedServerGroups.forEach(({ group, sessionNames }) => {
+      const liveNames = new Set(group.liveSessions.map((session) => session.sessionName));
+      const nonLiveSessionNames = sessionNames.filter((sessionName) => !liveNames.has(sessionName));
+      if (!firstLiveSessionId) {
+        firstLiveSessionId = group.sessions.find((entry) => sessionNames.includes(entry.sessionName) && entry.liveSession)?.liveSession?.id || null;
+      }
+      if (nonLiveSessionNames.length === 0) {
+        return;
+      }
+      const target = resolveGroupBridgeTarget(group);
+      groupsToOpen.push({
+        name: `${getGroupTitleName(group)} · ${getSessionCountLabel(nonLiveSessionNames.length)}`,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: group.daemonHostId,
+        authToken: target.authToken,
+        sessionNames: nonLiveSessionNames,
+      });
+    });
+
+    if (groupsToOpen.length > 0) {
+      onOpenServerGroups(groupsToOpen);
+      return;
+    }
+    if (firstLiveSessionId) {
+      onResumeSession(firstLiveSessionId);
+    }
+  };
+
+  const resolveGroupBridgeTarget = (group: ServerGroupView): { bridgeHost: string; bridgePort: number; authToken?: string } => {
+    if (group.bridgeHost && group.bridgePort) {
+      return { bridgeHost: group.bridgeHost, bridgePort: group.bridgePort, authToken: group.authToken };
+    }
+    if (group.daemonHostId) {
+      const matchedHost = hosts.find(
+        (h) => (h.daemonHostId || h.relayHostId || '').trim().toLowerCase() === group.daemonHostId!.trim().toLowerCase()
+      );
+      if (matchedHost) {
+        return { bridgeHost: matchedHost.bridgeHost, bridgePort: matchedHost.bridgePort, authToken: matchedHost.authToken || group.authToken };
+      }
+    }
+    return { bridgeHost: group.bridgeHost || '', bridgePort: group.bridgePort || 0, authToken: group.authToken };
+  };
+
+  const openGroupSessions = (group: ServerGroupView, sessionNames: string[]) => {
+    if (group.liveSessions.length > 0) {
+      onResumeSession(group.liveSessions[0]!.id);
+      return;
+    }
+    if (sessionNames.length === 0) {
+      openGroupEditor(group);
+      return;
+    }
+    const target = resolveGroupBridgeTarget(group);
+    onOpenServerGroups([
+      {
+        name: `${getGroupTitleName(group)} · ${getSessionCountLabel(sessionNames.length)}`,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: group.daemonHostId,
+        authToken: target.authToken,
+        sessionNames,
+      },
+    ]);
+  };
+
   return (
     <div
       data-testid="connections-scroll"
@@ -201,7 +332,58 @@ export function ConnectionsPage({
 
         {serverGroups.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightMuted }}>SERVERS</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightMuted }}>SERVERS</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={selectAllServerGroups}
+                  style={{
+                    border: 'none',
+                    borderRadius: '999px',
+                    padding: '7px 10px',
+                    backgroundColor: 'rgba(16,18,24,0.08)',
+                    color: mobileTheme.colors.lightText,
+                    fontSize: '12px',
+                    fontWeight: 800,
+                  }}
+                >
+                  All servers
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllServerGroups}
+                  style={{
+                    border: 'none',
+                    borderRadius: '999px',
+                    padding: '7px 10px',
+                    backgroundColor: 'rgba(16,18,24,0.06)',
+                    color: mobileTheme.colors.lightMuted,
+                    fontSize: '12px',
+                    fontWeight: 800,
+                  }}
+                >
+                  Clear
+                </button>
+                {managementMode && (
+                  <button
+                    type="button"
+                    onClick={exitManagementMode}
+                    style={{
+                      border: 'none',
+                      borderRadius: '999px',
+                      padding: '7px 10px',
+                      backgroundColor: mobileTheme.colors.shell,
+                      color: mobileTheme.colors.accent,
+                      fontSize: '12px',
+                      fontWeight: 800,
+                    }}
+                  >
+                    Done
+                  </button>
+                )}
+              </div>
+            </div>
             {serverGroups.map((group) => {
               const expanded = expandedGroupIds.includes(group.id);
               const selectedSessions = selectedSessionsByGroup[group.id] || [];
@@ -215,14 +397,16 @@ export function ConnectionsPage({
               return (
                 <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <ConnectionCard
-                    title={`${getGroupDisplayName(group)} · ${group.sessions.length} sessions`}
-                    subtitle={group.daemonHostId || `${group.bridgeHost}:${group.bridgePort}`}
+                    title={`${getGroupTitleName(group)} · ${getSessionCountLabel(group.sessions.length)}`}
+                    subtitle={getDaemonSubtitle(group)}
                     preview={
                       isOpen
                         ? `Live now · ${group.liveSessions.length}/${group.sessions.length} sessions open`
                         : group.savedCount > 0
-                          ? `Saved ${group.savedCount} sessions · last active ${formatRelative(group.lastOpenedAt)}`
-                          : `History only · last active ${formatRelative(group.lastOpenedAt)}`
+                        ? `Saved ${getSessionCountLabel(group.savedCount)} · last active ${formatRelative(group.lastOpenedAt)}`
+                          : group.sessions.length > 0
+                            ? `History only · last active ${formatRelative(group.lastOpenedAt)}`
+                            : `No sessions reported · last seen ${formatRelative(Date.parse(group.daemonLastSeenAt || '') || 0)}`
                     }
                     accentLabel={
                       expanded
@@ -231,22 +415,14 @@ export function ConnectionsPage({
                     }
                     icon="◫"
                     tone={tone}
-                    actionLabel={isOpen ? 'Enter' : 'Open'}
+                    actionLabel={canOpenGroup ? (isOpen ? 'Enter' : 'Open') : 'Details'}
                     secondaryLabel={expanded ? '−' : '+'}
+                    secondaryAriaLabel={`${expanded ? 'Collapse' : 'Expand'} ${getGroupTitleName(group)} sessions`}
                     onPrimaryAction={() => {
-                      if (!canOpenGroup) {
-                        return;
-                      }
-                      onOpenServerGroups([
-                        {
-                          name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} sessions`,
-                          bridgeHost: group.bridgeHost,
-                          bridgePort: group.bridgePort,
-                          daemonHostId: group.daemonHostId,
-                          authToken: group.authToken,
-                          sessionNames: actionSessionNames,
-                        },
-                      ]);
+                      openGroupSessions(group, actionSessionNames);
+                    }}
+                    onActionButton={() => {
+                      openGroupSessions(group, actionSessionNames);
                     }}
                     onSecondaryAction={() => {
                       if (!expanded) {
@@ -389,7 +565,7 @@ export function ConnectionsPage({
                           </div>
                         );
                       })}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', paddingTop: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', paddingTop: '4px', flexWrap: 'wrap' }}>
                         <button
                           onClick={() => updateGroupSelection(group, group.sessions.map((entry) => entry.sessionName))}
                           style={{
@@ -438,6 +614,7 @@ export function ConnectionsPage({
                               ...current,
                               [group.id]: [],
                             }));
+                            setExpandedGroupIds((current) => current.filter((item) => item !== group.id));
                             onDeleteServerGroup(group);
                           }}
                           style={{
@@ -457,13 +634,14 @@ export function ConnectionsPage({
                             if (!canOpenGroup) {
                               return;
                             }
+                            const target = resolveGroupBridgeTarget(group);
                             onOpenServerGroups([
                               {
-                                name: `${getGroupDisplayName(group)} · ${actionSessionNames.length} sessions`,
-                                bridgeHost: group.bridgeHost,
-                                bridgePort: group.bridgePort,
+                                name: `${getGroupTitleName(group)} · ${getSessionCountLabel(actionSessionNames.length)}`,
+                                bridgeHost: target.bridgeHost,
+                                bridgePort: target.bridgePort,
                                 daemonHostId: group.daemonHostId,
-                                authToken: group.authToken,
+                                authToken: target.authToken,
                                 sessionNames: actionSessionNames,
                               },
                             ]);
@@ -490,7 +668,7 @@ export function ConnectionsPage({
           </div>
         )}
 
-        {selectedGroupCount > 1 && (
+        {selectedGroupCount > 0 && (
           <div
             style={{
               position: 'sticky',
@@ -500,18 +678,7 @@ export function ConnectionsPage({
             }}
           >
             <button
-              onClick={() =>
-                onOpenServerGroups(
-                  selectedServerGroups.map(({ group, sessionNames }) => ({
-                    name: `${getGroupDisplayName(group)} · ${sessionNames.length} sessions`,
-                    bridgeHost: group.bridgeHost,
-                    bridgePort: group.bridgePort,
-                    daemonHostId: group.daemonHostId,
-                    authToken: group.authToken,
-                    sessionNames,
-                  })),
-                )
-              }
+              onClick={openSelectedServerGroups}
               style={{
                 width: '100%',
                 border: 'none',
@@ -531,6 +698,49 @@ export function ConnectionsPage({
                 {selectedGroupCount} groups · {selectedSessionCount} sessions
               </span>
             </button>
+          </div>
+        )}
+        {managementMode && selectedGroupCount === 0 && (
+          <div
+            style={{
+              position: 'sticky',
+              top: `calc(${mobileTheme.safeArea.top} + 72px)`,
+              zIndex: 3,
+              marginTop: '-6px',
+            }}
+          >
+            <button
+              onClick={exitManagementMode}
+              style={{
+                width: '100%',
+                border: 'none',
+                borderRadius: '16px',
+                padding: '14px 16px',
+                backgroundColor: mobileTheme.colors.shell,
+                color: mobileTheme.colors.accent,
+                boxShadow: mobileTheme.shadow.strong,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Done
+            </button>
+          </div>
+        )}
+        {vaultNoticeVisible && (
+          <div
+            role="status"
+            style={{
+              borderRadius: '16px',
+              padding: '12px 14px',
+              backgroundColor: '#ffffff',
+              color: mobileTheme.colors.lightText,
+              border: `1px solid ${mobileTheme.colors.lightBorder}`,
+              boxShadow: mobileTheme.shadow.soft,
+              fontWeight: 700,
+            }}
+          >
+            Vaults are not available yet
           </div>
         )}
         {serverGroups.length === 0 && (
@@ -557,6 +767,7 @@ export function ConnectionsPage({
       {!managementMode && <ConnectionFab onClick={onAddNew} />}
       <ConnectionsBottomNav
         activePage="connections"
+        onOpenVaults={handleOpenVaults}
         onOpenConnections={() => undefined}
         onOpenSettings={onOpenSettings}
       />

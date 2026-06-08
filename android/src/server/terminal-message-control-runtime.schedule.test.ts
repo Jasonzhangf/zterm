@@ -1,0 +1,90 @@
+import { describe, expect, it, vi } from 'vitest';
+import { handleScheduleMessageRuntime, type TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
+import type { TerminalSession } from './terminal-runtime-types';
+
+function makeSession(): TerminalSession {
+  return {
+    id: 'server-session-1',
+    sessionName: 'tmux-1',
+    mirrorKey: 'tmux-1',
+    transport: null,
+  } as TerminalSession;
+}
+
+function makeDeps(overrides?: Partial<TerminalMessageControlRuntimeDeps>): TerminalMessageControlRuntimeDeps {
+  return {
+    sessions: new Map(),
+    mirrors: new Map(),
+    issueSessionTransportToken: vi.fn(() => 'token-1'),
+    consumeSessionTransportToken: vi.fn(() => true),
+    scheduleEngine: {
+      listBySession: vi.fn(() => []),
+      upsert: vi.fn(),
+      delete: vi.fn(() => null),
+      toggle: vi.fn(() => null),
+      runNow: vi.fn(async () => null),
+      renameSession: vi.fn(),
+      markSessionMissing: vi.fn(),
+    },
+    sendTransportMessage: vi.fn(),
+    sendMessage: vi.fn(),
+    sendScheduleStateToSession: vi.fn(),
+    listTmuxSessions: vi.fn(() => []),
+    createDetachedTmuxSession: vi.fn(() => 'tmux-1'),
+    renameTmuxSession: vi.fn(() => 'tmux-2'),
+    runTmux: vi.fn(() => ({ ok: true, stdout: '' })),
+    sanitizeSessionName: (input?: string) => (input || '').trim(),
+    createTransportBoundSession: vi.fn(() => makeSession()),
+    bindConnectionToSession: vi.fn((_connection, session) => session),
+    getMirrorKey: (sessionName: string) => sessionName,
+    attachTmux: vi.fn(),
+    destroyMirror: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe('terminal-message-control-runtime schedule errors', () => {
+  it('emits schedule-error when deleting a stale job', () => {
+    const session = makeSession();
+    const deps = makeDeps();
+
+    handleScheduleMessageRuntime(deps, session, {
+      type: 'schedule-delete',
+      payload: { jobId: 'missing-job' },
+    }, null);
+
+    expect(deps.sendMessage).toHaveBeenCalledWith(session, {
+      type: 'schedule-error',
+      payload: {
+        sessionName: 'tmux-1',
+        operation: 'delete',
+        jobId: 'missing-job',
+        code: 'schedule_job_not_found',
+        message: 'Schedule job no longer exists',
+      },
+    });
+  });
+
+  it('emits schedule-error when run-now resolves to a missing job', async () => {
+    const session = makeSession();
+    const deps = makeDeps();
+
+    handleScheduleMessageRuntime(deps, session, {
+      type: 'schedule-run-now',
+      payload: { jobId: 'missing-job' },
+    }, null);
+
+    await vi.waitFor(() => {
+      expect(deps.sendMessage).toHaveBeenCalledWith(session, {
+        type: 'schedule-error',
+        payload: {
+          sessionName: 'tmux-1',
+          operation: 'run-now',
+          jobId: 'missing-job',
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        },
+      });
+    });
+  });
+});

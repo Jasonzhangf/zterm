@@ -1,135 +1,285 @@
-import type { CSSProperties, ReactNode } from 'react';
+/**
+ * 跨平台 PaneStage 容器。
+ *
+ * 设计原则：
+ * - 核心是 **horizontal split flex container**，和具体的尺寸/手势无关
+ * - pane 之间的 divider 在 desktop/tablet 显示 drag handle，phone 隐藏
+ * - pane 比例 (pane.size) 由调用方传入（workspace-model normalizePaneSizes 已经处理）
+ *
+ * 平台差异仅在 onPointerDown onDivider / 是否显示 drag handle 上：
+ * - phone: divider hit area 18px，但视觉透明
+ * - desktop/tablet: divider 始终可见 + drag handle
+ *
+ * 核心算法（比例变更、pane 添加/删除）由 workspace-model 负责
+ * 本组件不持有 workspace 状态，只渲染 + 暴露 drag 事件
+ */
 
-export interface PaneSlotDefinition {
+import type { CSSProperties, ReactNode } from 'react';
+import { resolvePaneProfile, type PanePlatform, type PaneProfile, type PaneStageTokens } from './pane-profile';
+
+export interface PaneSlotDefinition<TTabId extends string = string> {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   badge?: string;
-  widthWeight?: number;
+  size: number;
+  isActive: boolean;
   hideHeader?: boolean;
   render: () => ReactNode;
+  /**
+   * pane 内 tab 列表的 id 列表（用于 swipe gesture 路由）
+   */
+  tabIds: TTabId[];
+  activeTabId: TTabId | null;
 }
 
-interface PaneStageProps {
-  columns: number;
-  slots: PaneSlotDefinition[];
-  columnTemplate?: string;
+export interface PaneStageDragEvent {
+  sourcePaneId: string;
+  targetPaneId: string;
+  ratio: number;
 }
 
-interface PaneFrameProps {
-  index: number;
-  slot: PaneSlotDefinition;
-  children: ReactNode;
-  showDivider: boolean;
+interface PaneStageProps<TTabId extends string> {
+  platform: PanePlatform;
+  splitVisible: boolean;
+  slots: PaneSlotDefinition<TTabId>[];
+  topInsetPx?: number;
+  landscape?: boolean;
+  /**
+   * desktop/tablet 拖拽 divider 改 pane 比例时回调
+   * 父组件负责把 ratio 写回 workspace state
+   */
+  onPaneRatioChange?: (event: PaneStageDragEvent) => void;
+  /**
+   * desktop/tablet 点击 pane（激活焦点）
+   * phone 通过 tab 点击自然激活
+   */
+  onActivatePane?: (paneId: string) => void;
 }
 
-const frameStyle: CSSProperties = {
+const STAGE_BASE_STYLE: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'stretch',
+  position: 'relative',
+};
+
+const PANE_BASE_STYLE: CSSProperties = {
   minWidth: 0,
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  background: 'linear-gradient(180deg, rgba(15, 20, 31, 0.98) 0%, rgba(10, 14, 24, 0.98) 100%)',
+  boxSizing: 'border-box',
+  position: 'relative',
 };
 
-const headerStyle: CSSProperties = {
-  display: 'flex',
-  gap: '6px',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '8px 10px',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-  background: 'rgba(255, 255, 255, 0.018)',
-};
+function PaneFrame<TTabId extends string>({
+  slot,
+  profile,
+  onActivate,
+}: {
+  slot: PaneSlotDefinition<TTabId>;
+  profile: PaneProfile;
+  onActivate?: (paneId: string) => void;
+}) {
+  const stageTokens: PaneStageTokens = profile.stage;
+  const frameStyle: CSSProperties = {
+    ...PANE_BASE_STYLE,
+    flex: `${Math.max(0.01, slot.size)} 1 0%`,
+    borderRadius: stageTokens.paneRadius,
+    overflow: 'hidden',
+    outline: slot.isActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
+    outlineOffset: slot.isActive ? '-2px' : undefined,
+    cursor: profile.gesture.dragResizeEnabled && !slot.isActive ? 'pointer' : undefined,
+  };
 
-const indexStyle: CSSProperties = {
-  display: 'inline-grid',
-  placeItems: 'center',
-  minWidth: '24px',
-  height: '20px',
-  borderRadius: '999px',
-  background: 'rgba(61, 126, 255, 0.18)',
-  color: '#cfe0ff',
-  fontWeight: 700,
-  fontSize: '9px',
-};
-
-const bodyStyle: CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  padding: '10px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '8px',
-};
-
-function PaneFrame({ index, slot, children, showDivider }: PaneFrameProps) {
   return (
     <section
-      style={{
-        ...frameStyle,
-        borderLeft: showDivider ? '1px solid rgba(255, 255, 255, 0.08)' : undefined,
-      }}
+      data-testid="pane-stage-frame"
+      data-pane-id={slot.id}
+      data-pane-active={slot.isActive ? 'true' : 'false'}
+      onPointerDown={() => onActivate?.(slot.id)}
+      style={frameStyle}
     >
-      {slot.hideHeader ? null : (
-        <div style={headerStyle}>
-          <div style={{ minWidth: 0, display: 'flex', gap: '8px', alignItems: 'center', flex: 1 }}>
-            <span style={indexStyle}>{String(index + 1).padStart(2, '0')}</span>
-            <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: '13px', lineHeight: 1.15 }}>{slot.title}</h2>
-              <p style={{ margin: '1px 0 0', color: '#8393a8', lineHeight: 1.25, fontSize: '10px' }}>{slot.subtitle}</p>
-            </div>
-          </div>
-          {slot.badge ? (
-            <div
-              style={{
-                flexShrink: 0,
-                borderRadius: '999px',
-                padding: '3px 7px',
-                background: 'rgba(59, 204, 160, 0.14)',
-                color: '#7ff1cc',
-                fontSize: '9px',
-                fontWeight: 700,
-              }}
-            >
-              {slot.badge}
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <div style={{ ...bodyStyle, padding: slot.hideHeader ? '8px' : bodyStyle.padding }}>{children}</div>
+      {slot.render()}
     </section>
   );
 }
 
-export function PaneStage({ columns, slots, columnTemplate }: PaneStageProps) {
-  const visibleSlots = slots.slice(0, columns);
-  const template = columnTemplate || visibleSlots.map((slot) => `${slot.widthWeight || 1}fr`).join(' ');
+function PaneDivider<TTabId extends string>({
+  sourceSlot,
+  targetSlot,
+  profile,
+  onPaneRatioChange,
+  onActivatePane,
+}: {
+  sourceSlot: PaneSlotDefinition<TTabId>;
+  targetSlot: PaneSlotDefinition<TTabId>;
+  profile: PaneProfile;
+  onPaneRatioChange?: (event: PaneStageDragEvent) => void;
+  onActivatePane?: (paneId: string) => void;
+}) {
+  const hitPx = profile.gesture.dividerHitPx;
+  const visible = profile.gesture.dragResizeEnabled;
+
+  const containerStyle: CSSProperties = {
+    width: `${hitPx}px`,
+    flexShrink: 0,
+    alignSelf: 'stretch',
+    position: 'relative',
+    cursor: visible ? 'col-resize' : 'default',
+    backgroundColor: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
+  const lineStyle: CSSProperties = visible
+    ? {
+        width: '1px',
+        flex: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
+      }
+    : {
+        width: '1px',
+        flex: 1,
+        backgroundColor: 'transparent',
+      };
+
+  const handleStyle: CSSProperties = visible
+    ? {
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '4px',
+        height: '28px',
+        borderRadius: '2px',
+        backgroundColor: 'rgba(255, 255, 255, 0.32)',
+        pointerEvents: 'none',
+      }
+    : { display: 'none' };
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      data-testid="pane-stage-divider"
+      data-divider-source={sourceSlot.id}
+      data-divider-target={targetSlot.id}
+      onPointerDown={(event) => {
+        if (!visible || !onPaneRatioChange) {
+          onActivatePane?.(sourceSlot.id);
+          return;
+        }
+        event.preventDefault();
+        const startX = event.clientX;
+        const startRatio = sourceSlot.size;
+        const targetRatio = targetSlot.size;
+        const stage = (event.currentTarget.parentElement as HTMLElement | null);
+        const stageWidth = stage?.getBoundingClientRect().width ?? 0;
+        const move = (e: PointerEvent) => {
+          if (!stageWidth) {
+            return;
+          }
+          const delta = (e.clientX - startX) / stageWidth;
+          const nextSource = Math.max(0.1, Math.min(0.9, startRatio + delta));
+          const nextTarget = Math.max(0.1, startRatio + targetRatio - nextSource);
+          onPaneRatioChange({
+            sourcePaneId: sourceSlot.id,
+            targetPaneId: targetSlot.id,
+            ratio: nextSource / (nextSource + nextTarget),
+          });
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      }}
+      style={containerStyle}
+    >
+      <div style={lineStyle} />
+      <div style={handleStyle} />
+    </div>
+  );
+}
+
+export function PaneStage<TTabId extends string = string>({
+  platform,
+  splitVisible,
+  slots,
+  topInsetPx = 0,
+  landscape = false,
+  onPaneRatioChange,
+  onActivatePane,
+}: PaneStageProps<TTabId>) {
+  const profile = resolvePaneProfile({ platform, splitVisible, topInsetPx, landscape });
+
+  if (!splitVisible) {
+    // single-pane: render only first slot
+    const first = slots[0];
+    if (!first) {
+      return null;
+    }
+    return (
+      <main
+        data-testid="pane-stage-single"
+        data-stage-mode={profile.mode}
+        style={{
+          ...STAGE_BASE_STYLE,
+          flexDirection: 'column',
+          margin: profile.stage.outerMargin,
+          borderRadius: profile.stage.containerRadius,
+        }}
+      >
+        <PaneFrame
+          slot={first}
+          profile={profile}
+          onActivate={onActivatePane}
+        />
+      </main>
+    );
+  }
 
   return (
     <main
+      data-testid="pane-stage-split"
+      data-stage-mode={profile.mode}
       style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'grid',
-        gridTemplateColumns: template,
-        gap: 0,
-        overflow: 'hidden',
-        borderRadius: '14px',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        background: 'rgba(8, 10, 15, 0.9)',
+        ...STAGE_BASE_STYLE,
+        gap: profile.stage.paneGap,
+        margin: profile.stage.outerMargin,
+        padding: profile.stage.rowBottomPadding,
       }}
     >
-      {visibleSlots.map((slot, index) => (
-        <PaneFrame
-          key={slot.id}
-          index={index}
-          slot={slot}
-          showDivider={index > 0}
-        >
-          {slot.render()}
-        </PaneFrame>
-      ))}
+      {slots.map((slot, index) => {
+        const next = slots[index + 1];
+        return (
+          <div
+            key={slot.id}
+            style={{ display: 'contents' }}
+          >
+            <PaneFrame
+              slot={slot}
+              profile={profile}
+              onActivate={onActivatePane}
+            />
+            {next ? (
+              <PaneDivider
+                sourceSlot={slot}
+                targetSlot={next}
+                profile={profile}
+                onPaneRatioChange={onPaneRatioChange}
+                onActivatePane={onActivatePane}
+              />
+            ) : null}
+          </div>
+        );
+      })}
     </main>
   );
 }

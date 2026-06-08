@@ -967,6 +967,62 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
+  it('rebuilds render rows when a fixed bottom row is replaced inside the same lines container', async () => {
+    const session = makeSession({
+      revision: 1,
+      lines: [...buildRows(79), 'fixed-bottom-old'],
+      bufferTailEndIndex: 80,
+    });
+    const sharedLines = session.buffer.lines;
+    const sharedGapRanges: Array<{ startIndex: number; endIndex: number }> = [];
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: sharedLines,
+            bufferStartIndex: session.buffer.startIndex,
+            bufferEndIndex: session.buffer.endIndex,
+            bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+            bufferGapRanges: sharedGapRanges,
+            revision: 1,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('fixed-bottom-old'));
+
+    sharedLines[79] = Array.from('fixed-bottom-new').map((char) => cell(char));
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: sharedLines,
+            bufferStartIndex: session.buffer.startIndex,
+            bufferEndIndex: session.buffer.endIndex,
+            bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+            bufferGapRanges: sharedGapRanges,
+            revision: 2,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('fixed-bottom-new'));
+    expect(readRenderedRows(view.container)).not.toContain('fixed-bottom-old');
+  });
+
   it('forces a hidden reading tab back to follow when it becomes active again', async () => {
     const onViewportChange = vi.fn();
     const session = makeSession({

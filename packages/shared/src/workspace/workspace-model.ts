@@ -171,6 +171,46 @@ export function removePaneFromWorkspace<TTab extends WorkspaceTab>(
   return next;
 }
 
+export function setActivePane<TTab extends WorkspaceTab>(
+  current: WorkspaceState<TTab>,
+  paneId: string,
+): WorkspaceState<TTab> {
+  if (current.activePaneId === paneId) {
+    return current;
+  }
+  if (!current.panes.some((pane) => pane.id === paneId)) {
+    return current;
+  }
+  const next = cloneWorkspaceState(current);
+  next.activePaneId = paneId;
+  return next;
+}
+
+export function resizePaneRatio<TTab extends WorkspaceTab>(
+  current: WorkspaceState<TTab>,
+  sourcePaneId: string,
+  targetPaneId: string,
+  sourceRatio: number,
+): WorkspaceState<TTab> {
+  if (sourcePaneId === targetPaneId) {
+    return current;
+  }
+  const sourcePane = current.panes.find((pane) => pane.id === sourcePaneId);
+  const targetPane = current.panes.find((pane) => pane.id === targetPaneId);
+  if (!sourcePane || !targetPane) {
+    return current;
+  }
+  const safeRatio = Math.max(0.1, Math.min(0.9, sourceRatio));
+  const targetRatio = Math.max(0.1, sourcePane.size + targetPane.size - safeRatio);
+  const next = cloneWorkspaceState(current);
+  const srcIndex = next.panes.findIndex((pane) => pane.id === sourcePaneId);
+  const tgtIndex = next.panes.findIndex((pane) => pane.id === targetPaneId);
+  next.panes[srcIndex] = { ...next.panes[srcIndex], size: safeRatio };
+  next.panes[tgtIndex] = { ...next.panes[tgtIndex], size: targetRatio };
+  next.panes = normalizePaneSizes(next.panes);
+  return next;
+}
+
 export function moveTabBetweenPanes<TTab extends WorkspaceTab>(
   current: WorkspaceState<TTab>,
   sourcePaneId: string,

@@ -43,7 +43,11 @@ interface FileTransferDispatcher {
 }
 
 function isTerminalSessionMissingCode(code?: string) {
-  return code === 'tmux_session_unavailable' || code === 'tmux_session_killed';
+  return code === 'tmux_session_killed';
+}
+
+function isRetryableTerminalAttachCode(code?: string) {
+  return code === 'tmux_session_unavailable';
 }
 
 export function handleSocketServerMessageRuntime(options: {
@@ -158,6 +162,14 @@ export function handleSocketServerMessageRuntime(options: {
         lastEvent: msg.payload,
       }));
       break;
+    case 'schedule-error':
+      options.setScheduleStateForSession(params.sessionId, (current) => ({
+        ...current,
+        sessionName: msg.payload.sessionName || current.sessionName,
+        loading: false,
+        error: msg.payload.message,
+      }));
+      break;
     case 'debug-control':
       setRuntimeDebugEnabled(Boolean(msg.payload.enabled));
       options.runtimeDebug('session.runtime-debug.control', {
@@ -186,6 +198,16 @@ export function handleSocketServerMessageRuntime(options: {
       }
       break;
     case 'error':
+      if (isRetryableTerminalAttachCode(msg.payload.code)) {
+        options.runtimeDebug(`session.ws.${params.debugScope}.remote-session-unavailable`, {
+          sessionId: params.sessionId,
+          code: msg.payload.code,
+          message: msg.payload.message,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+        });
+        params.onFailure(msg.payload.message, true);
+        break;
+      }
       if (isTerminalSessionMissingCode(msg.payload.code)) {
         options.runtimeDebug(`session.ws.${params.debugScope}.remote-session-missing`, {
           sessionId: params.sessionId,

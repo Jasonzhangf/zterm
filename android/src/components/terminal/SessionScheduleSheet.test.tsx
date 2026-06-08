@@ -68,6 +68,38 @@ describe('SessionScheduleSheet', () => {
     expect(screen.getByText('Enabled')).toBeTruthy();
   });
 
+  it('renders loading state and disables schedule mutations while pending', () => {
+    const onRefresh = vi.fn();
+    const onRunNow = vi.fn();
+    const onDelete = vi.fn();
+    const onSave = vi.fn();
+    const job = createJob({ id: 'job-pending' });
+    renderSheet({
+      onRefresh,
+      onRunNow,
+      onDelete,
+      onSave,
+      scheduleState: { ...createState([job]), loading: true },
+    });
+
+    expect(screen.getByRole('status').textContent).toBe('正在同步定时任务...');
+    expect((screen.getByText('Refresh') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Run now') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Delete') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Create') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText('Run now'));
+    fireEvent.click(screen.getByText('Delete'));
+    fireEvent.click(screen.getByText('Create'));
+    expect(onRunNow).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('renders schedule operation error from schedule state', () => {
+    renderSheet({ scheduleState: { ...createState(), error: 'schedule transport not connected' } });
+    expect(screen.getByRole('alert').textContent).toBe('schedule transport not connected');
+  });
+
   it('creates a new schedule job with text and interval', () => {
     const onSave = vi.fn();
     renderSheet({ onSave });

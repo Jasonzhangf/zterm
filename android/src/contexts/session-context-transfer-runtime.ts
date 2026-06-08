@@ -20,6 +20,23 @@ interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
 
+const TRANSFER_BINARY_CHUNK_BYTES = 16 * 1024;
+
+function sendBinaryTransferPayload(
+  sessionId: string,
+  ws: BridgeTransportSocket,
+  fileBuffer: ArrayBuffer,
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void,
+) {
+  for (let offset = 0; offset < fileBuffer.byteLength; offset += TRANSFER_BINARY_CHUNK_BYTES) {
+    sendSocketPayload(
+      sessionId,
+      ws,
+      fileBuffer.slice(offset, Math.min(offset + TRANSFER_BINARY_CHUNK_BYTES, fileBuffer.byteLength)),
+    );
+  }
+}
+
 interface RemoteScreenshotRuntimeLike {
   request: (
     sessionId: string,
@@ -42,7 +59,7 @@ export function sendInputRuntime(options: {
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
+  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   probeOrReconnectStaleSessionTransport: (
@@ -127,7 +144,7 @@ export async function sendImagePasteRuntime(options: {
     type: 'paste-image-start',
     payload,
   } satisfies ClientMessage));
-  options.sendSocketPayload(targetSessionId, ws, fileBuffer);
+  sendBinaryTransferPayload(targetSessionId, ws, fileBuffer, options.sendSocketPayload);
 }
 
 export async function sendFileAttachRuntime(options: {
@@ -153,7 +170,7 @@ export async function sendFileAttachRuntime(options: {
     type: 'attach-file-start',
     payload,
   } satisfies ClientMessage));
-  options.sendSocketPayload(targetSessionId, ws, fileBuffer);
+  sendBinaryTransferPayload(targetSessionId, ws, fileBuffer, options.sendSocketPayload);
 }
 
 export async function requestRemoteScreenshotRuntime(options: {

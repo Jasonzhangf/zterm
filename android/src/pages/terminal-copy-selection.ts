@@ -105,3 +105,31 @@ export async function writeTextToClipboard(text: string) {
 export function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
 }
+
+/**
+ * Resolve buffer covering [startRowIndex, endRowIndex].
+ * Returns null when no buffer covers the requested rows.
+ * Callers must handle null explicitly instead of silently ignoring copy.
+ */
+export function resolveCopySelectionBufferOrWarn(
+  sessionBufferStore: SessionRenderBufferStore | null | undefined,
+  sessions: Session[],
+  sessionId: string,
+  startRowIndex: number,
+  endRowIndex: number,
+): SessionRenderBufferSnapshot | null {
+  const buffer = resolveCopySelectionBuffer(
+    sessionBufferStore,
+    sessions,
+    sessionId,
+    startRowIndex,
+    endRowIndex,
+  );
+  if (!buffer) {
+    logAsyncCleanupFailure(
+      `[CopySelection] buffer does not cover rows ${Math.min(startRowIndex, endRowIndex)}-${Math.max(startRowIndex, endRowIndex)}, session=${sessionId}`,
+      new Error("buffer coverage miss"),
+    );
+  }
+  return buffer;
+}

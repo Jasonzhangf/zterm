@@ -1,8 +1,8 @@
 import { memo as ReactMemo, useCallback, useMemo } from "react";
+import { PaneStage, resolvePaneProfile, type PaneSlotDefinition } from "@zterm/shared";
 import { TerminalView } from "../components/TerminalView";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipeSurface";
-import { resolveTerminalLayoutProfile } from "../lib/terminal-layout-profile";
 import { resolveTerminalOrientation } from "../lib/terminal-viewport-metrics";
 import { mobileTheme } from "../lib/mobile-ui";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
@@ -44,7 +44,7 @@ const TerminalStageShell = ReactMemo(
     visiblePaneEntries: {
       pane: AndroidWorkspacePane;
       paneIndex: number;
-      session: Session;
+      session: Session | null;
     }[];
     splitVisible: boolean;
     activePaneId: string;
@@ -82,8 +82,8 @@ const TerminalStageShell = ReactMemo(
       typeof window !== "undefined"
         ? resolveTerminalOrientation() === "landscape"
         : false;
-    const layoutProfile = useMemo(
-      () => resolveTerminalLayoutProfile({ splitVisible, landscape }),
+    const paneProfile = useMemo(
+      () => resolvePaneProfile({ platform: "phone", splitVisible, landscape }),
       [landscape, splitVisible],
     );
 
@@ -169,15 +169,57 @@ const TerminalStageShell = ReactMemo(
         terminalKeyboardRequested,
         terminalThemeId,
         terminalWidthMode,
-        layoutProfile.stage.containerRadius,
-        layoutProfile.stage.outerMargin,
-        layoutProfile.stage.paneGap,
-        layoutProfile.stage.paneRadius,
-        layoutProfile.stage.rowBottomPadding,
         copySelection,
         onLongPressRow,
       ],
     );
+
+    const stageSlots = useMemo<PaneSlotDefinition[]>(() => {
+      const entries = splitVisible
+        ? visiblePaneEntries
+        : (renderedPaneSessions.length > 0 ? renderedPaneSessions : [null]).map((session, index) => ({
+            pane: {
+              id: index === 0 ? "pane-main" : `pane-hidden-${session?.id ?? index}`,
+              size: 1,
+              tabs: [],
+              activeTabId: session?.id ?? "",
+            } as AndroidWorkspacePane,
+            paneIndex: index,
+            session,
+          }));
+      return entries.map(({ pane, paneIndex, session }) => {
+        const sessionIsActive = Boolean(session && session.id === interactiveSession?.id);
+        return {
+          id: pane.id,
+          title: `Pane ${paneIndex + 1}`,
+          size: pane.size ?? 1,
+          isActive: splitVisible ? pane.id === activePaneId : sessionIsActive,
+          activeTabId: session?.id ?? null,
+          tabIds: session ? [session.id] : [],
+          render: () => {
+            if (!session) {
+              return <div style={{ flex: 1, minHeight: 0, backgroundColor: mobileTheme.colors.canvas }} />;
+            }
+            return (
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  height: "100%",
+                  position: "relative",
+                  overflow: "hidden",
+                  backgroundColor: mobileTheme.colors.canvas,
+                  border: `1px solid ${mobileTheme.colors.cardBorder}`,
+                  boxSizing: "border-box",
+                }}
+              >
+                {renderTerminal(session, sessionIsActive, splitVisible ? `${pane.id}:${session.id}` : session.id)}
+              </div>
+            );
+          },
+        };
+      });
+    }, [activePaneId, interactiveSession?.id, renderedPaneSessions, renderTerminal, splitVisible, visiblePaneEntries]);
 
     return (
       <div
@@ -195,8 +237,8 @@ const TerminalStageShell = ReactMemo(
           style={{
             flex: 1,
             minHeight: 0,
-            margin: layoutProfile.stage.outerMargin,
-            borderRadius: layoutProfile.stage.containerRadius,
+            margin: paneProfile.stage.outerMargin,
+            borderRadius: paneProfile.stage.containerRadius,
             backgroundColor: splitVisible
               ? "transparent"
               : mobileTheme.colors.canvas,
@@ -208,85 +250,14 @@ const TerminalStageShell = ReactMemo(
             overscrollBehaviorY: "contain",
           }}
         >
-          {interactiveSession ? (
-            splitVisible ? (
-              <div
-                style={{
-                  flex: 1,
-                  height: "100%",
-                  minHeight: 0,
-                  display: "flex",
-                  gap: layoutProfile.stage.paneGap,
-                  padding: layoutProfile.stage.rowBottomPadding,
-                }}
-              >
-                {visiblePaneEntries.map(({ pane, session }) => {
-                  const paneIsActive = pane.id === activePaneId;
-                  const sessionIsActive = session.id === interactiveSession?.id;
-                  return (
-                    <div
-                      key={pane.id}
-                      data-testid="terminal-pane-shell"
-                      data-pane-id={pane.id}
-                      onPointerDown={() => onActivatePane?.(pane.id)}
-                      style={{
-                        flex: `${Math.max(0.01, pane.size ?? 1)} 1 0%`,
-                        minWidth: 0,
-                        height: "100%",
-                        minHeight: 0,
-                        display: "flex",
-                        flexDirection: "column",
-                        borderRadius: layoutProfile.stage.paneRadius,
-                        backgroundColor: mobileTheme.colors.canvas,
-                        overflow: "hidden",
-                        border: `1px solid ${mobileTheme.colors.cardBorder}`,
-                        outline: paneIsActive
-                          ? "2px solid rgba(83, 139, 255, 0.78)"
-                          : undefined,
-                        outlineOffset: paneIsActive ? "-2px" : undefined,
-                        boxSizing: "border-box",
-                        cursor: !paneIsActive ? "pointer" : undefined,
-                      }}
-                    >
-                      <div
-                        style={{
-                          flex: 1,
-                          minHeight: 0,
-                          position: "relative",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {renderTerminal(
-                          session,
-                          sessionIsActive,
-                          `${pane.id}:${session.id}`,
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              renderedPaneSessions.map((session) => {
-                const sessionIsActive = session.id === interactiveSession?.id;
-                return (
-                  <div
-                    key={session.id}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      visibility: sessionIsActive ? "visible" : "hidden",
-                      opacity: sessionIsActive ? 1 : 0,
-                      zIndex: sessionIsActive ? 1 : 0,
-                      pointerEvents: sessionIsActive ? "auto" : "none",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {renderTerminal(session, sessionIsActive, session.id)}
-                  </div>
-                );
-              })
-            )
+          {interactiveSession || stageSlots.length > 0 ? (
+            <PaneStage
+              platform="phone"
+              splitVisible={splitVisible}
+              slots={stageSlots}
+              landscape={landscape}
+              onActivatePane={onActivatePane}
+            />
           ) : (
             <div
               style={{
@@ -347,10 +318,10 @@ const TerminalStageShell = ReactMemo(
     prev.copySelection === next.copySelection &&
     prev.onLongPressRow === next.onLongPressRow &&
     prev.visiblePaneEntries
-      .map((entry) => `${entry.pane.id}:${entry.session.id}`)
+      .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
       .join("||") ===
       next.visiblePaneEntries
-        .map((entry) => `${entry.pane.id}:${entry.session.id}`)
+        .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
         .join("||") &&
     prev.onActivatePane === next.onActivatePane,
 );

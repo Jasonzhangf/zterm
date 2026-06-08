@@ -984,4 +984,5 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(setHead).toHaveBeenCalledTimes(1);
     expect(scheduleSessionRenderCommit).toHaveBeenCalledTimes(1);
   });
+
 });

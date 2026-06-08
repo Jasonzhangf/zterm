@@ -276,7 +276,7 @@ export function markPendingInputTailRefreshInfraRuntime(options: {
   localRevision: number;
   pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
 }) {
-  markPendingInputTailRefreshRuntime(options);
+  return markPendingInputTailRefreshRuntime(options);
 }
 
 export function clearSessionPullStateInfraRuntime(options: {

@@ -141,6 +141,7 @@ export function SessionScheduleSheet({
     () => scheduleState.jobs.find((job) => job.id === editingJobId) || null,
     [editingJobId, scheduleState.jobs],
   );
+  const busy = Boolean(scheduleState.loading);
 
   const startEditing = (job?: ScheduleJob) => {
     const nextDraft = job ? createDraftFromJob(job) : createDefaultDraft(sessionName, composerSeedText);
@@ -156,6 +157,9 @@ export function SessionScheduleSheet({
   const submitDraft = () => {
     if (!draft.payload.text.trim()) {
       window.alert('先填写要发送的文本。');
+      return;
+    }
+    if (busy) {
       return;
     }
 
@@ -229,10 +233,28 @@ export function SessionScheduleSheet({
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="button" onClick={onRefresh} style={ghostButtonStyle}>Refresh</button>
+            <button type="button" onClick={onRefresh} disabled={busy} style={ghostButtonStyle}>Refresh</button>
             <button type="button" onClick={onClose} style={ghostButtonStyle}>Done</button>
           </div>
         </div>
+
+        {busy || scheduleState.error ? (
+          <div
+            role={scheduleState.error ? 'alert' : 'status'}
+            style={{
+              marginTop: '10px',
+              borderRadius: '12px',
+              border: scheduleState.error ? '1px solid rgba(255, 120, 120, 0.35)' : `1px solid ${mobileTheme.colors.cardBorder}`,
+              background: scheduleState.error ? 'rgba(103, 29, 37, 0.42)' : mobileTheme.colors.shellMuted,
+              color: scheduleState.error ? '#ffd0d0' : mobileTheme.colors.textSecondary,
+              padding: '8px 10px',
+              fontSize: '12px',
+              lineHeight: 1.35,
+            }}
+          >
+            {scheduleState.error || '正在同步定时任务...'}
+          </div>
+        ) : null}
 
         <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
           {scheduleState.jobs.length === 0 ? (
@@ -270,15 +292,16 @@ export function SessionScheduleSheet({
                     <input
                       type="checkbox"
                       checked={job.enabled}
+                      disabled={busy}
                       onChange={(event) => onToggle(job.id, event.target.checked)}
                     />
                     Enabled
                   </label>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => startEditing(job)} style={ghostButtonStyle}>Edit</button>
-                  <button type="button" onClick={() => onRunNow(job.id)} style={ghostButtonStyle}>Run now</button>
-                  <button type="button" onClick={() => onDelete(job.id)} style={dangerButtonStyle}>Delete</button>
+                  <button type="button" onClick={() => startEditing(job)} disabled={busy} style={ghostButtonStyle}>Edit</button>
+                  <button type="button" onClick={() => onRunNow(job.id)} disabled={busy} style={ghostButtonStyle}>Run now</button>
+                  <button type="button" onClick={() => onDelete(job.id)} disabled={busy} style={dangerButtonStyle}>Delete</button>
                 </div>
               </div>
             ))
@@ -605,10 +628,10 @@ export function SessionScheduleSheet({
           )}
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={() => startEditing()} style={ghostButtonStyle}>
+            <button type="button" onClick={() => startEditing()} disabled={busy} style={ghostButtonStyle}>
               Reset
             </button>
-            <button type="button" onClick={submitDraft} style={primaryButtonStyle}>
+            <button type="button" onClick={submitDraft} disabled={busy} style={primaryButtonStyle}>
               {editingJob ? 'Update' : 'Create'}
             </button>
           </div>

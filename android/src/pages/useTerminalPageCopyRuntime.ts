@@ -2,7 +2,7 @@ import * as React from "react";
 import {
   type CopySelectionState,
   EMPTY_COPY_SELECTION_STATE,
-  resolveCopySelectionBuffer,
+  resolveCopySelectionBufferOrWarn,
   terminalBufferRowsToPlainText,
   writeTextToClipboard,
   logAsyncCleanupFailure,
@@ -87,6 +87,17 @@ export function useTerminalPageCopyRuntime({
     });
   }, []);
 
+  /** Copy text and reset copy mode to inactive on success; preserve state on failure. */
+  const copyTextAndResetOnSuccess = React.useCallback((text: string) => {
+    void writeTextToClipboard(text)
+      .then(() => {
+        setCopySelection(EMPTY_COPY_SELECTION_STATE);
+      })
+      .catch((error) => {
+        logAsyncCleanupFailure("[CopyRuntime] writeTextToClipboard", error);
+      });
+  }, []);
+
   const handleCopySelectionEnd = React.useCallback(() => {
     const current = copySelectionRef.current;
     const pendingCopy =
@@ -104,7 +115,7 @@ export function useTerminalPageCopyRuntime({
       return { ...current, endRowIndex: current.menu.rowIndex, menu: null };
     });
     if (pendingCopy?.sessionId) {
-      const buffer = resolveCopySelectionBuffer(
+      const buffer = resolveCopySelectionBufferOrWarn(
         sessionBufferStore,
         sessions,
         pendingCopy.sessionId,
@@ -116,14 +127,18 @@ export function useTerminalPageCopyRuntime({
         pendingCopy.startRowIndex,
         pendingCopy.endRowIndex,
       );
-      if (text) {
-        void writeTextToClipboard(text).catch((error) => {
-          logAsyncCleanupFailure("[CopyRuntime] writeTextToClipboard", error);
-        });
+      if (!text) {
+        logAsyncCleanupFailure(
+          `[CopyRuntime] selected text is empty, session=${pendingCopy.sessionId}, rows=${Math.min(pendingCopy.startRowIndex, pendingCopy.endRowIndex)}-${Math.max(pendingCopy.startRowIndex, pendingCopy.endRowIndex)}`,
+          new Error("empty copy selection"),
+        );
+        keepTerminalInputFocused();
+        return;
       }
+      copyTextAndResetOnSuccess(text);
       keepTerminalInputFocused();
     }
-  }, [keepTerminalInputFocused, sessionBufferStore, sessions]);
+  }, [keepTerminalInputFocused, sessionBufferStore, sessions, copyTextAndResetOnSuccess]);
 
   const handleCopySelectedText = React.useCallback(() => {
     const current = copySelectionRef.current;
@@ -132,7 +147,7 @@ export function useTerminalPageCopyRuntime({
       return;
     }
     const endRowIndex = current.endRowIndex ?? current.startRowIndex;
-    const buffer = resolveCopySelectionBuffer(
+    const buffer = resolveCopySelectionBufferOrWarn(
       sessionBufferStore,
       sessions,
       sessionId,
@@ -141,16 +156,18 @@ export function useTerminalPageCopyRuntime({
     );
     const text = terminalBufferRowsToPlainText(buffer, current.startRowIndex, endRowIndex);
     if (!text) {
+      logAsyncCleanupFailure(
+        `[CopyRuntime] selected text is empty, session=${sessionId}, rows=${Math.min(current.startRowIndex, endRowIndex)}-${Math.max(current.startRowIndex, endRowIndex)}`,
+        new Error("empty copy selection"),
+      );
       return;
     }
-    void writeTextToClipboard(text).catch((error) => {
-      logAsyncCleanupFailure("[CopyRuntime] writeTextToClipboard", error);
-    });
+    copyTextAndResetOnSuccess(text);
     keepTerminalInputFocused();
-  }, [keepTerminalInputFocused, sessionBufferStore, sessions]);
+  }, [keepTerminalInputFocused, sessionBufferStore, sessions, copyTextAndResetOnSuccess]);
 
   const handleCloseCopyMenu = React.useCallback(() => {
-    setCopySelection((current) => ({ ...current, menu: null }));
+    setCopySelection(EMPTY_COPY_SELECTION_STATE);
     keepTerminalInputFocused();
   }, [keepTerminalInputFocused]);
 

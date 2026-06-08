@@ -2675,8 +2675,8 @@ function TerminalQuickBarComponent({
               bottom: `calc(${floatingPanelBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`,
               zIndex: 130,
               width: "min(320px, calc(100vw - 24px))",
-              maxHeight: `min(560px, calc(100dvh - ${Math.max(180, keyboardInsetPx + 72)}px))`,
-              borderRadius: "22px",
+              maxHeight: `min(500px, calc(100dvh - ${Math.max(156, keyboardInsetPx + 64)}px))`,
+              borderRadius: "18px",
               backgroundColor: "rgba(23, 27, 45, 0.96)",
               color: "#fff",
               boxShadow: "0 20px 50px rgba(0,0,0,0.32)",
@@ -2689,11 +2689,11 @@ function TerminalQuickBarComponent({
           >
             <div
               style={{
-                padding: "14px 14px 10px",
+                padding: "10px 10px 8px",
                 borderBottom: "1px solid rgba(255,255,255,0.08)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
+                gap: "8px",
               }}
             >
               <div
@@ -2707,15 +2707,6 @@ function TerminalQuickBarComponent({
                 <div>
                   <div style={{ fontSize: "15px", fontWeight: 800 }}>
                     快捷输入
-                  </div>
-                  <div
-                    style={{
-                      marginTop: "2px",
-                      fontSize: "11px",
-                      color: "rgba(255,255,255,0.5)",
-                    }}
-                  >
-                    外点关闭，右侧可直接进入定时发送
                   </div>
                   {copyDebugLabel ? (
                     <div
@@ -2756,7 +2747,7 @@ function TerminalQuickBarComponent({
                   border: "1px solid rgba(255,255,255,0.08)",
                   backgroundColor: "rgba(14, 19, 31, 0.88)",
                   boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
-                  padding: "8px",
+                  padding: "6px",
                 }}
               >
                 <textarea
@@ -2774,65 +2765,68 @@ function TerminalQuickBarComponent({
                   placeholder="预输入内容，按 session 持久化"
                   style={{
                     width: "100%",
-                    minHeight: "148px",
-                    maxHeight: "220px",
+                    minHeight: "86px",
+                    maxHeight: "160px",
                     resize: "vertical",
-                    padding: "12px 14px",
-                    borderRadius: "14px",
+                    padding: "9px 10px",
+                    borderRadius: "12px",
                     border: "1px solid rgba(255,255,255,0.08)",
                     backgroundColor: "rgba(255,255,255,0.04)",
                     color: "#fff",
                     fontSize: "14px",
                     whiteSpace: "pre-wrap",
-                    lineHeight: 1.5,
+                    lineHeight: 1.35,
                   }}
                 />
               </div>
 
-              <button
-                onClick={() => {
-                  setFloatingMenuOpen(false);
-                  onOpenScheduleComposer?.(quickInputValueRef.current);
-                }}
-                disabled={!activeSessionId}
-                style={{
-                  width: "88px",
-                  minHeight: "40px",
-                  border: "1px solid rgba(113, 164, 255, 0.24)",
-                  borderRadius: "14px",
-                  backgroundColor: "rgba(113, 164, 255, 0.12)",
-                  color: "#8db7ff",
-                  fontWeight: 800,
-                  opacity: !activeSessionId ? 0.45 : 1,
-                  cursor: !activeSessionId ? "not-allowed" : "pointer",
-                }}
-              >
-                定时
-              </button>
-              <button
-                onClick={() => {
-                  sendSessionDraft();
-                }}
-                style={{
-                  width: "88px",
-                  minHeight: "40px",
-                  border: "1px solid rgba(31,214,122,0.18)",
-                  borderRadius: "14px",
-                  backgroundColor: "rgba(31,214,122,0.18)",
-                  color: mobileTheme.colors.accent,
-                  fontWeight: 800,
-                }}
-              >
-                发送
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => {
+                    setFloatingMenuOpen(false);
+                    onOpenScheduleComposer?.(quickInputValueRef.current);
+                  }}
+                  disabled={!activeSessionId}
+                  style={{
+                    flex: 1,
+                    minHeight: "36px",
+                    border: "1px solid rgba(113, 164, 255, 0.24)",
+                    borderRadius: "12px",
+                    backgroundColor: "rgba(113, 164, 255, 0.12)",
+                    color: "#8db7ff",
+                    fontWeight: 800,
+                    opacity: !activeSessionId ? 0.45 : 1,
+                    cursor: !activeSessionId ? "not-allowed" : "pointer",
+                  }}
+                >
+                  定时
+                </button>
+                <button
+                  onClick={() => {
+                    sendSessionDraft();
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: "36px",
+                    border: "1px solid rgba(31,214,122,0.18)",
+                    borderRadius: "12px",
+                    backgroundColor: "rgba(31,214,122,0.18)",
+                    color: mobileTheme.colors.accent,
+                    fontWeight: 800,
+                  }}
+                >
+                  发送
+                </button>
+              </div>
             </div>
 
             {splitAvailable && (
               <div
                 style={{
+                  padding: "8px 10px 0",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "8px",
+                  gap: "6px",
                   alignItems: "stretch",
                 }}
               >
@@ -2857,8 +2851,8 @@ function TerminalQuickBarComponent({
                         aria-label={`${count} 分屏`}
                         style={{
                           minWidth: "72px",
-                          minHeight: "40px",
-                          padding: "0 12px",
+                          minHeight: "34px",
+                          padding: "0 10px",
                           border: `1px solid ${active ? "rgba(113, 164, 255, 0.28)" : "rgba(255,255,255,0.08)"}`,
                           borderRadius: "14px",
                           backgroundColor: active
@@ -2904,7 +2898,7 @@ function TerminalQuickBarComponent({
                     }}
                     style={{
                       width: "110px",
-                      minHeight: "40px",
+                      minHeight: "34px",
                       border: "1px solid rgba(255,255,255,0.08)",
                       borderRadius: "14px",
                       backgroundColor: "rgba(22, 28, 41, 0.92)",
@@ -2918,9 +2912,19 @@ function TerminalQuickBarComponent({
               </div>
             )}
 
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div style={{ padding: "8px 10px 0", display: "flex", gap: "8px", alignItems: "center" }}>
               <div
-                style={{ display: "flex", gap: "8px", flex: 1, minWidth: 0 }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "6px",
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "3px",
+                  borderRadius: "13px",
+                  backgroundColor: "rgba(14, 19, 31, 0.72)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
               >
                 <button
                   onClick={() => setFloatingPanelTab("quick-actions")}
@@ -2932,7 +2936,22 @@ function TerminalQuickBarComponent({
                       ? mobileTheme.colors.accent
                       : "#fff",
                   )}
-                ></button>
+                >
+                  快捷
+                </button>
+                <button
+                  onClick={() => setFloatingPanelTab("clipboard")}
+                  style={floatingPillButton(
+                    floatingPanelTab === "clipboard"
+                      ? "rgba(113, 164, 255, 0.18)"
+                      : "transparent",
+                    floatingPanelTab === "clipboard"
+                      ? "#8db7ff"
+                      : "#fff",
+                  )}
+                >
+                  剪贴板
+                </button>
               </div>
             </div>
 
@@ -2941,14 +2960,14 @@ function TerminalQuickBarComponent({
               style={{
                 flex: 1,
                 minHeight: 0,
-                padding: "10px",
+                padding: "8px 10px 10px",
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
                 touchAction: "pan-y",
                 maxHeight: `${10 * 50}px`,
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
+                gap: "6px",
               }}
             >
               {floatingPanelTab === "quick-actions" ? (
@@ -2979,17 +2998,17 @@ function TerminalQuickBarComponent({
                           style={{
                             flex: 1,
                             minWidth: 0,
-                            minHeight: "42px",
+                            minHeight: "36px",
                             border: "none",
                             borderRadius: "14px",
                             backgroundColor: "rgba(255,255,255,0.08)",
                             color: "#fff",
-                            padding: "0 14px",
+                            padding: "0 10px",
                             textAlign: "left",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            gap: "10px",
+                            gap: "8px",
                             fontWeight: 700,
                             cursor: "pointer",
                           }}
@@ -3016,8 +3035,8 @@ function TerminalQuickBarComponent({
                         <button
                           onClick={() => openEditor("edit", draftAction)}
                           style={{
-                            width: "40px",
-                            height: "40px",
+                            width: "36px",
+                            height: "36px",
                             borderRadius: "12px",
                             border: "none",
                             backgroundColor: "rgba(255,255,255,0.1)",

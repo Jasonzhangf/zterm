@@ -273,7 +273,7 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const markPendingInputTailRefresh = (sessionId: string, localRevision: number) => {
-    markPendingInputTailRefreshInfraRuntime({
+    return markPendingInputTailRefreshInfraRuntime({
       sessionId,
       localRevision,
       pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,

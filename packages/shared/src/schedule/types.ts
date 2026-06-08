@@ -68,6 +68,14 @@ export interface ScheduleEventPayload {
   message?: string;
 }
 
+export interface ScheduleErrorPayload {
+  sessionName: string;
+  operation: 'list' | 'upsert' | 'delete' | 'toggle' | 'run-now';
+  jobId?: string;
+  code: string;
+  message: string;
+}
+
 export interface SessionScheduleState {
   sessionName: string;
   jobs: ScheduleJob[];

@@ -20,6 +20,10 @@ import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
+import {
+  buildRelayInjectedAppUpdatePreferences,
+  deriveRelayUpdateManifestUrl,
+} from './lib/app-update-relay-manifest';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
   connectTraversalRelayDevicesStream,
@@ -81,6 +85,70 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     isRollingBack,
     rollbackToPreviousVersion,
   } = useAppUpdate();
+
+  // Effective manifest URL: prefer user-saved URL, else derive from Relay wsHostUrl.
+  const effectiveManifestUrl = (() => {
+    const saved = appUpdatePreferences.manifestUrl.trim();
+    if (saved) return saved;
+    const wsHost = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';
+    if (!wsHost) return '';
+    try {
+      return deriveRelayUpdateManifestUrl(wsHost);
+    } catch {
+      return '';
+    }
+  })();
+
+  // 同步 Relay 账号 store 变化（login/register/refresh）到 React state；
+  // 设备流推送会继续通过 onDevices 覆盖，账号 store 仅作为登录即时快照。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      const next = readTraversalRelayAccountState();
+      setRelayDevices(next?.devices || []);
+      const nextRelay = next?.relaySettings;
+      if (!nextRelay) {
+        return;
+      }
+      setBridgeSettings((current) => {
+        const currentRelay = current.traversalRelay;
+        if (
+          currentRelay
+          && currentRelay.accessToken === nextRelay.accessToken
+          && currentRelay.relayBaseUrl === nextRelay.relayBaseUrl
+          && currentRelay.wsDevicesUrl === nextRelay.wsDevicesUrl
+        ) {
+          return current;
+        }
+        return applyTraversalRelaySettings(current, nextRelay);
+      });
+    };
+    window.addEventListener('traversal-relay-account-change', handler);
+    return () => window.removeEventListener('traversal-relay-account-change', handler);
+  }, [setBridgeSettings]);
+
+  // 登录 Relay 后自动注入 upgrade manifest URL：仅当用户未设置且能从 wsHostUrl 派生时。
+  useEffect(() => {
+    const wsHost = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';
+    if (!wsHost) {
+      return;
+    }
+    if (appUpdatePreferences.manifestUrl.trim()) {
+      return;
+    }
+    try {
+      const derived = deriveRelayUpdateManifestUrl(wsHost);
+      if (!derived) {
+        return;
+      }
+      setAppUpdatePreferences((current) => {
+        const next = buildRelayInjectedAppUpdatePreferences(current, wsHost);
+        return next.manifestUrl === current.manifestUrl ? current : next;
+      });
+    } catch {
+      return;
+    }
+  }, [appUpdatePreferences.manifestUrl, bridgeSettings.traversalRelay?.wsHostUrl, setAppUpdatePreferences]);
   const {
     state,
     scheduleStates = {},
@@ -105,6 +173,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     deleteScheduleJob,
     toggleScheduleJob,
     runScheduleJobNow,
+    getSessionScheduleState,
     getSessionRenderBufferStore,
   } = useSession();
   void sendMessageRaw;
@@ -300,7 +369,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     terminalActiveSessionId: terminalActiveSession?.id || null,
     relayConfigured: Boolean(bridgeSettings.traversalRelay?.accessToken),
     runtimeVersionCode,
-    appUpdateStage: appUpdatePreferences.manifestUrl.trim() ? updateStage : 'idle',
+    appUpdateStage: (appUpdatePreferences.manifestUrl.trim() || effectiveManifestUrl) ? updateStage : 'idle',
     updateChecking,
     updateInstalling,
     updateError,
@@ -553,6 +622,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onDelete={handleDelete}
             onAddNew={handleAddNew}
             onOpenSettings={handleOpenSettingsPage}
+            onOpenVaults={handleOpenSettingsPage}
           />
         )}
 
@@ -659,6 +729,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onSessionDraftSend={handleSessionDraftSend}
             onLoadSavedTabList={handleLoadSavedTabList}
             scheduleState={terminalActiveSession ? scheduleStates[terminalActiveSession.id] || null : null}
+            getScheduleState={getSessionScheduleState}
             onRequestScheduleList={requestScheduleList}
             onUpsertScheduleJob={upsertScheduleJob}
             onDeleteScheduleJob={deleteScheduleJob}

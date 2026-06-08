@@ -46,6 +46,7 @@ describe('useOpenTabSessionActions transport semantics', () => {
   it('does not downgrade an explicit resume into a generic tab switch when transport reopen already succeeded', () => {
     const applyOpenTabState = vi.fn();
     const openExplicitSessionById = vi.fn(() => true);
+    const ensureTerminalPageVisible = vi.fn();
 
     const { result } = renderHook(() => useOpenTabSessionActions({
       openTabStateRef: createRef({
@@ -58,7 +59,7 @@ describe('useOpenTabSessionActions transport semantics', () => {
       sessionsRef: createRef([]),
       runtimeActiveSessionIdRef: createRef('s1'),
       applyOpenTabState,
-      ensureTerminalPageVisible: vi.fn(),
+      ensureTerminalPageVisible,
       moveSession: vi.fn(),
       renameSession: vi.fn(),
       applyClosedOpenTabIntent: vi.fn(),
@@ -71,5 +72,6 @@ describe('useOpenTabSessionActions transport semantics', () => {
 
     expect(openExplicitSessionById).toHaveBeenCalledWith('s2');
     expect(applyOpenTabState).not.toHaveBeenCalled();
+    expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 });

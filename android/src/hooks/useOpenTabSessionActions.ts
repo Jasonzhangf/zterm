@@ -120,10 +120,11 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
 
   const handleResumeSession = useCallback((sessionId: string) => {
     if (openExplicitSessionById(sessionId)) {
+      ensureTerminalPageVisible();
       return;
     }
     handleSwitchSession(sessionId);
-  }, [handleSwitchSession, openExplicitSessionById]);
+  }, [ensureTerminalPageVisible, handleSwitchSession, openExplicitSessionById]);
 
   return {
     handleSwitchSession,

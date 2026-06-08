@@ -159,17 +159,23 @@ function cleanupWorkspaceAfterMove(
 
 function splitOutTabToNewPane(
   current: AndroidWorkspaceState,
-  activeSessionId: string | null,
+  _activeSessionId: string | null,
 ): AndroidWorkspaceState | null {
   const next = cloneWorkspaceState(current);
-  const protectedTabId = activeSessionId ? `tab-${activeSessionId}` : null;
+
+  if (next.panes.length === 1 && next.panes[0]?.tabs.length === 1) {
+    const pane = next.panes[0];
+    next.panes.push(createWorkspacePane(pane.tabs[0], 1));
+    next.panes = distributeEvenPaneSizes(next.panes);
+    return next;
+  }
 
   for (let paneIndex = 0; paneIndex < next.panes.length; paneIndex += 1) {
     const pane = next.panes[paneIndex];
     if (pane.tabs.length <= 1) {
       continue;
     }
-    const movableTab = [...pane.tabs].reverse().find((tab) => tab.id !== protectedTabId) || null;
+    const movableTab = [...pane.tabs].reverse().find((tab) => tab.id !== pane.activeTabId) || null;
     if (!movableTab) {
       continue;
     }

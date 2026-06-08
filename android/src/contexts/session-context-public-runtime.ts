@@ -37,7 +37,9 @@ export function sendMessageRuntime(options: SendMessageRuntimeOptions) {
   const ws = options.readSessionTransportSocket(options.sessionId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     options.sendSocketPayload(options.sessionId, ws, JSON.stringify(options.msg));
+    return true;
   }
+  return false;
 }
 
 export function sendMessageRawRuntime(options: {
@@ -56,82 +58,123 @@ export function requestScheduleListRuntime(options: {
   sessionId: string;
   sessions: Session[];
   setScheduleStateForSession: ScheduleStateSetter;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  sendMessage: (sessionId: string, msg: ClientMessage) => boolean;
 }) {
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;
   if (!session) {
+    options.setScheduleStateForSession(options.sessionId, (current) => ({
+      ...current,
+      loading: false,
+      error: 'schedule session not found',
+    }));
     return;
   }
-  options.setScheduleStateForSession(options.sessionId, (current) => ({
-    ...current,
-    sessionName: session.sessionName,
-    loading: true,
-    error: undefined,
-  }));
-  options.sendMessage(options.sessionId, {
+  const sent = options.sendMessage(options.sessionId, {
     type: 'schedule-list',
     payload: { sessionName: session.sessionName },
   });
+  options.setScheduleStateForSession(options.sessionId, (current) => ({
+    ...current,
+    sessionName: session.sessionName,
+    loading: sent,
+    error: sent ? undefined : 'schedule transport not connected',
+  }));
 }
 
 export function upsertScheduleJobRuntime(options: {
   sessionId: string;
   job: ScheduleJobDraft;
+  sessions: Session[];
   setScheduleStateForSession: ScheduleStateSetter;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  sendMessage: (sessionId: string, msg: ClientMessage) => boolean;
 }) {
+  if (!options.sessions.some((item) => item.id === options.sessionId)) {
+    options.setScheduleStateForSession(options.sessionId, (current) => ({
+      ...current,
+      loading: false,
+      error: 'schedule session not found',
+    }));
+    return;
+  }
+  const sent = options.sendMessage(options.sessionId, { type: 'schedule-upsert', payload: { job: options.job } });
   options.setScheduleStateForSession(options.sessionId, (current) => ({
     ...current,
-    loading: true,
-    error: undefined,
+    loading: sent,
+    error: sent ? undefined : 'schedule transport not connected',
   }));
-  options.sendMessage(options.sessionId, { type: 'schedule-upsert', payload: { job: options.job } });
 }
 
 export function deleteScheduleJobRuntime(options: {
   sessionId: string;
   jobId: string;
+  sessions: Session[];
   setScheduleStateForSession: ScheduleStateSetter;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  sendMessage: (sessionId: string, msg: ClientMessage) => boolean;
 }) {
+  if (!options.sessions.some((item) => item.id === options.sessionId)) {
+    options.setScheduleStateForSession(options.sessionId, (current) => ({
+      ...current,
+      loading: false,
+      error: 'schedule session not found',
+    }));
+    return;
+  }
+  const sent = options.sendMessage(options.sessionId, { type: 'schedule-delete', payload: { jobId: options.jobId } });
   options.setScheduleStateForSession(options.sessionId, (current) => ({
     ...current,
-    loading: true,
-    error: undefined,
+    loading: sent,
+    error: sent ? undefined : 'schedule transport not connected',
   }));
-  options.sendMessage(options.sessionId, { type: 'schedule-delete', payload: { jobId: options.jobId } });
 }
 
 export function toggleScheduleJobRuntime(options: {
   sessionId: string;
   jobId: string;
   enabled: boolean;
+  sessions: Session[];
   setScheduleStateForSession: ScheduleStateSetter;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  sendMessage: (sessionId: string, msg: ClientMessage) => boolean;
 }) {
-  options.setScheduleStateForSession(options.sessionId, (current) => ({
-    ...current,
-    loading: true,
-    error: undefined,
-  }));
-  options.sendMessage(options.sessionId, {
+  if (!options.sessions.some((item) => item.id === options.sessionId)) {
+    options.setScheduleStateForSession(options.sessionId, (current) => ({
+      ...current,
+      loading: false,
+      error: 'schedule session not found',
+    }));
+    return;
+  }
+  const sent = options.sendMessage(options.sessionId, {
     type: 'schedule-toggle',
     payload: { jobId: options.jobId, enabled: options.enabled },
   });
+  options.setScheduleStateForSession(options.sessionId, (current) => ({
+    ...current,
+    loading: sent,
+    error: sent ? undefined : 'schedule transport not connected',
+  }));
 }
 
 export function runScheduleJobNowRuntime(options: {
   sessionId: string;
   jobId: string;
+  sessions: Session[];
   setScheduleStateForSession: ScheduleStateSetter;
-  sendMessage: (sessionId: string, msg: ClientMessage) => void;
+  sendMessage: (sessionId: string, msg: ClientMessage) => boolean;
 }) {
+  if (!options.sessions.some((item) => item.id === options.sessionId)) {
+    options.setScheduleStateForSession(options.sessionId, (current) => ({
+      ...current,
+      loading: false,
+      error: 'schedule session not found',
+    }));
+    return;
+  }
+  const sent = options.sendMessage(options.sessionId, { type: 'schedule-run-now', payload: { jobId: options.jobId } });
   options.setScheduleStateForSession(options.sessionId, (current) => ({
     ...current,
-    loading: true,
-    error: undefined,
+    loading: sent,
+    error: sent ? undefined : 'schedule transport not connected',
   }));
-  options.sendMessage(options.sessionId, { type: 'schedule-run-now', payload: { jobId: options.jobId } });
 }
 
 export function updateSessionViewportRuntime(options: {

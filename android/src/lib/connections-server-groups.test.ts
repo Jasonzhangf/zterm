@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildConnectionsServerGroups } from './connections-server-groups';
-import type { Host, Session, SessionGroupHistory } from './types';
+import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
 
 function makeHost(overrides: Partial<Host> = {}): Host {
   return {
@@ -66,6 +66,23 @@ function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHi
     authToken: overrides.authToken || 'token-a',
     sessionNames: overrides.sessionNames || ['main', 'logs'],
     lastOpenedAt: overrides.lastOpenedAt || 30,
+  };
+}
+
+function makeRelayDevice(overrides: Partial<TraversalRelayDeviceSnapshot> = {}): TraversalRelayDeviceSnapshot {
+  return {
+    deviceId: overrides.deviceId || 'mac-studio-device',
+    deviceName: overrides.deviceName || 'mac-studio',
+    platform: overrides.platform || 'mac',
+    appVersion: overrides.appVersion || '0.1.2',
+    updatedAt: overrides.updatedAt || '2026-05-29T00:00:00.000Z',
+    client: overrides.client || { connected: false, lastSeenAt: '' },
+    daemon: overrides.daemon || {
+      connected: true,
+      lastSeenAt: '2026-05-29T00:00:00.000Z',
+      hostId: 'mac-studio',
+      version: '0.1.2',
+    },
   };
 }
 
@@ -238,6 +255,97 @@ describe('buildConnectionsServerGroups', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.id).toBe('daemon:daemon-Macstudio.local-128564413166185f');
+  });
+
+  it('uses account relay daemon devices as parent truth and folds legacy daemon ids into the same device card', () => {
+    const groups = buildConnectionsServerGroups({
+      relayDevices: [makeRelayDevice()],
+      hosts: [
+        makeHost({
+          id: 'host-main',
+          name: 'mac-studio main',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          sessionName: 'main',
+        }),
+      ],
+      sessions: [
+        makeSession({
+          id: 'legacy-live',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-Macstudio.local-128564413166185f',
+          sessionName: 'rcc',
+        }),
+      ],
+      sessionGroups: [
+        makeGroup({
+          daemonHostId: 'mac-studio',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          sessionNames: ['main'],
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      id: 'daemon:mac-studio',
+      name: 'mac-studio',
+      daemonHostId: 'mac-studio',
+    });
+    expect(groups[0]?.sessions.map((entry) => entry.sessionName).sort()).toEqual(['main', 'rcc']);
+  });
+
+  it('keeps recently disconnected account daemon devices visible before sessions are known', () => {
+    const groups = buildConnectionsServerGroups({
+      relayDevices: [
+        makeRelayDevice({
+          deviceId: 'mac-air-device',
+          deviceName: 'macbook-air',
+          daemon: {
+            connected: false,
+            lastSeenAt: new Date(Date.now() - 60_000).toISOString(),
+            hostId: 'macbook-air',
+            version: '0.1.2',
+          },
+        }),
+      ],
+      hosts: [],
+      sessions: [],
+      sessionGroups: [],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      name: 'macbook-air',
+      daemonHostId: 'macbook-air',
+      daemonConnected: false,
+      sessions: [],
+    });
+  });
+
+  it('removes stale offline account daemon zombies when they have no child sessions', () => {
+    const groups = buildConnectionsServerGroups({
+      relayDevices: [
+        makeRelayDevice({
+          deviceId: 'remote-smoke-device',
+          deviceName: 'remote-smoke-daemon',
+          daemon: {
+            connected: false,
+            lastSeenAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString(),
+            hostId: 'remote-smoke-daemon',
+            version: '0.1.2',
+          },
+        }),
+      ],
+      hosts: [],
+      sessions: [],
+      sessionGroups: [],
+    });
+
+    expect(groups).toEqual([]);
   });
 
   it('merges a stale bridge-only history group into an existing daemon-owned host group for the same saved session instead of showing a second stale card', () => {

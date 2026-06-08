@@ -294,6 +294,120 @@ describe('session-context-socket-message-runtime connected truth', () => {
     expect(ws.onerror).toBeNull();
     expect(ws.onclose).toBeNull();
   });
+
+  it('treats tmux_session_unavailable as a retryable temporary error instead of a closed tab event', () => {
+    const onFailure = vi.fn();
+    const onClosed = vi.fn();
+    const ws = {
+      onopen: vi.fn(),
+      onmessage: vi.fn(),
+      onerror: vi.fn(),
+      onclose: vi.fn(),
+    } as any;
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure,
+        onClosed,
+      },
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'tmux session temporarily unavailable',
+          code: 'tmux_session_unavailable',
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [makeSession()],
+            activeSessionId: 'session-1',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(onClosed).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('tmux session temporarily unavailable', true);
+    expect(ws.onopen).not.toBeNull();
+    expect(ws.onmessage).not.toBeNull();
+    expect(ws.onerror).not.toBeNull();
+    expect(ws.onclose).not.toBeNull();
+  });
+
+  it('routes schedule-error into schedule state without terminal transport failure', () => {
+    const onFailure = vi.fn();
+    const setScheduleStateForSession = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure,
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'schedule-error',
+        payload: {
+          sessionName: 'tmux-1',
+          operation: 'delete',
+          jobId: 'missing-job',
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [makeSession()],
+            activeSessionId: 'session-1',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession,
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(setScheduleStateForSession).toHaveBeenCalledWith('session-1', expect.any(Function));
+    const reducer = setScheduleStateForSession.mock.calls[0][1] as (current: SessionScheduleState) => SessionScheduleState;
+    expect(reducer({ ...makeScheduleState(), loading: true }).error).toBe('Schedule job no longer exists');
+    expect(reducer({ ...makeScheduleState(), loading: true }).loading).toBe(false);
+  });
 });
 
 describe('session-context-socket-message-runtime inactive live buffer gate', () => {

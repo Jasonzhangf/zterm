@@ -87,10 +87,12 @@ export function markPendingInputTailRefresh(options: {
   localRevision: number;
   pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
 }) {
+  const wasPending = options.pendingInputTailRefreshRef.current.has(options.sessionId);
   options.pendingInputTailRefreshRef.current.set(options.sessionId, {
     requestedAt: Date.now(),
     localRevision: Math.max(0, Math.floor(options.localRevision || 0)),
   });
+  return !wasPending;
 }
 
 export function clearSessionPullState(options: {

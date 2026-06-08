@@ -9,7 +9,9 @@ interface ConnectionCardProps {
   icon?: string;
   actionLabel?: string;
   secondaryLabel?: string;
+  secondaryAriaLabel?: string;
   onPrimaryAction?: () => void;
+  onActionButton?: () => void;
   onSecondaryAction?: () => void;
   onTertiaryAction?: () => void;
   tertiaryLabel?: string;
@@ -25,8 +27,10 @@ export function ConnectionCard({
   icon = '⌘',
   actionLabel = 'Open',
   secondaryLabel,
+  secondaryAriaLabel,
   tertiaryLabel,
   onPrimaryAction,
+  onActionButton,
   onSecondaryAction,
   onTertiaryAction,
   onLongPress,
@@ -158,7 +162,7 @@ export function ConnectionCard({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <button
-            onClick={onPrimaryAction}
+            onClick={onActionButton || onPrimaryAction}
             style={{
               minWidth: '54px',
               height: '38px',
@@ -169,7 +173,7 @@ export function ConnectionCard({
               padding: '0 12px',
               fontWeight: 700,
               fontSize: '12px',
-              cursor: onPrimaryAction ? 'pointer' : 'default',
+              cursor: (onActionButton || onPrimaryAction) ? 'pointer' : 'default',
             }}
           >
             {actionLabel}
@@ -178,6 +182,7 @@ export function ConnectionCard({
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               {secondaryLabel && (
                 <button
+                  aria-label={secondaryAriaLabel || secondaryLabel}
                   onClick={onSecondaryAction}
                   style={{
                     width: '38px',

@@ -309,6 +309,7 @@ function TerminalViewComponent({
     renderEndOffset,
     renderStartOffset,
     renderBuffer.gapRanges,
+    renderBuffer.revision,
     renderBuffer.startIndex,
   ]);
   const longPressTimerRef = useRef<number | null>(null);

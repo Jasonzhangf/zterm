@@ -184,7 +184,7 @@ export function createWorkspaceFromSessions(
     ? activeSessionId
     : sessionIds[0];
   const pane: AndroidWorkspacePane = {
-    id: generateWorkspaceId('pane'),
+    id: 'pane-main',
     size: 1,
     tabs,
     activeTabId: `tab-${resolvedActiveSessionId}`,

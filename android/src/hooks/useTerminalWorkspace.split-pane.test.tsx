@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useTerminalWorkspace } from '../../src/hooks/useTerminalWorkspace';
@@ -40,8 +41,9 @@ describe('useTerminalWorkspace split-pane isolation', () => {
     const { result } = renderHook(() => useTerminalWorkspace({
       sessions,
       activeSessionId: 's1',
-      viewportWidth: 390,
+      viewportWidth: 900,
       viewportHeight: 844,
+      maxSplitCount: 4,
     }));
 
     // Initially 1 pane with 2 tabs, s1 is active
@@ -87,8 +89,9 @@ describe('useTerminalWorkspace split-pane isolation', () => {
     const { result } = renderHook(() => useTerminalWorkspace({
       sessions,
       activeSessionId: 's1',
-      viewportWidth: 390,
+      viewportWidth: 900,
       viewportHeight: 844,
+      maxSplitCount: 4,
     }));
 
     // 1 pane, 1 tab

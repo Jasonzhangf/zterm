@@ -39,7 +39,7 @@ export function createSessionInteractionRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
+  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;

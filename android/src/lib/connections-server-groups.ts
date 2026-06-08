@@ -3,7 +3,9 @@ import {
   buildSessionSemanticOwnerKey,
   sessionSemanticOwnersMatch,
 } from './session-semantic-identity';
-import type { Host, Session, SessionGroupHistory } from './types';
+import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
+
+const STALE_OFFLINE_DAEMON_WITHOUT_SESSIONS_MS = 30 * 60_000;
 
 export interface ServerGroupSessionView {
   id: string;
@@ -20,6 +22,10 @@ export interface ServerGroupView {
   bridgeHost: string;
   bridgePort: number;
   daemonHostId?: string;
+  daemonConnected?: boolean;
+  daemonVersion?: string;
+  daemonLastSeenAt?: string;
+  relayDeviceTruth?: boolean;
   authToken?: string;
   sessions: ServerGroupSessionView[];
   defaultSessionNames: string[];
@@ -35,23 +41,79 @@ interface MutableServerGroup {
   bridgeHost: string;
   bridgePort: number;
   daemonHostId?: string;
+  daemonConnected?: boolean;
+  daemonVersion?: string;
+  daemonLastSeenAt?: string;
+  relayDeviceTruth?: boolean;
   authToken?: string;
   sessionsByName: Map<string, ServerGroupSessionView>;
   hostsBySessionName: Map<string, Host>;
   lastOpenedAt: number;
 }
 
-function buildLiveSessionMap(sessions: Session[]) {
+function normalizeDaemonAlias(input?: string | null) {
+  return (input || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function buildRelayDaemonCanonicalizer(devices?: TraversalRelayDeviceSnapshot[]) {
+  const canonicalByAlias = new Map<string, string>();
+  for (const device of devices || []) {
+    const hostId = device.daemon.hostId.trim();
+    if (!hostId) {
+      continue;
+    }
+    [hostId, device.deviceName, device.deviceId].forEach((alias) => {
+      const normalized = normalizeDaemonAlias(alias);
+      if (normalized) {
+        canonicalByAlias.set(normalized, hostId);
+      }
+    });
+  }
+
+  return (daemonHostId?: string | null) => {
+    const raw = (daemonHostId || '').trim();
+    if (!raw) {
+      return '';
+    }
+    const normalized = normalizeDaemonAlias(raw);
+    const exact = canonicalByAlias.get(normalized);
+    if (exact) {
+      return exact;
+    }
+    for (const [alias, canonical] of canonicalByAlias.entries()) {
+      if (alias.length >= 4 && normalized.includes(alias)) {
+        return canonical;
+      }
+    }
+    return raw;
+  };
+}
+
+function buildLiveSessionMapWithCanonicalizer(
+  sessions: Session[],
+  canonicalizeDaemonHostId: (daemonHostId?: string | null) => string,
+) {
   const map = new Map<string, Session>();
   for (const session of sessions) {
     const key = `${buildSessionSemanticOwnerKey({
-      daemonHostId: session.daemonHostId,
+      daemonHostId: canonicalizeDaemonHostId(session.daemonHostId),
       bridgeHost: session.bridgeHost,
       bridgePort: session.bridgePort,
     })}::${session.sessionName}`;
     map.set(key, session);
   }
   return map;
+}
+
+function isStaleOfflineDaemonWithoutSessions(group: Pick<ServerGroupView, 'relayDeviceTruth' | 'daemonConnected' | 'daemonLastSeenAt' | 'sessions'>) {
+  if (!group.relayDeviceTruth || group.daemonConnected !== false || group.sessions.length > 0) {
+    return false;
+  }
+  const lastSeenMs = Date.parse(group.daemonLastSeenAt || '');
+  if (!Number.isFinite(lastSeenMs)) {
+    return true;
+  }
+  return Date.now() - lastSeenMs > STALE_OFFLINE_DAEMON_WITHOUT_SESSIONS_MS;
 }
 
 function hostMatchesGroupTarget(
@@ -176,17 +238,33 @@ export function buildConnectionsServerGroups(options: {
   hosts: Host[];
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
+  relayDevices?: TraversalRelayDeviceSnapshot[];
 }): ServerGroupView[] {
   const { hosts, sessions, sessionGroups } = options;
-  const liveSessionMap = buildLiveSessionMap(sessions);
+  const canonicalizeDaemonHostId = buildRelayDaemonCanonicalizer(options.relayDevices);
+  const liveSessionMap = buildLiveSessionMapWithCanonicalizer(sessions, canonicalizeDaemonHostId);
   const grouped = new Map<string, MutableServerGroup>();
+
+  for (const device of options.relayDevices || []) {
+    const hostId = device.daemon.hostId.trim();
+    if (!hostId) {
+      continue;
+    }
+    const group = ensureGroup(grouped, '', 0, hostId, undefined);
+    group.name = device.deviceName.trim() || hostId;
+    group.daemonConnected = device.daemon.connected;
+    group.daemonVersion = device.daemon.version;
+    group.daemonLastSeenAt = device.daemon.lastSeenAt;
+    group.relayDeviceTruth = true;
+    group.lastOpenedAt = Math.max(group.lastOpenedAt, Date.parse(device.daemon.lastSeenAt) || 0);
+  }
 
   for (const host of hosts) {
     const group = ensureGroup(
       grouped,
       host.bridgeHost,
       host.bridgePort,
-      host.daemonHostId || host.relayHostId,
+      canonicalizeDaemonHostId(host.daemonHostId || host.relayHostId),
       host.authToken,
     );
     const sessionName = getResolvedSessionName(host);
@@ -203,7 +281,7 @@ export function buildConnectionsServerGroups(options: {
       grouped,
       groupHistory.bridgeHost,
       groupHistory.bridgePort,
-      groupHistory.daemonHostId,
+      canonicalizeDaemonHostId(groupHistory.daemonHostId),
       groupHistory.authToken,
     );
     group.lastOpenedAt = Math.max(group.lastOpenedAt, groupHistory.lastOpenedAt);
@@ -227,7 +305,7 @@ export function buildConnectionsServerGroups(options: {
       grouped,
       liveSession.bridgeHost,
       liveSession.bridgePort,
-      liveSession.daemonHostId,
+      canonicalizeDaemonHostId(liveSession.daemonHostId),
       liveSession.authToken,
     );
     const current = group.sessionsByName.get(liveSession.sessionName);
@@ -291,6 +369,10 @@ export function buildConnectionsServerGroups(options: {
         bridgeHost: group.bridgeHost,
         bridgePort: group.bridgePort,
         daemonHostId: group.daemonHostId,
+        daemonConnected: group.daemonConnected,
+        daemonVersion: group.daemonVersion,
+        daemonLastSeenAt: group.daemonLastSeenAt,
+        relayDeviceTruth: group.relayDeviceTruth,
         authToken: group.authToken,
         sessions: groupSessions,
         defaultSessionNames: savedSessions.length > 0 ? savedSessions : groupSessions.map((entry) => entry.sessionName),
@@ -300,8 +382,13 @@ export function buildConnectionsServerGroups(options: {
         openableSessions,
       };
     })
-    .filter((group) => group.sessions.length > 0)
+    .filter((group) => (group.relayDeviceTruth || group.sessions.length > 0) && !isStaleOfflineDaemonWithoutSessions(group))
     .sort((a, b) => {
+      const aConnected = a.daemonConnected ? 1 : 0;
+      const bConnected = b.daemonConnected ? 1 : 0;
+      if (aConnected !== bConnected) {
+        return bConnected - aConnected;
+      }
       if (a.liveSessions.length !== b.liveSessions.length) {
         return b.liveSessions.length - a.liveSessions.length;
       }

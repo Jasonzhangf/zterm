@@ -26,7 +26,7 @@ export function RemoteAccessSection({
   return (
     <ConnectionSection
       title="Remote Access"
-      description="自动连接顺序固定为 Tailscale → IPv6 → IPv4 → Relay；若已登录 relay，则协议信息自动从控制面下发，对用户透明。"
+      description="自动连接顺序由 Settings 的 Auto 线路优先级决定；若已登录 relay，则协议信息自动从控制面下发，对用户透明。"
     >
       <div style={{ display: 'flex', gap: '10px' }}>
         <button type="button" onClick={() => onTransportModeChange('auto')} style={segmentedButtonStyle(transportMode === 'auto')}>

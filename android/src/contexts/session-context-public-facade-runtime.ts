@@ -78,7 +78,7 @@ export function createSessionPublicFacadeRuntime(options: {
   };
 }) {
   const sendMessage = (sessionId: string, msg: ClientMessage) => {
-    sendMessageRuntime({
+    return sendMessageRuntime({
       sessionId,
       msg,
       readSessionTransportSocket: options.readSessionTransportSocket,
@@ -99,6 +99,7 @@ export function createSessionPublicFacadeRuntime(options: {
     upsertScheduleJobRuntime({
       sessionId,
       job,
+      sessions: options.stateRef.current.sessions,
       setScheduleStateForSession: options.setScheduleStateForSession,
       sendMessage,
     });
@@ -108,6 +109,7 @@ export function createSessionPublicFacadeRuntime(options: {
     deleteScheduleJobRuntime({
       sessionId,
       jobId,
+      sessions: options.stateRef.current.sessions,
       setScheduleStateForSession: options.setScheduleStateForSession,
       sendMessage,
     });
@@ -118,6 +120,7 @@ export function createSessionPublicFacadeRuntime(options: {
       sessionId,
       jobId,
       enabled,
+      sessions: options.stateRef.current.sessions,
       setScheduleStateForSession: options.setScheduleStateForSession,
       sendMessage,
     });
@@ -127,6 +130,7 @@ export function createSessionPublicFacadeRuntime(options: {
     runScheduleJobNowRuntime({
       sessionId,
       jobId,
+      sessions: options.stateRef.current.sessions,
       setScheduleStateForSession: options.setScheduleStateForSession,
       sendMessage,
     });

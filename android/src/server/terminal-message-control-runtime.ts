@@ -21,8 +21,8 @@ export interface TerminalMessageControlRuntimeDeps {
   scheduleEngine: {
     listBySession: (sessionName: string) => ScheduleJob[];
     upsert: (job: ScheduleJobDraft) => void;
-    delete: (jobId: string) => void;
-    toggle: (jobId: string, enabled: boolean) => void;
+    delete: (jobId: string) => ScheduleJob | null;
+    toggle: (jobId: string, enabled: boolean) => ScheduleJob | null;
     runNow: (jobId: string) => Promise<unknown>;
     renameSession: (currentName: string, nextName: string) => void;
     markSessionMissing: (sessionName: string, reason: string) => void;
@@ -131,6 +131,28 @@ export function handleScheduleMessageRuntime(
     | { type: 'schedule-run-now'; payload: { jobId: string } },
   transport: TerminalSessionTransport | null | undefined,
 ) {
+  function sendScheduleError(
+    targetSession: TerminalSession,
+    payload: {
+      operation: 'list' | 'upsert' | 'delete' | 'toggle' | 'run-now';
+      jobId?: string;
+      code: string;
+      message: string;
+      sessionName?: string;
+    },
+  ) {
+    deps.sendMessage(targetSession, {
+      type: 'schedule-error',
+      payload: {
+        sessionName: deps.sanitizeSessionName(payload.sessionName || targetSession.sessionName),
+        operation: payload.operation,
+        jobId: payload.jobId,
+        code: payload.code,
+        message: payload.message,
+      },
+    });
+  }
+
   if (!session) {
     deps.sendTransportMessage(transport, {
       type: 'error',
@@ -160,9 +182,10 @@ export function handleScheduleMessageRuntime(
           },
         );
         if (!normalized.targetSessionName) {
-          deps.sendMessage(session, {
-            type: 'error',
-            payload: { message: 'Missing target session', code: 'schedule_invalid_target' },
+          sendScheduleError(session, {
+            operation: 'upsert',
+            code: 'schedule_invalid_target',
+            message: 'Missing target session',
           });
           return;
         }
@@ -172,20 +195,54 @@ export function handleScheduleMessageRuntime(
         });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
-        deps.sendMessage(session, {
-          type: 'error',
-          payload: { message: `Failed to save schedule: ${err}`, code: 'schedule_upsert_failed' },
+        sendScheduleError(session, {
+          operation: 'upsert',
+          jobId: message.payload.job.id,
+          code: 'schedule_upsert_failed',
+          message: `Failed to save schedule: ${err}`,
+          sessionName: message.payload.job.targetSessionName,
         });
       }
       return;
     case 'schedule-delete':
-      deps.scheduleEngine.delete(message.payload.jobId);
+      if (!deps.scheduleEngine.delete(message.payload.jobId)) {
+        sendScheduleError(session, {
+          operation: 'delete',
+          jobId: message.payload.jobId,
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        });
+      }
       return;
     case 'schedule-toggle':
-      deps.scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled));
+      if (!deps.scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled))) {
+        sendScheduleError(session, {
+          operation: 'toggle',
+          jobId: message.payload.jobId,
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        });
+      }
       return;
     case 'schedule-run-now':
-      void deps.scheduleEngine.runNow(message.payload.jobId);
+      void deps.scheduleEngine.runNow(message.payload.jobId).then((job) => {
+        if (!job) {
+          sendScheduleError(session, {
+            operation: 'run-now',
+            jobId: message.payload.jobId,
+            code: 'schedule_job_not_found',
+            message: 'Schedule job no longer exists',
+          });
+        }
+      }).catch((error) => {
+        const err = error instanceof Error ? error.message : String(error);
+        sendScheduleError(session, {
+          operation: 'run-now',
+          jobId: message.payload.jobId,
+          code: 'schedule_run_now_failed',
+          message: `Failed to run schedule: ${err}`,
+        });
+      });
       return;
   }
 }

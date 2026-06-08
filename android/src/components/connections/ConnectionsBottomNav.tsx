@@ -7,12 +7,13 @@ const items = [
 ];
 
 interface ConnectionsBottomNavProps {
-  activePage: 'connections' | 'settings';
+  activePage: 'vaults' | 'connections' | 'settings';
+  onOpenVaults: () => void;
   onOpenConnections: () => void;
   onOpenSettings: () => void;
 }
 
-export function ConnectionsBottomNav({ activePage, onOpenConnections, onOpenSettings }: ConnectionsBottomNavProps) {
+export function ConnectionsBottomNav({ activePage, onOpenVaults, onOpenConnections, onOpenSettings }: ConnectionsBottomNavProps) {
   return (
     <div
       style={{
@@ -37,7 +38,17 @@ export function ConnectionsBottomNav({ activePage, onOpenConnections, onOpenSett
           return (
             <button
               key={item.label}
-              onClick={() => (item.page === 'settings' ? onOpenSettings() : onOpenConnections())}
+              onClick={() => {
+                if (item.page === 'vaults') {
+                  onOpenVaults();
+                  return;
+                }
+                if (item.page === 'settings') {
+                  onOpenSettings();
+                  return;
+                }
+                onOpenConnections();
+              }}
               style={{
                 border: 'none',
                 background: 'transparent',

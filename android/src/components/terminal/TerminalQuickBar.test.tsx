@@ -550,6 +550,23 @@ describe("TerminalQuickBar", () => {
     });
   });
 
+  it("exposes real quick and clipboard tabs in the floating menu", async () => {
+    renderQuickBar({
+      shellMode: "floating-collapsed",
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle floating quick menu" }),
+    );
+
+    expect(screen.getByRole("button", { name: "快捷" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "剪贴板" })).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "" })).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+    expect(screen.getByRole("button", { name: "读取系统剪贴板" })).toBeTruthy();
+  });
+
   it("routes visible tool bar actions through explicit callbacks and keeps upload/sync semantics correct", async () => {
     const onOpenFileTransfer = vi.fn();
     const onFileAttach = vi.fn();

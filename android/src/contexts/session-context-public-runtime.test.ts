@@ -1,222 +1,107 @@
-// @vitest-environment jsdom
-
 import { describe, expect, it, vi } from 'vitest';
+import {
+  requestScheduleListRuntime,
+  runScheduleJobNowRuntime,
+  sendMessageRuntime,
+} from './session-context-public-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
-import type { Session } from '../lib/types';
-import { updateSessionViewportRuntime } from './session-context-public-runtime';
+import type { Session, SessionScheduleState } from '../lib/types';
 
-function makeSession(sessionId: string): Session {
+function makeSession(overrides?: Partial<Session>): Session {
   return {
-    id: sessionId,
-    hostId: `host-${sessionId}`,
-    connectionName: `conn-${sessionId}`,
-    bridgeHost: '127.0.0.1',
+    id: 'session-1',
+    hostId: 'host-1',
+    connectionName: 'Conn',
+    bridgeHost: '100.127.23.27',
     bridgePort: 3333,
-    sessionName: `tmux-${sessionId}`,
-    title: sessionId,
+    sessionName: 'tmux-1',
+    title: 'tmux-1',
     ws: null,
     state: 'connected',
     hasUnread: false,
+    createdAt: 1,
     buffer: createSessionBufferState({
-      lines: Array.from({ length: 24 }, (_, index) => `row-${96 + index}`),
-      startIndex: 96,
-      endIndex: 120,
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
       bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 120,
+      bufferTailEndIndex: 0,
       cols: 80,
       rows: 24,
-      revision: 5,
+      revision: 0,
       cacheLines: 1000,
     }),
-    daemonHeadRevision: 5,
-    daemonHeadEndIndex: 120,
-    createdAt: 1,
+    ...overrides,
   };
 }
 
-describe('session-context-public-runtime', () => {
-  it('requests visible-range repair when follow viewport expands upward beyond the current local window', () => {
-    const sessionId = 'session-1';
-    const session = makeSession(sessionId);
-    const requestSessionBufferSync = vi.fn(() => true);
+function reduceScheduleCall(
+  setScheduleStateForSession: ReturnType<typeof vi.fn>,
+  current: SessionScheduleState = { sessionName: 'tmux-1', jobs: [], loading: true },
+) {
+  const lastCall = setScheduleStateForSession.mock.calls[setScheduleStateForSession.mock.calls.length - 1];
+  const reducer = lastCall?.[1] as
+    | SessionScheduleState
+    | ((state: SessionScheduleState) => SessionScheduleState);
+  return typeof reducer === 'function' ? reducer(current) : reducer;
+}
 
-    updateSessionViewportRuntime({
-      sessionId,
-      visibleRange: {
-        startIndex: 80,
-        endIndex: 120,
-        viewportRows: 40,
-      },
-      triggerRepair: false,
-      viewportMode: 'follow',
-      sessionVisibleRangeRef: {
-        current: new Map([
-          [sessionId, {
-            startIndex: 96,
-            endIndex: 120,
-            viewportRows: 24,
-          }],
-        ]),
-      },
-      isSessionTransportActive: () => true,
-      sessions: [session],
-      sessionBufferHeadsRef: { current: new Map() },
-      readSessionBufferSnapshot: () => session.buffer,
-      requestSessionBufferSync,
+describe('session-context-public-runtime schedule send lifecycle', () => {
+  it('sendMessageRuntime reports whether a socket payload was actually sent', () => {
+    const sendSocketPayload = vi.fn();
+    const openSocket = { readyState: WebSocket.OPEN } as any;
+    const closedSocket = { readyState: WebSocket.CLOSED } as any;
+
+    expect(sendMessageRuntime({
+      sessionId: 'session-1',
+      msg: { type: 'ping' },
+      readSessionTransportSocket: () => openSocket,
+      sendSocketPayload,
+    })).toBe(true);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+
+    expect(sendMessageRuntime({
+      sessionId: 'session-1',
+      msg: { type: 'ping' },
+      readSessionTransportSocket: () => closedSocket,
+      sendSocketPayload,
+    })).toBe(false);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it('requestScheduleListRuntime writes a visible transport error when send fails', () => {
+    const setScheduleStateForSession = vi.fn();
+
+    requestScheduleListRuntime({
+      sessionId: 'session-1',
+      sessions: [makeSession()],
+      setScheduleStateForSession,
+      sendMessage: vi.fn(() => false),
     });
 
-    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
-      reason: 'viewport-visible-range-demand',
-      purpose: 'reading-repair',
-      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
-      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
-      sessionOverride: session,
+    expect(reduceScheduleCall(setScheduleStateForSession)).toMatchObject({
+      sessionName: 'tmux-1',
+      loading: false,
+      error: 'schedule transport not connected',
     });
   });
 
-  it('does not request repair when follow viewport change does not expand beyond the previous visible range', () => {
-    const sessionId = 'session-1';
-    const session = makeSession(sessionId);
-    const requestSessionBufferSync = vi.fn(() => true);
+  it('runScheduleJobNowRuntime writes session-not-found instead of silently returning', () => {
+    const setScheduleStateForSession = vi.fn();
+    const sendMessage = vi.fn();
 
-    updateSessionViewportRuntime({
-      sessionId,
-      visibleRange: {
-        startIndex: 97,
-        endIndex: 121,
-        viewportRows: 24,
-      },
-      triggerRepair: false,
-      viewportMode: 'follow',
-      sessionVisibleRangeRef: {
-        current: new Map([
-          [sessionId, {
-            startIndex: 96,
-            endIndex: 120,
-            viewportRows: 24,
-          }],
-        ]),
-      },
-      isSessionTransportActive: () => true,
-      sessions: [session],
-      sessionBufferHeadsRef: { current: new Map() },
-      readSessionBufferSnapshot: () => session.buffer,
-      requestSessionBufferSync,
+    runScheduleJobNowRuntime({
+      sessionId: 'missing-session',
+      jobId: 'job-1',
+      sessions: [makeSession()],
+      setScheduleStateForSession,
+      sendMessage,
     });
 
-    expect(requestSessionBufferSync).not.toHaveBeenCalled();
-  });
-
-  it('requests visible-range repair when follow viewport expands upward over stale rows even if local buffer still covers the old smaller follow window', () => {
-    const sessionId = 'session-1';
-    const session = makeSession(sessionId);
-    const requestSessionBufferSync = vi.fn(() => true);
-
-    updateSessionViewportRuntime({
-      sessionId,
-      visibleRange: {
-        startIndex: 80,
-        endIndex: 120,
-        viewportRows: 40,
-      },
-      triggerRepair: false,
-      viewportMode: 'follow',
-      sessionVisibleRangeRef: {
-        current: new Map([
-          [sessionId, {
-            startIndex: 96,
-            endIndex: 120,
-            viewportRows: 24,
-          }],
-        ]),
-      },
-      isSessionTransportActive: () => true,
-      sessions: [session],
-      sessionBufferHeadsRef: {
-        current: new Map([
-          [sessionId, {
-            revision: 6,
-            latestEndIndex: 120,
-            availableStartIndex: 0,
-            availableEndIndex: 120,
-            seenAt: 1,
-          }],
-        ]),
-      },
-      readSessionBufferSnapshot: () => session.buffer,
-      requestSessionBufferSync,
-    });
-
-    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
-      reason: 'viewport-visible-range-demand',
-      purpose: 'reading-repair',
-      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
-      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
-      sessionOverride: session,
-    });
-  });
-
-  it('requests visible-range repair when follow viewport expands upward over already-filled local rows that may be stale from a narrower tail repaint', () => {
-    const sessionId = 'session-1';
-    const session: Session = {
-      ...makeSession(sessionId),
-      buffer: createSessionBufferState({
-        lines: Array.from({ length: 40 }, (_, index) => `row-${80 + index}`),
-        startIndex: 80,
-        endIndex: 120,
-        bufferHeadStartIndex: 0,
-        bufferTailEndIndex: 120,
-        cols: 80,
-        rows: 40,
-        revision: 6,
-        cacheLines: 1000,
-      }),
-      daemonHeadRevision: 6,
-      daemonHeadEndIndex: 120,
-    };
-    const requestSessionBufferSync = vi.fn(() => true);
-
-    updateSessionViewportRuntime({
-      sessionId,
-      visibleRange: {
-        startIndex: 80,
-        endIndex: 120,
-        viewportRows: 40,
-      },
-      triggerRepair: false,
-      viewportMode: 'follow',
-      sessionVisibleRangeRef: {
-        current: new Map([
-          [sessionId, {
-            startIndex: 96,
-            endIndex: 120,
-            viewportRows: 24,
-          }],
-        ]),
-      },
-      isSessionTransportActive: () => true,
-      sessions: [session],
-      sessionBufferHeadsRef: {
-        current: new Map([
-          [sessionId, {
-            revision: 6,
-            latestEndIndex: 120,
-            availableStartIndex: 0,
-            availableEndIndex: 120,
-            seenAt: 1,
-          }],
-        ]),
-      },
-      readSessionBufferSnapshot: () => session.buffer,
-      requestSessionBufferSync,
-    });
-
-    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
-      reason: 'viewport-visible-range-demand',
-      purpose: 'reading-repair',
-      requestWindowOverride: { requestStartIndex: 80, requestEndIndex: 120 },
-      requestMissingRangesOverride: [{ startIndex: 80, endIndex: 96 }],
-      sessionOverride: session,
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(reduceScheduleCall(setScheduleStateForSession)).toMatchObject({
+      loading: false,
+      error: 'schedule session not found',
     });
   });
 });

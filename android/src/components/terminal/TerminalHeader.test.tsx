@@ -25,9 +25,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function makeSession(): Session {
+function makeSession(id?: string): Session {
   return {
-    id: 'session-1',
+    id: id || 'session-1',
     hostId: 'host-1',
     connectionName: 'local',
     bridgeHost: '127.0.0.1',
@@ -121,10 +121,10 @@ describe('TerminalHeader', () => {
     );
 
     const root = container.firstElementChild as HTMLElement | null;
-    expect(root?.style.padding).toBe('21px 4px 2px');
+    expect(root?.style.padding).toBe('1px 4px 2px');
   });
 
-  it('keeps a touch-safe status-bar gap above split tabs', () => {
+  it('uses only the real status-bar inset above split tabs', () => {
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       writable: true,
@@ -158,7 +158,7 @@ describe('TerminalHeader', () => {
     );
 
     const root = container.firstElementChild as HTMLElement | null;
-    expect(root?.style.padding).toBe('37px 4px 2px');
+    expect(root?.style.padding).toBe('17px 4px 2px');
   });
 
   it('renders a close button on the active tab and closes on single tap', () => {
@@ -182,6 +182,52 @@ describe('TerminalHeader', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '关闭当前 tab' })[0]!);
     expect(onCloseSession).toHaveBeenCalledWith('session-1', 'terminal-header-close-button');
     expect(onSwitchSession).not.toHaveBeenCalled();
+  });
+
+  it('toggles relay mode from the active path badge without adding header width', () => {
+    const session = makeSession();
+    session.resolvedPath = 'tailscale';
+    const onForceRelaySession = vi.fn();
+    const onUseAutoSession = vi.fn();
+
+    const { rerender } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onForceRelaySession={onForceRelaySession}
+        onUseAutoSession={onUseAutoSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '强制 Relay 重连当前 tab' }));
+    expect(screen.getByRole('button', { name: '强制 Relay 重连当前 tab' }).style.position).toBe('absolute');
+    expect(onForceRelaySession).toHaveBeenCalledWith('session-1');
+    expect(onUseAutoSession).not.toHaveBeenCalled();
+
+    const relaySession = { ...session, resolvedPath: 'rtc-relay' as const };
+    rerender(
+      <TerminalHeader
+        sessions={[toHeaderSession(relaySession)]}
+        activeSession={toHeaderSession(relaySession)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onForceRelaySession={onForceRelaySession}
+        onUseAutoSession={onUseAutoSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '切回 Auto 重连当前 tab' }));
+    expect(onUseAutoSession).toHaveBeenCalledWith('session-1');
   });
 
   it('keeps active-tab close working on touch events used by touch devices', () => {
@@ -463,4 +509,46 @@ describe('TerminalHeader', () => {
 
     expect(container.innerHTML).toContain('flex: 0.25 1 0%');
   });
+
+  it('lays out split pane tab groups in one horizontal row', () => {
+    const session1 = makeSession('session-1');
+    const session2 = makeSession('session-2');
+    const { container } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session1), toHeaderSession(session2)]}
+        activeSession={toHeaderSession(session1)}
+        topInsetPx={0}
+        showBackButton={false}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        splitVisible
+        paneGroups={[
+          {
+            paneId: 'pane-1',
+            size: 0.5,
+            sessions: [toHeaderSession(session1)],
+            activeSessionId: session1.id,
+            isActivePane: true,
+          },
+          {
+            paneId: 'pane-2',
+            size: 0.5,
+            sessions: [toHeaderSession(session2)],
+            activeSessionId: session2.id,
+            isActivePane: false,
+          },
+        ]}
+      />,
+    );
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.display).toBe('flex');
+    expect(root.style.alignItems).toBe('stretch');
+    expect(root.style.width).toBe('100%');
+    expect(container.innerHTML).toContain('flex: 0.5 1 0%');
+  });
+
 });

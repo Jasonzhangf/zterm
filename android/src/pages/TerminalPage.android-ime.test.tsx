@@ -484,7 +484,7 @@ describe("TerminalPage Android IME bridge", () => {
     );
   });
 
-  it("does not render the legacy copy menu in TerminalPage after copy button toggle", async () => {
+  it("renders the copy menu when copy mode is active and a row is long-pressed", async () => {
     const session = makeSession("s1");
 
     render(
@@ -507,16 +507,15 @@ describe("TerminalPage Android IME bridge", () => {
       />,
     );
 
+    // copy mode not active: longpress does nothing
+    fireEvent.click(screen.getByText("longpress-row-100"));
+    expect(screen.queryByTestId("terminal-copy-menu")).toBeNull();
+
+    // activate copy mode then longpress: menu should appear
     fireEvent.click(screen.getByText("toggle-copy-mode"));
     fireEvent.click(screen.getByText("longpress-row-100"));
 
-    expect(screen.queryByTestId("terminal-copy-menu")).toBeNull();
-    expect(
-      screen.getByTestId("terminal-view-s1").getAttribute("data-copy-preview"),
-    ).toBe("");
-    expect(
-      screen.getByTestId("terminal-view-s1").getAttribute("data-copy-start"),
-    ).toBe("");
+    expect(screen.queryByTestId("terminal-copy-menu")).not.toBeNull();
   });
 
   it("releases editor mode before keyboard toggle and requests Android IME focus", async () => {
@@ -561,7 +560,7 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("switching tabs keeps TerminalPage free of legacy copy menu overlays", async () => {
+  it("copy menu clears when switching tabs away from active copy session", async () => {
     const session1 = makeSession("s1");
     const session2 = makeSession("s2");
 
@@ -598,7 +597,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     fireEvent.click(screen.getByText("toggle-copy-mode"));
     fireEvent.click(screen.getByText("longpress-row-100"));
-    expect(screen.queryByTestId("terminal-copy-menu")).toBeNull();
+    expect(screen.queryByTestId("terminal-copy-menu")).not.toBeNull();
 
     fireEvent.click(screen.getByText("switch-to-s2"));
 

@@ -230,9 +230,20 @@ export function writeTraversalRelayAccountState(state: TraversalRelayAccountStat
   }
   if (!state) {
     storage.removeItem(STORAGE_KEY);
+    emitTraversalRelayAccountChange(state);
     return;
   }
   storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  emitTraversalRelayAccountChange(state);
+}
+
+function emitTraversalRelayAccountChange(state: TraversalRelayAccountState | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('traversal-relay-account-change', { detail: { state } }));
+  } catch {
+    // ignore
+  }
 }
 
 export function deriveTraversalRelayClientSettings(
