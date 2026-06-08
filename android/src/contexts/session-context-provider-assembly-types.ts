@@ -52,7 +52,7 @@ export interface SessionProviderCoreAssembliesResult {
   isReconnectInFlight: (sessionId: string) => boolean;
   resolveSessionCacheLines: (rows?: number | null) => number;
   scheduleSessionRenderCommit: (sessionId: string) => void;
-  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
+  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
@@ -73,5 +73,5 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionBufferHead?: (sessionId: string) => any;
   requestSessionBufferSync: (sessionId: string, options?: any) => boolean;
   requestSessionBufferHead: (sessionId: string, ws?: any, options?: { force?: boolean }) => boolean;
-  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
+  resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
 }

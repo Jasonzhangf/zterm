@@ -99,6 +99,49 @@ buffer-sync apply
 - 这个 diff 只能基于 **daemon mirror 前一版 vs 当前版** 计算
 - daemon **不得**基于任何客户端 local buffer / visible range / active 状态生成 live diff
 
+### 1.0.2 daemon live 性能调度冻结
+
+正常 live push 可以基于 daemon 自己持有的物理事实调节 cadence：
+
+- mirror capture cost
+- canonicalize cost
+- transport send buffered bytes
+- send error / non-open fact
+- subscriber transport count
+- daemon 自己的 failure/backoff fact
+
+daemon live scheduler 禁止读取或持有客户端 UI / renderer 语义：
+
+- active tab
+- foreground / background
+- follow / reading
+- visible range / viewport
+- pane layout
+
+好链路与弱链路的调度目标固定为：
+
+```text
+good transport + low capture cost + no backpressure
+  -> fast lane
+
+normal transport / normal capture cost
+  -> normal lane
+
+high RTT / high buffered bytes / send backlog / over-budget capture
+  -> slow lane or overloaded lane
+```
+
+性能 trace 只允许记录 metadata：
+
+- timestamp
+- duration
+- byte count
+- line count
+- session / mirror id
+- transport kind
+
+禁止把真实 terminal payload 内容写入 trace 来换取观测便利。
+
 ### 1.1 server 响应规则
 
 - `buffer-head-request`：返回当前 head

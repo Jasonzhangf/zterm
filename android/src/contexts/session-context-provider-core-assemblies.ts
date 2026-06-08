@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { runtimeDebug } from "../lib/runtime-debug";
 import { resolveTerminalRefreshCadence } from "../lib/mobile-config";
+import { resolveSessionRuntimeTransportCadenceInput } from "../lib/session-runtime-cadence";
 import {
   createSessionInfraFacadeRuntime,
 } from "./session-context-infra-facade-runtime";
@@ -63,6 +64,15 @@ export function useSessionProviderCoreAssemblies(
     finalizeSocketFailureBaselineRef,
     handleSocketServerMessageRef,
   } = options.refs;
+
+  const resolveSessionTerminalRefreshCadence = (sessionId?: string | null) => resolveTerminalRefreshCadence({
+    runtimeTransport: sessionId
+      ? resolveSessionRuntimeTransportCadenceInput({
+          socket: transportRuntimeStoreRef.current.sessions.get(sessionId)?.activeSocket || null,
+          metrics: sessionDebugMetricsStoreRef.current.getMetrics(sessionId, null, false),
+        })
+      : null,
+  });
 
   const sessionInfraRuntime = useMemo(() => createSessionInfraFacadeRuntime({
     stateRef: options.stateRef,
@@ -370,7 +380,7 @@ export function useSessionProviderCoreAssemblies(
     clearSessionTransportRuntime,
     requestSessionBufferSync,
     requestSessionBufferHead,
-    resolveTerminalRefreshCadence,
+    resolveTerminalRefreshCadence: resolveSessionTerminalRefreshCadence,
   }), [
     clearReconnectForSession,
     clearSessionHandshakeTimeout,
@@ -403,7 +413,7 @@ export function useSessionProviderCoreAssemblies(
     requestSessionBufferSync,
     resetSessionTransportPullBookkeeping,
     resolveSessionCacheLines,
-    resolveTerminalRefreshCadence,
+    resolveSessionTerminalRefreshCadence,
     scheduleReconnect,
     scheduleSessionRenderCommit,
     sendSocketPayload,

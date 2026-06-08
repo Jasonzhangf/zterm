@@ -301,3 +301,10 @@
 
 ## 2026-06-01 Mac render must not resize tmux
 - Mac projection render must not include hidden/1px wterm proxies or call `onResize` from render geometry. Hidden autoResize can shrink tmux cols to 1 and produce vertical text. Follow Android: renderer consumes projection; tmux resize only comes from explicit viewport/width owner paths.
+
+## 2026-06-08 Daemon/client transport performance truth
+- Daemon live cadence can only use daemon-owned physical facts: capture/canonicalize duration, subscriber count, transport ready/buffered bytes/send error/backpressure, and mirror failure/in-flight state. It must not consume active tab, pane layout, follow/reading, viewport, or any client UI state.
+- Client render/head cadence must be session-owned: read the target session socket buffered amount and debug metrics, pass `sessionId` through render gate/lifecycle resolvers, and allow good-link 16ms fast lane while weak/backpressured links slow down.
+- Performance traces may record metadata only (timestamp, duration, bytes, line counts, ids, kind). Tests must forbid payload/text/lines/cells/content/data keys so optimization cannot be achieved by leaking or trimming terminal payload.
+- Daemon mirror lab assertions over sparse `buffer-sync` must replay payload history; final sparse payload alone is not mirror truth because later prompt-only diffs can overwrite the last observed payload while an earlier diff already contained the oracle marker.
+  Tags: terminal-performance, daemon-scheduler, client-cadence, trace-metadata, regression-gate

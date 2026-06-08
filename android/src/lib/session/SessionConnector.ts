@@ -35,6 +35,7 @@ export class SessionConnector {
       close: (code?: number, reason?: string) => transport.close(code, reason),
       getDiagnostics: () => transport.getDiagnostics(),
       get readyState() { return transport.readyState; },
+      get bufferedAmount() { return transport.bufferedAmount || 0; },
       set onopen(handler) { transport.onopen = handler; },
       get onopen() { return transport.onopen; },
       set onmessage(handler) { transport.onmessage = handler; },

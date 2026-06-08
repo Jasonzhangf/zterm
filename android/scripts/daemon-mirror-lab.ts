@@ -659,7 +659,7 @@ async function waitForPayloadToMatchOracle(
   oracle: OracleSnapshot,
   timeoutMs: number = WAIT_TIMEOUT_MS,
 ) {
-  return probe.waitForPayload(
+  return probe.waitForHistory(
     label,
     () => replayHistoryMirrorCompare(oracle, probe.history).ok,
     timeoutMs,
@@ -1010,6 +1010,18 @@ class DaemonProbe {
       await sleep(80);
     }
     throw new Error(`timeout waiting for payload: ${label}`);
+  }
+
+  async waitForHistory(label: string, predicate: () => boolean, timeoutMs: number = WAIT_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= timeoutMs) {
+      this.requestHead();
+      if (this.lastPayload && predicate()) {
+        return this.lastPayload;
+      }
+      await sleep(80);
+    }
+    throw new Error(`timeout waiting for payload history: ${label}`);
   }
 
   async waitForMarker(marker: string, timeoutMs: number = WAIT_TIMEOUT_MS) {

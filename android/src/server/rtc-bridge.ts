@@ -21,6 +21,7 @@ export interface RtcServerTransport {
   id: string;
   requestOrigin: string;
   readyState: number;
+  bufferedAmount?: number;
   sendText(text: string): void;
   close(reason?: string): void;
 }
@@ -71,6 +72,10 @@ class RtcPeerTransport implements RtcServerTransport {
       return CLOSED;
     }
     return CONNECTING;
+  }
+
+  public get bufferedAmount() {
+    return Math.max(0, Math.floor(this.channel?.bufferedAmount || 0));
   }
 
   public attach(peerConnection: RTCPeerConnection, channel: RTCDataChannel, handlers: TransportHandlers) {

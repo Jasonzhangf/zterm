@@ -83,6 +83,13 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - `mirror body changed -> push buffer-sync diff`
   - diff 只允许基于 daemon mirror 前后版本计算
   - **不得**基于客户端状态算 diff
+- daemon live 性能调度只允许消费 daemon 自己的物理事实：
+  - mirror capture/canonicalize duration
+  - transport kind / readyState / buffered bytes / send error
+  - subscriber transport count
+  - daemon failure/backoff fact
+  - 禁止消费 `active tab / foreground / follow / reading / visible range / viewport / pane layout`
+- 好网 fast lane 与弱网 slow lane 必须由红测锁定；性能 trace 只记录 timestamp/duration/bytes/line count/id/kind 这类 metadata，禁止记录真实 terminal payload 内容。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**
 - daemon **不得改写 buffer cells 本身**

@@ -10,6 +10,10 @@ function readDaemonRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-daemon-runtime.ts'), 'utf8');
 }
 
+function readPerformanceSchedulerSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-performance-scheduler.ts'), 'utf8');
+}
+
 function extractBlock(source: string, anchor: string, length = 2600) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -55,5 +59,14 @@ describe('server daemon runtime truth gates', () => {
     expect(shutdownBlock).toContain('deps.shutdownTerminalSessions(deps.sessions, reason)');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
     expect(shutdownBlock).toContain('deps.server.close((error) => {');
+  });
+
+  it('keeps daemon performance scheduler free of client UI state', () => {
+    const source = readPerformanceSchedulerSource();
+
+    expect(source).not.toMatch(/activeSessionId|activeTab|foreground|background/);
+    expect(source).not.toMatch(/follow|reading|visibleRange|viewport|paneLayout/);
+    expect(source).toContain('transportBufferedBytes');
+    expect(source).toContain('lastCaptureDurationMs');
   });
 });

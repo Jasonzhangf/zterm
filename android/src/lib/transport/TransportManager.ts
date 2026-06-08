@@ -18,6 +18,7 @@ export interface Transport {
   onerror: ((event: Event) => void) | null;
   getDiagnostics(): TransportDiagnostics;
   readonly readyState: number;
+  readonly bufferedAmount: number;
 }
 
 export interface TransportDiagnostics {
@@ -118,6 +119,10 @@ export class WebSocketTransport implements Transport {
 
   get readyState(): number {
     return this.ws.readyState;
+  }
+
+  get bufferedAmount(): number {
+    return Math.max(0, Math.floor(this.ws.bufferedAmount || 0));
   }
 }
 
@@ -262,6 +267,10 @@ export class HeartbeatTransport implements Transport {
 
   get readyState(): number {
     return this.inner.readyState;
+  }
+
+  get bufferedAmount(): number {
+    return this.inner.bufferedAmount;
   }
 }
 
@@ -435,6 +444,10 @@ export class ReconnectTransport implements Transport {
 
   get readyState(): number {
     return this.inner ? this.inner.readyState : WebSocket.CLOSED;
+  }
+
+  get bufferedAmount(): number {
+    return this.inner ? this.inner.bufferedAmount : 0;
   }
 }
 

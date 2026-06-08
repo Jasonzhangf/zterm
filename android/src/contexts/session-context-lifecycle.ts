@@ -84,8 +84,8 @@ export function useSessionContextLifecycle(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
-  resolveActiveHeadRefreshTickMs: () => number;
-  resolveHeadStalePingMs: () => number;
+  resolveActiveHeadRefreshTickMs: (sessionId?: string | null) => number;
+  resolveHeadStalePingMs: (sessionId?: string | null) => number;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
@@ -215,9 +215,9 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const headStalePingMs = options.resolveHeadStalePingMs();
         const now = Date.now();
         refreshTargets.forEach((sessionId) => {
+          const headStalePingMs = options.resolveHeadStalePingMs(sessionId);
           if (!shouldScheduleActiveTickRefresh({
             state: options.refs.stateRef.current,
             sessionId,
@@ -234,7 +234,7 @@ export function useSessionContextLifecycle(options: {
           });
         });
         scheduleNext();
-      }, Math.max(16, options.resolveActiveHeadRefreshTickMs()));
+      }, Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId)));
     };
 
     scheduleNext();

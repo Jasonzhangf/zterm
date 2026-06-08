@@ -115,7 +115,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   ) => 'probed' | 'waiting' | 'recovered' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  resolveTerminalRefreshCadence: () => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
+  resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
   reconnectSession: (sessionId: string) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
@@ -217,7 +217,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     }
 
     const now = Date.now();
-    const cadence = options.resolveTerminalRefreshCadence();
+    const cadence = options.resolveTerminalRefreshCadence(options.refreshOptions.sessionId);
     const lastActiveReentryAt = options.refs.lastActiveReentryAtRef.current.get(options.refreshOptions.sessionId) || 0;
     const shouldForceHeadRequest = Boolean(options.refreshOptions.forceHead);
     const shouldSkipImmediateForcedResumeHead = (
@@ -234,7 +234,20 @@ export function ensureActiveSessionFreshRuntime(options: {
     );
 
     if (options.refreshOptions.markResumeTail) {
-      options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
+      // active-reentry stable: if the session is already connected with a non-empty
+      // local buffer, no tail-refresh is needed. The daemon push already keeps the
+      // tail in sync; a fresh resume-tail here would just trigger a full cache pull
+      // that races the input path.
+      const skipResumeTailForStableReentry = (
+        options.refreshOptions.source === 'active-reentry'
+        && ws?.readyState === WebSocket.OPEN
+        && sessionState === 'connected'
+        && localBuffer.revision > 0
+        && localBuffer.endIndex >= localBuffer.startIndex
+      );
+      if (!skipResumeTailForStableReentry) {
+        options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
+      }
     }
 
     if (shouldSkipImmediateForcedResumeHead) {

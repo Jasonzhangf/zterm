@@ -51,6 +51,30 @@ describe('session-render-gate', () => {
     }
   });
 
+  it('resolves render cadence with the scheduled session id', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const resolveRenderCommitMs = vi.fn(() => 16);
+      const gate = createSessionRenderGate({
+        liveBufferStore,
+        liveHeadStore,
+        recordSessionRenderCommit,
+        resolveRenderCommitMs,
+      });
+
+      liveBufferStore.setBuffer('session-fast', makeBuffer(['alpha'], 1));
+      liveHeadStore.setHead('session-fast', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('session-fast');
+
+      expect(resolveRenderCommitMs).toHaveBeenCalledWith('session-fast');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('coalesces burst commit requests and publishes the latest truth once per frame', async () => {
     vi.useFakeTimers();
     try {
@@ -395,6 +419,34 @@ describe('session-render-gate', () => {
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses 16ms fast lane when render cadence resolver returns 16ms', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({
+        liveBufferStore,
+        liveHeadStore,
+        recordSessionRenderCommit,
+        resolveRenderCommitMs: () => 16,
+      });
+      const renderStore = gate.getRenderStore();
+
+      liveBufferStore.setBuffer('session-1', makeBuffer(['fast'], 1));
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('session-1');
+
+      await vi.advanceTimersByTimeAsync(15);
+      expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
+      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['fast'], 1).lines);
+    } finally {
       vi.useRealTimers();
     }
   });

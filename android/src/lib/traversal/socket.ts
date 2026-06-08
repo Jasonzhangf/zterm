@@ -30,6 +30,7 @@ function computeTraversalReconnectDelay(attempt: number) {
 
 type Backend = {
   readonly readyState: number;
+  readonly bufferedAmount: number;
   send(data: string | ArrayBuffer): void;
   close(code?: number, reason?: string): void;
   start(handlers: {
@@ -51,6 +52,10 @@ class WebSocketBackend implements Backend {
 
   public get readyState() {
     return this.socket.readyState;
+  }
+
+  public get bufferedAmount() {
+    return Math.max(0, Math.floor(this.socket.bufferedAmount || 0));
   }
 
   public start(handlers: {
@@ -104,6 +109,10 @@ class WebRtcBackend implements Backend {
       return this.dataChannel.readyState === 'closing' ? CLOSING : CLOSED;
     }
     return this.signalSocket?.readyState === WebSocket.CLOSING ? CLOSING : CONNECTING;
+  }
+
+  public get bufferedAmount() {
+    return Math.max(0, Math.floor(this.dataChannel?.bufferedAmount || 0));
   }
 
   private async detectResolvedPath() {
@@ -326,6 +335,10 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   public get readyState() {
     return this.backend?.readyState ?? (this.closedByClient ? CLOSED : CONNECTING);
+  }
+
+  public get bufferedAmount() {
+    return Math.max(0, Math.floor(this.backend?.bufferedAmount || 0));
   }
 
   public getDiagnostics() {

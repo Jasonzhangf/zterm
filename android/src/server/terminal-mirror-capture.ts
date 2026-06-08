@@ -38,6 +38,8 @@ interface ResolvedMirrorCaptureSnapshot {
   canonicalLineCount: number;
   totalAvailableLines: number;
   visibleTopIndex: number;
+  captureDurationMs: number;
+  canonicalizeDurationMs: number;
 }
 
 function normalizeMirrorCursor(options: {
@@ -117,11 +119,13 @@ function currentMirrorMatchesSnapshot(
       bufferStartIndex: mirror.bufferStartIndex,
       bufferLines: mirror.bufferLines,
       cursor: mirror.cursor,
-      capturedLineCount: mirror.bufferLines.length,
-      canonicalLineCount: mirror.bufferLines.length,
-      totalAvailableLines: getMirrorAvailableEndIndex(mirror),
-      visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - mirror.rows),
-    },
+	      capturedLineCount: mirror.bufferLines.length,
+	      canonicalLineCount: mirror.bufferLines.length,
+	      totalAvailableLines: getMirrorAvailableEndIndex(mirror),
+	      visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - mirror.rows),
+	      captureDurationMs: mirror.lastCaptureDurationMs || 0,
+	      canonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+	    },
     snapshot,
   );
 }
@@ -298,6 +302,7 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   async function captureTmuxMirrorSnapshot(mirror: SessionMirror): Promise<ResolvedMirrorCaptureSnapshot> {
+    const captureStartedAt = Date.now();
     const metrics = readTmuxPaneMetrics(mirror.sessionName);
     const cursor = readTmuxCursorState(metrics.paneId);
     const maxLines = deps.resolveMirrorCacheLines(metrics.paneRows);
@@ -306,10 +311,13 @@ export function createTerminalMirrorCaptureRuntime(
       maxLines,
       alternateOn: metrics.alternateOn,
     });
+    const captureDoneAt = Date.now();
 
     const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
     mirror.scratchBridge = scratchBridge;
+    const canonicalizeStartedAt = Date.now();
     const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);
+    const canonicalizeDoneAt = Date.now();
 
     const totalAvailableLines = resolveCanonicalAvailableLineCount({
       paneRows: metrics.paneRows,
@@ -349,6 +357,8 @@ export function createTerminalMirrorCaptureRuntime(
       canonicalLineCount: nextBufferLines.length,
       totalAvailableLines,
       visibleTopIndex,
+      captureDurationMs: Math.max(0, captureDoneAt - captureStartedAt),
+      canonicalizeDurationMs: Math.max(0, canonicalizeDoneAt - canonicalizeStartedAt),
     };
   }
 
@@ -357,6 +367,8 @@ export function createTerminalMirrorCaptureRuntime(
     const currentMirrorMatched = currentMirrorMatchesSnapshot(mirror, snapshot);
 
     if (currentMirrorMatched) {
+      mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
+      mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
       mirror.pendingStableCaptureSnapshot = null;
       console.log(
         `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=1 stabilizeMode=current-mirror`,
@@ -365,6 +377,8 @@ export function createTerminalMirrorCaptureRuntime(
     }
 
     applyMirrorCaptureSnapshot(mirror, snapshot);
+    mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
+    mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
     mirror.pendingStableCaptureSnapshot = null;
 
     console.log(

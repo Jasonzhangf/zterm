@@ -125,11 +125,9 @@ function projectRenderBuffer(options: {
       return cloneRenderRow(row);
     }
     const previousOffset = absoluteIndex - options.previousSourceStartIndex;
-    const previousSourceRow = options.previousSourceRows[previousOffset];
     const previousProjectedRow = previousProjected.lines[previousOffset];
     if (
-      previousSourceRow === row
-      && previousProjectedRow
+      previousProjectedRow
       && rowsEqual(row, previousProjectedRow)
     ) {
       reusedRowMask.push(true);
@@ -197,7 +195,7 @@ export function createSessionRenderGate(options: {
   liveHeadStore: SessionHeadStore;
   recordSessionRenderCommit: (sessionId: string) => void;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
-  resolveRenderCommitMs?: () => number;
+  resolveRenderCommitMs?: (sessionId: string) => number;
 }): SessionRenderGate {
   const renderStore = createSessionRenderBufferStore();
   const runtimes = new Map<string, RenderGateSessionRuntime>();
@@ -293,7 +291,7 @@ export function createSessionRenderGate(options: {
         scheduleFlush(sessionId);
       }
     };
-    const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.() || 33));
+    const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.(sessionId) || 33));
     runtime.frameTimerId = setTimeout(runFlush, renderCommitMs) as unknown as number;
   };
 

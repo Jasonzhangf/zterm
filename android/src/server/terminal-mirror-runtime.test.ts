@@ -259,7 +259,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(mirror?.lifecycle).toBe('ready');
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(34);
+      await vi.advanceTimersByTimeAsync(16);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
@@ -304,7 +304,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(secondSession.mirrorKey).toBe('demo');
       expect(secondSession.transport?.connectedSent).toBe(true);
 
-      await vi.advanceTimersByTimeAsync(34);
+      await vi.advanceTimersByTimeAsync(16);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();

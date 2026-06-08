@@ -6,6 +6,8 @@ import type {
 import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
 import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
+import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
+import { readTerminalTransportBackpressureSnapshot } from './terminal-transport-runtime';
 import type {
   TerminalSession,
   SessionMirror,
@@ -140,12 +142,31 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function resolveMirrorLiveSyncDelay(mirror: SessionMirror, requestedDelayMs?: number) {
     const now = Date.now();
     const lastProgressAt = Math.max(mirror.lastFlushStartedAt, mirror.lastFlushCompletedAt);
-    const recentlyActive = lastProgressAt > 0 && (now - lastProgressAt) <= 1500;
-    const baseDelay = recentlyActive ? MIRROR_LIVE_SYNC_ACTIVE_MS : MIRROR_LIVE_SYNC_IDLE_MS;
-    const requestedDelay = typeof requestedDelayMs === 'number' && Number.isFinite(requestedDelayMs)
-      ? Math.max(0, Math.floor(requestedDelayMs))
-      : baseDelay;
-    return Math.min(requestedDelay, baseDelay);
+    let transportBufferedBytes = 0;
+    let transportBackpressureCount = 0;
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      const snapshot = readTerminalTransportBackpressureSnapshot(session?.transport);
+      if (!snapshot) {
+        continue;
+      }
+      transportBufferedBytes = Math.max(transportBufferedBytes, snapshot.bufferedBytes);
+      transportBackpressureCount = Math.max(transportBackpressureCount, snapshot.backpressureCount);
+    }
+    return resolveTerminalLiveSyncDelay({
+      requestedDelayMs,
+      activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
+      idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
+      now,
+      lastProgressAt,
+      consecutiveFailures: mirror.consecutiveFailures,
+      subscriberCount: mirror.subscribers.size,
+      transportBufferedBytes,
+      transportBackpressureCount,
+      lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
+      lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+      flushInFlight: mirror.flushInFlight,
+    }).delayMs;
   }
 
   function createMirror(sessionName: string): SessionMirror {
@@ -166,6 +187,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastCaptureDurationMs: 0,
+      lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
@@ -229,6 +252,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.cursor = null;
     mirror.lastFlushStartedAt = 0;
     mirror.lastFlushCompletedAt = 0;
+    mirror.lastCaptureDurationMs = 0;
+    mirror.lastCanonicalizeDurationMs = 0;
     mirror.lastScrollbackCount = -1;
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
@@ -480,11 +505,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       stopMirrorLiveSync(mirror);
       return;
     }
-    const backoffMultiplier = Math.min(mirror.consecutiveFailures, 10);
-    const dynamicDelay = resolveMirrorLiveSyncDelay(mirror, delayMs);
-    const effectiveDelay = backoffMultiplier > 0
-      ? Math.max(dynamicDelay, MIRROR_LIVE_SYNC_IDLE_MS * (1 + backoffMultiplier))
-      : dynamicDelay;
+    const effectiveDelay = resolveMirrorLiveSyncDelay(mirror, delayMs);
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;

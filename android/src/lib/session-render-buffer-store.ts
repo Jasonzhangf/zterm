@@ -37,10 +37,6 @@ const EMPTY_SNAPSHOT: SessionRenderStoreSnapshot = {
   buffer: EMPTY_BUFFER,
 };
 
-function cloneRenderLines(lines: SessionRenderBufferSnapshot['lines']) {
-  return lines.map((row) => row.map((cell) => ({ ...cell })));
-}
-
 function cloneRenderGapRanges(gapRanges: SessionRenderBufferSnapshot['gapRanges']) {
   return gapRanges.map((range) => ({ ...range }));
 }
@@ -56,12 +52,24 @@ function cloneRenderCursor(cursor: SessionRenderBufferSnapshot['cursor']) {
   };
 }
 
-function cloneRenderBuffer(buffer: SessionRenderBufferSnapshot): SessionRenderBufferSnapshot {
+function cloneRenderBuffer(
+  buffer: SessionRenderBufferSnapshot,
+  previous?: SessionRenderBufferSnapshot | null,
+): SessionRenderBufferSnapshot {
   return {
     ...buffer,
-    lines: cloneRenderLines(buffer.lines),
-    gapRanges: cloneRenderGapRanges(buffer.gapRanges),
-    cursor: cloneRenderCursor(buffer.cursor),
+    lines: buffer.lines.map((row, index) => {
+      const previousRow = previous?.lines[index] || null;
+      return previousRow && row === previousRow
+        ? previousRow
+        : row.map((cell) => ({ ...cell }));
+    }),
+    gapRanges: previous && gapRangesEqual(buffer.gapRanges, previous.gapRanges)
+      ? previous.gapRanges
+      : cloneRenderGapRanges(buffer.gapRanges),
+    cursor: previous && cursorEqual(buffer.cursor, previous.cursor)
+      ? previous.cursor
+      : cloneRenderCursor(buffer.cursor),
   };
 }
 
@@ -191,7 +199,7 @@ export function createSessionRenderBufferStore(): SessionRenderBufferStore {
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer: cloneRenderBuffer(buffer),
+      buffer: cloneRenderBuffer(buffer, previous?.buffer || null),
     });
     notify(sessionId);
     return true;

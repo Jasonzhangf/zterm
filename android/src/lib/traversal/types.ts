@@ -81,6 +81,7 @@ export interface BridgeSocketMessageLike {
 
 export interface BridgeTransportSocket {
   readonly readyState: number;
+  readonly bufferedAmount?: number;
   onopen: ((event?: Event) => void) | null;
   onmessage: ((event: BridgeSocketMessageLike) => void) | null;
   onerror: ((event?: Event) => void) | null;

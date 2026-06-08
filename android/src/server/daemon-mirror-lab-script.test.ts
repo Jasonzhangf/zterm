@@ -55,6 +55,18 @@ describe('daemon mirror lab isolation gate', () => {
     expect(buildStepBlock).not.toContain('payloadCoversVisibleViewport');
   });
 
+  it('uses replay-history waits for settled oracle matching after a later sparse diff changes the last payload', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
+    const waitForOraclePayloadBlock = script.slice(
+      script.indexOf('async function waitForPayloadToMatchOracle('),
+      script.indexOf('class AttachedTmuxOperator'),
+    );
+    expect(script).toContain('async waitForHistory(label: string, predicate: () => boolean');
+    expect(waitForOraclePayloadBlock).toContain('return probe.waitForHistory(');
+    expect(waitForOraclePayloadBlock).toContain('() => replayHistoryMirrorCompare(oracle, probe.history).ok');
+    expect(waitForOraclePayloadBlock).not.toContain('return probe.waitForPayload(');
+  });
+
   it('waits for top/vim exit payloads to settle to tmux truth after alternate-screen returns to shell', () => {
     const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
     expect(script).toContain("'top enter settled payload'");

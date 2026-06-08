@@ -32,6 +32,16 @@ export interface TerminalRefreshCadence {
 
 const TERMINAL_RENDER_COMMIT_MS = ACTIVE_HEAD_REFRESH_TICK_MS;
 
+export interface TerminalRefreshCadenceOptions {
+  runtimeTransport?: {
+    rttMs?: number;
+    bufferedBytes?: number;
+    backpressure?: boolean;
+    recentPayloadBytes?: number;
+    hasRecentProgress?: boolean;
+  } | null;
+}
+
 function readEffectiveNetworkProfile(): { effectiveType: string; saveData: boolean; rttMs: number } {
   if (typeof navigator === 'undefined') {
     return {
@@ -58,8 +68,42 @@ function readEffectiveNetworkProfile(): { effectiveType: string; saveData: boole
   };
 }
 
-export function resolveTerminalRefreshCadence(): TerminalRefreshCadence {
+export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOptions): TerminalRefreshCadence {
   const network = readEffectiveNetworkProfile();
+  const runtimeTransport = options?.runtimeTransport || null;
+  const runtimeRttMs = Number.isFinite(runtimeTransport?.rttMs)
+    ? Math.max(0, Math.floor(runtimeTransport?.rttMs || 0))
+    : 0;
+  const runtimeBufferedBytes = Number.isFinite(runtimeTransport?.bufferedBytes)
+    ? Math.max(0, Math.floor(runtimeTransport?.bufferedBytes || 0))
+    : 0;
+  const recentPayloadBytes = Number.isFinite(runtimeTransport?.recentPayloadBytes)
+    ? Math.max(0, Math.floor(runtimeTransport?.recentPayloadBytes || 0))
+    : 0;
+
+  if (runtimeTransport?.backpressure || runtimeBufferedBytes >= 128 * 1024) {
+    return {
+      headTickMs: 120,
+      minTailRefreshGapMs: 120,
+      headStalePingMs: 520,
+      pullRequestStaleMs: 2500,
+      readingSyncDelayMs: 72,
+      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
+    };
+  }
+
+  const hasGoodRuntimeProgress = runtimeTransport
+    && (runtimeTransport.hasRecentProgress || (runtimeRttMs > 0 && runtimeRttMs < 80));
+  if (hasGoodRuntimeProgress && recentPayloadBytes <= 8 * 1024) {
+    return {
+      headTickMs: 16,
+      minTailRefreshGapMs: 16,
+      headStalePingMs: 160,
+      pullRequestStaleMs: 1200,
+      readingSyncDelayMs: 16,
+      renderCommitMs: 16,
+    };
+  }
 
   if (network.rttMs >= 800) {
     return {

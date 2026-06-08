@@ -1,7 +1,4 @@
 import { useMemo } from 'react';
-import {
-  resolveTerminalRefreshCadence,
-} from '../lib/mobile-config';
 import { CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS } from '../lib/runtime-debug-flush';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
@@ -25,8 +22,8 @@ import type {
 } from './session-context-provider-assembly-types';
 
 const IMAGE_PASTE_READY_TIMEOUT_MS = 6000;
-function resolveActiveTransportProbeWaitMs() {
-  const cadence = resolveTerminalRefreshCadence();
+function resolveActiveTransportProbeWaitMs(resolveCadence: (sessionId?: string | null) => { headTickMs: number }) {
+  const cadence = resolveCadence();
   if (cadence.headTickMs >= 120) { return 500; }
   if (cadence.headTickMs >= 66) { return 900; }
   return 1500;
@@ -80,7 +77,7 @@ export function useSessionProviderFacadeAssemblies(
     },
     runtimeDebug,
     defaultViewport: DEFAULT_TERMINAL_SESSION_VIEWPORT,
-    activeTransportProbeWaitMs: resolveActiveTransportProbeWaitMs(),
+    activeTransportProbeWaitMs: resolveActiveTransportProbeWaitMs(core.resolveTerminalRefreshCadence),
     resolveSessionCacheLines: core.resolveSessionCacheLines,
     createSessionSync: core.createSessionSync,
     deleteSessionSync: core.deleteSessionSync,
@@ -257,8 +254,8 @@ export function useSessionProviderFacadeAssemblies(
     flushRuntimeDebugLogs: core.flushRuntimeDebugLogs,
     clientRuntimeDebugFlushIntervalMs: CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS,
     ensureActiveSessionFresh,
-    resolveActiveHeadRefreshTickMs: () => resolveTerminalRefreshCadence().headTickMs,
-    resolveHeadStalePingMs: () => resolveTerminalRefreshCadence().headStalePingMs,
+    resolveActiveHeadRefreshTickMs: (sessionId?: string | null) => core.resolveTerminalRefreshCadence(sessionId).headTickMs,
+    resolveHeadStalePingMs: (sessionId?: string | null) => core.resolveTerminalRefreshCadence(sessionId).headStalePingMs,
     clearSessionHandshakeTimeout: core.clearSessionHandshakeTimeout,
     cleanupSocket: core.cleanupSocket,
     cleanupControlSocket: core.cleanupControlSocket,

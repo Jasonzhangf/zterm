@@ -48,4 +48,36 @@ describe('mobile-config refresh cadence', () => {
     expect(cadence.headTickMs).toBe(120);
     expect(cadence.renderCommitMs).toBe(33);
   });
+
+  it('uses render fast lane when runtime transport quality is good', () => {
+    mockConnection('4g', false);
+    const cadence = resolveTerminalRefreshCadence({
+      runtimeTransport: {
+        rttMs: 24,
+        bufferedBytes: 0,
+        backpressure: false,
+        recentPayloadBytes: 1200,
+      },
+    });
+
+    expect(cadence.headTickMs).toBe(16);
+    expect(cadence.minTailRefreshGapMs).toBe(16);
+    expect(cadence.renderCommitMs).toBe(16);
+  });
+
+  it('uses slow lane when runtime transport reports backpressure even on 4g', () => {
+    mockConnection('4g', false);
+    const cadence = resolveTerminalRefreshCadence({
+      runtimeTransport: {
+        rttMs: 40,
+        bufferedBytes: 512 * 1024,
+        backpressure: true,
+        recentPayloadBytes: 48 * 1024,
+      },
+    });
+
+    expect(cadence.headTickMs).toBeGreaterThanOrEqual(120);
+    expect(cadence.minTailRefreshGapMs).toBeGreaterThanOrEqual(120);
+    expect(cadence.renderCommitMs).toBeGreaterThanOrEqual(33);
+  });
 });

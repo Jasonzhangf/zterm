@@ -13,6 +13,18 @@ export interface DaemonTransportConnection extends TerminalTransportConnection {
   wsAlive: boolean;
 }
 
+export interface TerminalTransportBackpressureSnapshot {
+  kind: TerminalSessionTransport['kind'];
+  ready: boolean;
+  bufferedBytes: number;
+  backpressure: boolean;
+  backpressureCount: number;
+  lastSendBytes: number;
+  totalSendBytes: number;
+  lastSendAt: number;
+  lastSendError: string | null;
+}
+
 export interface TerminalTransportRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   connections: Map<string, DaemonTransportConnection>;
@@ -32,6 +44,38 @@ export interface TerminalTransportRuntime {
   ) => DaemonTransportConnection;
 }
 
+const TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128_000;
+
+export function estimateTransportMessageBytes(text: string) {
+  return Buffer.byteLength(text, 'utf8');
+}
+
+export function readTerminalTransportBackpressureSnapshot(
+  transport: TerminalSessionTransport | null | undefined,
+): TerminalTransportBackpressureSnapshot | null {
+  if (!transport) {
+    return null;
+  }
+  const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
+  const backpressure = bufferedBytes >= TRANSPORT_BACKPRESSURE_BUFFERED_BYTES;
+  if (backpressure) {
+    transport.backpressureCount = Math.max(0, Math.floor(transport.backpressureCount || 0)) + 1;
+  } else {
+    transport.backpressureCount = 0;
+  }
+  return {
+    kind: transport.kind,
+    ready: transport.readyState === WebSocket.OPEN,
+    bufferedBytes,
+    backpressure,
+    backpressureCount: Math.max(0, Math.floor(transport.backpressureCount || 0)),
+    lastSendBytes: Math.max(0, Math.floor(transport.lastSendBytes || 0)),
+    totalSendBytes: Math.max(0, Math.floor(transport.totalSendBytes || 0)),
+    lastSendAt: Math.max(0, Math.floor(transport.lastSendAt || 0)),
+    lastSendError: transport.lastSendError || null,
+  };
+}
+
 export function createTerminalTransportRuntime(
   deps: TerminalTransportRuntimeDeps,
 ): TerminalTransportRuntime {
@@ -42,6 +86,9 @@ export function createTerminalTransportRuntime(
       connectedSent: false,
       get readyState() {
         return ws.readyState;
+      },
+      get bufferedAmount() {
+        return Math.max(0, Math.floor(ws.bufferedAmount || 0));
       },
       sendText(text: string) {
         ws.send(text);
@@ -63,6 +110,9 @@ export function createTerminalTransportRuntime(
       get readyState() {
         return transport.readyState;
       },
+      get bufferedAmount() {
+        return Math.max(0, Math.floor(transport.bufferedAmount || 0));
+      },
       sendText(text: string) {
         transport.sendText(text);
       },
@@ -76,7 +126,21 @@ export function createTerminalTransportRuntime(
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }
-    transport.sendText(JSON.stringify(message));
+    const text = JSON.stringify(message);
+    const bytes = estimateTransportMessageBytes(text);
+    try {
+      transport.sendText(text);
+      transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
+      transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
+      transport.lastSendError = null;
+      readTerminalTransportBackpressureSnapshot(transport);
+    } catch (error) {
+      transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
+      transport.lastSendError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 
   function sendMessage(session: TerminalSession, message: ServerMessage) {

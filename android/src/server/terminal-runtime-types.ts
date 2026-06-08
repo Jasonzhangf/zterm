@@ -9,6 +9,12 @@ import type {
 export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';
   readyState: number;
+  bufferedAmount?: number;
+  lastSendAt?: number;
+  lastSendBytes?: number;
+  totalSendBytes?: number;
+  lastSendError?: string | null;
+  backpressureCount?: number;
   sendText: (text: string) => void;
   close: (reason?: string) => void;
   ping?: () => void;
@@ -62,6 +68,8 @@ export interface SessionMirror {
   cursor: TerminalCursorState | null;
   lastFlushStartedAt: number;
   lastFlushCompletedAt: number;
+  lastCaptureDurationMs?: number;
+  lastCanonicalizeDurationMs?: number;
   flushInFlight: boolean;
   flushPromise: Promise<boolean> | null;
   pendingStableCaptureSnapshot?: {

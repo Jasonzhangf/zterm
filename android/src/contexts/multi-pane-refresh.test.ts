@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildLifecycleRefreshTargets } from './session-context-lifecycle';
 import { requestSessionBufferHeadRuntime, requestSessionBufferSyncRuntime } from './session-context-buffer-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import {
+  createTerminalPerformanceTraceStore,
+  summarizeTerminalPerformanceTrace,
+} from '../lib/terminal-performance-trace';
 import type { Session } from '../lib/types';
 
 function makeSession(sessionId: string): Session {
@@ -134,5 +138,28 @@ describe('multi-pane refresh truth', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('summarizes 3-pane capture-to-render latency so multi-pane freshness has a measurable SLA gate', () => {
+    const store = createTerminalPerformanceTraceStore({ limit: 50 });
+    const panes = [
+      { sessionId: 'pane-1', start: 0, render: 42 },
+      { sessionId: 'pane-2', start: 3, render: 70 },
+      { sessionId: 'pane-3', start: 6, render: 95 },
+    ];
+
+    for (const pane of panes) {
+      store.record({ sessionId: pane.sessionId, stage: 'capture-start', at: pane.start });
+      store.record({ sessionId: pane.sessionId, stage: 'send-done', at: pane.start + 20, bytes: 900, lineCount: 6 });
+      store.record({ sessionId: pane.sessionId, stage: 'client-rx', at: pane.start + 25, bytes: 900 });
+      store.record({ sessionId: pane.sessionId, stage: 'buffer-apply-done', at: pane.start + 32 });
+      store.record({ sessionId: pane.sessionId, stage: 'render-commit', at: pane.render });
+    }
+
+    const summary = summarizeTerminalPerformanceTrace(store.snapshot());
+
+    expect(summary.sessions).toHaveLength(3);
+    expect(summary.p95CaptureToRenderMs).toBe(89);
+    expect(summary.p95CaptureToRenderMs).toBeLessThan(120);
   });
 });
