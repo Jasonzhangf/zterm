@@ -124,13 +124,7 @@ export function sendInputThroughSessionTransport(options: {
     options.sendSocketPayload(
       targetSessionId,
       ws,
-      JSON.stringify({
-        type: 'input',
-        payload: {
-          data: options.data,
-          sentAt: Date.now(),
-        },
-      }),
+      JSON.stringify({ type: 'input', payload: options.data }),
     );
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({

@@ -24,6 +24,10 @@ tmux truth
 
 ## 0. transport / session 语义冻结
 
+- terminal input wire 在没有 daemon/client 协议协商与版本门禁前必须保持 **string-only**：
+  - 禁止把 `{ data, sentAt }` 这类 object envelope 直接放进现有 `input.payload`，旧 daemon 会把 object 写成 `[object Object]` 进入 tmux
+  - 若需要迟到输入防护，优先在 client transport backpressure 处拒绝入队；新增 wire envelope 必须先有协议版本协商、旧 daemon 红测和升级迁移计划
+  - daemon 收到非 string input payload 必须显式 `input_invalid`，不得解包执行、不得隐式 stringification
 - client 侧必须把下面两类动作彻底拆开，禁止再混成一个 `switchRuntime` 布尔语义：
   1. `restore-sync`
      - 只恢复本地 runtime shell / active tab

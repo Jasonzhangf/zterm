@@ -309,64 +309,25 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('writes fresh timestamped input payloads to the attached session', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-06-08T12:00:00.000Z'));
-    try {
-      const { runtime, sessions, handleInput, sendMessage } = createRuntime();
-      const session = createSession();
-      sessions.set(session.id, session);
-      const connection = createConnection(session.id);
+  it('writes string input payloads to the attached session', async () => {
+    const { runtime, sessions, handleInput, sendMessage } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
 
-      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
-        type: 'input',
-        payload: {
-          data: 'pwd\r',
-          sentAt: Date.now(),
-        },
-      })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: 'pwd\r',
+    })));
 
-      expect(handleInput).toHaveBeenCalledWith(session, 'pwd\r');
-      expect(sendMessage).not.toHaveBeenCalledWith(
-        session,
-        expect.objectContaining({ type: 'error' }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(handleInput).toHaveBeenCalledWith(session, 'pwd\r');
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'error' }),
+    );
   });
 
-  it('rejects stale timestamped input instead of executing delayed client backlog', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-06-08T12:00:00.000Z'));
-    try {
-      const { runtime, sessions, handleInput, sendMessage } = createRuntime();
-      const session = createSession();
-      sessions.set(session.id, session);
-      const connection = createConnection(session.id);
-
-      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
-        type: 'input',
-        payload: {
-          data: 'rm -rf should-not-flush-later\r',
-          sentAt: Date.now() - 120_000,
-        },
-      })));
-
-      expect(handleInput).not.toHaveBeenCalled();
-      expect(sendMessage).toHaveBeenCalledWith(session, {
-        type: 'error',
-        payload: {
-          message: 'stale input dropped',
-          code: 'input_stale',
-        },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('rejects object input payloads without a valid sentAt timestamp', async () => {
+  it('rejects object input payloads instead of writing object stringification to tmux', async () => {
     const { runtime, sessions, handleInput, sendMessage } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);
@@ -376,6 +337,7 @@ describe('terminal message runtime explicit error truth', () => {
       type: 'input',
       payload: {
         data: 'pwd\r',
+        sentAt: Date.now(),
       },
     })));
 

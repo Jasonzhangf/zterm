@@ -90,6 +90,7 @@ describe('session-context-input-runtime', () => {
     });
 
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2]).payload).toBe('pwd\r');
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
     expect(probeOrReconnectStaleSessionTransport).toHaveBeenCalledWith('session-2', ws, 'input');
     expect(reconnectSession).not.toHaveBeenCalled();
