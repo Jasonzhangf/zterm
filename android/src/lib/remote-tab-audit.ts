@@ -1,6 +1,5 @@
 import { runtimeDebug } from './runtime-debug';
-import { fetchRemoteTmuxSessionNamesByOwner, filterRestorableOpenTabsByRemoteSessionNames } from './open-tab-restore';
-import { normalizeOpenTabIntentState } from './open-tab-intent';
+import { fetchRemoteTmuxSessionNamesByOwner } from './open-tab-restore';
 import type { BridgeSettings } from './bridge-settings';
 import type { Host, PersistedOpenTab, SessionGroupHistory } from './types';
 
@@ -9,11 +8,14 @@ export interface RemoteTabAuditDeps {
   sessionGroups: SessionGroupHistory[];
   bridgeSettingsRef: { current: BridgeSettings };
   hostsRef: { current: Host[] };
-  sessionsRef: { current: any[] };
-  runtimeActiveSessionIdRef: { current: string | null };
   remoteOpenTabAuditTokenRef: { current: number };
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
-  applyClosedOpenTabIntent: (sessionId: string, options: any) => void;
+}
+
+function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
+  return target.daemonHostId?.trim()
+    ? `daemon:${target.daemonHostId.trim()}`
+    : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`;
 }
 
 export async function auditOpenTabsAgainstRemoteSessions(
@@ -42,7 +44,7 @@ export async function auditOpenTabsAgainstRemoteSessions(
 
   const prunedOwnerKeys = new Set<string>();
   for (const target of auditTargets) {
-    const ownerKey = `${target.daemonHostId?.trim() ? `daemon:${target.daemonHostId.trim()}` : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`}`;
+    const ownerKey = buildAuditOwnerKey(target);
     if (prunedOwnerKeys.has(ownerKey)) {
       continue;
     }
@@ -58,51 +60,24 @@ export async function auditOpenTabsAgainstRemoteSessions(
     }, remoteSessionNames);
   }
 
-  const remoteAvailability = filterRestorableOpenTabsByRemoteSessionNames({
-    tabs: currentTabs,
-    sessionNamesByTarget,
-  });
-  const normalizedRemoteState = normalizeOpenTabIntentState(
-    remoteAvailability.restorableTabs,
-    deps.openTabStateRef.current.activeSessionId,
-  );
-  const remoteState = {
-    tabs: normalizedRemoteState.tabs,
-    activeSessionId: normalizedRemoteState.activeSessionId,
-    droppedTabs: remoteAvailability.droppedTabs,
-  };
   if (deps.remoteOpenTabAuditTokenRef.current !== auditToken) {
     return;
   }
 
-  const droppedTabs = remoteState.droppedTabs.filter((tab) => (
-    deps.openTabStateRef.current.tabs.some((currentTab) => currentTab.sessionId === tab.sessionId)
-  ));
-  if (droppedTabs.length === 0) {
+  const missingTabs = currentTabs.filter((tab) => {
+    const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(tab));
+    if (!remoteSessionNames) {
+      return false;
+    }
+    return !new Set(remoteSessionNames).has(tab.sessionName.trim());
+  });
+  if (missingTabs.length === 0) {
     return;
   }
 
-  runtimeDebug('app.open-tabs.remote-session-prune', {
+  runtimeDebug('app.open-tabs.remote-session-missing', {
     reason,
-    droppedSessionIds: droppedTabs.map((tab) => tab.sessionId),
-    droppedTargets: droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-    remainingSessionIds: remoteState.tabs.map((tab) => tab.sessionId),
+    sessionIds: missingTabs.map((tab) => tab.sessionId),
+    targets: missingTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
   });
-
-  for (const tab of droppedTabs) {
-    const runtimeSessions = deps.sessionsRef.current;
-    if (!deps.openTabStateRef.current.tabs.some((currentTab) => currentTab.sessionId === tab.sessionId)) {
-      continue;
-    }
-    deps.applyClosedOpenTabIntent(tab.sessionId, {
-      runtimeSessions,
-      runtimeActiveSessionId: deps.runtimeActiveSessionIdRef.current,
-      fallbackSessionIds: runtimeSessions
-        .filter((session) => session.id !== tab.sessionId)
-        .map((session) => session.id),
-      closeRuntimeSession: runtimeSessions.some((session) => session.id === tab.sessionId),
-      clearDraft: true,
-      source: `remote-session-audit:${reason}`,
-    });
-  }
 }

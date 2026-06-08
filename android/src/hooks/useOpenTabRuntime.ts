@@ -312,13 +312,10 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       sessionGroups,
       bridgeSettingsRef,
       hostsRef,
-      sessionsRef,
-      runtimeActiveSessionIdRef,
       remoteOpenTabAuditTokenRef,
       pruneSessionGroupSelectionToRemoteTruth,
-      applyClosedOpenTabIntent,
     });
-  }, [applyClosedOpenTabIntent, pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
+  }, [pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
   useEffect(() => {
     sessionsRef.current = sessions;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;

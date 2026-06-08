@@ -34,12 +34,6 @@ export async function loadSavedTabList(
     bridgeSettings: deps.bridgeSettingsRef.current,
     hosts: deps.hostsRef.current,
   });
-  if (importPlan.droppedTabs.length > 0) {
-    runtimeDebug('app.saved-tab-list.drop-missing-remote-sessions', {
-      droppedSessionIds: importPlan.droppedTabs.map((tab) => tab.sessionId),
-      droppedTargets: importPlan.droppedTabs.map((tab) => tab.bridgeHost + ':' + tab.bridgePort + ':' + tab.sessionName),
-    });
-  }
   const filteredTabs = options?.clearMatchingTombstones
     ? importPlan.tabs.map((tab) => {
         const reuseKey = buildPersistedOpenTabReuseKey(tab);

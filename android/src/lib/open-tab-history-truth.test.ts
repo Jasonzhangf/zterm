@@ -81,7 +81,8 @@ describe('open-tab / history / connections truth gates', () => {
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
     const openTabOpenPolicySource = readSource('lib/open-tab-open-policy.ts');
 
-    expect(restoreRuntimeSource).toContain('persistClosedTabReuseKeys(');
+    expect(restoreRuntimeSource).not.toContain('persistClosedTabReuseKeys(');
+    expect(restoreRuntimeSource).not.toContain('closedOpenTabReuseKeysRef.current.add(');
     expect(restoreRuntimeSource).not.toContain('clearClosedTabReuseKeysForOwner(');
     expect(restoreRuntimeSource).not.toContain('closedOpenTabReuseKeysRef.current.delete(');
     expect(restoreRuntimeSource).not.toContain("source: 'saved-tab-import-revive'");
@@ -92,6 +93,17 @@ describe('open-tab / history / connections truth gates', () => {
     expect(openTabOpenPolicySource).toContain("Extract<OpenTabOpenSource, 'saved-tab-import' | 'saved-tab-import-revive'>");
     expect(openTabOpenPolicySource).toContain('clearClosedTabReuseKeysForOwner(');
     expect(openTabOpenPolicySource).toContain('reviveClosedReuseOnImport: true');
+  });
+
+  it('keeps remote tmux audits unable to close open tabs automatically', () => {
+    const remoteTabAuditSource = readSource('lib/remote-tab-audit.ts');
+    const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
+
+    expect(remoteTabAuditSource).not.toContain('applyClosedOpenTabIntent');
+    expect(remoteTabAuditSource).not.toContain('closeRuntimeSession');
+    expect(remoteTabAuditSource).not.toContain('closeSession(');
+    expect(remoteTabAuditSource).not.toContain('persistClosedTabReuseKeys(');
+    expect(openTabRuntimeSource).not.toContain('useOpenTabRemoteAudit');
   });
 
   it('keeps runtime tab switching owned by applyOpenTabState instead of exposing extra switch/persist refs to child hooks', () => {

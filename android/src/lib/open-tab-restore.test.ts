@@ -13,7 +13,7 @@ describe('open-tab restore truth', () => {
     fetchTmuxSessionsMock.mockReset();
   });
 
-  it('filters out persisted tabs whose tmux session no longer exists remotely', async () => {
+  it('keeps persisted tabs even when their tmux session no longer exists remotely', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
 
     const { filterRestorableOpenTabsByRemoteTmuxSessions } = await import('./open-tab-restore');
@@ -51,8 +51,8 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-b']);
-    expect(result.droppedTabs.map((tab) => tab.sessionId)).toEqual(['tab-a']);
+    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-a', 'tab-b']);
+    expect(result.droppedTabs).toEqual([]);
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
   });
 
@@ -106,8 +106,8 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-a1', 'tab-b1']);
-    expect(result.droppedTabs.map((tab) => tab.sessionId)).toEqual(['tab-a2']);
+    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-a1', 'tab-a2', 'tab-b1']);
+    expect(result.droppedTabs).toEqual([]);
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2);
   });
 
@@ -206,8 +206,8 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-daemon-a']);
-    expect(result.droppedTabs.map((tab) => tab.sessionId)).toEqual(['tab-daemon-b']);
+    expect(result.restorableTabs.map((tab) => tab.sessionId)).toEqual(['tab-daemon-a', 'tab-daemon-b']);
+    expect(result.droppedTabs).toEqual([]);
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2);
     expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
       1,
@@ -319,9 +319,9 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.tabs.map((tab) => tab.sessionId)).toEqual(['tab-b']);
-    expect(result.activeSessionId).toBe('tab-b');
-    expect(result.droppedTabs.map((tab) => tab.sessionId)).toEqual(['tab-a']);
+    expect(result.tabs.map((tab) => tab.sessionId)).toEqual(['tab-a', 'tab-b']);
+    expect(result.activeSessionId).toBe('tab-a');
+    expect(result.droppedTabs).toEqual([]);
   });
 
   it('keeps persisted tabs when remote tmux truth is unavailable (timeout/error)', async () => {

@@ -3,8 +3,6 @@ import {
   buildOpenTabSessionCreateOptions,
 } from '../lib/open-tab-open-policy';
 import {
-  buildPersistedOpenTabReuseKeyVariants,
-  persistClosedTabReuseKeys,
   resolveHostForPersistedOpenTab,
 } from '../lib/open-tab-persistence';
 import { resolveRemoteRestorableOpenTabState } from '../lib/open-tab-restore';
@@ -101,23 +99,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           if (cancelled) {
             return;
           }
-          if (initialRestoreState.droppedTabs.length > 0) {
-            runtimeDebug('app.open-tabs.restore.drop-missing-remote-sessions', {
-              droppedSessionIds: initialRestoreState.droppedTabs.map((tab) => tab.sessionId),
-              droppedTargets: initialRestoreState.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-            });
-            // Permanently mark dropped tabs as "do not open"
-            for (const tab of initialRestoreState.droppedTabs) {
-              const reuseKeys = buildPersistedOpenTabReuseKeyVariants({
-                daemonHostId: tab.daemonHostId,
-                bridgeHost: tab.bridgeHost,
-                bridgePort: tab.bridgePort,
-                sessionName: tab.sessionName,
-              });
-              reuseKeys.forEach((key) => closedOpenTabReuseKeysRef.current.add(key));
-            }
-            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
-          }
           currentOpenTabState = applyOpenTabState({
             tabs: initialRestoreState.tabs,
             activeSessionId: initialRestoreState.activeSessionId,
@@ -198,22 +179,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           });
           if (cancelled) {
             return currentOpenTabState;
-          }
-          if (restoreState.droppedTabs.length > 0) {
-            runtimeDebug('app.open-tabs.restore.drop-missing-remote-sessions', {
-              droppedSessionIds: restoreState.droppedTabs.map((tab) => tab.sessionId),
-              droppedTargets: restoreState.droppedTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-            });
-            for (const tab of restoreState.droppedTabs) {
-              const reuseKeys = buildPersistedOpenTabReuseKeyVariants({
-                daemonHostId: tab.daemonHostId,
-                bridgeHost: tab.bridgeHost,
-                bridgePort: tab.bridgePort,
-                sessionName: tab.sessionName,
-              });
-              reuseKeys.forEach((key) => closedOpenTabReuseKeysRef.current.add(key));
-            }
-            persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
           }
           return {
             tabs: restoreState.tabs,

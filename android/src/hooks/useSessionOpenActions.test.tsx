@@ -632,7 +632,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     // Reuse key should remain — the tab was explicitly closed, so it must not be reopened
     expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(true);
     expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([reuseKey]));
-    // No tabs should have been opened because the only candidate was filtered out
+    // No tabs should have been opened because the only candidate still has an explicit close tombstone.
     expect(harness.refs.openTabStateRef.current.tabs).toEqual([]);
   });
 });

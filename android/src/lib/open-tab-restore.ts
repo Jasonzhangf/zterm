@@ -50,14 +50,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
-function buildTabTargetKey(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
-  return buildSessionSemanticOwnerKey({
-    daemonHostId: tab.daemonHostId,
-    bridgeHost: tab.bridgeHost,
-    bridgePort: tab.bridgePort,
-  });
-}
-
 function pickPreferredOwnerHost(current: Host | null, candidate: Host) {
   if (!current) {
     return candidate;
@@ -186,35 +178,9 @@ export function filterRestorableOpenTabsByRemoteSessionNames(options: {
   tabs: PersistedOpenTab[];
   sessionNamesByTarget: ReadonlyMap<string, ReadonlySet<string> | readonly string[]>;
 }): RestoreTabAvailabilityResult {
-  if (options.tabs.length === 0) {
-    return {
-      restorableTabs: [],
-      droppedTabs: [],
-    };
-  }
-
-  const restorableTabs: PersistedOpenTab[] = [];
-  const droppedTabs: PersistedOpenTab[] = [];
-  for (const tab of options.tabs) {
-    const targetKey = buildTabTargetKey(tab);
-    const rawSessionNames = options.sessionNamesByTarget.get(targetKey);
-    if (!rawSessionNames) {
-      restorableTabs.push(tab);
-      continue;
-    }
-    const sessionNames = rawSessionNames instanceof Set
-      ? rawSessionNames
-      : new Set(rawSessionNames || []);
-    if (sessionNames.has(tab.sessionName.trim())) {
-      restorableTabs.push(tab);
-      continue;
-    }
-    droppedTabs.push(tab);
-  }
-
   return {
-    restorableTabs,
-    droppedTabs,
+    restorableTabs: options.tabs,
+    droppedTabs: [],
   };
 }
 

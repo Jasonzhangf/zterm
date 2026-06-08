@@ -1366,7 +1366,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
   });
 
-  it('drops persisted tabs whose remote tmux session no longer exists and persists the pruned truth before restore', async () => {
+  it('keeps persisted tabs whose remote tmux session no longer exists during restore', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
     sessionHarness.update({
       sessions: [],
@@ -1428,19 +1428,24 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'host-a', sessionName: 'alpha' }),
+      expect.objectContaining({ sessionId: 'tab-a', activate: false, connect: false }),
+    );
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-b', sessionName: 'beta' }),
       expect.objectContaining({ sessionId: 'tab-b', activate: false, connect: false }),
     );
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'tab-a', sessionName: 'alpha' }),
       expect.objectContaining({ sessionId: 'tab-b', sessionName: 'beta' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('tab-b');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('tab-a');
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not reappend a runtime-only stale session after remote restore pruned it from persisted open tabs', async () => {
+  it('keeps a runtime session visible after remote restore reports it missing from tmux truth', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
     sessionHarness.update({
       sessions: [],
@@ -1502,8 +1507,9 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'tab-a' }),
       expect.objectContaining({ sessionId: 'tab-b' }),
     ]);
 
@@ -1546,14 +1552,15 @@ describe('App dynamic refresh matrix', () => {
     });
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('4'));
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('3'));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'tab-a', sessionName: 'alpha' }),
       expect.objectContaining({ sessionId: 'tab-b', sessionName: 'beta' }),
     ]);
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('tab-b');
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('tab-a,tab-b');
   });
 
-  it('prunes persisted tabs by remote tmux truth before runtime-session merge when runtime sessions already exist on cold launch', async () => {
+  it('keeps persisted tabs during runtime-session merge when remote tmux truth omits them on cold launch', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 's1',
@@ -1595,13 +1602,14 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('2'));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
-    expect(sessionHarness.switchSession).not.toHaveBeenCalledWith('s2');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
   });
 
   it('keeps different daemonHostId tabs separate during runtime merge even when bridge endpoint and sessionName match', async () => {
@@ -3232,7 +3240,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.closeSession).not.toHaveBeenCalled();
   });
 
-  it('prunes a session-status closed tab only after remote audit confirms tmux truth missing, and keeps the semantic tombstone on relaunch', async () => {
+  it('keeps a session-status closed tab open when remote audit reports its tmux session missing', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'persisted-old',
@@ -3290,11 +3298,13 @@ describe('App dynamic refresh matrix', () => {
       }));
     });
 
-    await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2'));
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('runtime-new');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionName: 'session-shared' }),
       expect.objectContaining({ sessionId: 's2', sessionName: 'session-s2' }),
     ]);
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('runtime-new');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
     fetchTmuxSessionsMock.mockReset();
     fetchTmuxSessionsMock.mockResolvedValue(['session-s2']);
 
@@ -3312,14 +3322,14 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-shared' }),
+      expect.objectContaining({ activate: false, connect: false }),
+    );
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),
       expect.objectContaining({ sessionId: 's2', activate: false, connect: false }),
-    );
-    expect(sessionHarness.createSession).not.toHaveBeenCalledWith(
-      expect.objectContaining({ sessionName: 'session-shared' }),
-      expect.anything(),
     );
   });
 
@@ -3540,7 +3550,7 @@ describe('App dynamic refresh matrix', () => {
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
   });
 
-  it('still prunes stored session groups after cold-start restore clears stale OPEN_TABS first', async () => {
+  it('does not clear stale OPEN_TABS during cold-start restore before a stored session group audit', async () => {
     sessionHarness.update({
       sessions: [],
       activeSessionId: null,
@@ -3579,18 +3589,13 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([]));
-    await waitFor(() => expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
-      {
-        bridgeHost: '127.0.0.1',
-        bridgePort: 3333,
-        daemonHostId: 'daemon-a',
-      },
-      ['session-s1'],
-    ));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'stale-tab', sessionName: 'session-stale' }),
+    ]));
+    expect(sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
   });
 
-  it('prunes tabs on foreground resume when remote tmux session truth no longer contains them', async () => {
+  it('keeps tabs on foreground resume when remote tmux session truth no longer contains them', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('s1', 1), makeSession('s2', 2)],
@@ -3619,15 +3624,17 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1'));
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
   });
 
-  it('keeps a remote-audit-pruned tab hidden even if a semantic duplicate runtime session later reappears with a new id', async () => {
+  it('keeps a remote-audit-missing tab visible when a semantic duplicate runtime session later reappears with a new id', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('s1', 1), makeSession('s2', 2)],
@@ -3652,10 +3659,13 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2', sessionName: 'session-s2' }),
     ]);
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
 
     act(() => {
       sessionHarness.update(
@@ -3678,13 +3688,16 @@ describe('App dynamic refresh matrix', () => {
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('3'));
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-      expect.objectContaining({ sessionId: 's1' }),
-    ]);
+    expect(screen.getByTestId('terminal-session-ids').textContent).not.toBe('s1');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionName: 'session-s2' }),
+      ]),
+    );
   });
 
-  it('keeps a daemon-owned remote-audit-pruned tab hidden even if a bridge-only semantic duplicate later reappears', async () => {
+  it('keeps a daemon-owned remote-audit-missing tab visible when a bridge-only semantic duplicate later reappears', async () => {
     sessionHarness.update(
       {
         sessions: [
@@ -3725,10 +3738,13 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,daemon-live');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 'daemon-live', sessionName: 'shared' }),
     ]);
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
 
     act(() => {
       sessionHarness.update(
@@ -3751,10 +3767,13 @@ describe('App dynamic refresh matrix', () => {
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('3'));
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-      expect.objectContaining({ sessionId: 's1' }),
-    ]);
+    expect(screen.getByTestId('terminal-session-ids').textContent).not.toBe('s1');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 's1' }),
+        expect.objectContaining({ sessionName: 'shared' }),
+      ]),
+    );
   });
 
   it('does not run remote open-tab audit on passive foreground timers anymore', async () => {
@@ -3840,7 +3859,7 @@ describe('App dynamic refresh matrix', () => {
     ]);
   });
 
-  it('prunes open tabs immediately when a newly connected runtime session triggers remote audit and tmux truth no longer contains it', async () => {
+  it('keeps open tabs when a newly connected runtime session triggers remote audit and tmux truth no longer contains it', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 's1',
@@ -3899,15 +3918,17 @@ describe('App dynamic refresh matrix', () => {
     });
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
-  it('prunes open tabs after tmux session picker refresh when remote tmux truth drops a session', async () => {
+  it('keeps open tabs after tmux session picker refresh when remote tmux truth drops a session', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 's1',
@@ -3958,12 +3979,14 @@ describe('App dynamic refresh matrix', () => {
       await pickerProps.onRemoteSessionsRefreshed({ bridgeHost: '127.0.0.1', bridgePort: 3333 }, ['session-s1']);
     });
 
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('s2');
+    await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
   it('does not rewrite OPEN_TABS or reswitch tabs on non-structural runtime title/state churn', async () => {
@@ -4080,7 +4103,7 @@ describe('App dynamic refresh matrix', () => {
     });
   });
 
-  it('filters saved tab import by remote tmux truth and does not reimport dead sessions', async () => {
+  it('keeps saved tab import entries even when remote tmux truth omits a session', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('current-live', 1)],
@@ -4131,19 +4154,24 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
     fireEvent.click(screen.getByTestId('load-saved-tab-list'));
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'alpha', bridgeHost: '100.127.23.27' }),
       expect.objectContaining({ sessionId: 'saved-a', activate: false }),
     );
-    expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-a');
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionName: 'beta', bridgeHost: '100.127.23.27' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', activate: false }),
+    );
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('saved-b-new');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 'saved-a', sessionName: 'alpha' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', sessionName: 'beta' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-a');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
   });
 
-  it('filters saved tab import by daemonHostId owner so same endpoint sessions from another daemon do not revive', async () => {
+  it('keeps saved tab import entries for different daemonHostId owners even when one owner omits the session', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('current-live', 1)],
@@ -4193,17 +4221,22 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
     fireEvent.click(screen.getByTestId('load-daemon-owned-saved-tab-list'));
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: 'shared', bridgeHost: '100.127.23.27', daemonHostId: 'daemon-a' }),
       expect.objectContaining({ sessionId: 'saved-daemon-a', activate: false }),
     );
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionName: 'shared', bridgeHost: '100.127.23.27', daemonHostId: 'daemon-b' }),
+      expect.objectContaining({ sessionId: 'saved-daemon-b', activate: false }),
+    );
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 'saved-daemon-a', daemonHostId: 'daemon-a', sessionName: 'shared' }),
+      expect.objectContaining({ sessionId: 'saved-daemon-b', daemonHostId: 'daemon-b', sessionName: 'shared' }),
     ]);
   });
 
-  it('persists explicit empty OPEN_TABS truth when a saved tab import is fully filtered out by remote tmux truth', async () => {
+  it('persists saved tab import entries even when remote tmux truth omits all sessions', async () => {
     sessionHarness.update(
       {
         sessions: [makeSession('current-live', 1)],
@@ -4249,9 +4282,12 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
     fireEvent.click(screen.getByTestId('load-saved-tab-list'));
 
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([]));
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
-    expect(sessionHarness.createSession).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'saved-a', sessionName: 'alpha' }),
+      expect.objectContaining({ sessionId: 'saved-b-new', sessionName: 'beta' }),
+    ]);
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('saved-b-new');
   });
 
   it('restores the saved-tab batch truth on next launch after the batch import persisted OPEN_TABS and ACTIVE_SESSION', async () => {
@@ -4391,6 +4427,7 @@ describe('App dynamic refresh matrix', () => {
 
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionId: 'saved-daemon-a', daemonHostId: 'daemon-a', sessionName: 'shared' }),
+      expect.objectContaining({ sessionId: 'saved-daemon-b', daemonHostId: 'daemon-b', sessionName: 'shared' }),
     ]));
     expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
 
@@ -4423,7 +4460,7 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.127.23.27',
@@ -4433,6 +4470,19 @@ describe('App dynamic refresh matrix', () => {
       }),
       expect.objectContaining({
         sessionId: 'saved-daemon-a',
+        activate: false,
+        connect: false,
+      }),
+    );
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-b',
+        sessionName: 'shared',
+      }),
+      expect.objectContaining({
+        sessionId: 'saved-daemon-b',
         activate: false,
         connect: false,
       }),

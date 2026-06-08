@@ -40,9 +40,7 @@ tmux truth
 - `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
 - transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`
 - transport `closed/error/tmux_session_unavailable` 只属于 **transport / attach fact**，**不得**被 App 直接映射成 open-tab 物理关闭
-- open-tab prune 只能由：
-  1. 用户显式 close
-  2. 远端 tmux session-name audit 确认真缺失
+- open-tab 物理关闭只能由用户显式 close 触发；远端 tmux session-name audit 只能记录缺失/更新历史 session group，不得删除 open tab、切走 active tab、写 closed tombstone、调用 runtime `closeSession`
 - 现场若出现：
   - app 说 connected
   - 但 daemon 看不到 subscriber / session-open / head-sync 进展
