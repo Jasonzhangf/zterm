@@ -173,6 +173,11 @@ export interface AttachFileStartPayload {
   byteLength: number;
 }
 
+export interface TerminalInputPayload {
+  data: string;
+  sentAt: number;
+}
+
 export type BridgeClientMessage =
   | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
@@ -190,7 +195,7 @@ export type BridgeClientMessage =
   | { type: 'tmux-create-session'; payload: { sessionName: string } }
   | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
-  | { type: 'input'; payload: string }
+  | { type: 'input'; payload: string | TerminalInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }

@@ -164,6 +164,16 @@ function readSentMessages(ws: MockWebSocket) {
     .map((item) => JSON.parse(item));
 }
 
+function readInputPayloadText(payload: unknown) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (payload && typeof payload === 'object' && typeof (payload as { data?: unknown }).data === 'string') {
+    return (payload as { data: string }).data;
+  }
+  return null;
+}
+
 vi.mock('@capacitor/app', () => ({
   App: {
     addListener: vi.fn(async () => ({ remove: vi.fn() })),
@@ -466,7 +476,7 @@ describe('App Android IME input closed loop', () => {
 
     await waitFor(() => {
       const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'input' && item.payload === 'ls')).toBe(true);
+      expect(sent.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === 'ls')).toBe(true);
       expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
 
@@ -569,7 +579,7 @@ describe('App Android IME input closed loop', () => {
 
     await waitFor(() => {
       const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'input' && item.payload === '语音识别结果')).toBe(true);
+      expect(sent.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === '语音识别结果')).toBe(true);
       expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
 
@@ -608,7 +618,7 @@ describe('App Android IME input closed loop', () => {
 
     await waitFor(() => {
       const sent = readSentMessages(ws);
-      expect(sent.some((item) => item.type === 'input' && item.payload === '!')).toBe(true);
+      expect(sent.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === '!')).toBe(true);
       expect(sent.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
   });

@@ -3,9 +3,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { sendInputThroughSessionTransport } from './session-context-input-runtime';
 
-function createSocket(readyState: number) {
+function createSocket(readyState: number, bufferedAmount = 0) {
   return {
     readyState,
+    bufferedAmount,
+    close: vi.fn(),
     getDiagnostics: () => ({}),
   } as any;
 }
@@ -265,6 +267,57 @@ describe('session-context-input-runtime', () => {
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(markPendingInputTailRefresh).toHaveBeenCalledWith('session-2', 3);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue input into a backpressured open transport and forces a fresh transport', () => {
+    const runtimeDebug = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const reconnectSession = vi.fn();
+    const requestSessionBufferHead = vi.fn();
+    const markPendingInputTailRefresh = vi.fn();
+    const ws = createSocket(WebSocket.OPEN, 256_000);
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'rm -rf should-not-flush-later\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-2' },
+        },
+      },
+      runtimeDebug,
+      readSessionTransportSocket: () => ws,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload,
+      markPendingInputTailRefresh,
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead,
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession,
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(markPendingInputTailRefresh).not.toHaveBeenCalled();
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(ws.close).toHaveBeenCalledWith(4000, 'input backpressure');
+    expect(reconnectSession).toHaveBeenCalledWith('session-2');
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.input.drop.backpressured-transport',
+      expect.objectContaining({
+        sessionId: 'session-2',
+        size: 30,
+        bufferedBytes: 256_000,
+      }),
+    );
   });
 
   it('does not cache input behind a pending transport open when the target transport is unavailable', () => {

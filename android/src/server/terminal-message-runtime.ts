@@ -51,6 +51,8 @@ export interface TerminalMessageRuntime {
   handleMessage: (connection: TerminalTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
+const MAX_TERMINAL_INPUT_AGE_MS = 10_000;
+
 export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
@@ -292,7 +294,31 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        deps.handleInput(session, message.payload);
+        if (typeof message.payload === 'string') {
+          deps.handleInput(session, message.payload);
+          break;
+        }
+        if (
+          !message.payload
+          || typeof message.payload !== 'object'
+          || typeof message.payload.data !== 'string'
+          || typeof message.payload.sentAt !== 'number'
+          || !Number.isFinite(message.payload.sentAt)
+        ) {
+          deps.sendMessage(session, {
+            type: 'error',
+            payload: { message: 'invalid input payload', code: 'input_invalid' },
+          });
+          break;
+        }
+        if (Date.now() - message.payload.sentAt > MAX_TERMINAL_INPUT_AGE_MS) {
+          deps.sendMessage(session, {
+            type: 'error',
+            payload: { message: 'stale input dropped', code: 'input_stale' },
+          });
+          break;
+        }
+        deps.handleInput(session, message.payload.data);
         break;
       case 'paste-image':
         if (!session) {

@@ -9,6 +9,8 @@ interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
 
+const TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
+
 const pendingInputHeadRefreshes = new Map<string, {
   ws: BridgeTransportSocket;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
@@ -89,6 +91,25 @@ export function sendInputThroughSessionTransport(options: {
   const reconnectInFlight = options.isReconnectInFlight(targetSessionId);
 
   if (ws && ws.readyState === WebSocket.OPEN) {
+    const bufferedBytes = Number.isFinite(ws.bufferedAmount)
+      ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
+      : 0;
+    if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
+      options.runtimeDebug('session.input.drop.backpressured-transport', {
+        sessionId: targetSessionId,
+        size: options.data.length,
+        bufferedBytes,
+        thresholdBytes: TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
+        reconnectInFlight,
+      });
+      if (ws.readyState < WebSocket.CLOSING) {
+        ws.close(4000, 'input backpressure');
+      }
+      if (!reconnectInFlight) {
+        options.reconnectSession(targetSessionId);
+      }
+      return;
+    }
     const localRevision = options.readSessionBufferSnapshot(targetSessionId).revision;
     options.runtimeDebug('session.input.send', {
       sessionId: targetSessionId,
@@ -103,7 +124,13 @@ export function sendInputThroughSessionTransport(options: {
     options.sendSocketPayload(
       targetSessionId,
       ws,
-      JSON.stringify({ type: 'input', payload: options.data }),
+      JSON.stringify({
+        type: 'input',
+        payload: {
+          data: options.data,
+          sentAt: Date.now(),
+        },
+      }),
     );
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({

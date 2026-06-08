@@ -189,6 +189,16 @@ function readSentMessages(ws: MockWebSocket) {
     .map((item) => JSON.parse(item));
 }
 
+function readInputPayloadText(payload: unknown) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (payload && typeof payload === 'object' && typeof (payload as { data?: unknown }).data === 'string') {
+    return (payload as { data: string }).data;
+  }
+  return null;
+}
+
 const host: Host = {
   id: 'host-1',
   createdAt: 1,
@@ -2515,7 +2525,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         .slice(sentCountBeforeInput)
         .filter((item): item is string => typeof item === 'string')
         .map((item) => JSON.parse(item));
-      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === 'typed-from-client\r')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     });
@@ -2907,7 +2917,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(false);
+      expect(sentMessages.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === 'typed-on-second\r')).toBe(false);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
   });
@@ -3215,7 +3225,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
-      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'input' && readInputPayloadText(item.payload) === 'typed-from-client\r')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     });
