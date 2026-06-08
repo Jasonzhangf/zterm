@@ -44,6 +44,10 @@ function makeDraft(overrides: Partial<ScheduleJobDraft> = {}): ScheduleJobDraft 
   };
 }
 
+function lastItem<T>(items: T[]) {
+  return items[items.length - 1];
+}
+
 // ═══════════════════════════════════════════════════════════
 //  ScheduleEngine
 // ═══════════════════════════════════════════════════════════
@@ -192,9 +196,10 @@ describe('ScheduleEngine', () => {
     vi.setSystemTime(now);
 
     const executed: string[] = [];
+    const savedJobs: ScheduleJob[][] = [];
     const engine = new ScheduleEngine({
       initialJobs: [makeJob({ id: 'job-1' })],
-      saveJobs: () => {},
+      saveJobs: (jobs) => savedJobs.push(jobs),
       executeJob: (job) => {
         executed.push(job.id);
         return { ok: true };
@@ -207,34 +212,46 @@ describe('ScheduleEngine', () => {
     expect(result!.lastFiredAt).toBe(now.toISOString());
     expect(result!.lastResult).toBe('ok');
     expect(result!.execution.firedCount).toBe(1);
+    expect(lastItem(savedJobs)?.[0]).toMatchObject({
+      id: 'job-1',
+      lastFiredAt: now.toISOString(),
+      execution: { firedCount: 1 },
+    });
 
     engine.dispose();
   });
 
-  it('stops a job after it reaches maxRuns', async () => {
+  it('removes a naturally completed finite-run job from memory and persistence', async () => {
     const now = new Date('2026-04-26T00:00:00.000Z');
     vi.setSystemTime(now);
 
+    const savedJobs: ScheduleJob[][] = [];
+    const states: Array<{ sessionName: string; jobIds: string[] }> = [];
+    const events: string[] = [];
     const engine = new ScheduleEngine({
       initialJobs: [makeJob({ id: 'job-1', execution: { maxRuns: 1, firedCount: 0 } })],
-      saveJobs: () => {},
+      saveJobs: (jobs) => savedJobs.push(jobs),
       executeJob: () => ({ ok: true }),
+      onStateChange: (sessionName, jobs) => states.push({ sessionName, jobIds: jobs.map((job) => job.id) }),
+      onEvent: (event) => events.push(`${event.type}:${event.message || ''}`),
     });
 
     const result = await engine.runNow('job-1');
     expect(result).not.toBeNull();
-    expect(result!.execution.firedCount).toBe(1);
-    expect(result!.enabled).toBe(false);
-    expect(result!.nextFireAt).toBeUndefined();
+    expect(engine.listBySession('main')).toHaveLength(0);
+    expect(lastItem(savedJobs)).toEqual([]);
+    expect(lastItem(states)).toEqual({ sessionName: 'main', jobIds: [] });
+    expect(events).toContain('triggered:schedule reached max runs');
 
     engine.dispose();
   });
 
-  it('does not execute jobs whose endAt has already passed', async () => {
+  it('removes an expired job instead of leaving a disabled disk orphan', async () => {
     const now = new Date('2026-04-26T00:10:00.000Z');
     vi.setSystemTime(now);
 
     const executed = vi.fn();
+    const savedJobs: ScheduleJob[][] = [];
     const engine = new ScheduleEngine({
       initialJobs: [makeJob({
         id: 'job-1',
@@ -244,7 +261,7 @@ describe('ScheduleEngine', () => {
           endAt: '2026-04-26T00:05:00.000Z',
         },
       })],
-      saveJobs: () => {},
+      saveJobs: (jobs) => savedJobs.push(jobs),
       executeJob: () => {
         executed();
         return { ok: true };
@@ -254,8 +271,8 @@ describe('ScheduleEngine', () => {
     const result = await engine.runNow('job-1');
     expect(executed).not.toHaveBeenCalled();
     expect(result).not.toBeNull();
-    expect(result!.enabled).toBe(false);
-    expect(result!.nextFireAt).toBeUndefined();
+    expect(engine.listBySession('main')).toHaveLength(0);
+    expect(lastItem(savedJobs)).toEqual([]);
 
     engine.dispose();
   });
@@ -303,6 +320,40 @@ describe('ScheduleEngine', () => {
     expect(result!.lastError).toBe("can't find session: main");
     expect(result!.enabled).toBe(false);
     expect(events).toContain('error:job-1');
+
+    engine.dispose();
+  });
+
+  it('records thrown execution errors and reschedules without a tight retry loop', async () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    vi.setSystemTime(now);
+
+    const savedJobs: ScheduleJob[][] = [];
+    const events: string[] = [];
+    const engine = new ScheduleEngine({
+      initialJobs: [makeJob({ id: 'job-1' })],
+      saveJobs: (jobs) => savedJobs.push(jobs),
+      executeJob: () => {
+        throw new Error('tmux write exploded');
+      },
+      onEvent: (event) => events.push(`${event.type}:${event.message || ''}`),
+    });
+
+    const result = await engine.runNow('job-1');
+    expect(result).not.toBeNull();
+    expect(result!.lastResult).toBe('error');
+    expect(result!.lastError).toBe('tmux write exploded');
+    expect(result!.execution.firedCount).toBe(1);
+    expect(result!.enabled).toBe(true);
+    expect(result!.nextFireAt).toBe('2026-04-26T00:01:00.000Z');
+    expect(lastItem(savedJobs)?.[0]).toMatchObject({
+      id: 'job-1',
+      lastResult: 'error',
+      lastError: 'tmux write exploded',
+      execution: { firedCount: 1 },
+      nextFireAt: '2026-04-26T00:01:00.000Z',
+    });
+    expect(events).toContain('error:tmux write exploded');
 
     engine.dispose();
   });
@@ -365,6 +416,29 @@ describe('ScheduleEngine', () => {
     engine.dispose();
     vi.advanceTimersByTime(120_000);
     expect(executed).toEqual([]);
+  });
+
+  it('dispose prevents an in-flight due run from resurrecting a timer', async () => {
+    const now = new Date('2026-04-26T00:00:00.000Z');
+    vi.setSystemTime(now);
+
+    let resolveExecution: (value: { ok: boolean }) => void = () => {};
+    const engine = new ScheduleEngine({
+      initialJobs: [makeJob({ id: 'job-1' })],
+      saveJobs: () => {},
+      executeJob: () => new Promise((resolve) => {
+        resolveExecution = resolve;
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.getTimerCount()).toBe(0);
+
+    engine.dispose();
+    resolveExecution?.({ ok: true });
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('concurrent timer: running lock prevents double execution', async () => {

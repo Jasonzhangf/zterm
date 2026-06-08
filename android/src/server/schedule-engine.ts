@@ -32,6 +32,8 @@ export class ScheduleEngine {
 
   private running = false;
 
+  private disposed = false;
+
   private readonly saveJobs: ScheduleEngineOptions['saveJobs'];
 
   private readonly executeJob: ScheduleEngineOptions['executeJob'];
@@ -62,6 +64,7 @@ export class ScheduleEngine {
   }
 
   dispose() {
+    this.disposed = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -143,8 +146,9 @@ export class ScheduleEngine {
     if (!existing) {
       return null;
     }
-    await this.execute(existing, this.now());
-    return this.jobs.get(jobId) || null;
+    const executed = await this.execute(existing, this.now());
+    this.persistAndReschedule();
+    return executed;
   }
 
   renameSession(previousSessionName: string, nextSessionName: string) {
@@ -234,6 +238,9 @@ export class ScheduleEngine {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.disposed) {
+      return;
+    }
     const nextJob = this.getNextDueJob();
     if (!nextJob?.nextFireAt) {
       return;
@@ -266,10 +273,10 @@ export class ScheduleEngine {
     }
   }
 
-  private async execute(job: ScheduleJob, now: Date) {
+  private async execute(job: ScheduleJob, now: Date): Promise<ScheduleJob | null> {
     const currentBeforeExecute = this.jobs.get(job.id);
     if (!currentBeforeExecute) {
-      return;
+      return null;
     }
     const currentMaxRuns = Math.max(0, Math.floor(currentBeforeExecute.execution.maxRuns || 0));
     const currentFiredCount = Math.max(0, Math.floor(currentBeforeExecute.execution.firedCount || 0));
@@ -280,16 +287,16 @@ export class ScheduleEngine {
         updatedAt: now.toISOString(),
         nextFireAt: undefined,
       };
-      this.jobs.set(job.id, stoppedJob);
-      this.emitState(stoppedJob.targetSessionName);
+      this.jobs.delete(job.id);
+      this.emitState(currentBeforeExecute.targetSessionName);
       this.emitEvent({
         sessionName: stoppedJob.targetSessionName,
         jobId: stoppedJob.id,
         type: 'updated',
         at: now.toISOString(),
-        message: 'schedule stopped after reaching max runs',
+        message: 'schedule removed after reaching max runs',
       });
-      return;
+      return stoppedJob;
     }
     if (currentBeforeExecute.execution.endAt) {
       const endAtMs = Date.parse(currentBeforeExecute.execution.endAt);
@@ -300,23 +307,32 @@ export class ScheduleEngine {
           updatedAt: now.toISOString(),
           nextFireAt: undefined,
         };
-        this.jobs.set(job.id, stoppedJob);
-        this.emitState(stoppedJob.targetSessionName);
+        this.jobs.delete(job.id);
+        this.emitState(currentBeforeExecute.targetSessionName);
         this.emitEvent({
           sessionName: stoppedJob.targetSessionName,
           jobId: stoppedJob.id,
           type: 'updated',
           at: now.toISOString(),
-          message: 'schedule stopped after end time',
+          message: 'schedule removed after end time',
         });
-        return;
+        return stoppedJob;
       }
     }
 
-    const result = await this.executeJob(job);
+    const result = await (async (): Promise<ScheduleExecutionResult> => {
+      try {
+        return await this.executeJob(job);
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })();
     const current = this.jobs.get(job.id);
     if (!current) {
-      return;
+      return null;
     }
 
     const lastResult = result.ok ? 'ok' : 'error';
@@ -339,7 +355,11 @@ export class ScheduleEngine {
       ...nextBase,
       nextFireAt: nextBase.enabled ? computeNextFireAtForJob(nextBase, now) : undefined,
     };
-    this.jobs.set(job.id, nextJob);
+    if (reachedRunLimit) {
+      this.jobs.delete(job.id);
+    } else {
+      this.jobs.set(job.id, nextJob);
+    }
     this.emitState(nextJob.targetSessionName);
     this.emitEvent({
       sessionName: nextJob.targetSessionName,
@@ -351,5 +371,6 @@ export class ScheduleEngine {
           ? 'schedule reached max runs'
           : result.message,
     });
+    return nextJob;
   }
 }
