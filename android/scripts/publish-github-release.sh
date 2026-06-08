@@ -46,6 +46,13 @@ Install from npm:
 
 \`\`\`bash
 npm install -g @jsonstudio/zterm-daemon
+printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
+  --relay-url "$RELAY_BASE_URL" \\
+  --username "$RELAY_USERNAME" \\
+  --password-stdin \\
+  --host-id "$(hostname -s)" \\
+  --device-id "$(hostname -s)" \\
+  --device-name "$(hostname)"
 zterm-daemon install-service
 zterm-daemon service-status
 \`\`\`
@@ -56,6 +63,13 @@ Install from standalone tarball:
 tar -xzf zterm-daemon-${BASE_VERSION}-darwin-arm64.tar.gz
 cd zterm-daemon-${BASE_VERSION}-darwin-arm64
 ./bin/install-global.sh
+printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
+  --relay-url "$RELAY_BASE_URL" \\
+  --username "$RELAY_USERNAME" \\
+  --password-stdin \\
+  --host-id "$(hostname -s)" \\
+  --device-id "$(hostname -s)" \\
+  --device-name "$(hostname)"
 zterm-daemon install-service
 zterm-daemon service-status
 \`\`\`

@@ -13,15 +13,23 @@ const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as un
   RTCIceCandidate: typeof globalThis.RTCIceCandidate;
 };
 
+function requireEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required for remote relay smoke`);
+  }
+  return value;
+}
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const androidDir = join(scriptDir, '..');
 const daemonPort = 4336;
-const relayBaseUrl = process.env.RELAY_BASE_URL || 'https://coder2.codewhisper.cc/relay/';
+const relayBaseUrl = requireEnv('RELAY_BASE_URL');
 const relayHostId = `remote-smoke-${Date.now()}`;
 const relayDeviceId = `device-${Date.now()}`;
 const relayDeviceName = 'remote-smoke-daemon';
-const relayUsername = process.env.RELAY_USERNAME || `remote-smoke-${Date.now()}`;
-const relayPassword = process.env.RELAY_PASSWORD || 'remote-smoke-pass-123';
+const relayUsername = requireEnv('RELAY_USERNAME');
+const relayPassword = requireEnv('RELAY_PASSWORD');
 const tmuxSession = `zterm-remote-relay-smoke-${Date.now()}`;
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-traversal-remote-smoke-'));
 const tempHome = join(tempRoot, 'home');
@@ -49,17 +57,7 @@ function buildUrl(base: string, path: string) {
 }
 
 async function ensureAccount() {
-  const registerUrl = buildUrl(relayBaseUrl, '/api/auth/register');
   const loginUrl = buildUrl(relayBaseUrl, '/api/auth/login');
-
-  const register = await fetch(registerUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: relayUsername, password: relayPassword }),
-  });
-  if (!register.ok && register.status !== 409) {
-    throw new Error(`register failed: HTTP ${register.status} ${await register.text()}`);
-  }
 
   const login = await fetch(loginUrl, {
     method: 'POST',
@@ -209,7 +207,7 @@ async function main() {
     throw new Error(`tmux new-session failed: ${tmuxCreate.stderr || tmuxCreate.stdout}`);
   }
 
-  const daemonProc = spawn(process.execPath, [tsxBin, 'src/server/server.ts'], {
+  const daemonProc = spawn(tsxBin, ['src/server/server.ts'], {
     cwd: androidDir,
     env: daemonEnv,
     stdio: ['ignore', 'pipe', 'pipe'],

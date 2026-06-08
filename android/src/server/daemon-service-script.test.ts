@@ -1,9 +1,23 @@
-import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
 function readDaemonScript() {
   return readFileSync(join(process.cwd(), 'scripts', 'zterm-daemon.sh'), 'utf8');
+}
+
+function readReleaseScript() {
+  return readFileSync(join(process.cwd(), 'scripts', 'prepare-global-daemon-release.sh'), 'utf8');
+}
+
+function readDaemonNpmPackageScript() {
+  return readFileSync(join(process.cwd(), 'scripts', 'prepare-daemon-npm-package.mjs'), 'utf8');
+}
+
+function readReleaseVerifyScript() {
+  return readFileSync(join(process.cwd(), 'scripts', 'verify-release-assets.mjs'), 'utf8');
 }
 
 function extractBlock(script: string, anchor: string, length = 1200) {
@@ -13,6 +27,117 @@ function extractBlock(script: string, anchor: string, length = 1200) {
 }
 
 describe('zterm daemon service script truth gates', () => {
+  it('exposes relay account configuration as a global daemon command without leaking secrets', () => {
+    const script = readDaemonScript();
+    const usageBlock = extractBlock(script, 'Usage:', 1200);
+    const caseBlock = extractBlock(script, 'case "$cmd" in', 1200);
+    const configureBody = extractBlock(script, 'configure_relay() {', 5200);
+
+    expect(usageBlock).toContain('configure-relay --relay-url');
+    expect(caseBlock).toContain('configure-relay) configure_relay "$@" ;;');
+    expect(configureBody).toContain('mobile.relay');
+    expect(configureBody).toContain('passwordSet=true');
+    expect(configureBody).not.toContain('password=${relay_password}');
+  });
+
+  it('writes relay config from the global command while preserving daemon config', () => {
+    const tempHome = mkdtempSync(join(tmpdir(), 'zterm-daemon-relay-config-'));
+    try {
+      const configPath = join(tempHome, '.wterm', 'config.json');
+      mkdirSync(join(tempHome, '.wterm'), { recursive: true });
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            mobile: {
+              daemon: {
+                host: '127.0.0.1',
+                port: 17680,
+                authToken: 'keep-daemon-token',
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const output = execFileSync(
+        'bash',
+        [
+          './scripts/zterm-daemon.sh',
+          'configure-relay',
+          '--relay-url',
+          'https://relay.example.com/relay/',
+          '--username',
+          'zterm-relay-smoke',
+          '--password',
+          'secret-password',
+          '--host-id',
+          'mac-studio',
+          '--device-name',
+          'Mac Studio',
+          '--no-restart',
+        ],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, HOME: tempHome },
+          encoding: 'utf8',
+        },
+      );
+
+      const config = JSON.parse(readFileSync(configPath, 'utf8'));
+      expect(config.mobile.daemon.authToken).toBe('keep-daemon-token');
+      expect(config.mobile.relay).toMatchObject({
+        relayUrl: 'https://relay.example.com/relay/',
+        username: 'zterm-relay-smoke',
+        password: 'secret-password',
+        hostId: 'mac-studio',
+        deviceName: 'Mac Studio',
+      });
+      expect(output).toContain('passwordSet=true');
+      expect(output).not.toContain('secret-password');
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps relay configuration available in generated global release installers', () => {
+    const script = readReleaseScript();
+
+    expect(script).toContain('zterm-daemon configure-relay --relay-url URL');
+    expect(script).toContain('configure-relay) configure_relay "$@" ;;');
+    expect(script).toContain('wait_for_service_unloaded()');
+    expect(script).toContain("resolve_node_package_dir '@roamhq/wrtc'");
+    expect(script).toContain('resolve_wrtc_platform_package_name');
+    expect(extractBlock(script, 'start_service() {', 1300)).not.toContain('prime_daemon_install_permissions');
+    expect(extractBlock(script, 'restart_service() {', 1300)).not.toContain('prime_daemon_install_permissions');
+    expect(script).toContain('start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run');
+  });
+
+  it('keeps install-time native RTC dependencies inside the daemon npm package', () => {
+    const script = readDaemonNpmPackageScript();
+
+    expect(script).not.toContain("rmSync(resolve(npmPackageDir, 'runtime/node_modules')");
+    expect(script).toContain("requirePath(resolve(releaseDir, 'runtime/node_modules/node-pty')");
+    expect(script).toContain("requirePath(resolve(releaseDir, 'runtime/node_modules/@roamhq/wrtc')");
+    expect(script).toContain("resolve(releaseDir, `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`)");
+    expect(script).toContain('zterm-daemon configure-relay --relay-url');
+    expect(script).toContain('--password-stdin');
+    expect(script).toContain('passwordSet=true');
+  });
+
+  it('verifies daemon npm tarballs contain native runtime dependencies before release', () => {
+    const script = readReleaseVerifyScript();
+
+    expect(script).toContain('listTarballEntries');
+    expect(script).toContain('package/runtime/node_modules/node-pty');
+    expect(script).toContain('package/runtime/node_modules/@roamhq/wrtc');
+    expect(script).toContain('package/runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node');
+    expect(script).toContain('package/support/zterm-daemon.sh');
+    expect(script).toContain('configure-relay');
+  });
+
   it('restages the current daemon runtime before bootstrapping launchd on service start', () => {
     const script = readDaemonScript();
     const body = extractBlock(script, 'start_service() {', 1400);

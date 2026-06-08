@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { setTimeout as delay } from 'timers/promises';
 import { WebSocket } from 'ws';
 import wrtc from '@roamhq/wrtc';
@@ -22,7 +23,7 @@ const relayHostId = `local-smoke-${Date.now()}`;
 const relayDeviceId = `device-${Date.now()}`;
 const relayDeviceName = 'local-smoke-daemon';
 const relayUsername = `smoke-${Date.now()}`;
-const relayPassword = 'smoke-pass-123';
+const relayPassword = `smoke-${randomUUID()}`;
 const tmuxSession = `zterm-relay-smoke-${Date.now()}`;
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-traversal-smoke-'));
 const tempHome = join(tempRoot, 'home');
@@ -300,12 +301,12 @@ async function rtcClientSmoke(accessToken: string) {
 }
 
 async function main() {
-  const relayProc = spawn(process.execPath, [tsxBin, 'src/traversal-relay/server.ts'], {
+  const relayProc = spawn(tsxBin, ['src/traversal-relay/server.ts'], {
     cwd: androidDir,
     env: relayEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const daemonProc = spawn(process.execPath, [tsxBin, 'src/server/server.ts'], {
+  const daemonProc = spawn(tsxBin, ['src/server/server.ts'], {
     cwd: androidDir,
     env: daemonEnv,
     stdio: ['ignore', 'pipe', 'pipe'],

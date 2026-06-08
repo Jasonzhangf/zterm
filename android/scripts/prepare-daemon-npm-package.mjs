@@ -51,6 +51,12 @@ requirePath(
   `daemon release directory not found: ${releaseDir}\nRun: pnpm --dir android run daemon:prepare-release`,
 );
 requirePath(resolve(releaseDir, 'runtime/server.cjs'), `missing staged daemon runtime under ${releaseDir}`);
+requirePath(resolve(releaseDir, 'runtime/node_modules/node-pty'), `missing staged node-pty runtime under ${releaseDir}`);
+requirePath(resolve(releaseDir, 'runtime/node_modules/@roamhq/wrtc'), `missing staged @roamhq/wrtc runtime under ${releaseDir}`);
+requirePath(
+  resolve(releaseDir, `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`),
+  `missing staged @roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node under ${releaseDir}`,
+);
 requirePath(resolve(releaseDir, 'support/zterm-daemon.sh'), `missing daemon support script under ${releaseDir}`);
 requirePath(resolve(releaseDir, 'support/zterm-daemon'), `missing native zterm-daemon binary under ${releaseDir}`);
 
@@ -58,7 +64,6 @@ rmSync(npmPackageDir, { recursive: true, force: true });
 mkdirSync(resolve(npmPackageDir, 'bin'), { recursive: true });
 
 cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime'), { recursive: true });
-rmSync(resolve(npmPackageDir, 'runtime/node_modules'), { recursive: true, force: true });
 cpSync(resolve(releaseDir, 'support'), resolve(npmPackageDir, 'support'), { recursive: true });
 copyFileSync(resolve(releaseDir, 'VERSION'), resolve(npmPackageDir, 'VERSION'));
 copyFileSync(resolve(workspaceRoot, 'LICENSE'), resolve(npmPackageDir, 'LICENSE'));
@@ -105,9 +110,18 @@ ZTerm daemon for macOS. It runs the local WebSocket bridge used by the ZTerm And
 
 \`\`\`bash
 npm install -g ${npmPackageName}
+printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
+  --relay-url "$RELAY_BASE_URL" \\
+  --username "$RELAY_USERNAME" \\
+  --password-stdin \\
+  --host-id "$(hostname -s)" \\
+  --device-id "$(hostname -s)" \\
+  --device-name "$(hostname)"
 zterm-daemon install-service
 zterm-daemon service-status
 \`\`\`
+
+The relay password must come from a local secret manager, shell secret, or CI secret. The configure command only prints \`passwordSet=true\`; it must not echo the password.
 
 The installer uses these locations:
 
@@ -124,6 +138,7 @@ zterm-daemon start             # start launchd service
 zterm-daemon status            # direct runtime status
 zterm-daemon stop              # stop launchd service
 zterm-daemon restart           # restart launchd service
+zterm-daemon configure-relay   # write ~/.wterm/config.json mobile.relay from secret input
 zterm-daemon install-service   # install and start launchd service
 zterm-daemon uninstall-service # stop and remove launchd service
 zterm-daemon service-status    # launchd service status
@@ -148,6 +163,20 @@ Optional config file: \`~/.wterm/config.json\`.
   }
 }
 \`\`\`
+
+Relay account configuration should be written through the global CLI, not by hand-editing scattered daemon files. The command shape is \`zterm-daemon configure-relay --relay-url ... --username ... --password-stdin --host-id ...\`:
+
+\`\`\`bash
+printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
+  --relay-url "$RELAY_BASE_URL" \\
+  --username "$RELAY_USERNAME" \\
+  --password-stdin \\
+  --host-id "mac-studio" \\
+  --device-id "mac-studio" \\
+  --device-name "Mac Studio"
+\`\`\`
+
+Successful output contains \`passwordSet=true\` and never prints the relay password.
 
 Environment variables override config:
 
@@ -193,9 +222,7 @@ writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
     'README.md',
     'LICENSE',
   ],
-  dependencies: {
-    'node-pty': '^1.1.0',
-  },
+  bundledDependencies: [],
   publishConfig: {
     access: 'public',
     registry: 'https://registry.npmjs.org/',

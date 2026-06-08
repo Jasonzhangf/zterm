@@ -12,9 +12,17 @@ const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as un
   RTCIceCandidate: typeof globalThis.RTCIceCandidate;
 };
 
-const relayBaseUrl = 'https://coder2.codewhisper.cc/relay/';
-const relayUsername = 'jason-relay-z49giz';
-const relayPassword = 'ZtermhhIhJeBF35';
+function requireEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required for remote relay verification`);
+  }
+  return value;
+}
+
+const relayBaseUrl = requireEnv('RELAY_BASE_URL');
+const relayUsername = requireEnv('RELAY_USERNAME');
+const relayPassword = requireEnv('RELAY_PASSWORD');
 const relayHostId = `rtc-verify-${Date.now()}`;
 const relayDeviceId = `rtc-device-${Date.now()}`;
 const daemonPort = 4351;

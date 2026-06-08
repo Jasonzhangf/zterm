@@ -528,7 +528,19 @@ function buildHealthSnapshot(request: IncomingMessage) {
       liveClientDevices: liveClientDevices.size,
       liveDaemonDevices: liveDaemonDevices.size,
     },
-    turn: TURN_CONFIG,
+    turn: buildHealthTurnSnapshot(),
+  };
+}
+
+function buildHealthTurnSnapshot() {
+  if (!TURN_CONFIG) {
+    return null;
+  }
+  return {
+    configured: true,
+    url: TURN_CONFIG.url,
+    username: TURN_CONFIG.username ? 'configured' : '',
+    credential: TURN_CONFIG.credential ? 'configured' : '',
   };
 }
 

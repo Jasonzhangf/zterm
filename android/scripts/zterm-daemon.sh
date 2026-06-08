@@ -60,18 +60,152 @@ Usage:
   ./scripts/zterm-daemon.sh status
   ./scripts/zterm-daemon.sh stop
   ./scripts/zterm-daemon.sh restart
+  ./scripts/zterm-daemon.sh configure-relay --relay-url URL --username USER --password PASS --host-id HOST_ID [--device-name NAME] [--restart-service]
   ./scripts/zterm-daemon.sh install-service
   ./scripts/zterm-daemon.sh uninstall-service
   ./scripts/zterm-daemon.sh service-status
-  zterm-daemon start|stop|restart|status|install-service|uninstall-service|service-status
-  wterm daemon start|stop|restart|status|install-service|uninstall-service|service-status  # legacy alias
+  zterm-daemon start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status
+  wterm daemon start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status  # legacy alias
 
 Behavior:
   - `run` keeps daemon in foreground (for launchd autostart)
   - start/stop/restart manage launchd service if installed, otherwise use a direct background daemon process
   - host / port / auth token are read from ~/.wterm/config.json
+  - relay account config is written to ~/.wterm/config.json by configure-relay
   - env still overrides config when explicitly provided
 EOF
+}
+
+configure_relay() {
+  local relay_url=""
+  local relay_username=""
+  local relay_password=""
+  local relay_host_id=""
+  local relay_device_id=""
+  local relay_device_name=""
+  local restart_after_config="0"
+
+  if [[ "${1:-}" == "configure-relay" ]]; then
+    shift
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --relay-url)
+        relay_url="${2:-}"
+        shift 2
+        ;;
+      --username)
+        relay_username="${2:-}"
+        shift 2
+        ;;
+      --password)
+        relay_password="${2:-}"
+        shift 2
+        ;;
+      --password-stdin)
+        IFS= read -r relay_password
+        shift
+        ;;
+      --password-env)
+        local password_env_name="${2:-}"
+        if [[ -z "$password_env_name" ]]; then
+          echo "--password-env requires an environment variable name" >&2
+          return 1
+        fi
+        relay_password="${!password_env_name:-}"
+        shift 2
+        ;;
+      --host-id)
+        relay_host_id="${2:-}"
+        shift 2
+        ;;
+      --device-id)
+        relay_device_id="${2:-}"
+        shift 2
+        ;;
+      --device-name)
+        relay_device_name="${2:-}"
+        shift 2
+        ;;
+      --restart-service)
+        restart_after_config="1"
+        shift
+        ;;
+      --no-restart)
+        restart_after_config="0"
+        shift
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown configure-relay option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [[ -z "$relay_url" || -z "$relay_username" || -z "$relay_password" || -z "$relay_host_id" ]]; then
+    echo "configure-relay requires --relay-url, --username, --password/--password-stdin/--password-env, and --host-id" >&2
+    return 1
+  fi
+
+  mkdir -p "$WTERM_HOME"
+  CONFIG_PATH="${WTERM_HOME}/config.json" \
+  RELAY_URL="$relay_url" \
+  RELAY_USERNAME="$relay_username" \
+  RELAY_PASSWORD="$relay_password" \
+  RELAY_HOST_ID="$relay_host_id" \
+  RELAY_DEVICE_ID="$relay_device_id" \
+  RELAY_DEVICE_NAME="$relay_device_name" \
+  "$NODE_BIN" <<'NODE'
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const configPath = process.env.CONFIG_PATH;
+const relayUrl = process.env.RELAY_URL;
+const username = process.env.RELAY_USERNAME;
+const password = process.env.RELAY_PASSWORD;
+const hostId = process.env.RELAY_HOST_ID;
+const deviceId = process.env.RELAY_DEVICE_ID || hostId;
+const deviceName = process.env.RELAY_DEVICE_NAME || os.hostname();
+
+let config = {};
+if (fs.existsSync(configPath)) {
+  const raw = fs.readFileSync(configPath, 'utf8');
+  config = raw.trim() ? JSON.parse(raw) : {};
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error(`${configPath} root must be a JSON object`);
+  }
+}
+
+config.mobile = config.mobile && typeof config.mobile === 'object' && !Array.isArray(config.mobile)
+  ? config.mobile
+  : {};
+config.mobile.relay = {
+  relayUrl,
+  username,
+  password,
+  hostId,
+  deviceId,
+  deviceName,
+  platform: process.platform,
+};
+
+fs.mkdirSync(path.dirname(configPath), { recursive: true });
+fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+fs.chmodSync(configPath, 0o600);
+NODE
+
+  echo "zterm relay configured: path=${WTERM_HOME}/config.json relayUrl=${relay_url} username=${relay_username} hostId=${relay_host_id} deviceName=${relay_device_name:-$(hostname)} passwordSet=true"
+  if [[ "$restart_after_config" == "1" ]]; then
+    restart_service
+  else
+    echo "run 'zterm-daemon restart' after configuration to reconnect relay"
+  fi
 }
 
 service_installed() {
@@ -721,6 +855,7 @@ case "$cmd" in
   status) status ;;
   stop) stop ;;
   restart) restart ;;
+  configure-relay) configure_relay "$@" ;;
   install-service) install_service ;;
   uninstall-service) uninstall_service ;;
   service-status) status_service ;;

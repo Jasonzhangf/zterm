@@ -8,6 +8,7 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
+NODE_BIN="$(command -v node)"
 PACKAGE_VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
 TARGET_OS="darwin"
 TARGET_ARCH="$(uname -m)"
@@ -22,6 +23,48 @@ SHA_PATH="${ARCHIVE_PATH}.sha256"
 NODE_PTY_SOURCE="${ROOT_DIR}/node_modules/node-pty"
 NATIVE_DAEMON_SOURCE="${ROOT_DIR}/scripts/native/zterm-daemon.swift"
 NATIVE_DAEMON_BIN="${SUPPORT_DIR}/zterm-daemon"
+
+resolve_node_package_dir() {
+  local package_name="${1:-}"
+  [[ -n "${package_name}" ]] || return 1
+  if "$NODE_BIN" - "$ROOT_DIR" "$WORKSPACE_ROOT" "$package_name" <<'EOF'
+const path = require('path');
+
+const [rootDir, workspaceRoot, packageName] = process.argv.slice(2);
+for (const base of [rootDir, workspaceRoot]) {
+  try {
+    const resolved = require.resolve(`${packageName}/package.json`, { paths: [base] });
+    console.log(path.dirname(resolved));
+    process.exit(0);
+  } catch {}
+}
+process.exit(1);
+EOF
+  then
+    return 0
+  fi
+
+  local namespace package_basename candidate
+  namespace="${package_name%/*}"
+  package_basename="${package_name##*/}"
+  candidate="$(
+    {
+      find "${ROOT_DIR}/node_modules/.pnpm" -path "*/node_modules/${namespace}/${package_basename}" -type d 2>/dev/null || true
+      find "${WORKSPACE_ROOT}/node_modules/.pnpm" -path "*/node_modules/${namespace}/${package_basename}" -type d 2>/dev/null || true
+    } | sort -V | tail -n 1
+  )"
+  if [[ -n "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  echo "[zterm-daemon] unable to resolve ${package_name} in ${ROOT_DIR} or ${WORKSPACE_ROOT}" >&2
+  return 1
+}
+
+resolve_wrtc_platform_package_name() {
+  "${NODE_BIN}" -e "console.log('@roamhq/wrtc-' + process.platform + '-' + process.arch)"
+}
 
 resolve_esbuild_bin() {
   local candidate
@@ -39,9 +82,12 @@ resolve_esbuild_bin() {
 }
 
 stage_runtime() {
-  local esbuild_bin
+  local esbuild_bin wrtc_package_dir wrtc_platform_package_name wrtc_platform_package_dir
   esbuild_bin="$(resolve_esbuild_bin)"
-  mkdir -p "${RUNTIME_DIR}/node_modules"
+  wrtc_package_dir="$(resolve_node_package_dir '@roamhq/wrtc')"
+  wrtc_platform_package_name="$(resolve_wrtc_platform_package_name)"
+  wrtc_platform_package_dir="$(resolve_node_package_dir "${wrtc_platform_package_name}")"
+  mkdir -p "${RUNTIME_DIR}/node_modules" "${RUNTIME_DIR}/node_modules/@roamhq"
   "${esbuild_bin}" "${ROOT_DIR}/src/server/server.ts" \
     --bundle \
     --platform=node \
@@ -51,6 +97,9 @@ stage_runtime() {
     --external:node-pty >/dev/null
   rm -rf "${RUNTIME_DIR}/node_modules/node-pty"
   cp -RL "${NODE_PTY_SOURCE}" "${RUNTIME_DIR}/node_modules/"
+  rm -rf "${RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  cp -RL "${wrtc_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/wrtc"
+  cp -RL "${wrtc_platform_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 }
 
@@ -154,10 +203,143 @@ Usage:
   zterm-daemon status
   zterm-daemon stop
   zterm-daemon restart
+  zterm-daemon configure-relay --relay-url URL --username USER --password PASS --host-id HOST_ID [--device-name NAME] [--restart-service]
   zterm-daemon install-service
   zterm-daemon uninstall-service
   zterm-daemon service-status
 USAGE
+}
+
+configure_relay() {
+  local relay_url=""
+  local relay_username=""
+  local relay_password=""
+  local relay_host_id=""
+  local relay_device_id=""
+  local relay_device_name=""
+  local restart_after_config="0"
+
+  if [[ "${1:-}" == "configure-relay" ]]; then
+    shift
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --relay-url)
+        relay_url="${2:-}"
+        shift 2
+        ;;
+      --username)
+        relay_username="${2:-}"
+        shift 2
+        ;;
+      --password)
+        relay_password="${2:-}"
+        shift 2
+        ;;
+      --password-stdin)
+        IFS= read -r relay_password
+        shift
+        ;;
+      --password-env)
+        local password_env_name="${2:-}"
+        if [[ -z "$password_env_name" ]]; then
+          echo "--password-env requires an environment variable name" >&2
+          return 1
+        fi
+        relay_password="${!password_env_name:-}"
+        shift 2
+        ;;
+      --host-id)
+        relay_host_id="${2:-}"
+        shift 2
+        ;;
+      --device-id)
+        relay_device_id="${2:-}"
+        shift 2
+        ;;
+      --device-name)
+        relay_device_name="${2:-}"
+        shift 2
+        ;;
+      --restart-service)
+        restart_after_config="1"
+        shift
+        ;;
+      --no-restart)
+        restart_after_config="0"
+        shift
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown configure-relay option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [[ -z "$relay_url" || -z "$relay_username" || -z "$relay_password" || -z "$relay_host_id" ]]; then
+    echo "configure-relay requires --relay-url, --username, --password/--password-stdin/--password-env, and --host-id" >&2
+    return 1
+  fi
+
+  mkdir -p "$WTERM_HOME"
+  CONFIG_PATH="${WTERM_HOME}/config.json" \
+  RELAY_URL="$relay_url" \
+  RELAY_USERNAME="$relay_username" \
+  RELAY_PASSWORD="$relay_password" \
+  RELAY_HOST_ID="$relay_host_id" \
+  RELAY_DEVICE_ID="$relay_device_id" \
+  RELAY_DEVICE_NAME="$relay_device_name" \
+  "$NODE_BIN" <<'NODE'
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const configPath = process.env.CONFIG_PATH;
+const relayUrl = process.env.RELAY_URL;
+const username = process.env.RELAY_USERNAME;
+const password = process.env.RELAY_PASSWORD;
+const hostId = process.env.RELAY_HOST_ID;
+const deviceId = process.env.RELAY_DEVICE_ID || hostId;
+const deviceName = process.env.RELAY_DEVICE_NAME || os.hostname();
+
+let config = {};
+if (fs.existsSync(configPath)) {
+  const raw = fs.readFileSync(configPath, 'utf8');
+  config = raw.trim() ? JSON.parse(raw) : {};
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error(`${configPath} root must be a JSON object`);
+  }
+}
+
+config.mobile = config.mobile && typeof config.mobile === 'object' && !Array.isArray(config.mobile)
+  ? config.mobile
+  : {};
+config.mobile.relay = {
+  relayUrl,
+  username,
+  password,
+  hostId,
+  deviceId,
+  deviceName,
+  platform: process.platform,
+};
+
+fs.mkdirSync(path.dirname(configPath), { recursive: true });
+fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+fs.chmodSync(configPath, 0o600);
+NODE
+
+  echo "zterm relay configured: path=${WTERM_HOME}/config.json relayUrl=${relay_url} username=${relay_username} hostId=${relay_host_id} deviceName=${relay_device_name:-$(hostname)} passwordSet=true"
+  if [[ "$restart_after_config" == "1" ]]; then
+    restart_service
+  else
+    echo "run 'zterm-daemon restart' after configuration to reconnect relay"
+  fi
 }
 
 service_installed() {
@@ -190,6 +372,21 @@ wait_for_service_ready() {
     sleep 0.2
     attempts=$((attempts + 1))
   done
+  return 1
+}
+
+wait_for_service_unloaded() {
+  local attempts=0
+  local max_attempts=30
+
+  while (( attempts < max_attempts )); do
+    if ! service_loaded; then
+      return 0
+    fi
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+
   return 1
 }
 
@@ -529,7 +726,6 @@ start_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
-  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
     wait_for_service_unloaded || {
@@ -567,7 +763,6 @@ restart_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
-  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {
@@ -589,7 +784,6 @@ install_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
-  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {
@@ -631,6 +825,7 @@ case "$cmd" in
   status) status ;;
   stop) stop_service ;;
   restart) restart_service ;;
+  configure-relay) configure_relay "$@" ;;
   install-service) install_service ;;
   uninstall-service) uninstall_service ;;
   service-status) status_service ;;
@@ -681,13 +876,13 @@ if [[ "\${1:-}" == "daemon" ]]; then
   exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\$@"
 fi
 case "\${1:-}" in
-  start|stop|restart|status|install-service|uninstall-service|service-status|run)
+  start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run)
     exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\$@"
     ;;
 esac
 echo "Usage:"
-echo "  wterm daemon start|stop|restart|status|install-service|uninstall-service|service-status"
-echo "  wterm start|stop|restart|status|install-service|uninstall-service|service-status"
+echo "  wterm daemon start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status"
+echo "  wterm start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status"
 exit 1
 WRAP
 chmod +x "${LOCAL_BIN}/wterm"
