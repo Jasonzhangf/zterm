@@ -2600,3 +2600,31 @@ Validation evidence:
 - Fix: removed hidden wterm proxy entirely. `MacTerminalView` visible DOM now owns focus/keyboard/paste input; render remains projection DOM rows; no automatic `onResize` from render layer.
 - Red test locks: no legacy wterm proxy, no aria-hidden layer, visible DOM input emits `onInput`, and rendering does not call `onResize`.
 - Validation: shared Mac terminal + split-tree tests 8/8 pass; ShellWorkspace split tests 8/8 pass; `pnpm --filter @zterm/mac type-check` pass; package pass; global install launched `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
+
+---
+Jason 2026-06-08 daemon/client transport performance closeout
+- Plan: `android/docs/goals/daemon-client-transport-performance-plan.md` freezes red-test-first order, no payload trimming/fallback rule, validation matrix, APK delivery paths, and commit/push requirement.
+- Implemented daemon fast/slow lane: `terminal-performance-scheduler` consumes only daemon physical truth (capture/canonicalize duration, subscriber count, transport buffered bytes/backpressure, failure/backoff, in-flight state). Source gates forbid daemon scheduler from consuming client UI state.
+- Implemented transport backpressure truth: ws/rtc adapters expose `bufferedAmount`; send path records bytes/last send/error and rethrows send failures instead of swallowing them.
+- Implemented client cadence truth: session-aware runtime cadence reads each session socket buffered amount + debug metrics; good link can hit 16ms render commit, weak/backpressured link slows head/pull/render cadence.
+- Implemented trace metadata store: records timestamps/durations/bytes/line counts/kinds only; tests forbid payload/text/line/cell content from trace events.
+- Implemented multi-pane latency gate: synthetic 3-pane trace asserts p95 capture-to-render latency stays below fixed slow-path budget; current trace summary p95 is 89ms and gate requires <120ms.
+- Harness fix: daemon mirror lab now waits against payload history replay, not only the final sparse payload, so later sparse prompt-only payloads cannot hide a marker that already arrived.
+- Fail-first evidence captured during implementation:
+  - `session-render-gate.test.ts` first failed because render gate resolver was called without `sessionId`, so fast lane could not be session-owned.
+  - `session-runtime-cadence.test.ts` first failed because good-link runtime cadence still returned 33ms instead of 16ms.
+  - `daemon-mirror-lab-script.test.ts` first failed before the source gate/harness replay fix.
+  - `build:android` first failed in embedded daemon mirror lab `external-input-echo`, where `probe-history.json` contained the marker but final payload was later overwritten by a prompt-only sparse diff.
+- Green verification:
+  - `pnpm --dir android exec tsc --noEmit` PASS.
+  - Directed performance suite: 12 files / 70 tests PASS.
+  - `pnpm --dir android exec vitest run src/server/daemon-mirror-lab-script.test.ts --reporter dot` PASS, 10 tests.
+  - `pnpm --dir android daemon:mirror:close-loop` PASS, 8 cases.
+  - `pnpm --dir android test:terminal:regression` PASS: contracts 42 files / 501 tests, common flows 7 files / 82 tests, daemon mirror 8 cases, relay smoke PASS.
+  - `pnpm --dir android build:android` PASS and produced APK `0.1.3.1758`.
+- APK delivery:
+  - `android/update-dist/zterm-0.1.3.1758.apk`
+  - `android/update-dist/zterm-latest-debug.apk`
+  - `~/.wterm/updates/zterm-0.1.3.1758.apk`
+  - `~/.wterm/updates/zterm-latest-debug.apk`
+  - sha256 `8e66b56ab90d3ecd889b0f758a12c39936c2fb1d41c8fc79b64a529ac9510794`
