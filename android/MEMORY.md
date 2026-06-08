@@ -305,6 +305,10 @@
 ## 2026-06-08 Daemon/client transport performance truth
 - Daemon live cadence can only use daemon-owned physical facts: capture/canonicalize duration, subscriber count, transport ready/buffered bytes/send error/backpressure, and mirror failure/in-flight state. It must not consume active tab, pane layout, follow/reading, viewport, or any client UI state.
 - Client render/head cadence must be session-owned: read the target session socket buffered amount and debug metrics, pass `sessionId` through render gate/lifecycle resolvers, and allow good-link 16ms fast lane while weak/backpressured links slow down.
+
+## 2026-06-08 Android hardware keyboard and fast cadence
+- Android physical keyboard events must not depend on DOM textarea focus. Native `ImeAnchor key` should send special keys and Ctrl/Alt modified keys through shared terminal keyboard resolvers directly into the active session; plain letters stay on the editable/IME text path.
+- High terminal throughput is not slow-network evidence by itself. Fast runtime progress with no socket backpressure should keep 16ms cadence even when `recentPayloadBytes` is large; weak-link decisions must use RTT/backpressure/buffered bytes/progress, not payload trimming or semantic payload changes.
 - Performance traces may record metadata only (timestamp, duration, bytes, line counts, ids, kind). Tests must forbid payload/text/lines/cells/content/data keys so optimization cannot be achieved by leaking or trimming terminal payload.
 - Daemon mirror lab assertions over sparse `buffer-sync` must replay payload history; final sparse payload alone is not mirror truth because later prompt-only diffs can overwrite the last observed payload while an earlier diff already contained the oracle marker.
   Tags: terminal-performance, daemon-scheduler, client-cadence, trace-metadata, regression-gate

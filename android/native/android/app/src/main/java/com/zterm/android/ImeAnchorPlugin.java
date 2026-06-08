@@ -313,7 +313,46 @@ public class ImeAnchorPlugin extends Plugin {
         notifyListeners("key", payload);
     }
 
-    private static String mapKeyCodeToKey(int keyCode) {
+    static String mapHardwareKeyEventToKey(int keyCode, KeyEvent event) {
+        return mapHardwareKeyToKey(
+            keyCode,
+            event != null && event.isCtrlPressed(),
+            event != null && event.isAltPressed(),
+            event != null && event.isShiftPressed()
+        );
+    }
+
+    static String mapHardwareKeyEventToCode(int keyCode, KeyEvent event) {
+        return mapHardwareKeyToCode(
+            keyCode,
+            event != null && event.isCtrlPressed(),
+            event != null && event.isAltPressed()
+        );
+    }
+
+    static String mapHardwareKeyToKey(int keyCode, boolean ctrlPressed, boolean altPressed, boolean shiftPressed) {
+        String specialKey = mapSpecialKeyCodeToKey(keyCode);
+        if (specialKey != null) {
+            return specialKey;
+        }
+        if (!ctrlPressed && !altPressed) {
+            return null;
+        }
+        return mapTerminalModifiedKeyCodeToKey(keyCode, shiftPressed);
+    }
+
+    static String mapHardwareKeyToCode(int keyCode, boolean ctrlPressed, boolean altPressed) {
+        String specialCode = mapSpecialKeyCodeToCode(keyCode);
+        if (specialCode != null) {
+            return specialCode;
+        }
+        if (!ctrlPressed && !altPressed) {
+            return null;
+        }
+        return mapTerminalModifiedKeyCodeToCode(keyCode);
+    }
+
+    private static String mapSpecialKeyCodeToKey(int keyCode) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE:
                 return "Escape";
@@ -335,7 +374,7 @@ public class ImeAnchorPlugin extends Plugin {
         }
     }
 
-    private static String mapKeyCodeToCode(int keyCode) {
+    private static String mapSpecialKeyCodeToCode(int keyCode) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE:
                 return "Escape";
@@ -353,6 +392,56 @@ public class ImeAnchorPlugin extends Plugin {
                 return "Enter";
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
                 return "NumpadEnter";
+            default:
+                return null;
+        }
+    }
+
+    private static String mapTerminalModifiedKeyCodeToKey(int keyCode, boolean shiftPressed) {
+        if (keyCode >= KeyEvent.KEYCODE_A && keyCode <= KeyEvent.KEYCODE_Z) {
+            char base = (char) ('a' + (keyCode - KeyEvent.KEYCODE_A));
+            return String.valueOf(shiftPressed ? Character.toUpperCase(base) : base);
+        }
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_LEFT_BRACKET:
+                return "[";
+            case KeyEvent.KEYCODE_RIGHT_BRACKET:
+                return "]";
+            case KeyEvent.KEYCODE_BACKSLASH:
+                return "\\";
+            case KeyEvent.KEYCODE_SPACE:
+                return shiftPressed ? "@" : " ";
+            case KeyEvent.KEYCODE_MINUS:
+                return shiftPressed ? "_" : "-";
+            case KeyEvent.KEYCODE_GRAVE:
+                return shiftPressed ? "~" : "`";
+            case KeyEvent.KEYCODE_EQUALS:
+                return shiftPressed ? "+" : "=";
+            default:
+                return null;
+        }
+    }
+
+    private static String mapTerminalModifiedKeyCodeToCode(int keyCode) {
+        if (keyCode >= KeyEvent.KEYCODE_A && keyCode <= KeyEvent.KEYCODE_Z) {
+            char base = (char) ('A' + (keyCode - KeyEvent.KEYCODE_A));
+            return "Key" + base;
+        }
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_LEFT_BRACKET:
+                return "BracketLeft";
+            case KeyEvent.KEYCODE_RIGHT_BRACKET:
+                return "BracketRight";
+            case KeyEvent.KEYCODE_BACKSLASH:
+                return "Backslash";
+            case KeyEvent.KEYCODE_SPACE:
+                return "Space";
+            case KeyEvent.KEYCODE_MINUS:
+                return "Minus";
+            case KeyEvent.KEYCODE_GRAVE:
+                return "Backquote";
+            case KeyEvent.KEYCODE_EQUALS:
+                return "Equal";
             default:
                 return null;
         }
@@ -515,11 +604,11 @@ public class ImeAnchorPlugin extends Plugin {
         @Override
         public boolean onKeyDown(int keyCode, KeyEvent event) {
             if (plugin != null) {
-                String key = mapKeyCodeToKey(keyCode);
+                String key = mapHardwareKeyEventToKey(keyCode, event);
                 if (key != null) {
                     plugin.emitHardwareKey(
                         key,
-                        mapKeyCodeToCode(keyCode),
+                        mapHardwareKeyEventToCode(keyCode, event),
                         event.isCtrlPressed(),
                         event.isAltPressed(),
                         event.isMetaPressed(),

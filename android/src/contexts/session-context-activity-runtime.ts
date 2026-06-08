@@ -127,7 +127,8 @@ export function ensureActiveSessionFreshRuntime(options: {
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
   const isExplicitForegroundResumeTarget = options.refreshOptions.source === 'active-resume';
   const isExplicitResumeTarget = options.refreshOptions.source === 'explicit-resume';
-  const isRefreshTarget = isExplicitForegroundResumeTarget || isExplicitResumeTarget || isActive || isLive;
+  const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
+  const isRefreshTarget = isExplicitForegroundResumeTarget || isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
@@ -165,6 +166,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       isLive,
       isExplicitForegroundResumeTarget,
       isExplicitResumeTarget,
+      isActiveReentryTarget,
       isRefreshTarget,
       sessionState,
       wsReadyState: ws?.readyState ?? null,
@@ -185,6 +187,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     isLive,
     isExplicitForegroundResumeTarget,
     isExplicitResumeTarget,
+    isActiveReentryTarget,
     isRefreshTarget,
     localRevision: localBuffer.revision ?? null,
     localStartIndex: localBuffer.startIndex ?? null,
@@ -224,6 +227,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       (
         options.refreshOptions.source === 'active-resume'
         || options.refreshOptions.source === 'explicit-resume'
+        || options.refreshOptions.source === 'active-reentry'
       )
       && shouldForceHeadRequest
       && ws?.readyState === WebSocket.OPEN

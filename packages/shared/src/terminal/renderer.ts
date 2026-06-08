@@ -360,6 +360,7 @@ export function applySessionSwitchRenderReset(options: {
 export function resolveTerminalCtrlChord(event: KeyboardEvent) {
   if (event.altKey || event.metaKey) return null;
   if (!event.ctrlKey || event.key.length !== 1) return null;
+  if (event.key === ' ') return '\x00';
   const code = event.key.toUpperCase().charCodeAt(0);
   if (code < 64 || code > 95) return null;
   return String.fromCharCode(code - 64);

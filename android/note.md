@@ -2628,3 +2628,10 @@ Jason 2026-06-08 daemon/client transport performance closeout
   - `~/.wterm/updates/zterm-0.1.3.1758.apk`
   - `~/.wterm/updates/zterm-latest-debug.apk`
   - sha256 `8e66b56ab90d3ecd889b0f758a12c39936c2fb1d41c8fc79b64a529ac9510794`
+
+---
+Jason 2026-06-08 物理键盘与刷新慢修复收口
+- 根因: Android native `key` 路径仍把事件 dispatch 到 DOM textarea；新版 Android terminal 关闭 DOM focus 后，物理键盘特殊键/控制键不能可靠进入 terminal input。刷新慢的独立根因: client cadence 把高吞吐 `recentPayloadBytes` 当成慢链路，导致好网大输出仍降到 33ms。
+- 修复: native plain letter 不拦截，Ctrl/Alt modified keys 和 Escape/方向键走硬件 key path；TerminalPage 的 ImeAnchor key listener 直接使用 shared `resolveTerminalCtrlChord/resolveTerminalKeyboardInput` 并 `emitToActiveSession`；`Ctrl+Space` 映射 NUL；good runtime progress 不再按 payload bytes 降速。
+- Active reentry 修复: `active-reentry` 在 runtime activeSessionId catch-up 前也可强制 head；同一 cadence window 去重；tab switch out 清该 session reentry guard，切回来可重新 head-first。
+- 验证: Android IME 33 tests PASS; mobile-config 6 tests PASS; shared keyboard 3 tests PASS; native ImeAnchor hardware/input unit BUILD SUCCESS; tsc PASS; terminal regression PASS; APK `0.1.3.1760` 发布到 `android/update-dist/` 与 `~/.wterm/updates/`，sha256 `d21560720eae05dd6332c1ccf3428c4f590ef43cb66633097be4d70ff84bba51`。

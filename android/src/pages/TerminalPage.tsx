@@ -12,6 +12,10 @@ import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { TerminalTabSwipeSurface } from '../components/terminal/TerminalTabSwipeSurface';
+import {
+  resolveTerminalCtrlChord,
+  resolveTerminalKeyboardInput,
+} from '@zterm/shared/terminal/renderer';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -1832,10 +1836,6 @@ function TerminalPageComponent({
           if (!sessionId || quickBarEditorFocusedRef.current) {
             return;
           }
-          const input = querySessionInput(sessionId);
-          if (!input) {
-            return;
-          }
           const keyboardEvent = new KeyboardEvent('keydown', {
             key: event.key || '',
             code: event.code || '',
@@ -1846,7 +1846,24 @@ function TerminalPageComponent({
             bubbles: true,
             cancelable: true,
           });
-          input.dispatchEvent(keyboardEvent);
+          if (keyboardEvent.metaKey) {
+            return;
+          }
+          const ctrlChord = resolveTerminalCtrlChord(keyboardEvent);
+          if (ctrlChord) {
+            emitToActiveSession(ctrlChord);
+            return;
+          }
+          const cursorKeysApp = Boolean(
+            sessionBufferStore?.getSnapshot(sessionId).buffer.cursorKeysApp,
+          );
+          const keyboardInput = resolveTerminalKeyboardInput(
+            keyboardEvent,
+            cursorKeysApp,
+          );
+          if (keyboardInput) {
+            emitToActiveSession(keyboardInput);
+          }
         });
         if (disposed) {
           void keyListener.remove().catch((error) => {

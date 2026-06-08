@@ -141,6 +141,7 @@ export function useSessionProviderFacadeAssemblies(
     const prev = options.stateRef.current.activeSessionId;
     if (prev && prev !== id) {
       core.resetSessionTransportPullBookkeeping(prev, 'tab-switch-out');
+      lastActiveReentryAtRef.current.delete(prev);
     }
     lastActivatedSessionIdRef.current = id;
     core.setActiveSessionSync(id);

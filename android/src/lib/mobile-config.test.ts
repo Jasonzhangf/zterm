@@ -65,6 +65,23 @@ describe('mobile-config refresh cadence', () => {
     expect(cadence.renderCommitMs).toBe(16);
   });
 
+  it('keeps fast cadence for high-throughput runtime progress without backpressure', () => {
+    mockConnection('4g', false);
+    const cadence = resolveTerminalRefreshCadence({
+      runtimeTransport: {
+        rttMs: 24,
+        bufferedBytes: 0,
+        backpressure: false,
+        recentPayloadBytes: 64 * 1024,
+        hasRecentProgress: true,
+      },
+    });
+
+    expect(cadence.headTickMs).toBe(16);
+    expect(cadence.minTailRefreshGapMs).toBe(16);
+    expect(cadence.renderCommitMs).toBe(16);
+  });
+
   it('uses slow lane when runtime transport reports backpressure even on 4g', () => {
     mockConnection('4g', false);
     const cadence = resolveTerminalRefreshCadence({

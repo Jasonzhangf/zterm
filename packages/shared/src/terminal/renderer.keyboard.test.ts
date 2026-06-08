@@ -27,6 +27,7 @@ describe('terminal renderer keyboard mapping', () => {
 
   it('keeps ctrl chords but rejects ctrl when meta/alt also pressed', () => {
     expect(resolveTerminalCtrlChord(keydown({ key: 'c', ctrlKey: true }))).toBe('\x03');
+    expect(resolveTerminalCtrlChord(keydown({ key: ' ', ctrlKey: true }))).toBe('\x00');
     expect(resolveTerminalCtrlChord(keydown({ key: 'c', ctrlKey: true, metaKey: true }))).toBeNull();
     expect(resolveTerminalCtrlChord(keydown({ key: 'c', ctrlKey: true, altKey: true }))).toBeNull();
   });

@@ -183,6 +183,9 @@ vi.mock("../components/TerminalView", () => ({
         data-terminal-input-session-id={sessionId}
         defaultValue=""
         onKeyDown={(event) => {
+          if (!allowDomFocus) {
+            return;
+          }
           if (!onInput) {
             return;
           }
@@ -1090,9 +1093,11 @@ describe("TerminalPage Android IME bridge", () => {
 
     imeListeners.get("key")?.({ key: "ArrowUp", code: "ArrowUp" });
     imeListeners.get("key")?.({ key: "Escape", code: "Escape" });
+    imeListeners.get("key")?.({ key: "c", code: "KeyC", ctrlKey: true });
 
     expect(onTerminalInput).toHaveBeenNthCalledWith(1, "s2", "\u001b[A");
     expect(onTerminalInput).toHaveBeenNthCalledWith(2, "s2", "\u001b");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(3, "s2", "\u0003");
   });
 
   it("uses native ImeAnchor keyboardState to raise terminal chrome on Android", async () => {

@@ -77,10 +77,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
   const runtimeBufferedBytes = Number.isFinite(runtimeTransport?.bufferedBytes)
     ? Math.max(0, Math.floor(runtimeTransport?.bufferedBytes || 0))
     : 0;
-  const recentPayloadBytes = Number.isFinite(runtimeTransport?.recentPayloadBytes)
-    ? Math.max(0, Math.floor(runtimeTransport?.recentPayloadBytes || 0))
-    : 0;
-
   if (runtimeTransport?.backpressure || runtimeBufferedBytes >= 128 * 1024) {
     return {
       headTickMs: 120,
@@ -94,7 +90,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
 
   const hasGoodRuntimeProgress = runtimeTransport
     && (runtimeTransport.hasRecentProgress || (runtimeRttMs > 0 && runtimeRttMs < 80));
-  if (hasGoodRuntimeProgress && recentPayloadBytes <= 8 * 1024) {
+  if (hasGoodRuntimeProgress) {
     return {
       headTickMs: 16,
       minTailRefreshGapMs: 16,
