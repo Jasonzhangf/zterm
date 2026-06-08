@@ -155,3 +155,19 @@ Jason，已完成本轮自闭环：
 - 本地 `pnpm --filter @zterm/mac package` 必须默认跳过 macOS code signing：`CSC_IDENTITY_AUTO_DISCOVERY=false` + `build.mac.identity=null`。
 - 禁止让 `electron-builder` 自动发现 distribution identity；否则每次 package 都可能触发 Keychain 授权弹窗。
 - 只有正式发布/分发签名任务才允许显式启用签名 identity，并必须单独说明签名和 notarization 验证。
+
+## 六、Mac dev runtime 单实例验证规则（2026-06-02）
+- 调试 Electron dev app 时，同一轮只能保留一个 `--remote-debugging-port` 实例；新开前先用明确 PID/app-level quit 收掉旧实例，禁止多端口并发导致证据串线。
+- 截图/DOM probe/输入验证必须指向同一个 CDP target、同一个 tmux session、同一个 evidence JSON；不得在多个 Electron 窗口之间交叉取证。
+- 临时 CDP probe 不要往页面注入会持久影响事件链的监听器/异常代码；若注入失败导致 renderer error，必须 reload 或重启唯一实例后再验证。
+- local tmux 颜色真源是 `tmux capture-pane -e` 的 SGR 输出；纯 `capture-pane -p` 只保留文本，会把 `fg/bg` 全部退成默认色。
+
+## 七、单 session 操作铁律（2026-06-02 新增）
+
+### 7.1 禁止向任意 session 写入 input
+- **绝对禁止**：`tmux send-keys`、`send-text` 到任何不在本次测试范围内的 tmux session
+- **绝对禁止**：用 IPC / CDP / AppleScript 向非目标 window/pane 注入按键
+- **原因**：会污染用户真实工作 session（如 `fin`、`rcc`、`server` 等已有 session）
+- **触发场景**：任何 input echo 验证、按键注入测试、session 列表遍历
+- **正确做法**：只操作本次 smoke 专用 session（如 `zterm_mac_color`），不碰其他 session
+- **验证方式**：`tmux capture-pane -p -t <session>` 确认只含测试内容，无污染

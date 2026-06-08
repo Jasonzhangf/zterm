@@ -41,3 +41,8 @@
 - [2026-04-23] Mac reading/backfill 链路里，`missingRanges` 必须从 `TerminalView -> runtime -> transport` 原样透传；一旦 runtime 层把它清空，scroll prefetch 会静默变成 no-op，看起来像‘滚动了但历史补不回来’
 - [2026-04-23] Mac 的 schedule modal 若只依赖 schedule domain，也应走 `packages/shared/src/schedule/*` 叶子 import；这样桌面端做静态 HTML preview / SSR 时不会被 `@zterm/shared` 根入口里的 terminal CSS 反向拖崩。
 - [2026-04-23] 若 Mac 当前只需要“未来可接入”的快捷键组合能力，最小对齐动作不是提前复制 UI，而是先补本地 re-export 指向 shared composer；这样后续桌面编辑器落地时天然复用 Android 已验证过的算法
+- [2026-06-02] Mac local tmux 颜色真源必须用 `tmux capture-pane -e` 保留 SGR；纯 `capture-pane -p` 只出文本，会让 `fg/bg` 全部落到默认 256，表现为 terminal 无彩色输出。
+- [2026-06-02] Mac terminal 验证必须保持单 Electron/CDP 实例 + 单 tmux session + 单 evidence 文件；多个 remote-debugging-port 并发会造成 DOM、截图、日志串线。
+- [2026-06-02] Mac dev Electron 的 CDP `Input.dispatchKeyEvent` 与 `webContents.sendInputEvent` 在 vite HMR dev build 下不可靠地触发 React onKeyDown；输入回显必须用真键盘或 packaged app 验证，不要把自动化失败当链路 bug。
+- [2026-06-02] Mac dev automation 反模式：不要在 main 端对所有 local tmux session 注入 input。即使是用于验证，旁路路径必须只针对 active client（manager.clients 唯一项），否则会污染其他用户工作 session。
+- [2026-06-02] Mac input verification 硬规则：严禁在 main 端对 local tmux manager 列出/已知的所有 session 写 input（即使有"只写一次"的意图）。只能对当前 active client（`manager.clients` 唯一项、`payload.clientId` 命中、且 `sessionName` 是本次 smoke 专用 session，如 `zterm_mac_color`）发 input。触发信号：CDP `Input.dispatchKeyEvent` / `webContents.sendInputEvent` 失败后想用"广播 tmux send-keys"兜底。

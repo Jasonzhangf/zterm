@@ -95,6 +95,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 
 ### 2.10 daemon 收敛规则
 - server 侧启动入口要收敛成单一 daemon CLI，默认监听地址/端口由统一配置真源决定（当前 `0.0.0.0:3333`）
+- relay/account 配置必须走全局发行包入口：先 `install-global.sh` 安装/升级 `~/.local/bin/zterm-daemon`，再用 `zterm-daemon configure-relay` 写 `~/.wterm/config.json -> mobile.relay`；daemon 只读取配置，不承载账号 UX，禁止把手工改散落配置当成最终交付。
+- 发行包验证必须覆盖 native runtime 依赖：TURN/RTC 需要 `@roamhq/wrtc` 与当前平台 `@roamhq/wrtc-<platform>-<arch>/wrtc.node` 随 release staging 打包；只在源码环境通过不代表全局安装可启动。
 - 验证过程中产生的临时 tmux session 需要及时清掉，只保留一个明确实验 session，避免把测试垃圾当成真实 session 列表
 - `bridgePort` / daemon 端口 / daemon tmux session 名必须共用同一配置真源；不要在 UI、server、shell script、文案里散落硬编码
 - daemon restart/status 只证明 tmux session 存在，不等于 socket 已 ready；验证时至少补一次端口监听检查或真实 WebSocket probe
@@ -889,6 +891,21 @@ android/
 - **动作**: 用 `pointer/touch move threshold` 区分 click 和 drag；超过阈值后进入拖动态并 suppress click，位置持久化到 localStorage
 - **反模式**: 只靠长按进入拖动，或拖动完成后未 suppress click，都会导致“拖不动”或“拖完又误开菜单”
 
+### 模式: Connections 账号 daemon 是父列表真源
+- **触发信号**: 用户要求同一账号下所有 daemon 设备统一显示，或页面出现 legacy daemon id / bridge endpoint 重复父卡片
+- **动作**: 父行只从 relay account devices / device stream 建立；saved host、history group、live session 只能折叠成该 daemon 的子 session，legacy daemon id 必须 canonicalize 到 account daemon hostId
+- **反模式**: 用 host/history/live session 反向生成父服务器列表，导致同一账号设备被拆成多张乱序卡片
+
+### 模式: Connections group 生命周期必须可退出
+- **触发信号**: 长按/展开 server group 后出现 `All/None/Manage/Clear/Open checked`，用户反馈不能退出或键盘遮挡操作
+- **动作**: 管理态必须有显式 `Done`；`Clear` 要同时清 selection 和 expanded state；action row 必须 wrap，避免窄屏/键盘下横向溢出
+- **反模式**: 只清 selection 不收起 expanded group，或把 Vault/占位入口静默路由回当前页让用户以为点击失效
+
+### 模式: Connections 卡片点击进入，按钮才打开
+- **触发信号**: 用户反馈“到了 group 卡片页面点击不会进入 group”或 `Open` 在 history-only/0-session 卡片上空转
+- **动作**: card body tap 只负责 enter/expand group；`Open/Enter` 按钮才负责打开/恢复 session；不可打开的 group 显示 `Details` 并展开，禁止死 `Open`
+- **反模式**: 让卡片 body 和 action button 共用一个 callback，导致点击卡片直接打开或空转而不能进入 group
+
 ---
 
 Inspired by coding-principals skill.
@@ -921,3 +938,11 @@ Inspired by coding-principals skill.
 - 使用 CSS transition 实现平滑高度变化
 - Session 切换面板使用 position: absolute + z-index: 100
 - 编辑界面使用 position: fixed 全屏覆盖
+
+## 经验精华（2026-06-08）
+
+### QuickBar schedule 生命周期
+- 打开定时发送 sheet 时必须冻结 target `{ sessionId, sessionName, seedText, nonce }`；所有后续操作只用 frozen `sessionId`，禁止切 tab 后重绑 active session。
+- schedule 业务错误必须走 `schedule-error -> scheduleState.error`；socket 未连接、session 缺失、stale job 都要显式 `loading=false + error`，禁止 silent send 或混入 terminal transport failure。
+- floating menu 若保留 clipboard 分支必须给真实 segmented 入口；禁止空 pill/不可达 UI。紧凑化默认删除解释文案、降低 composer 高度、把 `定时/发送` 放同一 action row。
+- `ScheduleEngine` 是定时任务唯一生命周期 owner：每次执行后必须持久化并重排 timer；自然完成/过期任务必须物理删除，避免 `schedules.json` 磁盘孤儿；`dispose()` 后 in-flight run 结束不得复活 timer；`executeJob` throw 必须进入显式 error result。
