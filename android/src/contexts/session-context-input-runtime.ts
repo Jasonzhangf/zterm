@@ -9,6 +9,34 @@ interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
 
+const pendingInputHeadRefreshes = new Map<string, {
+  ws: BridgeTransportSocket;
+  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
+}>();
+
+function scheduleInputHeadRefresh(options: {
+  sessionId: string;
+  ws: BridgeTransportSocket;
+  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
+}) {
+  const alreadyPending = pendingInputHeadRefreshes.has(options.sessionId);
+  pendingInputHeadRefreshes.set(options.sessionId, {
+    ws: options.ws,
+    requestSessionBufferHead: options.requestSessionBufferHead,
+  });
+  if (alreadyPending) {
+    return;
+  }
+  queueMicrotask(() => {
+    const pending = pendingInputHeadRefreshes.get(options.sessionId) || null;
+    pendingInputHeadRefreshes.delete(options.sessionId);
+    if (!pending) {
+      return;
+    }
+    pending.requestSessionBufferHead(options.sessionId, pending.ws, { force: true });
+  });
+}
+
 export function sendInputThroughSessionTransport(options: {
   sessionId: string;
   data: string;
@@ -21,7 +49,7 @@ export function sendInputThroughSessionTransport(options: {
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => void;
+  markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   probeOrReconnectStaleSessionTransport: (sessionId: string, ws: BridgeTransportSocket, reason: 'input' | 'active-tick' | 'active-reentry') => void;
@@ -61,27 +89,34 @@ export function sendInputThroughSessionTransport(options: {
   const reconnectInFlight = options.isReconnectInFlight(targetSessionId);
 
   if (ws && ws.readyState === WebSocket.OPEN) {
+    const localRevision = options.readSessionBufferSnapshot(targetSessionId).revision;
     options.runtimeDebug('session.input.send', {
       sessionId: targetSessionId,
       size: options.data.length,
       preview: options.data.slice(0, 32),
       transportStale,
     });
-    options.markPendingInputTailRefresh(
+    const isFirstPendingInputTailRefresh = options.markPendingInputTailRefresh(
       targetSessionId,
-      options.readSessionBufferSnapshot(targetSessionId).revision,
+      localRevision,
     );
     options.sendSocketPayload(
       targetSessionId,
       ws,
       JSON.stringify({ type: 'input', payload: options.data }),
     );
+    if (isFirstPendingInputTailRefresh) {
+      scheduleInputHeadRefresh({
+        sessionId: targetSessionId,
+        ws,
+        requestSessionBufferHead: options.requestSessionBufferHead,
+      });
+    }
     if (transportStale && !reconnectInFlight) {
       options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
     }
-    // Input path: explicit input may proactively probe a stale-open transport, but
-    // tail-refresh marker remains the single write-side anchor; per-keystroke force-head
-    // is still forbidden.
+    // Input path keeps transport input synchronous and moves head refresh to a
+    // coalesced microtask so refresh work cannot block key dispatch.
     return;
   }
 

@@ -132,9 +132,105 @@ describe('session-context-input-runtime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('sends input and marks tail-refresh — no force-head on healthy transport', () => {
+  it('sends input immediately and defers first pending input head refresh off the key event stack', async () => {
     const requestSessionBufferHead = vi.fn();
     const markPendingInputTailRefresh = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const ws = createSocket(WebSocket.OPEN);
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'pwd\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-2' },
+        },
+      },
+      runtimeDebug: vi.fn(),
+      readSessionTransportSocket: () => ws,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn((sessionId, localRevision) => {
+        markPendingInputTailRefresh(sessionId, localRevision);
+        return true;
+      }),
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead,
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession: vi.fn(),
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(markPendingInputTailRefresh).toHaveBeenCalledWith('session-2', 3);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', ws, { force: true });
+  });
+
+  it('coalesces burst input behind the same pending tail-refresh into one deferred head refresh', async () => {
+    const requestSessionBufferHead = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const ws = createSocket(WebSocket.OPEN);
+    let pending = false;
+
+    const send = (data: string) => {
+      sendInputThroughSessionTransport({
+        sessionId: 'session-2',
+        data,
+        refs: {
+          sessionsRef: {
+            current: [
+              { id: 'session-2' } as any,
+            ],
+          },
+          stateRef: {
+            current: { activeSessionId: 'session-2' },
+          },
+        },
+        runtimeDebug: vi.fn(),
+        readSessionTransportSocket: () => ws,
+        isSessionTransportActivityStale: () => false,
+        isReconnectInFlight: () => false,
+        sendSocketPayload,
+        markPendingInputTailRefresh: vi.fn(() => {
+          const first = !pending;
+          pending = true;
+          return first;
+        }),
+        readSessionBufferSnapshot: () => ({ revision: 3 }),
+        requestSessionBufferHead,
+        probeOrReconnectStaleSessionTransport: vi.fn(),
+        hasPendingSessionTransportOpen: () => false,
+        isPendingSessionTransportOpenStale: () => false,
+        shouldReconnectQueuedActiveInput: () => false,
+        reconnectSession: vi.fn(),
+      });
+    };
+
+    send('a');
+    send('b');
+    send('c');
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(3);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+    expect(requestSessionBufferHead).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not force another head request while input tail-refresh is already pending', () => {
+    const requestSessionBufferHead = vi.fn();
+    const markPendingInputTailRefresh = vi.fn(() => false);
     const sendSocketPayload = vi.fn();
     const ws = createSocket(WebSocket.OPEN);
 

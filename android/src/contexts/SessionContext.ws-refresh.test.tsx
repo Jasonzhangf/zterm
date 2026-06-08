@@ -2557,15 +2557,16 @@ describe('SessionContext websocket dynamic refresh', () => {
       .map((item) => JSON.parse(item));
 
     expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(3);
-    // After input-lag fix: sendInput no longer triggers buffer-head-request.
-    // Input only sends; head refresh is owned by the dedicated heartbeat loop.
     expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
     expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
 
-    await new Promise((resolve) => setTimeout(resolve, 180));
+    await waitFor(() => {
+      const delayedMessages = readSentMessages(ws);
+      expect(delayedMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+    });
   });
 
-  it('forces a fresh head request when user input exits reading mode inside the head throttle window', async () => {
+  it('defers the input head request when user input exits reading mode inside the head throttle window', async () => {
     let now = 1000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
@@ -2600,8 +2601,11 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(2);
-      // After input-lag fix: sendInput no longer triggers buffer-head-request, even in reading mode.
       expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
+      await waitFor(() => {
+        const delayedMessages = readSentMessages(ws);
+        expect(delayedMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+      });
     } finally {
       nowSpy.mockRestore();
     }
@@ -2710,7 +2714,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('input sends only input and does not immediately request head (head cascade processed by heartbeat)', async () => {
+  it('input sends upstream immediately and defers head for the first pending tail refresh', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -2748,13 +2752,15 @@ describe('SessionContext websocket dynamic refresh', () => {
       },
     });
 
-    // After input-lag fix: sendInput no longer triggers buffer-head-request.
-    // Input only sends. Head refresh is owned by the dedicated heartbeat loop.
     const sentMessages = ws.sent
       .filter((item): item is string => typeof item === 'string')
       .map((item) => JSON.parse(item));
     expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
     expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(false);
+    await waitFor(() => {
+      const delayedMessages = readSentMessages(ws);
+      expect(delayedMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
   });
 
   it('immediately catches up to a newer head after an older tail pull finishes instead of waiting for the next head tick', async () => {
@@ -2817,14 +2823,10 @@ describe('SessionContext websocket dynamic refresh', () => {
       }),
     });
 
-    // After input-lag fix: sendInput no longer triggers buffer-head-request.
-    // Head refresh is owned by the dedicated heartbeat loop. The cascade from
-    // input -> newer head -> catch-up sync is still tested but without input
-    // directly requesting head.
     await waitFor(() => {
       const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request').length).toBeGreaterThanOrEqual(1);
-      expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBe(0);
+      expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThanOrEqual(1);
     }, { timeout: 220 });
   });
 

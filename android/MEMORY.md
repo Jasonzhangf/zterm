@@ -278,7 +278,7 @@
 ## 2026-06-01 input echo after multi-tab switch
 
 - Verified root cause: successful `sendInput` had been changed to only send the input and wait for lifecycle/heartbeat head refresh. After multi-tab switching this can delay echo because local renderer sees remote output only after a later `buffer-head` -> `buffer-sync` cascade.
-- Durable rule: explicit terminal input must request fresh head truth immediately, but only for the first unresolved input tail refresh; burst keystrokes must coalesce under `pendingInputTailRefresh` until `buffer-sync` clears it.
+- Durable rule: explicit terminal input must send payload synchronously, then request fresh head truth from a coalesced microtask only for the first unresolved input tail refresh; burst keystrokes must coalesce under `pendingInputTailRefresh` until `buffer-sync` clears it.
 
 
 ## 2026-06-01 multi-pane alignment lessons
