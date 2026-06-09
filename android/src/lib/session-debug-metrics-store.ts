@@ -5,6 +5,7 @@ export interface SessionWireStatsSnapshot {
   rxBytes: number;
   renderCommits: number;
   refreshRequests: number;
+  lastRenderCommitAt: number;
 }
 
 interface SessionWireStatsPreviousSnapshot {
@@ -18,6 +19,8 @@ export interface SessionDebugMetricsRefreshInput {
   active: boolean;
   pullStatePurpose: 'tail-refresh' | 'reading-repair' | null;
   bufferPullActive: boolean;
+  transportBufferedBytes?: number;
+  transportBackpressured?: boolean;
 }
 
 const DEFAULT_WIRE_STATS: SessionWireStatsSnapshot = {
@@ -25,6 +28,7 @@ const DEFAULT_WIRE_STATS: SessionWireStatsSnapshot = {
   rxBytes: 0,
   renderCommits: 0,
   refreshRequests: 0,
+  lastRenderCommitAt: 0,
 };
 
 function cloneWireStats(stats: SessionWireStatsSnapshot): SessionWireStatsSnapshot {
@@ -33,6 +37,7 @@ function cloneWireStats(stats: SessionWireStatsSnapshot): SessionWireStatsSnapsh
     rxBytes: stats.rxBytes,
     renderCommits: stats.renderCommits,
     refreshRequests: stats.refreshRequests,
+    lastRenderCommitAt: stats.lastRenderCommitAt,
   };
 }
 
@@ -72,6 +77,9 @@ function sessionDebugMetricsEqual(
       || leftItem.downlinkBps !== rightItem.downlinkBps
       || leftItem.renderHz !== rightItem.renderHz
       || leftItem.pullHz !== rightItem.pullHz
+      || leftItem.transportBufferedBytes !== rightItem.transportBufferedBytes
+      || leftItem.transportBackpressured !== rightItem.transportBackpressured
+      || leftItem.lastRenderCommitAt !== rightItem.lastRenderCommitAt
       || leftItem.bufferPullActive !== rightItem.bufferPullActive
       || leftItem.status !== rightItem.status
       || leftItem.active !== rightItem.active
@@ -110,8 +118,9 @@ export function createSessionDebugMetricsStore() {
     recordRxBytes(sessionId: string, data: string | ArrayBuffer) {
       ensureWireStats(sessionId).rxBytes += this.estimateWireBytes(data);
     },
-    recordRenderCommit(sessionId: string) {
+    recordRenderCommit(sessionId: string, at = Date.now()) {
       ensureWireStats(sessionId).renderCommits += 1;
+      ensureWireStats(sessionId).lastRenderCommitAt = Math.max(0, Math.floor(at || 0));
     },
     recordRefreshRequest(sessionId: string) {
       ensureWireStats(sessionId).refreshRequests += 1;
@@ -143,6 +152,9 @@ export function createSessionDebugMetricsStore() {
           downlinkBps: Math.max(0, Math.round(rxBytesDelta / deltaSeconds)),
           renderHz: Math.max(0, Number((renderDelta / deltaSeconds).toFixed(1))),
           pullHz: Math.max(0, Number((pullDelta / deltaSeconds).toFixed(1))),
+          transportBufferedBytes: Math.max(0, Math.floor(input.transportBufferedBytes || 0)),
+          transportBackpressured: Boolean(input.transportBackpressured),
+          lastRenderCommitAt: current.lastRenderCommitAt,
           bufferPullActive: input.bufferPullActive,
           status: resolveDebugStatus(input.sessionState, input.pullStatePurpose),
           active: input.active,
@@ -172,6 +184,9 @@ export function createSessionDebugMetricsStore() {
           downlinkBps: 0,
           renderHz: 0,
           pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
           bufferPullActive: false,
           status: resolveDebugStatus(sessionState, null),
           active,

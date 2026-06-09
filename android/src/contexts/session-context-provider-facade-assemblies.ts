@@ -39,6 +39,7 @@ export function useSessionProviderFacadeAssemblies(
 ) {
   const {
     sessionDebugMetricsStoreRef,
+    transportRuntimeStoreRef,
     sessionVisibleRangeRef,
     sessionBufferHeadsRef,
     remoteScreenshotRuntimeRef,
@@ -241,6 +242,7 @@ export function useSessionProviderFacadeAssemblies(
       stateRef: options.stateRef,
       scheduleStatesRef: options.scheduleStatesRef,
       sessionDebugMetricsStoreRef,
+      transportRuntimeStoreRef,
       sessionPullStateRef,
       lastActivatedSessionIdRef,
       lastActiveReentryAtRef,

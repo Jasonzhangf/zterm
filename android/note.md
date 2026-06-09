@@ -1,4 +1,11 @@
 # note
+- Jason 2026-06-09 四分屏 FPS/黑屏刷新调查:
+  - 现象: 四分屏下刷新帧率仍低；刷新时会先黑屏再出新画面。
+  - 修复: 状态浮窗在分屏时显示每个 visible pane 的 renderHz/pullHz/downlink，并补 active session 的 transport buffered/backpressure/last render commit age，便于截图判断瓶颈是 transport、pull 还是 render。
+  - 修复: revision reset 期间收到 `startIndex/endIndex` 为空且 `lines=[]` 的低 revision payload 时，不再把已有 local buffer 清成空帧发布给 renderer；保留上一帧，等待后续非空/有范围 buffer-sync 再刷新。
+  - 红测: `session-context-buffer-runtime.test.ts` 锁住空 reset payload 不触发 commit/render；`TerminalPage.render-scope.test.tsx` 锁住四 pane 状态浮窗指标。
+  - 验证: `tsc --noEmit` PASS；四 pane/render/lifecycle 定向 44 tests PASS；`test:terminal:regression` PASS；APK 0.1.3.1765 已发布到 update channel。
+
 - Jason 2026-05-09 multi-pane goal completion audit补口:
   - 现象：completion audit 只剩 `SessionContext.ws-refresh` 一条红测：
     `reissues tail refresh after active tab re-entry even when the stale in-flight request targets the same head window`

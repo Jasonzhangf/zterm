@@ -179,6 +179,9 @@ export interface SessionDebugOverlayMetrics {
   downlinkBps: number;
   renderHz: number;
   pullHz: number;
+  transportBufferedBytes: number;
+  transportBackpressured: boolean;
+  lastRenderCommitAt: number;
   bufferPullActive: boolean;
   status: 'waiting' | 'refreshing' | 'loading' | 'reconnecting' | 'error' | 'closed' | 'connecting';
   active: boolean;

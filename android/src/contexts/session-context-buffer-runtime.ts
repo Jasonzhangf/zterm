@@ -620,6 +620,27 @@ export function applyIncomingBufferSyncRuntime(options: {
     && Math.max(0, Math.floor(options.payload.revision || 0)) <= Math.max(0, Math.floor(localBuffer.revision || 0))
       ? options.payload
       : null;
+  if (
+    revisionResetExpectation
+    && lowerRevisionPayload
+    && localBuffer.lines.length > 0
+    && lowerRevisionPayload.lines.length === 0
+    && Math.max(0, Math.floor(lowerRevisionPayload.endIndex || 0)) <= Math.max(0, Math.floor(lowerRevisionPayload.startIndex || 0))
+  ) {
+    options.runtimeDebug('session.buffer.revision-reset.wait-for-nonempty-payload', {
+      sessionId: options.sessionId,
+      expectation: revisionResetExpectation,
+      localRevision: localBuffer.revision,
+      localStartIndex: localBuffer.startIndex,
+      localEndIndex: localBuffer.endIndex,
+      localLineCount: localBuffer.lines.length,
+      incomingRevision: lowerRevisionPayload.revision,
+      incomingStartIndex: lowerRevisionPayload.startIndex,
+      incomingEndIndex: lowerRevisionPayload.endIndex,
+      incomingLineCount: lowerRevisionPayload.lines.length,
+    });
+    return;
+  }
 
   let nextBuffer = (
     revisionResetExpectation && lowerRevisionPayload

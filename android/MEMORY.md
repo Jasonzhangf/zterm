@@ -8,6 +8,7 @@
 
 ## Key Decisions
 
+- [2026-06-09] client buffer 在 revision reset / 窗口失真期间不得发布空中间帧清空已有画面；若收到低 revision 且 `startIndex/endIndex` 为空、`lines=[]` 的 payload，只能记录等待，保留上一帧，直到非空或有明确范围的 `buffer-sync` 再提交 renderer，避免“先黑屏再刷新”。
 - [2026-05-02] terminal 四层模型再次冻结：daemon 只管 `tmux -> mirror truth`；renderer 是 visible range 唯一真相；buffer manager 只管 local sparse buffer / gap repair，不持有 `follow / reading / renderBottomIndex`；gap 必须先空白占位，再按行/区间 patch 重刷
 - [2026-05-02] terminal transport 也再次冻结：transport 必须长期复用长链接；同一 `bridge target` 只允许一个 control transport，同一 `clientSessionId` 只允许一个稳定 per-session transport；foreground/background/tab switch 只影响取数，不得 fresh recreate transport
 

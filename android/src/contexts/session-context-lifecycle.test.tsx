@@ -107,6 +107,7 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+          transportRuntimeStoreRef: { current: { sessions: new Map() } },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },

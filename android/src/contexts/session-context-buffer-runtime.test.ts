@@ -341,6 +341,65 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('does not publish an empty reset frame over an existing render buffer while waiting for fresh sync payload', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const runtimeDebug = vi.fn();
+    const sessionRevisionResetRef = {
+      current: new Map([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 0,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef,
+        sessionBufferHeadsRef: { current: new Map() },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        sessionVisibleRangeRef: { current: new Map() },
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(sessionRevisionResetRef.current.has(sessionId)).toBe(true);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.revision-reset.wait-for-nonempty-payload',
+      expect.objectContaining({
+        sessionId,
+        localRevision: 1,
+        incomingRevision: 1,
+        localLineCount: 1,
+      }),
+    );
+  });
+
   it('rejects buffer-head request when caller passes a stale superseded socket override', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);

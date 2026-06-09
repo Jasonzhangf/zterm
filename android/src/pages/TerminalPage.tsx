@@ -399,6 +399,7 @@ function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   visible,
   session,
+  visiblePaneSessions,
   sessionViewportModeStore,
   getSessionDebugMetrics,
   debugOverlayPos,
@@ -419,6 +420,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
 }: {
   visible: boolean;
   session: Session | null;
+  visiblePaneSessions?: Session[];
   sessionViewportModeStore: SessionViewportModeStore;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
   debugOverlayPos: { x: number; y: number };
@@ -465,14 +467,22 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   const metrics = getSessionDebugMetrics ? (getSessionDebugMetrics(session.id) || undefined) : undefined;
   const status = resolveDebugStatus(session, metrics);
   const viewportMode = viewportModeSnapshot.mode;
+  const paneSessions = (visiblePaneSessions && visiblePaneSessions.length > 0)
+    ? visiblePaneSessions
+    : [session];
+  const paneMetrics = paneSessions.map((paneSession, index) => ({
+    session: paneSession,
+    index,
+    metrics: getSessionDebugMetrics ? (getSessionDebugMetrics(paneSession.id) || undefined) : undefined,
+  }));
   const overlayStyle: React.CSSProperties = {
     position: 'absolute',
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : '10px',
     left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
     right: debugOverlayPos.x >= 0 ? undefined : '10px',
     zIndex: 12,
-    minWidth: '88px',
-    maxWidth: '96px',
+    minWidth: paneMetrics.length > 1 ? '156px' : '88px',
+    maxWidth: paneMetrics.length > 1 ? '176px' : '96px',
     padding: '5px 6px',
     borderRadius: '10px',
     border: `1.5px solid ${metrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(83, 139, 255, 0.6)'}`,
@@ -575,6 +585,47 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>P</span>
         <span>{formatDebugHz(metrics?.pullHz || 0)}</span>
+      </div>
+      {paneMetrics.length > 1 ? (
+        <div
+          data-testid="terminal-debug-pane-metrics"
+          style={{
+            marginTop: '3px',
+            paddingTop: '3px',
+            borderTop: '1px solid rgba(255,255,255,0.10)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+        >
+          {paneMetrics.map(({ session: paneSession, index, metrics: paneMetric }) => (
+            <div
+              key={paneSession.id}
+              data-testid={`terminal-debug-pane-metric-${paneSession.id}`}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '14px 1fr 1fr 1fr',
+                columnGap: '3px',
+                color: paneMetric?.transportBackpressured ? '#fca5a5' : 'rgba(231, 238, 252, 0.78)',
+              }}
+            >
+              <span>{index + 1}</span>
+              <span>{formatDebugHz(paneMetric?.renderHz || 0)}</span>
+              <span>{formatDebugHz(paneMetric?.pullHz || 0)}</span>
+              <span>{formatDebugRate(paneMetric?.downlinkBps || 0)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>BUF</span>
+        <span style={{ color: metrics?.transportBackpressured ? '#fca5a5' : '#93c5fd' }}>
+          {formatDebugBytes(metrics?.transportBufferedBytes || 0)}
+        </span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>LC</span>
+        <span>{metrics?.lastRenderCommitAt ? Math.max(0, Math.round((Date.now() - metrics.lastRenderCommitAt) / 1000)) : '-'}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '2px' }}>
         <span>KB</span>
@@ -983,6 +1034,17 @@ function formatDebugRate(bytesPerSecond: number) {
     return `${(safeValue / 1024).toFixed(1)} KB/s`;
   }
   return `${Math.round(safeValue)} B/s`;
+}
+
+function formatDebugBytes(bytes: number) {
+  const safeValue = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
+  if (safeValue >= 1024 * 1024) {
+    return `${(safeValue / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (safeValue >= 1024) {
+    return `${(safeValue / 1024).toFixed(1)} KB`;
+  }
+  return `${Math.round(safeValue)} B`;
 }
 
 function formatDebugHz(value: number) {
@@ -2534,6 +2596,7 @@ function TerminalPageComponent({
         <TerminalDebugOverlay
           visible={debugOverlayVisible}
           session={interactiveSession}
+          visiblePaneSessions={renderedPaneSessions}
           sessionViewportModeStore={sessionViewportModeStoreRef.current}
           getSessionDebugMetrics={getSessionDebugMetrics}
           debugOverlayPos={debugOverlayPos}

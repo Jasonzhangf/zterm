@@ -24,6 +24,9 @@ describe('session-debug-metrics-store', () => {
       downlinkBps: 8,
       renderHz: 1,
       pullHz: 1,
+      transportBufferedBytes: 0,
+      transportBackpressured: false,
+      lastRenderCommitAt: expect.any(Number),
       bufferPullActive: true,
       status: 'refreshing',
       active: true,
@@ -37,6 +40,9 @@ describe('session-debug-metrics-store', () => {
       downlinkBps: 0,
       renderHz: 0,
       pullHz: 0,
+      transportBufferedBytes: 0,
+      transportBackpressured: false,
+      lastRenderCommitAt: 0,
       bufferPullActive: false,
       status: 'connecting',
       active: false,
@@ -57,5 +63,28 @@ describe('session-debug-metrics-store', () => {
     ], 1000);
 
     expect(store.getMetrics('s1', 'connected', true, 2000)?.active).toBe(true);
+  });
+
+  it('keeps transport buffered/backpressure and last render commit visible for pane diagnostics', () => {
+    const store = createSessionDebugMetricsStore();
+    store.recordRenderCommit('s1', 1500);
+
+    const metrics = store.refresh([
+      {
+        sessionId: 's1',
+        sessionState: 'connected',
+        active: true,
+        pullStatePurpose: null,
+        bufferPullActive: false,
+        transportBufferedBytes: 256 * 1024,
+        transportBackpressured: true,
+      },
+    ], 2000);
+
+    expect(metrics.s1).toMatchObject({
+      transportBufferedBytes: 256 * 1024,
+      transportBackpressured: true,
+      lastRenderCommitAt: 1500,
+    });
   });
 });

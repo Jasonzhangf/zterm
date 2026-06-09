@@ -11,6 +11,8 @@ interface SessionDebugMetricsStoreLike {
       active: boolean;
       pullStatePurpose: 'tail-refresh' | 'reading-repair' | null;
       bufferPullActive: boolean;
+      transportBufferedBytes?: number;
+      transportBackpressured?: boolean;
     }>,
     now: number,
   ) => Record<string, SessionDebugOverlayMetrics | undefined>;
@@ -64,6 +66,7 @@ export function useSessionContextLifecycle(options: {
     stateRef: { current: SessionManagerState };
     scheduleStatesRef: { current: Record<string, SessionScheduleState> };
     sessionDebugMetricsStoreRef: { current: SessionDebugMetricsStoreLike };
+    transportRuntimeStoreRef: { current: { sessions: Map<string, { activeSocket?: { bufferedAmount?: number } | null }> } };
     sessionPullStateRef: { current: Map<string, unknown> };
     lastActivatedSessionIdRef: { current: string | null };
     lastActiveReentryAtRef: { current: Map<string, number> };
@@ -136,12 +139,18 @@ export function useSessionContextLifecycle(options: {
         options.refs.stateRef.current.sessions.map((session) => {
           const pullStates = options.refs.sessionPullStateRef.current.get(session.id) || null;
           const pullState = getPrimarySessionPullState(pullStates as any);
+          const activeSocket = options.refs.transportRuntimeStoreRef.current.sessions.get(session.id)?.activeSocket || null;
+          const transportBufferedBytes = Number.isFinite(activeSocket?.bufferedAmount)
+            ? Math.max(0, Math.floor(activeSocket?.bufferedAmount || 0))
+            : 0;
           return {
             sessionId: session.id,
             sessionState: session.state,
             active: options.refs.stateRef.current.activeSessionId === session.id,
             pullStatePurpose: pullState?.purpose || null,
             bufferPullActive: hasActiveSessionPullState((pullStates as any) || null),
+            transportBufferedBytes,
+            transportBackpressured: transportBufferedBytes >= 128 * 1024,
           };
         }),
         now,

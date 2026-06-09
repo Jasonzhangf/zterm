@@ -184,6 +184,9 @@ function makeDebugMetrics(active: boolean) {
     downlinkBps: 0,
     renderHz: 0,
     pullHz: 0,
+    transportBufferedBytes: 0,
+    transportBackpressured: false,
+    lastRenderCommitAt: 0,
     bufferPullActive: false,
     status: 'waiting' as const,
     active,
@@ -470,6 +473,56 @@ describe('TerminalPage renderer scope', () => {
 
     expect(screen.queryByText('渲染')).toBeNull();
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
+  });
+
+  it('shows per-visible-pane performance metrics in split debug overlay', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.25, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.25, activeTabId: 'tab-s2', tabs: [{ id: 'tab-s2', sessionId: 's2' }] },
+        { id: 'pane-3', size: 0.25, activeTabId: 'tab-s3', tabs: [{ id: 'tab-s3', sessionId: 's3' }] },
+        { id: 'pane-4', size: 0.25, activeTabId: 'tab-s4', tabs: [{ id: 'tab-s4', sessionId: 's4' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    const sessions = ['s1', 's2', 's3', 's4'].map(makeSession);
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        getSessionDebugMetrics={(sessionId) => ({
+          ...makeDebugMetrics(sessionId === 's1'),
+          downlinkBps: sessionId === 's3' ? 4096 : 1024,
+          renderHz: sessionId === 's2' ? 7.5 : 15,
+          pullHz: sessionId === 's4' ? 2.5 : 10,
+          transportBufferedBytes: sessionId === 's4' ? 256 * 1024 : 0,
+          transportBackpressured: sessionId === 's4',
+          lastRenderCommitAt: 1000,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+
+    expect(screen.getByTestId('terminal-debug-pane-metrics')).not.toBeNull();
+    expect(screen.getByTestId('terminal-debug-pane-metric-s1').textContent).toContain('15.0 Hz');
+    expect(screen.getByTestId('terminal-debug-pane-metric-s2').textContent).toContain('7.5 Hz');
+    expect(screen.getByTestId('terminal-debug-pane-metric-s3').textContent).toContain('4.0 KB/s');
+    expect(screen.getByTestId('terminal-debug-pane-metric-s4').textContent).toContain('2.5 Hz');
   });
 
   it('toggles absolute line numbers independently from the 行号 quickbar button', () => {

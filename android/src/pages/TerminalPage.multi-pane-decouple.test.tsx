@@ -105,6 +105,7 @@ function s(id: string, title = id): Session {
 const base = {
   getSessionDebugMetrics: (): SessionDebugOverlayMetrics => ({
     uplinkBps: 0, downlinkBps: 0, renderHz: 0, pullHz: 0,
+    transportBufferedBytes: 0, transportBackpressured: false, lastRenderCommitAt: 0,
     bufferPullActive: false, status: 'waiting', active: false, updatedAt: 1,
   }),
   onSwitchSession: vi.fn(),
