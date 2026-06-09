@@ -5,14 +5,20 @@ import {
   readPersistedOpenTabsState,
   readPersistedClosedTabReuseKeys,
   persistClosedTabReuseKeys,
+  resolveHostForPersistedOpenTab,
 } from '../lib/open-tab-persistence';
 import {
   deriveCloseOpenTabIntent,
+  materializeOpenTabRuntimeSessions,
   normalizeOpenTabIntentState,
   openTabIntentStatesEqual,
 } from '../lib/open-tab-intent';
+import {
+  buildOpenTabSessionCreateOptions,
+} from '../lib/open-tab-open-policy';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
 import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib/page-state';
+import { runtimeDebug } from '../lib/runtime-debug';
 import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from '../lib/types';
@@ -83,6 +89,7 @@ export interface OpenTabRuntimeRefs {
   }>;
   closedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   closedOpenTabReuseKeysRef: MutableRefObject<Set<string>>;
+  pendingMaterializedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   terminalActiveSessionIdRef: MutableRefObject<string | null>;
   ensureTerminalPageVisibleRef: MutableRefObject<() => void>;
   renameSessionRef: MutableRefObject<(sessionId: string, name: string) => void>;
@@ -141,6 +148,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   const hasPersistedOpenTabsTruthRef = useRef(persistedOpenTabsBootstrapRef.current.hasStoredValue);
   const closedOpenTabSessionIdsRef = useRef(new Set<string>());
   const closedOpenTabReuseKeysRef = useRef(readPersistedClosedTabReuseKeys());
+  const pendingMaterializedOpenTabSessionIdsRef = useRef(new Set<string>());
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(sessions);
@@ -174,10 +182,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     if (openTabState.tabs.length === 0) {
       return [] as Session[];
     }
-    const runtimeSessionsById = new Map(sessions.map((session) => [session.id, session]));
-    return openTabState.tabs
-      .map((tab) => runtimeSessionsById.get(tab.sessionId) || null)
-      .filter((session): session is Session => session !== null);
+    return materializeOpenTabRuntimeSessions(openTabState.tabs, sessions);
   }, [openTabState.tabs, sessions]);
 
   const terminalActiveSession = useMemo(() => {
@@ -221,13 +226,41 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     if (!nextActiveSessionId) {
       return;
     }
+    if (
+      switchReason === 'explicit-resume'
+      && !sessionsRef.current.some((session) => session.id === nextActiveSessionId)
+      && !pendingMaterializedOpenTabSessionIdsRef.current.has(nextActiveSessionId)
+    ) {
+      const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === nextActiveSessionId) || null;
+      if (tab) {
+        runtimeDebug('app.open-tabs.materialize-explicit-resume', {
+          sessionId: nextActiveSessionId,
+          bridgeHost: tab.bridgeHost,
+          bridgePort: tab.bridgePort,
+          daemonHostId: tab.daemonHostId || null,
+          sessionName: tab.sessionName,
+        });
+        createSession(
+          resolveHostForPersistedOpenTab({
+            tab,
+            hosts: hostsRef.current,
+          }),
+          buildOpenTabSessionCreateOptions('explicit-open', {
+            customName: tab.customName,
+            createdAt: tab.createdAt,
+            sessionId: tab.sessionId,
+          }),
+        );
+        pendingMaterializedOpenTabSessionIdsRef.current.add(nextActiveSessionId);
+      }
+    }
     if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
       switchSession(nextActiveSessionId);
     }
     if (switchReason === 'explicit-resume') {
       resumeActiveSessionTransport(nextActiveSessionId);
     }
-  }, [resumeActiveSessionTransport, switchSession]);
+  }, [createSession, resumeActiveSessionTransport, switchSession]);
 
   const persistAndSwitchExplicitOpenTabs = useCallback((
     tabs: PersistedOpenTab[],
@@ -322,6 +355,9 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     bridgeSettingsRef.current = bridgeSettings;
     hostsRef.current = hosts;
     terminalActiveSessionIdRef.current = terminalActiveSession?.id || null;
+    sessions.forEach((session) => {
+      pendingMaterializedOpenTabSessionIdsRef.current.delete(session.id);
+    });
   }, [
     bridgeSettings,
     hosts,
@@ -398,6 +434,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     hasPersistedOpenTabsTruthRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     applyOpenTabState,
     createSession,
   });
@@ -452,6 +489,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     openTabStateRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     terminalActiveSessionIdRef,
     ensureTerminalPageVisibleRef,
     renameSessionRef,

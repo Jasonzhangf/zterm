@@ -106,6 +106,13 @@ describe('open-tab / history / connections truth gates', () => {
     expect(openTabRuntimeSource).not.toContain('useOpenTabRemoteAudit');
   });
 
+  it('keeps terminal tab chrome materialized from OPEN_TABS instead of filtering by live runtime sessions', () => {
+    const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
+
+    expect(openTabRuntimeSource).toContain('materializeOpenTabRuntimeSessions(openTabState.tabs, sessions)');
+    expect(openTabRuntimeSource).not.toContain(".filter((session): session is Session => session !== null)");
+  });
+
   it('keeps runtime tab switching owned by applyOpenTabState instead of exposing extra switch/persist refs to child hooks', () => {
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
     const openTabSessionActionsSource = readSource('hooks/useOpenTabSessionActions.ts');

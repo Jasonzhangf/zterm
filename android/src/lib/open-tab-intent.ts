@@ -106,6 +106,48 @@ export function buildBootstrapOpenTabIntentStateFromSessions(
   return normalizeOpenTabIntentState(tabs, runtimeActiveSessionId);
 }
 
+export function materializeOpenTabRuntimeSessions(
+  tabs: PersistedOpenTab[],
+  runtimeSessions: Session[],
+): Session[] {
+  const runtimeSessionsById = new Map(runtimeSessions.map((session) => [session.id, session]));
+  return tabs.map((tab) => runtimeSessionsById.get(tab.sessionId) || {
+    id: tab.sessionId,
+    hostId: tab.hostId,
+    connectionName: tab.connectionName,
+    bridgeHost: tab.bridgeHost,
+    bridgePort: tab.bridgePort,
+    daemonHostId: tab.daemonHostId,
+    sessionName: tab.sessionName,
+    authToken: tab.authToken,
+    autoCommand: tab.autoCommand,
+    title: tab.customName?.trim() || tab.sessionName,
+    ws: null,
+    state: 'closed',
+    hasUnread: false,
+    customName: tab.customName,
+    buffer: {
+      lines: [],
+      gapRanges: [],
+      startIndex: 0,
+      endIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      cursor: null,
+      updateKind: 'replace',
+      revision: 0,
+    },
+    daemonHeadRevision: 0,
+    daemonHeadEndIndex: 0,
+    reconnectAttempt: 0,
+    createdAt: tab.createdAt,
+    lastError: 'Runtime transport is closed; explicit resume is required.',
+  });
+}
+
 export function deriveRuntimeOpenTabSyncDecision(options: {
   currentState: OpenTabIntentState;
   runtimeSessions: Array<Pick<

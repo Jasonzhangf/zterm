@@ -8,6 +8,7 @@ import {
   deriveCloseOpenTabIntent,
   derivePersistedOpenTabRestorePlan,
   deriveRuntimeOpenTabSyncDecision,
+  materializeOpenTabRuntimeSessions,
   mergeRuntimeSessionsIntoOpenTabIntentState,
   moveOpenTabIntentSession,
   normalizeOpenTabIntentState,
@@ -336,6 +337,38 @@ describe('open-tab intent truth', () => {
       expect.objectContaining({ sessionId: 's2' }),
     ]);
     expect(state.activeSessionId).toBe('s2');
+  });
+
+  it('materializes explicit open tabs from persisted truth when runtime transport disappeared', () => {
+    const sessions = materializeOpenTabRuntimeSessions([
+      makeTab('rcc-tab', {
+        connectionName: 'Mac',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+        customName: 'rcc',
+      }),
+      makeTab('zterm-tab', {
+        sessionName: 'zterm',
+      }),
+    ], [
+      makeSession('zterm-tab', { state: 'connected', sessionName: 'zterm' }),
+    ]);
+
+    expect(sessions.map((session) => session.id)).toEqual(['rcc-tab', 'zterm-tab']);
+    expect(sessions[0]).toEqual(expect.objectContaining({
+      id: 'rcc-tab',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'rcc',
+      title: 'rcc',
+      state: 'closed',
+      ws: null,
+    }));
+    expect(sessions[1]).toEqual(expect.objectContaining({
+      id: 'zterm-tab',
+      state: 'connected',
+    }));
   });
 
   it('closes active tab and falls through to next persisted/runtime candidate', () => {

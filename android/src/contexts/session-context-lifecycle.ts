@@ -27,6 +27,16 @@ export function collectNewlyVisibleLiveSessionIds(previousIds: string[], nextIds
   return nextIds.filter((sessionId) => Boolean(sessionId) && !previousSet.has(sessionId));
 }
 
+export function collectNewlyMaterializedLiveSessionIds(
+  previousRuntimeSessionIds: string[],
+  nextRuntimeSessionIds: string[],
+  liveSessionIds: string[],
+) {
+  const previousSet = new Set(previousRuntimeSessionIds.filter(Boolean));
+  const liveSet = new Set(liveSessionIds.filter(Boolean));
+  return nextRuntimeSessionIds.filter((sessionId) => liveSet.has(sessionId) && !previousSet.has(sessionId));
+}
+
 export function buildLifecycleRefreshTargets(state: Pick<SessionManagerState, 'activeSessionId' | 'liveSessionIds'>) {
   return Array.from(new Set([
     ...(state.activeSessionId ? [state.activeSessionId] : []),
@@ -94,7 +104,8 @@ export function useSessionContextLifecycle(options: {
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
 }) {
   const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
-  const lastLiveSessionIdsRef = useRef<string[]>(options.state.liveSessionIds);
+  const lastLiveSessionIdsRef = useRef<string[]>([]);
+  const lastRuntimeSessionIdsRef = useRef<string[]>([]);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
 
   useEffect(() => {
@@ -182,8 +193,21 @@ export function useSessionContextLifecycle(options: {
       ? options.state.liveSessionIds
       : [];
     const previousLiveSessionIds = lastLiveSessionIdsRef.current;
+    const previousRuntimeSessionIds = lastRuntimeSessionIdsRef.current;
+    const nextRuntimeSessionIds = options.state.sessions.map((session) => session.id);
+    const nextRuntimeSessionIdsSet = new Set(nextRuntimeSessionIds);
     lastLiveSessionIdsRef.current = nextLiveSessionIds;
-    collectNewlyVisibleLiveSessionIds(previousLiveSessionIds, nextLiveSessionIds).forEach((sessionId) => {
+    lastRuntimeSessionIdsRef.current = nextRuntimeSessionIds;
+    const refreshTargets = Array.from(new Set([
+      ...collectNewlyVisibleLiveSessionIds(previousLiveSessionIds, nextLiveSessionIds)
+        .filter((sessionId) => nextRuntimeSessionIdsSet.has(sessionId)),
+      ...collectNewlyMaterializedLiveSessionIds(
+        previousRuntimeSessionIds,
+        nextRuntimeSessionIds,
+        nextLiveSessionIds,
+      ),
+    ]));
+    refreshTargets.forEach((sessionId) => {
       if (sessionId === options.state.activeSessionId) {
         return;
       }
@@ -194,7 +218,7 @@ export function useSessionContextLifecycle(options: {
         allowReconnectIfUnavailable: true,
       });
     });
-  }, [options.ensureActiveSessionFresh, options.state.liveSessionIds]);
+  }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

@@ -1024,13 +1024,30 @@ class DaemonProbe {
     throw new Error(`timeout waiting for payload history: ${label}`);
   }
 
+  private historyText() {
+    const rows = Math.max(1, this.lastPayload?.rows || LAB_ROWS);
+    const cols = Math.max(1, this.lastPayload?.cols || LAB_COLS);
+    const buffer = replayBufferSyncHistory({
+      history: this.payloadHistory,
+      rows,
+      cols,
+      cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+    });
+    const renderWindow = deriveRenderRows({
+      lines: buffer.lines,
+      startIndex: buffer.startIndex,
+      viewportEndIndex: buffer.bufferTailEndIndex,
+      viewportRows: rows,
+    });
+    return renderWindow.rows.map((entry) => cellsToLine(entry.row)).join('\n');
+  }
+
   async waitForMarker(marker: string, timeoutMs: number = WAIT_TIMEOUT_MS) {
-    return this.waitForPayload(`marker ${marker}`, (payload) => {
-      const joined = normalizeWireLines(payload.lines, payload.cols || LAB_COLS)
-        .map((line) => cellsToText(line.cells))
-        .join('\n');
-      return joined.includes(marker);
-    }, timeoutMs);
+    return this.waitForHistory(
+      `marker ${marker}`,
+      () => this.historyText().includes(marker),
+      timeoutMs,
+    );
   }
 
   sendMessage(message: ClientMessage) {

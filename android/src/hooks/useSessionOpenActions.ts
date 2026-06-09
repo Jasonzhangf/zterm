@@ -129,6 +129,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     openTabStateRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     terminalActiveSessionIdRef,
     ensureTerminalPageVisibleRef,
     renameSessionRef,
@@ -182,6 +183,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       activate: false,
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
     });
+    pendingMaterializedOpenTabSessionIdsRef.current.add(sessionId);
     closedOpenTabSessionIdsRef.current.delete(sessionId);
     const deletedAnyReuseKey = clearClosedTabReuseKeysForOwner(closedOpenTabReuseKeysRef.current, {
       daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
@@ -225,6 +227,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     createSession,
     ensureTerminalPageVisible,
     openTabStateRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     applyOpenTabState,
     rememberBridgeTarget,
     runtimeActiveSessionId,

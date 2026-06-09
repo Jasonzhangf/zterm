@@ -4,6 +4,7 @@ import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildLifecycleRefreshTargets,
+  collectNewlyMaterializedLiveSessionIds,
   collectNewlyVisibleLiveSessionIds,
   shouldScheduleActiveTickRefresh,
   useSessionContextLifecycle,
@@ -81,6 +82,23 @@ describe('session-context-lifecycle', () => {
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
+  });
+
+  it('treats the first live pane id snapshot as newly visible so split cold start opens non-active panes', () => {
+    expect(collectNewlyVisibleLiveSessionIds([], ['s1', 's2'])).toEqual(['s1', 's2']);
+  });
+
+  it('treats later runtime shell materialization as a live pane resume target', () => {
+    expect(collectNewlyMaterializedLiveSessionIds(
+      ['s1'],
+      ['s1', 's2'],
+      ['s1', 's2'],
+    )).toEqual(['s2']);
+    expect(collectNewlyMaterializedLiveSessionIds(
+      ['s1'],
+      ['s1', 's2'],
+      ['s1'],
+    )).toEqual([]);
   });
 
   it('triggers active-resume refresh exactly once when app foreground truth flips back to active', async () => {

@@ -21,6 +21,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const openTabStateRef = createRef(normalizeOpenTabIntentState([], null));
   const closedOpenTabSessionIdsRef = createRef(new Set<string>());
   const closedOpenTabReuseKeysRef = createRef(new Set<string>());
+  const pendingMaterializedOpenTabSessionIdsRef = createRef(new Set<string>());
   const setBridgeSettings = vi.fn();
   const createSession = vi.fn((host: any, options?: any) => (
     options?.sessionId || `runtime:${host.daemonHostId || host.relayHostId || host.bridgeHost}:${host.sessionName}`
@@ -52,6 +53,7 @@ function createOptions(overrides: Partial<any> = {}) {
     openTabStateRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     terminalActiveSessionIdRef: createRef<string | null>(overrides.runtimeActiveSessionId ?? null),
     ensureTerminalPageVisibleRef: createRef(ensureTerminalPageVisible),
     renameSessionRef: createRef(vi.fn()),
@@ -90,6 +92,7 @@ function createOptions(overrides: Partial<any> = {}) {
       openTabStateRef,
       closedOpenTabSessionIdsRef,
       closedOpenTabReuseKeysRef,
+      pendingMaterializedOpenTabSessionIdsRef,
     },
     spies: {
       setBridgeSettings,

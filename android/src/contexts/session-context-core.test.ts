@@ -98,4 +98,14 @@ describe('reduceSessionAction no-op short circuit', () => {
     expect(next.liveSessionIds).toEqual(['s1']);
     expect(next.sessions.map((session) => session.id)).toEqual(['s1', 's2']);
   });
+
+  it('keeps live pane ids even when runtime shells have not materialized yet', () => {
+    const state = buildState();
+    const next = reduceSessionAction(state, {
+      type: 'SET_LIVE_SESSIONS',
+      ids: ['s1', 'missing-runtime-shell'],
+    });
+    expect(next.liveSessionIds).toEqual(['s1', 'missing-runtime-shell']);
+    expect(next.liveSessionIdsExplicit).toBe(true);
+  });
 });

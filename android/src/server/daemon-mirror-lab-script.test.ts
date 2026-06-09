@@ -67,6 +67,18 @@ describe('daemon mirror lab isolation gate', () => {
     expect(waitForOraclePayloadBlock).not.toContain('return probe.waitForPayload(');
   });
 
+  it('waits for markers in replayed client mirror history instead of only the latest sparse payload', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
+    const waitForMarkerBlock = script.slice(
+      script.indexOf('async waitForMarker('),
+      script.indexOf('sendMessage(message: ClientMessage)'),
+    );
+    expect(script).toContain('private historyText()');
+    expect(waitForMarkerBlock).toContain('return this.waitForHistory(');
+    expect(waitForMarkerBlock).toContain('() => this.historyText().includes(marker)');
+    expect(waitForMarkerBlock).not.toContain('normalizeWireLines(payload.lines');
+  });
+
   it('waits for top/vim exit payloads to settle to tmux truth after alternate-screen returns to shell', () => {
     const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
     expect(script).toContain("'top enter settled payload'");

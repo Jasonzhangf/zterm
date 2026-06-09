@@ -57,6 +57,7 @@ interface UseOpenTabRestoreRuntimeSyncOptions {
   hasPersistedOpenTabsTruthRef: MutableRefObject<boolean>;
   closedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   closedOpenTabReuseKeysRef: MutableRefObject<Set<string>>;
+  pendingMaterializedOpenTabSessionIdsRef: MutableRefObject<Set<string>>;
   applyOpenTabState: ApplyOpenTabStateFn;
 }
 
@@ -74,6 +75,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     hasPersistedOpenTabsTruthRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     applyOpenTabState,
   } = options;
 
@@ -212,6 +214,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           typeof createdSessionId === 'string' && createdSessionId.trim().length > 0
             ? createdSessionId
             : tab.sessionId;
+        pendingMaterializedOpenTabSessionIdsRef.current.add(restoredSessionId);
         restoredRuntimeTabs.push(
           restoredSessionId === tab.sessionId
             ? tab
@@ -261,6 +264,7 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     hasPersistedOpenTabsTruthRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
+    pendingMaterializedOpenTabSessionIdsRef,
     createSession,
   ]);
 }

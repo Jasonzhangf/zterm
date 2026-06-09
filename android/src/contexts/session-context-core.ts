@@ -131,7 +131,7 @@ export function reduceSessionAction(state: SessionManagerState, action: SessionA
     }
     case 'SET_LIVE_SESSIONS': {
       const normalizedIds = Array.from(new Set(action.ids.filter((id) => typeof id === 'string' && id.trim().length > 0)));
-      const liveSessionIds = normalizedIds.filter((id) => state.sessions.some((session) => session.id === id));
+      const liveSessionIds = normalizedIds;
       if (
         liveSessionIds.length === state.liveSessionIds.length
         && liveSessionIds.every((id, index) => state.liveSessionIds[index] === id)

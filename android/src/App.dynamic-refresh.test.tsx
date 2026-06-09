@@ -3240,6 +3240,141 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.closeSession).not.toHaveBeenCalled();
   });
 
+  it('keeps an explicit rcc tab visible when transport close removes it from runtime sessions', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'rcc-tab',
+        hostId: 'host-rcc',
+        connectionName: 'Mac',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+        authToken: 'token-rcc',
+        customName: 'rcc',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'zterm-tab',
+        hostId: 'host-zterm',
+        connectionName: 'Mac',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-zterm',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'rcc-tab');
+    sessionHarness.update(
+      {
+        sessions: [
+          makeSession('rcc-tab', 1),
+          makeSession('zterm-tab', 2),
+        ],
+        activeSessionId: 'rcc-tab',
+        connectedCount: 2,
+      } as any,
+      makeSession('rcc-tab', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('rcc-tab,zterm-tab'));
+
+    sessionHarness.update(
+      {
+        sessions: [makeSession('zterm-tab', 2)],
+        activeSessionId: 'zterm-tab',
+        connectedCount: 1,
+      } as any,
+      makeSession('zterm-tab', 2),
+    );
+    fetchTmuxSessionsMock.mockClear();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('zterm:session-status', {
+        detail: { sessionId: 'rcc-tab', type: 'closed', message: 'socket closed' },
+      }));
+      view.rerender(
+        <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('rcc-tab,zterm-tab'));
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('rcc-tab');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'rcc-tab', sessionName: 'rcc' }),
+      expect.objectContaining({ sessionId: 'zterm-tab', sessionName: 'zterm' }),
+    ]);
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
+    expect(sessionHarness.switchSession).not.toHaveBeenCalledWith('zterm-tab');
+  });
+
+  it('materializes a missing runtime shell when the user explicitly resumes a kept open tab', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'zterm-tab',
+        hostId: 'host-zterm',
+        connectionName: 'Mac',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-zterm',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'rcc-tab',
+        hostId: 'host-rcc',
+        connectionName: 'Mac',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+        authToken: 'token-rcc',
+        customName: 'rcc',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'zterm-tab');
+    sessionHarness.update(
+      {
+        sessions: [makeSession('zterm-tab', 2)],
+        activeSessionId: 'zterm-tab',
+        connectedCount: 1,
+      } as any,
+      makeSession('zterm-tab', 2),
+    );
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('zterm-tab,rcc-tab'));
+    sessionHarness.createSession.mockClear();
+    sessionHarness.resumeActiveSessionTransport.mockClear();
+
+    fireEvent.click(screen.getByTestId('switch-second-tab'));
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+        authToken: 'token-rcc',
+      }),
+      expect.objectContaining({
+        activate: false,
+        connect: true,
+        sessionId: 'rcc-tab',
+        customName: 'rcc',
+      }),
+    ));
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('rcc-tab');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('rcc-tab');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('rcc-tab');
+  });
+
   it('keeps a session-status closed tab open when remote audit reports its tmux session missing', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {

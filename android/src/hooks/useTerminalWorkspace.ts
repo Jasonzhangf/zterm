@@ -64,11 +64,12 @@ function syncWorkspaceWithSessions(
   sessions: Session[],
   activeSessionId: string | null,
 ): AndroidWorkspaceState {
-  if (sessions.length === 0) {
+  const openTabSessionIds = sessions.map((session) => session.id);
+  if (openTabSessionIds.length === 0) {
     return readPersistedWorkspace([], activeSessionId);
   }
 
-  const sessionIds = new Set(sessions.map((session) => session.id));
+  const sessionIds = new Set(openTabSessionIds);
   let next = cloneWorkspaceState(current);
 
   next.panes = next.panes
@@ -99,9 +100,7 @@ function syncWorkspaceWithSessions(
   const existingSessionIds = new Set(
     next.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId)),
   );
-  const missingSessionIds = sessions
-    .map((session) => session.id)
-    .filter((sessionId) => !existingSessionIds.has(sessionId));
+  const missingSessionIds = openTabSessionIds.filter((sessionId) => !existingSessionIds.has(sessionId));
 
   if (missingSessionIds.length > 0 && next.panes.length === 1) {
     const targetPane = next.panes[0];

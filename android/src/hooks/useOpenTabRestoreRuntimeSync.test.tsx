@@ -81,6 +81,7 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
       hasPersistedOpenTabsTruthRef: createRef(true),
       closedOpenTabSessionIdsRef: createRef(new Set<string>()),
       closedOpenTabReuseKeysRef: createRef(new Set<string>()),
+      pendingMaterializedOpenTabSessionIdsRef: createRef(new Set<string>()),
       restoreSwitchReason: 'explicit-resume',
       applyOpenTabState,
     }));
@@ -127,6 +128,7 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
       hasPersistedOpenTabsTruthRef: createRef(true),
       closedOpenTabSessionIdsRef: createRef(new Set<string>()),
       closedOpenTabReuseKeysRef: createRef(new Set<string>()),
+      pendingMaterializedOpenTabSessionIdsRef: createRef(new Set<string>()),
       restoreSwitchReason: 'restore-sync',
       applyOpenTabState,
     }));
