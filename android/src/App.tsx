@@ -613,6 +613,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             sessionGroups={sessionGroups}
             relayDevices={relayDevices}
             onResumeSession={handleResumeSession}
+            onCloseSession={handleCloseSession}
             onOpenGroupSession={handleOpenGroupSession}
             onOpenServerGroups={handleOpenServerGroups}
             onEditServerGroup={handleEditServerGroup}
@@ -757,6 +758,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
           customName: tab.customName,
           bridgeHost: tab.bridgeHost,
           bridgePort: tab.bridgePort,
+          daemonHostId: tab.daemonHostId,
         }))}
         activeTabId={openTabState.activeSessionId}
         initialTarget={pickerTarget}

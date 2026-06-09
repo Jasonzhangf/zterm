@@ -12,6 +12,10 @@ import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-targ
 import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
 import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
+import {
+  buildTmuxSessionPickerRows,
+  filterActionableTmuxSelections,
+} from './tmux-session-picker-rows';
 
 interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
@@ -24,6 +28,7 @@ interface TmuxSessionPickerSheetProps {
     customName?: string;
     bridgeHost: string;
     bridgePort: number;
+    daemonHostId?: string;
   }>;
   activeTabId?: string | null;
   initialTarget?: Partial<BridgeTarget> | null;
@@ -135,13 +140,31 @@ export function TmuxSessionPickerSheet({
 
   const serverViews = useMemo(() => buildBridgeServerPresetViews(servers), [servers]);
   const sortedServers = useMemo(() => serverViews.map((entry) => entry.server), [serverViews]);
-  const selectedCount = selectedSessions.length;
   const statusTone =
     discoveryState === 'done' ? mobileTheme.colors.accent : discoveryState === 'error' ? mobileTheme.colors.danger : '#f2b94b';
   void clockTick;
   const isEditGroupMode = mode === 'edit-group';
   const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
   const daemonFirst = relayEnabled && relayDevices.length > 0;
+  const showOpenTabState = mode === 'quick-tab';
+  const unifiedSessionRows = useMemo(() => buildTmuxSessionPickerRows({
+    availableSessions,
+    openTabs,
+    target: selectedTarget,
+    includeOpenTabs: showOpenTabState,
+  }), [
+    availableSessions,
+    openTabs,
+    selectedTarget.bridgeHost,
+    selectedTarget.bridgePort,
+    selectedTarget.daemonHostId,
+    selectedTarget.relayHostId,
+    showOpenTabState,
+  ]);
+  const actionableSelectedSessions = useMemo(() => (
+    filterActionableTmuxSelections(selectedSessions, unifiedSessionRows, showOpenTabState)
+  ), [selectedSessions, showOpenTabState, unifiedSessionRows]);
+  const selectedCount = actionableSelectedSessions.length;
 
   const handleRefreshNow = async () => {
     const bridgeHost = selectedTarget.bridgeHost.trim();
@@ -180,7 +203,15 @@ export function TmuxSessionPickerSheet({
     try {
       const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(selectedTarget, bridgeSettings));
       setAvailableSessions(sessions);
-      setSelectedSessions((current) => current.filter((item) => sessions.includes(item)));
+      setSelectedSessions((current) => {
+        const nextRows = buildTmuxSessionPickerRows({
+          availableSessions: sessions,
+          openTabs,
+          target: selectedTarget,
+          includeOpenTabs: showOpenTabState,
+        });
+        return filterActionableTmuxSelections(current, nextRows, showOpenTabState);
+      });
       setDiscoveryState('done');
       setErrorMessage('');
       setLastRefreshedAt(Date.now());
@@ -434,86 +465,6 @@ export function TmuxSessionPickerSheet({
             />
         </div>
 
-        {mode === 'quick-tab' && openTabs.length > 0 ? (
-          <div
-            style={{
-              borderRadius: '22px',
-              padding: '16px',
-              backgroundColor: '#ffffff',
-              boxShadow: mobileTheme.shadow.soft,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-            }}
-          >
-            <SectionTitle title="Current Tabs" subtitle="这里管理已经打开的本地 tabs；切换、改名、关闭都在这里，不需要再去别处。" />
-            {openTabs.map((tab) => {
-              const active = tab.id === activeTabId;
-              const displayName = tab.customName || tab.sessionName;
-              return (
-                <div
-                  key={tab.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      onSwitchOpenTab?.(tab.id);
-                      onClose();
-                    }}
-                    style={{
-                      flex: 1,
-                      border: 'none',
-                      borderRadius: '18px',
-                      padding: '12px 14px',
-                      backgroundColor: active ? 'rgba(113, 164, 255, 0.16)' : '#f6f8fb',
-                      color: mobileTheme.colors.lightText,
-                      textAlign: 'left',
-                    }}
-                  >
-                    <div style={{ fontWeight: 800 }}>{displayName}</div>
-                    <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                      {tab.bridgeHost}:{tab.bridgePort} · {tab.sessionName}
-                      {active ? ' · Active' : ''}
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => handleRenameOpenTab(tab.id, displayName)}
-                    disabled={!onRenameOpenTab}
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      border: 'none',
-                      borderRadius: '14px',
-                      backgroundColor: mobileTheme.colors.shellMuted,
-                      color: '#ffffff',
-                    }}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    onClick={() => onCloseOpenTab?.(tab.id, 'quick-tab-picker-close-button')}
-                    disabled={!onCloseOpenTab}
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      border: 'none',
-                      borderRadius: '14px',
-                      backgroundColor: 'rgba(255,124,146,0.16)',
-                      color: mobileTheme.colors.danger,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-
         <div
           style={{
               borderRadius: '16px',
@@ -659,7 +610,14 @@ export function TmuxSessionPickerSheet({
             gap: '14px',
           }}
         >
-          <SectionTitle title="Tmux Sessions" subtitle="有明确勾选框；先点 Connect，再勾选并批量打开。这里不再自动刷新。" />
+          <SectionTitle
+            title="Sessions"
+            subtitle={
+              showOpenTabState
+                ? '按 daemon session 顺序合并本地 open tabs。已打开的可进入/关闭，未打开的可勾选或直接打开。'
+                : '有明确勾选框；先点 Connect，再勾选并批量打开。这里不再自动刷新。'
+            }
+          />
 
           <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
             {!selectedTarget.bridgeHost && '先输入 Tailscale IP 或选择一个服务器'}
@@ -668,65 +626,112 @@ export function TmuxSessionPickerSheet({
             {selectedTarget.bridgeHost && discoveryState === 'done' && availableSessions.length === 0 && '当前服务器还没有 tmux session'}
           </div>
 
-          {availableSessions.map((sessionName) => {
+          {unifiedSessionRows.map((row) => {
+            const { sessionName } = row;
             const selected = selectedSessions.includes(sessionName);
+            const active = row.openTab?.id === activeTabId;
+            const openStatus = row.openTab
+              ? row.remotePresent
+                ? `Open tab${active ? ' · Active' : ''}`
+                : 'Open tab · not reported by daemon'
+              : 'Daemon session';
             return (
               <div
-                key={sessionName}
+                key={row.key}
+                data-testid="tmux-session-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                 }}
               >
+                {!row.openTab && row.remotePresent ? (
+                  <button
+                    onClick={() => toggleSession(sessionName)}
+                    aria-label={`Select ${sessionName}`}
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '12px',
+                      border: selected ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
+                      backgroundColor: selected ? mobileTheme.colors.accentSoft : '#ffffff',
+                      color: selected ? mobileTheme.colors.accent : mobileTheme.colors.lightMuted,
+                      fontWeight: 900,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {selected ? '✓' : ''}
+                  </button>
+                ) : null}
                 <button
-                  onClick={() => toggleSession(sessionName)}
-                  aria-label={`Select ${sessionName}`}
-                  style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '12px',
-                    border: selected ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
-                    backgroundColor: selected ? mobileTheme.colors.accentSoft : '#ffffff',
-                    color: selected ? mobileTheme.colors.accent : mobileTheme.colors.lightMuted,
-                    fontWeight: 900,
-                    flexShrink: 0,
+                  onClick={() => {
+                    if (row.openTab) {
+                      onSwitchOpenTab?.(row.openTab.id);
+                      onClose();
+                      return;
+                    }
+                    toggleSession(sessionName);
                   }}
-                >
-                  {selected ? '✓' : ''}
-                </button>
-                <button
-                  onClick={() => toggleSession(sessionName)}
                   style={{
                     flex: 1,
                     border: 'none',
                     borderRadius: '18px',
                     padding: '12px 14px',
-                    backgroundColor: selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                    backgroundColor: row.openTab ? 'rgba(113, 164, 255, 0.16)' : selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
                     color: mobileTheme.colors.lightText,
                     textAlign: 'left',
                     fontWeight: 800,
                   }}
                 >
-                  <div>{sessionName}</div>
+                  <div data-testid="tmux-session-name">{row.displayName}</div>
+                  <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                    {openStatus}
+                    {row.displayName !== sessionName ? ` · ${sessionName}` : ''}
+                  </div>
                 </button>
+                {row.openTab ? (
+                  <button
+                    onClick={() => {
+                      onSwitchOpenTab?.(row.openTab!.id);
+                      onClose();
+                    }}
+                    style={{
+                      minWidth: '56px',
+                      height: '44px',
+                      border: 'none',
+                      borderRadius: '14px',
+                      backgroundColor: mobileTheme.colors.accentSoft,
+                      color: mobileTheme.colors.accent,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Enter
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onOpenTmuxSession(selectedTarget, sessionName)}
+                    style={{
+                      minWidth: '56px',
+                      height: '44px',
+                      border: 'none',
+                      borderRadius: '14px',
+                      backgroundColor: mobileTheme.colors.accentSoft,
+                      color: mobileTheme.colors.accent,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Open
+                  </button>
+                )}
                 <button
-                  onClick={() => onOpenTmuxSession(selectedTarget, sessionName)}
-                  style={{
-                    minWidth: '56px',
-                    height: '44px',
-                    border: 'none',
-                    borderRadius: '14px',
-                    backgroundColor: mobileTheme.colors.accentSoft,
-                    color: mobileTheme.colors.accent,
-                    fontWeight: 800,
+                  onClick={() => {
+                    if (row.openTab) {
+                      handleRenameOpenTab(row.openTab.id, row.displayName);
+                      return;
+                    }
+                    void handleRenameSession(sessionName);
                   }}
-                >
-                  Open
-                </button>
-                <button
-                  onClick={() => handleRenameSession(sessionName)}
-                  disabled={busyAction !== null}
+                  disabled={row.openTab ? !onRenameOpenTab : busyAction !== null}
                   style={{
                     width: '44px',
                     height: '44px',
@@ -739,10 +744,16 @@ export function TmuxSessionPickerSheet({
                   ✎
                 </button>
                 <button
-                  onClick={() => handleKillSession(sessionName)}
-                  disabled={busyAction !== null}
+                  onClick={() => {
+                    if (row.openTab) {
+                      onCloseOpenTab?.(row.openTab.id, 'quick-tab-picker-close-button');
+                      return;
+                    }
+                    void handleKillSession(sessionName);
+                  }}
+                  disabled={row.openTab ? !onCloseOpenTab : busyAction !== null}
                   style={{
-                    width: '44px',
+                    minWidth: row.openTab ? '58px' : '44px',
                     height: '44px',
                     border: 'none',
                     borderRadius: '14px',
@@ -750,7 +761,7 @@ export function TmuxSessionPickerSheet({
                     color: mobileTheme.colors.danger,
                   }}
                 >
-                  ×
+                  {row.openTab ? 'Close' : '×'}
                 </button>
               </div>
             );
@@ -763,7 +774,7 @@ export function TmuxSessionPickerSheet({
                   onSaveGroupSelection?.(selectedTarget, selectedSessions);
                   return;
                 }
-                onOpenMultipleTmuxSessions(selectedTarget, selectedSessions);
+                onOpenMultipleTmuxSessions(selectedTarget, actionableSelectedSessions);
               }}
               style={{
                 minHeight: '48px',

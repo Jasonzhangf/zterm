@@ -179,6 +179,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - session picker 顶部必须支持手动输入 Tailscale IP / token，并在输入后立即尝试拉 tmux sessions
 - tmux session 列表需要支持最小 CRUD（list/create/rename/kill）以及 multi-select 直接开多个 tabs
 - terminal 顶部 `+` 的长按必须复用同一个 session picker，用于 quick new tab；普通点击再回 Connections
+- quick-tab picker 只允许一份 session row projection：daemon tmux session 顺序为主，open tab 状态贴在同一行；daemon refresh 未返回但仍在 OPEN_TABS 的本地 tab 只能追加为 not-reported row，不得隐藏或自动关闭。
 
 ### 2.12 Bridge Auth 规则
 - daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override

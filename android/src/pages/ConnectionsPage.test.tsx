@@ -99,6 +99,7 @@ describe('ConnectionsPage', () => {
 
   it('covers grouped server usage: open defaults, manage selection, open single sessions, and route edit/delete', () => {
     const onResumeSession = vi.fn();
+    const onCloseSession = vi.fn();
     const onOpenGroupSession = vi.fn();
     const onSaveServerGroupSelection = vi.fn();
     const onOpenServerGroups = vi.fn();
@@ -114,6 +115,7 @@ describe('ConnectionsPage', () => {
         sessions={[makeSession({ id: 'live-logs', hostId: 'host-logs', sessionName: 'logs' })]}
         sessionGroups={[makeGroup()]}
         onResumeSession={onResumeSession}
+        onCloseSession={onCloseSession}
         onOpenGroupSession={onOpenGroupSession}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={onSaveServerGroupSelection}
@@ -155,6 +157,9 @@ describe('ConnectionsPage', () => {
     fireEvent.click(screen.getAllByText('Enter')[1]);
     expect(onResumeSession).toHaveBeenCalledWith('live-logs');
 
+    fireEvent.click(screen.getByText('Close'));
+    expect(onCloseSession).toHaveBeenCalledWith('live-logs', 'connections-session-row-close-button');
+
     fireEvent.click(screen.getByText('Open'));
     expect(onOpenGroupSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '100.64.0.10', bridgePort: 3333 }),
@@ -182,6 +187,7 @@ describe('ConnectionsPage', () => {
           makeGroup({ id: 'group-b', bridgeHost: '100.64.0.20', daemonHostId: 'daemon-b', sessionNames: ['work'] }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -212,6 +218,7 @@ describe('ConnectionsPage', () => {
         sessions={[makeSession({ id: 'live-rcc', daemonHostId: 'daemon-Macstudio.local-128564413166185f', sessionName: 'rcc' })]}
         sessionGroups={[makeGroup({ daemonHostId: 'mac-studio', sessionNames: ['main'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -240,6 +247,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -275,6 +283,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -310,6 +319,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -339,6 +349,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -367,6 +378,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -419,6 +431,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -471,6 +484,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -504,6 +518,7 @@ describe('ConnectionsPage', () => {
         sessions={[]}
         sessionGroups={[makeGroup({ daemonHostId: 'daemon-host-1', bridgeHost: '100.64.0.10', bridgePort: 3333, sessionNames: ['main', 'logs'] })]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -558,6 +573,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -614,6 +630,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -661,6 +678,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={onSaveServerGroupSelection}
@@ -710,6 +728,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={onSaveServerGroupSelection}
@@ -745,6 +764,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={onOpenGroupSession}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}
@@ -796,6 +816,7 @@ describe('ConnectionsPage', () => {
           }),
         ]}
         onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
         onEditServerGroup={vi.fn()}
         onSaveServerGroupSelection={vi.fn()}

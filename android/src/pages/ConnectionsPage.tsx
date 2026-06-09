@@ -15,6 +15,7 @@ interface ConnectionsPageProps {
   sessionGroups: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
   onResumeSession: (sessionId: string) => void;
+  onCloseSession: (sessionId: string, source?: string) => void;
   onOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
   onEditServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
   onSaveServerGroupSelection: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
@@ -72,6 +73,7 @@ export function ConnectionsPage({
   sessionGroups,
   relayDevices = [],
   onResumeSession,
+  onCloseSession,
   onOpenGroupSession,
   onEditServerGroup,
   onSaveServerGroupSelection,
@@ -515,6 +517,28 @@ export function ConnectionsPage({
                                   }}
                                 >
                                   {entry.liveSession ? 'Enter' : 'Open'}
+                                </button>
+                              )}
+                              {entry.liveSession && (
+                                <button
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onCloseSession(entry.liveSession!.id, 'connections-session-row-close-button');
+                                  }}
+                                  style={{
+                                    border: 'none',
+                                    borderRadius: '999px',
+                                    padding: '6px 10px',
+                                    backgroundColor: 'rgba(255,124,146,0.12)',
+                                    color: mobileTheme.colors.danger,
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Close
                                 </button>
                               )}
                               {entry.host && (
