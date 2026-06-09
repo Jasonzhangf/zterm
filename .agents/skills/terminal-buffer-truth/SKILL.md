@@ -181,6 +181,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - `anchor mismatch` / `head mismatch` 也一样；它们只影响下一次 request plan，不影响已有 absolute-index 内容的存在性
 - buffer manager **没有权利**把已有本地 buffer 先 reset 成空窗再重拉
 - revision reset / reconnect / reanchor 期间若已有本地画面，低 revision 且 `startIndex/endIndex` 为空、`lines=[]` 的 payload 只能表示“新 buffer 尚未 ready”；client 必须保留上一帧等待非空或明确范围的 `buffer-sync`，禁止先发布空 buffer 导致黑屏再刷新
+- 遇到上述 revision-reset 空 payload 且本地已有画面时，client 必须清掉该 session 的 tail-refresh debounce 并立即用 authoritative head 重发 tail sync；禁止只早退等待旧 debounce/下一轮 tick，否则普通连接/恢复会表现为“保留旧画面但刷新很慢”
 - 正确动作只能是：保留已有内容 -> 计算缺口/新窗口 -> 请求 range -> merge -> 通知 renderer
 
 ### 2.2 follow 路径
@@ -215,6 +216,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 写侧：同步 daemon -> 更新本地 sparse buffer
   - 读侧：renderer 只消费当前本地 buffer
 - buffer manager 不关心 renderer 如何滚动、如何绘制、如何布局
+- buffer/head request cadence 必须是 session-aware：以目标 session 的 transport/socket buffered amount 与 runtime metrics 解析快慢通道；禁止在 assembly/request 路径直接调用全局 cadence，避免好网 session 被非目标或默认 33ms 节流拖慢
 - same-revision merge 也必须遵守“tail 优先稳定”：
   - 若当前本地窗口已经贴着 authoritative tail，且迟到 payload 只覆盖更老的历史、不推进 tail
   - 那么它只能补当前窗口内已有 absolute-index 行，**不得**回拖 `startIndex/endIndex`

@@ -570,6 +570,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
   };
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
@@ -638,6 +639,21 @@ export function applyIncomingBufferSyncRuntime(options: {
       incomingStartIndex: lowerRevisionPayload.startIndex,
       incomingEndIndex: lowerRevisionPayload.endIndex,
       incomingLineCount: lowerRevisionPayload.lines.length,
+    });
+    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.requestSessionBufferSync(options.sessionId, {
+      reason: 'revision-reset-empty-payload-retry',
+      purpose: 'tail-refresh',
+      sessionOverride: {
+        ...session,
+        daemonHeadRevision: revisionResetExpectation.revision,
+        daemonHeadEndIndex: revisionResetExpectation.latestEndIndex,
+      },
+      liveHead: options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+        revision: revisionResetExpectation.revision,
+        latestEndIndex: revisionResetExpectation.latestEndIndex,
+        seenAt: revisionResetExpectation.seenAt,
+      },
     });
     return;
   }

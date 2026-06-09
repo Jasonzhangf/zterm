@@ -1,4 +1,3 @@
-import { resolveTerminalRefreshCadence } from '../lib/mobile-config';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { MutableRefObject } from 'react';
 import type { TerminalBufferPayload } from '../lib/types';
@@ -66,6 +65,12 @@ export interface SessionMessageAssembliesOptions {
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer: (sessionId: string) => boolean;
   resolveSessionCacheLines: (rows?: number | null) => number;
+  resolveTerminalRefreshCadence: (sessionId?: string | null) => {
+    headTickMs: number;
+    pullRequestStaleMs: number;
+    minTailRefreshGapMs: number;
+    readingSyncDelayMs: number;
+  };
   setScheduleStateForSession: (sessionId: string, nextState: any) => void;
   setSessionTitleSync: (id: string, title: string) => void;
   updateSessionSync: (id: string, updates: any) => void;
@@ -117,7 +122,7 @@ export function createSessionMessageAssemblies(
     clearSessionPullState: options.clearSessionPullState,
     sendSocketPayload: options.sendSocketPayload,
     runtimeDebug,
-    resolveTerminalRefreshCadence,
+    resolveTerminalRefreshCadence: () => options.resolveTerminalRefreshCadence(sessionId),
   });
 
   const requestSessionBufferHead = (
@@ -135,7 +140,7 @@ export function createSessionMessageAssemblies(
     },
     readSessionTransportSocket: options.readSessionTransportSocket,
     sendSocketPayload: options.sendSocketPayload,
-    resolveTerminalRefreshCadence,
+    resolveTerminalRefreshCadence: () => options.resolveTerminalRefreshCadence(sessionId),
   });
 
   const handleBufferHead = (
@@ -187,6 +192,7 @@ export function createSessionMessageAssemblies(
         pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
         pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
         pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
+        lastSyncRequestAtRef: options.lastSyncRequestAtRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       },
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,

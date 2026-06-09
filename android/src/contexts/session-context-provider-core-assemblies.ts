@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { runtimeDebug } from "../lib/runtime-debug";
 import { resolveTerminalRefreshCadence } from "../lib/mobile-config";
 import { resolveSessionRuntimeTransportCadenceInput } from "../lib/session-runtime-cadence";
@@ -65,14 +65,14 @@ export function useSessionProviderCoreAssemblies(
     handleSocketServerMessageRef,
   } = options.refs;
 
-  const resolveSessionTerminalRefreshCadence = (sessionId?: string | null) => resolveTerminalRefreshCadence({
+  const resolveSessionTerminalRefreshCadence = useCallback((sessionId?: string | null) => resolveTerminalRefreshCadence({
     runtimeTransport: sessionId
       ? resolveSessionRuntimeTransportCadenceInput({
           socket: transportRuntimeStoreRef.current.sessions.get(sessionId)?.activeSocket || null,
           metrics: sessionDebugMetricsStoreRef.current.getMetrics(sessionId, null, false),
         })
       : null,
-  });
+  }), [sessionDebugMetricsStoreRef, transportRuntimeStoreRef]);
 
   const sessionInfraRuntime = useMemo(() => createSessionInfraFacadeRuntime({
     stateRef: options.stateRef,
@@ -279,6 +279,7 @@ export function useSessionProviderCoreAssemblies(
     isSessionTransportActive,
     shouldAcceptSessionLiveBuffer,
     resolveSessionCacheLines,
+    resolveTerminalRefreshCadence: resolveSessionTerminalRefreshCadence,
     setScheduleStateForSession,
     setSessionTitleSync,
     updateSessionSync,
@@ -308,6 +309,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionBufferSnapshot,
     readSessionTransportSocket,
     resolveSessionCacheLines,
+    resolveSessionTerminalRefreshCadence,
     scheduleSessionRenderCommit,
     sendSocketPayload,
     sessionBufferHeadsRef,

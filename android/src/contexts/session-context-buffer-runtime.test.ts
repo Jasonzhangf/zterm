@@ -347,7 +347,25 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const commitSessionBufferUpdate = vi.fn(() => true);
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const lastSyncRequestAtRef = {
+      current: new Map<string, any>([
+        [`${sessionId}:tail-refresh`, {
+          sentAt: 10,
+          requestStartIndex: 0,
+          requestEndIndex: 30,
+          knownRevision: 1,
+          localStartIndex: 0,
+          localEndIndex: 1,
+          targetHeadRevision: 3,
+          repairSignature: '',
+        }],
+      ]),
+    };
     const sessionRevisionResetRef = {
+      current: new Map([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]),
+    };
+    const sessionBufferHeadsRef = {
       current: new Map([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]),
     };
 
@@ -365,10 +383,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef,
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionBufferHeadsRef,
         pendingInputTailRefreshRef: { current: new Map() },
         pendingConnectTailRefreshRef: { current: new Set() },
         pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef,
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => session.buffer,
@@ -383,12 +402,25 @@ describe('session-context-buffer-runtime inactive gating', () => {
       commitSessionBufferUpdate,
       scheduleSessionRenderCommit,
       isSessionTransportActive: () => true,
-      requestSessionBufferSync: vi.fn(() => true),
+      requestSessionBufferSync,
     });
 
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
     expect(sessionRevisionResetRef.current.has(sessionId)).toBe(true);
+    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
+      reason: 'revision-reset-empty-payload-retry',
+      purpose: 'tail-refresh',
+      sessionOverride: expect.objectContaining({
+        daemonHeadRevision: 3,
+        daemonHeadEndIndex: 30,
+      }),
+      liveHead: expect.objectContaining({
+        revision: 3,
+        latestEndIndex: 30,
+      }),
+    });
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.revision-reset.wait-for-nonempty-payload',
       expect.objectContaining({
