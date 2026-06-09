@@ -119,10 +119,27 @@ function normalizePayload(payload: unknown): string | undefined {
   }
 }
 
+function isCriticalRuntimeDebugScope(scope: string) {
+  return (
+    scope.startsWith('terminal.ime.')
+    || scope.startsWith('terminal.debug-input.')
+    || scope === 'session.input.send'
+    || scope.startsWith('session.input.drop.')
+    || scope === 'session.input.transport-unavailable'
+  );
+}
+
 function enqueueRuntimeDebugEntry(entry: RuntimeDebugLogEntry) {
   runtimeDebugQueue.push(entry);
   while (runtimeDebugQueue.length > MAX_RUNTIME_DEBUG_QUEUE) {
-    runtimeDebugQueue.shift();
+    const removableIndex = runtimeDebugQueue.findIndex((candidate) => (
+      candidate.seq !== entry.seq && !isCriticalRuntimeDebugScope(candidate.scope)
+    ));
+    if (removableIndex >= 0) {
+      runtimeDebugQueue.splice(removableIndex, 1);
+    } else {
+      runtimeDebugQueue.shift();
+    }
     droppedRuntimeDebugEntries += 1;
   }
 }

@@ -24,6 +24,7 @@ import { mobileTheme } from '../lib/mobile-ui';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
 import { runtimeDebug } from '../lib/runtime-debug';
+import { DebugInput, isDebugInputSupported } from '../plugins/DebugInputPlugin';
 import { useTerminalWorkspace } from '../hooks/useTerminalWorkspace';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
 import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
@@ -1950,19 +1951,62 @@ function TerminalPageComponent({
     let backspaceListener: { remove: () => Promise<void> } | null = null;
     let keyListener: { remove: () => Promise<void> } | null = null;
     let keyboardStateListener: { remove: () => Promise<void> } | null = null;
+    let debugInputListener: { remove: () => Promise<void> } | null = null;
 
-    const emitToActiveSession = (data: string) => {
+    const emitToActiveSession = (data: string, source: 'ime-input' | 'ime-backspace' | 'ime-key' | 'debug-input') => {
       const sessionId = activeSessionIdRef.current;
-      if (!sessionId || !data || quickBarEditorFocusedRef.current) {
+      const quickBarEditorFocused = quickBarEditorFocusedRef.current;
+      runtimeDebug(`terminal.${source}.received`, {
+        sessionId,
+        size: data.length,
+        splitVisible: splitVisibleRef.current,
+        activePaneId: activePaneIdRef.current,
+        quickBarEditorFocused,
+      });
+      if (!sessionId) {
+        runtimeDebug(`terminal.${source}.drop`, {
+          why: 'missing-active-session',
+          size: data.length,
+          splitVisible: splitVisibleRef.current,
+          activePaneId: activePaneIdRef.current,
+        });
         return;
       }
+      if (!data) {
+        runtimeDebug(`terminal.${source}.drop`, {
+          why: 'empty-input',
+          sessionId,
+          splitVisible: splitVisibleRef.current,
+          activePaneId: activePaneIdRef.current,
+        });
+        return;
+      }
+      if (quickBarEditorFocused) {
+        runtimeDebug(`terminal.${source}.drop`, {
+          why: 'quick-editor-focused',
+          sessionId,
+          size: data.length,
+          splitVisible: splitVisibleRef.current,
+          activePaneId: activePaneIdRef.current,
+        });
+        return;
+      }
+      runtimeDebug(`terminal.${source}.emit`, {
+        sessionId,
+        size: data.length,
+        splitVisible: splitVisibleRef.current,
+        activePaneId: activePaneIdRef.current,
+      });
       terminalInputHandlerRef.current?.(sessionId, data);
     };
 
     const attachListeners = async () => {
       try {
         inputListener = await ImeAnchor.addListener('input', (event) => {
-          emitToActiveSession(normalizeTerminalCommittedText(event.text || '').replace(/\n/g, '\r'));
+          emitToActiveSession(
+            normalizeTerminalCommittedText(event.text || '').replace(/\n/g, '\r'),
+            'ime-input',
+          );
         });
         if (disposed) {
           void inputListener.remove().catch((error) => {
@@ -1973,7 +2017,7 @@ function TerminalPageComponent({
         }
         backspaceListener = await ImeAnchor.addListener('backspace', (event) => {
           const count = Math.max(1, Math.round(event.count || 1));
-          emitToActiveSession('\x7f'.repeat(count));
+          emitToActiveSession('\x7f'.repeat(count), 'ime-backspace');
         });
         if (disposed) {
           void backspaceListener.remove().catch((error) => {
@@ -2003,7 +2047,7 @@ function TerminalPageComponent({
           }
           const ctrlChord = resolveTerminalCtrlChord(keyboardEvent);
           if (ctrlChord) {
-            emitToActiveSession(ctrlChord);
+            emitToActiveSession(ctrlChord, 'ime-key');
             return;
           }
           const cursorKeysApp = Boolean(
@@ -2014,7 +2058,7 @@ function TerminalPageComponent({
             cursorKeysApp,
           );
           if (keyboardInput) {
-            emitToActiveSession(keyboardInput);
+            emitToActiveSession(keyboardInput, 'ime-key');
           }
         });
         if (disposed) {
@@ -2047,6 +2091,19 @@ function TerminalPageComponent({
             logAsyncCleanupFailure('ImeAnchor keyboardState listener remove after dispose', error);
           });
           keyboardStateListener = null;
+          return;
+        }
+        if (isDebugInputSupported()) {
+          debugInputListener = await DebugInput.addListener('debug-input', (event) => {
+            const payload = `${event.text || ''}${event.newline || ''}`;
+            emitToActiveSession(payload, 'debug-input');
+          });
+          if (disposed) {
+            void debugInputListener.remove().catch((error) => {
+              logAsyncCleanupFailure('DebugInput listener remove after dispose', error);
+            });
+            debugInputListener = null;
+          }
         }
       } catch (error) {
         console.warn('[TerminalPage] Failed to attach ImeAnchor listeners:', error);
@@ -2075,6 +2132,11 @@ function TerminalPageComponent({
       if (keyboardStateListener) {
         void keyboardStateListener.remove().catch((error) => {
           logAsyncCleanupFailure('ImeAnchor keyboardState listener remove', error);
+        });
+      }
+      if (debugInputListener) {
+        void debugInputListener.remove().catch((error) => {
+          logAsyncCleanupFailure('DebugInput listener remove', error);
         });
       }
     };

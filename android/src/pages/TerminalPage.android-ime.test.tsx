@@ -20,6 +20,7 @@ import {
 import { ImeAnchor } from "../plugins/ImeAnchorPlugin";
 
 const imeListeners = new Map<string, (event: any) => void>();
+const debugInputListeners = new Map<string, (event: any) => void>();
 const keyboardListeners = new Map<string, (event: any) => void>();
 const { nativeClipboardWriteText } = vi.hoisted(() => ({
   nativeClipboardWriteText: vi.fn(async () => undefined),
@@ -28,7 +29,21 @@ const { nativeClipboardWriteText } = vi.hoisted(() => ({
 vi.mock("@capacitor/core", () => ({
   Capacitor: {
     getPlatform: () => "android",
+    isNativePlatform: () => true,
   },
+  registerPlugin: () => ({
+    sendInput: vi.fn(async () => ({ ok: true })),
+    addListener: vi.fn(
+      async (eventName: string, listener: (event: any) => void) => {
+        debugInputListeners.set(eventName, listener);
+        return {
+          remove: vi.fn(async () => {
+            debugInputListeners.delete(eventName);
+          }),
+        };
+      },
+    ),
+  }),
 }));
 
 vi.mock("@capacitor/keyboard", () => ({
@@ -276,6 +291,7 @@ describe("TerminalPage Android IME bridge", () => {
     cleanup();
     vi.unstubAllGlobals();
     imeListeners.clear();
+    debugInputListeners.clear();
     keyboardListeners.clear();
   });
 
@@ -334,6 +350,39 @@ describe("TerminalPage Android IME bridge", () => {
 
     expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音输入\r下一行");
     expect(onTerminalInput).toHaveBeenCalledWith("s1", "\x7f\x7f");
+  });
+
+  it("routes Android DebugInput diagnostics through the same active terminal input path", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(debugInputListeners.has("debug-input")).toBe(true);
+    });
+
+    debugInputListeners.get("debug-input")?.({ text: "debug-probe", newline: "\r" });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "debug-probe\r");
   });
 
   it("routes Android IME input to the focused split pane session instead of the old runtime active session", async () => {
