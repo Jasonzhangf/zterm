@@ -149,11 +149,11 @@ operation -> event -> projection
 
 - `OPEN_TABS` 一旦存在，就是 **explicit client truth**
 - runtime sessions 只能：
-  - rewrite semantic duplicate tab
-  - sync active id
-  - close/prune already-open tabs
+  - 为同 `sessionId` 的 open tab 提供 runtime transport/state
+  - 在 explicit resume/switch 场景同步 runtime active id
 - runtime sessions **不得 append runtime-only tabs 回 OPEN_TABS**
-- 用户显式关闭 tab、remote prune 必须统一走 open-tab close owner，再由它持久化
+- runtime sessions / remote audit / semantic reuse key **不得**合并、替换、关闭、prune already-open tabs；`sessionName + daemon/bridge owner` 只能用于 saved-list import 去重和 explicit close tombstone，不是 open-tab 物理身份
+- open-tab 物理身份只能是 `sessionId`；用户显式关闭 tab 必须统一走 open-tab close owner，再由它持久化
 - `session-status closed/error/tmux_session_unavailable` 只属于 transport 事实：
   - 可触发 remote tmux audit
   - **不得**直接映射成 open-tab 物理关闭

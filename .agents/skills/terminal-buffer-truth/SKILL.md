@@ -42,6 +42,7 @@ tmux truth
 - transport `closed/error/tmux_session_unavailable` 只属于 **transport / attach fact**，**不得**被 App 直接映射成 open-tab 物理关闭
 - open-tab 物理关闭只能由用户显式 close 触发；远端 tmux session-name audit 只能记录缺失/更新历史 session group，不得删除 open tab、切走 active tab、写 closed tombstone、调用 runtime `closeSession`
 - terminal tab chrome 必须以 `OPEN_TABS` 为唯一真源 materialize；runtime sessions 只补 transport/state。若 persisted open tab 的 runtime shell 缺失，UI 必须保留 closed placeholder；只有用户显式 resume/open 才允许按 persisted tab 重建 runtime shell 和 transport，禁止用 `open tabs ∩ runtime sessions` 过滤导致“看起来自动关闭 tab”。
+- `OPEN_TABS` 的物理身份只能是 `sessionId`；`sessionName + daemon/bridge owner` 语义 key 不得用于 normalize/upsert/runtime-merge/close 时合并、替换、删除已打开 tab。semantic key 只允许用于 saved-list import 去重与用户显式 close 后的 tombstone。
 - 现场若出现：
   - app 说 connected
   - 但 daemon 看不到 subscriber / session-open / head-sync 进展

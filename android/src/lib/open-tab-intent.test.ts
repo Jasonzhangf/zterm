@@ -67,7 +67,7 @@ function makeTab(sessionId: string, overrides?: Partial<PersistedOpenTab>): Pers
 }
 
 describe('open-tab intent truth', () => {
-  it('normalizes and deduplicates persisted tab intent state', () => {
+  it('normalizes persisted tab intent state without merging distinct open tab session ids', () => {
     const state = normalizeOpenTabIntentState([
       makeTab('old', { sessionName: 'zterm', authToken: 'token-z' }),
       makeTab('new', { sessionName: 'zterm', authToken: 'token-z', createdAt: 2, customName: 'Keep Me' }),
@@ -75,6 +75,9 @@ describe('open-tab intent truth', () => {
 
     expect(state).toEqual({
       tabs: [
+        expect.objectContaining({
+          sessionId: 'old',
+        }),
         expect.objectContaining({
           sessionId: 'new',
           customName: 'Keep Me',
@@ -194,7 +197,7 @@ describe('open-tab intent truth', () => {
     expect(state.activeSessionId).toBe('s2');
   });
 
-  it('rewrites an old bridge-only persisted tab to the new daemon-owned runtime tab instead of keeping duplicates', () => {
+  it('does not rewrite an old bridge-only persisted tab to a different runtime session id', () => {
     const state = mergeRuntimeSessionsIntoOpenTabIntentState(
       normalizeOpenTabIntentState([
         makeTab('persisted-bridge', {
@@ -220,16 +223,15 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs).toEqual([
       expect.objectContaining({
-        sessionId: 'runtime-daemon',
-        daemonHostId: 'daemon-Macstudio.local-128564413166185f',
+        sessionId: 'persisted-bridge',
         bridgeHost: '100.66.1.82',
         sessionName: 'zterm',
       }),
     ]);
-    expect(state.activeSessionId).toBe('runtime-daemon');
+    expect(state.activeSessionId).toBe('persisted-bridge');
   });
 
-  it('replaces a semantic duplicate persisted tab with the live runtime session id instead of appending a duplicate tab', () => {
+  it('does not replace a distinct persisted tab with a semantic duplicate runtime session id', () => {
     const state = mergeRuntimeSessionsIntoOpenTabIntentState(
       normalizeOpenTabIntentState([
         makeTab('persisted-old', {
@@ -253,13 +255,13 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs).toEqual([
       expect.objectContaining({
-        sessionId: 'runtime-new',
+        sessionId: 'persisted-old',
         sessionName: 'tmux-shared',
         customName: 'Keep Me',
       }),
       expect.objectContaining({ sessionId: 's2' }),
     ]);
-    expect(state.activeSessionId).toBe('runtime-new');
+    expect(state.activeSessionId).toBe('persisted-old');
   });
 
   it('upserts, activates, renames and moves with a single pure truth module', () => {
@@ -277,7 +279,7 @@ describe('open-tab intent truth', () => {
     expect(activated.activeSessionId).toBe('s1');
   });
 
-  it('upserts by semantic reuse key and rewrites the tab session id instead of keeping duplicates', () => {
+  it('upserts a new distinct session id without deleting an existing semantic peer', () => {
     const state = upsertOpenTabIntentSession(
       normalizeOpenTabIntentState([
         makeTab('persisted-old', {
@@ -298,18 +300,24 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs).toEqual([
       expect.objectContaining({
-        sessionId: 'runtime-new',
+        sessionId: 'persisted-old',
         sessionName: 'tmux-shared',
         authToken: 'shared-token',
         customName: 'Keep Me',
         createdAt: 1,
       }),
       expect.objectContaining({ sessionId: 's2' }),
+      expect.objectContaining({
+        sessionId: 'runtime-new',
+        sessionName: 'tmux-shared',
+        authToken: 'shared-token',
+        createdAt: 3,
+      }),
     ]);
     expect(state.activeSessionId).toBe('runtime-new');
   });
 
-  it('upserts by semantic reuse key without activation and preserves the existing active tab', () => {
+  it('upserts a distinct semantic peer without activation and preserves the existing active tab', () => {
     const state = upsertOpenTabIntentSession(
       normalizeOpenTabIntentState([
         makeTab('persisted-old', {
@@ -330,11 +338,15 @@ describe('open-tab intent truth', () => {
 
     expect(state.tabs).toEqual([
       expect.objectContaining({
-        sessionId: 'runtime-new',
+        sessionId: 'persisted-old',
         customName: 'Keep Me',
         createdAt: 1,
       }),
       expect.objectContaining({ sessionId: 's2' }),
+      expect.objectContaining({
+        sessionId: 'runtime-new',
+        createdAt: 3,
+      }),
     ]);
     expect(state.activeSessionId).toBe('s2');
   });
@@ -385,7 +397,7 @@ describe('open-tab intent truth', () => {
     expect(state.activeSessionId).toBe('s2');
   });
 
-  it('closes the persisted representative for the same bridge target instead of only deleting the runtime session id', () => {
+  it('does not close a different persisted tab just because it shares the same bridge target', () => {
     const state = closeOpenTabIntentSession(
       normalizeOpenTabIntentState([
         makeTab('persisted-old', {
@@ -413,8 +425,8 @@ describe('open-tab intent truth', () => {
       },
     );
 
-    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
-    expect(state.activeSessionId).toBe('s2');
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['persisted-old', 's2']);
+    expect(state.activeSessionId).toBe('persisted-old');
   });
 
   it('derives close intent result with reuse-key truth in the same pure module', () => {
@@ -446,8 +458,8 @@ describe('open-tab intent truth', () => {
 
     expect(result.closedReuseKey).toBe('bridge:100.127.23.27::3333::session:tmux-shared');
     expect(result.closedReuseKeyVariants).toEqual(['bridge:100.127.23.27::3333::session:tmux-shared']);
-    expect(result.nextState.tabs.map((tab) => tab.sessionId)).toEqual(['s2']);
-    expect(result.nextState.activeSessionId).toBe('s2');
+    expect(result.nextState.tabs.map((tab) => tab.sessionId)).toEqual(['persisted-old', 's2']);
+    expect(result.nextState.activeSessionId).toBe('persisted-old');
   });
 
   it('derives close intent reuse-key variants for daemon-owned tabs so reopen can clear every semantic tombstone shape', () => {
@@ -539,7 +551,7 @@ describe('open-tab intent truth', () => {
     });
   });
 
-  it('resolves saved-tab import plan with dedupe plus requested focus in one pure module', () => {
+  it('resolves saved-tab import plan with import-only dedupe plus requested focus in one pure module', () => {
     const plan = resolveSavedOpenTabsImportPlan([
       makeTab('saved-a', {
         bridgeHost: '100.127.23.27',

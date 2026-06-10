@@ -1666,15 +1666,15 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('runtime-a-new,runtime-b-new'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('persisted-daemon-a,persisted-daemon-b'));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
-      expect.objectContaining({ sessionId: 'runtime-a-new', daemonHostId: 'daemon-a', sessionName: 'shared' }),
-      expect.objectContaining({ sessionId: 'runtime-b-new', daemonHostId: 'daemon-b', sessionName: 'shared' }),
+      expect.objectContaining({ sessionId: 'persisted-daemon-a', daemonHostId: 'daemon-a', sessionName: 'shared' }),
+      expect.objectContaining({ sessionId: 'persisted-daemon-b', daemonHostId: 'daemon-b', sessionName: 'shared' }),
     ]);
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('runtime-b-new');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('persisted-daemon-b');
   });
 
-  it('deduplicates restored persisted tabs that point to the same bridge target and tmux session', async () => {
+  it('preserves restored persisted tabs that point to the same bridge target and tmux session', async () => {
     sessionHarness.update({
       sessions: [],
       activeSessionId: null,
@@ -1723,7 +1723,11 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'host-z', sessionName: 'zterm' }),
+      expect.objectContaining({ sessionId: 'tab-z-old', activate: false, connect: false }),
+    );
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'host-z', sessionName: 'zterm' }),
       expect.objectContaining({ sessionId: 'tab-z-new', activate: false, connect: false, customName: 'Keep Me' }),
@@ -2768,7 +2772,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('tab-a');
   });
 
-  it('removes the persisted representative when closing a runtime session that reuses the same bridge target', async () => {
+  it('does not let a runtime semantic duplicate replace or close the persisted open tab', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'persisted-old',
@@ -2815,17 +2819,17 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
-    fireEvent.click(screen.getByTestId('close-active-tab'));
-
-    expect(sessionHarness.closeSession).toHaveBeenCalledWith('runtime-new');
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('persisted-old,s2'));
+    expect(screen.getByTestId('terminal-revision').textContent).toBe('0');
+    expect(sessionHarness.closeSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('persisted-old');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
+      expect.objectContaining({ sessionId: 'persisted-old', sessionName: 'session-shared' }),
       expect.objectContaining({ sessionId: 's2' }),
     ]);
   });
 
-  it('does not cold-restore a semantic-duplicate tab after its reused live session was explicitly closed', async () => {
+  it('does not cold-restore a persisted tab only after that exact open tab id was explicitly closed', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'persisted-old',
@@ -2873,7 +2877,7 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('persisted-old,s2'));
     fireEvent.click(screen.getByTestId('close-active-tab'));
 
     await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2'));
@@ -2957,7 +2961,7 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('persisted-old,s2'));
     fireEvent.click(screen.getByTestId('close-active-tab'));
 
     await waitFor(() => expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toContain('bridge:127.0.0.1::3333::session:session-shared'));
@@ -3423,7 +3427,7 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('persisted-old,s2'));
     fetchTmuxSessionsMock.mockReset();
     fetchTmuxSessionsMock.mockResolvedValueOnce(['session-s2']);
 
@@ -3434,7 +3438,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     await waitFor(() => expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1));
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('runtime-new');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('persisted-old');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.OPEN_TABS) || '[]')).toEqual([
       expect.objectContaining({ sessionName: 'session-shared' }),
       expect.objectContaining({ sessionId: 's2', sessionName: 'session-s2' }),
@@ -3460,7 +3464,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledTimes(2));
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-shared' }),
-      expect.objectContaining({ activate: false, connect: false }),
+      expect.objectContaining({ sessionId: 'persisted-old', activate: false, connect: false }),
     );
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'session-s2' }),

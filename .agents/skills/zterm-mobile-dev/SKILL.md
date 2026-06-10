@@ -180,6 +180,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - tmux session 列表需要支持最小 CRUD（list/create/rename/kill）以及 multi-select 直接开多个 tabs
 - terminal 顶部 `+` 的长按必须复用同一个 session picker，用于 quick new tab；普通点击再回 Connections
 - quick-tab picker 只允许一份 session row projection：daemon tmux session 顺序为主，open tab 状态贴在同一行；daemon refresh 未返回但仍在 OPEN_TABS 的本地 tab 只能追加为 not-reported row，不得隐藏或自动关闭。
+- OPEN_TABS 已打开 tab 不得按 semantic reuse key 自动合并/替换/删除；同名 tmux session 的 runtime duplicate 只能作为 transport fact，不能顶替 persisted open tab 的 `sessionId`。saved tab list 导入可做 import-only semantic 去重。
 
 ### 2.12 Bridge Auth 规则
 - daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override

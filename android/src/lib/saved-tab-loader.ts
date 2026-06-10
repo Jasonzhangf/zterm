@@ -1,5 +1,6 @@
 import { runtimeDebug } from './runtime-debug';
 import { resolveRemoteRestorableOpenTabState } from './open-tab-restore';
+import { resolveSavedOpenTabsImportPlan } from './open-tab-intent';
 import {
   buildPersistedOpenTabFromHostSession,
   buildPersistedOpenTabReuseKey,
@@ -28,9 +29,10 @@ export async function loadSavedTabList(
   deps: LoadSavedTabListDeps,
   options?: { clearMatchingTombstones?: boolean },
 ) {
+  const requestedImportPlan = resolveSavedOpenTabsImportPlan(tabs, requestedActiveSessionId);
   const importPlan = await resolveRemoteRestorableOpenTabState({
-    tabs,
-    activeSessionId: requestedActiveSessionId?.trim() || null,
+    tabs: requestedImportPlan.tabs,
+    activeSessionId: requestedImportPlan.activeSessionId,
     bridgeSettings: deps.bridgeSettingsRef.current,
     hosts: deps.hostsRef.current,
   });
