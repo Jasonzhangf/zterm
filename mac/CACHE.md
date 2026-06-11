@@ -1,19 +1,24 @@
-# CACHE — Mac Short-Term Memory
-
-## Current Task
-
-- 任务：按 Android 已冻结的 contract model，对 Mac 客户端继续做完全重写
-- 当前切片：runtime contract 第二刀（head-driven follow sync + reading/request gating）
-- 当前目标：让 Mac runtime 不再只靠 renderer viewport emit 驱动 buffer-sync，而是开始消费 server `buffer-head` 作为 follow 主触发信号
-
-## Freeze
-
-- follow 底部真相优先来自 server `buffer-head.latestEndIndex`，不是 renderer 本地旧 viewportEndIndex
-- reading 请求继续只围绕当前窗口 / missingRanges 发，不主动补全整段历史
-- 本轮仍未宣称 split / local tmux / packaged smoke closeout
-
-## Next
-
-1. 继续把 runtime adapter 拆成更清晰的 session head / sync planner / buffer worker 边界
-2. 清理旧 `ShellWorkspace` 残留模块与未使用 desktop workspace 编排
-3. 再补 packaged smoke
+# Mac terminal display/color/input checkpoint — 2026-06-02
+- 目标：mac app terminal 正常显示底部、输入回显、颜色正确，并有截图证明。
+- 已修：
+  - `packages/shared/src/terminal/mac-terminal-view.tsx` flex/minHeight + allowDomFocus
+  - `mac/src/pages/TerminalSlot.tsx` 透传 allowDomFocus
+  - `mac/src/styles.css` slot/surface CSS
+  - `mac/electron/local-tmux.ts` 改 `capture-pane -e` + SGR parser，保留 fg/bg/flags
+  - `mac/electron/main.ts` + `preload.cts`/`preload.ts` 增加 `zterm:dev:send-input` test-only IPC
+- 验证：
+  - `cd mac && pnpm type-check` ✅
+  - `cd mac && pnpm build` ✅
+  - `cd mac && CSC_IDENTITY_AUTO_DISCOVERY=false pnpm package` ✅
+  - `cd mac && pnpm vitest run` 44 pass / 2 已知 red baseline (`terminal-runtime-lifecycle`)
+  - 单实例 dev Electron (`--remote-debugging-port=9340`, PID 60787) + 单一 tmux session `zterm_mac_color`
+  - packaged ZTerm.app (`mac/out/mac-arm64/ZTerm.app`) 单跑一次后已关
+  - 截图 `mac/evidence/2026-06-02-mac-electron-terminal.png` (2880x1800)
+  - JSON `mac/evidence/2026-06-02-mac-electron-terminal.json`
+- 已证实：
+  - 颜色 fg/bg 恢复（RED `rgb(244,71,71)` / GREEN `rgb(106,153,85)` / BLUEBG bg `rgb(86,156,214)`）
+  - bottom line in viewport (`lastInViewport=true`)
+  - packaged app 同样颜色 + 底部 OK
+- 未完成：CDP `Input.dispatchKeyEvent` 与 Electron `webContents.sendInputEvent` 在本 dev 与 packaged 实例下都未能触发 React onKeyDown。**这是自动化路径问题**——真键盘仍可能正常（手动 / packaged 真实键入未跑）。需要你手测或更新 packaged 重试真键盘 smoke。
+- 反模式（已记录到 note/MEMORY）：不要在 main 端给"所有 local tmux session" 写 input。
+- 单实例规则：单 Electron / 单 CDP / 单 tmux session / 单 evidence 文件。

@@ -303,6 +303,28 @@
 ## 2026-06-01 Mac render must not resize tmux
 - Mac projection render must not include hidden/1px wterm proxies or call `onResize` from render geometry. Hidden autoResize can shrink tmux cols to 1 and produce vertical text. Follow Android: renderer consumes projection; tmux resize only comes from explicit viewport/width owner paths.
 
+- 2026-06-03: zterm TURN/relay 账号问题不要误判到 sub2api。Claw 上 coturn 真源是共享 TURN 账号 `ztermturn`，应用登录账号在 `zterm-traversal-relay` store：`/var/lib/zterm-traversal-relay/store.json`。本轮重新注册 `2094423@qq.com`，密码 `welcome4zcam#`，公共入口 `https://claw.codewhisper.cc:18443/relay/`，验证 `/api/auth/login`、`/api/auth/me`、`/api/devices` 均成功。
+  Tags: zterm, claw, traversal-relay, turn, account, correction, verification
+
+## 2026-06-07 Copy mode lifecycle: full-exit on close / reset-on-success
+- `handleCloseCopyMenu` 必须 `setCopySelection(EMPTY_COPY_SELECTION_STATE)` 全量重置（包括 `active=false`），仅清 `menu` 会留下 QuickBar 高亮残留。
+- 复制成功后 async reset：`copyTextAndResetOnSuccess` 里 `.then(() => setCopySelection(EMPTY))`；失败则 `.catch` warn 保留状态。
+- 测试矩阵：关闭菜单=全重置、中途关闭=全重置、复制成功 async reset、clipboard 失败保留 active + warn、buffer miss 保留 active + warn。
+  Tags: copy-lifecycle, quickbar, regression-gate
+
+## 2026-06-08 Input refresh after tab switch: first pending input must request head
+- Explicit terminal input 不能只 mark `pendingInputTailRefresh` 后等待 heartbeat/active tick；多次 tab switch 后会出现“远端收到输入但本地不刷新”。
+- 正确语义：`markPendingInputTailRefresh` 返回是否首次 pending；input payload 必须同步 send，首次 pending input 的 `requestSessionBufferHead(sessionId, ws, { force: true })` 必须移到 coalesced microtask，禁止阻塞 key event stack，后续 burst input 不重复 force head。
+- Gate: `session-context-input-runtime.test.ts` 锁 input 同步 send、首次 pending 延迟到 microtask 发 head、已有 pending 不发；`SessionContext.ws-refresh.test.tsx` 锁 burst 三连 input 同 tick 无 head、随后只有 1 条 `buffer-head-request`。
+  Tags: input-refresh, tab-switch, head-first, regression-gate
+
+## 2026-06-08 QuickBar schedule lifecycle and APK 1757
+- Schedule sheet 打开后必须冻结 `{ sessionId, sessionName, seedText, nonce }`；刷新/保存/删除/启停/run-now 全部使用 frozen `sessionId`，禁止切 tab 后漂移到 active session。
+- Schedule 业务错误必须走专用 `schedule-error -> scheduleState.error`，socket 未连接/target session 缺失也必须显式 `loading=false + error`；禁止 silent send 后让 UI loading 卡死，也禁止把 stale job 等业务错误混进 terminal transport failure。
+- QuickBar floating menu 若保留 clipboard 分支，必须有真实 `快捷/剪贴板` segmented 入口；禁止空 pill/不可达 UI。紧凑浮层默认删除说明文案、压缩 composer 高度，并把 `定时/发送` 放同一 action row。
+- Gate: `TerminalPage.schedule-target.test.tsx`、`session-context-public-runtime.test.ts`、`terminal-message-control-runtime.schedule.test.ts`、QuickBar/SessionScheduleSheet tests；APK `0.1.3.1757` 已发布到 `android/update-dist/` 与 `~/.wterm/updates/`。
+  Tags: quickbar, schedule-lifecycle, schedule-error, apk-delivery, regression-gate
+
 ## 2026-06-08 Daemon/client transport performance truth
 - Daemon live cadence can only use daemon-owned physical facts: capture/canonicalize duration, subscriber count, transport ready/buffered bytes/send error/backpressure, and mirror failure/in-flight state. It must not consume active tab, pane layout, follow/reading, viewport, or any client UI state.
 - Client render/head cadence must be session-owned: read the target session socket buffered amount and debug metrics, pass `sessionId` through render gate/lifecycle resolvers, and allow good-link 16ms fast lane while weak/backpressured links slow down.
@@ -313,3 +335,5 @@
 - Performance traces may record metadata only (timestamp, duration, bytes, line counts, ids, kind). Tests must forbid payload/text/lines/cells/content/data keys so optimization cannot be achieved by leaking or trimming terminal payload.
 - Daemon mirror lab assertions over sparse `buffer-sync` must replay payload history; final sparse payload alone is not mirror truth because later prompt-only diffs can overwrite the last observed payload while an earlier diff already contained the oracle marker.
   Tags: terminal-performance, daemon-scheduler, client-cadence, trace-metadata, regression-gate
+- 2026-06-09: open tab 生命周期冻结：远端 tmux session-name audit / foreground resume / connect audit / session picker refresh / cold restore / saved tab import 都不得自动关闭或过滤 open tabs。唯一允许物理关闭 tab 与 runtime session 的入口是用户显式 close；远端缺失只能记录 `app.open-tabs.remote-session-missing` 或剪裁 session group 历史，不能写 closed tombstone。
+  Tags: open-tab-lifecycle, remote-audit, no-auto-close, tombstone

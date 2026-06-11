@@ -451,3 +451,70 @@
   - mirror body changed -> push `buffer-sync diff`
   - diff is computed **only from daemon mirror previous vs current truth**
 - Guard: daemon must not look at any client local buffer / visible range / active state when building live push diff.
+
+## 2026-06-04 session switch input lag - investigation kickoff
+- User reports: 切换 session 后输入非常慢、卡死。
+- 真源候选: switchSession → core.setActiveSessionSync → ensureActiveSessionFresh('active-reentry', forceHead, markResumeTail) → requestSessionBufferHead/resetPullBookkeeping
+- 关键疑点:
+  1. switchSession 自己已经 markResumeTail + forceHead; 之后 lifecycle.ts:160-172 useEffect 又会因为 activeSessionId 变化而再跑 ensureActiveSessionFresh('active-reentry')，用 lastActivatedSessionIdRef 二次去重；但如果 markResumeTail 已经在第一次跑成功，第二次的 forceHead 仍然会触发 requestSessionBufferHead 重新拉一次 head。
+  2. 切到非 active tab 之前，previous session 的 resetSessionTransportPullBookkeeping 会清掉其 pull state；如果切到下一个 session 时 transport 正在 reconnect，会触发 probe-stale-transport 路径 → 同步走 reset + probe + force-head。
+  3. TerminalView 的 useLayoutEffect 1052-1076 + useEffect 1105-1116 在 render 行数/行高变化时跑 syncFollowScrollToAnchor + syncScrollHostToRenderBottom；切换 session 会同时改 visible rows 数 + 重新对齐 bottom，可能一帧内多次 IO。
+  4. 切到非 active tab 时，App.tsx:555 / 599 的 forceRelaySession 副作用会跑 connectSession 同步栈，可能与 switchSession 的 active-reentry 并发争 transport。
+- 下一步:
+  - 真源追踪从 switchSession → 一直追到 ws send 阻塞点（transport 在哪个 stage 卡住）
+  - 用 vitest 写真实 daemon 交互的红测：mock 整个 ws，使 ensureActiveSessionFresh 在 active-reentry 上同步阻塞；跑 switch session × 2，看总耗时与 head 请求次数
+  - 定位具体到某一行同步逻辑后，再修
+
+## 2026-06-04T02:52:15.434Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260604T105051743-255967-3804:stop_followup:stop_followup:stop_followup:stop_followup:stop_followup:stop_followup:stop_followup
+- sessionId: 019e9074-96ee-75a3-84a2-01f1ddc91406
+- stopReason: 工具 exec_command / view 连续多次被拒，无法读 3 个未核验文件（useTerminalPageCopyRuntime.ts / TerminalPageCopyMenu.tsx / TerminalPage.tsx import 区），无法执行 patch，无法跑 type-check 验证。证据未补全，目标未完成。
+- evidence: 已核：TerminalPage.tsx:2301 copyModeActive 硬编码 false；TerminalView.tsx:301-302 已接 prop；useTerminalPageCopyRuntime 仅 TYPE import；TerminalPageStageShell.tsx 未被引用。缺：hook 返回签名、CopyMenu props、TerminalPage import 区。
+
+wterm refactor 落地校验硬规则：refactor 提交后必须 grep 确认旧调用点全部替换 / 新 hook 在每个生产路径实例化；本仓 AGENTS.md 未强制 refactor 后回归测试门禁，建议加入。
+
+## 2026-06-04T03:25:46.366Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260604T112516295-256107-3944:stop_followup
+- sessionId: 019e9074-96ee-75a3-84a2-01f1ddc91406
+- stopReason: 工具 exec_command / view 连续被拒，无法读 useTerminalPageCopyRuntime.ts / TerminalPageCopyMenu.tsx / TerminalPage.tsx import 区，无法 patch，无法跑 type-check 验证。
+- evidence: 已核：TerminalPage.tsx:2301 copyModeActive 硬编码 false；TerminalView.tsx:301-302 已接 prop；useTerminalPageCopyRuntime 仅 TYPE import；TerminalPageStageShell.tsx 未被引用。缺：hook 返回签名、CopyMenu props、TerminalPage import 区。
+
+wterm refactor 落地校验硬规则：refactor commit 后必须 grep 确认旧调用点全替换 / 新 hook 在每个生产路径实例化；本仓 AGENTS.md 未强制 refactor 后回归测试门禁，建议加入。
+
+## 2026-06-04T03:42:34.859Z stopless learned
+
+- requestId: openai-responses-mini27.key1-MiniMax-M2.7-20260604T114108968-256247-4084:stop_followup
+- sessionId: 019e9074-96ee-75a3-84a2-01f1ddc91406
+- stopReason: exec_command 连续被拒，无法读 TerminalPage.tsx 定位 handleLongPressCopyRow 引用冲突，无法完成 patch，无法跑 type-check，无法构建 APK。工具链完全中断。
+- evidence: 已核：TerminalPage.tsx:2301 copyModeActive 硬编码 false；TerminalView.tsx:301-302 prop 完整；useTerminalPageCopyRuntime.ts 返回类型完整；TerminalPageCopyMenu.tsx props 完整；patch 4 次写入文件；type-check 输出显示 1 个真实错误（handleLongPressCopyRow 声明/引用冲突）+ mac-terminal-view.tsx 预存错误。
+
+wterm refactor 后 copyModeActive 硬编码 false + hook 未接入；patch 改名时注意变量在 destructure 中声明但引用在作用域外的情况，hook destructure 里的变量名应与 TerminalStageShell prop 名完全一致。
+
+## 2026-06-04T04:28:34.295Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260604T122749976-256536-179:stop_followup
+- sessionId: 019e9074-96ee-75a3-84a2-01f1ddc91406
+- stopReason: 用户切任务方向：拷贝按钮 patch 已落盘且 tsc 通过，但 split header tab 隔离 + 图片传输两条新目标未启动。Mac-side lint 3 条 pre-existing 报错跨 scope（AGENTS 禁止 fallback 改 out-of-scope 文件），需先收 android scope 内的 lint 再切新任务。
+- evidence: android/.../TerminalPage.tsx 已 patch（hook 实例化 + onLongPressRow 透传 + CopyMenu 渲染 + _unused 注释）；android tsc --noEmit 0 error；Mac lint 报错来自 mac-terminal-view.tsx，git blame 早于本次 patch。
+
+wterm-mobile-dev 流程硬规则：refactor 后必须 tsc + lint + 单测三件套验证，禁止只跑 tsc 收口；本仓 lint 跨 mac/android scope 时按 AGENTS 硬护栏拒绝跨 scope 改动，只能在 android scope 内收尾。Split header 在 TerminalHeader.tsx 已支持 paneGroups 透传，问题大概率在 TerminalPage 透传层而非 header 内部。
+
+## 2026-06-07T06:18:50.141Z stopless learned
+
+- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260607T141805984-313222-995:stop_followup
+- sessionId: 019e9fed-6fa2-7f52-8636-9c86281f1265
+- stopReason: 已完成：拷贝模式生命周期修复（handleCloseCopyMenu 重置 active、copyTextAndResetOnSuccess helper），所有测试通过，APK 已交付到 android/update-dist 和 ~/.wterm/updates
+- evidence: android/update-dist/latest.json: {"versionName":"0.1.3.1754","sha256":"21bc69738cb7f1173f1bc29bf9ee4e495fb27e3fa113d0dabec2ab9d61733565"}; 测试：10/10 useTerminalPageCopyRuntime.test.tsx + 20/20 相关测试套件；tsc --noEmit 0 错误
+
+handleCloseCopyMenu 必须完整重置为 EMPTY_COPY_SELECTION_STATE；copy mode 的 UI 高亮只绑 copySelection.active，菜单关闭但未重置 active 则高亮持续；copyTextAndResetOnSuccess 统一了成功退出/失败保留的语义
+
+## 2026-06-07T06:33:15.720Z stopless learned
+
+- requestId: openai-responses-mini27.key1-MiniMax-M2.7-20260607T143227868-313344-1117:stop_followup
+- sessionId: 019e9fed-6fa2-7f52-8636-9c86281f1265
+- stopReason: 目标已全部完成：代码修复、测试编写、全量回归通过、APK 构建并交付到升级路径。剩余为用户手验步骤（Agent 无法替代）。
+- evidence: 文件：android/src/pages/useTerminalPageCopyRuntime.ts（含 handleCloseCopyMenu + copyTextAndResetOnSuccess）；测试：10 个生命周期测试 + 519 回归全绿；构建：APK sha256 88f69f131a89afd787fed9bc685ad1be5f2e1c0f0b0e03d55941a6c4da36caf8，两路径一致；tsc --noEmit 0 错误
+
+拷贝模式生命周期必须有三个退出点：1)用户主动关闭(重置所有) 2)复制成功(异步写入后重置) 3)复制失败(warn+保留)。写操作用.then/.catch分离成功失败路径，不能同步try/catch吞掉异步异常。
