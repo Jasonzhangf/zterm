@@ -22,8 +22,10 @@ describe('server debug runtime truth gates', () => {
 
     expect(source).toContain('createTerminalDebugRuntime');
     expect(source).toContain('const terminalDebugRuntime = createTerminalDebugRuntime({');
+    expect(source).toContain('daemonRuntimeDebugStore,');
     expect(source).toContain('logTimePrefix,');
     expect(source).toContain('daemonRuntimeDebug,');
+    expect(source).toContain('setDaemonRuntimeDebugEnabled,');
     expect(source).toContain('summarizePayload,');
     expect(source).toContain('handleClientDebugLog,');
     expect(source).toContain('} = terminalDebugRuntime;');
@@ -48,6 +50,8 @@ describe('server debug runtime truth gates', () => {
     const clientDebugBlock = extractBlock(source, 'function handleClientDebugLog(');
     const summaryBlock = extractBlock(source, 'function summarizePayload(');
 
+    expect(debugBlock).toContain('deps.daemonRuntimeDebugStore.appendBatch');
+    expect(debugBlock).toContain('sanitizeDaemonDebugPayload(payload)');
     expect(debugBlock).toContain("console.debug(`[daemon-runtime:${scope}] ${timestamp}`");
     expect(clientDebugBlock).toContain('deps.clientRuntimeDebugStore.appendBatch');
     expect(clientDebugBlock).toContain('[client-debug]');

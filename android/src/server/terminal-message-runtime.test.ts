@@ -31,6 +31,15 @@ function createConnection(boundSessionId: string | null = null): TerminalTranspo
   };
 }
 
+function bindSessionToConnection(session: TerminalSession, connection: TerminalTransportConnection) {
+  session.id = connection.transportId;
+  session.transportId = connection.transportId;
+  session.transport = connection.transport;
+  session.closeTransport = connection.closeTransport;
+  connection.boundSessionId = session.id;
+  connection.role = 'session';
+}
+
 function createSession(id = 'session-1'): TerminalSession {
   return {
     id,
@@ -72,6 +81,7 @@ function createRuntime(options?: {
   const handleClientDebugLog = vi.fn();
   const handleClientDebugSnapshot = vi.fn();
   const handleAdaptiveResize = vi.fn();
+  const daemonRuntimeDebug = vi.fn();
   const terminalFileTransferRuntime = createFileTransferRuntimeStub();
 
   const runtime = createTerminalMessageRuntime({
@@ -87,6 +97,7 @@ function createRuntime(options?: {
     terminalFileTransferRuntime,
     handleClientDebugLog,
     handleClientDebugSnapshot,
+    daemonRuntimeDebug,
     controlRuntimeDeps: {
       sessions,
       mirrors: new Map<string, SessionMirror>(),
@@ -130,6 +141,7 @@ function createRuntime(options?: {
     handleInput,
     closeSession,
     handleAdaptiveResize,
+    daemonRuntimeDebug,
   };
 }
 
@@ -310,10 +322,11 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('writes string input payloads to the attached session', async () => {
-    const { runtime, sessions, handleInput, sendMessage } = createRuntime();
+    const { runtime, sessions, handleInput, sendMessage, daemonRuntimeDebug } = createRuntime();
     const session = createSession();
-    sessions.set(session.id, session);
     const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'input',
@@ -325,13 +338,28 @@ describe('terminal message runtime explicit error truth', () => {
       session,
       expect.objectContaining({ type: 'error' }),
     );
+    expect(daemonRuntimeDebug).toHaveBeenCalledWith('input-receive', expect.objectContaining({
+      transportId: connection.transportId,
+      sessionId: session.id,
+      bytes: 4,
+      queueDepth: 0,
+    }));
+    expect(daemonRuntimeDebug).toHaveBeenCalledWith('input-write', expect.objectContaining({
+      transportId: connection.transportId,
+      sessionId: session.id,
+      sessionName: 'demo',
+      bytes: 4,
+      queueDepth: 0,
+    }));
+    expect(JSON.stringify(daemonRuntimeDebug.mock.calls)).not.toContain('pwd');
   });
 
   it('rejects object input payloads instead of writing object stringification to tmux', async () => {
     const { runtime, sessions, handleInput, sendMessage } = createRuntime();
     const session = createSession();
-    sessions.set(session.id, session);
     const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'input',
@@ -348,6 +376,69 @@ describe('terminal message runtime explicit error truth', () => {
         message: 'invalid input payload',
         code: 'input_invalid',
       },
+    });
+  });
+
+  it('drops input when the bound session was detached before dispatch reaches tmux', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+    sessions.delete(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: 'late-after-detach\r',
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'error',
+      payload: { message: 'input requires an attached session transport', code: 'session_required' },
+    });
+  });
+
+  it('drops input when the current session transport no longer matches the message transport', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage, daemonRuntimeDebug } = createRuntime();
+    const session = createSession();
+    session.transportId = 'transport-2';
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: 'late-from-old-transport\r',
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'error',
+      payload: { message: 'input requires the current attached session transport', code: 'input_stale_transport' },
+    });
+    expect(daemonRuntimeDebug).toHaveBeenCalledWith('input-drop', expect.objectContaining({
+      transportId: connection.transportId,
+      sessionId: session.id,
+      reason: 'input_stale_transport',
+      bytes: 24,
+      queueDepth: 0,
+    }));
+    expect(JSON.stringify(daemonRuntimeDebug.mock.calls)).not.toContain('late-from-old-transport');
+  });
+
+  it('drops plain text input when the current session transport no longer matches the message transport', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage } = createRuntime();
+    const session = createSession();
+    session.transportId = 'transport-2';
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from('plain-late-from-old-transport\r'));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'error',
+      payload: { message: 'input requires the current attached session transport', code: 'input_stale_transport' },
     });
   });
 });

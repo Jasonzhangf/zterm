@@ -16,8 +16,10 @@ export interface TerminalHttpRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   clientRuntimeDebugStore: RuntimeDebugStore;
+  daemonRuntimeDebugStore: RuntimeDebugStore;
   resolveDebugRouteLimit: (input: string | null | undefined) => number;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
+  setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
   logTimePrefix: (date?: Date) => string;
 }
 
@@ -174,6 +176,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       authEnabled: Boolean(deps.requiredAuthToken),
       health: buildRuntimeHealthSnapshot(request),
       clientDebug: deps.clientRuntimeDebugStore.getSummary(),
+      daemonDebug: deps.daemonRuntimeDebugStore.getSummary(),
       clientDebugSnapshots: deps.clientRuntimeDebugStore.listSnapshots(),
       clientSessions: sessionEntries.map((session) => ({
         id: session.id,
@@ -242,17 +245,25 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         tmuxSessionName: tmuxSessionName || undefined,
         scopeIncludes: scopeIncludes || undefined,
       });
+      const daemonEntries = deps.daemonRuntimeDebugStore.listEntries({
+        limit,
+        sessionId: sessionId || undefined,
+        tmuxSessionName: tmuxSessionName || undefined,
+        scopeIncludes: scopeIncludes || undefined,
+      });
       serveJson(response, {
         ok: true,
         generatedAt: deps.logTimePrefix(),
         limit,
         returned: entries.length,
+        daemonReturned: daemonEntries.length,
         filters: {
           sessionId: sessionId || null,
           tmuxSessionName: tmuxSessionName || null,
           scope: scopeIncludes || null,
         },
         entries,
+        daemonEntries,
       });
       return;
     }
@@ -265,10 +276,12 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       const enabled = enabledRaw === '1' || enabledRaw === 'true' || enabledRaw === 'on';
       const sessionId = url.searchParams.get('sessionId')?.trim() || '';
       const reason = url.searchParams.get('reason')?.trim() || 'remote-http-control';
+      deps.setDaemonRuntimeDebugEnabled(enabled);
       deps.broadcastRuntimeDebugControl(enabled, reason, sessionId || undefined);
       serveJson(response, {
         ok: true,
         enabled,
+        daemonDebugEnabled: enabled,
         reason,
         sessionId: sessionId || null,
         targetedSessions: sessionId

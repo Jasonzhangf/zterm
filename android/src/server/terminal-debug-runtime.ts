@@ -7,12 +7,14 @@ export interface TerminalDebugRuntimeDeps {
   maxClientDebugBatchLogEntries: number;
   maxClientDebugLogPayloadChars: number;
   clientRuntimeDebugStore: RuntimeDebugStore;
+  daemonRuntimeDebugStore: RuntimeDebugStore;
   sessions: Map<string, TerminalSession>;
 }
 
 export interface TerminalDebugRuntime {
   logTimePrefix: (date?: Date) => string;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
+  setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
   handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
@@ -21,6 +23,9 @@ export interface TerminalDebugRuntime {
 export function createTerminalDebugRuntime(
   deps: TerminalDebugRuntimeDeps,
 ): TerminalDebugRuntime {
+  let daemonRuntimeDebugEnabled = deps.daemonRuntimeDebugEnabled;
+  let daemonRuntimeDebugSeq = 0;
+
   function formatLocalLogTimestamp(date = new Date()) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -40,18 +45,77 @@ export function createTerminalDebugRuntime(
     return formatLocalLogTimestamp(date);
   }
 
+  function setDaemonRuntimeDebugEnabled(enabled: boolean) {
+    daemonRuntimeDebugEnabled = enabled;
+  }
+
+  function sanitizeDaemonDebugPayload(payload: unknown) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {};
+    }
+    const source = payload as Record<string, unknown>;
+    const sanitized: Record<string, unknown> = {};
+    for (const key of [
+      'transportId',
+      'sessionId',
+      'sessionName',
+      'reason',
+      'bytes',
+      'durationMs',
+      'queueDepth',
+      'type',
+      'payloadSummary',
+    ]) {
+      if (source[key] !== undefined) {
+        sanitized[key] = source[key];
+      }
+    }
+    if (source.payload && typeof source.payload === 'object' && !Array.isArray(source.payload)) {
+      sanitized.payloadSummary = source.payload;
+    }
+    return sanitized;
+  }
+
+  function stringifyDaemonDebugPayload(payload: Record<string, unknown>) {
+    const text = JSON.stringify(payload);
+    return truncateDaemonLogPayload(text, deps.maxClientDebugLogPayloadChars);
+  }
+
   function daemonRuntimeDebug(scope: string, payload?: unknown) {
-    if (!deps.daemonRuntimeDebugEnabled) {
+    if (!daemonRuntimeDebugEnabled) {
       return;
     }
 
     const timestamp = logTimePrefix();
-    if (payload === undefined) {
-      console.debug(`[daemon-runtime:${scope}] ${timestamp}`);
+    const sanitizedPayload = sanitizeDaemonDebugPayload(payload);
+    const sessionId = typeof sanitizedPayload.sessionId === 'string' && sanitizedPayload.sessionId.trim()
+      ? sanitizedPayload.sessionId.trim()
+      : 'daemon';
+    const tmuxSessionName = typeof sanitizedPayload.sessionName === 'string' && sanitizedPayload.sessionName.trim()
+      ? sanitizedPayload.sessionName.trim()
+      : 'daemon';
+    const payloadText = Object.keys(sanitizedPayload).length > 0
+      ? stringifyDaemonDebugPayload(sanitizedPayload)
+      : '';
+
+    deps.daemonRuntimeDebugStore.appendBatch(
+      {
+        sessionId,
+        tmuxSessionName,
+      },
+      [{
+        seq: ++daemonRuntimeDebugSeq,
+        ts: timestamp,
+        scope,
+        payload: payloadText,
+      }],
+    );
+
+    if (payloadText) {
+      console.debug(`[daemon-runtime:${scope}] ${timestamp}`, payloadText);
       return;
     }
-
-    console.debug(`[daemon-runtime:${scope}] ${timestamp}`, payload);
+    console.debug(`[daemon-runtime:${scope}] ${timestamp}`);
   }
 
   function truncateDaemonLogPayload(value: string, maxChars: number) {
@@ -139,6 +203,7 @@ export function createTerminalDebugRuntime(
   return {
     logTimePrefix,
     daemonRuntimeDebug,
+    setDaemonRuntimeDebugEnabled,
     summarizePayload,
     handleClientDebugLog,
     handleClientDebugSnapshot,

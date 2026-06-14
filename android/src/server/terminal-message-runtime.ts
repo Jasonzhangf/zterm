@@ -40,6 +40,7 @@ export interface TerminalMessageRuntimeDeps {
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
   handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
   controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
+  daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
 }
 
 export interface TerminalMessageRuntime {
@@ -54,6 +55,69 @@ export interface TerminalMessageRuntime {
 export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
+  function debugInput(scope: 'receive' | 'drop' | 'write', payload: Record<string, unknown>) {
+    deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
+  }
+
+  function resolveCurrentSessionForInput(connection: TerminalTransportConnection): TerminalSession | null {
+    if (!connection.boundSessionId) {
+      return null;
+    }
+    const current = deps.sessions.get(connection.boundSessionId) || null;
+    if (!current) {
+      return null;
+    }
+    if (current.transportId !== connection.transportId || current.transport !== connection.transport) {
+      return null;
+    }
+    return current;
+  }
+
+  function reportInputDrop(connection: TerminalTransportConnection, reason: 'session_required' | 'input_stale_transport', bytes: number) {
+    debugInput('drop', {
+      transportId: connection.transportId,
+      sessionId: connection.boundSessionId,
+      reason,
+      bytes,
+      queueDepth: 0,
+    });
+    deps.sendTransportMessage(connection.transport, {
+      type: 'error',
+      payload: reason === 'input_stale_transport'
+        ? { message: 'input requires the current attached session transport', code: 'input_stale_transport' }
+        : { message: 'input requires an attached session transport', code: 'session_required' },
+    });
+  }
+
+  function writeInputIfCurrent(connection: TerminalTransportConnection, data: string) {
+    const bytes = Buffer.byteLength(data, 'utf8');
+    debugInput('receive', {
+      transportId: connection.transportId,
+      sessionId: connection.boundSessionId,
+      bytes,
+      queueDepth: 0,
+    });
+    const inputSession = resolveCurrentSessionForInput(connection);
+    if (!inputSession) {
+      reportInputDrop(
+        connection,
+        connection.boundSessionId && deps.sessions.has(connection.boundSessionId) ? 'input_stale_transport' : 'session_required',
+        bytes,
+      );
+      return;
+    }
+    const startedAt = Date.now();
+    deps.handleInput(inputSession, data);
+    debugInput('write', {
+      transportId: connection.transportId,
+      sessionId: inputSession.id,
+      sessionName: inputSession.sessionName,
+      bytes,
+      durationMs: Date.now() - startedAt,
+      queueDepth: 0,
+    });
+  }
+
   function sendSessionNotReadyError(
     session: TerminalSession,
     operation: 'buffer-head-request' | 'buffer-sync-request',
@@ -106,14 +170,14 @@ export function createTerminalMessageRuntime(
     try {
       message = JSON.parse(text) as ClientMessage;
     } catch {
-      if (!session) {
+      if (!connection.boundSessionId) {
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: 'Plain text input requires an attached session transport', code: 'input_requires_session' },
         });
         return;
       }
-      deps.handleInput(session, text);
+      writeInputIfCurrent(connection, text);
       return;
     }
 
@@ -285,15 +349,15 @@ export function createTerminalMessageRuntime(
         handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
         break;
       case 'input':
+        if (typeof message.payload === 'string') {
+          writeInputIfCurrent(connection, message.payload);
+          break;
+        }
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
             type: 'error',
             payload: { message: 'input requires an attached session transport', code: 'session_required' },
           });
-          break;
-        }
-        if (typeof message.payload === 'string') {
-          deps.handleInput(session, message.payload);
           break;
         }
         deps.sendMessage(session, {

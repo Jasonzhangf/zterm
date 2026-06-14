@@ -23,6 +23,8 @@ describe('server http route truth gates', () => {
     expect(source).toContain('createTerminalHttpRuntime');
     expect(source).toContain('const terminalHttpRuntime = createTerminalHttpRuntime({');
     expect(source).toContain('terminalHttpRuntime.handleHttpRequest(request, response)');
+    expect(source).toContain('daemonRuntimeDebugStore,');
+    expect(source).toContain('setDaemonRuntimeDebugEnabled,');
     expect(source).toContain(
       'buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin)',
     );
@@ -42,12 +44,17 @@ describe('server http route truth gates', () => {
 
   it('keeps health/debug/update routes in dedicated http runtime', () => {
     const source = readHttpRuntimeSource();
-    const block = extractBlock(source, 'function handleHttpRequest(', 3600);
+    const snapshotBlock = extractBlock(source, 'function buildDebugRuntimeSnapshot(', 2200);
+    const block = extractBlock(source, 'function handleHttpRequest(', 8000);
 
+    expect(snapshotBlock).toContain('daemonDebug: deps.daemonRuntimeDebugStore.getSummary()');
     expect(block).toContain("url.pathname === '/health'");
     expect(block).toContain("url.pathname === '/debug/runtime'");
     expect(block).toContain("url.pathname === '/debug/runtime/logs'");
     expect(block).toContain("url.pathname === '/debug/runtime/control'");
+    expect(block).toContain('daemonEntries');
+    expect(block).toContain('daemonReturned');
+    expect(block).toContain('deps.setDaemonRuntimeDebugEnabled(enabled)');
     expect(block).toContain("url.pathname === '/updates/latest.json'");
     expect(block).toContain("url.pathname.startsWith('/updates/')");
   });

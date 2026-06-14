@@ -93,6 +93,7 @@ const connections = new Map<string, DaemonTransportConnection>();
 const mirrors = new Map<string, SessionMirror>();
 const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
+const daemonRuntimeDebugStore = createRuntimeDebugStore();
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
@@ -102,6 +103,7 @@ const terminalDebugRuntime = createTerminalDebugRuntime({
   maxClientDebugBatchLogEntries: MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES,
   maxClientDebugLogPayloadChars: MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS,
   clientRuntimeDebugStore,
+  daemonRuntimeDebugStore,
   sessions,
 });
 const terminalCoreSupport = createTerminalCoreSupport({
@@ -111,6 +113,7 @@ const terminalCoreSupport = createTerminalCoreSupport({
 const {
   logTimePrefix,
   daemonRuntimeDebug,
+  setDaemonRuntimeDebugEnabled,
   summarizePayload,
   handleClientDebugLog,
   handleClientDebugSnapshot,
@@ -250,8 +253,10 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   sessions,
   mirrors,
   clientRuntimeDebugStore,
+  daemonRuntimeDebugStore,
   resolveDebugRouteLimit,
   broadcastRuntimeDebugControl,
+  setDaemonRuntimeDebugEnabled,
   logTimePrefix,
 });
 
@@ -268,6 +273,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   terminalFileTransferRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,
+  daemonRuntimeDebug,
   controlRuntimeDeps: {
     sessions,
     mirrors,
