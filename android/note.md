@@ -1,17 +1,4 @@
 # note
-- [2026-06-15] formal rollback config backup:
-  - Jason 明确冻结：真正 rollback 不能依赖“旧运行时重打更高 versionCode”，正式产品链路必须是 `配置备份 -> 卸载当前版本 -> 安装旧版 -> 导入配置恢复`。
-  - 真源收口：
-    - payload / allowlist：`src/lib/app-config-backup.ts`
-    - 生命周期 owner：`src/lib/app-config-backup-runtime.ts`
-    - Android external storage 接线：`src/hooks/useAppConfigBackup.ts`
-  - allowlist 当前覆盖：`STORAGE_KEYS.*` + `zterm:app-update-settings` + `zterm:traversal-relay-account`。
-  - 固定备份路径：`/storage/emulated/0/Download/zterm/zterm-config-backup.json`，不做文件选择器和多份真源。
-  - restore 语义：只改 allowlist；backup 缺失的 allowlist key 要物理 remove；未知 key 保持不动；完成后整 app reload，让 mount-time hooks 重新取真相。
-  - 红测首轮暴露的真实问题：
-    - runtime test 被权限拒绝 mock 污染，导致 restore 测试误红
-    - AppUpdateSection test 因未 cleanup 多次 render，误点到前一棵树的按钮
-  - 已修复并转绿：feature gate 17 tests、settings/update 回归 9 tests、`tsc --noEmit`。
 - Jason 2026-06-15 copy mode git 真源审计:
   - `9c7e304` / `2ba484c` / `da3d24a` / `38db24f` 证明 copy mode 之前已经完整实现过：quickbar 拷贝开关、应用内长按选行、normal mode 恢复系统选中、copy mode 注入 `-webkit-touch-callout:none`。
   - 当前主线并非完全丢失，只是 `TerminalView` 还保留了 `touch-callout:none` 样式，但缺少 Android touch long-press 事件链；因此 pointer 测试能过，真机触摸仍可能落回系统菜单。
@@ -32,6 +19,11 @@
   - 回退策略冻结为：基于旧稳定提交 `c31a773` 构建独立 APK，但把 `.build-meta.json` 提升到 `1785`，保证 Android 允许覆盖安装。
   - 为避免污染主仓脏工作区，回退构建只在独立 worktree `/tmp/zterm-rollback-c31a773` 进行。
   - 已确认旧提交阻塞点不是编译错误，而是 `android/package.json -> prebuild -> test:terminal:regression` 依赖缺失的历史 evidence fixture 与本机 tmux 环境；本轮交付 APK 走显式底层构建链，不复用该旧 prebuild 门。
+- [2026-06-15] rollback stop-bleed package 1797:
+  - 用户否决 `0.1.3.1796`，要求立即回退到上一个可用版本。
+  - 当前冻结路线：不重跑 web build，不复用当前 `assets/public`；直接以 `android/update-dist/zterm-0.1.3.1795.apk` 中的 `assets/` 作为前端真值，覆盖 `native/android/app/src/main/assets` 后仅走 Gradle-only 构建。
+  - 版本号策略：`.build-meta.json` 已升到 `1797`，目的是生成可覆盖安装的新 APK，同时保持运行时内容回到 `1795`。
+  - 验证目标：`android/update-dist/zterm-0.1.3.1797.apk` + `latest.json` + `~/.wterm/updates/` 同步完成，并记录 sha256。
 - [2026-06-15] daemon stale input / runtime debug closeout:
   - 当前目标: close/error/detach 后旧 transport queued input 必须显式 drop，不得继续写 tmux；input wire 保持 string-only；daemon receive/drop/write/queue metadata 可通过 `/debug/runtime` 在线观测。
   - 已有先红测证据: `terminal-debug-runtime.test.ts` 最初失败，证明 daemon debug 只 console、不进 store，远程 control 不能开 daemon debug，console 会泄露真实 input payload。

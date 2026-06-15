@@ -3,38 +3,6 @@
   "description": "Global feature owner registry for zterm Android. Every feature_id must have one owner surface and explicit gates before code changes.",
   "features": [
     {
-      "feature_id": "settings.config_backup",
-      "title": "External config backup and restore for uninstall-safe rollback",
-      "domain": "settings-storage",
-      "owners": [
-        "src/lib/app-config-backup-runtime.ts"
-      ],
-      "allowed_paths": [
-        "src/lib/app-config-backup.ts",
-        "src/lib/app-config-backup-runtime.ts",
-        "src/hooks/useAppConfigBackup.ts",
-        "src/components/settings/AppUpdateSection.tsx",
-        "src/pages/SettingsPage.tsx",
-        "src/App.tsx",
-        "src/lib/traversal-relay-client.ts"
-      ],
-      "forbidden_paths": [
-        "src/server/",
-        "src/pages/TerminalPage.tsx"
-      ],
-      "required_gates": [
-        "src/lib/app-config-backup.test.ts",
-        "src/lib/app-config-backup-runtime.test.ts",
-        "src/hooks/useAppConfigBackup.test.tsx",
-        "src/components/settings/AppUpdateSection.test.tsx",
-        "src/lib/feature-registry-truth.test.ts"
-      ],
-      "truth_sources": [
-        "docs/feature-gates.md",
-        "docs/goals/config-backup-rollback-plan.md"
-      ]
-    },
-    {
       "feature_id": "terminal.copy_mode",
       "title": "Terminal copy mode and selection lifecycle",
       "domain": "terminal-ui",

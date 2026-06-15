@@ -6,7 +6,6 @@ Before changing a feature, locate its `feature_id`, read its owner paths, and ru
 
 | feature_id | owner | allowed change surface | required gate source |
 | --- | --- | --- | --- |
-| `settings.config_backup` | `src/lib/app-config-backup-runtime.ts` | config backup contract, Android external-storage hook, settings/app-update wiring, traversal relay storage key truth | `app-config-backup.test.ts`; `app-config-backup-runtime.test.ts`; `useAppConfigBackup.test.tsx`; `AppUpdateSection.test.tsx` |
 | `terminal.copy_mode` | `src/pages/useTerminalPageCopyRuntime.ts` | copy runtime, TerminalPage wiring, `TerminalView` pointer/touch long-press ownership, `VisibleRow` selection/menu guard, header state | `src/pages/useTerminalPageCopyRuntime.test.tsx`; `system-copy-state-machine.test.tsx`; `system-copy-longpress-regression.test.tsx`; `TerminalView.selection-guard.test.tsx`; `VisibleRow.selection.test.tsx` |
 | `terminal.quickbar` | `src/components/terminal/TerminalQuickBar.tsx` | quickbar UI, terminal page shell wiring, workspace/layout profile | `TerminalQuickBar.test.tsx`; `TerminalPage.real-quickbar-split.test.tsx` |
 | `terminal.keyboard_ime` | `src/pages/terminal-keyboard-lift.ts`; `src/pages/TerminalPage.tsx`; `src/pages/TerminalPageStageShell.tsx` | IME lift, keyboard visibility, viewport safe-area, stage shell visual lift, listener cleanup | `terminal-keyboard-lift.test.ts`; `TerminalPage.android-ime.test.tsx`; `TerminalPage.lifecycle-cleanup.test.tsx`; `TerminalPageStageShell.pane-stage.test.tsx` |

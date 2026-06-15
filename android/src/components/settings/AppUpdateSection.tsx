@@ -1,6 +1,5 @@
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { AppUpdateManifest, AppUpdatePreferences, AppUpdateRollbackBackup } from '../../lib/app-update';
-import { APP_CONFIG_BACKUP_FILE_PATH, type AppConfigBackupInfo } from '../../lib/app-config-backup';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
 
 interface AppUpdateSectionProps {
@@ -18,22 +17,9 @@ interface AppUpdateSectionProps {
   onCheckForUpdate: () => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
-  configBackupPath?: string;
-  configBackupInfo?: AppConfigBackupInfo | null;
-  configBackupError?: string | null;
-  isExportingConfig?: boolean;
-  isRestoringConfig?: boolean;
-  onExportConfig?: () => void;
-  onRestoreConfig?: () => void;
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
-}
-
-function formatTimestamp(timestamp: number) {
-  return new Date(timestamp).toLocaleString('zh-CN', {
-    hour12: false,
-  });
 }
 
 export function AppUpdateSection({
@@ -51,13 +37,6 @@ export function AppUpdateSection({
   onCheckForUpdate,
   onInstallUpdate,
   onResetUpdateIgnorePolicy,
-  configBackupPath = APP_CONFIG_BACKUP_FILE_PATH,
-  configBackupInfo,
-  configBackupError,
-  isExportingConfig = false,
-  isRestoringConfig = false,
-  onExportConfig,
-  onRestoreConfig,
   rollbackBackup,
   isRollingBack = false,
   onRollback,
@@ -143,21 +122,6 @@ export function AppUpdateSection({
         <div style={{ color: mobileTheme.colors.danger, fontSize: '13px', lineHeight: 1.5 }}>{updateError}</div>
       ) : null}
 
-      <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-        配置备份路径 {configBackupPath}
-      </div>
-
-      {configBackupInfo ? (
-        <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-          最近配置备份 {configBackupInfo.appVersion} · versionCode {configBackupInfo.appVersionCode}
-          {` · ${formatTimestamp(configBackupInfo.exportedAt)} · ${configBackupInfo.storedKeys} 项`}
-        </div>
-      ) : null}
-
-      {configBackupError ? (
-        <div style={{ color: mobileTheme.colors.danger, fontSize: '13px', lineHeight: 1.5 }}>{configBackupError}</div>
-      ) : null}
-
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button
           onClick={onCheckForUpdate}
@@ -192,40 +156,6 @@ export function AppUpdateSection({
           }}
         >
           {updateInstalling ? '准备安装…' : '下载并安装'}
-        </button>
-        <button
-          onClick={onExportConfig}
-          disabled={isExportingConfig || isRestoringConfig}
-          style={{
-            minHeight: '44px',
-            padding: '0 16px',
-            borderRadius: '14px',
-            border: 'none',
-            backgroundColor: 'rgba(59,130,246,0.16)',
-            color: '#1d4ed8',
-            fontWeight: 800,
-            cursor: isExportingConfig || isRestoringConfig ? 'wait' : 'pointer',
-            opacity: isExportingConfig || isRestoringConfig ? 0.55 : 1,
-          }}
-        >
-          {isExportingConfig ? '正在导出配置…' : '导出配置'}
-        </button>
-        <button
-          onClick={onRestoreConfig}
-          disabled={isRestoringConfig || isExportingConfig}
-          style={{
-            minHeight: '44px',
-            padding: '0 16px',
-            borderRadius: '14px',
-            border: 'none',
-            backgroundColor: 'rgba(14,165,233,0.16)',
-            color: '#0369a1',
-            fontWeight: 800,
-            cursor: isRestoringConfig || isExportingConfig ? 'wait' : 'pointer',
-            opacity: isRestoringConfig || isExportingConfig ? 0.55 : 1,
-          }}
-        >
-          {isRestoringConfig ? '正在恢复配置…' : '从备份恢复'}
         </button>
         {rollbackBackup ? (
           <button

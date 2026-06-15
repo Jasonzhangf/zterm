@@ -25,7 +25,6 @@ Do not use another feature owner to compensate for a broken owner. If a feature 
 ## Current High-Risk Gates
 
 - `terminal.copy_mode`: prove copy mode has an explicit enter/exit lifecycle, Android touch long-press is routed to app copy menu instead of native system selection, and close/copy/failure paths do not leave highlighted controls behind.
-- `settings.config_backup`: prove export writes the allowlist to the fixed external-storage file, restore rewrites exactly that allowlist and clears missing keys, permission denial is explicit, and invalid backup files do not mutate local storage or trigger reload.
 - `terminal.keyboard_ime`: prove IME lift and keyboard listeners clean up without double-lift, stale listeners, hidden-input overlap, or stage-height shrink regressions.
 - `terminal.daemon_input`: prove stale or detached input is dropped before tmux write, input wire remains string-only, connect/close attach barriers stay ordered, per-transport input lane can bypass slow non-input work without crossing attach barriers, mirror live cadence falls back to idle without fake activity, and debug metadata exposes receive/drop/write/queue facts without terminal payload.
 - `terminal.open_tabs`: prove no daemon audit, transport close, or runtime absence can physically auto-close a client tab.

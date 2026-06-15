@@ -25,7 +25,6 @@ const architecturePath = join(androidRoot, 'docs', 'architecture.md');
 const workflowPath = join(androidRoot, 'docs', 'dev-workflow.md');
 
 const requiredFeatureIds = [
-  'settings.config_backup',
   'terminal.copy_mode',
   'terminal.quickbar',
   'terminal.keyboard_ime',
@@ -43,7 +42,6 @@ const requiredFeatureIds = [
 ] as const;
 
 const requiredCoveragePaths = [
-  'src/lib/app-config-backup-runtime.ts',
   'src/pages/useTerminalPageCopyRuntime.ts',
   'src/components/terminal/TerminalQuickBar.tsx',
   'src/pages/terminal-keyboard-lift.ts',

@@ -58,32 +58,28 @@
 5. `pnpm --filter @zterm/android build` 成功
 6. 出 APK 包
 
-## 2026-06-15 正式回退链路补齐
-- 目标：补正式 rollback 前置链路，支持 `配置备份 -> 卸载当前版本 -> 安装旧版 -> 从固定备份恢复配置`
+## 2026-06-15 回退止血包 1797
+- 目标：基于已验证 `zterm-0.1.3.1795.apk` 的前端 assets 重打一个可覆盖安装的新 APK，止血当前 `1796` 渲染错误版本
 - 成功标准：
-  1. 配置备份/恢复有唯一 owner、feature registry、function map、gate
-  2. 导出仅写 allowlist 到固定外部存储文件
-  3. 恢复仅重写 allowlist、删除备份中缺失的 allowlist key，并触发整 app reload
-  4. 权限拒绝与非法备份显式报错，不做 fallback
-  5. 红测、type-check、settings 回归通过
+  1. `native/android/app/src/main/assets` 被 `1795` APK 内的 assets 真值覆盖后，Gradle-only 构建成功
+  2. 生成 `android/update-dist/zterm-0.1.3.1797.apk`
+  3. `android/update-dist/latest.json` 指向 `0.1.3.1797`
+  4. 产物同步到 `~/.wterm/updates/`
 - 验证入口：
-  - `pnpm --dir android exec vitest run src/lib/app-config-backup.test.ts src/lib/app-config-backup-runtime.test.ts src/hooks/useAppConfigBackup.test.tsx src/components/settings/AppUpdateSection.test.tsx src/lib/feature-registry-truth.test.ts`
-  - `pnpm --dir android exec vitest run src/pages/SettingsPage.theme.test.tsx src/hooks/useAppUpdate.test.tsx`
-  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `cd android/native/android && ./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug`
+  - `node android/scripts/prepare-update-bundle.mjs android/native/android/app/build/outputs/apk/debug/app-debug.apk`
+  - `shasum -a 256 android/update-dist/zterm-0.1.3.1797.apk`
 - 范围：
-  - `src/lib/app-config-backup*.ts`
-  - `src/hooks/useAppConfigBackup.ts`
-  - `src/components/settings/AppUpdateSection.tsx`
-  - `src/pages/SettingsPage.tsx`
-  - `src/App.tsx`
-  - feature registry / gates / plan doc
+  - `android/.build-meta.json`
+  - `android/native/android/app/src/main/assets/**`
+  - `android/update-dist/**`
 - 不在范围：
-  - 历史旧 APK 的版本号策略
-  - daemon / terminal transport 行为
-  - 自动卸载或自动降级安装
+  - 当前主线源码功能修复
+  - formal config-backup 产品链路
+  - daemon / transport / renderer 逻辑变更
 - 风险：
-  - 历史旧 APK 若未包含恢复入口，仍需后续统一产品版本策略
-  - 真机 external storage 权限流需 APK 安装态验证
+  - 这是止血包，不解决源码主线中的坏改动
+  - 若当前 native 层与 `1795` assets 存在二进制不兼容，需以构建/安装结果判定
 - 证据输出位置：
   - `android/update-dist/`
   - `~/.wterm/updates/`

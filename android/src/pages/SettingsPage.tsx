@@ -6,7 +6,6 @@ import {
   type BridgeSettings,
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
-import { APP_CONFIG_BACKUP_FILE_PATH, type AppConfigBackupInfo } from '../lib/app-config-backup';
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
@@ -37,13 +36,6 @@ interface SettingsPageProps {
   onCheckForUpdate: (next: AppUpdatePreferences) => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
-  configBackupPath?: string;
-  configBackupInfo?: AppConfigBackupInfo | null;
-  configBackupError?: string | null;
-  isExportingConfig?: boolean;
-  isRestoringConfig?: boolean;
-  onExportConfig?: () => void;
-  onRestoreConfig?: () => void;
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
@@ -84,13 +76,6 @@ export function SettingsPage({
   onCheckForUpdate,
   onInstallUpdate,
   onResetUpdateIgnorePolicy,
-  configBackupPath = APP_CONFIG_BACKUP_FILE_PATH,
-  configBackupInfo,
-  configBackupError,
-  isExportingConfig = false,
-  isRestoringConfig = false,
-  onExportConfig,
-  onRestoreConfig,
   rollbackBackup,
   isRollingBack = false,
   onRollback,
@@ -242,13 +227,6 @@ export function SettingsPage({
           onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
           onInstallUpdate={onInstallUpdate}
           onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
-          configBackupPath={configBackupPath}
-          configBackupInfo={configBackupInfo}
-          configBackupError={configBackupError}
-          isExportingConfig={isExportingConfig}
-          isRestoringConfig={isRestoringConfig}
-          onExportConfig={onExportConfig}
-          onRestoreConfig={onRestoreConfig}
           rollbackBackup={rollbackBackup}
           isRollingBack={isRollingBack}
           onRollback={onRollback}
