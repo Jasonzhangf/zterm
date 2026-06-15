@@ -39,6 +39,10 @@ interface SettingsPageProps {
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
+  onExportConfig?: () => void;
+  onImportConfig?: () => void;
+  configExporting?: boolean;
+  configImporting?: boolean;
   onTerminalThemeChange?: (themeId: BridgeSettings['terminalThemeId']) => void;
   onBack: () => void;
 }
@@ -79,6 +83,10 @@ export function SettingsPage({
   rollbackBackup,
   isRollingBack = false,
   onRollback,
+  onExportConfig,
+  onImportConfig,
+  configExporting = false,
+  configImporting = false,
   onTerminalThemeChange,
   onBack,
 }: SettingsPageProps) {
@@ -226,7 +234,11 @@ export function SettingsPage({
           onUpdateDraftChange={(updater) => setUpdateDraft((current) => updater(current))}
           onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
           onInstallUpdate={onInstallUpdate}
-          onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
+         onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
+          onExportConfig={onExportConfig}
+          onImportConfig={onImportConfig}
+          configExporting={configExporting}
+          configImporting={configImporting}
           rollbackBackup={rollbackBackup}
           isRollingBack={isRollingBack}
           onRollback={onRollback}

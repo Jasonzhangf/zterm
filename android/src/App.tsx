@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
+import { useConfigExport } from './hooks/useConfigExport';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
@@ -85,6 +86,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     isRollingBack,
     rollbackToPreviousVersion,
   } = useAppUpdate();
+
+  const {
+    exporting: configExporting,
+    importing: configImporting,
+    lastError: _configExportError,
+    exportConfig,
+    importConfig,
+  } = useConfigExport();
 
   // Effective manifest URL: prefer user-saved URL, else derive from Relay wsHostUrl.
   const effectiveManifestUrl = (() => {
@@ -669,6 +678,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
               void startUpdate();
             }}
             onResetUpdateIgnorePolicy={resetIgnorePolicy}
+            onExportConfig={() => { void exportConfig(); }}
+            onImportConfig={() => { void importConfig(); }}
+            configExporting={configExporting}
+            configImporting={configImporting}
             rollbackBackup={rollbackBackup}
             isRollingBack={isRollingBack}
             onRollback={() => {

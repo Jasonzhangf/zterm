@@ -16,7 +16,11 @@ interface AppUpdateSectionProps {
   onUpdateDraftChange: (updater: (current: AppUpdatePreferences) => AppUpdatePreferences) => void;
   onCheckForUpdate: () => void;
   onInstallUpdate: () => void;
-  onResetUpdateIgnorePolicy: () => void;
+ onResetUpdateIgnorePolicy: () => void;
+  onExportConfig?: () => void;
+  onImportConfig?: () => void;
+  configExporting?: boolean;
+  configImporting?: boolean;
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
@@ -37,6 +41,10 @@ export function AppUpdateSection({
   onCheckForUpdate,
   onInstallUpdate,
   onResetUpdateIgnorePolicy,
+  onExportConfig,
+  onImportConfig,
+  configExporting = false,
+  configImporting = false,
   rollbackBackup,
   isRollingBack = false,
   onRollback,
@@ -154,8 +162,42 @@ export function AppUpdateSection({
             cursor: !hasNewVersion || updateInstalling ? 'not-allowed' : 'pointer',
             opacity: !hasNewVersion || updateInstalling ? 0.55 : 1,
           }}
+       >
+         {updateInstalling ? '准备安装…' : '下载并安装'}
+       </button>
+        <button
+          onClick={onExportConfig}
+          disabled={configExporting || configImporting}
+          style={{
+            minHeight: '44px',
+            padding: '0 16px',
+            borderRadius: '14px',
+            border: 'none',
+            backgroundColor: 'rgba(59,130,246,0.16)',
+            color: '#1d4ed8',
+            fontWeight: 800,
+            cursor: configExporting || configImporting ? 'wait' : 'pointer',
+            opacity: configExporting || configImporting ? 0.55 : 1,
+          }}
         >
-          {updateInstalling ? '准备安装…' : '下载并安装'}
+          {configExporting ? '导出中…' : '导出配置'}
+        </button>
+        <button
+          onClick={onImportConfig}
+          disabled={configImporting || configExporting}
+          style={{
+            minHeight: '44px',
+            padding: '0 16px',
+            borderRadius: '14px',
+            border: 'none',
+            backgroundColor: 'rgba(14,165,233,0.16)',
+            color: '#0369a1',
+            fontWeight: 800,
+            cursor: configImporting || configExporting ? 'wait' : 'pointer',
+            opacity: configImporting || configExporting ? 0.55 : 1,
+          }}
+        >
+          {configImporting ? '导入中…' : '导入配置'}
         </button>
         {rollbackBackup ? (
           <button
