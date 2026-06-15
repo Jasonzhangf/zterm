@@ -58,7 +58,7 @@ export interface TraversalRelayAccountState {
   relaySettings?: TraversalRelayClientSettings;
 }
 
-const STORAGE_KEY = 'zterm:traversal-relay-account';
+export const TRAVERSAL_RELAY_ACCOUNT_STORAGE_KEY = 'zterm:traversal-relay-account';
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -216,7 +216,7 @@ export function readTraversalRelayAccountState(): TraversalRelayAccountState | n
     return null;
   }
   try {
-    return normalizeStoredState(JSON.parse(storage.getItem(STORAGE_KEY) || 'null'));
+    return normalizeStoredState(JSON.parse(storage.getItem(TRAVERSAL_RELAY_ACCOUNT_STORAGE_KEY) || 'null'));
   } catch (error) {
     console.error('[traversal-relay-client] Failed to read account state:', error);
     return null;
@@ -229,11 +229,11 @@ export function writeTraversalRelayAccountState(state: TraversalRelayAccountStat
     return;
   }
   if (!state) {
-    storage.removeItem(STORAGE_KEY);
+    storage.removeItem(TRAVERSAL_RELAY_ACCOUNT_STORAGE_KEY);
     emitTraversalRelayAccountChange(state);
     return;
   }
-  storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  storage.setItem(TRAVERSAL_RELAY_ACCOUNT_STORAGE_KEY, JSON.stringify(state));
   emitTraversalRelayAccountChange(state);
 }
 

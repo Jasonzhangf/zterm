@@ -1,4 +1,83 @@
 # note
+- [2026-06-15] formal rollback config backup:
+  - Jason 明确冻结：真正 rollback 不能依赖“旧运行时重打更高 versionCode”，正式产品链路必须是 `配置备份 -> 卸载当前版本 -> 安装旧版 -> 导入配置恢复`。
+  - 真源收口：
+    - payload / allowlist：`src/lib/app-config-backup.ts`
+    - 生命周期 owner：`src/lib/app-config-backup-runtime.ts`
+    - Android external storage 接线：`src/hooks/useAppConfigBackup.ts`
+  - allowlist 当前覆盖：`STORAGE_KEYS.*` + `zterm:app-update-settings` + `zterm:traversal-relay-account`。
+  - 固定备份路径：`/storage/emulated/0/Download/zterm/zterm-config-backup.json`，不做文件选择器和多份真源。
+  - restore 语义：只改 allowlist；backup 缺失的 allowlist key 要物理 remove；未知 key 保持不动；完成后整 app reload，让 mount-time hooks 重新取真相。
+  - 红测首轮暴露的真实问题：
+    - runtime test 被权限拒绝 mock 污染，导致 restore 测试误红
+    - AppUpdateSection test 因未 cleanup 多次 render，误点到前一棵树的按钮
+  - 已修复并转绿：feature gate 17 tests、settings/update 回归 9 tests、`tsc --noEmit`。
+- Jason 2026-06-15 copy mode git 真源审计:
+  - `9c7e304` / `2ba484c` / `da3d24a` / `38db24f` 证明 copy mode 之前已经完整实现过：quickbar 拷贝开关、应用内长按选行、normal mode 恢复系统选中、copy mode 注入 `-webkit-touch-callout:none`。
+  - 当前主线并非完全丢失，只是 `TerminalView` 还保留了 `touch-callout:none` 样式，但缺少 Android touch long-press 事件链；因此 pointer 测试能过，真机触摸仍可能落回系统菜单。
+  - 本轮修复策略：不重写状态机，只按 git 真源回补 `onTouchStart/onTouchMove/onTouchEnd/onTouchCancel` 到 `TerminalView`/`VisibleRow`，并把 `terminal.copy_mode` 的 function map + gate 明确锁到 pointer/touch 双路径。
+  - 构建阻塞顺手收口：`cap sync android` 会生成 `native/android/capacitor-cordova-android-plugins/src/main/res/.gitkeep` 与 `java/.gitkeep`，AGP `parseDebugLocalResources` 遇到 `res` 下普通文件会直接失败；`build-android-debug.sh` 现已在 sync 后物理删除这两个占位文件。
+- [2026-06-15] rollback follow-up: IME 容器不上抬:
+  - 回退到 `c31a773` 后，大部分界面问题止血，但 Android 现场仍有“键盘已弹出、quick bar 知道 inset、terminal 容器不抬”的问题。
+  - 已用回退 worktree `/tmp/zterm-rollback-c31a773` 补红测锁定：`quickBar DOM editor owns focus + keyboardDidShow(height=280)` 时，`terminal-stage-shell` 之前仍停在 `bottom: 30px`，没有抬到 `310px`。
+  - 真因不是 `resolveKeyboardLiftPx()` helper 本身，而是 `TerminalPage.tsx` 把 stage 上抬 gate 锁成了 `terminalKeyboardRequested && !quickBarEditorFocused`；当编辑器接管焦点时，键盘实际仍可见，但 `terminalImeLiftPx` 被错误清零。
+  - 修复：stage 上抬真源改为 `terminalStageKeyboardVisible = terminalKeyboardRequested || keyboardInset > 0`；`terminalImeActive` 仅保留给输入路由，不再决定 stage 是否抬升。
+  - 二次现场否认后继续下钻到原生层：回退版 `ImeAnchorPlugin` 的 `keyboardState` 真源是 `OnGlobalLayoutListener + getWindowVisibleDisplayFrame()` 推断 occludedHeight，这条在部分机型上可能拿不到有效 IME 高度，导致前端 `keyboardInset` 长期为 0。
+  - 原生修复：`ImeAnchorPlugin` 改为优先读取 `ViewCompat.getRootWindowInsets(rootView).getInsets(Type.ime()).bottom`，API 30+ 再补 `rootView.getRootWindowInsets().getInsets(WindowInsets.Type.ime())`，旧 `visibleFrame` 仅作为兼容 fallback；发布统一经 `publishKeyboardState()` 去重。
+  - 验证：原生 `gradlew assembleDebug` PASS。下一步直接出回退基线上的 `1787` 升级包给真机复测。
+  - 现场反馈 `1787` 仍不抬后，先补观测闭环，不再猜：状态悬浮框新增 `SKB`(stage 是否认为键盘可见)、`QE`(quick editor focus)、`SL`(实际 stage lift)、`QS`(quickbar lift)、`NKB`(native last/current IME height)、`NF`(native focus/window/token)。`NKB` 通过 debug overlay 打开时轮询 `ImeAnchor.getState()` 获取，便于截图判断卡在原生高度、前端事件还是 stage 应用。
+  - 验证：IME 定向 45 tests PASS；`pnpm run type-check` PASS。下一步出 `1788` 观测包。
+- [2026-06-15] rollback build plan:
+  - Jason 已明确要求回退旧版本行为，停止在当前坏界面上继续热修。
+  - 回退策略冻结为：基于旧稳定提交 `c31a773` 构建独立 APK，但把 `.build-meta.json` 提升到 `1785`，保证 Android 允许覆盖安装。
+  - 为避免污染主仓脏工作区，回退构建只在独立 worktree `/tmp/zterm-rollback-c31a773` 进行。
+  - 已确认旧提交阻塞点不是编译错误，而是 `android/package.json -> prebuild -> test:terminal:regression` 依赖缺失的历史 evidence fixture 与本机 tmux 环境；本轮交付 APK 走显式底层构建链，不复用该旧 prebuild 门。
+- [2026-06-15] daemon stale input / runtime debug closeout:
+  - 当前目标: close/error/detach 后旧 transport queued input 必须显式 drop，不得继续写 tmux；input wire 保持 string-only；daemon receive/drop/write/queue metadata 可通过 `/debug/runtime` 在线观测。
+  - 已有先红测证据: `terminal-debug-runtime.test.ts` 最初失败，证明 daemon debug 只 console、不进 store，远程 control 不能开 daemon debug，console 会泄露真实 input payload。
+  - 本轮修复: `terminal-http-runtime.ts` 接入 `daemonRuntimeDebugStore` 和 `setDaemonRuntimeDebugEnabled`；`/debug/runtime` 增加 `daemonDebug`；`/debug/runtime/logs` 保留 client `entries` 并新增 `daemonEntries/daemonReturned`；`/debug/runtime/control` 可热开关 daemon debug。
+  - 本轮验证: 定向 `terminal-debug-runtime.test.ts/server.debug-truth/server.http-truth/terminal-message-runtime` 20 tests PASS；`tsc --noEmit` PASS；`test:terminal:regression` PASS，contracts 48 files / 541 tests PASS，close-loop all replay + strict audit cases passed。
+  - 在线验证: `daemon:prepare-release` 后通过 `bash android/scripts/zterm-daemon.sh restart` 做 service-scoped restart，daemon pid=57493，`/debug/runtime` 出现 `daemonDebug` 字段，`/debug/runtime/control` 返回 `daemonDebugEnabled=true`。
+  - 在线 probe: 临时 tmux session `zterm-input-probe-1781471162033` 正常 input marker 写入成功，close 后 late input marker 未出现在 tmux capture；`/debug/runtime/logs?scope=input` 返回 `daemonReturned=4`，含 `input-receive`、`input-write(durationMs=5, queueDepth=0)`、`input-drop(reason=session_required, queueDepth=0)`，daemon debug payload 未包含真实 marker 文本。
+- [2026-06-15] daemon input queue / IME lift gate closeout in progress:
+  - daemon 输入半程修复已收敛到绿测：`terminal-message-runtime.test.ts`、`terminal-mirror-runtime.test.ts`、`terminal-performance-scheduler.test.ts`、`server.control-truth.test.ts`、`server.bridge-runtime-truth.test.ts` 共 39 tests PASS；`tsc --noEmit` PASS。
+  - 新确认 IME 真因不是“innerHeight == visualViewport 就等于已整体上抬”，而是 zero-lift 判定误把“当前 viewport 暂时收缩”当成“稳定 shell viewport 已完成 adjustResize”。当 stable layout viewport 仍高于 current viewport 时，必须继续按 occluded bottom 抬升。
+  - 收口方向：`terminal-keyboard-lift.ts` 成为唯一 helper 真源；`TerminalPage.tsx` 只做转发导出，避免 helper 再分叉。
+- [2026-06-15] TerminalStageShell owner / IME / swipe 再审计：
+  - 发现 `TerminalPage.tsx` 内联了一份 `TerminalStageShell`，而 `src/pages/TerminalPageStageShell.tsx` 里还保留另一份实现；两份逻辑已经漂移。
+  - 现场“代码改了但升级后没效果”的一个明确风险点就是这个双实现：`TerminalPage.tsx` 内联版已经改成 `bottom + translateY`，但独立文件仍是旧的 `bottom + imeLift` 缩高度。
+  - 新收口目标：`TerminalPageStageShell.tsx` 作为唯一 stage owner，`TerminalPage.tsx` 只接线；旧内联实现物理删除。
+  - 现场“左右滑无效”不是偶发故障，而是当前代码显式 `enabled={terminalWidthMode !== 'mirror-fixed'}` 禁用了 `mirror-fixed` 下 swipe，且现场没有另一条可用手势替代。
+- [2026-06-14] function map / owner registry / gate 补齐：
+  - 用户本轮最新优先级不是先修 copy/input 细节，而是先把项目治理门禁补齐，再进行功能修复。
+  - 已新增全局 feature registry：`android/docs/feature-registry.json`，首批覆盖 10 个高风险 feature：copy、quickbar、schedule、remote screenshot、open tabs、transport lifecycle、daemon input、buffer/render、connections projection、file transfer。
+  - 已新增人类可读 map/gate：`android/docs/function-map.md`、`android/docs/feature-gates.md`。
+  - 已把 registry 接入 `android/docs/architecture.md`、`android/docs/dev-workflow.md`，要求改动前先按 `feature_id -> owner -> allowed paths -> required gates` 定位；没有 registry 条目不得宣称闭环。
+  - 已新增 `android/src/lib/feature-registry-truth.test.ts`，用于锁住：feature id 唯一、owner/gate/truth source 路径真实存在、architecture/workflow 已引用 registry。
+  - 下一步：跑定向 truth gate 与 `test:terminal:contracts`，确认治理门禁本身可执行；再回到 daemon input 链路修复。
+- [2026-06-14] function map / owner registry / gate 第二轮补齐：
+  - 首版 registry 覆盖 10 个 feature，但 `keyboard/IME`、`workspace panes`、`interaction runtime`、`shell actions runtime` 仍未被唯一 owner 显式认领。
+  - 本轮补充 4 个 feature_id：`terminal.keyboard_ime`、`terminal.workspace_panes`、`terminal.interaction_runtime`、`terminal.shell_actions`。
+  - `feature-registry-truth.test.ts` 升级为硬 gate：不仅检查路径存在，还要求所有高风险 feature_id 出现，且关键 owner 路径必须被 registry 覆盖。
+  - 新增 `useTerminalPageShellActionsRuntime.test.tsx`，锁住 tab manager scope、quick picker pane routing、viewport mode store 更新属于 shell-actions owner。
+- [2026-06-11] multi-pane 刷新审计与修复:
+  - 结论: 多 pane 卡顿的一个明确放大器是 `SessionContext lifecycle` 把 active 和 visible live panes 放进同一个高频 tick fan-out，导致 pane 数量越多，head/refresh 判定越多。
+  - 修复: active tick 只刷新 active session；visible non-active panes 走独立更慢的 passive visible tick。新增 `buildPassiveVisibleRefreshTargets()` / `shouldSchedulePassiveVisibleTickRefresh()`，并把 `buildLifecycleRefreshTargets()` 收口为 active-only。
+  - 页面层继续收口: `TerminalPage.tsx` 不再本地保留第二份 `interactiveSession / renderedPaneSessions / livePaneSessionIds / pane-attach / chrome switch / swipe tab` orchestration，已切到 `useTerminalPageInteractionRuntime` 作为唯一 owner，避免页面层重复计算和重复语义。
+  - 验证: `src/contexts/session-context-lifecycle.test.tsx`、`src/contexts/multi-pane-refresh.test.ts`、`src/pages/TerminalPage.multi-pane-decouple.test.tsx`、`src/pages/TerminalPage.render-scope.test.tsx`、`tsc --noEmit` 通过。
+  - 剩余风险: 还未做真机 / APK / 在线性能验证，TerminalPage renderer 侧仍可能存在额外多 pane render churn，但这轮已先把一个明确的同频 fan-out 去掉。
+
+- [2026-06-12] tab 切换后输入成功但本地刷新慢:
+  - 根因收敛: `switchSession()` / active re-entry 的 reset 只清了 `sessionPullStateRef` 和 `lastSyncRequestAtRef`，**没清 `pendingInputTailRefreshRef`**。旧的 input tail pending 会让切回后的第一笔输入失去“立刻 head refresh”触发条件，表现为远端先动、本地刷新慢。
+  - 修复: `resetSessionTransportPullBookkeeping()` 现在统一清理 `pendingInputTailRefreshRef`、tail/read debounce、in-flight pull state；`SessionContext` 的 tab switch / active re-entry 走同一 reset 口。
+  - 红测: `session-context-pull-runtime.test.ts` 增加 pending input tail refresh 清理回归；`SessionContext.ws-refresh.test.tsx` 的 active tab re-entry 相关用例继续为绿。
+  - 验证: `vitest` 定向通过、`tsc --noEmit` 通过；APK 需要重新打包后再交付到升级路径。
+
+- [2026-06-12] `build:android` / relay smoke 门禁修复:
+  - 根因: `android/scripts/traversal-relay-local-smoke.ts` 固定使用 `19091/4335`，本机已有服务占用时会把 relay health 误判成 `HTTP 404`，直接卡死 `pnpm --dir android run build:android`。
+  - 修复: smoke 改为启动前动态申请空闲端口，再注入 relay/daemon env；不改 relay/daemon 业务协议。
+  - 验证: `pnpm --dir android exec tsx scripts/traversal-relay-local-smoke.ts` 通过；`pnpm --dir android run build:android` 通过，产出 `0.1.3.1773` 并发布到 `android/update-dist/` 和 `~/.wterm/updates/`。
+
 - Jason 2026-06-09 rcc tab 自动关闭事故调查:
   - 现场反馈: `100.127.23.27` 上 `rcc` tab 刚刚自动关闭，必须严禁。
   - 根因收敛: remote audit 没有直接删 `OPEN_TABS`；实际风险是 UI tab chrome 由 `openTabState.tabs ∩ runtime sessions` 投影，transport close / runtime session 缺失时，open-tab 持久真源仍在但 UI 会把 tab 过滤掉，看起来像自动关闭。
@@ -200,6 +279,18 @@ All green locally. Next focus stays on remaining real-world slowness after app r
 
 [2026-05-03] Tab-switch lag audit: found duplicated active-session refresh trigger in client SessionContext. `switchSession()` both set active session and immediately called `ensureActiveSessionFresh(active-reentry)`, while the dedicated `useEffect([state.activeSessionId])` also called the same active-reentry path on the same switch. This doubled head refresh / reconnect decision work on every tab switch. Fixed by keeping `switchSession()` pure (`setActiveSessionSync` only) and leaving active-reentry refresh solely to the activeSessionId effect as the unique truth.
 - Jason 2026-05-03 新确认: daemon 侧 `findChangedIndexedRanges()` 已支持“已有 absolute row 内容变化”，不是只看新增尾行；本轮真实缺口在 client same-end revision advance 请求窗口过小。
+
+- [2026-06-14] daemon 输入链路审计：
+  - 运行态证据：`/debug/runtime` 显示当前 `sessions.total=0`、`mirrors.subscribers=0`，客户端断开后 daemon 仍保留 mirror truth；`/debug/runtime/logs` 能看到 `session.input.send` 与大量 `buffer-sync/drop-summary`，但 daemon 侧没有 input receive / stale drop / tmux write duration telemetry。
+  - 源码证据：`terminal-bridge-runtime.ts` 的 WS/RTC `message` 都是 `void handleMessage(...)`，没有 per-transport 串行 drain；`terminal-message-runtime.ts` 在函数开头抓一次 `session`，input 执行前没有 current transport 二次门禁；`terminal-control-runtime.ts` 的 tmux write 是同步 `spawnSync(send-keys)`。
+  - 初步结论：输入分钟级延迟和“客户端杀掉后仍继续输入”的主因收敛为“入站消息缺少 stale/current transport gate + 每次 input 同步 spawnSync 阻塞 Node event loop，导致旧 input backlog 在 detach 后继续 drain”。
+  - 修复方向：补 input telemetry、input stale gate、per-target bounded coalescer、detach 清理 pending input、flush 前复验 source active、mirror sync 收敛到 flush 后一次触发。
+
+- [2026-06-14] daemon 输入链路审计：
+  - 运行态证据：`/debug/runtime` 显示当前 `sessions.total=0`、`mirrors.subscribers=0`，客户端断开后 daemon 仍保留 mirror truth；`/debug/runtime/logs` 能看到 `session.input.send` 与大量 `buffer-sync/drop-summary`，但 daemon 侧没有 input receive / stale drop / tmux write duration telemetry。
+  - 源码证据：`terminal-bridge-runtime.ts` 的 WS/RTC `message` 都是 `void handleMessage(...)`，没有 per-transport 串行 drain；`terminal-message-runtime.ts` 在函数开头抓一次 `session`，input 执行前没有 current transport 二次门禁；`terminal-control-runtime.ts` 的 tmux write 是同步 `spawnSync(send-keys)`。
+  - 初步结论：输入分钟级延迟和“客户端杀掉后仍继续输入”的主因收敛为“入站消息缺少 stale/current transport gate + 每次 input 同步 spawnSync 阻塞 Node event loop，导致旧 input backlog 在 detach 后继续 drain”。
+  - 修复方向：补 input telemetry、input stale gate、per-target bounded coalescer、detach 清理 pending input、flush 前复验 source active、mirror sync 收敛到 flush 后一次触发。
 - Jason 2026-05-03 新冻结: 当 `buffer-head` 出现 `revision` 增长但 `latestEndIndex` 不增长时，follow 路径必须重拉完整 follow request window（三屏），不能只拉当前可视一屏，否则已有行改写会漏补。
 
 [2026-05-03] open-tab / active-session 唯一真源审计
@@ -2866,3 +2957,115 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
 - 用户反馈: 仍出现 rcc tab 自动关闭，严禁任何自动关闭 tab。
 - 根因确认: `src/lib/open-tab-intent.ts` 把 semantic reuse key (`sessionName + daemon/bridge owner`) 用于 normalize/upsert/runtime merge/close，导致 runtime duplicate 或同名 persisted tab 可自动合并、替换、删除另一个 `sessionId` 的 open tab。
 - 修复方向: `OPEN_TABS` 物理身份只允许 `sessionId`；semantic key 只能用于 saved-list import 去重和用户显式 close 后的 tombstone，不能改写已打开 tab 生命周期。
+
+## 2026-06-12 bottom/head same-window refresh audit
+- 用户要求把“输入显示闭环”与“bottom/head 刷新阻塞”拆开审计，本轮只看刷新链路。
+- 已确认阻塞点不在 planner 的窗口计算，而在 pull-state 覆盖判定：旧 in-flight tail-refresh 只按 local snapshot + window 覆盖判断，没有把 target head revision 纳入唯一真源，导致“同窗口但更高 head”会被误判为已覆盖。
+- 修复方向：`BufferSyncRequestPayload` / shared request snapshot 传递 `targetHeadRevision`，cover 判定必须同时匹配 head revision，防止旧 in-flight 请求挡住新 head-first tail refresh。
+- 需要验证：新增 same-window newer-head 红测必须稳定通过；随后再单独审计输入显示 owner 分裂问题。
+
+## 2026-06-15 daemon bridge input priority audit
+- 现场剩余主诉收口到 daemon bridge 入站调度：此前 `terminal-bridge-runtime.ts` 只有单一 `connectionMessageChains`，同一 transport 上 `buffer-head-request / buffer-sync-request / connect / close / input` 全部严格 FIFO，输入会被切 tab/resume 后的 control traffic 长时间压住。
+- 本轮修复把 bridge 调度显式拆成三条 per-connection serial lane：
+  - `attach`：`session-open / connect / close`
+  - `input`：`type === input` 与 plain text input
+  - `message`：其余非输入消息与 binary
+- 调度约束：
+  - input 可越过慢的 non-input message；
+  - input 不可越过 attach barrier；
+  - input 自身仍保持到达顺序；
+  - 不改 wire payload，不加 fallback，不改 stale/current transport gate；最终写入真源仍在 `terminal-message-runtime.ts`.
+- 新增红测：
+  - `src/server/terminal-bridge-runtime.test.ts`
+    - 慢 `buffer-head-request` 在途时，后到 input 先执行
+    - 多个 input 在慢 `buffer-sync-request` 期间仍保持顺序
+    - input 不能越过 pending `connect`
+- gate 同步：
+  - `src/server/server.bridge-runtime-truth.test.ts`
+  - `docs/feature-registry.json`
+  - `docs/function-map.md`
+  - `docs/feature-gates.md`
+- 已验证：
+  - `pnpm --dir android exec vitest run src/server/terminal-bridge-runtime.test.ts src/server/server.bridge-runtime-truth.test.ts src/server/terminal-message-runtime.test.ts src/server/server.transport-lifecycle-truth.test.ts --reporter dot` PASS
+  - `pnpm --dir android exec vitest run src/server/terminal-bridge-runtime.test.ts src/server/terminal-message-runtime.test.ts src/server/terminal-mirror-runtime.test.ts src/server/terminal-performance-scheduler.test.ts src/server/server.control-truth.test.ts src/server/server.bridge-runtime-truth.test.ts src/server/terminal-runtime.detached-session.test.ts src/server/server.transport-lifecycle-truth.test.ts --reporter dot` PASS
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+- feature-level closeout audit:
+  - `terminal.keyboard_ime` required gates re-run green:
+    - `src/pages/terminal-keyboard-lift.test.ts`
+    - `src/pages/TerminalPage.android-ime.test.tsx`
+    - `src/pages/TerminalPage.lifecycle-cleanup.test.tsx`
+    - `src/lib/feature-registry-truth.test.ts`
+    - total 49 tests PASS
+  - `terminal.daemon_input` required gates re-run green:
+    - `src/server/terminal-bridge-runtime.test.ts`
+    - `src/server/terminal-message-runtime.test.ts`
+    - `src/server/terminal-mirror-runtime.test.ts`
+    - `src/server/terminal-performance-scheduler.test.ts`
+    - `src/server/server.control-truth.test.ts`
+    - `src/server/server.bridge-runtime-truth.test.ts`
+    - `src/server/terminal-runtime.detached-session.test.ts`
+    - `src/server/server.transport-lifecycle-truth.test.ts`
+    - `src/lib/feature-registry-truth.test.ts`
+    - total 65 tests PASS
+- APK delivery verified:
+  - `android/update-dist/zterm-0.1.3.1778.apk`
+  - `~/.wterm/updates/zterm-0.1.3.1778.apk`
+  - sha256 `496fffc3b7f6a902ac7d5760e20e4ce89c460f0940c6059def6623233aab6afd`
+- Remaining gap is only real-device evidence:
+  - local `adb` exists at `/Users/fanzhang/Library/Android/sdk/platform-tools/adb`
+  - `adb devices -l` returned no attached devices on 2026-06-15
+  - therefore current session cannot prove final field fix for:
+    - tab switch after input latency gone on real phone
+    - IME visible lift correct on real phone
+- 待继续：
+  - 设备重新连上 `adb` 后，直接安装 `0.1.3.1778` 做现场复验
+  - 确认“切 tab 后刷新还在动但输入迟到”是否清零
+  - 确认 IME 抬起时页面 lift 是否正确
+  - 若仍复现，再继续下钻 daemon 内部 control/message 处理耗时分布
+- 2026-06-15 IME 遮挡继续审计：
+  - `terminal.keyboard_ime` owner 仍是 `src/pages/terminal-keyboard-lift.ts` + `src/pages/TerminalPage.tsx`
+  - 新发现：`quickBarEditorFocused` 目前同时参与了 IME 输入路由停用和 `terminalImeActive` 计算；这会导致“DOM editor 持有焦点但键盘已真实弹出”时，quickbar inset 已更新而 terminal stage 不抬升，形成显示区被 IME 遮挡的状态机裂缝
+  - 计划：先补 `TerminalPage.android-ime.test.tsx` 红测锁“editor focus 下 keyboard visible 仍必须抬 terminal stage”，再只在输入路由上保留 editor gate，把 shell lift 改成只看真实 keyboard inset / visible truth
+  - 现场截图新证据：状态浮窗显示 `KB=326 / IM=Y / SH=914 / VV=914 / LIFT=0`，证明这台设备上键盘真实弹出但 `resolveKeyboardLiftPx` 把它误判成“已 adjustResize 到位”
+  - 已处理：从 `src/pages/terminal-keyboard-lift.ts` 物理删除 `viewportAlreadyResizedByIme => return 0` 启发式；新的唯一真源只按 `stable layout viewport - visualViewportBottom` 的真实遮挡量计算 lift，并保持 cap
+  - 额外审计：左右滑当前不是偶发失效，而是 `mirror-fixed` 模式在 `TerminalPage.tsx` / `TerminalPageStageShell.tsx` 明确 `enabled={terminalWidthMode !== 'mirror-fixed'}` 关闭 swipe；这与项目冻结规则一致，不属于 IME 修复回归
+
+## 2026-06-15 IME lift hotfix 1789
+- Jason screenshot showed native and Web IME state present (`NKB=999|999`, `KB=326`, `IM/SKB=Y`) but `LIFT=0`, `SL=0`; root break is Web lift calculation suppressing lift when visual viewport matches layout viewport.
+- Rollback hotfix removed the resize-mode zero-lift branch; keyboard inset is now the floor for stage lift, capped by layout ratio / occluded bottom when available.
+- Added/updated red tests so reported keyboard inset with matching visual/layout viewport still returns positive lift. Built 0.1.3.1789 and staged to update paths.
+
+## 2026-06-15 input latency + copy gate audit
+- Jason confirmed IME lift fixed in 1789; new blockers: input is extremely slow and copy button appears ineffective.
+- Feature registry file is absent in rollback worktree; current gate must bind to existing owners: `session-context-input-runtime*` for input transport, `TerminalQuickBar` + `useTerminalPageCopyRuntime` + `terminal-copy-selection` for copy lifecycle.
+- Current copy button only toggles copy mode; actual clipboard write requires selection/menu path. Need red tests to prevent a highlighted no-result button state and preserve explicit failure on clipboard/write coverage errors.
+
+## 2026-06-15 input hot-path + copy gate 1790
+- Added red gate for input hot path: open transport must write input frame before buffer snapshot, tail-refresh bookkeeping, runtime debug, or head refresh. Fixed `sendInputThroughSessionTransport` to send socket payload first.
+- Added copy gate: when copy mode already owns a selected row/range, pressing quickbar copy executes clipboard write instead of only toggling highlight. Empty/missing buffer still warns and preserves copy state.
+- Verified targeted TS/native gates and built 0.1.3.1790 to update paths.
+
+## 2026-06-15 rollback stop-bleed 1795
+- Jason reports latest build render path is unusable and requests continued rollback.
+- Attempted source rollback in detached worktrees:
+  - `6221683`: too old for current workspace/shared surface (`pane-profile` missing, evidence/test layout drift).
+  - `526e47b`: newer and self-consistent on shared surface, but old repo-wide type/test baseline still mismatched current monorepo install, so source-path rebuild was not the fastest safe stop-bleed path.
+- Switched to binary-truth rollback path:
+  - treat `~/.wterm/updates/zterm-0.1.3.1789.apk` as the last user-validated runtime truth for render/UI.
+  - back up current `android/native/android/app/src/main/assets`.
+  - replace only `android/native/android/app/src/main/assets/public` with `1789` APK's `assets/public`.
+  - bump `android/.build-meta.json` to `1795`.
+  - rebuild current Android shell with Gradle only (`setup-android-java.sh` + `./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug`).
+  - publish via `node ./scripts/prepare-update-bundle.mjs`.
+- Verified published artifact:
+  - `android/update-dist/zterm-0.1.3.1795.apk`
+  - `~/.wterm/updates/zterm-0.1.3.1795.apk`
+  - manifest `versionName=0.1.3.1795`, `versionCode=1031795`
+  - sha256 `7aac1360594fd15e9b41cdfe14b3b6f5bcdb26ff016e6f6c6a9feb5fac404b26`
+- Restored local source assets from `/tmp/zterm-rollback-asset-backup/assets-1794` after packaging so repo worktree does not stay pinned to `1789` assets.
+- Jason 明确校正：`1795` 这种“高版本旧运行时回灌”只适合止血，不是正式 rollback 设计。正式产品闭环必须支持：
+  1. 配置备份/导出
+  2. 卸载当前版本
+  3. 安装旧版 APK（允许 versionCode 降级，因为走卸载后安装）
+  4. 配置导入/恢复
+- 后续凡涉及“回退版本可安装”诉求，优先建设 backup/restore + reinstall 流程，不再把“重打高 versionCode 的旧包”当成唯一方案。

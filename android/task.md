@@ -57,3 +57,33 @@
 4. `pnpm --filter @zterm/android test` 全部 pass
 5. `pnpm --filter @zterm/android build` 成功
 6. 出 APK 包
+
+## 2026-06-15 正式回退链路补齐
+- 目标：补正式 rollback 前置链路，支持 `配置备份 -> 卸载当前版本 -> 安装旧版 -> 从固定备份恢复配置`
+- 成功标准：
+  1. 配置备份/恢复有唯一 owner、feature registry、function map、gate
+  2. 导出仅写 allowlist 到固定外部存储文件
+  3. 恢复仅重写 allowlist、删除备份中缺失的 allowlist key，并触发整 app reload
+  4. 权限拒绝与非法备份显式报错，不做 fallback
+  5. 红测、type-check、settings 回归通过
+- 验证入口：
+  - `pnpm --dir android exec vitest run src/lib/app-config-backup.test.ts src/lib/app-config-backup-runtime.test.ts src/hooks/useAppConfigBackup.test.tsx src/components/settings/AppUpdateSection.test.tsx src/lib/feature-registry-truth.test.ts`
+  - `pnpm --dir android exec vitest run src/pages/SettingsPage.theme.test.tsx src/hooks/useAppUpdate.test.tsx`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+- 范围：
+  - `src/lib/app-config-backup*.ts`
+  - `src/hooks/useAppConfigBackup.ts`
+  - `src/components/settings/AppUpdateSection.tsx`
+  - `src/pages/SettingsPage.tsx`
+  - `src/App.tsx`
+  - feature registry / gates / plan doc
+- 不在范围：
+  - 历史旧 APK 的版本号策略
+  - daemon / terminal transport 行为
+  - 自动卸载或自动降级安装
+- 风险：
+  - 历史旧 APK 若未包含恢复入口，仍需后续统一产品版本策略
+  - 真机 external storage 权限流需 APK 安装态验证
+- 证据输出位置：
+  - `android/update-dist/`
+  - `~/.wterm/updates/`

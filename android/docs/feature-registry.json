@@ -1,0 +1,482 @@
+{
+  "schema_version": 1,
+  "description": "Global feature owner registry for zterm Android. Every feature_id must have one owner surface and explicit gates before code changes.",
+  "features": [
+    {
+      "feature_id": "settings.config_backup",
+      "title": "External config backup and restore for uninstall-safe rollback",
+      "domain": "settings-storage",
+      "owners": [
+        "src/lib/app-config-backup-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/app-config-backup.ts",
+        "src/lib/app-config-backup-runtime.ts",
+        "src/hooks/useAppConfigBackup.ts",
+        "src/components/settings/AppUpdateSection.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/App.tsx",
+        "src/lib/traversal-relay-client.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "required_gates": [
+        "src/lib/app-config-backup.test.ts",
+        "src/lib/app-config-backup-runtime.test.ts",
+        "src/hooks/useAppConfigBackup.test.tsx",
+        "src/components/settings/AppUpdateSection.test.tsx",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/feature-gates.md",
+        "docs/goals/config-backup-rollback-plan.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.copy_mode",
+      "title": "Terminal copy mode and selection lifecycle",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageCopyRuntime.ts"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/VisibleRow.tsx",
+        "src/components/terminal/TerminalHeader.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/useTerminalPageCopyRuntime.test.tsx",
+        "src/components/terminal/system-copy-state-machine.test.tsx",
+        "src/components/terminal/system-copy-longpress-regression.test.tsx",
+        "src/components/TerminalView.selection-guard.test.tsx",
+        "src/components/terminal/VisibleRow.selection.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/feature-gates.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.quickbar",
+      "title": "Terminal floating quickbar and split controls",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/components/terminal/TerminalQuickBar.tsx"
+      ],
+      "allowed_paths": [
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/pages/useTerminalPageOverlays.ts",
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/lib/terminal-layout-profile.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "src/hooks/useTerminalWorkspace.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/ui-slices.md",
+        "docs/decisions/0001-cross-platform-layout-profile.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.keyboard_ime",
+      "title": "Terminal keyboard, IME lift, and viewport-safe shell lifecycle",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "allowed_paths": [
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/terminal-keyboard-lift.test.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/plugins/ImeAnchorPlugin.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/terminal-keyboard-lift.test.ts",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.schedule",
+      "title": "Scheduled terminal send lifecycle",
+      "domain": "daemon-automation",
+      "owners": [
+        "src/server/schedule-engine.ts",
+        "src/server/schedule-store.ts",
+        "src/server/schedule-dispatch.ts"
+      ],
+      "allowed_paths": [
+        "src/server/schedule-engine.ts",
+        "src/server/schedule-store.ts",
+        "src/server/schedule-dispatch.ts",
+        "src/pages/TerminalPage.tsx",
+        "packages/shared/src/schedule/"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx"
+      ],
+      "required_gates": [
+        "src/server/schedule-engine.test.ts",
+        "src/server/schedule-store.test.ts",
+        "src/server/schedule-dispatch.test.ts",
+        "src/server/server.schedule-truth.test.ts",
+        "src/pages/TerminalPage.schedule-target.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.remote_screenshot",
+      "title": "Remote screenshot capture, transfer, preview, and save",
+      "domain": "daemon-file-transfer",
+      "owners": [
+        "src/lib/remote-screenshot-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/remote-screenshot-runtime.ts",
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/lib/remote-screenshot-runtime.test.ts",
+        "src/pages/TerminalPage.remote-screenshot.test.tsx",
+        "src/server/remote-screenshot-daemon-blackbox.test.ts",
+        "src/server/server.file-transfer-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.open_tabs",
+      "title": "Open tab persistence, restore, and explicit close lifecycle",
+      "domain": "terminal-session",
+      "owners": [
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/lib/open-tab-persistence.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabRestoreRuntimeSync.ts",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/lib/open-tab-persistence.ts",
+        "src/lib/open-tab-intent.ts",
+        "src/lib/open-tab-open-policy.ts",
+        "src/lib/open-tab-restore.ts",
+        "src/lib/remote-tab-audit.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/lib/connections-server-groups.ts"
+      ],
+      "required_gates": [
+        "src/lib/open-tab-history-truth.test.ts",
+        "src/lib/open-tab-persistence.test.ts",
+        "src/lib/open-tab-restore.test.ts",
+        "src/lib/open-tab-intent.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.transport_lifecycle",
+      "title": "Client and daemon terminal transport lifecycle",
+      "domain": "terminal-transport",
+      "owners": [
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/contexts/SessionContext.tsx",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-socket-message-runtime.ts",
+        "src/lib/session-transport-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-transport-runtime.ts",
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/lib/connections-server-groups.ts"
+      ],
+      "required_gates": [
+        "src/server/server.transport-lifecycle-truth.test.ts",
+        "src/server/terminal-transport-runtime.test.ts",
+        "src/lib/session-transport-runtime.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/architecture.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.daemon_input",
+      "title": "Daemon input receive, stale drop, queue, and tmux write lifecycle",
+      "domain": "daemon-input",
+      "owners": [
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-performance-scheduler.ts",
+        "src/server/terminal-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "required_gates": [
+        "src/server/terminal-bridge-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-performance-scheduler.test.ts",
+        "src/server/server.control-truth.test.ts",
+        "src/server/server.bridge-runtime-truth.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.buffer_render",
+      "title": "Daemon mirror, client buffer manager, and renderer commit path",
+      "domain": "terminal-render",
+      "owners": [
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/lib/session-render-gate.ts"
+      ],
+      "allowed_paths": [
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/contexts/session-context-pull-runtime.ts",
+        "src/contexts/session-context-lifecycle.ts",
+        "src/lib/session-render-gate.ts",
+        "src/lib/session-render-buffer-store.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/terminal-control-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/pages/TerminalPage.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx"
+      ],
+      "required_gates": [
+        "src/lib/session-render-gate.test.ts",
+        "src/lib/session-render-buffer-store.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts",
+        "src/contexts/multi-pane-refresh.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.workspace_panes",
+      "title": "Workspace pane ownership, split layout, and pane-stage truth",
+      "domain": "terminal-workspace",
+      "owners": [
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "allowed_paths": [
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "src/lib/workspace-persistence.ts",
+        "packages/shared/src/workspace/workspace-model.ts",
+        "packages/shared/src/workspace/workspace-model.test.ts",
+        "packages/shared/src/workspace/workspace-model.actions.test.ts",
+        "packages/shared/src/react/pane-stage.tsx",
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/lib/connections-server-groups.ts"
+      ],
+      "required_gates": [
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "packages/shared/src/workspace/workspace-model.test.ts",
+        "packages/shared/src/workspace/workspace-model.actions.test.ts",
+        "packages/shared/src/react/pane-profile.test.ts"
+      ],
+      "truth_sources": [
+        "docs/ui-slices.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.interaction_runtime",
+      "title": "Terminal page interaction routing, pane attach, and active session isolation",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageInteractionRuntime.ts"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageInteractionRuntime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.shell_actions",
+      "title": "Terminal page shell actions, viewport mode routing, and tab manager scope",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageShellActionsRuntime.ts"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/lib/session-viewport-mode-store.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "connections.history_projection",
+      "title": "Connections page daemon/session history projection",
+      "domain": "connections",
+      "owners": [
+        "src/lib/connections-server-groups.ts",
+        "src/hooks/useSessionHistoryStorage.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/connections-server-groups.ts",
+        "src/hooks/useSessionHistoryStorage.ts",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/lib/connections-server-groups.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/hooks/useOpenTabRuntime.ts"
+      ],
+      "required_gates": [
+        "src/lib/open-tab-history-truth.test.ts",
+        "src/lib/connections-server-groups.test.ts",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.file_transfer",
+      "title": "Daemon file transfer and client transfer message runtime",
+      "domain": "daemon-file-transfer",
+      "owners": [
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/lib/connections-server-groups.ts",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/server/server.file-transfer-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    }
+  ]
+}
