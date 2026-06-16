@@ -210,7 +210,7 @@ export function resolveKeyboardLiftPx(
   // mode, applying an extra lift causes double-count over-lift for quickbar.
   const viewportAlreadyResizedByIme =
     currentLayoutViewportHeight > 0
-    && Math.abs(layoutViewportHeight - currentLayoutViewportHeight) <= 2
+    && Math.abs(layoutViewportHeight - visualViewportBottom) <= 2
     && Math.abs(currentLayoutViewportHeight - visualViewportBottom) <= 2
     && safeCappedInset >= 24;
   if (viewportAlreadyResizedByIme) {
