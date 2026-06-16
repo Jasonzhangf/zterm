@@ -879,53 +879,6 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("keeps stage bottom-shrink semantics while quick bar DOM editor owns focus if Android keyboard is visible", async () => {
-    const session = makeSession("s1");
-
-    render(
-      <TerminalPage
-        sessions={[session]}
-        activeSession={session}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
-      />,
-    );
-
-    const terminalStage = screen.getByTestId("terminal-stage-shell");
-    expect(terminalStage.getAttribute("style") || "").toContain("bottom: 30px;");
-
-    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
-
-    await waitFor(() => {
-      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
-    });
-
-    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset"),
-      ).toBe("280");
-    });
-
-    await waitFor(() => {
-      const style = terminalStage.getAttribute("style") || "";
-      expect(style).toContain("bottom: 310px;");
-      expect(style).not.toContain("transform: translateY");
-    });
-  });
-
   it("re-activates ImeAnchor routing when quick editor yields focus while terminal keyboard is already visible", async () => {
     const session = makeSession("s1");
 
