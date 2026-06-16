@@ -341,3 +341,44 @@
   Tags: terminal-performance, daemon-scheduler, client-cadence, trace-metadata, regression-gate
 - 2026-06-09: open tab 生命周期冻结：远端 tmux session-name audit / foreground resume / connect audit / session picker refresh / cold restore / saved tab import 都不得自动关闭或过滤 open tabs。唯一允许物理关闭 tab 与 runtime session 的入口是用户显式 close；远端缺失只能记录 `app.open-tabs.remote-session-missing` 或剪裁 session group 历史，不能写 closed tombstone。
   Tags: open-tab-lifecycle, remote-audit, no-auto-close, tombstone
+
+## 2026-06-16 IME lift: keyboardInset is the only physical truth in adjustPan mode
+
+### Bug: viewportAlreadyResizedByIme false-positive
+
+`d5284be` introduced `viewportAlreadyResizedByIme` heuristic that compares layout vs
+visual viewport bottoms to detect `adjustResize`-style WebView. On Jason's hardware keyboard
+device, WebView keeps full layout height (`innerHeight = document.clientHeight = 792`) while
+`visualViewport` also reports bottom = 792 — the WebView does not expose IME occlusion in any
+viewport metric. The heuristic's three abs-checks all passed, causing `resolveKeyboardLiftPx`
+to return 0 even when `keyboardInset = 297`. Result: stage did not lift above the IME.
+
+Verified-good baseline: `fb4154a` / `0defafa` had no `viewportAlreadyResizedByIme` at all.
+The function was:
+  if (occludedBottom <= 0) return safeReportedInset;
+  return min(safeReportedInset, occludedBottom);
+
+Jason confirmed `0.1.3.1823` (which removes the heuristic branch) **does lift correctly**.
+
+### Rule
+`resolveKeyboardLiftPx` must not return 0 purely because viewport metrics do not reflect IME
+occlusion. `keyboardInset` (from Capacitor `keyboardDidShow`) is the physical truth; if
+`keyboardInset > 0`, lift must be positive. A `viewportAlreadyResizedByIme`-style heuristic
+may only suppress lift when **both** `layoutViewportHeight` and `currentLayoutViewportHeight`
+have actually been compressed to match `visualViewportBottom` — i.e., when the WebView has
+already absorbed the IME into its layout. Never add back a false-positive heuristic that
+silently returns 0 when viewport metrics are stable.
+
+### Gates locked
+- `terminal.keyboard_ime` red tests in `TerminalPage.android-ime.test.tsx`:
+  - "falls back to reported keyboard inset when WebView viewport metrics do not expose IME
+    occlusion" → `resolveKeyboardLiftPx(320)` must return 320, not 0.
+  - "keeps reported keyboard inset when layout and visual viewport bottoms are already
+    aligned" → `resolveKeyboardLiftPx(320, 600)` returns 300 (cap ratio × height), not 0.
+  - "keeps terminal stage shell lifted while quick bar editor owns focus and Android keyboard
+    is visible" → stage `bottom: 310px` when `keyboardInset = 280`.
+  - `TerminalPage.android-ime.test.tsx`: PASS 38/38
+  - `tsc --noEmit`: PASS
+
+### APK delivered
+`0.1.3.1823` / `1031823` / sha256 `21d48400c53326db9fe32ebb931274254bdd9a68b3175a02c1e27fff451b3557`
