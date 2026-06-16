@@ -198,25 +198,6 @@ export function resolveKeyboardLiftPx(
   const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
   const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
   const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
-  const currentLayoutViewportHeight = Math.max(
-    0,
-    Math.round(
-      Math.max(window.innerHeight || 0, window.document?.documentElement?.clientHeight || 0),
-    ),
-  );
-
-  // Resize-mode truth: on some Android devices the WebView already shrinks the
-  // whole layout viewport above the IME (adjustResize-like behavior). In this
-  // mode, applying an extra lift causes double-count over-lift for quickbar.
-  const viewportAlreadyResizedByIme =
-    currentLayoutViewportHeight > 0
-    && Math.abs(layoutViewportHeight - visualViewportBottom) <= 2
-    && Math.abs(currentLayoutViewportHeight - visualViewportBottom) <= 2
-    && safeCappedInset >= 24;
-  if (viewportAlreadyResizedByIme) {
-    return 0;
-  }
-
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {

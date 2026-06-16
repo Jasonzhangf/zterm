@@ -1692,7 +1692,7 @@ describe("TerminalPage Android IME bridge", () => {
 });
 
 describe("resolveKeyboardLiftPx", () => {
-  it("returns zero lift when WebView viewport is already resized above the keyboard", () => {
+  it("falls back to reported keyboard inset when WebView viewport metrics do not expose IME occlusion", () => {
     const originalInnerHeight = window.innerHeight;
     const originalVisualViewport = window.visualViewport;
 
@@ -1708,7 +1708,7 @@ describe("resolveKeyboardLiftPx", () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320)).toBe(0);
+    expect(resolveKeyboardLiftPx(320)).toBe(320);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
@@ -1720,7 +1720,7 @@ describe("resolveKeyboardLiftPx", () => {
     });
   });
 
-  it("returns zero lift when Android adjustResize already shrunk layout viewport to match visual viewport", () => {
+  it("keeps reported keyboard inset when layout and visual viewport bottoms are already aligned", () => {
     const originalInnerHeight = window.innerHeight;
     const originalDocumentClientHeight = document.documentElement.clientHeight;
     const originalVisualViewport = window.visualViewport;
@@ -1741,7 +1741,7 @@ describe("resolveKeyboardLiftPx", () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320, 600)).toBe(0);
+    expect(resolveKeyboardLiftPx(320, 600)).toBe(300);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
