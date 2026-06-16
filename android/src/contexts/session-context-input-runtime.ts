@@ -12,18 +12,18 @@ interface RuntimeDebugFn {
 const TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 
 const pendingInputHeadRefreshes = new Map<string, {
-  ws: BridgeTransportSocket;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }>();
 
 function scheduleInputHeadRefresh(options: {
   sessionId: string;
-  ws: BridgeTransportSocket;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }) {
   const alreadyPending = pendingInputHeadRefreshes.has(options.sessionId);
   pendingInputHeadRefreshes.set(options.sessionId, {
-    ws: options.ws,
+    readSessionTransportSocket: options.readSessionTransportSocket,
     requestSessionBufferHead: options.requestSessionBufferHead,
   });
   if (alreadyPending) {
@@ -35,7 +35,12 @@ function scheduleInputHeadRefresh(options: {
     if (!pending) {
       return;
     }
-    pending.requestSessionBufferHead(options.sessionId, pending.ws, { force: true });
+    const currentWs = pending.readSessionTransportSocket(options.sessionId);
+    pending.requestSessionBufferHead(
+      options.sessionId,
+      currentWs,
+      { force: true },
+    );
   });
 }
 
@@ -129,7 +134,7 @@ export function sendInputThroughSessionTransport(options: {
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({
         sessionId: targetSessionId,
-        ws,
+        readSessionTransportSocket: options.readSessionTransportSocket,
         requestSessionBufferHead: options.requestSessionBufferHead,
       });
     }

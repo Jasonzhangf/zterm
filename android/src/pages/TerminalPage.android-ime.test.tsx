@@ -494,6 +494,54 @@ describe("TerminalPage Android IME bridge", () => {
     expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "fast-after-switch");
   });
 
+  it("does not route fast post-switch IME input through a stale activeSessionIdRef owner", async () => {
+    const session1 = makeSession("s1");
+    const session2 = makeSession("s2");
+    const onTerminalInput = vi.fn();
+
+    function Harness() {
+      const [activeSessionId, setActiveSessionId] = useState("s1");
+      const activeSession = activeSessionId === "s2" ? session2 : session1;
+      return (
+        <>
+          <button type="button" onClick={() => setActiveSessionId("s2")}>
+            switch-to-s2
+          </button>
+          <TerminalPage
+            sessions={[session1, session2]}
+            activeSession={activeSession}
+            onSwitchSession={setActiveSessionId}
+            onMoveSession={vi.fn()}
+            onRenameSession={vi.fn()}
+            onCloseSession={vi.fn()}
+            onOpenConnections={vi.fn()}
+            onOpenQuickTabPicker={vi.fn()}
+            onResize={vi.fn()}
+            onTerminalInput={onTerminalInput}
+            onTerminalViewportChange={vi.fn()}
+            quickActions={[]}
+            shortcutActions={[]}
+            sessionDraft=""
+            onLoadSavedTabList={vi.fn()}
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(imeListeners.has("input")).toBe(true));
+    fireEvent.click(screen.getByText("switch-to-s2"));
+
+    imeListeners.get("input")?.({ text: "switch-race-1" });
+    imeListeners.get("input")?.({ text: "switch-race-2" });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s2", "switch-race-1");
+    expect(onTerminalInput).toHaveBeenCalledWith("s2", "switch-race-2");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "switch-race-1");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "switch-race-2");
+  });
+
   it("keeps editor overlay draft outside terminal body truth on Android", async () => {
     const session = makeSession("s1");
 
@@ -828,6 +876,53 @@ describe("TerminalPage Android IME bridge", () => {
     });
     expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({
       active: false,
+    });
+  });
+
+  it("keeps stage bottom-shrink semantics while quick bar DOM editor owns focus if Android keyboard is visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const terminalStage = screen.getByTestId("terminal-stage-shell");
+    expect(terminalStage.getAttribute("style") || "").toContain("bottom: 30px;");
+
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset"),
+      ).toBe("280");
+    });
+
+    await waitFor(() => {
+      const style = terminalStage.getAttribute("style") || "";
+      expect(style).toContain("bottom: 310px;");
+      expect(style).not.toContain("transform: translateY");
     });
   });
 
@@ -1675,6 +1770,43 @@ describe("resolveKeyboardLiftPx", () => {
     });
 
     expect(resolveKeyboardLiftPx(280)).toBe(280);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+
+  it("keeps lift when the stable shell viewport is still taller than the shrunken current viewport", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 618,
+        offsetTop: 2,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320, 900)).toBe(280);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,

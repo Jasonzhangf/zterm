@@ -37,6 +37,7 @@ function makeReadyMirror(): SessionMirror {
     cursor: null,
     lastFlushStartedAt: 0,
     lastFlushCompletedAt: 0,
+    lastLiveActivityAt: 0,
     flushInFlight: false,
     flushPromise: null,
     liveSyncTimer: null,

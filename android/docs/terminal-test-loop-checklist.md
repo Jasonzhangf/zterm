@@ -75,7 +75,7 @@
 - **不能**把“窗口不连续”解释成“已有内容不存在”
 - `mirror-fixed` 下长行只能裁切，不能换行/重排/回写上游宽度
 - `mirror-fixed` 下横向查看只改 renderer horizontal window
-- `mirror-fixed` 下必须自动关闭左右滑切 tab
+- `mirror-fixed` 下若当前没有独立 horizontal pan 手势链，左右滑切 tab 仍必须可用
 - `adaptive-phone` 若要适配手机，最多只允许写 `cols`；不得因为手机容器高度去写 tmux rows
 - `adaptive-phone` upstream width 必须由 daemon 统一计算：
   - 多连接时取最小 cols
@@ -156,7 +156,7 @@ tmux oracle
 7. 当前窗口有 gap 时继续画已有内容 + 空白 gap 占位
 8. `mirror-fixed` 长行默认左裁切，不本地重排
 9. `mirror-fixed` 横向平移只移动 renderer 列窗口，不改 buffer / head
-10. `mirror-fixed` 开启后左右滑切 tab 自动关闭
+10. `mirror-fixed` 在当前未接入独立 horizontal pan 手势链时左右滑切 tab 仍可用
 11. 混合 `ASCII + CJK double-width` 时，renderer 必须按实测像素列宽稳定对齐，不能因为 `1ch / 2ch` 假设导致整行错位
 12. `adaptive-phone` 只在 width truth / cols 变化时上报；纯高度变化不会重复触发上游 geometry write
 13. daemon 对 tmux 的 adaptive reconcile 只允许改 `cols`；任何场景都不得把 tmux `rows` 改窄/改宽

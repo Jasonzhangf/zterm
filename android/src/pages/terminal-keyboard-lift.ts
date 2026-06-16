@@ -79,7 +79,6 @@ export function resolveKeyboardLiftPx(
   if (viewportAlreadyResizedByIme) {
     return 0;
   }
-
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
 
   if (occludedBottom <= 0) {

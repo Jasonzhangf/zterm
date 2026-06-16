@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { homedir } from 'os';
 import type { SessionMirror } from './terminal-runtime-types';
 
@@ -13,10 +13,17 @@ export interface TerminalControlRuntimeDeps {
 
 export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
+  runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
   ensureTmuxSessionAlternateScreenDisabled: (sessionName: string) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
+  enqueueLiveMirrorInput: (
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    shouldWrite?: () => boolean,
+  ) => Promise<boolean>;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (input?: string, cwd?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
@@ -25,6 +32,8 @@ export interface TerminalControlRuntime {
 export function createTerminalControlRuntime(
   deps: TerminalControlRuntimeDeps,
 ): TerminalControlRuntime {
+  const liveMirrorInputChains = new Map<string, Promise<boolean>>();
+
   function cleanEnv(): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -86,6 +95,45 @@ export function createTerminalControlRuntime(
     return result;
   }
 
+  function runTmuxAsync(args: string[]) {
+    return new Promise<{ ok: true; stdout: string }>((resolve, reject) => {
+      const child = spawn(deps.tmuxBinary, args, {
+        cwd: process.env.HOME || homedir(),
+        env: cleanEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      child.on('error', (error) => {
+        reject(error);
+      });
+
+      child.on('close', (code) => {
+        if (code !== 0) {
+          const trimmedStderr = stderr.trim();
+          if (trimmedStderr.includes('no server running on') && args[0] === 'list-sessions') {
+            resolve({ ok: true, stdout: '' });
+            return;
+          }
+          reject(new Error(trimmedStderr || `tmux exited with status ${code ?? 'unknown'}`));
+          return;
+        }
+        resolve({ ok: true, stdout });
+      });
+    });
+  }
+
   function ensureTmuxSessionAlternateScreenDisabled(sessionName: string) {
     runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off']);
   }
@@ -107,6 +155,42 @@ export function createTerminalControlRuntime(
       runTmux(['send-keys', '-t', sessionName, 'Enter']);
     }
     return true;
+  }
+
+  function enqueueLiveMirrorInput(
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    shouldWrite?: () => boolean,
+  ) {
+    const mirrorKey = deps.getMirrorKey(sessionName);
+    const previous = liveMirrorInputChains.get(mirrorKey) || Promise.resolve(true);
+    const next = previous
+      .catch(() => false)
+      .then(async () => {
+        const mirror = deps.mirrors.get(mirrorKey);
+        if (!mirror || mirror.lifecycle !== 'ready') {
+          return false;
+        }
+        if (shouldWrite && !shouldWrite()) {
+          return false;
+        }
+        await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload]);
+        if (appendEnter) {
+          if (shouldWrite && !shouldWrite()) {
+            return false;
+          }
+          await runTmuxAsync(['send-keys', '-t', sessionName, 'Enter']);
+        }
+        return true;
+      })
+      .finally(() => {
+        if (liveMirrorInputChains.get(mirrorKey) === next) {
+          liveMirrorInputChains.delete(mirrorKey);
+        }
+      });
+    liveMirrorInputChains.set(mirrorKey, next);
+    return next;
   }
 
   function listTmuxSessions() {
@@ -136,10 +220,12 @@ export function createTerminalControlRuntime(
 
   return {
     runTmux,
+    runTmuxAsync,
     runCommand,
     ensureTmuxSessionAlternateScreenDisabled,
     writeToTmuxSession,
     writeToLiveMirror,
+    enqueueLiveMirrorInput,
     listTmuxSessions,
     createDetachedTmuxSession,
     renameTmuxSession,

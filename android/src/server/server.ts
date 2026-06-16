@@ -130,6 +130,7 @@ const {
 const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
+  runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
   logTimePrefix,
 });
 const terminalRuntime = createTerminalRuntime({
@@ -163,6 +164,8 @@ const terminalRuntime = createTerminalRuntime({
   mirrorCursorEqual,
   writeToLiveMirror: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter),
+  enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite) =>
+    terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite),
   writeToTmuxSession: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,

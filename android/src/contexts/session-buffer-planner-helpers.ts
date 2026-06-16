@@ -45,12 +45,13 @@ export function hasSessionLocalWindow(
 function buildBaseBufferSyncRequestPayload(
   session: Session,
   bufferOverride?: SessionBufferState | null,
-): Pick<BufferSyncRequestPayload, 'knownRevision' | 'localStartIndex' | 'localEndIndex'> {
+): Pick<BufferSyncRequestPayload, 'knownRevision' | 'localStartIndex' | 'localEndIndex' | 'targetHeadRevision'> {
   const buffer = resolveSessionBufferView(session, bufferOverride);
   return {
     knownRevision: Math.max(0, Math.floor(buffer.revision || 0)),
     localStartIndex: Math.max(0, Math.floor(buffer.startIndex || 0)),
     localEndIndex: Math.max(0, Math.floor(buffer.endIndex || 0)),
+    targetHeadRevision: Math.max(0, Math.floor(session.daemonHeadRevision || 0)),
   };
 }
 

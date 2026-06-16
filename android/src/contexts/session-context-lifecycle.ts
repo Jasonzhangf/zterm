@@ -38,10 +38,19 @@ export function collectNewlyMaterializedLiveSessionIds(
 }
 
 export function buildLifecycleRefreshTargets(state: Pick<SessionManagerState, 'activeSessionId' | 'liveSessionIds'>) {
-  return Array.from(new Set([
-    ...(state.activeSessionId ? [state.activeSessionId] : []),
-    ...(Array.isArray(state.liveSessionIds) ? state.liveSessionIds : []),
-  ]));
+  return state.activeSessionId ? [state.activeSessionId] : [];
+}
+
+export function buildPassiveVisibleRefreshTargets(state: Pick<SessionManagerState, 'activeSessionId' | 'liveSessionIds'>) {
+  return Array.from(new Set(
+    (Array.isArray(state.liveSessionIds) ? state.liveSessionIds : [])
+      .filter((sessionId) => Boolean(sessionId) && sessionId !== state.activeSessionId),
+  ));
+}
+
+export function resolvePassiveVisibleRefreshTickMs(activeHeadRefreshTickMs: number) {
+  const normalizedActiveTickMs = Math.max(16, Math.floor(activeHeadRefreshTickMs || 33));
+  return Math.max(160, Math.min(240, normalizedActiveTickMs * 6));
 }
 
 export function shouldScheduleActiveTickRefresh(options: {
@@ -60,8 +69,32 @@ export function shouldScheduleActiveTickRefresh(options: {
   }
   const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
   if (lastServerActivityAt <= 0) {
-    return options.state.activeSessionId === options.sessionId
-      || (Array.isArray(options.state.liveSessionIds) && options.state.liveSessionIds.includes(options.sessionId));
+    return options.state.activeSessionId === options.sessionId;
+  }
+  const now = options.now ?? Date.now();
+  return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
+}
+
+export function shouldSchedulePassiveVisibleTickRefresh(options: {
+  state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
+  sessionId: string;
+  lastServerActivityAtRef: { current: Map<string, number> };
+  headStalePingMs: number;
+  now?: number;
+}) {
+  const session = options.state.sessions.find((item) => item.id === options.sessionId) || null;
+  if (!session) {
+    return false;
+  }
+  if (session.state !== 'connected') {
+    return true;
+  }
+  if (options.state.activeSessionId === options.sessionId) {
+    return false;
+  }
+  const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  if (lastServerActivityAt <= 0) {
+    return true;
   }
   const now = options.now ?? Date.now();
   return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
@@ -243,7 +276,57 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const refreshTargets = buildLifecycleRefreshTargets(options.refs.stateRef.current);
+        const activeSessionId = options.refs.stateRef.current.activeSessionId;
+        if (!activeSessionId) {
+          scheduleNext();
+          return;
+        }
+        const now = Date.now();
+        const headStalePingMs = options.resolveHeadStalePingMs(activeSessionId);
+        if (shouldScheduleActiveTickRefresh({
+          state: options.refs.stateRef.current,
+          sessionId: activeSessionId,
+          lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+          headStalePingMs,
+          now,
+        })) {
+          options.ensureActiveSessionFresh({
+            sessionId: activeSessionId,
+            source: 'active-tick',
+            allowReconnectIfUnavailable: true,
+          });
+        }
+        scheduleNext();
+      }, Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId)));
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const scheduleNext = () => {
+      if (cancelled) {
+        return;
+      }
+      timer = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        if (!options.refs.foregroundActiveRef.current) {
+          scheduleNext();
+          return;
+        }
+        const refreshTargets = buildPassiveVisibleRefreshTargets(options.refs.stateRef.current);
         if (refreshTargets.length === 0) {
           scheduleNext();
           return;
@@ -251,7 +334,7 @@ export function useSessionContextLifecycle(options: {
         const now = Date.now();
         refreshTargets.forEach((sessionId) => {
           const headStalePingMs = options.resolveHeadStalePingMs(sessionId);
-          if (!shouldScheduleActiveTickRefresh({
+          if (!shouldSchedulePassiveVisibleTickRefresh({
             state: options.refs.stateRef.current,
             sessionId,
             lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
@@ -267,7 +350,7 @@ export function useSessionContextLifecycle(options: {
           });
         });
         scheduleNext();
-      }, Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId)));
+      }, Math.max(160, resolvePassiveVisibleRefreshTickMs(options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId))));
     };
 
     scheduleNext();

@@ -384,6 +384,9 @@ UI 只负责容器位置与裁切：
   - 自动关闭左右滑切 tab
   - 单指横滑只服务于 renderer horizontal pan
   - 不允许一次手势里同时尝试切 tab 与横向平移
+- `mirror-fixed` 下若当前客户端并没有独立 horizontal pan 手势链在生效：
+  - 禁止把左右滑切 tab 直接禁用成“无交互出口”
+  - 此时单指横滑仍归 UI shell swipe surface 所有，继续用于切 tab
 - `adaptive-phone` 下若保留左右滑切 tab，该手势也必须属于 **UI shell interaction surface**：
   - renderer 不得自己持有 swipe gesture state machine
   - renderer 不得自己决定 tab navigation 命中
@@ -406,7 +409,7 @@ UI 只负责容器位置与裁切：
 - daemon 把 cursor / selection / transient visual state 直接写进 buffer cells
 - client viewport 变窄就改写 daemon mirror / tmux 宽度
 - `mirror-fixed` 下把长行本地重排成手机宽度
-- `mirror-fixed` 下还保留左右滑切 tab，和横向平移发生手势冲突
+- `mirror-fixed` 下在没有 horizontal pan 手势链的情况下把 tab swipe 禁用，造成无横向交互出口
 - renderer 直接 request buffer
 - buffer manager 直接改 renderer follow/reading
 - follow 下因为历史 gap 去回补整段旧历史

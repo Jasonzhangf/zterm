@@ -14,9 +14,12 @@ cd "$ROOT_DIR"
 pnpm run deps:check-wterm-published
 pnpm build
 npx cap sync android
+find "$ROOT_DIR/native/android/capacitor-cordova-android-plugins/src/main" \
+  \( -path "*/res/.gitkeep" -o -path "*/java/.gitkeep" \) \
+  -delete
 
 cd "$ROOT_DIR/native/android"
-./gradlew assembleDebug
+./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug
 
 cd "$ROOT_DIR"
 WTERM_UPDATES_DIR="$UPDATES_DIR" node ./scripts/prepare-update-bundle.mjs "$APK_PATH"

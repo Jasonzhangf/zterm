@@ -98,6 +98,7 @@ export interface BufferSyncRequestPayload {
   localEndIndex: number;
   requestStartIndex: number;
   requestEndIndex: number;
+  targetHeadRevision?: number;
   missingRanges?: TerminalGapRange[];
 }
 

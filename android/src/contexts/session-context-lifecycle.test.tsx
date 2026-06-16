@@ -4,9 +4,11 @@ import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildLifecycleRefreshTargets,
+  buildPassiveVisibleRefreshTargets,
   collectNewlyMaterializedLiveSessionIds,
   collectNewlyVisibleLiveSessionIds,
   shouldScheduleActiveTickRefresh,
+  shouldSchedulePassiveVisibleTickRefresh,
   useSessionContextLifecycle,
 } from './session-context-lifecycle';
 
@@ -20,12 +22,23 @@ describe('session-context-lifecycle', () => {
     expect(collectNewlyVisibleLiveSessionIds(['s1', 's2'], ['s1', 's2'])).toEqual([]);
   });
 
-  it('builds active tick refresh targets from active + visible live panes', () => {
+  it('builds active tick refresh targets from active only', () => {
     expect(buildLifecycleRefreshTargets({
       activeSessionId: 's1',
       liveSessionIds: ['s1', 's2', 's3'],
-    } as any)).toEqual(['s1', 's2', 's3']);
+    } as any)).toEqual(['s1']);
     expect(buildLifecycleRefreshTargets({
+      activeSessionId: null,
+      liveSessionIds: ['s2'],
+    } as any)).toEqual([]);
+  });
+
+  it('builds passive visible refresh targets without the active session', () => {
+    expect(buildPassiveVisibleRefreshTargets({
+      activeSessionId: 's1',
+      liveSessionIds: ['s1', 's2', 's3', 's2'],
+    } as any)).toEqual(['s2', 's3']);
+    expect(buildPassiveVisibleRefreshTargets({
       activeSessionId: null,
       liveSessionIds: ['s2'],
     } as any)).toEqual(['s2']);
@@ -69,13 +82,44 @@ describe('session-context-lifecycle', () => {
     })).toBe(true);
   });
 
-  it('keeps visible live pane sessions refreshing before first server activity', () => {
+  it('keeps passive visible pane sessions refreshing before first server activity on the slow lane', () => {
     const state = {
-      sessions: [{ id: 'passive-pane', state: 'connected' }],
-      liveSessionIds: ['passive-pane'],
+      sessions: [
+        { id: 'active-pane', state: 'connected' },
+        { id: 'passive-pane', state: 'connected' },
+      ],
+      activeSessionId: 'active-pane',
+      liveSessionIds: ['active-pane', 'passive-pane'],
+    } as any;
+
+    expect(shouldSchedulePassiveVisibleTickRefresh({
+      state,
+      sessionId: 'passive-pane',
+      lastServerActivityAtRef: { current: new Map() },
+      headStalePingMs: 200,
+      now: 10_000,
+    })).toBe(true);
+  });
+
+  it('does not treat visible non-active panes as active tick refresh targets before first server activity', () => {
+    const state = {
+      sessions: [
+        { id: 'active-pane', state: 'connected' },
+        { id: 'passive-pane', state: 'connected' },
+      ],
+      activeSessionId: 'active-pane',
+      liveSessionIds: ['active-pane', 'passive-pane'],
     } as any;
 
     expect(shouldScheduleActiveTickRefresh({
+      state,
+      sessionId: 'passive-pane',
+      lastServerActivityAtRef: { current: new Map() },
+      headStalePingMs: 200,
+      now: 10_000,
+    })).toBe(false);
+
+    expect(shouldSchedulePassiveVisibleTickRefresh({
       state,
       sessionId: 'passive-pane',
       lastServerActivityAtRef: { current: new Map() },

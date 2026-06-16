@@ -22,6 +22,7 @@ describe('server mirror capture truth gates', () => {
 
     expect(source).toContain('createTerminalMirrorCaptureRuntime');
     expect(source).toContain('captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux');
+    expect(source).toContain('runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args)');
   });
 
   it('canonicalizes captured lines directly inside the snapshot capture owner instead of replaying a joined screen snapshot into synthetic scrollback', () => {
@@ -29,6 +30,8 @@ describe('server mirror capture truth gates', () => {
     const block = extractBlock(source, 'async function captureTmuxMirrorSnapshot');
 
     expect(block).toContain('canonicalizeCapturedMirrorLines');
+    expect(block).toContain('await readTmuxPaneMetricsAsync(mirror.sessionName)');
+    expect(block).toContain('await captureTmuxMirrorLinesAsync(metrics.paneId');
     expect(block).not.toContain("writeString(capturedLines.join('\\r\\n'))");
     expect(block).not.toContain('getScrollbackCount()');
     expect(block).not.toContain('readScrollbackRangeByOldestIndex(');

@@ -12,7 +12,7 @@ function input(overrides: Partial<TerminalLiveSyncSchedulerInput> = {}): Termina
     activeDelayMs: 33,
     idleDelayMs: 120,
     now: 1_000,
-    lastProgressAt: 990,
+    lastLiveActivityAt: 990,
     consecutiveFailures: 0,
     subscriberCount: 1,
     transportBufferedBytes: 0,
@@ -28,6 +28,23 @@ describe('terminal live performance scheduler', () => {
   it('uses fast lane for good transport with low capture cost and empty send queue', () => {
     expect(resolveTerminalLiveSyncDelay(input()).lane).toBe('fast');
     expect(resolveTerminalLiveSyncDelay(input()).delayMs).toBe(16);
+  });
+
+  it('keeps idle mirrors on idle cadence even when callers request active cadence', () => {
+    const result = resolveTerminalLiveSyncDelay(input({
+      requestedDelayMs: 33,
+      now: 10_000,
+      lastLiveActivityAt: 1_000,
+      subscriberCount: 1,
+      transportBufferedBytes: 0,
+      transportBackpressureCount: 0,
+      lastCaptureDurationMs: 8,
+      lastCanonicalizeDurationMs: 4,
+    }));
+
+    expect(result.lane).toBe('slow');
+    expect(result.delayMs).toBe(120);
+    expect(result.reason).toBe('idle');
   });
 
   it('slows down when transport buffered bytes show backpressure', () => {

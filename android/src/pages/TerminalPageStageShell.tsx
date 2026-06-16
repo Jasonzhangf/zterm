@@ -202,8 +202,11 @@ const TerminalStageShell = ReactMemo(
             }
             return (
               <div
+                data-testid="terminal-pane-shell"
+                data-pane-id={pane.id}
+                onPointerDown={() => onActivatePane?.(pane.id)}
                 style={{
-                  flex: 1,
+                  flex: `${Math.max(0.01, pane.size ?? 1)} 1 0%`,
                   minHeight: 0,
                   height: "100%",
                   position: "relative",

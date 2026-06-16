@@ -1,0 +1,3149 @@
+
+> @zterm/android@0.1.3 build:android /Volumes/extension/code/zterm/android
+> ./scripts/build-android-debug.sh
+
+[ensure-pnpm-install] dependencies already installed
+
+> @zterm/android@0.1.3 deps:check-wterm-published /Volumes/extension/code/zterm/android
+> node ./scripts/check-wterm-runtime-published.mjs
+
+npm warn Unknown env config "dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "ignore-deprecated-scripts". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "electron-mirror". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "ignore-deprecated-scripts". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "electron-mirror". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "ignore-deprecated-scripts". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "electron-mirror". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+{
+  "ok": true,
+  "packages": [
+    {
+      "name": "@jsonstudio/wtermmod-core",
+      "expected": "0.1.9",
+      "published": "0.1.9",
+      "ok": true
+    },
+    {
+      "name": "@jsonstudio/wtermmod-dom",
+      "expected": "0.1.9",
+      "published": "0.1.9",
+      "ok": true
+    },
+    {
+      "name": "@jsonstudio/wtermmod-react",
+      "expected": "0.1.9",
+      "published": "0.1.9",
+      "ok": true
+    }
+  ]
+}
+
+> @zterm/android@0.1.3 prebuild /Volumes/extension/code/zterm/android
+> bash ./scripts/ensure-pnpm-install.sh && pnpm run test:terminal:regression
+
+[ensure-pnpm-install] dependencies already installed
+
+> @zterm/android@0.1.3 test:terminal:regression /Volumes/extension/code/zterm/android
+> pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run daemon:mirror:close-loop && pnpm run test:relay:smoke
+
+
+> @zterm/android@0.1.3 test:terminal:contracts /Volumes/extension/code/zterm/android
+> pnpm exec vitest run src/server/buffer-sync-contract.test.ts src/server/daemon-service-script.test.ts src/server/daemon-mirror-lab-script.test.ts src/server/client-session-lifecycle.test.ts src/server/server.transport-lifecycle-truth.test.ts src/server/server.schedule-truth.test.ts src/server/server.control-truth.test.ts src/server/server.transport-runtime-truth.test.ts src/server/server.debug-truth.test.ts src/server/server.core-support-truth.test.ts src/server/server.daemon-runtime-truth.test.ts src/server/server.bridge-runtime-truth.test.ts src/server/session-transport-ticket.test.ts src/server/tmux-window-size-semantics.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-message-assemblies.test.ts src/components/TerminalView.dynamic-refresh.test.tsx src/components/terminal/TerminalHeader.test.tsx src/components/terminal/FileTransferSheet.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/pages/TerminalPage.render-scope.test.tsx src/lib/protocol-truth.test.ts src/lib/session-transport-runtime.test.ts src/lib/terminal-buffer-replay.evidence.test.ts src/lib/android-apk-smoke-runtime-verifier.test.ts src/lib/android-apk-smoke-device-bridge-target.test.ts src/lib/android-apk-smoke-leveldb-files.test.ts src/lib/android-apk-smoke-printable-dump.test.ts src/lib/android-apk-smoke-webview-leveldb-path.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.test.tsx src/App.first-paint.real-terminal.test.tsx src/server/terminal-performance-scheduler.test.ts src/server/terminal-transport-runtime.test.ts src/server/terminal-mirror-runtime.test.ts src/server/terminal-mirror-capture.test.ts src/contexts/multi-pane-refresh.test.ts src/contexts/session-context-weak-network-fix.test.ts src/lib/mobile-config.test.ts src/lib/session-runtime-cadence.test.ts src/lib/session-render-gate.test.ts src/lib/session-render-buffer-store.test.ts src/lib/terminal-performance-trace.test.ts
+
+
+ RUN  v1.6.1 /Volumes/extension/code/zterm/android
+
+ ✓ src/server/daemon-mirror-lab-script.test.ts  (11 tests) 3ms
+ ✓ src/server/server.control-truth.test.ts  (3 tests) 2ms
+ ✓ src/server/server.daemon-runtime-truth.test.ts  (4 tests) 4ms
+ ✓ src/server/server.core-support-truth.test.ts  (3 tests) 4ms
+ ✓ src/server/server.transport-lifecycle-truth.test.ts  (17 tests) 6ms
+ ✓ src/lib/session-transport-runtime.test.ts  (8 tests) 3ms
+ ✓ src/lib/mobile-config.test.ts  (6 tests) 2ms
+ ✓ src/server/buffer-sync-contract.test.ts  (10 tests) 5ms
+ ✓ src/lib/android-apk-smoke-runtime-verifier.test.ts  (4 tests) 6ms
+ ✓ src/lib/session-render-buffer-store.test.ts  (4 tests) 24ms
+ ✓ src/server/terminal-mirror-capture.test.ts  (9 tests) 7ms
+stdout | src/server/terminal-mirror-capture.test.ts > terminal mirror capture runtime > publishes a changed snapshot immediately in live mode instead of waiting for a second identical tick
+[2026-05-06 21:22:00] [mirror:demo] tmux capture sync captured=2 canonical=2 continuity=authoritative-replace matched=0 total=2 rows=2 cols=80 buffer=0-2 visible=0-2 stabilizeAttempts=1 stabilizeMode=single-capture-authoritative
+
+ ✓ src/lib/terminal-buffer-replay.evidence.test.ts  (8 tests) 38ms
+ ✓ src/server/server.bridge-runtime-truth.test.ts  (3 tests) 3ms
+ ✓ src/server/server.transport-runtime-truth.test.ts  (3 tests) 2ms
+ ✓ src/server/server.debug-truth.test.ts  (3 tests) 3ms
+ ✓ src/server/server.schedule-truth.test.ts  (3 tests) 2ms
+ ✓ src/server/terminal-performance-scheduler.test.ts  (4 tests) 3ms
+ ✓ src/lib/session-runtime-cadence.test.ts  (2 tests) 2ms
+ ✓ src/server/terminal-transport-runtime.test.ts  (4 tests) 4ms
+ ✓ src/lib/terminal-performance-trace.test.ts  (2 tests) 3ms
+ ✓ src/contexts/multi-pane-refresh.test.ts  (5 tests) 4ms
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > attachTmux boots a newly created mirror and marks session ready
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stderr | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > keeps the mirror/runtime shell alive and reports initial sync failure when initial capture hits a dead pane target
+[2026-05-13 00:30:00] canonical mirror refresh failed for rcc-zterm (streak=1): tmux returned invalid pane metrics for rcc-zterm: pane is dead
+[2026-05-13 00:30:00] initial buffer sync failed for rcc-zterm: Failed to capture canonical tmux buffer during initial sync
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > keeps recurring live sync after mirror boot so external tmux writes enter daemon mirror truth
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > reuses an already-ready mirror with one immediate sync and without duplicating recurring live sync loops
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > uses min adaptive cols across concurrent adaptive-phone subscribers
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > accepts adaptive-phone attach payload with cols only and keeps baseline rows
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > keeps upstream width untouched for mirror-fixed subscriber attach
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > stops recurring live sync once the last subscriber detaches, then resumes on reattach
+[2026-05-01 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 0,
+  nextEndIndex: 0,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: true,
+  changedLinePreview: []
+}
+
+ ✓ src/lib/android-apk-smoke-printable-dump.test.ts  (2 tests) 3ms
+ ✓ src/lib/android-apk-smoke-webview-leveldb-path.test.ts  (3 tests) 2ms
+ ✓ src/lib/protocol-truth.test.ts  (1 test) 2ms
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > bumps mirror revision when an existing canonical row changes without tail growth
+[2026-05-03 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 0,
+  previousEndIndex: 0,
+  nextStartIndex: 100,
+  nextEndIndex: 103,
+  changedRangeCount: 1,
+  firstChangedRange: { startIndex: 100, endIndex: 103 },
+  lastChangedRange: { startIndex: 100, endIndex: 103 },
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: false,
+  changedLinePreview: [
+    { index: 100, text: 'a' },
+    { index: 101, text: 'b' },
+    { index: 102, text: 'c' }
+  ]
+}
+[2026-05-03 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 2,
+  previousStartIndex: 100,
+  previousEndIndex: 103,
+  nextStartIndex: 100,
+  nextEndIndex: 103,
+  changedRangeCount: 1,
+  firstChangedRange: { startIndex: 101, endIndex: 102 },
+  lastChangedRange: { startIndex: 101, endIndex: 102 },
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: false,
+  changedLinePreview: [ { index: 101, text: 'B' } ]
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > broadcasts buffer-sync instead of buffer-head when an existing canonical row changes without tail growth
+[2026-05-11 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 100,
+  previousEndIndex: 103,
+  nextStartIndex: 100,
+  nextEndIndex: 103,
+  changedRangeCount: 1,
+  firstChangedRange: { startIndex: 101, endIndex: 102 },
+  lastChangedRange: { startIndex: 101, endIndex: 102 },
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: false,
+  changedLinePreview: [ { index: 101, text: 'B' } ]
+}
+
+stderr | src/server/terminal-mirror-runtime.test.ts > terminal mirror runtime lifecycle truth > does not release a ready mirror when live sync later discovers a dead pane target
+[2026-05-13 00:31:00] canonical mirror refresh failed for rcc-zterm (streak=1): tmux returned invalid pane metrics for rcc-zterm: pane is dead
+
+stdout | src/server/terminal-mirror-runtime.test.ts > broadcasts sparse mirror-diff buffer-sync to ready subscribers after canonical mirror content changes
+[2026-05-06 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 100,
+  previousEndIndex: 101,
+  nextStartIndex: 100,
+  nextEndIndex: 102,
+  changedRangeCount: 1,
+  firstChangedRange: { startIndex: 101, endIndex: 102 },
+  lastChangedRange: { startIndex: 101, endIndex: 102 },
+  cursorChanged: false,
+  cursorKeysAppChanged: false,
+  forceRevision: false,
+  changedLinePreview: [ { index: 101, text: 'b' } ]
+}
+
+stdout | src/server/terminal-mirror-runtime.test.ts > broadcasts buffer-head only when canonical mirror body is unchanged but cursor metadata changes
+[2026-05-06 00:00:00] mirror.flush.inspect {
+  sessionName: 'demo',
+  revision: 1,
+  previousStartIndex: 100,
+  previousEndIndex: 101,
+  nextStartIndex: 100,
+  nextEndIndex: 101,
+  changedRangeCount: 0,
+  firstChangedRange: null,
+  lastChangedRange: null,
+  cursorChanged: true,
+  cursorKeysAppChanged: false,
+  forceRevision: false,
+  changedLinePreview: []
+}
+
+ ✓ src/server/terminal-mirror-runtime.test.ts  (15 tests) 34ms
+ ✓ src/lib/android-apk-smoke-leveldb-files.test.ts  (2 tests) 2ms
+ ✓ src/server/client-session-lifecycle.test.ts  (1 test) 1ms
+ ✓ src/server/session-transport-ticket.test.ts  (1 test) 2ms
+ ✓ src/server/daemon-service-script.test.ts  (11 tests) 325ms
+(node:44603) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ src/contexts/session-context-weak-network-fix.test.ts  (3 tests) 2ms
+ ✓ src/lib/session-render-gate.test.ts  (13 tests) 9ms
+ ✓ src/lib/android-apk-smoke-device-bridge-target.test.ts  (5 tests) 3ms
+(node:44467) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/contexts/session-context-buffer-runtime.test.ts  (18 tests) 15ms
+stderr | src/contexts/session-context-buffer-runtime.test.ts > session-context-buffer-runtime inactive gating > accepts buffer-sync for visible non-active pane when shouldAcceptSessionLiveBuffer returns true
+[runtime-debug] Failed to read runtime debug flag: TypeError: Cannot read properties of undefined (reading 'getItem')
+    at safeReadStorageFlag (/Volumes/extension/code/zterm/android/src/lib/runtime-debug.ts:28:52)
+    at Module.shouldCollectRuntimeDebugScope (/Volumes/extension/code/zterm/android/src/lib/runtime-debug.ts:168:8)
+    at Module.applyIncomingBufferSyncRuntime (/Volumes/extension/code/zterm/android/src/contexts/session-context-buffer-runtime.ts:695:7)
+    at /Volumes/extension/code/zterm/android/src/contexts/session-context-buffer-runtime.test.ts:309:5
+    at file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:135:14
+    at file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:60:26
+    at runTest (file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:781:17)
+    at runSuite (file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runSuite (file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runFiles (file:///Volumes/extension/code/zterm/node_modules/.pnpm/@vitest+runner@1.6.1/node_modules/@vitest/runner/dist/index.js:958:5)
+
+ ✓ src/contexts/session-context-message-assemblies.test.ts  (1 test) 3ms
+ ✓ src/components/terminal/FileTransferSheet.test.tsx  (7 tests) 158ms
+ ✓ src/App.first-paint.test.tsx  (5 tests) 91ms
+ ✓ src/components/terminal/TerminalHeader.test.tsx  (14 tests) 249ms
+ ✓ src/pages/TerminalPage.render-scope.test.tsx  (14 tests) 215ms
+ ✓ src/App.first-paint.real-terminal.test.tsx  (4 tests) 596ms
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > persists closed tabs immediately and does not restore them on next launch
+[App] close session request {
+  sessionId: 's1',
+  source: 'unknown',
+  activeSessionId: 's1',
+  sessionCount: 2
+}
+
+ ✓ src/pages/TerminalPage.android-ime.test.tsx  (34 tests) 749ms
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > does not repersist a closed tab from lingering runtime sessions after the explicit close intent already removed it
+[App] close session request {
+  sessionId: 's1',
+  source: 'unknown',
+  activeSessionId: 's1',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > does not bootstrap open tabs back from runtime sessions after the user explicitly closed the final tab
+[App] close session request {
+  sessionId: 's1',
+  source: 'unknown',
+  activeSessionId: 's1',
+  sessionCount: 1
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > does not cold-restore a persisted tab only after that exact open tab id was explicitly closed
+[App] close session request {
+  sessionId: 'persisted-old',
+  source: 'unknown',
+  activeSessionId: 'runtime-new',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > persists closed semantic reuse tombstones so a closed duplicate tab still stays dead after cold launch
+[App] close session request {
+  sessionId: 'persisted-old',
+  source: 'unknown',
+  activeSessionId: 'runtime-new',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > does not resurrect explicitly closed tabs when runtime sessions later reappear
+[App] close session request {
+  sessionId: 's2',
+  source: 'unknown',
+  activeSessionId: 's2',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > uses explicit open-tab truth for the connections page after a tab is closed
+[App] close session request {
+  sessionId: 's1',
+  source: 'unknown',
+  activeSessionId: 's1',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > updates quick-tab current-tabs truth immediately after a tab is closed
+[App] close session request {
+  sessionId: 's1',
+  source: 'unknown',
+  activeSessionId: 's1',
+  sessionCount: 2
+}
+
+stderr | src/App.dynamic-refresh.test.tsx > App dynamic refresh matrix > keeps a closed tab hidden even if the runtime session keeps emitting later updates
+[App] close session request {
+  sessionId: 's2',
+  source: 'unknown',
+  activeSessionId: 's2',
+  sessionCount: 2
+}
+
+ ✓ src/App.dynamic-refresh.test.tsx  (75 tests) 1256ms
+ ✓ src/server/tmux-window-size-semantics.test.ts  (1 test) 2831ms
+ ✓ src/components/TerminalView.dynamic-refresh.test.tsx  (57 tests) 3758ms
+ ✓ src/contexts/SessionContext.ws-refresh.test.tsx  (123 tests) 4521ms
+
+ Test Files  44 passed (44)
+      Tests  526 passed (526)
+   Start at  08:03:34
+   Duration  5.76s (transform 4.23s, setup 1ms, collect 9.15s, tests 14.96s, environment 5.57s, prepare 2.65s)
+
+
+> @zterm/android@0.1.3 test:common-user-flows /Volumes/extension/code/zterm/android
+> pnpm exec vitest run src/lib/tmux-sessions.test.ts src/pages/ConnectionPropertiesPage.test.tsx src/pages/ConnectionsPage.test.tsx src/server/schedule-store.test.ts src/server/schedule-dispatch.test.ts src/server/next-fire.test.ts src/server/schedule-engine.test.ts
+
+
+ RUN  v1.6.1 /Volumes/extension/code/zterm/android
+
+ ✓ src/server/schedule-dispatch.test.ts  (4 tests) 3ms
+ ✓ src/server/next-fire.test.ts  (32 tests) 16ms
+ ✓ src/server/schedule-store.test.ts  (3 tests) 4ms
+ ✓ src/server/schedule-engine.test.ts  (18 tests) 8ms
+ ✓ src/lib/tmux-sessions.test.ts  (4 tests) 5ms
+ ✓ src/pages/ConnectionPropertiesPage.test.tsx  (7 tests) 267ms
+ ✓ src/pages/ConnectionsPage.test.tsx  (16 tests) 306ms
+
+ Test Files  7 passed (7)
+      Tests  84 passed (84)
+   Start at  08:03:41
+   Duration  943ms (transform 345ms, setup 0ms, collect 650ms, tests 609ms, environment 823ms, prepare 255ms)
+
+
+> @zterm/android@0.1.3 daemon:mirror:close-loop /Volumes/extension/code/zterm/android
+> tsx scripts/daemon-mirror-close-loop.ts
+
+(node:45148) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[daemon-mirror-lab] codex-live: PASS
+[daemon-mirror-lab] top-live: PASS
+[daemon-mirror-lab] vim-live: PASS
+[daemon-mirror-lab] initial-sync: PASS
+[daemon-mirror-lab] local-input-echo: PASS
+[daemon-mirror-lab] external-input-echo: PASS
+[daemon-mirror-lab] daemon-restart-recover: PASS
+[daemon-mirror-lab] schedule-fire: PASS
+[daemon-mirror-lab] summary: /Volumes/extension/code/zterm/android/evidence/daemon-mirror/2026-06-12/summary.json
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/codex-live
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 19,
+  "viewportBottomIndex": 43,
+  "expected": [
+    "codex-live-15",
+    "codex-live-16",
+    "codex-live-17",
+    "codex-live-18",
+    "codex-live-19",
+    "codex-live-20",
+    "codex-live-21",
+    "codex-live-22",
+    "codex-live-23",
+    "codex-live-24",
+    "codex-live-25",
+    "codex-live-26",
+    "codex-live-27",
+    "codex-live-28",
+    "codex-live-29",
+    "codex-live-30",
+    "codex-live-31",
+    "codex-live-32",
+    "codex-live-33",
+    "codex-live-34",
+    "codex-live-35",
+    "codex-live-36",
+    "__codex_live_tail__",
+    "fanzhang@Macstudio android %"
+  ],
+  "actual": [
+    "codex-live-15",
+    "codex-live-16",
+    "codex-live-17",
+    "codex-live-18",
+    "codex-live-19",
+    "codex-live-20",
+    "codex-live-21",
+    "codex-live-22",
+    "codex-live-23",
+    "codex-live-24",
+    "codex-live-25",
+    "codex-live-26",
+    "codex-live-27",
+    "codex-live-28",
+    "codex-live-29",
+    "codex-live-30",
+    "codex-live-31",
+    "codex-live-32",
+    "codex-live-33",
+    "codex-live-34",
+    "codex-live-35",
+    "codex-live-36",
+    "__codex_live_tail__",
+    "fanzhang@Macstudio android %"
+  ],
+  "stepChecks": [
+    {
+      "label": "codex-shell-visible",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 3,
+      "expected": [
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "codex-shell-local-echo",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 5,
+      "expected": [
+        "fanzhang@Macstudio android % printf '__codex_live_a__\\n'",
+        "__codex_live_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf '__codex_live_a__\\n'",
+        "__codex_live_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "codex-shell-tail-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 8,
+      "expected": [
+        "codex-live-15",
+        "codex-live-16",
+        "codex-live-17",
+        "codex-live-18",
+        "codex-live-19",
+        "codex-live-20",
+        "codex-live-21",
+        "codex-live-22",
+        "codex-live-23",
+        "codex-live-24",
+        "codex-live-25",
+        "codex-live-26",
+        "codex-live-27",
+        "codex-live-28",
+        "codex-live-29",
+        "codex-live-30",
+        "codex-live-31",
+        "codex-live-32",
+        "codex-live-33",
+        "codex-live-34",
+        "codex-live-35",
+        "codex-live-36",
+        "__codex_live_tail__",
+        "fanzhang@Macstudio android %"
+      ],
+      "actual": [
+        "codex-live-15",
+        "codex-live-16",
+        "codex-live-17",
+        "codex-live-18",
+        "codex-live-19",
+        "codex-live-20",
+        "codex-live-21",
+        "codex-live-22",
+        "codex-live-23",
+        "codex-live-24",
+        "codex-live-25",
+        "codex-live-26",
+        "codex-live-27",
+        "codex-live-28",
+        "codex-live-29",
+        "codex-live-30",
+        "codex-live-31",
+        "codex-live-32",
+        "codex-live-33",
+        "codex-live-34",
+        "codex-live-35",
+        "codex-live-36",
+        "__codex_live_tail__",
+        "fanzhang@Macstudio android %"
+      ]
+    }
+  ]
+}
+(node:46554) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/top-live
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android % top",
+    "fanzhang@Macstudio android % printf '__top_exit_ok__\\n'",
+    "__top_exit_ok__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android % top",
+    "fanzhang@Macstudio android % printf '__top_exit_ok__\\n'",
+    "__top_exit_ok__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "top-visible-screen",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 18,
+      "expected": [
+        "Processes: 1173 total, 3 running, 1170 sleeping, 11153 threads         08:03:45",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 7.13% user, 6.0% sys, 86.85% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 1215929 total, 40G resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (8754M wired, 0B compressor), 255G unused.",
+        "VM: 682T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686754/402G in, 617859172/741G out.",
+        "Disks: 355212402/17T read, 452084665/31T written.",
+        "",
+        "PID    COMMAND      %CPU TIME     #TH     #WQ  #PORT MEM   PURG  CMPR PGRP",
+        "99770  SkyComputerU 0.0  00:00.01 3       2/1  41    3921K 0B    0B   43257",
+        "99313  SkyComputerU 0.0  00:00.01 3       2/1  41    3888K 0B    0B   61726",
+        "99288  MTLCompilerS 0.0  00:00.06 2       1    34    14M   0B    0B   99288",
+        "98989  codex        0.0  00:06.95 36      1    68    17M   0B    0B   98983",
+        "98988  node         0.0  00:02.33 7       0    19    16M   0B    0B   98983",
+        "98983  Python       0.0  00:26.14 3       0    17    43M   0B    0B   98983",
+        "98426  SkyComputerU 0.0  00:00.01 3       2/1  41    3936K 0B    0B   50174",
+        "98085  AMPArtworkAg 0.0  00:00.07 2       1    46    3504K 32K   0B   98085",
+        "98072  com.apple.BK 0.0  00:00.09 2       1    59    3072K 0B    0B   98072",
+        "98071  PodcastConte 0.0  00:00.08 2       1    45    3281K 0B    0B   98071",
+        "98070  AMPLibraryAg 0.0  00:10.49 5       1    122   9377K 192K  0B   98070",
+        "98069  media-indexe 0.0  00:00.27 2       1    76    3072K 0B    0B   98069",
+        "98030  sysdiagnosed 0.0  00:00.11 2       1    33    2752K 0B    0B   98030",
+        "97726  tmux         0.0  00:00.00 1       0    15    2064K 0B    0B   97726"
+      ],
+      "actual": [
+        "Processes: 1173 total, 3 running, 1170 sleeping, 11153 threads         08:03:45",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 7.13% user, 6.0% sys, 86.85% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 1215929 total, 40G resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (8754M wired, 0B compressor), 255G unused.",
+        "VM: 682T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686754/402G in, 617859172/741G out.",
+        "Disks: 355212402/17T read, 452084665/31T written.",
+        "",
+        "PID    COMMAND      %CPU TIME     #TH     #WQ  #PORT MEM   PURG  CMPR PGRP",
+        "99770  SkyComputerU 0.0  00:00.01 3       2/1  41    3921K 0B    0B   43257",
+        "99313  SkyComputerU 0.0  00:00.01 3       2/1  41    3888K 0B    0B   61726",
+        "99288  MTLCompilerS 0.0  00:00.06 2       1    34    14M   0B    0B   99288",
+        "98989  codex        0.0  00:06.95 36      1    68    17M   0B    0B   98983",
+        "98988  node         0.0  00:02.33 7       0    19    16M   0B    0B   98983",
+        "98983  Python       0.0  00:26.14 3       0    17    43M   0B    0B   98983",
+        "98426  SkyComputerU 0.0  00:00.01 3       2/1  41    3936K 0B    0B   50174",
+        "98085  AMPArtworkAg 0.0  00:00.07 2       1    46    3504K 32K   0B   98085",
+        "98072  com.apple.BK 0.0  00:00.09 2       1    59    3072K 0B    0B   98072",
+        "98071  PodcastConte 0.0  00:00.08 2       1    45    3281K 0B    0B   98071",
+        "98070  AMPLibraryAg 0.0  00:10.49 5       1    122   9377K 192K  0B   98070",
+        "98069  media-indexe 0.0  00:00.27 2       1    76    3072K 0B    0B   98069",
+        "98030  sysdiagnosed 0.0  00:00.11 2       1    33    2752K 0B    0B   98030",
+        "97726  tmux         0.0  00:00.00 1       0    15    2064K 0B    0B   97726"
+      ]
+    },
+    {
+      "label": "top-enter-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 20,
+      "expected": [
+        "Processes: 1181 total, 5 running, 1176 sleeping, 11062 threads         08:03:46",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 7.31% user, 5.39% sys, 87.28% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 358 total, 12M resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (9715M wired, 0B compressor), 255G unused.",
+        "VM: 686T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686778/402G in, 617859197/741G out.",
+        "Disks: 355212402/17T read, 452084666/31T written.",
+        "",
+        "PID    COMMAND      %CPU  TIME     #TH     #WQ  #PORT MEM    PURG  CMPR PGRP",
+        "470    iTerm2       116.8 182 hrs  13/1    10   612   1947M+ 172M- 0B   470",
+        "489    ToDesk       20.3  38:08:11 103     6    757   1256M+ 23M-  0B   489",
+        "45383  top          14.1  00:01.09 1/1     0    35+   13M+   0B    0B   45383",
+        "0      kernel_task  11.6  58:47:39 1127/32 0    0     7968K- 0B    0B   0",
+        "574    Finder       4.8   09:46:17 11      8    1414  397M   7248K 0B   574",
+        "1      launchd      3.5   03:46:58 4       3    5001+ 18M+   0B    0B   1",
+        "141    opendirector 3.4   02:02:47 13      12   3340+ 10M+   128K  0B   141",
+        "3318   node         3.1   13:34:43 123     1    193   141M   0B    0B   3318",
+        "3916   tmux         2.8   08:18:46 1       0    20    40M+   0B    0B   3916",
+        "311    ToDesk_Servi 2.2   06:46:23 43      2    304   51M    0B    0B   311",
+        "129    mds          2.1   05:28:17 12      9    819+  325M+  0B    0B   129",
+        "45155  node         2.0   00:00.53 13      1    37    86M+   0B    0B   43997",
+        "167    notifyd      1.9   68:11.38 3       2    1359+ 5136K  0B    0B   167",
+        "10624  O+Connect He 1.8   04:35.59 41      1    185   73M    0B    0B   3352"
+      ],
+      "actual": [
+        "Processes: 1181 total, 5 running, 1176 sleeping, 11062 threads         08:03:46",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 7.31% user, 5.39% sys, 87.28% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 358 total, 12M resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (9715M wired, 0B compressor), 255G unused.",
+        "VM: 686T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686778/402G in, 617859197/741G out.",
+        "Disks: 355212402/17T read, 452084666/31T written.",
+        "",
+        "PID    COMMAND      %CPU  TIME     #TH     #WQ  #PORT MEM    PURG  CMPR PGRP",
+        "470    iTerm2       116.8 182 hrs  13/1    10   612   1947M+ 172M- 0B   470",
+        "489    ToDesk       20.3  38:08:11 103     6    757   1256M+ 23M-  0B   489",
+        "45383  top          14.1  00:01.09 1/1     0    35+   13M+   0B    0B   45383",
+        "0      kernel_task  11.6  58:47:39 1127/32 0    0     7968K- 0B    0B   0",
+        "574    Finder       4.8   09:46:17 11      8    1414  397M   7248K 0B   574",
+        "1      launchd      3.5   03:46:58 4       3    5001+ 18M+   0B    0B   1",
+        "141    opendirector 3.4   02:02:47 13      12   3340+ 10M+   128K  0B   141",
+        "3318   node         3.1   13:34:43 123     1    193   141M   0B    0B   3318",
+        "3916   tmux         2.8   08:18:46 1       0    20    40M+   0B    0B   3916",
+        "311    ToDesk_Servi 2.2   06:46:23 43      2    304   51M    0B    0B   311",
+        "129    mds          2.1   05:28:17 12      9    819+  325M+  0B    0B   129",
+        "45155  node         2.0   00:00.53 13      1    37    86M+   0B    0B   43997",
+        "167    notifyd      1.9   68:11.38 3       2    1359+ 5136K  0B    0B   167",
+        "10624  O+Connect He 1.8   04:35.59 41      1    185   73M    0B    0B   3352"
+      ]
+    },
+    {
+      "label": "top-enter-continued-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 23,
+      "expected": [
+        "Processes: 1181 total, 3 running, 1178 sleeping, 11043 threads         08:03:47",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 5.57% user, 3.6% sys, 91.36% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 0 total, 0B resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (8754M wired, 0B compressor), 255G unused.",
+        "VM: 686T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686876/402G in, 617859290/741G out.",
+        "Disks: 355212402/17T read, 452084668/31T written.",
+        "",
+        "PID    COMMAND      %CPU  TIME     #TH     #WQ  #PORT MEM    PURG  CMPR PGRP",
+        "470    iTerm2       118.9 182 hrs  13/1    10   612   1947M+ 160M- 0B   470",
+        "0      kernel_task  13.8  58:47:39 1127/32 0    0     7984K+ 0B    0B   0",
+        "45383  top          11.9  00:01.23 1/1     0    35    13M+   0B    0B   45383",
+        "489    ToDesk       7.7   38:08:11 103     6    757   410M-  23M   0B   489",
+        "45155  node         7.2   00:00.61 13      1    37    86M+   0B    0B   43997",
+        "10625  O+Connect He 6.4   04:41.86 41      1    186   73M    0B    0B   3352",
+        "10624  O+Connect He 6.3   04:35.66 41      1    185   73M    0B    0B   3352",
+        "3916   tmux         4.9   08:18:46 1       0    20    40M+   0B    0B   3916",
+        "3318   node         4.8   13:34:43 123     1    193   141M   0B    0B   3318",
+        "311    ToDesk_Servi 2.8   06:46:23 43      2    304   51M    0B    0B   311",
+        "45148  node         2.6   00:00.34 13      1    30    65M+   0B    0B   43997",
+        "1905   syspolicyd   2.4   02:13:40 5       3    192   29M    6032K 0B   1905",
+        "97587  language_ser 2.3   10:52:22 18      1    51    226M   0B    0B   5644",
+        "3427   O+Connect He 1.3   02:36:01 43      2    332   636M   18M   0B   3352"
+      ],
+      "actual": [
+        "Processes: 1181 total, 3 running, 1178 sleeping, 11043 threads         08:03:47",
+        "Load Avg: 4.26, 4.86, 4.97  CPU usage: 5.57% user, 3.6% sys, 91.36% idle",
+        "SharedLibs: 1558M resident, 219M data, 590M linkedit.",
+        "MemRegions: 0 total, 0B resident, 1630M private, 32G shared.",
+        "PhysMem: 256G used (8754M wired, 0B compressor), 255G unused.",
+        "VM: 686T vsize, 6144M framework vsize, 0(0) swapins, 0(0) swapouts.",
+        "Networks: packets: 420686876/402G in, 617859290/741G out.",
+        "Disks: 355212402/17T read, 452084668/31T written.",
+        "",
+        "PID    COMMAND      %CPU  TIME     #TH     #WQ  #PORT MEM    PURG  CMPR PGRP",
+        "470    iTerm2       118.9 182 hrs  13/1    10   612   1947M+ 160M- 0B   470",
+        "0      kernel_task  13.8  58:47:39 1127/32 0    0     7984K+ 0B    0B   0",
+        "45383  top          11.9  00:01.23 1/1     0    35    13M+   0B    0B   45383",
+        "489    ToDesk       7.7   38:08:11 103     6    757   410M-  23M   0B   489",
+        "45155  node         7.2   00:00.61 13      1    37    86M+   0B    0B   43997",
+        "10625  O+Connect He 6.4   04:41.86 41      1    186   73M    0B    0B   3352",
+        "10624  O+Connect He 6.3   04:35.66 41      1    185   73M    0B    0B   3352",
+        "3916   tmux         4.9   08:18:46 1       0    20    40M+   0B    0B   3916",
+        "3318   node         4.8   13:34:43 123     1    193   141M   0B    0B   3318",
+        "311    ToDesk_Servi 2.8   06:46:23 43      2    304   51M    0B    0B   311",
+        "45148  node         2.6   00:00.34 13      1    30    65M+   0B    0B   43997",
+        "1905   syspolicyd   2.4   02:13:40 5       3    192   29M    6032K 0B   1905",
+        "97587  language_ser 2.3   10:52:22 18      1    51    226M   0B    0B   5644",
+        "3427   O+Connect He 1.3   02:36:01 43      2    332   636M   18M   0B   3352"
+      ]
+    },
+    {
+      "label": "top-exit-shell-return",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 26,
+      "expected": [
+        "fanzhang@Macstudio android % top",
+        "fanzhang@Macstudio android % printf '__top_exit_ok__\\n'",
+        "__top_exit_ok__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % top",
+        "fanzhang@Macstudio android % printf '__top_exit_ok__\\n'",
+        "__top_exit_ok__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:46617) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/vim-live
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android % vim -Nu NONE",
+    "fanzhang@Macstudio android % printf '__vim_exit_ok__\\n'",
+    "__vim_exit_ok__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android % vim -Nu NONE",
+    "fanzhang@Macstudio android % printf '__vim_exit_ok__\\n'",
+    "__vim_exit_ok__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "vim-visible-screen",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 5,
+      "expected": [
+        "",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~                              VIM - Vi IMproved",
+        "~",
+        "~                               version 9.1.1752",
+        "~                           by Bram Moolenaar et al.",
+        "~                 Vim is open source and freely distributable",
+        "~",
+        "~                        Become a registered Vim user!",
+        "~                type  :help register<Enter>   for information",
+        "~",
+        "~                type  :q<Enter>               to exit",
+        "~                type  :help<Enter>  or  <F1>  for on-line help",
+        "~                type  :help version9<Enter>   for version info",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~",
+        ""
+      ],
+      "actual": [
+        "",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~                              VIM - Vi IMproved",
+        "~",
+        "~                               version 9.1.1752",
+        "~                           by Bram Moolenaar et al.",
+        "~                 Vim is open source and freely distributable",
+        "~",
+        "~                        Become a registered Vim user!",
+        "~                type  :help register<Enter>   for information",
+        "~",
+        "~                type  :q<Enter>               to exit",
+        "~                type  :help<Enter>  or  <F1>  for on-line help",
+        "~                type  :help version9<Enter>   for version info",
+        "~",
+        "~",
+        "~",
+        "~",
+        "~",
+        ""
+      ]
+    },
+    {
+      "label": "vim-fill-bottom-tail",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 7,
+      "expected": [
+        "row-058",
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "row-080",
+        ":call setline(1, map(range(1,80), 'printf(\"row-%03d\", v:val)')) | normal! G"
+      ],
+      "actual": [
+        "row-058",
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "row-080",
+        ":call setline(1, map(range(1,80), 'printf(\"row-%03d\", v:val)')) | normal! G"
+      ]
+    },
+    {
+      "label": "vim-top-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 10,
+      "expected": [
+        "TOP_MARKER-row-001",
+        "row-002",
+        "row-003",
+        "row-004",
+        "row-005",
+        "row-006",
+        "row-007",
+        "row-008",
+        "row-009",
+        "row-010",
+        "row-011",
+        "row-012",
+        "row-013",
+        "row-014",
+        "row-015",
+        "row-016",
+        "row-017",
+        "row-018",
+        "row-019",
+        "row-020",
+        "row-021",
+        "row-022",
+        "row-023",
+        "-- INSERT --                                                         ^["
+      ],
+      "actual": [
+        "TOP_MARKER-row-001",
+        "row-002",
+        "row-003",
+        "row-004",
+        "row-005",
+        "row-006",
+        "row-007",
+        "row-008",
+        "row-009",
+        "row-010",
+        "row-011",
+        "row-012",
+        "row-013",
+        "row-014",
+        "row-015",
+        "row-016",
+        "row-017",
+        "row-018",
+        "row-019",
+        "row-020",
+        "row-021",
+        "row-022",
+        "row-023",
+        "-- INSERT --                                                         ^["
+      ]
+    },
+    {
+      "label": "vim-bottom-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 13,
+      "expected": [
+        "row-058",
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "BOTTOM_MARKER-row-080",
+        "-- INSERT --                                                         ^["
+      ],
+      "actual": [
+        "row-058",
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "BOTTOM_MARKER-row-080",
+        "-- INSERT --                                                         ^["
+      ]
+    },
+    {
+      "label": "vim-append-refresh",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 16,
+      "expected": [
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "BOTTOM_MARKER-row-080",
+        "APPEND_MARKER-",
+        "-- INSERT --                                                         ^["
+      ],
+      "actual": [
+        "row-059",
+        "row-060",
+        "row-061",
+        "row-062",
+        "row-063",
+        "row-064",
+        "row-065",
+        "row-066",
+        "row-067",
+        "row-068",
+        "row-069",
+        "row-070",
+        "row-071",
+        "row-072",
+        "row-073",
+        "row-074",
+        "row-075",
+        "row-076",
+        "row-077",
+        "row-078",
+        "row-079",
+        "BOTTOM_MARKER-row-080",
+        "APPEND_MARKER-",
+        "-- INSERT --                                                         ^["
+      ]
+    },
+    {
+      "label": "vim-exit-shell-return",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 19,
+      "expected": [
+        "fanzhang@Macstudio android % vim -Nu NONE",
+        "fanzhang@Macstudio android % printf '__vim_exit_ok__\\n'",
+        "__vim_exit_ok__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % vim -Nu NONE",
+        "fanzhang@Macstudio android % printf '__vim_exit_ok__\\n'",
+        "__vim_exit_ok__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:46682) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/initial-sync
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "initial-sync",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 2,
+      "expected": [
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:46745) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/local-input-echo
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+    "hello-daemon-a",
+    "__daemon_local_a__",
+    "fanzhang@Macstudio android % printf 'hello-daemon-b\\n__daemon_local_b__\\n'",
+    "hello-daemon-b",
+    "__daemon_local_b__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+    "hello-daemon-a",
+    "__daemon_local_a__",
+    "fanzhang@Macstudio android % printf 'hello-daemon-b\\n__daemon_local_b__\\n'",
+    "hello-daemon-b",
+    "__daemon_local_b__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "local-input-echo-a",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 5,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+        "hello-daemon-a",
+        "__daemon_local_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+        "hello-daemon-a",
+        "__daemon_local_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "local-input-echo-b",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 8,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+        "hello-daemon-a",
+        "__daemon_local_a__",
+        "fanzhang@Macstudio android % printf 'hello-daemon-b\\n__daemon_local_b__\\n'",
+        "hello-daemon-b",
+        "__daemon_local_b__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'hello-daemon-a\\n__daemon_local_a__\\n'",
+        "hello-daemon-a",
+        "__daemon_local_a__",
+        "fanzhang@Macstudio android % printf 'hello-daemon-b\\n__daemon_local_b__\\n'",
+        "hello-daemon-b",
+        "__daemon_local_b__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:46808) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/external-input-echo
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 19,
+  "viewportBottomIndex": 43,
+  "expected": [
+    "external-tail-11",
+    "external-tail-12",
+    "external-tail-13",
+    "external-tail-14",
+    "external-tail-15",
+    "external-tail-16",
+    "external-tail-17",
+    "external-tail-18",
+    "external-tail-19",
+    "external-tail-20",
+    "external-tail-21",
+    "external-tail-22",
+    "external-tail-23",
+    "external-tail-24",
+    "external-tail-25",
+    "external-tail-26",
+    "external-tail-27",
+    "external-tail-28",
+    "external-tail-29",
+    "external-tail-30",
+    "external-tail-31",
+    "external-tail-32",
+    "__daemon_external_tail__",
+    "fanzhang@Macstudio android %"
+  ],
+  "actual": [
+    "external-tail-11",
+    "external-tail-12",
+    "external-tail-13",
+    "external-tail-14",
+    "external-tail-15",
+    "external-tail-16",
+    "external-tail-17",
+    "external-tail-18",
+    "external-tail-19",
+    "external-tail-20",
+    "external-tail-21",
+    "external-tail-22",
+    "external-tail-23",
+    "external-tail-24",
+    "external-tail-25",
+    "external-tail-26",
+    "external-tail-27",
+    "external-tail-28",
+    "external-tail-29",
+    "external-tail-30",
+    "external-tail-31",
+    "external-tail-32",
+    "__daemon_external_tail__",
+    "fanzhang@Macstudio android %"
+  ],
+  "stepChecks": [
+    {
+      "label": "external-input-echo-a",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 5,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'hello-external-a\\n__daemon_external_a__\\n'",
+        "hello-external-a",
+        "__daemon_external_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'hello-external-a\\n__daemon_external_a__\\n'",
+        "hello-external-a",
+        "__daemon_external_a__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "external-input-echo-b",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 7,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'hello-external-a\\n__daemon_external_a__\\n'",
+        "hello-external-a",
+        "__daemon_external_a__",
+        "fanzhang@Macstudio android % printf 'hello-external-b\\n__daemon_external_b__\\n'",
+        "hello-external-b",
+        "__daemon_external_b__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'hello-external-a\\n__daemon_external_a__\\n'",
+        "hello-external-a",
+        "__daemon_external_a__",
+        "fanzhang@Macstudio android % printf 'hello-external-b\\n__daemon_external_b__\\n'",
+        "hello-external-b",
+        "__daemon_external_b__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "external-input-echo-tail",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 9,
+      "expected": [
+        "external-tail-11",
+        "external-tail-12",
+        "external-tail-13",
+        "external-tail-14",
+        "external-tail-15",
+        "external-tail-16",
+        "external-tail-17",
+        "external-tail-18",
+        "external-tail-19",
+        "external-tail-20",
+        "external-tail-21",
+        "external-tail-22",
+        "external-tail-23",
+        "external-tail-24",
+        "external-tail-25",
+        "external-tail-26",
+        "external-tail-27",
+        "external-tail-28",
+        "external-tail-29",
+        "external-tail-30",
+        "external-tail-31",
+        "external-tail-32",
+        "__daemon_external_tail__",
+        "fanzhang@Macstudio android %"
+      ],
+      "actual": [
+        "external-tail-11",
+        "external-tail-12",
+        "external-tail-13",
+        "external-tail-14",
+        "external-tail-15",
+        "external-tail-16",
+        "external-tail-17",
+        "external-tail-18",
+        "external-tail-19",
+        "external-tail-20",
+        "external-tail-21",
+        "external-tail-22",
+        "external-tail-23",
+        "external-tail-24",
+        "external-tail-25",
+        "external-tail-26",
+        "external-tail-27",
+        "external-tail-28",
+        "external-tail-29",
+        "external-tail-30",
+        "external-tail-31",
+        "external-tail-32",
+        "__daemon_external_tail__",
+        "fanzhang@Macstudio android %"
+      ]
+    }
+  ]
+}
+(node:46876) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/daemon-restart-recover
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+    "'",
+    "before-restart",
+    "__daemon_restart_before__",
+    "fanzhang@Macstudio android % printf 'after-restart\\n__daemon_restart_after__\\n'",
+    "after-restart",
+    "__daemon_restart_after__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+    "'",
+    "before-restart",
+    "__daemon_restart_before__",
+    "fanzhang@Macstudio android % printf 'after-restart\\n__daemon_restart_after__\\n'",
+    "after-restart",
+    "__daemon_restart_after__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "daemon-restart-before",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 5,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "daemon-restart-reconnect",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 8,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "daemon-restart-after",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 14,
+      "expected": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android % printf 'after-restart\\n__daemon_restart_after__\\n'",
+        "after-restart",
+        "__daemon_restart_after__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf 'before-restart\\n__daemon_restart_before__\\n",
+        "'",
+        "before-restart",
+        "__daemon_restart_before__",
+        "fanzhang@Macstudio android % printf 'after-restart\\n__daemon_restart_after__\\n'",
+        "after-restart",
+        "__daemon_restart_after__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:46941) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 daemon:mirror:replay /Volumes/extension/code/zterm/android
+> tsx scripts/client-mirror-replay.ts evidence/daemon-mirror/2026-06-12/schedule-fire
+
+{
+  "ok": true,
+  "mismatchIndex": null,
+  "paneRows": 24,
+  "paneCols": 80,
+  "viewportTopIndex": 1,
+  "viewportBottomIndex": 25,
+  "expected": [
+    "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+    "__sched_fire_1781222633642__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "actual": [
+    "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+    "__sched_fire_1781222633642__",
+    "fanzhang@Macstudio android %",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "stepChecks": [
+    {
+      "label": "schedule-fire-marker-in-daemon-buffer",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 17,
+      "expected": [
+        "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+        "__sched_fire_1781222633642__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+        "__sched_fire_1781222633642__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "label": "schedule-event-received",
+      "ok": true,
+      "mismatchIndex": null,
+      "historyLength": 17,
+      "expected": [
+        "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+        "__sched_fire_1781222633642__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "actual": [
+        "fanzhang@Macstudio android % printf '__sched_fire_1781222633642__\\n'",
+        "__sched_fire_1781222633642__",
+        "fanzhang@Macstudio android %",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+(node:47004) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "ok": true,
+  "generatedAt": "2026-06-12T00:03:59.524Z",
+  "rootDir": "/Volumes/extension/code/zterm/android/evidence/daemon-mirror/2026-06-12",
+  "cases": [
+    {
+      "caseName": "codex-live",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "bufferSyncReceived": true,
+        "headReceived": true
+      },
+      "eventCount": 28,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "top-live",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "bufferSyncReceived": true,
+        "headReceived": true
+      },
+      "eventCount": 91,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "vim-live",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "bufferSyncReceived": true,
+        "headReceived": true
+      },
+      "eventCount": 51,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "initial-sync",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "startupSequence": true
+      },
+      "eventCount": 13,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "local-input-echo",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "inputSent": true,
+        "inputHeadRefresh": true,
+        "inputBufferRefresh": true
+      },
+      "eventCount": 35,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync"
+      ]
+    },
+    {
+      "caseName": "external-input-echo",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "externalHeadRefresh": true,
+        "externalBufferRefresh": true
+      },
+      "eventCount": 29,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "daemon-restart-recover",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true,
+        "reconnectTwice": true,
+        "reconnectHeadRefresh": true,
+        "reconnectBufferRefresh": true
+      },
+      "eventCount": 81,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-sync",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "sent:buffer-head-request"
+      ]
+    },
+    {
+      "caseName": "schedule-fire",
+      "ok": true,
+      "checks": {
+        "daemonCompare": true,
+        "clientCompare": true,
+        "stepsOk": true,
+        "compactWire": true
+      },
+      "eventCount": 77,
+      "firstEvents": [
+        "sent:session-open",
+        "recv:session-ticket",
+        "sent:connect",
+        "recv:title",
+        "recv:connected",
+        "sent:buffer-head-request",
+        "recv:schedule-state",
+        "recv:title"
+      ],
+      "lastEvents": [
+        "recv:buffer-sync",
+        "sent:buffer-head-request",
+        "recv:buffer-head",
+        "sent:buffer-sync-request",
+        "recv:buffer-sync",
+        "sent:schedule-delete",
+        "recv:schedule-state",
+        "recv:schedule-event"
+      ]
+    }
+  ]
+}
+(node:47025) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[daemon-mirror-close-loop] all replay + strict audit cases passed: codex-live, top-live, vim-live, initial-sync, local-input-echo, external-input-echo, daemon-restart-recover, schedule-fire
+(node:45127) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+> @zterm/android@0.1.3 test:relay:smoke /Volumes/extension/code/zterm/android
+> tsx scripts/traversal-relay-local-smoke.ts
+
+(node:47177) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "ok": true,
+  "relayUrl": "http://127.0.0.1:51474",
+  "relayHostId": "local-smoke-1781222640017",
+  "relayDeviceId": "device-1781222640017",
+  "relayUsername": "smoke-1781222640017",
+  "tmuxSession": "zterm-relay-smoke-1781222640018",
+  "daemonRegistration": {
+    "health": {
+      "ok": true,
+      "wsUrl": "ws://127.0.0.1:51475",
+      "updatesUrl": "http://127.0.0.1:51475/updates/latest.json",
+      "updatesDir": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-traversal-smoke-afhjtC/home/.wterm/updates",
+      "uptimeSec": 0,
+      "pid": 47191,
+      "memory": {
+        "rss": 111050752,
+        "heapTotal": 21118976,
+        "heapUsed": 12504432,
+        "external": 5005609,
+        "arrayBuffers": 1137141
+      },
+      "sessions": {
+        "total": 0,
+        "attached": 0,
+        "ready": 0
+      },
+      "mirrors": {
+        "total": 0,
+        "ready": 0,
+        "subscribers": 0
+      }
+    },
+    "devices": [
+      {
+        "deviceId": "device-1781222640017",
+        "deviceName": "local-smoke-daemon",
+        "platform": "darwin",
+        "appVersion": "smoke",
+        "createdAt": "2026-06-12T00:04:00.369Z",
+        "updatedAt": "2026-06-12T00:04:00.373Z",
+        "lastSeenAt": "2026-06-12T00:04:00.373Z",
+        "online": true,
+        "client": {
+          "connected": true,
+          "lastSeenAt": "2026-06-12T00:04:00.370Z"
+        },
+        "daemon": {
+          "connected": true,
+          "lastSeenAt": "2026-06-12T00:04:00.373Z",
+          "hostId": "local-smoke-1781222640017",
+          "version": "smoke-daemon"
+        }
+      }
+    ]
+  },
+  "deviceStreamSnapshot": [
+    {
+      "deviceId": "device-1781222640017",
+      "deviceName": "local-smoke-client",
+      "platform": "smoke-client",
+      "appVersion": "smoke",
+      "createdAt": "2026-06-12T00:04:00.369Z",
+      "updatedAt": "2026-06-12T00:04:00.369Z",
+      "lastSeenAt": "2026-06-12T00:04:00.369Z",
+      "online": true,
+      "client": {
+        "connected": true,
+        "lastSeenAt": "2026-06-12T00:04:00.369Z"
+      },
+      "daemon": {
+        "connected": false,
+        "lastSeenAt": "",
+        "hostId": "",
+        "version": ""
+      }
+    }
+  ],
+  "rtcResult": {
+    "ok": true,
+    "hostId": "local-smoke-1781222640017",
+    "sessions": [
+      "TA_cli_dev_instructions_probe_20260609",
+      "TA_local_agentteam_Kevin",
+      "TA_local_playground_Alice",
+      "TA_local_playground_Kevin",
+      "agentteam-tmux-probe",
+      "fin",
+      "rcc",
+      "rcc-OneStop",
+      "rcc-routecodex2",
+      "rcc-routecodex3",
+      "rcc2",
+      "server",
+      "tcm",
+      "zterm",
+      "zterm-relay-smoke-1781222640018"
+    ]
+  }
+}
+
+> @zterm/android@0.1.3 build /Volumes/extension/code/zterm/android
+> node ./scripts/bump-build-version.mjs && pnpm run type-check && vite build
+
+[build-version] 1773
+
+> @zterm/android@0.1.3 type-check /Volumes/extension/code/zterm/android
+> pnpm run check:no-source-js-pollution && tsc --noEmit
+
+
+> @zterm/android@0.1.3 check:no-source-js-pollution /Volumes/extension/code/zterm/android
+> node ./scripts/check-no-source-js-pollution.mjs
+
+[source-js-pollution] clean
+vite v5.4.21 building for production...
+transforming...
+✓ 257 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.54 kB │ gzip:   0.33 kB
+dist/assets/index-Cg5qikLU.css    1.02 kB │ gzip:   0.51 kB
+dist/assets/web-Bo9XybSa.js       0.72 kB │ gzip:   0.36 kB │ map:     1.87 kB
+dist/assets/web-tUlEqmXq.js       8.66 kB │ gzip:   2.98 kB │ map:    35.51 kB
+dist/assets/index-BXLoiSvX.js   867.99 kB │ gzip: 241.79 kB │ map: 3,439.10 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.12s
+npm warn Unknown env config "dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "ignore-deprecated-scripts". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "electron-mirror". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+✔ Copying web assets from dist to native/android/app/src/main/assets/public in 6.11ms
+✔ Creating capacitor.config.json in native/android/app/src/main/assets in 476.92μs
+✔ copy android in 13.14ms
+✔ Updating Android plugins in 1.34ms
+[info] Found 5 Capacitor plugins for android:
+       @capacitor/app@6.0.3
+       @capacitor/filesystem@6.0.4
+       @capacitor/keyboard@6.0.4
+       @capacitor/local-notifications@6.1.3
+       @capacitor/preferences@6.0.4
+✔ update android in 32.19ms
+[info] Sync finished in 0.056s
+Starting a Gradle Daemon (subsequent builds will be faster)
+
+> Configure project :app
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Configure project :capacitor-cordova-android-plugins
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-android:preBuild UP-TO-DATE
+> Task :capacitor-android:preDebugBuild UP-TO-DATE
+> Task :capacitor-android:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-app:preBuild UP-TO-DATE
+> Task :capacitor-app:preDebugBuild UP-TO-DATE
+> Task :capacitor-app:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preBuild UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preDebugBuild UP-TO-DATE
+> Task :capacitor-filesystem:preBuild UP-TO-DATE
+> Task :capacitor-filesystem:preDebugBuild UP-TO-DATE
+> Task :capacitor-filesystem:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-keyboard:preBuild UP-TO-DATE
+> Task :capacitor-keyboard:preDebugBuild UP-TO-DATE
+> Task :capacitor-keyboard:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-local-notifications:preBuild UP-TO-DATE
+> Task :capacitor-local-notifications:preDebugBuild UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:writeDebugAarMetadata
+> Task :capacitor-local-notifications:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-preferences:preBuild UP-TO-DATE
+> Task :capacitor-preferences:preDebugBuild UP-TO-DATE
+> Task :capacitor-preferences:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-android:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-app:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:processDebugNavigationResources
+> Task :capacitor-filesystem:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-keyboard:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-local-notifications:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-preferences:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :capacitor-android:generateDebugResValues UP-TO-DATE
+> Task :capacitor-android:generateDebugResources UP-TO-DATE
+> Task :capacitor-android:packageDebugResources UP-TO-DATE
+> Task :capacitor-app:generateDebugResValues UP-TO-DATE
+> Task :capacitor-app:generateDebugResources UP-TO-DATE
+> Task :capacitor-app:packageDebugResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:generateDebugResValues
+> Task :capacitor-cordova-android-plugins:generateDebugResources
+> Task :capacitor-cordova-android-plugins:packageDebugResources
+> Task :capacitor-filesystem:generateDebugResValues UP-TO-DATE
+> Task :capacitor-filesystem:generateDebugResources UP-TO-DATE
+> Task :capacitor-filesystem:packageDebugResources UP-TO-DATE
+> Task :capacitor-keyboard:generateDebugResValues UP-TO-DATE
+> Task :capacitor-keyboard:generateDebugResources UP-TO-DATE
+> Task :capacitor-keyboard:packageDebugResources UP-TO-DATE
+> Task :capacitor-local-notifications:generateDebugResValues UP-TO-DATE
+> Task :capacitor-local-notifications:generateDebugResources UP-TO-DATE
+> Task :capacitor-local-notifications:packageDebugResources UP-TO-DATE
+> Task :capacitor-preferences:generateDebugResValues UP-TO-DATE
+> Task :capacitor-preferences:generateDebugResources UP-TO-DATE
+> Task :capacitor-preferences:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-android:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-android:processDebugManifest UP-TO-DATE
+> Task :capacitor-app:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-app:processDebugManifest UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:extractDeepLinksDebug
+> Task :capacitor-filesystem:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-filesystem:processDebugManifest UP-TO-DATE
+> Task :capacitor-keyboard:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-keyboard:processDebugManifest UP-TO-DATE
+> Task :capacitor-local-notifications:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-local-notifications:processDebugManifest UP-TO-DATE
+> Task :capacitor-preferences:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-preferences:processDebugManifest UP-TO-DATE
+> Task :capacitor-android:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-android:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-android:generateDebugRFile UP-TO-DATE
+> Task :capacitor-app:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-app:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-app:generateDebugRFile UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:compileDebugLibraryResources
+> Task :capacitor-filesystem:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-filesystem:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:processDebugManifest
+> Task :capacitor-filesystem:generateDebugRFile UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :capacitor-keyboard:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-keyboard:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-keyboard:generateDebugRFile UP-TO-DATE
+> Task :capacitor-local-notifications:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-local-notifications:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-local-notifications:generateDebugRFile UP-TO-DATE
+> Task :capacitor-preferences:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-preferences:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-preferences:generateDebugRFile UP-TO-DATE
+> Task :capacitor-android:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:generateDebugRFile
+> Task :capacitor-android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-app:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-app:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-filesystem:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:javaPreCompileDebug
+> Task :capacitor-filesystem:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:compileDebugJavaWithJavac NO-SOURCE
+> Task :capacitor-filesystem:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-keyboard:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibCompileToJarDebug
+> Task :capacitor-keyboard:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-keyboard:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-local-notifications:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-local-notifications:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-local-notifications:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-preferences:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-preferences:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-preferences:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :capacitor-android:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-android:compileDebugShaders NO-SOURCE
+> Task :capacitor-android:generateDebugAssets UP-TO-DATE
+> Task :capacitor-android:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-app:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-app:compileDebugShaders NO-SOURCE
+> Task :capacitor-app:generateDebugAssets UP-TO-DATE
+> Task :capacitor-app:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugShaders
+> Task :capacitor-cordova-android-plugins:compileDebugShaders NO-SOURCE
+> Task :capacitor-cordova-android-plugins:generateDebugAssets UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugAssets
+> Task :capacitor-filesystem:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-filesystem:compileDebugShaders NO-SOURCE
+> Task :capacitor-filesystem:generateDebugAssets UP-TO-DATE
+> Task :capacitor-filesystem:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-keyboard:compileDebugShaders NO-SOURCE
+> Task :capacitor-keyboard:generateDebugAssets UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-local-notifications:compileDebugShaders NO-SOURCE
+> Task :capacitor-local-notifications:generateDebugAssets UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-preferences:compileDebugShaders NO-SOURCE
+> Task :capacitor-preferences:generateDebugAssets UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:processDebugManifestForPackage
+> Task :app:compressDebugAssets
+> Task :capacitor-app:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-filesystem:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-keyboard:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-local-notifications:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-preferences:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-android:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibRuntimeToJarDebug
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:processDebugJavaRes NO-SOURCE
+> Task :capacitor-android:processDebugJavaRes NO-SOURCE
+> Task :capacitor-app:processDebugJavaRes NO-SOURCE
+> Task :capacitor-cordova-android-plugins:processDebugJavaRes NO-SOURCE
+> Task :capacitor-filesystem:processDebugJavaRes NO-SOURCE
+> Task :capacitor-keyboard:processDebugJavaRes NO-SOURCE
+> Task :capacitor-local-notifications:processDebugJavaRes NO-SOURCE
+> Task :capacitor-preferences:processDebugJavaRes NO-SOURCE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :capacitor-app:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-filesystem:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-keyboard:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-local-notifications:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-preferences:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-android:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibRuntimeToDirDebug
+> Task :capacitor-android:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-android:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-android:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-app:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-app:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugJniLibFolders
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-filesystem:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:copyDebugJniLibsProjectOnly
+> Task :capacitor-filesystem:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-filesystem:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-keyboard:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-local-notifications:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-preferences:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :capacitor-android:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-android:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-android:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-android:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-android:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-android:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-android:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-android:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-android:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-android:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-android:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-android:bundleDebugAar UP-TO-DATE
+> Task :capacitor-android:assembleDebug UP-TO-DATE
+> Task :capacitor-app:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-app:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-app:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-app:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-app:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-app:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-app:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-app:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-app:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-app:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-app:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-app:bundleDebugAar UP-TO-DATE
+> Task :capacitor-app:assembleDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-cordova-android-plugins:copyDebugJniLibsProjectAndLocalJars
+> Task :capacitor-cordova-android-plugins:checkDebugAarMetadata
+> Task :capacitor-cordova-android-plugins:extractDebugAnnotations
+> Task :capacitor-cordova-android-plugins:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-filesystem:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-filesystem:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-filesystem:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-filesystem:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-filesystem:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-filesystem:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-filesystem:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-filesystem:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-filesystem:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-filesystem:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-filesystem:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-filesystem:bundleDebugAar UP-TO-DATE
+> Task :capacitor-filesystem:assembleDebug UP-TO-DATE
+> Task :capacitor-keyboard:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-keyboard:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-keyboard:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-keyboard:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-keyboard:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-keyboard:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-keyboard:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-keyboard:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-keyboard:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-keyboard:bundleDebugAar UP-TO-DATE
+> Task :capacitor-keyboard:assembleDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugJavaResource
+> Task :capacitor-local-notifications:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:syncDebugLibJars
+> Task :capacitor-cordova-android-plugins:bundleDebugAar
+> Task :capacitor-cordova-android-plugins:assembleDebug
+> Task :capacitor-local-notifications:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-local-notifications:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-local-notifications:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-local-notifications:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-local-notifications:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-local-notifications:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-local-notifications:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-local-notifications:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-local-notifications:bundleDebugAar UP-TO-DATE
+> Task :capacitor-local-notifications:assembleDebug UP-TO-DATE
+> Task :capacitor-preferences:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-preferences:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-preferences:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-preferences:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-preferences:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-preferences:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-preferences:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-preferences:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-preferences:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-preferences:bundleDebugAar UP-TO-DATE
+> Task :capacitor-preferences:assembleDebug UP-TO-DATE
+> Task :app:processDebugResources
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderDebug UP-TO-DATE
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:mergeProjectDexDebug UP-TO-DATE
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+
+[Incubating] Problems report is available at: file:///Volumes/extension/code/zterm/android/native/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 7s
+243 actionable tasks: 33 executed, 210 up-to-date
+[prepare-update-bundle] ready
+- apk: /Volumes/extension/code/zterm/android/update-dist/zterm-0.1.3.1773.apk
+- update latest alias: /Volumes/extension/code/zterm/android/update-dist/zterm-latest-debug.apk
+- release latest alias: /Volumes/extension/code/zterm/android/release-dist/zterm-latest-debug.apk
+- manifest: /Volumes/extension/code/zterm/android/update-dist/latest.json
+- daemon updates dir: /Users/fanzhang/.wterm/updates
+- versionName: 0.1.3.1773
+- versionCode: 1031773
+[build-android-debug] verify manifests
+[build-android-debug] APK built and published to update channel
+- apk: /Volumes/extension/code/zterm/android/native/android/app/build/outputs/apk/debug/app-debug.apk
+- updates dir: /Users/fanzhang/.wterm/updates

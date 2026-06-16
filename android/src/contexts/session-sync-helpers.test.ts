@@ -1000,6 +1000,7 @@ describe('session sync helper pull-state truth', () => {
       localEndIndex: 187513,
       requestStartIndex: 187519,
       requestEndIndex: 187550,
+      targetHeadRevision: 71737,
     })).toBe(true);
   });
 
@@ -1021,6 +1022,7 @@ describe('session sync helper pull-state truth', () => {
       localEndIndex: 60,
       requestStartIndex: 30,
       requestEndIndex: 70,
+      targetHeadRevision: 5,
       missingRanges: [{ startIndex: 60, endIndex: 61 }],
     })).toBe(true);
     expect(doesSessionPullStateCoverRequest(pullState, {
@@ -1029,6 +1031,7 @@ describe('session sync helper pull-state truth', () => {
       localEndIndex: 60,
       requestStartIndex: 30,
       requestEndIndex: 70,
+      targetHeadRevision: 5,
       missingRanges: [{ startIndex: 70, endIndex: 71 }],
     })).toBe(false);
   });

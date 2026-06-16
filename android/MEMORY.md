@@ -8,6 +8,10 @@
 
 ## Key Decisions
 
+- [2026-06-11] multi-pane refresh 的一个明确放大器已收口：`SessionContext lifecycle` 的 active tick 只刷新 active session，visible non-active panes 走独立更慢的 passive visible tick；`buildLifecycleRefreshTargets()` 只保留 active，新增 passive visible target / schedule helper。已用 lifecycle、multi-pane-refresh、TerminalPage page tests 和 `tsc --noEmit` 验证。
+- [2026-06-11] `TerminalPage` 的 interaction/live-pane orchestration 必须只有一个 owner；若 `interactiveSession / renderedPaneSessions / livePaneSessionIds / pane attach / chrome switch / swipe tab` 同时散在页面本体和 hook 中，就会形成第二份页面层语义与额外重算。当前唯一 owner 已收口到 `useTerminalPageInteractionRuntime`。
+- [2026-06-12] active tab 切回后输入成功但本地刷新慢的一个真实生命周期缺口是：`resetSessionTransportPullBookkeeping()` 只清 pull state / sync debounce，不清 `pendingInputTailRefreshRef`。旧 input tail pending 会让切回后的第一笔输入失去立即 head-refresh 触发，表现成“远端先动、本地慢刷”。现在切 tab / active re-entry 的 reset 口已统一清理该 pending 输入书账。
+- [2026-06-12] `build:android` 曾被 relay smoke 的固定端口 `19091/4335` 卡住，现已改成动态空闲端口分配后再注入 env；这是本机环境污染下的门禁问题，不是 relay/daemon 协议问题。修复后 `pnpm --dir android run build:android` 成功并发布 `0.1.3.1773` 到 `android/update-dist/`、`android/release-dist/` 和 `~/.wterm/updates/`，sha256 `c9a2e986715e99adda0977717b90b38e6d79541518e97c51fbdf376e17035f73`。
 - [2026-06-09] client buffer 在 revision reset / 窗口失真期间不得发布空中间帧清空已有画面；若收到低 revision 且 `startIndex/endIndex` 为空、`lines=[]` 的 payload，只能记录等待，保留上一帧，直到非空或有明确范围的 `buffer-sync` 再提交 renderer，避免“先黑屏再刷新”。
 - [2026-05-02] terminal 四层模型再次冻结：daemon 只管 `tmux -> mirror truth`；renderer 是 visible range 唯一真相；buffer manager 只管 local sparse buffer / gap repair，不持有 `follow / reading / renderBottomIndex`；gap 必须先空白占位，再按行/区间 patch 重刷
 - [2026-05-02] terminal transport 也再次冻结：transport 必须长期复用长链接；同一 `bridge target` 只允许一个 control transport，同一 `clientSessionId` 只允许一个稳定 per-session transport；foreground/background/tab switch 只影响取数，不得 fresh recreate transport

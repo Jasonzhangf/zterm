@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type PointerEventHandler } from 'react';
+import { memo, type CSSProperties, type PointerEventHandler, type TouchEventHandler } from 'react';
 import {
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
@@ -22,9 +22,13 @@ export interface VisibleRowProps {
   copyModeActive?: boolean;
   plainText?: string;
   onPointerDown?: PointerEventHandler<HTMLDivElement>;
+  onTouchStart?: TouchEventHandler<HTMLDivElement>;
   onPointerMove?: PointerEventHandler<HTMLDivElement>;
+  onTouchMove?: TouchEventHandler<HTMLDivElement>;
   onPointerUp?: PointerEventHandler<HTMLDivElement>;
+  onTouchEnd?: TouchEventHandler<HTMLDivElement>;
   onPointerCancel?: PointerEventHandler<HTMLDivElement>;
+  onTouchCancel?: TouchEventHandler<HTMLDivElement>;
 }
 
 export const VisibleRow = memo(function VisibleRow({
@@ -42,9 +46,13 @@ export const VisibleRow = memo(function VisibleRow({
   copyModeActive = false,
   plainText,
   onPointerDown,
+  onTouchStart,
   onPointerMove,
+  onTouchMove,
   onPointerUp,
+  onTouchEnd,
   onPointerCancel,
+  onTouchCancel,
 }: VisibleRowProps) {
   const viewModel = buildTerminalVisibleRowViewModel({
     absoluteIndex,
@@ -77,9 +85,13 @@ export const VisibleRow = memo(function VisibleRow({
         data-terminal-copy-mode={copyModeActive ? 'true' : undefined}
         data-terminal-row-text={plainText}
         onPointerDown={onPointerDown}
+        onTouchStart={onTouchStart}
         onPointerMove={onPointerMove}
+        onTouchMove={onTouchMove}
         onPointerUp={onPointerUp}
+        onTouchEnd={onTouchEnd}
         onPointerCancel={onPointerCancel}
+        onTouchCancel={onTouchCancel}
         onContextMenu={copyModeActive ? (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -103,9 +115,13 @@ export const VisibleRow = memo(function VisibleRow({
       data-terminal-copy-mode={copyModeActive ? 'true' : undefined}
       data-terminal-row-text={plainText}
       onPointerDown={onPointerDown}
+      onTouchStart={onTouchStart}
       onPointerMove={onPointerMove}
+      onTouchMove={onTouchMove}
       onPointerUp={onPointerUp}
+      onTouchEnd={onTouchEnd}
       onPointerCancel={onPointerCancel}
+      onTouchCancel={onTouchCancel}
       onContextMenu={copyModeActive ? (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -147,9 +163,13 @@ export const VisibleRow = memo(function VisibleRow({
   && prev.copyModeActive === next.copyModeActive
   && prev.plainText === next.plainText
   && prev.onPointerDown === next.onPointerDown
+  && prev.onTouchStart === next.onTouchStart
   && prev.onPointerMove === next.onPointerMove
+  && prev.onTouchMove === next.onTouchMove
   && prev.onPointerUp === next.onPointerUp
+  && prev.onTouchEnd === next.onTouchEnd
   && prev.onPointerCancel === next.onPointerCancel
+  && prev.onTouchCancel === next.onTouchCancel
 ));
 
 export { resolveCursorOverlay, hasDiscontinuousNeighbor };

@@ -96,15 +96,15 @@ describe('doesBufferSyncSatisfyPullState', () => {
 
 describe('doesPullStateCoverRequest', () => {
   it('returns true when pull state exactly matches request', () => {
-    expect(doesPullStateCoverRequest(makeTailPull({ requestKnownRevision: 5, requestLocalStartIndex: 0, requestLocalEndIndex: 50 }), makeRequest())).toBe(true);
+    expect(doesPullStateCoverRequest(makeTailPull({ requestKnownRevision: 5, requestLocalStartIndex: 0, requestLocalEndIndex: 50 }), makeRequest({ targetHeadRevision: 10 }))).toBe(true);
   });
 
   it('returns false when knownRevision differs', () => {
-    expect(doesPullStateCoverRequest(makeTailPull({ requestKnownRevision: 3 }), makeRequest())).toBe(false);
+    expect(doesPullStateCoverRequest(makeTailPull({ requestKnownRevision: 3 }), makeRequest({ targetHeadRevision: 10 }))).toBe(false);
   });
 
   it('returns false when target range does not cover request', () => {
-    expect(doesPullStateCoverRequest(makeTailPull({ targetStartIndex: 50, targetEndIndex: 150 }), makeRequest())).toBe(false);
+    expect(doesPullStateCoverRequest(makeTailPull({ targetStartIndex: 50, targetEndIndex: 150 }), makeRequest({ targetHeadRevision: 10 }))).toBe(false);
   });
 
   it('returns false when repair signature differs even if the window matches', () => {
@@ -123,6 +123,7 @@ describe('doesPullStateCoverRequest', () => {
         localEndIndex: 60,
         requestStartIndex: 20,
         requestEndIndex: 80,
+        targetHeadRevision: 10,
         repairSignature: buildBufferSyncRepairSignature([{ startIndex: 70, endIndex: 71 }]),
       }),
     )).toBe(false);

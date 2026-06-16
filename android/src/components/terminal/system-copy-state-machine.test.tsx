@@ -47,6 +47,17 @@ describe('system copy state machine guards', () => {
     vi.useRealTimers();
   });
 
+  it('entry: copy mode touch long-press opens app row menu on Android event path', () => {
+    vi.useFakeTimers();
+    const onLongPressRow = vi.fn();
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={onLongPressRow} />);
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    fireEvent.touchStart(row, { touches: [{ clientX: 14, clientY: 18 }] });
+    act(() => vi.advanceTimersByTime(430));
+    expect(onLongPressRow).toHaveBeenCalledWith('s1', 0, 14, 18);
+    vi.useRealTimers();
+  });
+
   it('expand-selection: row is app-selectable in copy mode and blocks system selection', () => {
     const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
     const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;

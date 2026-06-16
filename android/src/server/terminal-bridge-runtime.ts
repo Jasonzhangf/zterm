@@ -38,6 +38,83 @@ export interface TerminalBridgeRuntime {
 export function createTerminalBridgeRuntime(
   deps: TerminalBridgeRuntimeDeps,
 ): TerminalBridgeRuntime {
+  const connectionAttachChains = new Map<string, Promise<void>>();
+  const connectionInputChains = new Map<string, Promise<void>>();
+  const connectionMessageChains = new Map<string, Promise<void>>();
+
+  function decodeRawText(rawData: RawData) {
+    return typeof rawData === 'string'
+      ? rawData
+      : Buffer.isBuffer(rawData)
+        ? rawData.toString('utf8')
+        : Array.isArray(rawData)
+          ? Buffer.concat(rawData).toString('utf8')
+          : Buffer.from(rawData as ArrayBuffer).toString('utf8');
+  }
+
+  function resolveMessageLane(rawData: RawData, isBinary?: boolean): 'attach' | 'input' | 'message' {
+    if (isBinary) {
+      return 'message';
+    }
+    const text = decodeRawText(rawData);
+    try {
+      const parsed = JSON.parse(text) as { type?: unknown };
+      if (parsed.type === 'input') {
+        return 'input';
+      }
+      if (parsed.type === 'session-open' || parsed.type === 'connect' || parsed.type === 'close') {
+        return 'attach';
+      }
+      return 'message';
+    } catch {
+      return 'input';
+    }
+  }
+
+  function settleConnectionChain(
+    chains: Map<string, Promise<void>>,
+    connectionId: string,
+    chain: Promise<void>,
+  ) {
+    chains.set(connectionId, chain);
+    chain.finally(() => {
+      if (chains.get(connectionId) === chain) {
+        chains.delete(connectionId);
+      }
+    });
+  }
+
+  function enqueueConnectionMessage(connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) {
+    const attachPrevious = connectionAttachChains.get(connection.id) || Promise.resolve();
+    const inputPrevious = connectionInputChains.get(connection.id) || Promise.resolve();
+    const messagePrevious = connectionMessageChains.get(connection.id) || Promise.resolve();
+    const lane = resolveMessageLane(rawData, isBinary);
+    const previous = lane === 'attach'
+      ? Promise.all([attachPrevious, inputPrevious, messagePrevious]).then(() => undefined)
+      : lane === 'input'
+        ? Promise.all([attachPrevious, inputPrevious]).then(() => undefined)
+        : Promise.all([attachPrevious, messagePrevious]).then(() => undefined);
+    const next = previous
+      .catch(() => undefined)
+      .then(() => deps.handleMessage(connection, rawData, isBinary))
+      .catch((error) => {
+        console.error(
+          `[${deps.logTimePrefix()}] transport ${connection.id} message handling failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    if (lane === 'attach') {
+      settleConnectionChain(connectionAttachChains, connection.id, next);
+      return;
+    }
+    if (lane === 'input') {
+      settleConnectionChain(connectionInputChains, connection.id, next);
+      return;
+    }
+    settleConnectionChain(connectionMessageChains, connection.id, next);
+  }
+
   const rtcBridgeServer = createRtcBridgeServer({
     onTransportOpen: (transport) => {
       const connection = deps.createTransportConnection(
@@ -48,7 +125,7 @@ export function createTerminalBridgeRuntime(
       return {
         onMessage: (_transportId, data, isBinary) => {
           connection.wsAlive = true;
-          void deps.handleMessage(connection, data, isBinary);
+          enqueueConnectionMessage(connection, data, isBinary);
         },
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
@@ -93,7 +170,7 @@ export function createTerminalBridgeRuntime(
 
     ws.on('message', (rawData, isBinary) => {
       connection.wsAlive = true;
-      void deps.handleMessage(connection, rawData, isBinary);
+      enqueueConnectionMessage(connection, rawData, isBinary);
     });
 
     ws.on('close', (code, rawReason) => {

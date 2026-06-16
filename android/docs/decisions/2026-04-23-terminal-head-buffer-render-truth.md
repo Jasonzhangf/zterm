@@ -476,11 +476,11 @@ terminal 宽度语义固定为两种模式：
 
 ### 3.7 横向平移与 tab 手势边界
 
-`mirror-fixed` 下固定规则：
+`mirror-fixed` 下当前规则：
 
-1. 自动关闭左右滑切 tab
-2. 单指横滑只用于 renderer horizontal pan
-3. 一次手势只能命中“横向平移”这一条语义
+1. 若客户端没有独立 horizontal pan 手势链在生效，则左右滑切 tab 仍保持可用
+2. 一旦接入独立 horizontal pan，单指横滑只能命中 renderer horizontal pan，tab swipe 必须同步退出
+3. 一次手势只能命中一条 shell 语义
 
 这条属于 UI shell / renderer 的边界，不属于 buffer manager，更不属于 daemon
 

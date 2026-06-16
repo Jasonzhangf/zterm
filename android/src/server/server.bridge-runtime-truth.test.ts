@@ -43,13 +43,24 @@ describe('server bridge runtime truth gates', () => {
   it('keeps ws/rtc/upgrade bridge implementations inside dedicated runtime', () => {
     const source = readBridgeRuntimeSource();
     const rtcBlock = extractBlock(source, 'const rtcBridgeServer = createRtcBridgeServer({', 2600);
+    const queueBlock = extractBlock(source, 'function enqueueConnectionMessage(');
+    const laneBlock = extractBlock(source, 'function resolveMessageLane(');
     const wsBlock = extractBlock(source, 'function handleWebSocketConnection(');
     const upgradeBlock = extractBlock(source, 'function handleServerUpgrade(');
 
     expect(rtcBlock).toContain("deps.detachSessionTransportOnly(session, reason, connection.transportId)");
     expect(rtcBlock).toContain('deps.connections.delete(connection.id)');
+    expect(source).toContain('const connectionAttachChains = new Map<string, Promise<void>>()');
+    expect(source).toContain('const connectionInputChains = new Map<string, Promise<void>>()');
+    expect(source).toContain('const connectionMessageChains = new Map<string, Promise<void>>()');
+    expect(laneBlock).toContain("if (parsed.type === 'input')");
+    expect(laneBlock).toContain("parsed.type === 'session-open' || parsed.type === 'connect' || parsed.type === 'close'");
+    expect(queueBlock).toContain("lane === 'attach'");
+    expect(queueBlock).toContain("lane === 'input'");
+    expect(queueBlock).toContain('.then(() => deps.handleMessage(connection, rawData, isBinary))');
     expect(wsBlock).toContain("ws.on('close', (code, rawReason) => {");
     expect(wsBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId)");
+    expect(wsBlock).toContain('enqueueConnectionMessage(connection, rawData, isBinary)');
     expect(upgradeBlock).toContain("if (pathname === '/signal')");
     expect(upgradeBlock).toContain("if (pathname !== '/' && pathname !== '/ws')");
   });

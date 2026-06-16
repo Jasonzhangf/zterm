@@ -12,6 +12,7 @@ import type { SessionMirror, TmuxCursorState, TmuxPaneMetrics } from './terminal
 export interface TerminalMirrorCaptureDeps {
   resolveMirrorCacheLines: (rows: number) => number;
   runTmux: (args: string[]) => { ok: true; stdout: string };
+  runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   logTimePrefix: () => string;
 }
 
@@ -251,8 +252,8 @@ export function createTerminalMirrorCaptureRuntime(
     return currentPath;
   }
 
-  function readTmuxCursorState(target: string): TmuxCursorState {
-    const result = deps.runTmux([
+  async function readTmuxCursorStateAsync(target: string): Promise<TmuxCursorState> {
+    const result = await deps.runTmuxAsync([
       'display-message',
       '-p',
       '-t',
@@ -268,7 +269,7 @@ export function createTerminalMirrorCaptureRuntime(
     };
   }
 
-  function captureTmuxMirrorLines(
+  async function captureTmuxMirrorLinesAsync(
     target: string,
     options: {
       paneRows: number;
@@ -278,7 +279,7 @@ export function createTerminalMirrorCaptureRuntime(
   ) {
     const safePaneRows = Math.max(1, Math.floor(options.paneRows));
     const safeMaxLines = Math.max(1, Math.floor(options.maxLines));
-    const captureResult = deps.runTmux([
+    const captureResult = await deps.runTmuxAsync([
       'capture-pane',
       '-p',
       '-e',
@@ -301,12 +302,40 @@ export function createTerminalMirrorCaptureRuntime(
     return normalizedLines.slice(-safeMaxLines);
   }
 
+  async function readTmuxPaneMetricsAsync(sessionName: string): Promise<TmuxPaneMetrics> {
+    const result = await deps.runTmuxAsync([
+      'display-message',
+      '-p',
+      '-t',
+      sessionName,
+      '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}',
+    ]);
+    const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split('\t');
+    const paneRows = Number.parseInt(rowsRaw ?? '', 10);
+    const paneCols = Number.parseInt(colsRaw ?? '', 10);
+    if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
+      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: rows=${rowsRaw ?? ''} cols=${colsRaw ?? ''}`);
+    }
+    if (paneDeadRaw === '1') {
+      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: pane is dead`);
+    }
+    const historySize = Math.max(0, Number.parseInt(tmuxHistorySizeRaw ?? '', 10) || 0);
+    const alternateOn = alternateOnRaw === '1';
+    return {
+      paneId: paneIdRaw?.trim() || sessionName,
+      tmuxAvailableLineCountHint: historySize + paneRows,
+      paneRows,
+      paneCols,
+      alternateOn,
+    };
+  }
+
   async function captureTmuxMirrorSnapshot(mirror: SessionMirror): Promise<ResolvedMirrorCaptureSnapshot> {
     const captureStartedAt = Date.now();
-    const metrics = readTmuxPaneMetrics(mirror.sessionName);
-    const cursor = readTmuxCursorState(metrics.paneId);
+    const metrics = await readTmuxPaneMetricsAsync(mirror.sessionName);
+    const cursor = await readTmuxCursorStateAsync(metrics.paneId);
     const maxLines = deps.resolveMirrorCacheLines(metrics.paneRows);
-    const capturedLines = captureTmuxMirrorLines(metrics.paneId, {
+    const capturedLines = await captureTmuxMirrorLinesAsync(metrics.paneId, {
       paneRows: metrics.paneRows,
       maxLines,
       alternateOn: metrics.alternateOn,

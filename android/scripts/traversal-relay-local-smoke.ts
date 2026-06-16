@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
+import { createServer } from 'http';
 import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -16,9 +17,6 @@ const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as un
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const androidDir = join(scriptDir, '..');
-const relayPort = 19091;
-const daemonPort = 4335;
-const relayUrl = `http://127.0.0.1:${relayPort}`;
 const relayHostId = `local-smoke-${Date.now()}`;
 const relayDeviceId = `device-${Date.now()}`;
 const relayDeviceName = 'local-smoke-daemon';
@@ -31,28 +29,32 @@ mkdirSync(tempHome, { recursive: true });
 
 const tsxBin = join(androidDir, 'node_modules', '.bin', 'tsx');
 
-const relayEnv = {
-  ...process.env,
-  ZTERM_TRAVERSAL_HOST: '127.0.0.1',
-  ZTERM_TRAVERSAL_PORT: String(relayPort),
-  ZTERM_TRAVERSAL_DATA_DIR: join(tempRoot, 'relay-data'),
-};
+async function findAvailablePort(host: string) {
+  return await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, host, () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('failed to resolve dynamic smoke port')));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
 
-const daemonEnv = {
-  ...process.env,
-  HOME: tempHome,
-  ZTERM_HOST: '127.0.0.1',
-  ZTERM_PORT: String(daemonPort),
-  ZTERM_TRAVERSAL_RELAY_URL: relayUrl,
-  ZTERM_TRAVERSAL_USERNAME: relayUsername,
-  ZTERM_TRAVERSAL_PASSWORD: relayPassword,
-  ZTERM_TRAVERSAL_HOST_ID: relayHostId,
-  ZTERM_TRAVERSAL_DEVICE_ID: relayDeviceId,
-  ZTERM_TRAVERSAL_DEVICE_NAME: relayDeviceName,
-  ZTERM_TRAVERSAL_PLATFORM: 'darwin',
-  ZTERM_TRAVERSAL_APP_VERSION: 'smoke',
-  ZTERM_TRAVERSAL_DAEMON_VERSION: 'smoke-daemon',
-};
+let relayPort = 0;
+let daemonPort = 0;
+let relayUrl = '';
 
 let globalAccessToken = '';
 
@@ -301,6 +303,36 @@ async function rtcClientSmoke(accessToken: string) {
 }
 
 async function main() {
+  relayPort = await findAvailablePort('127.0.0.1');
+  daemonPort = await findAvailablePort('127.0.0.1');
+  relayUrl = `http://127.0.0.1:${relayPort}`;
+
+  const relayEnv = {
+    ...process.env,
+    ZTERM_TRAVERSAL_HOST: '127.0.0.1',
+    ZTERM_TRAVERSAL_PORT: String(relayPort),
+    // Local smoke must always probe the relay server at its root health path.
+    // Inherited deployment env may set a non-empty base path like /relay.
+    ZTERM_TRAVERSAL_BASE_PATH: '',
+    ZTERM_TRAVERSAL_DATA_DIR: join(tempRoot, 'relay-data'),
+  };
+
+  const daemonEnv = {
+    ...process.env,
+    HOME: tempHome,
+    ZTERM_HOST: '127.0.0.1',
+    ZTERM_PORT: String(daemonPort),
+    ZTERM_TRAVERSAL_RELAY_URL: relayUrl,
+    ZTERM_TRAVERSAL_USERNAME: relayUsername,
+    ZTERM_TRAVERSAL_PASSWORD: relayPassword,
+    ZTERM_TRAVERSAL_HOST_ID: relayHostId,
+    ZTERM_TRAVERSAL_DEVICE_ID: relayDeviceId,
+    ZTERM_TRAVERSAL_DEVICE_NAME: relayDeviceName,
+    ZTERM_TRAVERSAL_PLATFORM: 'darwin',
+    ZTERM_TRAVERSAL_APP_VERSION: 'smoke',
+    ZTERM_TRAVERSAL_DAEMON_VERSION: 'smoke-daemon',
+  };
+
   const relayProc = spawn(tsxBin, ['src/traversal-relay/server.ts'], {
     cwd: androidDir,
     env: relayEnv,

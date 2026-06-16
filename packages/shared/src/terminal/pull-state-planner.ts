@@ -33,6 +33,7 @@ export interface BufferSyncRequestSnapshot {
   localEndIndex: number;
   requestStartIndex: number;
   requestEndIndex: number;
+  targetHeadRevision?: number;
   repairSignature?: string;
 }
 
@@ -91,10 +92,21 @@ export function doesPullStateCoverRequest(
 ): boolean {
   const pullRepairSignature = typeof pullState.repairSignature === 'string' ? pullState.repairSignature : '';
   const requestRepairSignature = typeof request.repairSignature === 'string' ? request.repairSignature : '';
-  return (
+  const sameLocalSnapshot = (
     pullState.requestKnownRevision === Math.max(0, Math.floor(request.knownRevision || 0))
     && pullState.requestLocalStartIndex === Math.max(0, Math.floor(request.localStartIndex || 0))
     && pullState.requestLocalEndIndex === Math.max(0, Math.floor(request.localEndIndex || 0))
+  );
+  return (
+    sameLocalSnapshot
+    && (
+      pullState.purpose !== 'tail-refresh'
+      || pullState.targetHeadRevision === Math.max(0, Math.floor(request.targetHeadRevision || 0))
+      || (
+        pullState.targetStartIndex <= Math.max(0, Math.floor(request.requestStartIndex || 0))
+        && pullState.targetEndIndex >= Math.max(0, Math.floor(request.requestEndIndex || 0))
+      )
+    )
     && pullRepairSignature === requestRepairSignature
     && pullState.targetStartIndex <= Math.max(0, Math.floor(request.requestStartIndex || 0))
     && pullState.targetEndIndex >= Math.max(0, Math.floor(request.requestEndIndex || 0))

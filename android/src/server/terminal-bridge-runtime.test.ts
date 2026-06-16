@@ -1,0 +1,198 @@
+import { EventEmitter } from 'events';
+import type { IncomingMessage } from 'http';
+import { WebSocketServer, type RawData } from 'ws';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
+import type { TerminalSession } from './terminal-runtime';
+import type { DaemonTransportConnection } from './terminal-transport-runtime';
+
+class FakeWebSocket extends EventEmitter {
+  send = vi.fn();
+  close = vi.fn();
+}
+
+function flushMicrotasks() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function createRequest(url = '/ws?token=test-token'): IncomingMessage {
+  return {
+    url,
+    socket: {
+      remoteAddress: '127.0.0.1',
+    },
+    headers: {},
+  } as IncomingMessage;
+}
+
+function createConnection(id = 'connection-1'): DaemonTransportConnection {
+  return {
+    id,
+    transportId: `${id}-transport`,
+    requestOrigin: 'http://127.0.0.1:3333',
+    role: 'session',
+    boundSessionId: 'session-1',
+    wsAlive: true,
+    closeTransport: vi.fn(),
+    transport: {
+      kind: 'ws',
+      readyState: 1,
+      requestOrigin: undefined,
+      connectedSent: false,
+      sendText: vi.fn(),
+      close: vi.fn(),
+    },
+  };
+}
+
+function createRuntime(handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>) {
+  const sessions = new Map<string, TerminalSession>();
+  const connections = new Map<string, DaemonTransportConnection>();
+  const wss = new WebSocketServer({ noServer: true });
+  const connection = createConnection();
+  const runtime = createTerminalBridgeRuntime({
+    requiredAuthToken: 'test-token',
+    sessions,
+    connections,
+    wss,
+    logTimePrefix: () => '2026-06-15 12:00:00',
+    extractAuthToken: (rawUrl) => new URL(rawUrl || '/ws', 'http://127.0.0.1:3333').searchParams.get('token') || '',
+    resolveRequestOrigin: () => 'http://127.0.0.1:3333',
+    createWebSocketSessionTransport: () => connection.transport,
+    createRtcSessionTransport: () => connection.transport,
+    createTransportConnection: () => connection,
+    detachSessionTransportOnly: vi.fn(),
+    handleMessage,
+  });
+  return {
+    connection,
+    connections,
+    runtime,
+    wss,
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('terminal bridge runtime message scheduling', () => {
+  it('lets input overtake a slow non-input message on the same transport', async () => {
+    const events: string[] = [];
+    let releaseControl: (() => void) | undefined;
+    const { runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as {
+        type: string;
+        payload?: unknown;
+      };
+      if (message.type === 'buffer-head-request') {
+        events.push('control:start');
+        await new Promise<void>((resolve) => {
+          releaseControl = resolve;
+        });
+        events.push('control:end');
+        return;
+      }
+      if (message.type === 'input') {
+        events.push(`input:${String(message.payload)}`);
+      }
+    });
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'buffer-head-request', payload: {} })), false);
+    await flushMicrotasks();
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'ls' })), false);
+    await flushMicrotasks();
+
+    expect(events).toEqual(['control:start', 'input:ls']);
+
+    if (releaseControl) {
+      releaseControl();
+    }
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(events).toEqual(['control:start', 'input:ls', 'control:end']);
+    wss.close();
+  });
+
+  it('keeps input messages serialized in arrival order even while non-input work is still running', async () => {
+    const events: string[] = [];
+    let releaseControl: (() => void) | undefined;
+    const { runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as {
+        type: string;
+        payload?: unknown;
+      };
+      if (message.type === 'buffer-sync-request') {
+        events.push('sync:start');
+        await new Promise<void>((resolve) => {
+          releaseControl = resolve;
+        });
+        events.push('sync:end');
+        return;
+      }
+      if (message.type === 'input') {
+        events.push(`input:${String(message.payload)}`);
+      }
+    });
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'buffer-sync-request', payload: {} })), false);
+    await flushMicrotasks();
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'a' })), false);
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'b' })), false);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(events).toEqual(['sync:start', 'input:a', 'input:b']);
+
+    if (releaseControl) {
+      releaseControl();
+    }
+    await flushMicrotasks();
+    wss.close();
+  });
+
+  it('does not let input overtake a pending connect attach barrier', async () => {
+    const events: string[] = [];
+    let releaseConnect: (() => void) | undefined;
+    const { runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as {
+        type: string;
+        payload?: unknown;
+      };
+      if (message.type === 'connect') {
+        events.push('connect:start');
+        await new Promise<void>((resolve) => {
+          releaseConnect = resolve;
+        });
+        events.push('connect:end');
+        return;
+      }
+      if (message.type === 'input') {
+        events.push(`input:${String(message.payload)}`);
+      }
+    });
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'connect', payload: { sessionName: 'demo' } })), false);
+    await flushMicrotasks();
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'pwd' })), false);
+    await flushMicrotasks();
+
+    expect(events).toEqual(['connect:start']);
+
+    if (releaseConnect) {
+      releaseConnect();
+    }
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(events).toEqual(['connect:start', 'connect:end', 'input:pwd']);
+    wss.close();
+  });
+});

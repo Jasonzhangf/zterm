@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
+import type { TerminalMessageRuntimeDeps } from './terminal-message-runtime';
 import type {
   TerminalSession,
   TerminalSessionTransport,
@@ -76,7 +77,7 @@ function createRuntime(options?: {
   const sendMessage = vi.fn();
   const sendBufferHeadToSession = vi.fn();
   const refreshMirrorHeadForSession = vi.fn(async () => true);
-  const handleInput = vi.fn();
+  const handleInput = vi.fn(async () => true) as unknown as ReturnType<typeof vi.fn> & TerminalMessageRuntimeDeps['handleInput'];
   const closeSession = vi.fn();
   const handleClientDebugLog = vi.fn();
   const handleClientDebugSnapshot = vi.fn();
@@ -205,6 +206,7 @@ describe('terminal message runtime explicit error truth', () => {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
@@ -250,6 +252,7 @@ describe('terminal message runtime explicit error truth', () => {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
@@ -333,7 +336,7 @@ describe('terminal message runtime explicit error truth', () => {
       payload: 'pwd\r',
     })));
 
-    expect(handleInput).toHaveBeenCalledWith(session, 'pwd\r');
+    expect(handleInput).toHaveBeenCalledWith(session, 'pwd\r', expect.any(Function));
     expect(sendMessage).not.toHaveBeenCalledWith(
       session,
       expect.objectContaining({ type: 'error' }),
@@ -436,6 +439,35 @@ describe('terminal message runtime explicit error truth', () => {
     await runtime.handleMessage(connection, Buffer.from('plain-late-from-old-transport\r'));
 
     expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'error',
+      payload: { message: 'input requires the current attached session transport', code: 'input_stale_transport' },
+    });
+  });
+
+  it('drops queued input when transport/session becomes stale before async tmux write drains', async () => {
+    let allowWrite = false;
+    const { runtime, sessions, handleInput, sendTransportMessage } = createRuntime();
+    handleInput.mockImplementation(async (_session, _data, shouldWrite?: () => boolean) => {
+      await Promise.resolve();
+      return shouldWrite ? shouldWrite() : allowWrite;
+    });
+
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+
+    const pending = runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: 'delayed\r',
+    })));
+
+    sessions.delete(session.id);
+    allowWrite = false;
+    await pending;
+
+    expect(handleInput).toHaveBeenCalledWith(session, 'delayed\r', expect.any(Function));
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'error',
       payload: { message: 'input requires the current attached session transport', code: 'input_stale_transport' },

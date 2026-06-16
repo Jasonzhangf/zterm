@@ -637,6 +637,44 @@ describe('TerminalPage tab isolation', () => {
     expect(onSwitchSession).toHaveBeenCalledWith('s2');
   });
 
+  it('keeps mirror-fixed swipe available when no dedicated horizontal pan owner is active', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+        terminalWidthMode="mirror-fixed"
+      />,
+    );
+
+    const surface = screen.getByTestId('terminal-swipe-surface-s1');
+    expect(surface.getAttribute('data-swipe-enabled')).toBe('true');
+
+    fireEvent.touchStart(surface, { touches: [{ clientX: 220, clientY: 160 }] });
+    fireEvent.touchMove(surface, {
+      touches: [{ clientX: 120, clientY: 166 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 120, clientY: 166 }] });
+
+    expect(onSwitchSession).toHaveBeenCalledWith('s2');
+  });
+
   it('auto closes split when width shrinks back from wide profile to single-column', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     Object.defineProperty(window, 'visualViewport', {

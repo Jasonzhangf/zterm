@@ -5,7 +5,7 @@ export interface TerminalLiveSyncSchedulerInput {
   activeDelayMs: number;
   idleDelayMs: number;
   now: number;
-  lastProgressAt: number;
+  lastLiveActivityAt: number;
   consecutiveFailures: number;
   subscriberCount: number;
   transportBufferedBytes: number;
@@ -93,7 +93,7 @@ export function resolveTerminalLiveSyncDelay(
     };
   }
 
-  const recentlyActive = input.lastProgressAt > 0 && input.now - input.lastProgressAt <= RECENT_PROGRESS_MS;
+  const recentlyActive = input.lastLiveActivityAt > 0 && input.now - input.lastLiveActivityAt <= RECENT_PROGRESS_MS;
   if (recentlyActive && requestedDelayMs <= activeDelayMs && bufferedBytes === 0) {
     return {
       delayMs: Math.min(activeDelayMs, FAST_LANE_DELAY_MS),
@@ -103,7 +103,7 @@ export function resolveTerminalLiveSyncDelay(
   }
 
   return {
-    delayMs: Math.min(requestedDelayMs, recentlyActive ? activeDelayMs : idleDelayMs),
+    delayMs: recentlyActive ? Math.min(requestedDelayMs, activeDelayMs) : idleDelayMs,
     lane: recentlyActive ? 'normal' : 'slow',
     reason: recentlyActive ? 'normal-active' : 'idle',
   };

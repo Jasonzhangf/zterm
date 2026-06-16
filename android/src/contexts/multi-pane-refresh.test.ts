@@ -36,18 +36,18 @@ function makeSession(sessionId: string): Session {
 }
 
 describe('multi-pane refresh truth', () => {
-  it('builds one refresh target per visible session id even if active is duplicated', () => {
+  it('builds one refresh target for the active session only', () => {
     expect(buildLifecycleRefreshTargets({
       activeSessionId: 's1',
       liveSessionIds: ['s1', 's2', 's3'],
-    } as any)).toEqual(['s1', 's2', 's3']);
+    } as any)).toEqual(['s1']);
   });
 
-  it('preserves non-active visible pane sessions in refresh targets', () => {
+  it('does not include passive visible pane sessions in the active refresh target list', () => {
     expect(buildLifecycleRefreshTargets({
       activeSessionId: 's1',
       liveSessionIds: ['s2', 's3'],
-    } as any)).toEqual(['s1', 's2', 's3']);
+    } as any)).toEqual(['s1']);
   });
 
   it('debounces duplicate per-session sync requests even when multiple panes ask for the same session', () => {

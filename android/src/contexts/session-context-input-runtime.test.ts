@@ -231,6 +231,50 @@ describe('session-context-input-runtime', () => {
     expect(requestSessionBufferHead).toHaveBeenCalledTimes(1);
   });
 
+  it('retargets deferred input head refresh to the current session transport when the active socket changes before the microtask runs', async () => {
+    const sendSocketPayload = vi.fn();
+    const oldWs = createSocket(WebSocket.OPEN);
+    const newWs = createSocket(WebSocket.OPEN);
+    let currentWs = oldWs;
+    const requestSessionBufferHead = vi.fn();
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'pwd\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-2' },
+        },
+      },
+      runtimeDebug: vi.fn(),
+      readSessionTransportSocket: () => currentWs,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn(() => true),
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead,
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession: vi.fn(),
+    });
+
+    currentWs = newWs;
+    await Promise.resolve();
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(requestSessionBufferHead).toHaveBeenCalledTimes(1);
+    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', newWs, { force: true });
+    expect(requestSessionBufferHead).not.toHaveBeenCalledWith('session-2', oldWs, { force: true });
+  });
+
   it('does not force another head request while input tail-refresh is already pending', () => {
     const requestSessionBufferHead = vi.fn();
     const markPendingInputTailRefresh = vi.fn(() => false);
@@ -268,6 +312,50 @@ describe('session-context-input-runtime', () => {
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     expect(markPendingInputTailRefresh).toHaveBeenCalledWith('session-2', 3);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
+  });
+
+  it('routes deferred input head refresh through the latest session transport after a tab switch replaces the socket', async () => {
+    const requestSessionBufferHead = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const firstWs = createSocket(WebSocket.OPEN);
+    const secondWs = createSocket(WebSocket.OPEN);
+    let currentWs = firstWs as any;
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'pwd\r',
+      refs: {
+        sessionsRef: {
+          current: [
+            { id: 'session-2' } as any,
+          ],
+        },
+        stateRef: {
+          current: { activeSessionId: 'session-2' },
+        },
+      },
+      runtimeDebug: vi.fn(),
+      readSessionTransportSocket: () => currentWs,
+      isSessionTransportActivityStale: () => false,
+      isReconnectInFlight: () => false,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn(() => true),
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead,
+      probeOrReconnectStaleSessionTransport: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      shouldReconnectQueuedActiveInput: () => false,
+      reconnectSession: vi.fn(),
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    currentWs = secondWs as any;
+
+    await Promise.resolve();
+    expect(requestSessionBufferHead).toHaveBeenCalledTimes(1);
+    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', secondWs, { force: true });
+    expect(requestSessionBufferHead).not.toHaveBeenCalledWith('session-2', firstWs, { force: true });
   });
 
   it('does not enqueue input into a backpressured open transport and forces a fresh transport', () => {

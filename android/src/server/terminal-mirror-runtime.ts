@@ -57,6 +57,12 @@ export interface TerminalMirrorRuntimeDeps {
     right: TerminalCursorState | null | undefined,
   ) => boolean;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
+  enqueueLiveMirrorInput: (
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    shouldWrite?: () => boolean,
+  ) => Promise<boolean>;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
@@ -84,7 +90,7 @@ export interface TerminalMirrorRuntime {
     session: TerminalSession,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => void;
-  handleInput: (session: TerminalSession, data: string) => void;
+  handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
 }
 
@@ -141,7 +147,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function resolveMirrorLiveSyncDelay(mirror: SessionMirror, requestedDelayMs?: number) {
     const now = Date.now();
-    const lastProgressAt = Math.max(mirror.lastFlushStartedAt, mirror.lastFlushCompletedAt);
     let transportBufferedBytes = 0;
     let transportBackpressureCount = 0;
     for (const sessionId of mirror.subscribers) {
@@ -158,7 +163,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
       idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
       now,
-      lastProgressAt,
+      lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
       consecutiveFailures: mirror.consecutiveFailures,
       subscriberCount: mirror.subscribers.size,
       transportBufferedBytes,
@@ -187,6 +192,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
@@ -252,6 +258,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.cursor = null;
     mirror.lastFlushStartedAt = 0;
     mirror.lastFlushCompletedAt = 0;
+    mirror.lastLiveActivityAt = 0;
     mirror.lastCaptureDurationMs = 0;
     mirror.lastCanonicalizeDurationMs = 0;
     mirror.lastScrollbackCount = -1;
@@ -415,8 +422,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         const changedRanges = deps.mirrorBufferChanged(mirror, previousStartIndex, previousLines);
         const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
         const cursorKeysAppChanged = previousCursorKeysApp !== mirror.cursorKeysApp;
-        if (forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged) {
+        const hasLiveActivity = forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged;
+        if (hasLiveActivity) {
           mirror.revision += 1;
+          mirror.lastLiveActivityAt = Date.now();
         }
         if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
           const firstRange = changedRanges[0] || null;
@@ -728,10 +737,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     scheduleMirrorLiveSync(mirror, 0);
   }
 
-  function handleInput(session: TerminalSession, data: string) {
+  async function handleInput(
+    session: TerminalSession,
+    data: string,
+    shouldWrite?: () => boolean,
+  ) {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
-      return;
+      return false;
     }
     if (mirror.lifecycle === 'failed') {
       mirror.lifecycle = 'ready';
@@ -740,9 +753,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     if (mirror.lifecycle === 'ready') {
       mirror.consecutiveFailures = 0;
-      deps.writeToLiveMirror(mirror.sessionName, data, false);
-      scheduleMirrorLiveSync(mirror, 0);
+      const wrote = await deps.enqueueLiveMirrorInput(mirror.sessionName, data, false, shouldWrite);
+      if (wrote) {
+        mirror.lastLiveActivityAt = Date.now();
+        scheduleMirrorLiveSync(mirror, 0);
+        return true;
+      }
     }
+    return false;
   }
 
   return {

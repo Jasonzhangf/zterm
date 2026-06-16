@@ -469,6 +469,28 @@ and daemon mirror close loop green
   - follow 请求直接改成最新尾窗
   - 不再出现 stale local tail 继续请求
 
+### Layer S automation helper
+
+若本机已连 `adb` 设备，先跑：
+
+```bash
+pnpm --dir android test:android:terminal-real-device
+```
+
+该脚本当前自动完成：
+- 安装当前 debug APK
+- 拉起 `com.zterm.android/.MainActivity`
+- 采集 IME 前后截图 / `uiautomator dump` / `dumpsys input_method`
+- 从 WebView localStorage 提取当前 `bridgeHost/bridgePort/authToken/sessionId` 真源
+- 拉 daemon `/debug/runtime` 与 `/debug/runtime/logs`
+- 尝试驱动一次 `adb shell input text + Enter`
+- 落盘 `timeline.txt`、`runtime-logs.json`、`summary.json`
+
+说明：
+- 它是 Layer S 的证据采集器，不替代最终人工判图；
+- IME 是否“上抬正确”仍需结合 `before-ime.png` / `after-ime.png` 人眼确认；
+- 若没有在线 adb 设备，该层只能记为未完成，不得口头收口。
+
 ## 比较规则
 
 每个 case 必须输出以下断言结果：

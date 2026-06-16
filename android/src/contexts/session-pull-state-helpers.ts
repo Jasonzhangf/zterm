@@ -111,6 +111,7 @@ export function doesSessionPullStateCoverRequest(
     localEndIndex: Number(payload.localEndIndex ?? 0),
     requestStartIndex: Number(payload.requestStartIndex ?? 0),
     requestEndIndex: Number(payload.requestEndIndex ?? 0),
+    targetHeadRevision: Number(payload.targetHeadRevision ?? 0),
     repairSignature: buildBufferSyncRepairSignature(payload.missingRanges),
   };
   return sharedCoversRequest(snap, req);
@@ -138,6 +139,7 @@ export function doesSessionPullStateMatchExactLocalSnapshot(
     localEndIndex: Number(payload.localEndIndex ?? 0),
     requestStartIndex: Number(payload.requestStartIndex ?? 0),
     requestEndIndex: Number(payload.requestEndIndex ?? 0),
+    targetHeadRevision: Number(targetHeadRevision ?? 0),
     repairSignature: buildBufferSyncRepairSignature(payload.missingRanges),
   };
   return sharedMatchExact(snap, req, targetHeadRevision);

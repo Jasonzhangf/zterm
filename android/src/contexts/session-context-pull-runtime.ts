@@ -136,16 +136,18 @@ export function resetSessionTransportPullBookkeeping(options: {
   reason: string;
   activeSessionId: string | null;
   sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
+  pendingInputTailRefreshRef?: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
   lastSyncRequestAtRef: MutableRefObject<Map<string, unknown>>;
   runtimeDebug: RuntimeDebugFn;
 }) {
   const pullStates = options.sessionPullStateRef.current.get(options.sessionId) || null;
   const tailRefreshDebounceKey = `${options.sessionId}:tail-refresh`;
   const readingRepairDebounceKey = `${options.sessionId}:reading-repair`;
+  const hadPendingInputTailRefresh = Boolean(options.pendingInputTailRefreshRef?.current.has(options.sessionId));
   const hadTailRefreshDebounce = options.lastSyncRequestAtRef.current.has(tailRefreshDebounceKey);
   const hadReadingRepairDebounce = options.lastSyncRequestAtRef.current.has(readingRepairDebounceKey);
   const hasLivePullBookkeeping = Boolean(pullStates && hasActiveSessionPullState(pullStates));
-  if (!hasLivePullBookkeeping && !hadTailRefreshDebounce && !hadReadingRepairDebounce) {
+  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce) {
     return;
   }
   options.runtimeDebug('session.buffer.pull.reset', {
@@ -153,6 +155,7 @@ export function resetSessionTransportPullBookkeeping(options: {
     activeSessionId: options.activeSessionId,
     reason: options.reason,
     pullStates,
+    hadPendingInputTailRefresh,
     hadTailRefreshDebounce,
     hadReadingRepairDebounce,
   });
@@ -162,6 +165,7 @@ export function resetSessionTransportPullBookkeeping(options: {
       sessionPullStateRef: options.sessionPullStateRef,
     });
   }
+  options.pendingInputTailRefreshRef?.current.delete(options.sessionId);
   options.lastSyncRequestAtRef.current.delete(tailRefreshDebounceKey);
   options.lastSyncRequestAtRef.current.delete(readingRepairDebounceKey);
 }

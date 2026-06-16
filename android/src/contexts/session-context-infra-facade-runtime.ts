@@ -302,6 +302,7 @@ export function createSessionInfraFacadeRuntime(options: {
       reason,
       activeSessionId: options.stateRef.current.activeSessionId,
       sessionPullStateRef: options.sessionPullStateRef,
+      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
       lastSyncRequestAtRef: options.lastSyncRequestAtRef,
       runtimeDebug: options.runtimeDebug,
     });

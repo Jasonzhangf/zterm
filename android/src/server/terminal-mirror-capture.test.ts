@@ -28,6 +28,7 @@ describe('terminal mirror capture runtime', () => {
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
       runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
     });
 
@@ -51,6 +52,7 @@ describe('terminal mirror capture runtime', () => {
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
       runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
     });
 
@@ -74,6 +76,7 @@ describe('terminal mirror capture runtime', () => {
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
       runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-12 23:55:00',
     });
 
@@ -200,6 +203,7 @@ describe('terminal mirror capture runtime', () => {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
@@ -237,6 +241,7 @@ describe('terminal mirror capture runtime', () => {
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: () => 20,
       runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-06 21:22:00',
     });
 
@@ -255,6 +260,7 @@ describe('terminal mirror capture runtime', () => {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,

@@ -1,0 +1,102 @@
+(node:36366) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "ok": true,
+  "relayUrl": "http://127.0.0.1:50070",
+  "relayHostId": "local-smoke-1781222428964",
+  "relayDeviceId": "device-1781222428964",
+  "relayUsername": "smoke-1781222428964",
+  "tmuxSession": "zterm-relay-smoke-1781222428964",
+  "daemonRegistration": {
+    "health": {
+      "ok": true,
+      "wsUrl": "ws://127.0.0.1:50071",
+      "updatesUrl": "http://127.0.0.1:50071/updates/latest.json",
+      "updatesDir": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-traversal-smoke-R2HV6Y/home/.wterm/updates",
+      "uptimeSec": 0,
+      "pid": 36380,
+      "memory": {
+        "rss": 111525888,
+        "heapTotal": 21381120,
+        "heapUsed": 12283904,
+        "external": 5005609,
+        "arrayBuffers": 1137141
+      },
+      "sessions": {
+        "total": 0,
+        "attached": 0,
+        "ready": 0
+      },
+      "mirrors": {
+        "total": 0,
+        "ready": 0,
+        "subscribers": 0
+      }
+    },
+    "devices": [
+      {
+        "deviceId": "device-1781222428964",
+        "deviceName": "local-smoke-daemon",
+        "platform": "darwin",
+        "appVersion": "smoke",
+        "createdAt": "2026-06-12T00:00:29.315Z",
+        "updatedAt": "2026-06-12T00:00:29.320Z",
+        "lastSeenAt": "2026-06-12T00:00:29.320Z",
+        "online": true,
+        "client": {
+          "connected": true,
+          "lastSeenAt": "2026-06-12T00:00:29.316Z"
+        },
+        "daemon": {
+          "connected": true,
+          "lastSeenAt": "2026-06-12T00:00:29.320Z",
+          "hostId": "local-smoke-1781222428964",
+          "version": "smoke-daemon"
+        }
+      }
+    ]
+  },
+  "deviceStreamSnapshot": [
+    {
+      "deviceId": "device-1781222428964",
+      "deviceName": "local-smoke-client",
+      "platform": "smoke-client",
+      "appVersion": "smoke",
+      "createdAt": "2026-06-12T00:00:29.315Z",
+      "updatedAt": "2026-06-12T00:00:29.315Z",
+      "lastSeenAt": "2026-06-12T00:00:29.315Z",
+      "online": true,
+      "client": {
+        "connected": true,
+        "lastSeenAt": "2026-06-12T00:00:29.315Z"
+      },
+      "daemon": {
+        "connected": false,
+        "lastSeenAt": "",
+        "hostId": "",
+        "version": ""
+      }
+    }
+  ],
+  "rtcResult": {
+    "ok": true,
+    "hostId": "local-smoke-1781222428964",
+    "sessions": [
+      "TA_cli_dev_instructions_probe_20260609",
+      "TA_local_agentteam_Kevin",
+      "TA_local_playground_Alice",
+      "TA_local_playground_Kevin",
+      "agentteam-tmux-probe",
+      "fin",
+      "rcc",
+      "rcc-OneStop",
+      "rcc-routecodex2",
+      "rcc-routecodex3",
+      "rcc2",
+      "server",
+      "tcm",
+      "zterm",
+      "zterm-relay-smoke-1781222428964"
+    ]
+  }
+}

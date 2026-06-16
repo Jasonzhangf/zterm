@@ -42,6 +42,11 @@ describe('session-context-pull-runtime', () => {
         }],
       ]),
     };
+    const pendingInputTailRefreshRef = {
+      current: new Map([
+        [sessionId, { requestedAt: 122, localRevision: 5 }],
+      ]),
+    };
     const runtimeDebug = vi.fn();
 
     resetSessionTransportPullBookkeeping({
@@ -49,11 +54,13 @@ describe('session-context-pull-runtime', () => {
       reason: 'active-reentry',
       activeSessionId: sessionId,
       sessionPullStateRef: sessionPullStateRef as any,
+      pendingInputTailRefreshRef: pendingInputTailRefreshRef as any,
       lastSyncRequestAtRef: lastSyncRequestAtRef as any,
       runtimeDebug,
     });
 
     expect(sessionPullStateRef.current.has(sessionId)).toBe(false);
+    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
     expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
     expect(lastSyncRequestAtRef.current.has(`${sessionId}:reading-repair`)).toBe(false);
     expect(runtimeDebug).toHaveBeenCalledWith(
@@ -61,8 +68,39 @@ describe('session-context-pull-runtime', () => {
       expect.objectContaining({
         sessionId,
         reason: 'active-reentry',
+        hadPendingInputTailRefresh: true,
         hadTailRefreshDebounce: true,
         hadReadingRepairDebounce: true,
+      }),
+    );
+  });
+
+  it('also clears pending input tail refresh bookkeeping on bookkeeping reset', () => {
+    const sessionId = 'session-3';
+    const pendingInputTailRefreshRef = {
+      current: new Map([
+        [sessionId, { requestedAt: 122, localRevision: 5 }],
+      ]),
+    };
+    const runtimeDebug = vi.fn();
+
+    resetSessionTransportPullBookkeeping({
+      sessionId,
+      reason: 'tab-switch-in',
+      activeSessionId: sessionId,
+      sessionPullStateRef: { current: new Map() } as any,
+      pendingInputTailRefreshRef: pendingInputTailRefreshRef as any,
+      lastSyncRequestAtRef: { current: new Map() } as any,
+      runtimeDebug,
+    });
+
+    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.pull.reset',
+      expect.objectContaining({
+        sessionId,
+        reason: 'tab-switch-in',
+        hadPendingInputTailRefresh: true,
       }),
     );
   });

@@ -34,7 +34,7 @@ export interface TerminalMessageRuntimeDeps {
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
-  handleInput: (session: TerminalSession, data: string) => void;
+  handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
@@ -89,7 +89,7 @@ export function createTerminalMessageRuntime(
     });
   }
 
-  function writeInputIfCurrent(connection: TerminalTransportConnection, data: string) {
+  async function writeInputIfCurrent(connection: TerminalTransportConnection, data: string) {
     const bytes = Buffer.byteLength(data, 'utf8');
     debugInput('receive', {
       transportId: connection.transportId,
@@ -107,7 +107,14 @@ export function createTerminalMessageRuntime(
       return;
     }
     const startedAt = Date.now();
-    deps.handleInput(inputSession, data);
+    const wrote = await deps.handleInput(inputSession, data, () => {
+      const current = resolveCurrentSessionForInput(connection);
+      return current?.id === inputSession.id;
+    });
+    if (!wrote) {
+      reportInputDrop(connection, 'input_stale_transport', bytes);
+      return;
+    }
     debugInput('write', {
       transportId: connection.transportId,
       sessionId: inputSession.id,
@@ -177,9 +184,9 @@ export function createTerminalMessageRuntime(
         });
         return;
       }
-      writeInputIfCurrent(connection, text);
-      return;
-    }
+          await writeInputIfCurrent(connection, text);
+          return;
+        }
 
     switch (message.type) {
       case 'session-open':
@@ -350,7 +357,7 @@ export function createTerminalMessageRuntime(
         break;
       case 'input':
         if (typeof message.payload === 'string') {
-          writeInputIfCurrent(connection, message.payload);
+          await writeInputIfCurrent(connection, message.payload);
           break;
         }
         if (!session) {

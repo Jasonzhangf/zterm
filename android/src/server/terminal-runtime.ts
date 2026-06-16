@@ -53,6 +53,12 @@ interface TerminalRuntimeDeps {
     right: import('../lib/types').TerminalCursorState | null | undefined,
   ) => boolean;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
+  enqueueLiveMirrorInput: (
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    shouldWrite?: () => boolean,
+  ) => Promise<boolean>;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
@@ -85,7 +91,7 @@ export interface TerminalRuntime {
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize: (session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) => void;
-  handleInput: (session: TerminalSession, data: string) => void;
+  handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
 }
 
 export {
@@ -244,6 +250,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     mirrorBufferChanged: deps.mirrorBufferChanged,
     mirrorCursorEqual: deps.mirrorCursorEqual,
     writeToLiveMirror: deps.writeToLiveMirror,
+    enqueueLiveMirrorInput: deps.enqueueLiveMirrorInput,
     writeToTmuxSession: deps.writeToTmuxSession,
     autoCommandDelayMs: deps.autoCommandDelayMs,
     waitMs: deps.waitMs,

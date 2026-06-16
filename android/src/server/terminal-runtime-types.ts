@@ -68,6 +68,7 @@ export interface SessionMirror {
   cursor: TerminalCursorState | null;
   lastFlushStartedAt: number;
   lastFlushCompletedAt: number;
+  lastLiveActivityAt: number;
   lastCaptureDurationMs?: number;
   lastCanonicalizeDurationMs?: number;
   flushInFlight: boolean;

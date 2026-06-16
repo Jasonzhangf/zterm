@@ -19,7 +19,7 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: null,
-      widthMode: 'mirror-fixed',
+    widthMode: 'mirror-fixed',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -74,6 +74,7 @@ function createRuntime() {
     mirrorBufferChanged: () => [],
     mirrorCursorEqual: () => true,
     writeToLiveMirror: () => true,
+    enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
     writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
     waitMs: async () => {},
@@ -203,6 +204,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -261,6 +263,44 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
       await vi.advanceTimersByTimeAsync(16);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to idle cadence after initial forced revision ages out without new live activity', async () => {
+    vi.useFakeTimers();
+    try {
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime();
+      const session = createSession();
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      const mirror = mirrors.get('demo');
+      expect(mirror?.lifecycle).toBe('ready');
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(16);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(1600);
+      const callsBeforeIdleWindow = captureMirrorAuthoritativeBufferFromTmux.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(33);
+      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length - callsBeforeIdleWindow).toBeLessThanOrEqual(1);
+
+      await vi.advanceTimersByTimeAsync(120);
+      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length).toBeGreaterThan(callsBeforeIdleWindow);
     } finally {
       vi.useRealTimers();
     }
@@ -504,6 +544,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -585,6 +626,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -637,6 +679,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
@@ -684,6 +727,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -767,6 +811,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -853,6 +898,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
         && (left?.visible ?? null) === (right?.visible ?? null)
       ),
       writeToLiveMirror: () => true,
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},

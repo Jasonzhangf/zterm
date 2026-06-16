@@ -196,4 +196,37 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(ids).toContain('p1');
     expect(ids).toContain('p2');
   });
+
+  it('shrinks stage bottom when IME is visible', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const { getByTestId } = render(
+      <TerminalStageShell
+        interactiveSession={null}
+        renderedPaneSessions={[]}
+        visiblePaneEntries={[]}
+        splitVisible={false}
+        activePaneId="pane-main"
+        terminalChromeBottomPx={30}
+        terminalImeLiftPx={280}
+        terminalKeyboardRequested
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="mirror-fixed"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    const shell = getByTestId('terminal-stage-shell');
+    const style = shell.getAttribute('style') || '';
+    expect(style).toContain('bottom: 310px;');
+    expect(style).not.toContain('transform: translateY');
+  });
 });

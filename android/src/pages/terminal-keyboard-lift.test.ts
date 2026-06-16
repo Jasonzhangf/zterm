@@ -25,7 +25,7 @@ describe("terminal-keyboard-lift", () => {
   });
 
 
-  it("returns zero portrait lift when layout viewport already excludes IME area", () => {
+  it("keeps portrait lift when a reported keyboard inset is present", () => {
     vi.stubGlobal("window", {
       innerWidth: 1080,
       innerHeight: 2000,
@@ -40,10 +40,10 @@ describe("terminal-keyboard-lift", () => {
       },
     });
     // 2000 * 0.6 = 1200
-    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(0);
+    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(1200);
   });
 
-  it("returns zero landscape lift when layout viewport already excludes IME area", () => {
+  it("keeps landscape lift when a reported keyboard inset is present", () => {
     vi.stubGlobal("window", {
       innerWidth: 2000,
       innerHeight: 1000,
@@ -58,8 +58,28 @@ describe("terminal-keyboard-lift", () => {
       },
     });
     // 1000 * 0.5 = 500
-    expect(resolveKeyboardLiftPx(900, 1000)).toBe(0);
+    expect(resolveKeyboardLiftPx(900, 1000)).toBe(500);
   });
+
+  it("does not return zero lift when only the current viewport shrank but the stable layout viewport is still taller", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 1080,
+      innerHeight: 620,
+      document: {
+        documentElement: {
+          clientWidth: 1080,
+          clientHeight: 620,
+        },
+      },
+      visualViewport: {
+        height: 618,
+        offsetTop: 2,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320, 900)).toBe(280);
+  });
+
   it("uses reported inset when visualViewport is absent", () => {
     vi.stubGlobal("window", {
       innerHeight: 1000,

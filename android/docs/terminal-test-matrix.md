@@ -143,7 +143,7 @@
 - follow overdrag 不白屏/不花屏
 - 有 gap 时继续显示已有内容
 - `mirror-fixed` 长行只裁切不重排
-- `mirror-fixed` 开启后左右滑切 tab 自动关闭
+- `mirror-fixed` 在当前未接入独立 horizontal pan 手势链时左右滑切 tab 仍可用
 
 ### 已覆盖
 
@@ -184,7 +184,7 @@
 - [ ] **专项：窗口不连续时，renderer 不能把已有 absolute-index 内容整屏画空**
 - [ ] **专项：`mirror-fixed` 长行默认左裁切，不换行、不重排、不改 buffer truth**
 - [ ] **专项：`mirror-fixed` 横向平移只改 renderer 列窗口，不触发 `onResize` / buffer pull / mode change**
-- [ ] **专项：`mirror-fixed` 开启后左右滑切 tab 自动关闭**
+- [ ] **专项：`mirror-fixed` 在当前未接入独立 horizontal pan 手势链时左右滑切 tab 仍可用**
 
 ---
 
@@ -331,7 +331,7 @@
 
 - `src/components/TerminalView.dynamic-refresh.test.tsx`
   - `mirror-fixed` 不触发 upstream resize
-  - `mirror-fixed` 自动关闭左右滑切 tab
+  - `mirror-fixed` 在当前未接入独立 horizontal pan 手势链时保持左右滑切 tab 可用
 
 ### 还缺
 

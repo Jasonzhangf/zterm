@@ -30,6 +30,20 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - 只改本轮需要的文件
 - runtime 改动不凭编译通过结论收口
 - 页面级重构先按 `docs/ui-slices.md` 切片，不跨页混改
+- 改动前必须先按 `docs/feature-registry.json` 选定 `feature_id`，确认 owner、allowed paths、forbidden paths、required gates；找不到 feature registry 条目时，不得宣称功能闭环完成
+
+## Feature Registry 门禁
+
+- 功能 map 真源：
+  - `docs/feature-registry.json`
+  - `docs/function-map.md`
+  - `docs/feature-gates.md`
+- 任何功能修复或重构必须先完成：
+  1. 定位 `feature_id`
+  2. 确认唯一 owner
+  3. 确认变更文件位于 `allowed_paths`
+  4. 补齐或运行 `required_gates`
+- 若实现需要越过当前 owner 边界，先改 registry 与 truth gate，再改行为代码；禁止直接在 forbidden path 打补丁
 
 ## 设计参考使用规则
 
@@ -200,6 +214,21 @@ terminal 修复完成前，必须同时给出以下证据：
 - client buffer
 - renderer commit
 - 真机画面
+
+若本机已连 `adb` 设备，提交前额外执行：
+
+```bash
+pnpm --dir android test:android:terminal-real-device
+```
+
+该脚本会固定落盘：
+- APK 安装/启动结果
+- IME 前后截图与 `dumpsys input_method/window`
+- WebView localStorage 导出的 bridge/session 真源
+- daemon `/debug/runtime` snapshot/logs
+- `input -> head -> applied -> render` 时间线
+
+若 `adb devices -l` 为空，则只能交付 APK 与自动 gate 结果，不能宣称真机闭环完成。
 
 ## 证据要求
 

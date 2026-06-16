@@ -1,0 +1,267 @@
+$ git diff -- android/note.md
+[exit 0]
+diff --git a/android/note.md b/android/note.md
+index 7d0c0ff..d49623f 100644
+--- a/android/note.md
++++ b/android/note.md
+@@ -1,4 +1,16 @@
+ # note
++- Jason 2026-06-09 rcc tab 自动关闭事故调查:
++  - 现场反馈: `100.127.23.27` 上 `rcc` tab 刚刚自动关闭，必须严禁。
++  - 根因收敛: remote audit 没有直接删 `OPEN_TABS`；实际风险是 UI tab chrome 由 `openTabState.tabs ∩ runtime sessions` 投影，transport close / runtime session 缺失时，open-tab 持久真源仍在但 UI 会把 tab 过滤掉，看起来像自动关闭。
++  - 修复方向: terminal tab chrome 改为从 `OPEN_TABS` materialize sessions；runtime session 缺失时生成 closed placeholder 保留 bridge/sessionName；用户显式切回该 tab 时，从 persisted tab 重建 runtime shell 并走 explicit-open/resume。foreground/audit/status 不自动重建、不自动关闭。
++  - 红测: open-tab pure materialization、App 层 rcc runtime 缺失不消失且 active 不切走、显式恢复缺失 runtime shell、workspace pane closed tab 不过滤、history gate 禁止回到 live runtime filter。
++
++- Jason 2026-06-09 四分屏在线输入审计:
++  - 现场无 adb，已通过 daemon `/debug/runtime` 拉取在线客户端日志。
++  - 证据: 14:54 四分屏客户端仍持续上报 snapshot，`splitVisible=true`、`terminalImeActive=true`、`terminalKeyboardRequested=true`、active session 为 `session-1780546287200-wp5dv2o0`；daemon health `sessions.attached=25`、`mirrors.subscribers=25`。
++  - 证据: input scope 最新只有 13:31 的旧 `session.input.send`，没有 14:50 之后四分屏输入事件。
++  - 暂定边界: 刷新/transport/render alive；输入问题至少发生在客户端 UI/IME 事件进入 `sendInputThroughSessionTransport` 之前，或 IME 入口缺少可观测日志。
++
+ - Jason 2026-06-09 四分屏 FPS/黑屏刷新调查:
+   - 现象: 四分屏下刷新帧率仍低；刷新时会先黑屏再出新画面。
+   - 修复: 状态浮窗在分屏时显示每个 visible pane 的 renderHz/pullHz/downlink，并补 active session 的 transport buffered/backpressure/last render commit age，便于截图判断瓶颈是 transport、pull 还是 render。
+@@ -2607,18 +2619,193 @@ Validation evidence:
+ - Fix: removed hidden wterm proxy entirely. `MacTerminalView` visible DOM now owns focus/keyboard/paste input; render remains projection DOM rows; no automatic `onResize` from render layer.
+ - Red test locks: no legacy wterm proxy, no aria-hidden layer, visible DOM input emits `onInput`, and rendering does not call `onResize`.
+ - Validation: shared Mac terminal + split-tree tests 8/8 pass; ShellWorkspace split tests 8/8 pass; `pnpm --filter @zterm/mac type-check` pass; package pass; global install launched `/Applications/ZTerm.app/Contents/MacOS/ZTerm`.
++2026-06-01 23:39:55 +0800
++
++## Mac 多 pane 底部渲染继续审计
++- 线索：Android 底部几何只由 measured viewportRows/rowHeight + render frame padding 决定；没有额外 bottom sentinel 内容行。
++- Mac 当前在 term-grid 最后追加 data-mac-terminal-bottom-sentinel，导致 DOM scrollHeight 比 shared geometry totalRows 多一行；follow scrollTop 仍按 Android totalRows 算，真实 DOM 底部会错位，可能遮掉最后 prompt/input 行。
++- 修复方向：Mac 使用实测 viewportRows，不调用 onResize；移除 sentinel 内容行；红测要求 rendered row count/padding 与 Android geometry 完全一致，last row 为 prompt。
++2026-06-01 23:44:42 +0800
++
++## 用户反馈：Mac 渲染仍不完整/黑白
++- 证据：安装新版后用户确认“没有变化，依然渲染不完全，依然黑白无彩色”。
++- 结论修正：此前 sentinel/viewportRows 修复未命中真实现场；不能宣称解决。
++- 下一步：追 Mac local-tmux/bridge projection 生成，确认 cells fg/bg/flags 与 rows/endIndex 是否被 Mac adapter 丢失或快照化。
++
++## 2026-06-03 zterm TURN account correction
++- User corrected scope: issue is zterm TURN server account on Claw, not sub2api. Need inspect coturn/zterm traversal configs and restore 2094423@qq.com account if missing.
++
++## 2026-06-03 zterm TURN / traversal-relay account correction
++- User corrected scope: zterm TURN/traversal-relay account on Claw, not sub2api.
++- coturn: only account ztermturn / PJ2zHDuxpA1PziYOT64ndTYuvskC1tz9 (realm claw.codewhisper.cc) -- still intact.
++- zterm-traversal-relay app user store: /var/lib/zterm-traversal-relay/store.json, 4 test/smoke users, no 2094423@qq.com.
++- zterm-relay app env: ZTERM_TRAVERSAL_HOST=127.0.0.1:19090, BASE_PATH=/relay, TURN shared creds = ztermturn.
++- Server route POST /api/auth/register, /api/auth/login, /api/auth/me. Register is open by default.
++- zterm server end: nginx 18443 ssl -> 127.0.0.1:19090 with /relay/ prefix (claw.codewhisper.cc).
++- Next: call POST /api/auth/register with username=2094423@qq.com + chosen password over the public 18443 endpoint (https://claw.codewhisper.cc/relay/api/auth/register) and verify /api/auth/me + /api/devices.
++
++## 2026-06-03 zterm traversal account restored
++- Restored app user `2094423@qq.com` via `POST https://claw.codewhisper.cc:18443/relay/api/auth/register` with password `welcome4zcam#`.
++- Verified login/me/devices: ok true; devices empty.
++- coturn shared account unchanged: `ztermturn`.
++
++## 2026-06-03 ConnectionsGroup + Device list + Update fix
++- Fix 1: connections-server-groups.ts 缩进错误 (liveSession line) — 已修
++- Fix 2: ConnectionsPage openGroupSessions / openSelectedServerGroups / "Open checked" 三处把 group.bridgeHost='' 原样传入 buildDraftFromTmuxSession — 已加 resolveGroupBridgeTarget() 在 daemonHostId 命中本地 hosts 时反查 bridgeHost/bridgePort/authToken 兜底
++- Fix 3: App.tsx ConnectionsPage 缺 onOpenVaults prop — 暂时走 handleOpenSettingsPage 占位（VaultsPage 未实装）
++- Fix 4: relayDevices 登录后状态不同步 — App 本地 useState + useTraversalRelayAccount 双源
++- 升级包 manifestUrl: useAppUpdate 仍用 appUpdatePreferences.manifestUrl 为唯一真源；未注入默认 URL
++- 验证: typecheck 通过 (mac-terminal-view 三个 TS6133 是 mac/ 目录，跨平台分支错误，与本次修复无关) ；13+16+3+1+3+78 单元测试全过
++
++## 2026-06-04 session 切换 + 输入卡顿调查
++- 前轮尝试加 active-reentry skip markResumeTail + per-keystroke force head，**两者都被验证为无效修复**，已物理删除：
++  - `android/src/contexts/session-context-activity-runtime.ts:234` 回到原始 markResumeTail 行为
++  - `android/src/contexts/session-context-input-runtime.ts` 删掉 `if (shouldRequestInputHead) requestSessionBufferHead(force: true)` 分支 + 回退 markPendingInputTailRefresh 到 void
++  - `android/src/contexts/SessionContext.ws-refresh.test.tsx` 末尾的 `does not request a full-cache buffer-sync on switch to a stable already-connected session at head` 已删除（红测假阳：临时移除 fix 仍通过）
++- 临时引入的 `forceBypassCadence` 参数已物理删除（与 `force` 重复语义、属于冗余设计）
++- 当前 diff 范围：只剩 input-runtime 的注释文字微调（不改变行为）+ 1 句"修复前就红的"transfer-runtime.test.ts（基线红，不归本次）
++- 切换同步阻塞点候选：
++  - `switchSession` 中 `setActiveSessionSync` + `ensureActiveSessionFresh({forceHead:true, markResumeTail:true})` 同步发出 buffer-head-request
++  - `requestSessionBufferHead` 的 `force=true` 不受 cadence 控制（这是历史契约，input path 已不发 force head）
++  - 真正"输入卡顿"疑点可能在 renderer 侧：applySessionSwitchRenderReset 同步触发 setReadingMode/setRenderBottomIndex，但已经是 sessionChanged 早 return
++- 下一步：trace `sendInput` 从 keyboard event 走到 ws.send 的全链路，特别是 IME、terminal-xterm input 路径有无 sync 工作
++
++- Jason 2026-06-04 切换 session 输入卡慢排查 (rebaseline):
++  - 上一轮在 activity-runtime 加的两层 fix 中, 第一层 (markResumeTail skip for stable active-reentry) 是真实修复, 已落地, 验证 `does not mark resume tail for stable connected active reentry` 测试从基线红转绿.
++  - 第二层 (active-reentry head skip within cadence) 是假阳误判:
++    - 红测 5 次循环 trigger 同一 source/session 绕过了 `lifecycle.ts:156` 的 `lastActivatedSessionIdRef` guard, 不代表真实用户操作
++    - 该 fix 在 `forces a fresh head request when switching back to a connected tab inside the head throttle window` 契约上误伤 (1 failed) — 切回 connected tab 必须发 force head
++  - 物理删除 Layer 2 + rapid reentry describe block, 4-file 门禁 4 passed (157 tests)
++  - 真实 "切 session 输入卡慢" 真因不在 head 频率 — `sendInputThroughSessionTransport` 全程 sync, 无 await 阻塞
++  - 下一轮方向: 查 sendInput 入口 (UI 层 onInput/onSubmit) → 切 session 时 React 重 mount/重渲染/state cascade 是否阻塞 input dispatch
++
++- Jason 2026-06-04 切 session 输入卡慢 真实路径锁定:
++  - 唯一真因触发点: `src/contexts/session-context-provider-facade-assemblies.ts:143 switchSession`
++    - 4 步同步执行: resetSessionTransportPullBookkeeping(prev) -> setActiveSessionSync(id) -> resetSessionTransportPullBookkeeping(id) -> ensureActiveSessionFresh({source:'active-reentry', forceHead:true, markResumeTail:true})
++  - 显式 markResumeTail=true 是切 tab 的 hardcoded 行为, 直接加入 pendingResumeTailRefreshRef
++  - pendingResumeTailRefreshRef 在 buffer-sync 到达时强制 follow tail catchup pull (buffer-runtime.ts:752)
++  - 在切 session 同 tick 内发出 buffer-head-request + 后续 buffer-sync request, 抢占 JS 主线程
++  - 但 sendInput -> sendInputRuntime 全程 sync (input-runtime.ts:1-90, transfer-runtime.ts:34)
++  - 故 "输入卡慢" 的真因不在 input dispatch, 而在: 切 tab 的 1 个 tick 内同时触发 buffer-head-request + multiple transport bookkeeping reset + setActiveSessionSync, 后续 buffer-sync 拉大块数据返回时 React 渲染级联
++  - Layer 1 (markResumeTail skip) 已落地, 真消除"在 ws ready + connected + 有 buffer 情况下重复 trigger pendingResumeTailRefreshRef"; 但这只是局部优化, 不解决切 tab 时的 4-step 同步执行 + 大块 buffer-sync 渲染阻塞
++  - 完整修复需要: 在 switchSession 内部把 ensureActiveSessionFresh 拆成 microtask, 或者把 markResumeTail 改成 react-state-driven, 避免同 tick 重复发 head/sync
++
++- Jason 2026-06-04 切 session 输入卡慢 排查收口:
++  - 静态代码层穷尽排查, 没有 single-point 真因:
++    1. sendInput 路径 sync (input-runtime.ts:30-90) - 无 await 阻塞
++    2. head/sync 链全 async (buffer-runtime.ts requestSessionBufferHead/Sync) - 不阻塞 JS
++    3. input 不会因 pending transport open 卡死 - 'drop.pending-transport-open' 路径有 contract 锁定 (input-runtime.test.ts:174-211)
++    4. TerminalView 不因 active 切换 remount - key=sessionId 稳定 (TerminalPage.tsx:687)
++    5. activity-runtime markResumeTail skip (Layer 1) 已落地, 切 session 时不重复 trigger pendingResumeTailRefreshRef (与 sync pull 链路解耦)
++  - 真因大概率在运行时组合 (设备 IME 状态/buffer payload 大小/网络 RTT), 需要真机 perf profiling 才能定位
++  - 任何进一步修复必须先有真机 perf 红测作为依据, 不能凭静态代码继续猜
++  - 当前交付:
++    - Layer 1: session-context-activity-runtime.ts markResumeTail skip, 配合 2 条新单测
++    - 物理删除: Layer 2 head skip + rapid reentry 假阳红测
++  - 门禁: 4 file (activity/buffer/input/ws-refresh) 157/157 全绿
++  - 未完成: 真机复现切 session 输入卡慢的 perf 测量 + 定位渲染级联阻塞点
++
++- Jason 2026-06-04 真因候选 (静态代码层锁定, 需真机 perf 验证):
++  - 候选 1: switchSession 4 步同步链路 (provider-facade-assemblies.ts:143-160):
++    resetBookkeeping(prev) -> setActiveSessionSync -> resetBookkeeping(id) -> ensureActiveSessionFresh({markResumeTail:true})
++    - 第一个 reset 在 React 18 auto-batching 下仍同步, 但 ensureActiveSessionFresh 内 force head 同步发, markResumeTail 改 ref
++    - 真机中是否让 React render 跑多次取决于具体 batch
++  - 候选 2: session-render-buffer-store.ts setBuffer cloneRenderBuffer (80K 浅拷贝)
++    - 1000 行 × ~80 cells × {...cell} = 80K+ object literals
++    - 切 session 后 inactive session 的 live patch 仍可能触发, 但活跃 session 自身 re-render 不触发 clone
++  - 候选 3: TerminalView renderRows useMemo (TerminalView.tsx:297)
++    - 切 session 时 bufferLines 引用变化 -> useMemo 重算
++    - VisibleRow memo 优化应已生效, 但首屏 mount + overscan 仍是 O(rows)
++  - 候选 4: requestBufferSyncPayload 在 buffer-sync 到达时 fetcher + apply
++    - await new Promise / fetch 异步, 不阻塞 JS 线程
++    - 但 applyIncomingBufferSyncRuntime line 588-770 内的 commitSessionBufferUpdate + scheduleSessionRenderCommit 触发 setState -> 同步跑 React render
++- 下一轮真机 perf 红测设计:
++  - 用 React Profiler 跑 session A->B->A 切换 + 连打 20 个 keystroke
++  - 测量: commit duration / passive effects / longest effect
++  - 对照 fix: 拆 switchSession 4 步到 microtask + 给 setBuffer 用 structural sharing
++
++---
++Jason 2026-06-07 拷贝模式退出路径生命周期修复
++- 根因: handleCloseCopyMenu 仅 setCopySelection((c)=>({...c, menu:null})) - 保留 active=true，导致 QuickBar 高亮 + TerminalView 仍处于 copy mode
++- 修复:
++  1. handleCloseCopyMenu 改 setCopySelection(EMPTY_COPY_SELECTION_STATE) (整状态重置)
++  2. 新增 copyTextAndResetOnSuccess(text) helper: writeTextToClipboard.then 成功才 setCopySelection(EMPTY), .catch 警告并保留状态
++  3. handleCopySelectionEnd / handleCopySelectedText 改用该 helper
++- 测试 (useTerminalPageCopyRuntime.test.tsx, 10 测):
++  1. handleCloseCopyMenu 关闭后 active=false, menu/start/end/sessionId 全 null
++  2. 中途关闭同样全重置
++  3. handleCopySelectionEnd 成功后 async reset active=false
++  4. handleCopySelectedText 成功后 async reset
++  5. clipboard write 失败时 active 保留 + warn
++- APK 交付: 0.1.3.1755, sha256=88f69f131a89afd787fed9bc685ad1be5f2e1c0f0b0e03d55941a6c4da36caf8
++  - android/update-dist/zterm-latest-debug.apk
++  - ~/.wterm/updates/zterm-latest-debug.apk
++- 门禁: 433+82 contracts/flows 全绿, daemon mirror 8/8 PASS, relay smoke ok
++
++---
++Jason 2026-06-08 多次切 tab 后“远端收到输入但本地不刷新”
++- 现场症状: input 已到远端，client 本地不更新；断点优先在 client head/tail refresh 链，而非 input 发送链。
++- 根因: `sendInputThroughSessionTransport` 只 mark `pendingInputTailRefresh`，不再立即请求 `buffer-head`; 多次 tab switch 后依赖 heartbeat/active tick 可能错过首个输入后的 head-first 主循环。
++- 修复:
++  1. `markPendingInputTailRefresh` 返回是否“首次 pending”。
++  2. 首个 pending input 在同一 open transport 上立刻 `requestSessionBufferHead(sessionId, ws, { force: true })`。
++  3. 后续 burst input 不重复 force head，仍由已有 pending tail-refresh 合并，避免每键请求风暴。
++- 红测/gate:
++  - `session-context-input-runtime.test.ts`: 首个 pending input 发 head；已有 pending 不再发 head。
++  - `SessionContext.ws-refresh.test.tsx`: burst 3 次 input 只 1 条 `buffer-head-request`; reading/follow 输入同样首个 pending 发 head。
++  - 相关 gate: 272/272 通过; `tsc --noEmit` 通过。
++  - build gate: terminal contracts 433/433, common flows 82/82, daemon mirror 8/8 PASS, relay smoke ok。
++- APK: `0.1.3.1756`, sha256 `8a4006cecdf80ea34ec887d11959043883c1a1dfbda82d76902d1a06cede5a2b`, 已发布到 `android/update-dist/` 和 `~/.wterm/updates/`。
++
++---
++Jason 2026-06-08 快捷悬浮球/定时发送只读审计草稿
++- UI owner: `TerminalQuickBar.tsx` floating menu; schedule sheet owner: `SessionScheduleSheet.tsx`; schedule runtime owner: `terminal-schedule-runtime.ts` + `schedule-engine.ts` + `schedule-dispatch.ts` + `schedule-store.ts`.
++- 排版浪费初步证据: floating panel header 有说明文, textarea minHeight 148, 定时/发送按钮独占竖向两行, 存在空 tab/pill 区域, list item 42/46px + 8px gap。
++- 定时发送链路证据: QuickBar -> TerminalPage -> SessionScheduleSheet -> SessionContext public runtime -> websocket schedule-* -> daemon ScheduleEngine -> dispatchScheduledJob -> tmux/live mirror。
++- 生命周期风险初步证据: client schedule 操作在 socket 非 OPEN 时 `sendMessageRuntime` 静默不发, 但 public runtime 已把 scheduleState 置 loading; sheet 当前不展示 `scheduleState.error`; daemon 端 upsert 错误发通用 error, run-now 异步错误只进入 schedule-event/state, 需要 gate 锁定。
++
++---
++Jason 2026-06-08 分屏 tab 分隔与顶部空白修复
++- 现场: 分屏模式 header 顶部有明显空白, pane tab groups 之间边界不清。
++- 根因:
++  1. shared `pane-profile.ts` 与 legacy `terminal-layout-profile.ts` 的 split header padding 使用 `topInset + 20px + n`, 横屏分屏即使 `topInset=0` 也会产生 21px 顶部空白。
++  2. `TerminalHeader` split pane group 横排时没有 group-level separator, 多 pane tab strip 视觉上黏连。
++- 修复:
++  1. split profile 新增 `PHONE_SPLIT_HEADER_TOUCH_SAFE_OFFSET_PX=0`, split landscape padding 改 `topInset+1`, split default 改 `topInset+2`; single-pane 仍保留原 20px touch-safe offset。
++  2. `TerminalHeader` split root 增加 header 背景与 bottom border; 每个非最后 pane group 增加右侧 1px separator + 3px paddingRight。
++- 验证:
++  - `pnpm --dir android exec vitest run src/components/terminal/TerminalHeader.test.tsx src/components/terminal/TerminalHeader.pane-tabs.test.tsx src/lib/terminal-layout-profile.test.ts src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` -> 4 files / 33 tests PASS。
++  - `pnpm --filter @zterm/shared exec vitest run src/react/pane-profile.test.ts --reporter dot` -> 9 tests PASS。
++
++## 2026-06-08 quickbar schedule lifecycle
++- Schedule sheet target freeze implemented in TerminalPage: open stores sessionId/sessionName/seed/nonce target; sheet operations use frozen id instead of active session. App now passes getSessionScheduleState so non-active frozen target can read its own state.
++
++- Schedule lifecycle fixed: client schedule sends now return explicit success/failure; socket unavailable/session missing writes scheduleState.error; shared protocol adds schedule-error; server emits schedule-error for validation/stale delete-toggle-run-now; SessionScheduleSheet renders loading/error and disables ambiguous mutations.
++- QuickBar floating menu compacted: removed helper copy, reduced composer height, placed schedule/send in one row, added real quick/clipboard segmented tabs, tightened list rows.
++- Transport error split: tmux_session_unavailable is retryable failure, tmux_session_killed remains closed lifecycle.
++
++---
++Jason 2026-06-08 daemon/client transport performance audit notes
++- Scope: read-only audit for "good bandwidth should refresh fast, poor bandwidth should refresh slow"; no code changes.
++- Verified daemon live cadence: `terminal-mirror-runtime.ts` uses fixed 33ms active / 120ms idle timer, selected by recent flush activity and failure backoff only; no RTT/bps/ws bufferedAmount input.
++- Verified daemon capture cost model: each mirror tick calls sync `tmux display-message` metrics, sync cursor read, sync `capture-pane`, then WASM canonicalize. `runTmux` is `spawnSync`, so concurrent multi-pane mirrors share/block the Node event loop while tmux commands run.
++- Verified server send path: `sendTransportMessage` only checks OPEN and calls `sendText(JSON.stringify(message))`; no outbound queue length/backpressure/drain policy or bandwidth class.
++- Verified client cadence: `mobile-config.ts` reads `navigator.connection` and slows active head/pull cadence for high RTT/saveData/2g/3g; best case remains 33ms, render commit fixed 33ms. This controls client probes/pulls, not daemon push cadence.
++- Verified client live gate: active + `liveSessionIds` accept live `buffer-sync`; hidden inactive may preparse-drop. Multi-pane correctness gates exist, but they test target inclusion/dedupe, not end-to-end latency under N panes.
++- Verified metrics are observational: `session-debug-metrics-store.ts` records tx/rx bps, renderHz, pullHz; no scheduler consumes these values.
++- Likely bottleneck chain for "good network but multi-pane slow": per-mirror fixed timer + synchronous tmux capture/canonicalize + no transport backpressure feedback + render commit cap. Need measurement gate: tmux capture start/end, canonicalize end, broadcast end, client rx, buffer apply, render commit per session/pane.
+ 
+ ---
+ Jason 2026-06-08 daemon/client transport performance closeout
+-- Plan: `android/docs/goals/daemon-client-transport-performance-plan.md` freezes red-test-first order, no payload trimming/fallback rule, validation matrix, APK delivery paths, and commit/push requirement.
++- Plan: `android/docs/goals/daemon-client-transport-performance-plan.md` now freezes the red-test-first order, no payload trimming/fallback rule, validation matrix, APK delivery paths, and commit/push requirement.
+ - Implemented daemon fast/slow lane: `terminal-performance-scheduler` consumes only daemon physical truth (capture/canonicalize duration, subscriber count, transport buffered bytes/backpressure, failure/backoff, in-flight state). Source gates forbid daemon scheduler from consuming client UI state.
+ - Implemented transport backpressure truth: ws/rtc adapters expose `bufferedAmount`; send path records bytes/last send/error and rethrows send failures instead of swallowing them.
+ - Implemented client cadence truth: session-aware runtime cadence reads each session socket buffered amount + debug metrics; good link can hit 16ms render commit, weak/backpressured link slows head/pull/render cadence.
+ - Implemented trace metadata store: records timestamps/durations/bytes/line counts/kinds only; tests forbid payload/text/line/cell content from trace events.
+-- Implemented multi-pane latency gate: synthetic 3-pane trace asserts p95 capture-to-render latency stays below fixed slow-path budget; current trace summary p95 is 89ms and gate requires <120ms.
++- Implemented multi-pane latency gate: synthetic 3-pane trace asserts p95 capture-to-render latency stays below the fixed slow-path budget and queue/backpressure tests cover slow-link behavior.
+ - Harness fix: daemon mirror lab now waits against payload history replay, not only the final sparse payload, so later sparse prompt-only payloads cannot hide a marker that already arrived.
+ - Fail-first evidence captured during implementation:
+-  - `session-render-gate.test.ts` first failed because render gate resolver was called without `sessionId`, so fast lane could not be session-owned.
++  - `session-render-gate.test.ts` first failed because the render gate resolver was called without `sessionId`, so fast lane could not be session-owned.
+   - `session-runtime-cadence.test.ts` first failed because good-link runtime cadence still returned 33ms instead of 16ms.
+   - `daemon-mirror-lab-script.test.ts` first failed before the source gate/harness replay fix.
+   - `build:android` first failed in embedded daemon mirror lab `external-input-echo`, where `probe-history.json` contained the marker but final payload was later overwritten by a prompt-only sparse diff.
+@@ -2636,9 +2823,46 @@ Jason 2026-06-08 daemon/client transport performance closeout
+   - `~/.wterm/updates/zterm-latest-debug.apk`
+   - sha256 `8e66b56ab90d3ecd889b0f758a12c39936c2fb1d41c8fc79b64a529ac9510794`
+ 
++---
++Jason 2026-06-08 input channel delayed delivery investigation
++- Field symptom: split-screen/multi-pane refresh improved, but typed input appears on remote minutes later, even after the app was killed. Treat as input-channel delayed delivery, not echo/render latency.
++- Current hypothesis to red-test: `sendInputThroughSessionTransport` sends to any `OPEN` transport without checking `bufferedAmount`; under weak network/multi-pane output, input can enter WebSocket/RTC outbound backlog and later flush to daemon after UI/app teardown. Input path must not enqueue terminal payload into a backpressured transport.
++- Scope: client input runtime first; daemon input handler is synchronous `handleInput -> writeToLiveMirror -> tmux send-keys`, so if daemon receives late, the likely owner is client/transport outbound buffering.
++
++---
++Jason 2026-06-08 定时生命周期审计修复
++- 审计结论: server ScheduleEngine 单 timer/单 schedules.json 无 per-job 文件孤儿；client closeSessionRuntime 已删除 scheduleStates[sessionId]。
++- 发现并修复: runNow 执行后未持久化/重排 timer；有限次数或过期任务停用后会永久留在 schedules.json；in-flight due run 在 dispose 后可能重新 schedule timer；executeJob 抛错会中断链路不记录 error。
++- 修复: runNow 后 persistAndReschedule；自然完成/过期任务物理删除；disposed gate 禁止 timer 复活；executeJob throw 转 explicit error result 并推进 firedCount/nextFireAt。
++- 红测: schedule-engine 新增持久化、自然完成删除、过期删除、throw error、dispose in-flight 不复活 timer。
++
+ ---
+ Jason 2026-06-08 物理键盘与刷新慢修复收口
+ - 根因: Android native `key` 路径仍把事件 dispatch 到 DOM textarea；新版 Android terminal 关闭 DOM focus 后，物理键盘特殊键/控制键不能可靠进入 terminal input。刷新慢的独立根因: client cadence 把高吞吐 `recentPayloadBytes` 当成慢链路，导致好网大输出仍降到 33ms。
+ - 修复: native plain letter 不拦截，Ctrl/Alt modified keys 和 Escape/方向键走硬件 key path；TerminalPage 的 ImeAnchor key listener 直接使用 shared `resolveTerminalCtrlChord/resolveTerminalKeyboardInput` 并 `emitToActiveSession`；`Ctrl+Space` 映射 NUL；good runtime progress 不再按 payload bytes 降速。
+ - Active reentry 修复: `active-reentry` 在 runtime activeSessionId catch-up 前也可强制 head；同一 cadence window 去重；tab switch out 清该 session reentry guard，切回来可重新 head-first。
+ - 验证: Android IME 33 tests PASS; mobile-config 6 tests PASS; shared keyboard 3 tests PASS; native ImeAnchor hardware/input unit BUILD SUCCESS; tsc PASS; terminal regression PASS; APK `0.1.3.1760` 发布到 `android/update-dist/` 与 `~/.wterm/updates/`，sha256 `d21560720eae05dd6332c1ccf3428c4f590ef43cb66633097be4d70ff84bba51`。
++## 2026-06-09 open tab lifecycle audit
++
++- User requirement: no automatic tab close behavior. Only explicit user close is allowed to remove an open tab or close its runtime session.
++- Found current auto-close paths to verify/fix:
++  - `src/lib/remote-tab-audit.ts` calls `applyClosedOpenTabIntent` when remote tmux session-name audit drops a tab.
++  - `src/hooks/useOpenTabRemoteAudit.ts` contains the same stale auto-close logic and is not imported by current code.
++  - `src/lib/open-tab-restore.ts` / cold restore returns `droppedTabs` and callers persist a pruned open-tab truth when remote tmux names are missing.
++- Intended invariant: remote tmux audit may prune stored session-group history, but must not mutate `OPEN_TABS`, `ACTIVE_SESSION`, closed-tab tombstones, or call `closeSession` for open tabs.
++
++## 2026-06-09 ordinary connection lag audit
++- 用户反馈 0.1.3.1765 后普通连接也很卡；从上一版空 reset payload 防黑屏改动开始审计。
++- 已确认 socket buffer-sync 处理顺序是 settleSessionPullState -> applyIncomingBufferSyncRuntime；空 payload 会先清 pull state，但 apply 的 revision-reset 空 payload 早退不提交、不 render、且当前未主动补发 tail refresh。
++- 完整 test:terminal:regression：contracts 42/503 PASS，common flows 7/84 PASS；daemon close-loop 前 5 case PASS，external-input-echo FAIL，证据目录 android/evidence/daemon-mirror/2026-06-09/external-input-echo。继续判定是否本轮改动相关。
++2026-06-09 adb input现场注意：若 `dumpsys power` 显示 `mWakefulness=Dozing` 或 `dumpsys display` 显示 `Display State=OFF/DOZE`，`adb shell input text` 不可作为 WebView/IME 输入链证据；必须先确认设备 `ON/interactive`、zterm 前台、daemon 有 subscriber，再判断 native/JS/session input 断点。
++
++## 2026-06-09 session picker list merge
++- 用户需求: 合并已有 open tabs 与 daemon tmux sessions 两个列表，按 daemon session 顺序显示为同一个 session row；opened row 可 Enter/Close，unopened row 可勾选/直接 Open。
++- owner 定位: quick-tab sheet 的重复列表在 `src/components/tmux/TmuxSessionPickerSheet.tsx`：`Current Tabs` 与 `Tmux Sessions` 分开渲染；Connections 页已经是 server group 一层合并，但展开行仍缺 close action。
++- 设计边界: daemon session 顺序优先；open tab 只作为同一 row 的本地打开状态贴上去；daemon refresh 未返回但仍在 OPEN_TABS 的 tab 只能追加到尾部并标记 not reported，禁止因 daemon 列表缺失隐藏或自动关闭。
++
++## 2026-06-10 open tab semantic auto-close root cause
++- 用户反馈: 仍出现 rcc tab 自动关闭，严禁任何自动关闭 tab。
++- 根因确认: `src/lib/open-tab-intent.ts` 把 semantic reuse key (`sessionName + daemon/bridge owner`) 用于 normalize/upsert/runtime merge/close，导致 runtime duplicate 或同名 persisted tab 可自动合并、替换、删除另一个 `sessionId` 的 open tab。
++- 修复方向: `OPEN_TABS` 物理身份只允许 `sessionId`；semantic key 只能用于 saved-list import 去重和用户显式 close 后的 tombstone，不能改写已打开 tab 生命周期。

@@ -50,7 +50,7 @@
 - Client Render Width 不变量：
   - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
   - `mirror-fixed` 下 viewport / IME / safe-area / shell 宽度变化不得回写 daemon mirror / tmux 宽度
-  - `mirror-fixed` 下自动关闭左右滑切 tab，避免与 horizontal pan 冲突
+- `mirror-fixed` 下左右滑切 tab 仍由 shell interaction owner 负责；当前 mobile 端若没有独立 horizontal pan 手势链占用，swipe 必须保持可用，不得出现无交互出口的禁用态
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
@@ -314,8 +314,8 @@ Android client -> zterm-daemon -> macOS screenshot truth
 ## Terminal horizontal pan 边界
 
 - `mirror-fixed` 横向查看属于 renderer window horizontal pan
-- `mirror-fixed` 下自动关闭左右滑切 tab
-- 一次手势只能命中 horizontal pan，不允许共享给 tab swipe
+- `mirror-fixed` 下若未接入独立 horizontal pan 手势链，左右滑切 tab 仍需保持可用并由 shell interaction owner 独占
+- 一次手势只能命中一个 shell 语义；若未来恢复 horizontal pan，必须与 tab swipe 重新做单一命中门禁，禁止并发共享
 
 ## Terminal canonical buffer ownership
 
@@ -435,3 +435,15 @@ android/
 页面级切片和未来文件 ownership 统一见：
 
 - `docs/ui-slices.md`
+- `docs/feature-registry.json`
+- `docs/function-map.md`
+- `docs/feature-gates.md`
+
+任何功能改动在进入代码前，必须先按 `feature_id` 定位：
+
+- 唯一 owner
+- 允许修改路径
+- 禁止修改路径
+- required gates
+
+如果某个功能没有对应 `feature_id`，不得直接改代码；必须先补 registry 和 truth gate，再进入实现。
