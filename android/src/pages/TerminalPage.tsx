@@ -2256,7 +2256,7 @@ function TerminalPageComponent({
   const terminalChromeBottomPx = Math.max(0, quickBarHeight + layoutProfile.quickBar.touchSafeOffsetPx);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset, shellHeight);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
-  const terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0;
+  const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   useEffect(() => registerClientDebugSnapshotSource('terminal-page', () => ({
     activeSessionId: uiSessionId,
@@ -2567,6 +2567,8 @@ function TerminalPageComponent({
     layoutProfile.stage.paneGap,
     layoutProfile.stage.paneRadius,
     layoutProfile.stage.rowBottomPadding,
+    copySelection.active,
+    handleQuickBarToggleCopyMode,
   ]);
 
   return (
