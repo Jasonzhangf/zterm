@@ -472,10 +472,11 @@ function TerminalQuickBarComponent({
         onToggleKeyboard?.();
         return;
       }
-      if (action.id === "tmux-copy") {
-        onToggleCopyMode?.();
-        return;
-      }
+         if (action.id === "tmux-copy") {
+            console.log('[QuickBar] tmux-copy button clicked, calling onToggleCopyMode');
+           onToggleCopyMode?.();
+           return;
+         }
       if (action.id === "debug-overlay") {
         onToggleDebugOverlay?.();
         return;

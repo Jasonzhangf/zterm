@@ -175,14 +175,16 @@ export function useTerminalPageCopyRuntime({
     setCopySelection(EMPTY_COPY_SELECTION_STATE);
   }, []);
 
-  const handleQuickBarToggleCopyMode = React.useCallback(() => {
-    setCopySelection((current) => {
-      if (current.active) {
-        return EMPTY_COPY_SELECTION_STATE;
-      }
-      return { active: true, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null };
-    });
-  }, []);
+ const handleQuickBarToggleCopyMode = React.useCallback(() => {
+    console.log('[CopyRuntime] handleQuickBarToggleCopyMode called');
+   setCopySelection((current) => {
+      console.log('[CopyRuntime] setCopySelection: current.active=', current.active, '-> next.active=', !current.active);
+     if (current.active) {
+       return EMPTY_COPY_SELECTION_STATE;
+     }
+     return { active: true, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null };
+   });
+ }, []);
 
   // Keep ref in sync
   React.useEffect(() => {
