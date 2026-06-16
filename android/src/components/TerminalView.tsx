@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type PointerEvent,
+  type TouchEvent,
 } from "react";
 import {
   useSessionRenderBufferSnapshot,
@@ -359,6 +360,51 @@ function TerminalViewComponent({
       if (
         Math.abs(event.clientX - start.x) > 10 ||
         Math.abs(event.clientY - start.y) > 10
+      ) {
+        cancelCopyLongPress();
+      }
+    },
+    [cancelCopyLongPress],
+  );
+  const startCopyLongPressTouch = useCallback(
+    (event: TouchEvent<HTMLDivElement>, rowIndex: number) => {
+      if (!copyModeActive || !sessionId || !onLongPressRow) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      cancelCopyLongPress();
+      const touch = event.touches[0] ?? event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+      longPressStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        rowIndex,
+      };
+      longPressTimerRef.current = window.setTimeout(() => {
+        longPressTimerRef.current = null;
+        const start = longPressStartRef.current;
+        longPressStartRef.current = null;
+        if (!start) {
+          return;
+        }
+        onLongPressRow(sessionId, start.rowIndex, start.x, start.y);
+      }, 420);
+    },
+    [cancelCopyLongPress, copyModeActive, onLongPressRow, sessionId],
+  );
+  const handleCopyLongPressTouchMove = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const start = longPressStartRef.current;
+      const touch = event.touches[0];
+      if (!start || !touch) {
+        return;
+      }
+      if (
+        Math.abs(touch.clientX - start.x) > 10 ||
+        Math.abs(touch.clientY - start.y) > 10
       ) {
         cancelCopyLongPress();
       }
@@ -1338,13 +1384,23 @@ function TerminalViewComponent({
                     ? (event) => startCopyLongPress(event, absoluteIndex)
                     : undefined
                 }
+                onTouchStart={
+                  copyModeActive
+                    ? (event) => startCopyLongPressTouch(event, absoluteIndex)
+                    : undefined
+                }
                 onPointerMove={
                   copyModeActive ? handleCopyLongPressMove : undefined
                 }
+                onTouchMove={
+                  copyModeActive ? handleCopyLongPressTouchMove : undefined
+                }
                 onPointerUp={copyModeActive ? cancelCopyLongPress : undefined}
+                onTouchEnd={copyModeActive ? cancelCopyLongPress : undefined}
                 onPointerCancel={
                   copyModeActive ? cancelCopyLongPress : undefined
                 }
+                onTouchCancel={copyModeActive ? cancelCopyLongPress : undefined}
               />
             );
           })(),

@@ -117,27 +117,30 @@ vi.mock("../components/terminal/TabManagerSheet", () => ({
 }));
 
 vi.mock("../components/terminal/TerminalQuickBar", () => ({
-  TerminalQuickBar: ({
-    onEditorDomFocusChange,
-    onToggleKeyboard,
-    onToggleCopyMode,
-    keyboardVisible,
-    keyboardInsetPx,
-    sessionDraft,
-  }: {
-    onEditorDomFocusChange?: (active: boolean) => void;
-    onToggleKeyboard?: () => void;
-    onToggleCopyMode?: () => void;
-    keyboardVisible?: boolean;
-    keyboardInsetPx?: number;
-    sessionDraft?: string;
-  }) => (
-    <div
-      data-testid="terminal-quickbar"
-      data-keyboard-visible={keyboardVisible ? "true" : "false"}
-      data-keyboard-inset={String(keyboardInsetPx || 0)}
-      data-session-draft={sessionDraft || ""}
-    >
+TerminalQuickBar: ({
+  onEditorDomFocusChange,
+  onToggleKeyboard,
+  onToggleCopyMode,
+  keyboardVisible,
+  keyboardInsetPx,
+  sessionDraft,
+  copyModeActive,
+}: {
+  onEditorDomFocusChange?: (active: boolean) => void;
+  onToggleKeyboard?: () => void;
+  onToggleCopyMode?: () => void;
+  keyboardVisible?: boolean;
+  keyboardInsetPx?: number;
+  sessionDraft?: string;
+  copyModeActive?: boolean;
+}) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-keyboard-visible={keyboardVisible ? "true" : "false"}
+    data-keyboard-inset={String(keyboardInsetPx || 0)}
+    data-session-draft={sessionDraft || ""}
+    data-copy-mode-active={copyModeActive ? "true" : "false"}
+  >
       <button onClick={() => onEditorDomFocusChange?.(true)}>
         focus-quick-editor
       </button>
@@ -615,6 +618,39 @@ describe("TerminalPage Android IME bridge", () => {
     expect(screen.queryByTestId("terminal-copy-menu")).not.toBeNull();
   });
 
+  it("updates quick bar copy button state immediately when toggled", () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const quickBar = screen.getByTestId("terminal-quickbar");
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("true");
+
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+  });
+
   it("releases editor mode before keyboard toggle and requests Android IME focus", async () => {
     const session = makeSession("s1");
 
@@ -876,6 +912,53 @@ describe("TerminalPage Android IME bridge", () => {
     });
     expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({
       active: false,
+    });
+  });
+
+  it("keeps terminal stage shell lifted while quick bar editor owns focus and Android keyboard is visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const stage = screen.getByTestId("terminal-stage-shell");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 30px;");
+
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset"),
+      ).toBe("280");
+    });
+
+    await waitFor(() => {
+      const lifted = stage.getAttribute("style") || "";
+      expect(lifted).toContain("bottom: 310px;");
+      expect(lifted).not.toContain("transform: translateY");
     });
   });
 

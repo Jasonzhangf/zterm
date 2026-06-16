@@ -156,6 +156,48 @@ describe('terminal bridge runtime message scheduling', () => {
     wss.close();
   });
 
+  it('lets a fresh input start while an older input is still awaiting its own write path', async () => {
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const { runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as {
+        type: string;
+        payload?: unknown;
+      };
+      if (message.type !== 'input') {
+        return;
+      }
+      const text = String(message.payload);
+      if (text === 'a') {
+        events.push('input:a:start');
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        events.push('input:a:end');
+        return;
+      }
+      events.push(`input:${text}`);
+    });
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'a' })), false);
+    await flushMicrotasks();
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', payload: 'b' })), false);
+    await flushMicrotasks();
+
+    expect(events).toEqual(['input:a:start', 'input:b']);
+
+    if (releaseFirst) {
+      releaseFirst();
+    }
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(events).toEqual(['input:a:start', 'input:b', 'input:a:end']);
+    wss.close();
+  });
+
   it('does not let input overtake a pending connect attach barrier', async () => {
     const events: string[] = [];
     let releaseConnect: (() => void) | undefined;

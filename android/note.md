@@ -3061,3 +3061,53 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
   3. 安装旧版 APK（允许 versionCode 降级，因为走卸载后安装）
   4. 配置导入/恢复
 - 后续凡涉及“回退版本可安装”诉求，优先建设 backup/restore + reinstall 流程，不再把“重打高 versionCode 的旧包”当成唯一方案。
+
+## 1808 拷贝按钮 + 移动端长按 止血
+
+- 现象：点击 quickbar 上的 `拷贝` 按钮，按钮色不刷新，只有别的 UI 状态变化时才跟上。
+- 真因：`TerminalPage` 里 `quickBarNode = useMemo(<TerminalQuickBar .../>)`，依赖数组一开始只列了若干 layout 和 action 句柄，没列 `copySelection.active` 与 `handleQuickBarToggleCopyMode`。结果 `setCopySelection` 触发父组件重渲时，`copyModeActive` 已经变了，但 `useMemo` 命中（active 没出现在依赖里）→ 旧的 `TerminalQuickBar` element 复用 → `memo` 默认 shallow 比较仍然认为没变 → 子组件没重渲 → 按钮色不动。
+- 顺手发现的另一个根因（之前一直被遮住）：`TerminalView` 只把 `pointer` 长按接到复制状态机，`touch*` handler 没接。jsdom 测试 `entry: copy mode touch long-press ...` 一直是红的。修这个之前，移动端长按拷贝从一开始就走不通，只能撞系统菜单。
+- 修复：
+  1. `quickBarNode` 依赖加上 `copySelection.active` 和 `handleQuickBarToggleCopyMode`。
+  2. `TerminalView` 新增 `startCopyLongPressTouch` / `handleCopyLongPressTouchMove`，并把 `onTouchStart/Move/End/Cancel` 串到 `VisibleRow`。
+- 红测：
+  - 新增 `updates quick bar copy button state immediately when togged`：点 `toggle-copy-mode` 当帧 `data-copy-mode-active` 必须 false→true→false。
+  - 旧挂的 `system copy state machine ... touch long-press ...` 现在 PASS。
+  - 复制链路四组测试全绿（46/46）。
+- 构建：`pnpm build` + `cap sync android` + `./gradlew :app:assembleDebug` + `prepare-update-bundle.mjs`。
+- 产物：`android/update-dist/zterm-0.1.3.1808.apk`，`~/.wterm/updates/zterm-0.1.3.1808.apk`，sha256 `434209a584f0393fc61e9ffc2891341219f0ef1d9fd1bae00c35cc296fb0f13d`，versionCode `1031808`。
+- 风险：当前没用真实设备拉一遍回归，按钮即时刷新只过 jsdom 端到端 + 复制链路单元。IME 抬升 / daemon 输入延迟这两个原 goal 还没动，只在 note 里登记，不在本 APK 覆盖范围。
+
+## 1810 IME 抬升 + daemon 输入延迟 闭环
+
+### 1. IME 抬升
+- 现象：输入法弹出时，terminal 显示容器仍贴底，被键盘遮挡。
+- 真因：`terminalImeLiftPx = terminalImeActive ? effectiveKeyboardLiftPx : 0`，其中 `terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused`。只要 quickbar editor 抢焦点，stage bottom 就固定 30px，键盘高度全部丢失。
+- 修复：`terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0`。键盘报告高度非零就抬，不被 quickbar editor 状态短路。
+- 红测：`TerminalPage.android-ime.test.tsx` 新增 `keeps terminal stage shell lifted while quick bar editor owns focus and Android keyboard is visible`：点 `focus-quick-editor` → `keyboardDidShow(280)` → `terminal-stage-shell` 必须 `bottom: 310px` 且 `transform: translateY` 不存在。
+- gate：补进 `docs/feature-gates.md` `terminal.keyboard_ime` 条款。
+
+### 2. daemon 输入延迟
+- 现象：连击输入时后半段延迟明显（daemon 卡顿）。
+- 真因：`terminal-bridge-runtime.ts` 里 input lane 等 `connectionInputChains` 前一个 input 完成后才进 `handleMessage`。同时 `terminal-control-runtime.ts` 里 `liveMirrorInputChains` 也按 mirror 串行 tmux write。两层串行叠加，每条 input 都要等上一条 tmux `send-keys` 返回才放行下一条。
+- 修复：bridge input lane 只保留 attach barrier，不再串自己；attch lane 仍然等所有 input 清空，保证会话接入与输入顺序正确。mirror 串行保留，避免 tmux write 失序。
+- 红测：`terminal-bridge-runtime.test.ts` 新增 `lets a fresh input start while an older input is still awaiting its own write path`：先后发 input 'a' 与 'b'，'a' 故意挂起，'b' 必须立刻执行；'a' 释放后才收到 'a:end'。
+- gate：补进 `docs/feature-gates.md` `terminal.daemon_input` 条款。
+
+### 3. function map 同步
+- `docs/function-map.md` 更新两条 owner 描述：IME owner 加 "stage shell visual lift even when quickbar editor owns DOM focus"；daemon_input owner 加 "per-transport input lane bypass of older input work while attach barriers still hold"。
+- 不新增 feature_id，沿用 `terminal.keyboard_ime` / `terminal.daemon_input`。
+
+### 4. 验证
+- `pnpm run type-check`：clean
+- 组合 gate：`src/pages/TerminalPage.android-ime.test.tsx`、`src/components/terminal/system-copy-state-machine.test.tsx`、`src/components/terminal/system-copy-longpress-regression.test.tsx`、`src/components/TerminalView.selection-guard.test.tsx`、`src/server/terminal-bridge-runtime.test.ts`、`src/server/server.bridge-runtime-truth.test.ts`、`src/server/terminal-message-runtime.test.ts`、`src/server/server.control-truth.test.ts`，`69/69` PASS。
+
+### 5. 产物
+- `android/update-dist/zterm-0.1.3.1810.apk`
+- `~/.wterm/updates/zterm-0.1.3.1810.apk`
+- sha256 `c21d3b035086f17c0cc06e6336855365e83bf49cccfe452504b7cf9640d0ad4b`
+- versionCode `1031810`
+
+### 6. 残余风险
+- 没在真机拉过一次冒烟，IME 抬升和 input lane 仅过 jsdom 单测。如果现场出现新的输入卡顿，可能落在 mirror / buffer 同步那条线，需要继续看 `terminal-mirror-runtime` / `terminal-buffer-runtime`。
+- bridge runtime 的 input lane 已经允许 "bypass older input work on the same transport"，但全局顺序保证只覆盖 attach barrier 不破坏。如果业务侧后续需要 "严格按到达顺序写入"，要再开一条保守模式。

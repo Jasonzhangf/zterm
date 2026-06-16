@@ -92,7 +92,7 @@ export function createTerminalBridgeRuntime(
     const previous = lane === 'attach'
       ? Promise.all([attachPrevious, inputPrevious, messagePrevious]).then(() => undefined)
       : lane === 'input'
-        ? Promise.all([attachPrevious, inputPrevious]).then(() => undefined)
+        ? Promise.all([attachPrevious]).then(() => undefined)
         : Promise.all([attachPrevious, messagePrevious]).then(() => undefined);
     const next = previous
       .catch(() => undefined)
@@ -109,7 +109,11 @@ export function createTerminalBridgeRuntime(
       return;
     }
     if (lane === 'input') {
-      settleConnectionChain(connectionInputChains, connection.id, next);
+      const aggregate = Promise.all([
+        inputPrevious.catch(() => undefined),
+        next.catch(() => undefined),
+      ]).then(() => undefined);
+      settleConnectionChain(connectionInputChains, connection.id, aggregate);
       return;
     }
     settleConnectionChain(connectionMessageChains, connection.id, next);
