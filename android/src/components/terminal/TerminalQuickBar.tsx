@@ -3590,11 +3590,5 @@ function TerminalQuickBarComponent({
   );
 }
 
-export const TerminalQuickBar = memo(TerminalQuickBarComponent, (prevProps, nextProps) => {
-if (prevProps.copyModeActive !== nextProps.copyModeActive) {
-  console.log('[QuickBar.memo] copyModeActive changed:', prevProps.copyModeActive, '->', nextProps.copyModeActive);
-  return false;
-}
-return true;
-});
+export const TerminalQuickBar = memo(TerminalQuickBarComponent);
 TerminalQuickBar.displayName = "TerminalQuickBar";
