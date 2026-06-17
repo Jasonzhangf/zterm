@@ -38,6 +38,9 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
   - `docs/feature-registry.json`
   - `docs/function-map.md`
   - `docs/feature-gates.md`
+  - `docs/wiki/daemon.md` — daemon runtime owner walkthrough for new features touching server
+  - `docs/wiki/cli.md` — CLI command contract for new public subcommands
+  - `docs/wiki/mainline-source.md` — source ownership for Android / daemon / CLI
 - 任何功能修复或重构必须先完成：
   1. 定位 `feature_id`
   2. 确认唯一 owner

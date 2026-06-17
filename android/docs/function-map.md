@@ -20,6 +20,37 @@ Before changing a feature, locate its `feature_id`, read its owner paths, and ru
 | `terminal.shell_actions` | `src/pages/useTerminalPageShellActionsRuntime.ts` | quick picker, tab manager scope, viewport mode routing | `useTerminalPageShellActionsRuntime.test.tsx` |
 | `connections.history_projection` | `src/lib/connections-server-groups.ts`; `src/hooks/useSessionHistoryStorage.ts` | connections projection and history storage | open-tab/history truth; connections page/group tests |
 | `daemon.file_transfer` | `src/lib/file-transfer-message-runtime.ts`; daemon control runtime | file transfer message runtime, sheet UI, daemon file-transfer runtime | `FileTransferSheet.test.tsx`; file-transfer truth gate |
+| `daemon.runtime_entry` | `src/server/server.ts`; `src/server/daemon-config.ts`; `src/server/daemon-runtime-truth/*` | tmux/transport/mirror/control/schedule/relay/file-transfer orchestrator launched by `scripts/zterm-daemon.sh run`; must remain the only long-running daemon process | `src/server/server.daemon-runtime-truth.test.ts`; `src/server/server.core-support-truth.test.ts`; `src/server/server.http-truth.test.ts`; `src/server/server.debug-truth.test.ts` |
+| `daemon.cli_shell` | `scripts/zterm-daemon.sh`; `scripts/native/zterm-daemon.swift`; `scripts/install-global-daemon-cli.sh`; `scripts/prepare-global-daemon-release.sh`; `scripts/prepare-daemon-npm-package.mjs` | bash CLI surface (`run/start/stop/restart/status/configure-relay/install-service/uninstall-service/service-status`), launchd bootstrap/teardown, npm/global package layout, native screenshot binary; command table is the public contract | `src/lib/function-wiki-truth.test.ts` |
+| `daemon.cli_node` | `scripts/runtime-debug-remote.ts`; `scripts/collect-runtime-audit.ts`; `scripts/analyze-runtime-debug.ts`; `scripts/terminal-real-device-evidence.ts`; `scripts/traversal-relay-local-smoke.ts`; `scripts/daemon-mirror-close-loop.ts` | node CLI helpers that share `parseArgs`/`parseCli` helpers and run outside the daemon process | `src/lib/function-wiki-truth.test.ts`; `test:terminal:regression` |
+| `daemon.support` | `scripts/setup-android-java.sh`; `scripts/ensure-pnpm-install.sh`; `scripts/verify-release-assets.mjs`; `scripts/verify-relay-server-package.mjs`; `scripts/check-wterm-runtime-published.mjs`; `scripts/check-no-source-js-pollution.mjs` | release/install/build prerequisites and verifiers | `src/lib/function-wiki-truth.test.ts`; `release:verify` |
+| `mainline_source.android` | `android/native/android/app/src/main/**`; `android/capacitor.config.ts`; `android/vite.config.ts`; `android/src/main.tsx`; `android/src/App.tsx`; `android/src/components/TerminalView.tsx`; `android/src/pages/TerminalPage.tsx` | the Android render path; every file in this list is a published user surface | `test:feature-registry`; `docs/architecture.md` cross-reference gate |
+| `mainline_source.daemon` | `src/server/server.ts`; `src/server/terminal-runtime.ts`; `src/server/terminal-bridge-runtime.ts`; `src/server/terminal-message-runtime.ts`; `src/server/terminal-mirror-runtime.ts`; `src/server/terminal-control-runtime.ts`; `src/server/terminal-schedule-runtime.ts`; `src/server/terminal-file-transfer-runtime.ts`; `src/server/remote-screenshot-daemon.ts` | the daemon process mainline; wiki must draw a request path anchored at `server.ts` | `src/server/server.daemon-runtime-truth.test.ts`; `src/lib/function-wiki-truth.test.ts` |
+| `mainline_source.cli` | `scripts/zterm-daemon.sh`; `scripts/install-global-daemon-cli.sh`; `scripts/prepare-global-daemon-release.sh`; `scripts/prepare-daemon-npm-package.mjs`; `scripts/prepare-relay-server-npm-package.mjs` | the CLI release mainline; wiki must list the install paths, support script names, and the global bin name `zterm-daemon` (legacy alias `wterm`) | `src/lib/function-wiki-truth.test.ts`; `release:verify` |
+
+Rules:
+
+- One feature has one owner surface. Shared helpers are allowed only when the registry names them as allowed paths.
+- Forbidden paths are hard boundaries. Do not patch behavior there to make a feature pass indirectly.
+- Required gates are the minimum verification stack, not a replacement for broader regression when the change has wider impact.
+
+## Daemon & CLI Owner Map
+
+| command / entry | owner | allowed change surface | required gate source |
+| --- | --- | --- | --- |
+| `zterm-daemon.sh run` | `scripts/zterm-daemon.sh` -> `src/server/server.ts` | tsx entry, `~/.wterm/daemon-runtime/server.cjs` staging, `node-pty` + `@roamhq/wrtc` vendor, `ZTERM_DAEMON_NATIVE` handoff | `src/server/server.daemon-runtime-truth.test.ts`; `daemon:install-global` |
+| `zterm-daemon.sh start/stop/restart/status` | `scripts/zterm-daemon.sh` (`start_service` / `stop_service` / `restart_service` / `status*`) | launchd label `com.zterm.android.zterm-daemon`; legacy `com.zterm.android.daemon` and `com.wterm.mobile.daemon` cleanup; `wait_for_service_ready` port check; pid file `~/.wterm/run/zterm-daemon.pid` | `scripts/zterm-daemon.sh` smoke; `daemon:install-service` |
+| `zterm-daemon.sh configure-relay` | `scripts/zterm-daemon.sh` (`configure_relay`) | writes `~/.wterm/config.json -> mobile.relay`; required flags `--relay-url/--username/--password\|--password-stdin\|--password-env/--host-id`; optional `--device-id/--device-name/--restart-service` | `src/server/daemon-config.test.ts` |
+| `zterm-daemon.sh install-service` | `scripts/zterm-daemon.sh` (`install_service`) | prime macOS TCC preflight (file access + Screen Recording), install/refresh plist, `bootstrap_service`, port ready gate | `src/server/launch-agent-plist.test.ts`; `daemon:install-service` |
+| `zterm-daemon.sh uninstall-service` | `scripts/zterm-daemon.sh` (`uninstall_service`) | launchd `bootout`, remove plist, remove legacy agents | `src/server/launch-agent-plist.test.ts` |
+| `zterm-daemon.sh service-status` | `scripts/zterm-daemon.sh` (`status_service`) | `launchctl print` snapshot; reports `active count` + `last exit code` | `daemon:service-status` |
+| `pnpm run daemon:mirror:close-loop` | `scripts/daemon-mirror-close-loop.ts` | tmux oracle + daemon runtime + client mirror + renderer close loop; required by `test:terminal:regression` | `scripts/daemon-mirror-close-loop.ts` self-test |
+| `pnpm run daemon:runtime:analyze` / `:remote` / `:capture` | `scripts/analyze-runtime-debug.ts`; `scripts/runtime-debug-remote.ts`; `scripts/collect-runtime-audit.ts` | shared `parseArgs`/`parseCli` helper; reads `/debug/runtime`, `/debug/runtime/control`, `/debug/runtime/logs`; never embeds payload | `terminal-debug-runtime.test.ts`; `server.debug-truth.test.ts` |
+| `pnpm run build:android` | `scripts/build-android-debug.sh` | Vite build + cap sync + Gradle `:app:assembleDebug` + `prepare-update-bundle`; sha256 + `update-dist/latest.json` + `~/.wterm/updates/` | `test:feature-registry`; `prebuild` runs `test:terminal:regression` |
+
+## Mainline Source Index
+
+`docs/wiki/mainline-source.md` is the canonical source for "where does this user-visible surface live". It must stay in lockstep with this map. The `src/lib/function-wiki-truth.test.ts` gate fails when the wiki, the registry, and the mainline index disagree.
 
 Rules:
 

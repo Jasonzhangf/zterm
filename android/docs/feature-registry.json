@@ -445,6 +445,198 @@
         "docs/architecture.md",
         "docs/feature-gates.md"
       ]
+    },
+    {
+      "feature_id": "daemon.runtime_entry",
+      "owners": [
+        "src/server/server.ts",
+        "src/server/daemon-config.ts",
+        "src/server/terminal-daemon-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/server.ts",
+        "src/server/daemon-config.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-schedule-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/runtime-debug-store.ts",
+        "src/server/relay-client.ts",
+        "src/server/rtc-bridge.ts",
+        "src/server/remote-screenshot-daemon.ts"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/server/server.core-support-truth.test.ts",
+        "src/server/server.http-truth.test.ts",
+        "src/server/server.debug-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/daemon.md",
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md",
+        "docs/dev-workflow.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.cli_shell",
+      "owners": [
+        "scripts/zterm-daemon.sh"
+      ],
+      "allowed_paths": [
+        "scripts/zterm-daemon.sh",
+        "scripts/native/zterm-daemon.swift",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh",
+        "scripts/prepare-daemon-npm-package.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts",
+        "src/server/launch-agent-plist.test.ts",
+        "src/server/daemon-config.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/wiki/mainline-source.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.cli_node",
+      "owners": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts"
+      ],
+      "allowed_paths": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts",
+        "scripts/terminal-real-device-evidence.ts",
+        "scripts/traversal-relay-local-smoke.ts",
+        "scripts/daemon-mirror-close-loop.ts",
+        "scripts/build-function-wiki.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.support",
+      "owners": [
+        "scripts/setup-android-java.sh",
+        "scripts/ensure-pnpm-install.sh",
+        "scripts/verify-release-assets.mjs"
+      ],
+      "allowed_paths": [
+        "scripts/setup-android-java.sh",
+        "scripts/ensure-pnpm-install.sh",
+        "scripts/verify-release-assets.mjs",
+        "scripts/verify-relay-server-package.mjs",
+        "scripts/check-wterm-runtime-published.mjs",
+        "scripts/check-no-source-js-pollution.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.android",
+      "owners": [
+        "native/android/app/src/main/AndroidManifest.xml"
+      ],
+      "allowed_paths": [
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/assets/"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.daemon",
+      "owners": [
+        "src/server/server.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/server.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-schedule-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-transport-runtime.ts",
+        "src/server/relay-client.ts",
+        "src/server/remote-screenshot-daemon.ts"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/daemon.md",
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.cli",
+      "owners": [
+        "scripts/zterm-daemon.sh",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh"
+      ],
+      "allowed_paths": [
+        "scripts/zterm-daemon.sh",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh",
+        "scripts/prepare-daemon-npm-package.mjs",
+        "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/build-function-wiki.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/wiki/mainline-source.md",
+        "docs/function-map.md"
+      ]
     }
   ]
 }
