@@ -889,6 +889,13 @@ describe('SessionContext websocket dynamic refresh', () => {
 
   beforeEach(() => {
     cleanup();
+    // Reset mock instances BEFORE stubbing to ensure clean slate for THIS test file.
+    // This prevents cross-file bleed: other test files may not stub WebSocket to
+    // MockWebSocket, so their WebSocket usage would go to the real global and bypass
+    // MockWebSocket.instances tracking — but if they DO stub, their instances would
+    // otherwise accumulate here.
+    MockWebSocket.instances.length = 0;
+    MockWebSocket.controlInstances.length = 0;
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -920,6 +927,10 @@ describe('SessionContext websocket dynamic refresh', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    // Double-reset after unstub: ensures any late async callbacks that fire during
+    // teardown don't re-populate instances for the NEXT file in the run queue.
+    MockWebSocket.instances.length = 0;
+    MockWebSocket.controlInstances.length = 0;
     globalThis.WebSocket = originalWebSocket;
   });
 

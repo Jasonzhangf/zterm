@@ -19,6 +19,7 @@ find "$ROOT_DIR/native/android/capacitor-cordova-android-plugins/src/main" \
   -delete
 
 cd "$ROOT_DIR/native/android"
+./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources
 ./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug
 
 cd "$ROOT_DIR"

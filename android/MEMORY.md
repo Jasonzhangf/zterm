@@ -382,3 +382,14 @@ silently returns 0 when viewport metrics are stable.
 
 ### APK delivered
 `0.1.3.1823` / `1031823` / sha256 `21d48400c53326db9fe32ebb931274254bdd9a68b3175a02c1e27fff451b3557`
+
+## 2026-06-17 Daemon live input must batch per mirror burst writes
+
+- Do not reintroduce per-key `tmux send-keys` serial chains for live terminal input. The verified fix replaces `liveMirrorInputChains` with `liveMirrorInputBatches`: same-mirror same-microtask string input is coalesced into one `send-keys -l -- <payload>` while stale queued items are filtered by `shouldWrite` before writing.
+- Gates: `terminal-control-runtime.input-queue.test.ts` must cover burst coalescing, append-enter boundary preservation, and stale-item exclusion; `server.control-truth.test.ts` must reject the old direct `await runTmuxAsync(...payload)` implementation inside `enqueueLiveMirrorInput`.
+- Verified delivery: daemon staged runtime contains `liveMirrorInputBatches`; `daemon-mirror-lab --case=local-input-echo` PASS; APK `0.1.3.1833` delivered to `~/.wterm/updates/` with sha256 `e5d111e6df53d7a586caf66ec98e6a3eda4e5e7dcee5e1424a797a1a19a0d81c`.
+
+## 2026-06-17 Android build must prewarm Cordova plugin local resources
+
+- If `./scripts/build-android-debug.sh` fails in full assemble at `:capacitor-cordova-android-plugins:parseDebugLocalResources` with `!directory.isDirectory()` while the same task succeeds standalone, treat it as the empty Cordova plugin resource project not being materialized before assemble consumes it.
+- Standard build now runs `./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources` before `processDebugManifest assembleDebug`; do not remove this prewarm unless Gradle/AGP is upgraded and the full standard build is proven stable without it.

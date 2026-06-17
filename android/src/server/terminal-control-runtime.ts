@@ -32,7 +32,17 @@ export interface TerminalControlRuntime {
 export function createTerminalControlRuntime(
   deps: TerminalControlRuntimeDeps,
 ): TerminalControlRuntime {
-  const liveMirrorInputChains = new Map<string, Promise<boolean>>();
+  const liveMirrorInputBatches = new Map<string, {
+    items: Array<{
+      payload: string;
+      appendEnter: boolean;
+      shouldWrite?: () => boolean;
+      resolve: (value: boolean) => void;
+      reject: (reason?: unknown) => void;
+    }>;
+    scheduled: boolean;
+    flushing: boolean;
+  }>();
 
   function cleanEnv(): Record<string, string> {
     const env: Record<string, string> = {};
@@ -157,6 +167,121 @@ export function createTerminalControlRuntime(
     return true;
   }
 
+  async function flushPendingLiveMirrorInput(mirrorKey: string) {
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      return;
+    }
+    if (pending.flushing) {
+      return;
+    }
+    pending.scheduled = false;
+    pending.flushing = true;
+    const items = pending.items.splice(0);
+    const mirror = deps.mirrors.get(mirrorKey);
+    if (!mirror || mirror.lifecycle !== 'ready') {
+      for (const item of items) {
+        item.resolve(false);
+      }
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+      return;
+    }
+
+    const writableItems: typeof items = [];
+    for (const item of items) {
+      if (item.shouldWrite && !item.shouldWrite()) {
+        item.resolve(false);
+        continue;
+      }
+      writableItems.push(item);
+    }
+
+    if (writableItems.length === 0) {
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+      return;
+    }
+
+    const groups: Array<{
+      payload: string;
+      appendEnter: boolean;
+      items: typeof writableItems;
+    }> = [];
+    let groupPayload = '';
+    let groupItems: typeof writableItems = [];
+    for (const item of writableItems) {
+      groupPayload += item.payload;
+      groupItems.push(item);
+      if (item.appendEnter) {
+        groups.push({ payload: groupPayload, appendEnter: true, items: groupItems });
+        groupPayload = '';
+        groupItems = [];
+      }
+    }
+    if (groupItems.length > 0) {
+      groups.push({ payload: groupPayload, appendEnter: false, items: groupItems });
+    }
+
+    const unresolved = new Set(writableItems);
+    const resolveGroup = (group: typeof groups[number], value: boolean) => {
+      for (const item of group.items) {
+        unresolved.delete(item);
+        item.resolve(value);
+      }
+    };
+    const isGroupWritable = (group: typeof groups[number]) =>
+      group.items.every((item) => !item.shouldWrite || item.shouldWrite());
+
+    try {
+      for (const group of groups) {
+        if (!isGroupWritable(group)) {
+          resolveGroup(group, false);
+          continue;
+        }
+        if (group.payload) {
+          await runTmuxAsync(['send-keys', '-t', mirror.sessionName, '-l', '--', group.payload]);
+        }
+        if (group.appendEnter) {
+          if (!isGroupWritable(group)) {
+            resolveGroup(group, false);
+            continue;
+          }
+          await runTmuxAsync(['send-keys', '-t', mirror.sessionName, 'Enter']);
+        }
+        resolveGroup(group, true);
+      }
+    } catch (error) {
+      for (const item of unresolved) {
+        item.reject(error);
+      }
+    } finally {
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+    }
+  }
+
+  function schedulePendingLiveMirrorInput(mirrorKey: string) {
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending || pending.scheduled || pending.flushing) {
+      return;
+    }
+    pending.scheduled = true;
+    queueMicrotask(() => flushPendingLiveMirrorInput(mirrorKey));
+  }
+
   function enqueueLiveMirrorInput(
     sessionName: string,
     payload: string,
@@ -164,33 +289,26 @@ export function createTerminalControlRuntime(
     shouldWrite?: () => boolean,
   ) {
     const mirrorKey = deps.getMirrorKey(sessionName);
-    const previous = liveMirrorInputChains.get(mirrorKey) || Promise.resolve(true);
-    const next = previous
-      .catch(() => false)
-      .then(async () => {
-        const mirror = deps.mirrors.get(mirrorKey);
-        if (!mirror || mirror.lifecycle !== 'ready') {
-          return false;
-        }
-        if (shouldWrite && !shouldWrite()) {
-          return false;
-        }
-        await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload]);
-        if (appendEnter) {
-          if (shouldWrite && !shouldWrite()) {
-            return false;
-          }
-          await runTmuxAsync(['send-keys', '-t', sessionName, 'Enter']);
-        }
-        return true;
-      })
-      .finally(() => {
-        if (liveMirrorInputChains.get(mirrorKey) === next) {
-          liveMirrorInputChains.delete(mirrorKey);
-        }
+    let pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      pending = {
+        items: [],
+        scheduled: false,
+        flushing: false,
+      };
+      liveMirrorInputBatches.set(mirrorKey, pending);
+    }
+    const result = new Promise<boolean>((resolve, reject) => {
+      pending?.items.push({
+        payload,
+        appendEnter,
+        shouldWrite,
+        resolve,
+        reject,
       });
-    liveMirrorInputChains.set(mirrorKey, next);
-    return next;
+    });
+    schedulePendingLiveMirrorInput(mirrorKey);
+    return result;
   }
 
   function listTmuxSessions() {

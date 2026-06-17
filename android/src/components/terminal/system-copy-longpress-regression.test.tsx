@@ -42,4 +42,28 @@ describe('system copy long-press regression', () => {
     expect(row.getAttribute('data-terminal-copy-mode')).toBe('true');
     expect(container.querySelector('style')?.textContent || '').toContain('-webkit-touch-callout:none');
   });
+
+  it('copy mode installs native non-passive capture guards for Android WebView long press', () => {
+    const addSpy = vi.spyOn(HTMLElement.prototype, 'addEventListener');
+    const { unmount } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
+
+    expect(addSpy).toHaveBeenCalledWith(
+      'touchstart',
+      expect.any(Function),
+      expect.objectContaining({ capture: true, passive: false }),
+    );
+    expect(addSpy).toHaveBeenCalledWith(
+      'contextmenu',
+      expect.any(Function),
+      expect.objectContaining({ capture: true, passive: false }),
+    );
+    expect(addSpy).toHaveBeenCalledWith(
+      'selectstart',
+      expect.any(Function),
+      expect.objectContaining({ capture: true, passive: false }),
+    );
+
+    unmount();
+    addSpy.mockRestore();
+  });
 });

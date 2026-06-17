@@ -3145,3 +3145,13 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
 - update-dist: `android/update-dist/zterm-0.1.3.1827.apk`
 - release-dist: `android/release-dist/zterm-latest-debug.apk`
 - daemon updates dir: `~/.wterm/updates/zterm-0.1.3.1827.apk`
+
+## 2026-06-17 daemon live input batching closeout
+
+- 现象：用户输入已经到 daemon，但单 pane/多 pane 下仍出现分钟级输入延迟，杀掉客户端后旧输入仍可能继续排队。
+- 根因：`terminal-control-runtime.ts` 仍按 mirror 维护 `liveMirrorInputChains`，每个 literal input 都等待前一个 `tmux send-keys` 子进程完成；高频按键被放大成 per-key spawn 串行队列。
+- 修复：改为 `liveMirrorInputBatches`，同 mirror 同 microtask burst 的 string input 合并成一次 `tmux send-keys -l -- <payload>`；过期 queued item 仍由 `shouldWrite` 显式 drop，不进入合并 payload。
+- 红测：`terminal-control-runtime.input-queue.test.ts` 锁住 `a/b/c -> abc` 单次 tmux write，以及 stale queued input 不进入合并写入；`server.control-truth.test.ts` 禁止恢复旧 direct await per-key write。
+- 附带构建修复：`cap sync` 后 Cordova 空资源库在 full assemble 中两次触发 `:capacitor-cordova-android-plugins:parseDebugLocalResources -> !directory.isDirectory()`；单独跑该任务成功，确认是 assemble 阶段资源任务时序/缓存问题。`build-android-debug.sh` 现先串行预跑 `:capacitor-cordova-android-plugins:parseDebugLocalResources`，再 assemble，避免标准升级包构建被卡住。
+- 验证：targeted server/input suites 34/34 PASS；`pnpm run type-check` PASS；daemon staged/restart 后 `daemon-mirror-lab --case=local-input-echo` PASS；标准 `./scripts/build-android-debug.sh` PASS 并发布 `0.1.3.1833`。
+- 产物：`~/.wterm/updates/zterm-0.1.3.1833.apk`，sha256 `e5d111e6df53d7a586caf66ec98e6a3eda4e5e7dcee5e1424a797a1a19a0d81c`。

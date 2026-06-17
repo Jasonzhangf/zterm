@@ -58,6 +58,25 @@ describe('system copy state machine guards', () => {
     vi.useRealTimers();
   });
 
+  it('entry: copy mode host capture prevents native callout without blocking row touch long-press', () => {
+    vi.useFakeTimers();
+    const onLongPressRow = vi.fn();
+    const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={onLongPressRow} />);
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    fireEvent.touchStart(row, {
+      touches: [{ clientX: 18, clientY: 22 }],
+      changedTouches: [{ clientX: 18, clientY: 22 }],
+    });
+
+    act(() => vi.advanceTimersByTime(430));
+    expect(onLongPressRow).toHaveBeenCalledWith('s1', 0, 18, 22);
+
+    fireEvent.contextMenu(row);
+    expect(host.getAttribute('data-copy-mode')).toBe('true');
+    vi.useRealTimers();
+  });
+
   it('expand-selection: row is app-selectable in copy mode and blocks system selection', () => {
     const { container } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
     const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;

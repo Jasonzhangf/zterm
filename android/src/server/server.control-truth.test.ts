@@ -55,8 +55,9 @@ describe('server control runtime truth gates', () => {
     expect(runBlock).toContain("spawnSync(deps.tmuxBinary, args");
     expect(runBlock).toContain("stderr.includes('no server running on') && args[0] === 'list-sessions'");
     expect(mirrorWriteBlock).toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
-    expect(source).toContain('const liveMirrorInputChains = new Map<string, Promise<boolean>>()');
-    expect(enqueueWriteBlock).toContain("await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload])");
+    expect(source).toContain('const liveMirrorInputBatches = new Map<string, {');
+    expect(enqueueWriteBlock).toContain('schedulePendingLiveMirrorInput(mirrorKey)');
+    expect(enqueueWriteBlock).not.toContain("await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(sessionsBlock).toContain("runTmux(['list-sessions', '-F', '#S'])");
     expect(sessionsBlock).toContain('!deps.hiddenTmuxSessions.has(line)');
   });
