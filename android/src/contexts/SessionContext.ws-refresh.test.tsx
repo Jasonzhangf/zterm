@@ -1015,6 +1015,11 @@ describe('SessionContext websocket dynamic refresh', () => {
       await act(async () => {
         await Promise.resolve();
       });
+      // After the per-session debounce, the global RAF batch still needs one frame to flush.
+      await vi.advanceTimersByTimeAsync(16);
+      await act(async () => {
+        await Promise.resolve();
+      });
       expect(screen.getByTestId('render-session-lines').textContent).toContain('stable-line-001');
       expect(screen.getByTestId('render-session-revision').textContent).toBe('1');
     } finally {

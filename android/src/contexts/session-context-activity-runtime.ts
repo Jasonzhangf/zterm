@@ -37,6 +37,25 @@ export function probeOrReconnectStaleSessionTransportRuntime(options: {
 }) {
   const lastActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
   const lastProbeAt = options.refs.staleTransportProbeAtRef.current.get(options.sessionId) || 0;
+
+  // P3: active-reentry / explicit-resume should skip the probe path when we have
+  // very recent server activity. This avoids an extra probe -> wait -> reconnect
+  // window on healthy tab switches.
+  const freshActivityMs = lastActivityAt > 0 ? Math.max(0, Date.now() - lastActivityAt) : Number.POSITIVE_INFINITY;
+  const RECENT_ACTIVITY_SKIP_PROBE_MS = 1000; // < 2x typical headStalePingMs (500ms)
+  if (
+    (options.reason === 'active-reentry' || options.reason === 'explicit-resume')
+    && freshActivityMs < RECENT_ACTIVITY_SKIP_PROBE_MS
+  ) {
+    options.runtimeDebug(`session.transport.${options.reason}.probe-skipped-fresh-activity`, {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      lastServerActivityAt: lastActivityAt,
+      freshActivityMs,
+    });
+    return 'recovered' as const;
+  }
+
   if (lastProbeAt > 0 && lastActivityAt > lastProbeAt) {
     options.runtimeDebug(`session.transport.${options.reason}.probe-recovered`, {
       sessionId: options.sessionId,

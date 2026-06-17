@@ -343,12 +343,15 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses the single timer scheduler even when requestAnimationFrame exists', async () => {
+  it('uses requestAnimationFrame after the per-session debounce when requestAnimationFrame exists', async () => {
     vi.useFakeTimers();
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     try {
-      const rafSpy = vi.fn((_callback: FrameRequestCallback) => 1);
+      const rafSpy = vi.fn((callback: FrameRequestCallback) => {
+        setTimeout(() => callback(Date.now()), 0);
+        return 1;
+      });
       const cafSpy = vi.fn();
       window.requestAnimationFrame = rafSpy;
       window.cancelAnimationFrame = cafSpy;
@@ -374,6 +377,8 @@ describe('session-render-gate', () => {
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(1);
+      expect(rafSpy).toHaveBeenCalledTimes(1);
+      await vi.runAllTimersAsync();
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
       expect(cafSpy).not.toHaveBeenCalled();
@@ -384,7 +389,7 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses timer scheduling when requestAnimationFrame is unavailable', async () => {
+  it('uses timer fallback when requestAnimationFrame is unavailable', async () => {
     vi.useFakeTimers();
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -413,7 +418,8 @@ describe('session-render-gate', () => {
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
 
-      await vi.advanceTimersByTimeAsync(1);
+      // debounce timer fires (66ms) -> RAF fallback (16ms) -> flush at 82ms total
+      await vi.advanceTimersByTimeAsync(17);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
     } finally {
@@ -423,7 +429,7 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses 16ms fast lane when render cadence resolver returns 16ms', async () => {
+  it('uses 16ms fast lane before RAF enrollment when render cadence resolver returns 16ms', async () => {
     vi.useFakeTimers();
     try {
       const liveBufferStore = createSessionBufferStore();
@@ -443,9 +449,96 @@ describe('session-render-gate', () => {
 
       await vi.advanceTimersByTimeAsync(15);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
-      await vi.advanceTimersByTimeAsync(1);
+      // debounce fires at 16ms, then RAF callback runs (jsdom default uses setTimeout(16))
+      await vi.runAllTimersAsync();
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['fast'], 1).lines);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('P4 global RAF coalescing', () => {
+  it('uses a single requestAnimationFrame tick for multiple dirty sessions in the same frame', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+      const renderStore = gate.getRenderStore();
+
+      // Install RAF spy. Current implementation uses per-session setTimeout only,
+      // so this test fails until a global RAF coalescing layer is added.
+      const rafSpy = vi.fn((cb: FrameRequestCallback) => {
+        setTimeout(() => cb(Date.now()), 0);
+        return 1;
+      });
+      const originalRaf = globalThis.requestAnimationFrame;
+      // @ts-ignore
+      globalThis.requestAnimationFrame = rafSpy;
+      try {
+        for (const sessionId of ['s1', 's2', 's3', 's4']) {
+          liveBufferStore.setBuffer(sessionId, makeBuffer([sessionId], 1));
+          liveHeadStore.setHead(sessionId, { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
+          gate.scheduleCommit(sessionId);
+        }
+
+        await flushScheduledRenderCommit();
+
+        // Expect exactly one RAF for the batch, not 4 per-session timers.
+        expect(rafSpy).toHaveBeenCalledTimes(1);
+        expect(recordSessionRenderCommit).toHaveBeenCalledTimes(4);
+        expect(renderStore.getSnapshot('s1').buffer.lines).toEqual(makeBuffer(['s1'], 1).lines);
+        expect(renderStore.getSnapshot('s4').buffer.lines).toEqual(makeBuffer(['s4'], 1).lines);
+      } finally {
+        globalThis.requestAnimationFrame = originalRaf;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('coalesces follow-up dirty writes into the next RAF only once', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const recordSessionRenderCommit = vi.fn();
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
+
+      const rafSpy = vi.fn((cb: FrameRequestCallback) => {
+        setTimeout(() => cb(Date.now()), 0);
+        return 1;
+      });
+      const originalRaf = globalThis.requestAnimationFrame;
+      // @ts-ignore
+      globalThis.requestAnimationFrame = rafSpy;
+      try {
+        liveBufferStore.setBuffer('s1', makeBuffer(['one'], 1));
+        liveHeadStore.setHead('s1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
+        gate.scheduleCommit('s1');
+        liveBufferStore.setBuffer('s2', makeBuffer(['two'], 1));
+        liveHeadStore.setHead('s2', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
+        gate.scheduleCommit('s2');
+
+        await flushScheduledRenderCommit();
+
+        // New dirty after first frame
+        liveBufferStore.setBuffer('s1', makeBuffer(['one', 'one'], 2));
+        liveHeadStore.setHead('s1', { daemonHeadRevision: 2, daemonHeadEndIndex: 2 });
+        gate.scheduleCommit('s1');
+        liveBufferStore.setBuffer('s2', makeBuffer(['two', 'two'], 2));
+        liveHeadStore.setHead('s2', { daemonHeadRevision: 2, daemonHeadEndIndex: 2 });
+        gate.scheduleCommit('s2');
+
+        await flushScheduledRenderCommit();
+
+        expect(rafSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        globalThis.requestAnimationFrame = originalRaf;
+      }
     } finally {
       vi.useRealTimers();
     }

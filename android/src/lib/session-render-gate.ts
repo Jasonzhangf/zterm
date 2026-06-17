@@ -277,22 +277,70 @@ export function createSessionRenderGate(options: {
     }
   };
 
+  /**
+   * P4: global RAF coalescing layer.
+   *
+   * We keep the existing per-session debounce contract (`resolveRenderCommitMs`)
+   * so each session still chooses its own coalescing window. Once that window
+   * expires, the session is enrolled into a single shared RAF batch so all dirty
+   * sessions flush in the same browser frame.
+   */
+  let rafTickScheduled = false;
+  let rafFallbackTimer: number | null = null;
+  const pendingRafSessions = new Set<string>();
+
+  const runRafFrame = () => {
+    rafTickScheduled = false;
+    if (rafFallbackTimer !== null) {
+      clearTimeout(rafFallbackTimer);
+      rafFallbackTimer = null;
+    }
+    const toFlush = Array.from(pendingRafSessions);
+    pendingRafSessions.clear();
+    for (const sessionId of toFlush) {
+      const runtime = runtimes.get(sessionId);
+      if (!runtime) {
+        continue;
+      }
+      flush(sessionId);
+      if (runtime.dirty && !runtime.scheduled) {
+        scheduleFlush(sessionId);
+      }
+    }
+  };
+
+  const scheduleRafFrame = () => {
+    if (rafTickScheduled) {
+      return;
+    }
+    rafTickScheduled = true;
+    const raf =
+      typeof globalThis !== 'undefined' && typeof (globalThis as any).requestAnimationFrame === 'function'
+        ? (cb: FrameRequestCallback) => (globalThis as any).requestAnimationFrame(cb)
+        : null;
+    if (raf) {
+      raf(runRafFrame);
+    } else {
+      rafFallbackTimer = setTimeout(runRafFrame, 16) as unknown as number;
+    }
+  };
+
+  const enrollSessionIntoRafBatch = (sessionId: string) => {
+    const runtime = ensureRuntime(sessionId);
+    clearScheduledTimer(runtime);
+    runtime.scheduled = false;
+    pendingRafSessions.add(sessionId);
+    scheduleRafFrame();
+  };
+
   const scheduleFlush = (sessionId: string) => {
     const runtime = ensureRuntime(sessionId);
     if (runtime.scheduled) {
       return;
     }
     runtime.scheduled = true;
-    const runFlush = () => {
-      clearScheduledTimer(runtime);
-      runtime.scheduled = false;
-      flush(sessionId);
-      if (runtime.dirty && !runtime.scheduled) {
-        scheduleFlush(sessionId);
-      }
-    };
     const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.(sessionId) || 33));
-    runtime.frameTimerId = setTimeout(runFlush, renderCommitMs) as unknown as number;
+    runtime.frameTimerId = setTimeout(() => enrollSessionIntoRafBatch(sessionId), renderCommitMs) as unknown as number;
   };
 
   const scheduleCommit = (sessionId: string) => {

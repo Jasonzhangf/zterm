@@ -84,6 +84,13 @@ export interface TerminalMirrorRuntime {
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
+  resolveMirrorLiveSyncDelayForSubscriber: (
+    mirror: SessionMirror,
+    sessionId: string,
+    sessions: Map<string, TerminalSession>,
+    now: number,
+    requestedDelayMs?: number,
+  ) => { delayMs: number; lane: string; reason: string };
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize: (
@@ -96,6 +103,38 @@ export interface TerminalMirrorRuntime {
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
+
+export function resolvePerSubscriberTransportSnapshot(
+  sessions: Map<string, TerminalSession>,
+  sessionId: string,
+) {
+  const session = sessions.get(sessionId);
+  return readTerminalTransportBackpressureSnapshot(session?.transport);
+}
+
+export function resolveMirrorLiveSyncDelayForSubscriber(
+  mirror: SessionMirror,
+  sessionId: string,
+  sessions: Map<string, TerminalSession>,
+  now: number,
+  requestedDelayMs?: number,
+) {
+  const snapshot = resolvePerSubscriberTransportSnapshot(sessions, sessionId);
+  return resolveTerminalLiveSyncDelay({
+    requestedDelayMs,
+    activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
+    idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
+    now,
+    lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
+    consecutiveFailures: mirror.consecutiveFailures,
+    subscriberCount: 1,
+    transportBufferedBytes: snapshot?.bufferedBytes || 0,
+    transportBackpressureCount: snapshot?.backpressureCount || 0,
+    lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
+    lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+    flushInFlight: mirror.flushInFlight,
+  });
+}
 
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
@@ -352,9 +391,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!payload) {
       return;
     }
+    const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      // Per-subscriber cadence: a slow subscriber must not slow the whole mirror.
+      // Healthy subscribers still receive this diff immediately; only the slow peer's
+      // own transport pressure is considered for its lane decision.
+      const decision = resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, sessions, now, 0);
+      if (decision.lane === 'slow' && decision.reason === 'transport-backpressure') {
         continue;
       }
       ensureSessionReady(session, mirror);
@@ -771,6 +818,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,
+    resolveMirrorLiveSyncDelayForSubscriber,
     startMirror,
     attachTmux,
     handleAdaptiveResize,

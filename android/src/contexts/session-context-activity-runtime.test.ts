@@ -533,7 +533,7 @@ describe('probeOrReconnectStaleSessionTransportRuntime', () => {
     expect(resetSessionTransportPullBookkeeping).not.toHaveBeenCalled();
     expect(reconnectSession).not.toHaveBeenCalled();
     expect(runtimeDebug).toHaveBeenCalledWith(
-      'session.transport.active-reentry.probe-recovered',
+      'session.transport.active-reentry.probe-skipped-fresh-activity',
       expect.objectContaining({ sessionId: 'session-1' }),
     );
   });

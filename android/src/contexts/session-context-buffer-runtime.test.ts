@@ -1077,3 +1077,202 @@ describe('session-context-buffer-runtime inactive gating', () => {
   });
 
 });
+
+describe('P5 post-apply catchup trimming', () => {
+  it('does not request tail-refresh catchup when liveHead revision did not advance and local tail already caught up', () => {
+    const sessionId = 'session-p5-1';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['alpha', 'beta'],
+      startIndex: 0,
+      endIndex: 2,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 2,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.daemonHeadRevision = 2;
+    session.daemonHeadEndIndex = 2;
+
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 2,
+        startIndex: 0,
+        endIndex: 2,
+        lines: [['alpha'], ['beta']] as any,
+        cols: 80,
+        rows: 24,
+        cursor: null,
+        cursorKeysApp: false,
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+          revision: 2,
+          latestEndIndex: 2,
+          availableStartIndex: 0,
+          availableEndIndex: 2,
+          seenAt: 100,
+        }]]) },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session)]]) },
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({ revision: payload.revision, startIndex: payload.startIndex, endIndex: payload.endIndex }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ reason: 'buffer-sync-catchup', purpose: 'tail-refresh' }),
+    );
+  });
+
+  it('does not request visible-range repair when current payload already covers visible range', () => {
+    const sessionId = 'session-p5-2';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['alpha', 'beta', 'gamma'],
+      startIndex: 0,
+      endIndex: 3,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 3,
+      cols: 80,
+      rows: 24,
+      revision: 3,
+      cacheLines: 1000,
+    });
+
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 3,
+        startIndex: 0,
+        endIndex: 3,
+        lines: [['alpha'], ['beta'], ['gamma']] as any,
+        cols: 80,
+        rows: 24,
+        cursor: null,
+        cursorKeysApp: false,
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+          revision: 3,
+          latestEndIndex: 3,
+          availableStartIndex: 0,
+          availableEndIndex: 3,
+          seenAt: 100,
+        }]]) },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, {
+          startIndex: 0,
+          endIndex: 3,
+          stickToBottom: true,
+          measuredRows: 3,
+          measuredCols: 80,
+          scrollOffset: 0,
+          pinnedBottomRows: 3,
+        } as any]]) },
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({ revision: payload.revision, startIndex: payload.startIndex, endIndex: payload.endIndex }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate: vi.fn(() => true),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ reason: 'buffer-sync-visible-range-repair-catchup', purpose: 'reading-repair' }),
+    );
+  });
+
+  it('still requests tail-refresh catchup when liveHead revision is ahead of local buffer', () => {
+    const sessionId = 'session-p5-3';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['alpha', 'beta'],
+      startIndex: 0,
+      endIndex: 2,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 2,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.daemonHeadRevision = 5;
+    session.daemonHeadEndIndex = 5;
+
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 2,
+        startIndex: 0,
+        endIndex: 2,
+        lines: [['alpha'], ['beta']] as any,
+        cols: 80,
+        rows: 24,
+        cursor: null,
+        cursorKeysApp: false,
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+          revision: 5,
+          latestEndIndex: 5,
+          availableStartIndex: 0,
+          availableEndIndex: 5,
+          seenAt: 100,
+        }]]) },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session)]]) },
+      },
+      readSessionBufferSnapshot: () => session.buffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({ revision: payload.revision, startIndex: payload.startIndex, endIndex: payload.endIndex }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate: vi.fn(() => true),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ reason: 'buffer-sync-catchup', purpose: 'tail-refresh' }),
+    );
+  });
+});

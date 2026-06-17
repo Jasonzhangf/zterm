@@ -3,6 +3,21 @@ import type { SessionDebugOverlayMetrics, SessionScheduleState, SessionState } f
 import type { SessionManagerState, SessionReconnectRuntime } from './session-context-core';
 import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-pull-state-helpers';
 
+
+/** Transport health signals for cadence decisions */
+export interface TransportHealth {
+  /** Bytes buffered in the WebSocket send queue */
+  bufferedBytes: number;
+  /** True when send queue exceeds 128 KiB threshold */
+  backpressured: boolean;
+  /** True when session transport is connected */
+  connected: boolean;
+}
+
+/** Backpressure threshold matching session-render-gate.ts and buffer-runtime */
+const PASSIVE_BACKPRESSURE_BYTES = 128 * 1024;
+
+
 interface SessionDebugMetricsStoreLike {
   refresh: (
     sessions: Array<{
@@ -48,9 +63,58 @@ export function buildPassiveVisibleRefreshTargets(state: Pick<SessionManagerStat
   ));
 }
 
-export function resolvePassiveVisibleRefreshTickMs(activeHeadRefreshTickMs: number) {
+/**
+ * Resolves the passive visible pane refresh cadence in milliseconds.
+ *
+ * Fast lane (16-50ms): transport connected, no backpressure, low buffered bytes.
+ * Medium lane (50-100ms): transport connected, moderate buffered bytes.
+ * Slow lane (100-240ms): backpressured, disconnected, or high buffered bytes.
+ *
+ * Does NOT read active tick multiplied by a fixed factor — passive cadence is
+ * driven by transport health, not by the active session's tick rate.
+ */
+export function resolvePassiveVisibleRefreshTickMs(
+  activeHeadRefreshTickMs: number,
+  transportHealth?: TransportHealth,
+): number {
   const normalizedActiveTickMs = Math.max(16, Math.floor(activeHeadRefreshTickMs || 33));
-  return Math.max(160, Math.min(240, normalizedActiveTickMs * 6));
+
+  // No transport health signal: conservative slow lane (backward compatible)
+  if (!transportHealth) {
+    return Math.max(160, Math.min(240, normalizedActiveTickMs * 6));
+  }
+
+  const { bufferedBytes, backpressured, connected } = transportHealth;
+
+  if (!connected || backpressured || bufferedBytes >= PASSIVE_BACKPRESSURE_BYTES) {
+    // Slow lane: disconnected or backpressured — stay conservative
+    return Math.max(100, Math.min(240, normalizedActiveTickMs * 6));
+  }
+
+  if (bufferedBytes === 0) {
+    // Fast lane: clean transport — allow near-active cadence
+    return Math.max(16, Math.min(50, normalizedActiveTickMs));
+  }
+
+  // Medium lane: some bytes buffered but below backpressure threshold
+  return Math.max(50, Math.min(100, normalizedActiveTickMs * 2));
+}
+
+export function resolvePassiveTickTransportHealth(
+  sessionId: string,
+  sessionState: string,
+  transportRuntimeStoreRef: { current: { sessions: Map<string, { activeSocket?: { bufferedAmount?: number } | null }> } },
+): TransportHealth {
+  const transport = transportRuntimeStoreRef.current.sessions.get(sessionId);
+  const socket = transport?.activeSocket;
+  const bufferedBytes = Number.isFinite(socket?.bufferedAmount)
+    ? Math.max(0, Math.floor(socket?.bufferedAmount ?? 0))
+    : 0;
+  return {
+    bufferedBytes,
+    backpressured: bufferedBytes >= PASSIVE_BACKPRESSURE_BYTES,
+    connected: sessionState === 'connected',
+  };
 }
 
 export function shouldScheduleActiveTickRefresh(options: {
@@ -318,6 +382,23 @@ export function useSessionContextLifecycle(options: {
       if (cancelled) {
         return;
       }
+      const refreshTargets = buildPassiveVisibleRefreshTargets(options.refs.stateRef.current);
+      const nextDelay = refreshTargets.length === 0
+        ? Math.max(100, resolvePassiveVisibleRefreshTickMs(
+            options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId),
+          ))
+        : Math.min(...refreshTargets.map((sessionId) => {
+            const session = options.refs.stateRef.current.sessions.find((item) => item.id === sessionId);
+            return resolvePassiveVisibleRefreshTickMs(
+              options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId),
+              resolvePassiveTickTransportHealth(
+                sessionId,
+                session?.state || 'disconnected',
+                options.refs.transportRuntimeStoreRef,
+              ),
+            );
+          }));
+
       timer = window.setTimeout(() => {
         if (cancelled) {
           return;
@@ -326,7 +407,6 @@ export function useSessionContextLifecycle(options: {
           scheduleNext();
           return;
         }
-        const refreshTargets = buildPassiveVisibleRefreshTargets(options.refs.stateRef.current);
         if (refreshTargets.length === 0) {
           scheduleNext();
           return;
@@ -350,7 +430,7 @@ export function useSessionContextLifecycle(options: {
           });
         });
         scheduleNext();
-      }, Math.max(160, resolvePassiveVisibleRefreshTickMs(options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId))));
+      }, nextDelay);
     };
 
     scheduleNext();

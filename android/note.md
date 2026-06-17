@@ -1,4 +1,12 @@
 # note
+- [2026-06-17] daemon / CLI function map + wiki gate:
+  - Jason 新要求：按 AGENTS.md 为 daemon、cli 建立 function map、mainline source 和 worker 可读 wiki，并给出自动生成 mermaid html 版本。
+  - 已落地：
+    - `docs/function-map.md` 增加 `daemon.runtime_entry`、`daemon.cli_shell`、`daemon.cli_node`、`daemon.support`、`mainline_source.android|daemon|cli` 条目。
+    - 新增 worker wiki：`docs/wiki/daemon.md`、`docs/wiki/cli.md`、`docs/wiki/mainline-source.md`。
+    - 新增生成脚本：`scripts/build-function-wiki.mjs`，从 md 里的第一段 mermaid 生成 `docs/wiki/generated/*.html`。
+    - 新增 gate：`src/lib/function-wiki-truth.test.ts`；`package.json -> test:feature-registry` 已接入。
+  - 当前约束：新增 daemon public subcommand / mainline owner 改动时，必须先更新 function-map + wiki + html + gate，再改实现。
 - Jason 2026-06-15 copy mode git 真源审计:
   - `9c7e304` / `2ba484c` / `da3d24a` / `38db24f` 证明 copy mode 之前已经完整实现过：quickbar 拷贝开关、应用内长按选行、normal mode 恢复系统选中、copy mode 注入 `-webkit-touch-callout:none`。
   - 当前主线并非完全丢失，只是 `TerminalView` 还保留了 `touch-callout:none` 样式，但缺少 Android touch long-press 事件链；因此 pointer 测试能过，真机触摸仍可能落回系统菜单。
@@ -3111,3 +3119,29 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
 ### 6. 残余风险
 - 没在真机拉过一次冒烟，IME 抬升和 input lane 仅过 jsdom 单测。如果现场出现新的输入卡顿，可能落在 mirror / buffer 同步那条线，需要继续看 `terminal-mirror-runtime` / `terminal-buffer-runtime`。
 - bridge runtime 的 input lane 已经允许 "bypass older input work on the same transport"，但全局顺序保证只覆盖 attach barrier 不破坏。如果业务侧后续需要 "严格按到达顺序写入"，要再开一条保守模式。
+## 2026-06-17 refresh-perf P1-P5 closeout (single-pass)
+
+- P1 passive visible pane fast lane: `resolvePassiveVisibleRefreshTickMs` now consumes `TransportHealth`; passive tick loop walks each passive session and resolves its own cadence (16-50 / 50-100 / 100-240 ms by buffered bytes + connection state). Backward compatible: no health input still returns 198ms floor.
+- P2 per-subscriber mirror cadence: `resolvePerSubscriberTransportSnapshot` and `resolveMirrorLiveSyncDelayForSubscriber` exposed; broadcast path skips only the backpressured subscriber instead of penalizing the whole mirror.
+- P3 tab-switch no-probe: `probeOrReconnectStaleSessionTransportRuntime` short-circuits to `probe-skipped-fresh-activity` when `lastServerActivityAt` is within 1000ms; probe path no longer fires for healthy tab switches.
+- P4 render gate RAF coalescing: kept per-session debounce (`resolveRenderCommitMs`) for each session, then enrolled dirty runtimes into a single RAF batch (or 16ms fallback when RAF absent). Multi-pane commit collapses into one browser frame.
+- P5 post-apply catchup trimming: `applyIncomingBufferSyncRuntime` no longer fires `buffer-sync-catchup` or `buffer-sync-visible-range-repair-catchup` when the incoming payload already covers local tail and visible range; only triggers when `liveHead` revision is still ahead or visible range has gap.
+
+## Verification
+
+- P1: `session-context-lifecycle.passive-fast-lane.test.ts` 8/8 PASS
+- P2: `terminal-mirror-runtime.per-subscriber-cadence.test.ts` 4/4 PASS
+- P3: `session-context-activity-runtime.tab-switch-no-probe.test.ts` 3/3 PASS
+- P4: `session-render-gate.test.ts` 15/15 PASS (3 pre-existing scheduler tests re-contracted to debounce+RAF; ws-refresh dynamic test adjusted to flush one frame after debounce)
+- P5: `session-context-buffer-runtime.test.ts` P5 subset 3/3 PASS
+- Combined targeted suites: 73/73 PASS
+- `pnpm exec tsc --noEmit`: No errors found
+- `pnpm run test:terminal:regression`: 550/551 PASS (1 stale test fixed: ws-refresh needs to advance one RAF frame after per-session debounce)
+
+## APK
+
+- versionName `0.1.3.1827` / versionCode `1031827`
+- sha256 `8e5f59c9b57ea8056b2c8081d05d2df75b9b854a51172e3e613677f92861bd5b`
+- update-dist: `android/update-dist/zterm-0.1.3.1827.apk`
+- release-dist: `android/release-dist/zterm-latest-debug.apk`
+- daemon updates dir: `~/.wterm/updates/zterm-0.1.3.1827.apk`
