@@ -186,17 +186,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function resolveMirrorLiveSyncDelay(mirror: SessionMirror, requestedDelayMs?: number) {
     const now = Date.now();
-    let transportBufferedBytes = 0;
-    let transportBackpressureCount = 0;
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      const snapshot = readTerminalTransportBackpressureSnapshot(session?.transport);
-      if (!snapshot) {
-        continue;
-      }
-      transportBufferedBytes = Math.max(transportBufferedBytes, snapshot.bufferedBytes);
-      transportBackpressureCount = Math.max(transportBackpressureCount, snapshot.backpressureCount);
-    }
     return resolveTerminalLiveSyncDelay({
       requestedDelayMs,
       activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
@@ -205,8 +194,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
       consecutiveFailures: mirror.consecutiveFailures,
       subscriberCount: mirror.subscribers.size,
-      transportBufferedBytes,
-      transportBackpressureCount,
+      // Backpressure is handled per-subscriber in broadcastChangedRangesBufferSyncToSubscribers.
+      // Mirror-level capture cadence must not be dragged down by a single slow subscriber.
+      transportBufferedBytes: 0,
+      transportBackpressureCount: 0,
       lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
       lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
       flushInFlight: mirror.flushInFlight,
@@ -373,6 +364,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      // Backpressure skip: use a fresh transport snapshot directly, not the
+      // scheduler (the scheduler short-circuits on flushInFlight which is always
+      // true inside syncMirrorCanonicalBuffer). The slow subscriber's own transport
+      // pressure must not delay healthy peers.
+      const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+      if (snapshot && snapshot.backpressure) {
         continue;
       }
       ensureSessionReady(session, mirror);

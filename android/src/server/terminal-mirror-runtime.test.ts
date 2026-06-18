@@ -752,6 +752,114 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
     );
   });
+
+it('keeps fast subscriber lane green even when another subscriber is backpressured (R1)', async () => {
+  const { runtime, sessions } = createRuntime();
+  const fastSession = createSession('session-fast');
+  const slowSession = createSession('session-slow');
+  sessions.set(fastSession.id, fastSession);
+  sessions.set(slowSession.id, slowSession);
+  const mirror = runtime.createMirror('demo');
+  mirror.lifecycle = 'ready';
+  mirror.subscribers.add(fastSession.id);
+  mirror.subscribers.add(slowSession.id);
+  mirror.lastLiveActivityAt = Date.now() - 100;
+  slowSession.transport = {
+    ...slowSession.transport,
+    readyState: 1,
+    bufferedAmount: 256 * 1024,
+    backpressureCount: 3,
+  } as TerminalSession['transport'];
+  fastSession.transport = fastSession.transport as TerminalSession['transport'];
+  const now = Date.now();
+  const fastDecision = runtime.resolveMirrorLiveSyncDelayForSubscriber(mirror, fastSession.id, sessions, now);
+  const slowDecision = runtime.resolveMirrorLiveSyncDelayForSubscriber(mirror, slowSession.id, sessions, now);
+  // Mirror-level decision must NOT see per-subscriber backpressure now.
+  expect(slowDecision.lane).toBe('slow');
+  expect(slowDecision.reason).toBe('transport-backpressure');
+  expect(fastDecision.lane).toBe('fast');
+  expect(fastDecision.delayMs).toBeLessThan(slowDecision.delayMs);
+  });
+
+it('skips buffer-head broadcast for a backpressured subscriber while healthy peers still receive head (R2)', async () => {
+  const { sessions, sendMessage } = createRuntime();
+  const fastSession = createSession('session-fast-head');
+  const slowSession = createSession('session-slow-head');
+  sessions.set(fastSession.id, fastSession);
+  sessions.set(slowSession.id, slowSession);
+  slowSession.transport = {
+    ...slowSession.transport,
+    readyState: 1,
+    bufferedAmount: 256 * 1024,
+    backpressureCount: 5,
+  } as TerminalSession['transport'];
+  const setup = createRuntime();
+  const mirror = setup.runtime.createMirror('demo-head');
+  mirror.lifecycle = 'ready';
+  mirror.subscribers.add(fastSession.id);
+  mirror.subscribers.add(slowSession.id);
+  mirror.bufferStartIndex = 100;
+  mirror.bufferLines = [[{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }]];
+  mirror.cursor = { rowIndex: 100, col: 0, visible: true };
+  mirror.cursorKeysApp = false;
+
+  const capture = vi.fn(async (targetMirror: SessionMirror) => {
+    targetMirror.bufferStartIndex = 100;
+    targetMirror.bufferLines = [[{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }]];
+    targetMirror.cursor = { rowIndex: 100, col: 2, visible: true };
+    targetMirror.cursorKeysApp = false;
+    return true;
+  });
+
+  const customRuntime = createTerminalMirrorRuntime({
+    defaultViewport: { cols: 120, rows: 40 },
+    sessions,
+    mirrors: new Map<string, SessionMirror>([['demo-head', mirror]]),
+    sendMessage,
+    sendScheduleStateToSession: vi.fn(),
+    buildConnectedPayload: (sessionId: string) => ({ sessionId }),
+    buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
+      sessionId,
+      revision: targetMirror.revision,
+      latestEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+      availableStartIndex: targetMirror.bufferStartIndex,
+      availableEndIndex: targetMirror.bufferStartIndex + targetMirror.bufferLines.length,
+      cursorKeysApp: targetMirror.cursorKeysApp,
+      cursor: targetMirror.cursor,
+    }),
+    buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
+    sanitizeSessionName: (input?: string) => input?.trim() || 'demo-head',
+    getMirrorKey: (sessionName: string) => sessionName,
+    normalizeTerminalCols: (cols?: number) => cols || 120,
+    normalizeTerminalRows: (rows?: number) => rows || 40,
+    resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
+      requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
+    readTmuxPaneMetrics: () => ({ paneId: '%1', tmuxAvailableLineCountHint: 0, paneRows: 40, paneCols: 120, alternateOn: false }),
+    assertTmuxSessionExists: vi.fn(),
+    captureMirrorAuthoritativeBufferFromTmux: capture,
+    mirrorBufferChanged: () => [],
+    mirrorCursorEqual: () => false,
+    writeToLiveMirror: () => true,
+    enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+    writeToTmuxSession: vi.fn(),
+    autoCommandDelayMs: 0,
+    waitMs: async () => {},
+    logTimePrefix: () => '2026-05-06 00:00:00',
+    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    closeLogicalTerminalSession: vi.fn(),
+    getSessionMirror: () => mirror,
+  });
+
+  await customRuntime.syncMirrorCanonicalBuffer(mirror);
+
+  expect(sendMessage).toHaveBeenCalledWith(
+    fastSession,
+    expect.objectContaining({ type: 'buffer-head' }),
+  );
+  const slowHeadCalls = sendMessage.mock.calls.filter(
+    ([target, msg]) => target === slowSession && (msg as { type: string }).type === 'buffer-head',
+  );
+  expect(slowHeadCalls).toHaveLength(0);
 });
 
   it('broadcasts sparse mirror-diff buffer-sync to ready subscribers after canonical mirror content changes', async () => {
@@ -928,3 +1036,4 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
     );
   });
+});
