@@ -9,6 +9,7 @@ export interface TerminalControlRuntimeDeps {
   mirrors: Map<string, SessionMirror>;
   getMirrorKey: (sessionName: string) => string;
   sanitizeSessionName: (input?: string) => string;
+  daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
 }
 
 export interface TerminalControlRuntime {
@@ -24,6 +25,7 @@ export interface TerminalControlRuntime {
     appendEnter: boolean,
     shouldWrite?: () => boolean,
   ) => Promise<boolean>;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (input?: string, cwd?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
@@ -311,6 +313,43 @@ export function createTerminalControlRuntime(
     return result;
   }
 
+  // R3 closeout: caller MUST invoke this on transport close / mirror destroy /
+  // session detach to evict any pending input items for that mirror. Items
+  // already flushing are not touched; their promise resolution is driven by
+  // the in-flight tmux spawn.
+  // Returns the number of items evicted for telemetry.
+  function disposeLiveMirrorInputBatch(sessionName: string, reason: string) {
+    const mirrorKey = deps.getMirrorKey(sessionName);
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      return 0;
+    }
+    let evicted = 0;
+    if (!pending.flushing) {
+      const items = pending.items.splice(0);
+      for (const item of items) {
+        item.resolve(false);
+        evicted += 1;
+      }
+      liveMirrorInputBatches.delete(mirrorKey);
+    } else {
+      // flushing=true: in-flight tmux spawn cannot be cancelled; drain the
+      // items buffer so any further enqueue starts clean. The in-flight spawn
+      // resolves naturally; new enqueue creates a fresh batch entry.
+      const remaining = pending.items.splice(0);
+      for (const item of remaining) {
+        item.resolve(false);
+        evicted += 1;
+      }
+    }
+    deps.daemonRuntimeDebug?.('input-dispose', {
+      mirrorKey,
+      reason,
+      evicted,
+    });
+    return evicted;
+  }
+
   function listTmuxSessions() {
     const result = runTmux(['list-sessions', '-F', '#S']);
     return result.stdout
@@ -344,6 +383,7 @@ export function createTerminalControlRuntime(
     writeToTmuxSession,
     writeToLiveMirror,
     enqueueLiveMirrorInput,
+    disposeLiveMirrorInputBatch,
     listTmuxSessions,
     createDetachedTmuxSession,
     renameTmuxSession,

@@ -86,6 +86,7 @@ function createDeps() {
       enqueueLiveMirrorInput: vi.fn(async (_sessionName, _payload, _appendEnter, shouldWrite?: () => boolean) => (
         shouldWrite ? shouldWrite() : true
       )),
+      disposeLiveMirrorInputBatch: vi.fn(() => 0),
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -117,6 +118,9 @@ describe('terminal runtime detached transport cleanup', () => {
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
+      
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
@@ -166,6 +170,8 @@ describe('terminal runtime detached transport cleanup', () => {
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,

@@ -166,6 +166,8 @@ const terminalRuntime = createTerminalRuntime({
     terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter),
   enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite) =>
     terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite),
+  disposeLiveMirrorInputBatch: (sessionName, reason) =>
+    terminalControlRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
   writeToTmuxSession: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
@@ -201,6 +203,7 @@ terminalControlRuntime = createTerminalControlRuntime({
   mirrors,
   getMirrorKey,
   sanitizeSessionName,
+  daemonRuntimeDebug,
 });
 const {
   runTmux,

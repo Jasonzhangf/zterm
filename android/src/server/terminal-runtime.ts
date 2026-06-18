@@ -59,6 +59,7 @@ interface TerminalRuntimeDeps {
     appendEnter: boolean,
     shouldWrite?: () => boolean,
   ) => Promise<boolean>;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
@@ -83,6 +84,7 @@ export interface TerminalRuntime {
     reason: string,
     options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
@@ -185,8 +187,19 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
       mirror.adaptiveCols.delete(session.id);
+      // R3: this transport is going away, so any pending input items for its
+      // mirror must NOT survive into a future attach. We deliberately drop
+      // the in-queue items here; in-flight tmux spawn (if any) resolves
+      // naturally because shouldWrite() will return false on the next check.
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`);
       mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
-      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
+      // R10: do not force a 0-delay capture after detach. If peers are still
+      // attached, their own live sync loop will catch the new mirror state.
+      // Forcing immediate capture here caused tmux to thrash on every
+      // tab switch / reconnect.
+      if (mirror.subscribers.size > 0) {
+        mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      }
     }
     session.mirrorKey = null;
     sessions.delete(session.id);
@@ -202,8 +215,14 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
       mirror.adaptiveCols.delete(session.id);
+      // R3: drop the input queue for this mirror before the session is gone.
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`);
       mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
-      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
+      // R10: do not force a 0-delay capture after close. If peers are still
+      // attached, their own live sync loop will catch the new mirror state.
+      if (mirror.subscribers.size > 0) {
+        mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      }
     }
 
     if (notifyClient) {
@@ -251,6 +270,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     mirrorCursorEqual: deps.mirrorCursorEqual,
     writeToLiveMirror: deps.writeToLiveMirror,
     enqueueLiveMirrorInput: deps.enqueueLiveMirrorInput,
+    disposeLiveMirrorInputBatch: deps.disposeLiveMirrorInputBatch,
     writeToTmuxSession: deps.writeToTmuxSession,
     autoCommandDelayMs: deps.autoCommandDelayMs,
     waitMs: deps.waitMs,
@@ -272,6 +292,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     detachSessionTransportOnly,
     closeSession,
     destroyMirror: mirrorRuntime.destroyMirror,
+    disposeLiveMirrorInputBatch: (sessionName, reason) =>
+      mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
     ensureSessionReady: mirrorRuntime.ensureSessionReady,
     sendBufferHeadToSession: mirrorRuntime.sendBufferHeadToSession,
     refreshMirrorHeadForSession: mirrorRuntime.refreshMirrorHeadForSession,

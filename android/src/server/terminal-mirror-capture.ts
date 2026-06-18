@@ -1,5 +1,15 @@
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import type { TerminalCell, TerminalCursorState } from '../lib/types';
+// R8: module-level bridge promise so multiple mirrors share a single WASM
+// instance. WasmBridge.load() is expensive (compile + bind) and previously
+// each mirror paid the cost on first capture.
+let sharedScratchBridgePromise: Promise<WasmBridge> | null = null;
+function loadSharedScratchBridge() {
+  if (!sharedScratchBridgePromise) {
+    sharedScratchBridgePromise = WasmBridge.load();
+  }
+  return sharedScratchBridgePromise;
+}
 import {
   normalizeMirrorCaptureLines,
   rowsEqual,
@@ -342,7 +352,7 @@ export function createTerminalMirrorCaptureRuntime(
     });
     const captureDoneAt = Date.now();
 
-    const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
+    const scratchBridge = mirror.scratchBridge ?? await loadSharedScratchBridge();
     mirror.scratchBridge = scratchBridge;
     const canonicalizeStartedAt = Date.now();
     const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);

@@ -81,3 +81,43 @@ describe('terminal live performance scheduler', () => {
     expect(source).not.toMatch(/\bviewport\b/);
   });
 });
+
+describe('R9 fast lane bounds', () => {
+  it('flush-in-flight forces a minimum 16ms gap even when fast lane is otherwise active', () => {
+    const decision = resolveTerminalLiveSyncDelay({
+      requestedDelayMs: 16,
+      activeDelayMs: 33,
+      idleDelayMs: 120,
+      now: Date.now(),
+      lastLiveActivityAt: Date.now(),
+      consecutiveFailures: 0,
+      subscriberCount: 1,
+      transportBufferedBytes: 0,
+      transportBackpressureCount: 0,
+      lastCaptureDurationMs: 0,
+      lastCanonicalizeDurationMs: 0,
+      flushInFlight: true,
+    });
+    expect(decision.lane).toBe('normal');
+    expect(decision.delayMs).toBeGreaterThanOrEqual(16);
+  });
+
+  it('explicit-immediate (requestedDelayMs=0) returns 0 for attach/input first-frame path', () => {
+    const decision = resolveTerminalLiveSyncDelay({
+      requestedDelayMs: 0,
+      activeDelayMs: 33,
+      idleDelayMs: 120,
+      now: Date.now(),
+      lastLiveActivityAt: 0,
+      consecutiveFailures: 0,
+      subscriberCount: 1,
+      transportBufferedBytes: 0,
+      transportBackpressureCount: 0,
+      lastCaptureDurationMs: 0,
+      lastCanonicalizeDurationMs: 0,
+      flushInFlight: false,
+    });
+    expect(decision.lane).toBe('fast');
+    expect(decision.delayMs).toBe(0);
+  });
+});

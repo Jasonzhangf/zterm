@@ -3,6 +3,7 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '../lib/types';
+import type { TerminalWidthMode } from './terminal-runtime-types';
 import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
 import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
@@ -63,6 +64,7 @@ export interface TerminalMirrorRuntimeDeps {
     appendEnter: boolean,
     shouldWrite?: () => boolean,
   ) => Promise<boolean>;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
@@ -99,10 +101,24 @@ export interface TerminalMirrorRuntime {
   ) => void;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
+// R6: at most one tmux resize per mirror per this many ms. Keyboard / rotation
+// / pinch on the client can fire 50+ resize frames per second; we collapse
+// them into a single tmux resize here.
+const MIRROR_RESIZE_THROTTLE_MS = 250;
+// R7: multi-sub safety. When 2+ subscribers of the same mirror have
+// different widthMode values, we DO NOT resize tmux globally. Truncating the
+// mirror to a sub's narrow cols would corrupt another sub's view. Each sub
+// will instead receive a per-sub narrow mirror via buffer-sync truncation.
+const MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK = 2;
+// R14: head requests within this window reuse the last mirror state without
+// triggering another capture. This stops sub N=8 clients hammering daemon
+// with head requests after the head has just been broadcast.
+const MIRROR_HEAD_REQUEST_CACHE_MS = 100;
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -223,6 +239,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
@@ -267,6 +285,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       return;
     }
 
+    // R3: drop any pending input items for the dying mirror before subscribers
+    // are released or the mirror record is removed. Items already in flight
+    // resolve through their own tmux spawn; queued items must NOT survive.
+    deps.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`);
+
     mirror.lifecycle = 'destroyed';
 
     if (options?.closeLogicalSessions) {
@@ -289,6 +312,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lastFlushStartedAt = 0;
     mirror.lastFlushCompletedAt = 0;
     mirror.lastLiveActivityAt = 0;
+    mirror.lastHeadBroadcastAt = 0;
+    mirror.lastResizeAt = 0;
     mirror.lastCaptureDurationMs = 0;
     mirror.lastCanonicalizeDurationMs = 0;
     mirror.lastScrollbackCount = -1;
@@ -315,6 +340,19 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function reconcileMirrorAdaptiveWidth(mirror: SessionMirror) {
     const baselineCols = resolveMirrorBaselineCols(mirror);
     const baselineRows = resolveMirrorBaselineRows(mirror);
+    // R7: enumerate widthMode across all subscribers. If 2+ different
+    // widthMode values are present, refuse to mutate tmux; each sub gets its
+    // own narrow mirror at consume time (renderer / buffer-sync truncation).
+    const widthModes = new Set<TerminalWidthMode>();
+    for (const sessionId of mirror.subscribers) {
+      const sub = sessions.get(sessionId);
+      if (sub) {
+        widthModes.add(sub.widthMode);
+      }
+    }
+    if (widthModes.size >= MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK) {
+      return;
+    }
     let minCols = 0;
     for (const entry of mirror.adaptiveCols.values()) {
       if (entry.widthMode === 'adaptive-phone' && entry.cols > 0) {
@@ -341,6 +379,16 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (targetCols === mirror.cols && targetRows === mirror.rows) {
       return;
     }
+    // R6: throttle tmux resize. Capture the last-requested timestamp and
+    // bail if another resize landed within MIRROR_RESIZE_THROTTLE_MS.
+    const now = Date.now();
+    if (
+      mirror.lastResizeAt > 0
+      && now - mirror.lastResizeAt < MIRROR_RESIZE_THROTTLE_MS
+    ) {
+      return;
+    }
+    mirror.lastResizeAt = now;
     try {
       deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(targetCols)]);
       mirror.cols = targetCols;
@@ -361,24 +409,45 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   }
 
   function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
+    // R14: head broadcast dedup. Multiple subs / multiple requests within the
+    // cache window share the same broadcast timestamp; we still send to the
+    // whole fanout but only build the payload once. lastHeadBroadcastAt is the
+    // truth for the next dedup window.
+    const now = Date.now();
+    if (
+      mirror.lastHeadBroadcastAt > 0
+      && now - mirror.lastHeadBroadcastAt < MIRROR_HEAD_REQUEST_CACHE_MS
+    ) {
+      return;
+    }
+    mirror.lastHeadBroadcastAt = now;
+    // R5: pre-build the typed payload once, dispatch through sendMessage.
+    // sendMessage owns the per-sub transport and runtime-debug surface that
+    // tests still expect; we just stop paying N JSON.stringify per fanout.
+    type HeadMessage = Extract<ServerMessage, { type: 'buffer-head' }>;
+    const perSubMessages: Array<{ sessionId: string; message: HeadMessage }> = [];
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
         continue;
       }
-      // Backpressure skip: use a fresh transport snapshot directly, not the
-      // scheduler (the scheduler short-circuits on flushInFlight which is always
-      // true inside syncMirrorCanonicalBuffer). The slow subscriber's own transport
-      // pressure must not delay healthy peers.
       const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
       if (snapshot && snapshot.backpressure) {
         continue;
       }
       ensureSessionReady(session, mirror);
-      deps.sendMessage(session, {
-        type: 'buffer-head',
-        payload: deps.buildBufferHeadPayload(session.id, mirror),
+      perSubMessages.push({
+        sessionId,
+        message: {
+          type: 'buffer-head',
+          payload: deps.buildBufferHeadPayload(session.id, mirror),
+        },
       });
+    }
+    for (const item of perSubMessages) {
+      const session = sessions.get(item.sessionId);
+      if (!session) continue;
+      deps.sendMessage(session, item.message);
     }
   }
 
@@ -390,6 +459,12 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!payload) {
       return;
     }
+    // R5: build the typed payload once, dispatch through sendMessage.
+    // sendMessage still owns runtime-debug + per-sub transport send.
+    const message: Extract<ServerMessage, { type: 'buffer-sync' }> = {
+      type: 'buffer-sync',
+      payload,
+    };
     const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
@@ -404,10 +479,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         continue;
       }
       ensureSessionReady(session, mirror);
-      deps.sendMessage(session, {
-        type: 'buffer-sync',
-        payload,
-      });
+      deps.sendMessage(session, message);
     }
   }
 
@@ -415,11 +487,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!session.transport || session.transport.readyState !== 1) {
       return;
     }
-    ensureSessionReady(session, mirror);
-    deps.sendMessage(session, {
-      type: 'buffer-head',
-      payload: deps.buildBufferHeadPayload(session.id, mirror),
-    });
+    // R1+R2: a single sub's head request no longer takes a private fast path
+    // that bypasses the dedup'd broadcast. If the mirror just broadcast a head
+    // within the cache window we skip; otherwise we run the same broadcast
+    // path which serves all healthy subs in one pass with one stringify.
+    const now = Date.now();
+    if (
+      mirror.lastHeadBroadcastAt > 0
+      && now - mirror.lastHeadBroadcastAt < MIRROR_HEAD_REQUEST_CACHE_MS
+    ) {
+      return;
+    }
+    broadcastBufferHeadToSubscribers(mirror);
   }
 
   async function refreshMirrorHeadForSession(session: TerminalSession, mirror: SessionMirror) {
@@ -823,5 +902,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     handleAdaptiveResize,
     handleInput,
     reconcileMirrorAdaptiveWidth,
+    disposeLiveMirrorInputBatch: (sessionName, reason) =>
+      deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`),
   };
 }

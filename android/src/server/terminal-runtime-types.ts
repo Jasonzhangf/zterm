@@ -69,6 +69,11 @@ export interface SessionMirror {
   lastFlushStartedAt: number;
   lastFlushCompletedAt: number;
   lastLiveActivityAt: number;
+  // R14: last time a head payload was broadcast to any subscriber of this mirror.
+  lastHeadBroadcastAt: number;
+  // R6: last time reconcileMirrorAdaptiveWidth actually issued a tmux
+  // resize-window call. Used to throttle rapid client resize events.
+  lastResizeAt: number;
   lastCaptureDurationMs?: number;
   lastCanonicalizeDurationMs?: number;
   flushInFlight: boolean;

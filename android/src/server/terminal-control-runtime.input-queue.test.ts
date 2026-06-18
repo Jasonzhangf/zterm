@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionMirror } from './terminal-runtime-types';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
 
 const spawnMock = vi.fn();
@@ -19,20 +20,46 @@ function createFakeChild() {
   child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
   child.stdout.setEncoding = vi.fn();
   child.stderr.setEncoding = vi.fn();
-  queueMicrotask(() => child.emit('close', 0));
   return child;
 }
 
-function createReadyMirror() {
+function createReadyMirror(): SessionMirror {
   return {
     key: 'demo',
     sessionName: 'demo',
     lifecycle: 'ready',
-  } as any;
+    cols: 80,
+    rows: 24,
+    baselineCols: 80,
+    baselineRows: 24,
+    cursorKeysApp: false,
+    revision: 0,
+    lastScrollbackCount: -1,
+    bufferStartIndex: 0,
+    bufferLines: [],
+    cursor: null,
+    lastFlushStartedAt: 0,
+    lastFlushCompletedAt: 0,
+    lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
+    lastCaptureDurationMs: 0,
+    lastCanonicalizeDurationMs: 0,
+    flushInFlight: false,
+    flushPromise: null,
+    pendingStableCaptureSnapshot: null,
+    liveSyncTimer: null,
+    consecutiveFailures: 0,
+    adaptiveCols: new Map(),
+    subscribers: new Set(),
+    scratchBridge: null,
+  };
 }
 
 function createRuntime() {
-  const mirrors = new Map<string, any>([['demo', createReadyMirror()]]);
+  const mirrors = new Map<string, SessionMirror>([
+    ['demo', createReadyMirror()],
+  ]);
   const runtime = createTerminalControlRuntime({
     tmuxBinary: 'tmux',
     defaultSessionName: 'demo',
@@ -44,15 +71,25 @@ function createRuntime() {
   return { runtime, mirrors };
 }
 
+async function runSpawnMockImmediately() {
+  spawnMock.mockImplementation(() => {
+    const child = createFakeChild();
+    queueMicrotask(() => {
+      child.emit('close', 0);
+    });
+    return child;
+  });
+}
+
 describe('terminal control runtime input queue', () => {
   beforeEach(() => {
     spawnMock.mockReset();
     spawnSyncMock.mockReset();
-    spawnMock.mockImplementation(() => createFakeChild());
     spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
   });
 
   it('coalesces burst literal input for the same mirror into one tmux write', async () => {
+    await runSpawnMockImmediately();
     const { runtime } = createRuntime();
 
     const writes = await Promise.all([
@@ -74,6 +111,7 @@ describe('terminal control runtime input queue', () => {
   });
 
   it('does not include stale queued input in a coalesced tmux write', async () => {
+    await runSpawnMockImmediately();
     const { runtime } = createRuntime();
 
     const writes = await Promise.all([
@@ -94,6 +132,7 @@ describe('terminal control runtime input queue', () => {
   });
 
   it('preserves append-enter boundaries while batching surrounding literal input', async () => {
+    await runSpawnMockImmediately();
     const { runtime } = createRuntime();
 
     const writes = await Promise.all([
@@ -119,6 +158,56 @@ describe('terminal control runtime input queue', () => {
       '-l',
       '--',
       'next',
+    ]);
+  });
+
+  // R3 reverse tests: close/destroy must NOT leak input into a future attach.
+  it('disposeLiveMirrorInputBatch evicts queued items and reports evicted count', async () => {
+    // intentionally do NOT start spawn; we want to assert items stay queued and
+    // get rejected (false) when dispose runs, without ever touching tmux.
+    spawnMock.mockImplementation(() => createFakeChild());
+    const { runtime } = createRuntime();
+
+    const promiseA = runtime.enqueueLiveMirrorInput('demo', 'a', false, () => true);
+    const promiseB = runtime.enqueueLiveMirrorInput('demo', 'b', false, () => true);
+    const evicted = runtime.disposeLiveMirrorInputBatch('demo', 'unit-test');
+    expect(evicted).toBe(2);
+    expect(await Promise.all([promiseA, promiseB])).toEqual([false, false]);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('disposeLiveMirrorInputBatch is a no-op when nothing is queued', () => {
+    const { runtime } = createRuntime();
+    expect(runtime.disposeLiveMirrorInputBatch('demo', 'unit-test')).toBe(0);
+  });
+
+  it('re-enqueueing after dispose creates a fresh batch with no leftover items', async () => {
+    let calls = 0;
+    spawnMock.mockImplementation(() => {
+      calls += 1;
+      const child = createFakeChild();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+    const { runtime } = createRuntime();
+
+    // queue, then dispose
+    const stale = runtime.enqueueLiveMirrorInput('demo', 'stale', false, () => true);
+    runtime.disposeLiveMirrorInputBatch('demo', 'unit-test');
+    expect(await stale).toBe(false);
+    expect(spawnMock).not.toHaveBeenCalled();
+
+    // fresh attach -> fresh batch, the new write must be the only one sent
+    const fresh = runtime.enqueueLiveMirrorInput('demo', 'fresh', false, () => true);
+    expect(await fresh).toBe(true);
+    expect(calls).toBe(1);
+    expect(spawnMock.mock.calls[0]?.[1]).toEqual([
+      'send-keys',
+      '-t',
+      'demo',
+      '-l',
+      '--',
+      'fresh',
     ]);
   });
 });

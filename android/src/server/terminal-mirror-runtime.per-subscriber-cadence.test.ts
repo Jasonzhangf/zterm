@@ -30,6 +30,8 @@ function makeMirror(): any {
     sessionName: 'tmux-1',
     subscribers: new Set(['healthy', 'slow']),
     lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
     lastCaptureDurationMs: 4,
     lastCanonicalizeDurationMs: 1,
     flushInFlight: false,

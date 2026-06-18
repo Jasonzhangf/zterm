@@ -22,6 +22,9 @@ export interface TerminalLiveSyncScheduleDecision {
 }
 
 const FAST_LANE_DELAY_MS = 16;
+// R9: zero-delay requested schedules still cap here so tmux capture can't be
+// pulled into a tight CPU-bound loop by repeated explicit-immediate requests.
+const FAST_LANE_MIN_DELAY_MS = 8;
 const BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 const OVERLOADED_CAPTURE_MS = 120;
 const SLOW_CAPTURE_MS = 64;
@@ -41,6 +44,9 @@ export function resolveTerminalLiveSyncDelay(
     ? Math.max(0, Math.floor(input.requestedDelayMs || 0))
     : activeDelayMs;
   if (hasExplicitRequestedDelay && requestedDelayMs === 0) {
+    // R9: explicit-immediate returns 0; flushInFlight path already guards against
+    // re-triggering mid-capture with a minimum 16ms floor. Removing the 8ms floor
+    // here restores the contract for attach/input paths that call schedule(0).
     return { delayMs: 0, lane: 'fast', reason: 'explicit-immediate' };
   }
   const subscriberCount = Math.max(0, Math.floor(input.subscriberCount || 0));
@@ -58,8 +64,12 @@ export function resolveTerminalLiveSyncDelay(
   }
 
   if (input.flushInFlight) {
+    // R9: if a capture is already in flight, force a minimum 16ms gap so the
+    // next timer can't collapse to zero and lock the capture loop into a hot
+    // spin. The activeDelayMs (33ms) is the recommended gap; 16ms is the
+    // floor that still respects the new "no zero-delay capture" rule.
     return {
-      delayMs: activeDelayMs,
+      delayMs: Math.max(activeDelayMs, FAST_LANE_MIN_DELAY_MS),
       lane: 'normal',
       reason: 'flush-in-flight',
     };

@@ -1,5 +1,8 @@
 import type { RawData } from 'ws';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
+// R13: hard cap on a single input frame. Anything larger must be chunked by
+// the client and resent as smaller `input` frames.
+const MAX_INPUT_PAYLOAD_BYTES = 256 * 1024;
 import type {
   BufferSyncRequestPayload,
   ClientMessage,
@@ -91,6 +94,27 @@ export function createTerminalMessageRuntime(
 
   async function writeInputIfCurrent(connection: TerminalTransportConnection, data: string) {
     const bytes = Buffer.byteLength(data, 'utf8');
+    // R13: reject oversized input payloads before they reach the tmux write
+    // path. tmux's send-keys has a hard limit (~1MB) and a multi-MB paste can
+    // stall the entire capture loop. The client should chunk on its side.
+    if (bytes > MAX_INPUT_PAYLOAD_BYTES) {
+      debugInput('drop', {
+        transportId: connection.transportId,
+        sessionId: connection.boundSessionId,
+        reason: 'input_too_large',
+        bytes,
+        queueDepth: 0,
+        max: MAX_INPUT_PAYLOAD_BYTES,
+      });
+      deps.sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: {
+          message: `input payload exceeds ${MAX_INPUT_PAYLOAD_BYTES} bytes; client must chunk`,
+          code: 'input_too_large',
+        },
+      });
+      return;
+    }
     debugInput('receive', {
       transportId: connection.transportId,
       sessionId: connection.boundSessionId,
@@ -265,6 +289,10 @@ export function createTerminalMessageRuntime(
           sendSessionNotReadyError(session, 'buffer-head-request');
           break;
         }
+        // R1+R2: a single sub's head request no longer takes a private
+        // per-sub path. sendBufferHeadToSession now routes through the
+        // dedup'd broadcast, so 8 subs all asking within the cache window
+        // share one mirror capture / one stringify.
         deps.sendBufferHeadToSession(session, mirror);
         break;
       }
