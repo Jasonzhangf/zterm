@@ -34,6 +34,7 @@ class MockWebSocket {
   static CLOSED = 3;
   static instances: MockWebSocket[] = [];
   static controlInstances: MockWebSocket[] = [];
+  static activeFactoryCount = 0;
 
   readonly url: string;
   readonly transportRole: 'control' | 'session';
@@ -58,7 +59,11 @@ class MockWebSocket {
     if (role === 'control') {
       MockWebSocket.controlInstances.push(this);
       queueMicrotask(() => {
-        if (this.readyState === MockWebSocket.CONNECTING) {
+        MockWebSocket.activeFactoryCount += 1;
+    if (MockWebSocket.activeFactoryCount > 1) {
+      throw new Error('MockWebSocket: only one active WebSocket factory call allowed; cross-file bleed detected');
+    }
+    if (this.readyState === MockWebSocket.CONNECTING) {
           this.triggerOpen();
         }
       });
@@ -89,11 +94,13 @@ class MockWebSocket {
 
   close() {
     this.readyState = MockWebSocket.CLOSED;
+    MockWebSocket.activeFactoryCount = Math.max(0, MockWebSocket.activeFactoryCount - 1);
     this.onclose?.();
   }
 
   triggerOpen() {
     this.readyState = MockWebSocket.OPEN;
+    MockWebSocket.activeFactoryCount = Math.max(0, MockWebSocket.activeFactoryCount - 1);
     this.onopen?.();
   }
 
@@ -108,6 +115,7 @@ class MockWebSocket {
   static reset() {
     MockWebSocket.instances = [];
     MockWebSocket.controlInstances = [];
+    MockWebSocket.activeFactoryCount = 0;
   }
 }
 
