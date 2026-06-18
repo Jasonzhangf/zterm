@@ -3155,3 +3155,16 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
 - 附带构建修复：`cap sync` 后 Cordova 空资源库在 full assemble 中两次触发 `:capacitor-cordova-android-plugins:parseDebugLocalResources -> !directory.isDirectory()`；单独跑该任务成功，确认是 assemble 阶段资源任务时序/缓存问题。`build-android-debug.sh` 现先串行预跑 `:capacitor-cordova-android-plugins:parseDebugLocalResources`，再 assemble，避免标准升级包构建被卡住。
 - 验证：targeted server/input suites 34/34 PASS；`pnpm run type-check` PASS；daemon staged/restart 后 `daemon-mirror-lab --case=local-input-echo` PASS；标准 `./scripts/build-android-debug.sh` PASS 并发布 `0.1.3.1833`。
 - 产物：`~/.wterm/updates/zterm-0.1.3.1833.apk`，sha256 `e5d111e6df53d7a586caf66ec98e6a3eda4e5e7dcee5e1424a797a1a19a0d81c`。
+
+- [2026-06-19] daemon 性能/多 session 切换风险审计 R3/R9/R10/R13/R1/R2/R6/R7/R8/R14 收口
+  - 审计报告: `docs/audits/daemon-performance-multisession-audit-2026-06-18.md`
+  - 14 风险识别，9 项修复落地（PASS 561/561 contracts）
+  - R3: close/detach 路径清理 liveMirrorInputBatches (3 反向红测)
+  - R1+R2+R14: head request N² → broadcast dedup (lastHeadBroadcastAt 100ms)
+  - R9: flush-in-flight min 16ms floor
+  - R10: detach 不再 0-delay schedule
+  - R6+R7: resize 250ms 节流 + 多 sub widthMode 不全局 resize
+  - R8: WasmBridge.load() 模块级单例
+  - R13: input 256KB 上限
+  - 剩余: R5 完整版 (sendMessage pre-serialized text path) + R11+R12
+  - commit f2231db pushed

@@ -518,3 +518,12 @@ handleCloseCopyMenu 必须完整重置为 EMPTY_COPY_SELECTION_STATE；copy mode
 - evidence: 文件：android/src/pages/useTerminalPageCopyRuntime.ts（含 handleCloseCopyMenu + copyTextAndResetOnSuccess）；测试：10 个生命周期测试 + 519 回归全绿；构建：APK sha256 88f69f131a89afd787fed9bc685ad1be5f2e1c0f0b0e03d55941a6c4da36caf8，两路径一致；tsc --noEmit 0 错误
 
 拷贝模式生命周期必须有三个退出点：1)用户主动关闭(重置所有) 2)复制成功(异步写入后重置) 3)复制失败(warn+保留)。写操作用.then/.catch分离成功失败路径，不能同步try/catch吞掉异步异常。
+
+## 2026-06-18T21:43:43.038Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260619T054325292-368326-3609
+- sessionId: 019e9fed-6fa2-7f52-8636-9c86281f1265
+- stopReason: audit + 9 fixes landed + pushed + APK 1839 delivered, but真机实测未做，需要Jason在 100.127.23.27 装 APK 验证输入延迟
+- evidence: contracts 561/561 PASS, tsc 0 errors, close-loop 8/8, daemon pid fresh health.ok=true, APK 1839 sha256=8330a678..., commits f2231db+5b05c17 pushed, audit report android/docs/audits/daemon-performance-multisession-audit-2026-06-18.md
+
+R14 head dedup + R5 partial: 减少 per-sub stringify 必须改 sendMessage 接口，partial 收口不影响安全但性能未达最优

@@ -393,3 +393,18 @@ silently returns 0 when viewport metrics are stable.
 
 - If `./scripts/build-android-debug.sh` fails in full assemble at `:capacitor-cordova-android-plugins:parseDebugLocalResources` with `!directory.isDirectory()` while the same task succeeds standalone, treat it as the empty Cordova plugin resource project not being materialized before assemble consumes it.
 - Standard build now runs `./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources` before `processDebugManifest assembleDebug`; do not remove this prewarm unless Gradle/AGP is upgraded and the full standard build is proven stable without it.
+
+- [2026-06-19] daemon 性能风险修复 R3/R9/R10/R13/R1/R2/R6/R7/R8/R14 收口
+  - contracts 561 PASS, daemon close-loop 8/8, daemon restart healthy
+  - R3 关键：所有 close/detach/destroy 路径必须 active 清理 liveMirrorInputBatches
+  - R1+R2+R14 关键：head request 走 broadcast dedup，去除 N² 风暴
+  - R9 关键：flushInFlight 必须设 min 16ms 防止 capture 循环锁死
+  - R10 关键：detach 不再起 0-delay sync，避免 tmux 抖动
+  - R6+R7 关键：resize 250ms 节流 + 多 widthMode 不 resize tmux
+  - 审计报告落盘: docs/audits/daemon-performance-multisession-audit-2026-06-18.md
+  - commit f2231db
+
+- [2026-06-19] mock 串扰：SessionContext.ws-refresh.test.tsx 加 activeFactoryCount 守卫
+  - vitest --run / build 期间跨文件同时跑会触发第二 WS factory
+  - 加 activeFactoryCount 抛错 + close/open 时 decrement
+  - 1 commit 5b05c17；APK 1839 同步发布
