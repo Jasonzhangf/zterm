@@ -419,6 +419,8 @@ export function createTerminalDomInputController({
   normalizeCommittedText: (text: string) => string;
 }) {
   let composing = false;
+  // FIX: track sessionId at composition start
+  let compositionStartSessionId: string | null = null;
   let flushTimer: number | null = null;
   let flushRetryTimer: number | null = null;
 
@@ -437,8 +439,11 @@ export function createTerminalDomInputController({
   const focusTerminal = () => { focusTerminalRef.current(); };
 
   const flushDomInputValue = () => {
-    if (composing || !input.value) return;
-    sendTerminalInput(normalizeCommittedText(input.value).replace(/\n/g, '\r'));
+    if (!input.value) return;
+    const targetSessionId = compositionStartSessionId ?? sessionIdRef.current;
+    if (composing) return; // still composing — compositionend will flush
+    const normalized = normalizeCommittedText(input.value).replace(/\n/g, '\r');
+    onInputRef.current?.(targetSessionId, normalized);
     resetDomInput();
     focusTerminal();
   };
@@ -446,7 +451,7 @@ export function createTerminalDomInputController({
   const scheduleFlushDomInputValue = () => {
     clearScheduledFlush();
     flushTimer = window.setTimeout(() => { flushTimer = null; flushDomInputValue(); }, 0);
-    flushRetryTimer = window.setTimeout(() => { flushRetryTimer = null; flushDomInputValue(); }, 32);
+    // FIX: removed 32ms retry timer — compositionend now flushes directly
   };
 
   const sendImmediateTerminalInput = (value: string) => {
@@ -455,12 +460,24 @@ export function createTerminalDomInputController({
     clearScheduledFlush();
   };
 
-  const handleCompositionStart = () => { composing = true; resetDomInput(); };
+  // FIX: record sessionId at composition start
+  const handleCompositionStart = () => {
+    composing = true;
+    compositionStartSessionId = sessionIdRef.current;
+    resetDomInput();
+  };
 
+  // FIX: route to compositionStartSessionId; flush synchronously instead of schedule
   const handleCompositionEnd = (event: CompositionEvent) => {
     composing = false;
-    if (event.data && !input.value) input.value = event.data;
-    scheduleFlushDomInputValue();
+    const targetSessionId = compositionStartSessionId ?? sessionIdRef.current;
+    compositionStartSessionId = null;
+    if (event.data && !input.value) { input.value = event.data; }
+    if (!input.value) return;
+    const normalized = normalizeCommittedText(input.value).replace(/\n/g, '\r');
+    onInputRef.current?.(targetSessionId, normalized);
+    resetDomInput();
+    focusTerminal();
   };
 
   const handleBeforeInput = (event: InputEvent) => {
@@ -481,10 +498,10 @@ export function createTerminalDomInputController({
   const handleInput = () => {
     if (!composing) flushDomInputValue();
   };
+  // FIX: flush synchronously
+  const handleChange = () => { flushDomInputValue(); };
 
-  const handleChange = () => {
-    scheduleFlushDomInputValue();
-  };
+
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.metaKey) return;
