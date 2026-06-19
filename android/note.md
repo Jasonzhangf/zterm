@@ -3188,3 +3188,13 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
 
 ### 剩余
 - `TerminalPage.tsx` 剩余 ~70 useEffect 链式重渲问题、`TerminalView.tsx` 其他 useEffect、`session-context-lifecycle` active tick 背景降频后的 foreground 恢复策略 — 需后续继续审计
+
+## 2026-06-06 R5 审计优化完成 + APK 1841
+
+### 完成项
+- **R5 complete**: `broadcastChangedRangesBufferSyncToSubscribers` pre-JSON.stringify once, fan out via `sendText` (skip N×JSON.stringify).
+- **Client useEffect storm**: TerminalView RAF dedup, TerminalPage ref snapshot (27→0 deps), background tick 16ms→1s, QuickBar space trim.
+- **sendText dep chain**: transport-runtime → terminal-runtime → server → mirror-runtime, test fixtures all updated.
+- **Build**: APK `0.1.3.1841`, sha256 `b474c660b8cb63ce361ec229063614a042279fbfd6c8cd9ba462fb98b4817d81`, `~/.wterm/updates/` synced.
+- **Daemon**: global install + service restart + `local-input-echo` lab PASS.
+- **Commit**: `1f360f5` pushed.
