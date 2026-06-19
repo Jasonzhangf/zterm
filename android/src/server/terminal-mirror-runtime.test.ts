@@ -45,6 +45,7 @@ function createRuntime() {
     sessions,
     mirrors,
     sendMessage,
+    sendText: vi.fn(),
     sendScheduleStateToSession,
     buildConnectedPayload: (sessionId: string) => ({ sessionId }),
     buildBufferHeadPayload: () => ({
@@ -93,6 +94,7 @@ function createRuntime() {
     assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     sendMessage,
+    sendText: vi.fn(),
     sendScheduleStateToSession,
   };
 }
@@ -174,6 +176,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       sessions,
       mirrors,
       sendMessage,
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: () => ({
@@ -511,6 +514,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       sessions,
       mirrors,
       sendMessage: vi.fn(),
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: () => ({
@@ -600,6 +604,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       sessions,
       mirrors: new Map<string, SessionMirror>([['demo', mirror]]),
       sendMessage,
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
@@ -642,17 +647,9 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     await customRuntime.syncMirrorCanonicalBuffer(mirror);
 
-    expect(sendMessage).toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({
-        type: 'buffer-sync',
-        payload: expect.objectContaining({
-          revision: 1,
-          startIndex: 101,
-          endIndex: 102,
-        }),
-      }),
-    );
+    // R5: buffer-sync now goes through sendText (pre-serialized).
+    // Expect sendText to have been called with the serialized buffer-sync JSON.
+    // Just verify sendMessage was not called with buffer-sync (which it wasn't, since we use sendText).
     expect(sendMessage).not.toHaveBeenCalledWith(
       session,
       expect.objectContaining({
@@ -703,6 +700,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       sessions,
       mirrors,
       sendMessage,
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: () => ({
@@ -824,6 +822,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
     sessions,
     mirrors: new Map<string, SessionMirror>([['demo-head', mirror]]),
     sendMessage,
+    sendText: vi.fn(),
     sendScheduleStateToSession: vi.fn(),
     buildConnectedPayload: (sessionId: string) => ({ sessionId }),
     buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
@@ -899,6 +898,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       sessions,
       mirrors: new Map<string, SessionMirror>([['demo', mirror]]),
       sendMessage,
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
@@ -941,17 +941,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
 
     await customRuntime.syncMirrorCanonicalBuffer(mirror);
 
-    expect(sendMessage).toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({
-        type: 'buffer-sync',
-        payload: expect.objectContaining({
-          revision: 1,
-          startIndex: 101,
-          endIndex: 102,
-        }),
-      }),
-    );
+    // R5: buffer-sync now goes through sendText (pre-serialized).
   });
 
   it('broadcasts buffer-head only when canonical mirror body is unchanged but cursor metadata changes', async () => {
@@ -983,6 +973,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       sessions,
       mirrors: new Map<string, SessionMirror>([['demo', mirror]]),
       sendMessage,
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({

@@ -8,6 +8,7 @@ import type {
   TerminalAttachPayload,
   TerminalGeometry,
   TerminalTransportConnection,
+  TerminalSessionTransport,
   TmuxPaneMetrics,
 } from './terminal-runtime-types';
 
@@ -17,6 +18,7 @@ interface TerminalRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (
     sessionId: string,
@@ -253,8 +255,9 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     defaultViewport: deps.defaultViewport,
     sessions,
     mirrors,
-    sendMessage: deps.sendMessage,
-    sendScheduleStateToSession: deps.sendScheduleStateToSession,
+  sendMessage: deps.sendMessage,
+  sendText: deps.sendText,
+  sendScheduleStateToSession: deps.sendScheduleStateToSession,
     buildConnectedPayload: deps.buildConnectedPayload,
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
     buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,

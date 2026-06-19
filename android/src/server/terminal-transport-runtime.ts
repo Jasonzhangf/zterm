@@ -36,6 +36,7 @@ export interface TerminalTransportRuntime {
   createWebSocketSessionTransport: (ws: WebSocket) => TerminalSessionTransport;
   createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   createTransportConnection: (
@@ -143,6 +144,22 @@ export function createTerminalTransportRuntime(
     }
   }
 
+  // R5: broadcast helper that pre-serializes once and fans out without re-stringifying per sub.
+  // Owns: open-check, lastSendAt, lastSendError. Does NOT update totalSendBytes (caller owns).
+  function sendText(transport: TerminalSessionTransport | null | undefined, text: string) {
+    if (!transport || transport.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    try {
+      transport.sendText(text);
+      transport.lastSendAt = Date.now();
+    } catch (error) {
+      transport.lastSendAt = Date.now();
+      transport.lastSendError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
   function sendMessage(session: TerminalSession, message: ServerMessage) {
     if (session.transport && session.transport.readyState === WebSocket.OPEN) {
       if (message.type === 'buffer-sync' || message.type === 'connected') {
@@ -196,6 +213,7 @@ export function createTerminalTransportRuntime(
   return {
     createWebSocketSessionTransport,
     createRtcSessionTransport,
+    sendText,
     sendTransportMessage,
     sendMessage,
     broadcastRuntimeDebugControl,

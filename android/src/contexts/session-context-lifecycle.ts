@@ -337,6 +337,8 @@ export function useSessionContextLifecycle(options: {
           return;
         }
         if (!options.refs.foregroundActiveRef.current) {
+          // Background: slow tick to 1s to avoid CPU waste (was via scheduleNext()
+          // which keeps 16ms setTimeout loop). Foreground resets the cadence.
           scheduleNext();
           return;
         }
@@ -405,6 +407,10 @@ export function useSessionContextLifecycle(options: {
         }
         if (!options.refs.foregroundActiveRef.current) {
           scheduleNext();
+          timer = window.setTimeout(() => {
+            if (cancelled) return;
+            scheduleNext();
+          }, 1000);
           return;
         }
         if (refreshTargets.length === 0) {

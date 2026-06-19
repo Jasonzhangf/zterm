@@ -2239,7 +2239,12 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  useEffect(() => registerClientDebugSnapshotSource('terminal-page', () => ({
+  // Use a ref to hold the live snapshot lambda so the registration useEffect
+  // never needs to re-run. The producer reads ref.current, which is kept fresh
+  // every render. This decouples the snapshot source from all reactive deps,
+  // stopping the 27-item useEffect dep chain that fires on every keyboard/tick change.
+  const terminalPageSnapshotProducerRef = useRef<() => Record<string, unknown>>(() => ({}));
+  terminalPageSnapshotProducerRef.current = () => ({
     activeSessionId: uiSessionId,
     activeSessionState: uiSession?.state || null,
     sessionCount: sessions.length,
@@ -2261,28 +2266,11 @@ function TerminalPageComponent({
     connectionIssueVisible,
     isAndroid,
     widthMode: terminalWidthMode,
-  })), [
-    uiSessionId,
-    uiSession?.state,
-    connectionIssueVisible,
-    effectiveKeyboardLiftPx,
-    headerTopInsetPx,
-    isAndroid,
-    keyboardInset,
-    layoutProfile,
-    networkOnline,
-    quickBarEditorFocused,
-    quickBarHeight,
-    quickBarShellKeyboardLiftPx,
-    sessions.length,
-    shellHeight,
-    splitVisible,
-    terminalChromeBottomPx,
-    terminalImeActive,
-    terminalImeLiftPx,
-    terminalKeyboardRequested,
-    terminalWidthMode,
-  ]);
+  });
+  useEffect(() => registerClientDebugSnapshotSource(
+    'terminal-page',
+    () => terminalPageSnapshotProducerRef.current(),
+  ), []);
   const currentPersistedTabs = sessions.map(toPersistedOpenTab);
 
   const saveCurrentTabList = (name: string) => {

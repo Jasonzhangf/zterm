@@ -22,6 +22,7 @@ export interface TerminalMirrorRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendText: (transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined, text: string) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (
     sessionId: string,
@@ -459,12 +460,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!payload) {
       return;
     }
-    // R5: build the typed payload once, dispatch through sendMessage.
-    // sendMessage still owns runtime-debug + per-sub transport send.
-    const message: Extract<ServerMessage, { type: 'buffer-sync' }> = {
-      type: 'buffer-sync',
-      payload,
-    };
+    // R5: pre-serialize once, fan out via sendText to avoid N×JSON.stringify per sub.
+    // sendText owns transport open-check + lastSendAt; runtime-debug is skipped for
+    // high-frequency buffer-sync to keep CPU low at high subscriber counts.
+    const text = JSON.stringify({ type: 'buffer-sync', payload });
     const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
@@ -479,7 +478,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         continue;
       }
       ensureSessionReady(session, mirror);
-      deps.sendMessage(session, message);
+      deps.sendText(session.transport, text);
     }
   }
 

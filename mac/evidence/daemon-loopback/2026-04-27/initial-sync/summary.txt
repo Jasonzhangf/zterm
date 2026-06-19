@@ -1,5 +1,0 @@
-case=initial-sync
-ok=true
-reason=
-mismatchIndex=none
-generatedAt=2026-04-27T10:31:01.274Z

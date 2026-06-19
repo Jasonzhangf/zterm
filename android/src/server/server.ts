@@ -139,6 +139,7 @@ const terminalRuntime = createTerminalRuntime({
   sessions,
   mirrors,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
+  sendText: (transport, text) => terminalTransportRuntime.sendText(transport, text),
   sendScheduleStateToSession: (session, sessionName) =>
     terminalScheduleRuntime.sendScheduleStateToSession(session, sessionName),
   buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin),

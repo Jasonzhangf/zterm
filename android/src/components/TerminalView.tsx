@@ -215,6 +215,7 @@ function TerminalViewComponent({
   const pendingFollowScrollSyncRef = useRef(false);
   const pendingFollowViewportRealignRef = useRef(false);
   const recentViewportLayoutChangeRef = useRef(false);
+  const resizeRafTokenRef = useRef<number | null>(null);
   const ignoredProgrammaticScrollTopRef = useRef<number | null>(null);
   const lastSettledScrollTopRef = useRef(0);
   const hasSettledFollowFrameRef = useRef(false);
@@ -411,6 +412,22 @@ function TerminalViewComponent({
     },
     [cancelCopyLongPress],
   );
+  // Copy-mode native menu blocker: only intercept selection/contextmenu where the
+  // OS / WebView would otherwise show the system callout. We never stopPropagation
+  // here so per-row long-press detection on VisibleRow still runs.
+  const preventNativeCopyGestureDefault = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
+    if (!copyModeActive) {
+      return;
+    }
+    event.preventDefault();
+  }, [copyModeActive]);
+  const suppressNativeCopyMenu = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
+    if (!copyModeActive) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  }, [copyModeActive]);
   const { termGridPaddingTopPx, termGridPaddingBottomPx } = useMemo(
     () =>
       buildTerminalGridPadding({
@@ -1042,6 +1059,29 @@ function TerminalViewComponent({
   }, [consumeViewportRefreshTrigger, runViewportRefresh]);
 
   useEffect(() => {
+    const host = containerRef.current;
+    if (!host || !copyModeActive) {
+      return;
+    }
+    const preventNativeCallout = (event: Event) => {
+      event.preventDefault();
+    };
+    const suppressNativeMenu = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const options: AddEventListenerOptions = { capture: true, passive: false };
+    host.addEventListener('touchstart', preventNativeCallout, options);
+    host.addEventListener('contextmenu', suppressNativeMenu, options);
+    host.addEventListener('selectstart', suppressNativeMenu, options);
+    return () => {
+      host.removeEventListener('touchstart', preventNativeCallout, options);
+      host.removeEventListener('contextmenu', suppressNativeMenu, options);
+      host.removeEventListener('selectstart', suppressNativeMenu, options);
+    };
+  }, [copyModeActive]);
+
+  useEffect(() => {
     reconcileViewportAfterBufferShift();
   }, [
     refreshActive,
@@ -1052,7 +1092,6 @@ function TerminalViewComponent({
     followDemandAnchorEndIndex,
     maxScrollTop,
     reconcileViewportAfterBufferShift,
-    renderGeometryRevision,
     sessionId,
     viewportRows,
   ]);
@@ -1090,7 +1129,6 @@ function TerminalViewComponent({
     flushPendingFollowScrollSync,
     renderBuffer.revision,
     renderBuffer.startIndex,
-    renderGeometryRevision,
     rowHeightPx,
     viewportRows,
   ]);
@@ -1154,9 +1192,23 @@ function TerminalViewComponent({
       return;
     }
     runViewportRefreshRef.current();
-    const observer = new ResizeObserver(() => runViewportRefreshRef.current());
+    const observer = new ResizeObserver(() => {
+      if (resizeRafTokenRef.current !== null) {
+        return;
+      }
+      resizeRafTokenRef.current = window.requestAnimationFrame(() => {
+        resizeRafTokenRef.current = null;
+        runViewportRefreshRef.current();
+      });
+    });
     observer.observe(host);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeRafTokenRef.current !== null) {
+        window.cancelAnimationFrame(resizeRafTokenRef.current);
+        resizeRafTokenRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1286,13 +1338,10 @@ function TerminalViewComponent({
         }
         onActivateInput?.(sessionId);
       }}
-      onContextMenu={(event) => {
-        if (!copyModeActive) {
-          return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-      }}
+      onContextMenu={suppressNativeCopyMenu}
+      onPointerDownCapture={preventNativeCopyGestureDefault}
+      onTouchStartCapture={preventNativeCopyGestureDefault}
+      onMouseDownCapture={preventNativeCopyGestureDefault}
       onScroll={(event) => {
         if (suppressProgrammaticScrollRef.current) {
           return;
@@ -1336,6 +1385,10 @@ function TerminalViewComponent({
       <div
         className="term-grid"
         data-cursor-source="cursor-metadata"
+        onContextMenu={suppressNativeCopyMenu}
+        onPointerDownCapture={preventNativeCopyGestureDefault}
+        onTouchStartCapture={preventNativeCopyGestureDefault}
+        onMouseDownCapture={preventNativeCopyGestureDefault}
         style={{
           paddingTop: `${termGridPaddingTopPx}px`,
           paddingBottom: `${termGridPaddingBottomPx}px`,

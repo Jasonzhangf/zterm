@@ -47,6 +47,7 @@ function createDeps() {
       sessions,
       mirrors,
       sendMessage: vi.fn(),
+      sendText: vi.fn(),
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: (sessionId: string, mirror: SessionMirror) => ({

@@ -3168,3 +3168,23 @@ Jason 2026-06-08 物理键盘与刷新慢修复收口
   - R13: input 256KB 上限
   - 剩余: R5 完整版 (sendMessage pre-serialized text path) + R11+R12
   - commit f2231db pushed
+
+## 2026-06-06 费电/废CPU审计 R5 完整版 + 其他优化
+
+### R5: broadcastChangedRangesBufferSyncToSubscribers 预序列化
+- **现象**: broadcast 中每 subscriber 调一次 `deps.sendMessage(session, message)`，每次走 `sendTransportMessage` → `JSON.stringify(message)`。N 个 subscriber 产生 N 次序列化。
+- **修复**: 新增 `sendText(transport, text)` 作为纯文本发送口，不经过 `JSON.stringify`；`broadcastChangedRangesBufferSyncToSubscribers` 改为先 `JSON.stringify` 一次，再遍历 subscriber 走 `deps.sendText(session.transport, text)`，避免 N 次重复序列化。
+- **涉及文件**:
+  - `terminal-transport-runtime.ts`: 新增 `sendText` 接口、`sendText()` 实现，`TerminalSessionTransport` 接口增加 `sendText(text: string)`
+  - `terminal-mirror-runtime.ts`: `TerminalMirrorRuntimeDeps` 增加 `sendText`；`broadcastChangedRangesBufferSyncToSubscribers` 改走预序列化 + `deps.sendText`
+  - `terminal-runtime.ts`: `TerminalRuntimeDeps` 增加 `sendText`
+  - `server.ts`: wire `sendText` 到 `terminalTransportRuntime.sendText`
+
+### 费电审计项修复（已完成/部分完成）
+- **P0 `TerminalView` ResizeObserver + RAF 链** → 已加 RAF token dedup，每帧只一次
+- **P0 `TerminalPage.tsx` 72 useEffect 中的 debug snapshot** → 已改 ref 模式，dep 从 27 项降为 0
+- **P2 `session-context-lifecycle` background tick** → 背景时 16ms→1s 降频
+- **P1 `TerminalView` renderGeometryRevision useEffect** → `resizeRafTokenRef` dedup（未完全切掉 dep 但已减少重跑）
+
+### 剩余
+- `TerminalPage.tsx` 剩余 ~70 useEffect 链式重渲问题、`TerminalView.tsx` 其他 useEffect、`session-context-lifecycle` active tick 背景降频后的 foreground 恢复策略 — 需后续继续审计
