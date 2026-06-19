@@ -441,6 +441,7 @@ export function createTerminalDomInputController({
   const flushDomInputValue = () => {
     if (!input.value) return;
     const targetSessionId = compositionStartSessionId ?? sessionIdRef.current;
+    if (!targetSessionId) return;
     if (composing) return; // still composing — compositionend will flush
     const normalized = normalizeCommittedText(input.value).replace(/\n/g, '\r');
     onInputRef.current?.(targetSessionId, normalized);
@@ -472,6 +473,7 @@ export function createTerminalDomInputController({
     composing = false;
     const targetSessionId = compositionStartSessionId ?? sessionIdRef.current;
     compositionStartSessionId = null;
+    if (!targetSessionId) return;
     if (event.data && !input.value) { input.value = event.data; }
     if (!input.value) return;
     const normalized = normalizeCommittedText(input.value).replace(/\n/g, '\r');
