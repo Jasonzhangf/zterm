@@ -64,11 +64,13 @@ export async function auditOpenTabsAgainstRemoteSessions(
     return;
   }
 
-  const missingTabs = currentTabs.filter((tab) => {
+    const missingTabs = currentTabs.filter((tab) => {
     const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(tab));
-    if (!remoteSessionNames) {
+    // If no entry in map at all, or entry is empty array, treat as "unknown" - do NOT close tabs
+    if (!remoteSessionNames || remoteSessionNames.length === 0) {
       return false;
     }
+    // Only flag as missing if we have a non-empty confirmed session list AND our tab is not in it
     return !new Set(remoteSessionNames).has(tab.sessionName.trim());
   });
   if (missingTabs.length === 0) {

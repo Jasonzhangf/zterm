@@ -144,12 +144,28 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     }
   }));
 
+  // Track which targets were successfully fetched
+  const fetchedOwnerKeys = new Set<string>();
   for (const result of fetchResults) {
     if (!result.ok) {
       continue;
     }
+    fetchedOwnerKeys.add(result.targetKey);
     if (!sessionNamesByTarget.has(result.targetKey)) {
       sessionNamesByTarget.set(result.targetKey, result.sessionNames);
+    }
+  }
+
+  // Mark failed targets to distinguish "confirmed empty" from "fetch failed"
+  // Empty string array signals "fetch failed / unknown" - audit must NOT use this to close tabs
+  for (const resolvedTarget of resolvedTargets) {
+    const targetKey = buildSessionSemanticOwnerKey({
+      daemonHostId: resolvedTarget.daemonHostId,
+      bridgeHost: resolvedTarget.bridgeHost,
+      bridgePort: resolvedTarget.bridgePort,
+    });
+    if (!fetchedOwnerKeys.has(targetKey) && !sessionNamesByTarget.has(targetKey)) {
+      sessionNamesByTarget.set(targetKey, []);
     }
   }
 
