@@ -60,6 +60,7 @@ export type SessionState =
   | 'idle'        // 未连接
   | 'connecting'  // 正在建立连接
   | 'connected'   // 已连接，可交互
+  | 'disconnected' // transport 断开，runtime 仍保留，需显式恢复
   | 'reconnecting' // 断线重连中
   | 'error'       // 连接失败
   | 'closed';     // 已关闭

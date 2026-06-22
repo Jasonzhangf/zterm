@@ -46,7 +46,7 @@ function resolveDebugStatus(
   pullStatePurpose: SessionDebugMetricsRefreshInput['pullStatePurpose'],
 ): SessionDebugOverlayMetrics['status'] {
   return sessionState === 'error' ? 'error'
-    : sessionState === 'closed' ? 'closed'
+    : sessionState === 'closed' || sessionState === 'disconnected' ? 'closed'
     : sessionState === 'reconnecting' ? 'reconnecting'
     : sessionState === 'connecting' ? 'connecting'
     : pullStatePurpose === 'reading-repair' ? 'loading'

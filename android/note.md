@@ -158,6 +158,31 @@ ws.on("message", (msg: Buffer | string) => {
 - daemon optimization-2 还没跑 throughput bench，也没交付新 APK
 - 本轮只完成代码 + contracts 闭环，未构建 APK
 
+## 2026-06-22 optimization-3 自动关闭 tab close/disconnected closeout
+
+### 本轮改动
+- `SessionState` 新增 `disconnected`，表示 transport 断开但 runtime session / OPEN_TABS 仍保留。
+- daemon websocket `{ type: "closed" }` 经过 `buildSessionClosedUpdates()` 后只把 session 标记为 `disconnected`，不落成用户显式关闭态。
+- `buildActiveSessionRefreshPlan()` 将 `closed/disconnected/error` 都视为 unavailable，只有 `explicit-resume` 可以恢复。
+- debug UI 将 `disconnected` 显示为 closed 风格状态，但不删除 tab。
+
+### 删除门禁审计
+- 生产代码中 `deleteSessionSync()` 只有一个调用点：`closeSessionRuntime()`。
+- `closeSessionRuntime()` 先执行 `manualCloseRef.current.add(sessionId)`，之后才调用 `deleteSessionSync(sessionId)`。
+- `SessionAction.DELETE_SESSION` 类型要求 `manualClose: true`，`deleteSessionSyncRuntime()` 只发送该类型 action。
+- 因此 daemon closed / transport detach / auditOpenTabsAgainstRemoteSessions 均没有直接删除 OPEN_TABS 的路径。
+
+### 验证
+- `cd android && npx tsc --noEmit` PASS。
+- `cd android && pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/App.dynamic-refresh.test.tsx src/contexts/session-sync-helpers.test.ts src/contexts/session-context-activity-runtime.test.ts src/contexts/session-context-transport-open-runtime.test.ts src/contexts/session-context-lifecycle.test.tsx` PASS（279/279）。
+- `cd android && pnpm exec vitest run src/contexts/session-context-session-runtime.test.ts src/contexts/session-context-core.test.ts` PASS（14/14）。
+- `cd android && pnpm run test:terminal:contracts` PASS（564/564）。
+- `cd android && ./scripts/build-android-debug.sh` PASS。
+- 新 APK：`~/.wterm/updates/zterm-0.1.3.1869.apk`，versionCode `1031869`，sha256 `49859962c5a65dfa610b27ece2d577c97feb584875eea945d2ec1f60ee653eb9`，size `5459890`。
+- HTTP 验证：
+  - `http://127.0.0.1:3333/updates/latest.json` 200，APK 200。
+  - `http://100.66.1.82:3333/updates/latest.json` 200，APK 200。
+
 ## 2026-06-22 升级包 404 二次修复
 
 ### 现象

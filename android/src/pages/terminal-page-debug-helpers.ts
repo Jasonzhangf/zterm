@@ -32,6 +32,7 @@ function resolveDebugStatus(
   switch (session.state) {
     case "error":
       return "error";
+    case "disconnected":
     case "closed":
       return "closed";
     case "reconnecting":

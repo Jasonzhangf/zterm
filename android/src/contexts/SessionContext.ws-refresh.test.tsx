@@ -6763,7 +6763,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(screen.getByTestId('session-ids').textContent).toBe('session-1');
   });
 
-  it('emits closed status from websocket close message and does not fall back into reconnect on later socket close', async () => {
+  it('marks websocket close message as disconnected and does not fall back into reconnect on later socket close', async () => {
     const statusListener = vi.fn();
     window.addEventListener('zterm:session-status', statusListener as EventListener);
     try {
@@ -6785,13 +6785,13 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(statusListener.mock.calls[0]?.[0]).toMatchObject({
         detail: { sessionId: 'session-1', type: 'closed', message: 'tmux session closed' },
       });
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('closed'));
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('disconnected'));
 
       ws.close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(MockWebSocket.instances).toHaveLength(1);
       expect(statusListener).toHaveBeenCalledTimes(1);
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('closed'));
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('disconnected'));
     } finally {
       window.removeEventListener('zterm:session-status', statusListener as EventListener);
     }

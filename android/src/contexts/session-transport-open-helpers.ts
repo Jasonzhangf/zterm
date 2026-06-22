@@ -300,7 +300,7 @@ export function buildSessionClosedUpdates(
   message?: string,
 ): Pick<Session, 'state' | 'lastError' | 'reconnectAttempt' | 'ws'> {
   return {
-    state: 'closed',
+    state: 'disconnected',
     lastError: message || undefined,
     reconnectAttempt: 0,
     ws: null,
@@ -410,7 +410,9 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
   }
 
   const transportOpen = options.wsReadyState === WebSocket.OPEN;
-  const unavailableState = options.sessionState === 'closed' || options.sessionState === 'error';
+  const unavailableState = options.sessionState === 'closed'
+    || options.sessionState === 'disconnected'
+    || options.sessionState === 'error';
 
   if (unavailableState) {
     if (options.source !== 'explicit-resume') {

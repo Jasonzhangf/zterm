@@ -1162,11 +1162,11 @@ describe('App dynamic refresh matrix', () => {
         sessions: [
           {
             ...makeSession('s1', 1),
-            state: 'closed',
+            state: 'disconnected',
           },
           {
             ...makeSession('s2', 2),
-            state: 'closed',
+            state: 'disconnected',
           },
         ],
         activeSessionId: 's1',
@@ -1174,7 +1174,7 @@ describe('App dynamic refresh matrix', () => {
       } as any,
       {
         ...makeSession('s1', 1),
-        state: 'closed',
+        state: 'disconnected',
       } as any,
     );
 
