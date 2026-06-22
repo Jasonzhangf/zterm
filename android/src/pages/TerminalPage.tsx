@@ -1429,16 +1429,15 @@ function TerminalPageComponent({
   ), [activeHeaderSessionUiKey, interactiveSession]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
-    // 同一 host (bridgeHost:bridgePort) 在该客户端视角共享一个 hostLabel。
-    // 真源：session.bridgeHost + session.bridgePort；
-    // 显示：hostLabel 优先取该 host 上 customName（最常被作为别名），回退到 hostKey。
     const hostLabelByKey = new Map<string, string>();
     for (const session of sessions) {
       const hostKey = `${session.bridgeHost}:${session.bridgePort}`;
       if (hostLabelByKey.has(hostKey)) continue;
       hostLabelByKey.set(hostKey, session.customName || hostKey);
     }
-    return workspacePanes.flatMap((pane, paneIndex) => (
+
+    // 已打开的 session（按 pane 顺序）
+    const opened: TerminalSessionDrawerItem[] = workspacePanes.flatMap((pane, paneIndex) =>
       pane.tabs
         .map((tab) => sessions.find((candidate) => candidate.id === tab.sessionId) || null)
         .filter((session): session is Session => Boolean(session))
@@ -1451,8 +1450,29 @@ function TerminalPageComponent({
           active: activeSessionIds.has(session.id),
           hostKey: `${session.bridgeHost}:${session.bridgePort}`,
           hostLabel: hostLabelByKey.get(`${session.bridgeHost}:${session.bridgePort}`) || `${session.bridgeHost}:${session.bridgePort}`,
-        }))
-    ));
+        })),
+    );
+
+    // 未打开的 session（按名字排序），排除已打开的
+    const openedIds = new Set(opened.map((s) => s.id));
+    const unopened: TerminalSessionDrawerItem[] = sessions
+      .filter((s) => !openedIds.has(s.id))
+      .sort((a, b) => (a.customName || a.sessionName).localeCompare(b.customName || b.sessionName))
+      .map((session) => {
+        const hostKey = `${session.bridgeHost}:${session.bridgePort}`;
+        return {
+          id: session.id,
+          title: session.customName || session.sessionName,
+          subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
+          status: normalizeDrawerStatus(session.state),
+          paneLabel: undefined,
+          active: false,
+          hostKey,
+          hostLabel: hostLabelByKey.get(hostKey) || hostKey,
+        };
+      });
+
+    return [...opened, ...unopened];
   }, [renderedPaneSessions, sessions, workspacePanes]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;

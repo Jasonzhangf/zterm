@@ -119,18 +119,16 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    // 应显示 host rail
     expect(screen.getByTestId('terminal-session-drawer-host-rail')).toBeTruthy();
-    // 两个 host pill
     expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
 
-    // 默认选中 active session 所在 host（rcc-machine），应显示 s1、s2，不显示 s3
+    // 默认选中 active session 所在 host，显示 s1、s2，不显示 s3
     expect(screen.getByTestId('terminal-session-drawer-row-s1')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-row-s2')).toBeTruthy();
     expect(() => screen.getByTestId('terminal-session-drawer-row-s3')).toThrow();
 
-    // 点击 mac-dev host pill → 显示 s3
+    // 切到 mac-dev host → 显示 s3
     fireEvent.click(screen.getByTestId('terminal-session-drawer-host-100.66.1.82:3333'));
     rerender(
       <TerminalSessionDrawer
@@ -180,10 +178,32 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    // 无 host rail
     expect(() => screen.getByTestId('terminal-session-drawer-host-rail')).toThrow();
-    // 所有 session 都直接展示
     expect(screen.getByTestId('terminal-session-drawer-row-s1')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-row-s2')).toBeTruthy();
+  });
+
+  it('preserves caller-provided order (opened before unopened)', () => {
+    // 排序由 TerminalPage 负责；drawer 只保持传入顺序
+    const orderedSessions = [
+      { id: 'o-bravo', title: 'bravo', subtitle: 'host · bravo', status: 'connected' as const, paneLabel: 'P1', active: true, hostKey: 'host:3333' },
+      { id: 'u-alpha', title: 'alpha', subtitle: 'host · alpha', status: 'idle' as const, hostKey: 'host:3333' },
+      { id: 'u-zeta', title: 'zeta', subtitle: 'host · zeta', status: 'idle' as const, hostKey: 'host:3333' },
+    ];
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={orderedSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const oNode = screen.getByTestId('terminal-session-drawer-row-o-bravo');
+    const aNode = screen.getByTestId('terminal-session-drawer-row-u-alpha');
+    const zNode = screen.getByTestId('terminal-session-drawer-row-u-zeta');
+    expect(oNode.compareDocumentPosition(aNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aNode.compareDocumentPosition(zNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
