@@ -5979,6 +5979,13 @@ async function canonicalizeCapturedMirrorLines(capturedLines, cols, bridge) {
 }
 
 // src/server/terminal-mirror-capture.ts
+var sharedScratchBridgePromise = null;
+function loadSharedScratchBridge() {
+  if (!sharedScratchBridgePromise) {
+    sharedScratchBridgePromise = WasmBridge.load();
+  }
+  return sharedScratchBridgePromise;
+}
 function normalizeMirrorCursor(options) {
   const safePaneRows = Math.max(1, Math.floor(options.paneRows || 1));
   const safeBufferStartIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
@@ -6106,8 +6113,8 @@ function createTerminalMirrorCaptureRuntime(deps) {
     }
     return currentPath;
   }
-  function readTmuxCursorState(target) {
-    const result = deps.runTmux([
+  async function readTmuxCursorStateAsync(target) {
+    const result = await deps.runTmuxAsync([
       "display-message",
       "-p",
       "-t",
@@ -6122,10 +6129,10 @@ function createTerminalMirrorCaptureRuntime(deps) {
       cursorKeysApp: cursorKeysAppRaw === "1"
     };
   }
-  function captureTmuxMirrorLines(target, options) {
+  async function captureTmuxMirrorLinesAsync(target, options) {
     const safePaneRows = Math.max(1, Math.floor(options.paneRows));
     const safeMaxLines = Math.max(1, Math.floor(options.maxLines));
-    const captureResult = deps.runTmux([
+    const captureResult = await deps.runTmuxAsync([
       "capture-pane",
       "-p",
       "-e",
@@ -6146,18 +6153,45 @@ function createTerminalMirrorCaptureRuntime(deps) {
     }
     return normalizedLines.slice(-safeMaxLines);
   }
+  async function readTmuxPaneMetricsAsync(sessionName) {
+    const result = await deps.runTmuxAsync([
+      "display-message",
+      "-p",
+      "-t",
+      sessionName,
+      "#{pane_id}	#{history_size}	#{pane_height}	#{pane_width}	#{alternate_on}	#{pane_dead}"
+    ]);
+    const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split("	");
+    const paneRows = Number.parseInt(rowsRaw ?? "", 10);
+    const paneCols = Number.parseInt(colsRaw ?? "", 10);
+    if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
+      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: rows=${rowsRaw ?? ""} cols=${colsRaw ?? ""}`);
+    }
+    if (paneDeadRaw === "1") {
+      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: pane is dead`);
+    }
+    const historySize = Math.max(0, Number.parseInt(tmuxHistorySizeRaw ?? "", 10) || 0);
+    const alternateOn = alternateOnRaw === "1";
+    return {
+      paneId: paneIdRaw?.trim() || sessionName,
+      tmuxAvailableLineCountHint: historySize + paneRows,
+      paneRows,
+      paneCols,
+      alternateOn
+    };
+  }
   async function captureTmuxMirrorSnapshot(mirror) {
     const captureStartedAt = Date.now();
-    const metrics = readTmuxPaneMetrics(mirror.sessionName);
-    const cursor = readTmuxCursorState(metrics.paneId);
+    const metrics = await readTmuxPaneMetricsAsync(mirror.sessionName);
+    const cursor = await readTmuxCursorStateAsync(metrics.paneId);
     const maxLines = deps.resolveMirrorCacheLines(metrics.paneRows);
-    const capturedLines = captureTmuxMirrorLines(metrics.paneId, {
+    const capturedLines = await captureTmuxMirrorLinesAsync(metrics.paneId, {
       paneRows: metrics.paneRows,
       maxLines,
       alternateOn: metrics.alternateOn
     });
     const captureDoneAt = Date.now();
-    const scratchBridge = mirror.scratchBridge ?? await WasmBridge.load();
+    const scratchBridge = mirror.scratchBridge ?? await loadSharedScratchBridge();
     mirror.scratchBridge = scratchBridge;
     const canonicalizeStartedAt = Date.now();
     const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);
@@ -6463,6 +6497,7 @@ function summarizeIndexedLinesForDebug(lines) {
 
 // src/server/terminal-performance-scheduler.ts
 var FAST_LANE_DELAY_MS = 16;
+var FAST_LANE_MIN_DELAY_MS = 8;
 var BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 var OVERLOADED_CAPTURE_MS = 120;
 var SLOW_CAPTURE_MS = 64;
@@ -6492,7 +6527,7 @@ function resolveTerminalLiveSyncDelay(input) {
   }
   if (input.flushInFlight) {
     return {
-      delayMs: activeDelayMs,
+      delayMs: Math.max(activeDelayMs, FAST_LANE_MIN_DELAY_MS),
       lane: "normal",
       reason: "flush-in-flight"
     };
@@ -6521,7 +6556,7 @@ function resolveTerminalLiveSyncDelay(input) {
       reason: "capture-normal-budget"
     };
   }
-  const recentlyActive = input.lastProgressAt > 0 && input.now - input.lastProgressAt <= RECENT_PROGRESS_MS;
+  const recentlyActive = input.lastLiveActivityAt > 0 && input.now - input.lastLiveActivityAt <= RECENT_PROGRESS_MS;
   if (recentlyActive && requestedDelayMs <= activeDelayMs && bufferedBytes === 0) {
     return {
       delayMs: Math.min(activeDelayMs, FAST_LANE_DELAY_MS),
@@ -6530,7 +6565,7 @@ function resolveTerminalLiveSyncDelay(input) {
     };
   }
   return {
-    delayMs: Math.min(requestedDelayMs, recentlyActive ? activeDelayMs : idleDelayMs),
+    delayMs: recentlyActive ? Math.min(requestedDelayMs, activeDelayMs) : idleDelayMs,
     lane: recentlyActive ? "normal" : "slow",
     reason: recentlyActive ? "normal-active" : "idle"
   };
@@ -6673,6 +6708,19 @@ function createTerminalTransportRuntime(deps) {
       throw error;
     }
   }
+  function sendText(transport, text) {
+    if (!transport || transport.readyState !== import_websocket.default.OPEN) {
+      return;
+    }
+    try {
+      transport.sendText(text);
+      transport.lastSendAt = Date.now();
+    } catch (error) {
+      transport.lastSendAt = Date.now();
+      transport.lastSendError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
   function sendMessage2(session, message) {
     if (session.transport && session.transport.readyState === import_websocket.default.OPEN) {
       if (message.type === "buffer-sync" || message.type === "connected") {
@@ -6723,6 +6771,7 @@ function createTerminalTransportRuntime(deps) {
   return {
     createWebSocketSessionTransport: createWebSocketSessionTransport2,
     createRtcSessionTransport: createRtcSessionTransport2,
+    sendText,
     sendTransportMessage: sendTransportMessage2,
     sendMessage: sendMessage2,
     broadcastRuntimeDebugControl: broadcastRuntimeDebugControl2,
@@ -6733,6 +6782,29 @@ function createTerminalTransportRuntime(deps) {
 // src/server/terminal-mirror-runtime.ts
 var MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 var MIRROR_LIVE_SYNC_IDLE_MS = 120;
+var MIRROR_RESIZE_THROTTLE_MS = 250;
+var MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK = 2;
+function resolvePerSubscriberTransportSnapshot(sessions2, sessionId) {
+  const session = sessions2.get(sessionId);
+  return readTerminalTransportBackpressureSnapshot(session?.transport);
+}
+function resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, sessions2, now, requestedDelayMs) {
+  const snapshot = resolvePerSubscriberTransportSnapshot(sessions2, sessionId);
+  return resolveTerminalLiveSyncDelay({
+    requestedDelayMs,
+    activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
+    idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
+    now,
+    lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
+    consecutiveFailures: mirror.consecutiveFailures,
+    subscriberCount: 1,
+    transportBufferedBytes: snapshot?.bufferedBytes || 0,
+    transportBackpressureCount: snapshot?.backpressureCount || 0,
+    lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
+    lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+    flushInFlight: mirror.flushInFlight
+  });
+}
 function createTerminalMirrorRuntime(deps) {
   const sessions2 = deps.sessions;
   const mirrors2 = deps.mirrors;
@@ -6776,28 +6848,18 @@ function createTerminalMirrorRuntime(deps) {
   }
   function resolveMirrorLiveSyncDelay(mirror, requestedDelayMs) {
     const now = Date.now();
-    const lastProgressAt = Math.max(mirror.lastFlushStartedAt, mirror.lastFlushCompletedAt);
-    let transportBufferedBytes = 0;
-    let transportBackpressureCount = 0;
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions2.get(sessionId);
-      const snapshot = readTerminalTransportBackpressureSnapshot(session?.transport);
-      if (!snapshot) {
-        continue;
-      }
-      transportBufferedBytes = Math.max(transportBufferedBytes, snapshot.bufferedBytes);
-      transportBackpressureCount = Math.max(transportBackpressureCount, snapshot.backpressureCount);
-    }
     return resolveTerminalLiveSyncDelay({
       requestedDelayMs,
       activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
       idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
       now,
-      lastProgressAt,
+      lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
       consecutiveFailures: mirror.consecutiveFailures,
       subscriberCount: mirror.subscribers.size,
-      transportBufferedBytes,
-      transportBackpressureCount,
+      // Backpressure is handled per-subscriber in broadcastChangedRangesBufferSyncToSubscribers.
+      // Mirror-level capture cadence must not be dragged down by a single slow subscriber.
+      transportBufferedBytes: 0,
+      transportBackpressureCount: 0,
       lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
       lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
       flushInFlight: mirror.flushInFlight
@@ -6821,6 +6883,9 @@ function createTerminalMirrorRuntime(deps) {
       cursor: null,
       lastFlushStartedAt: 0,
       lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
@@ -6850,6 +6915,7 @@ function createTerminalMirrorRuntime(deps) {
     if (mirror.lifecycle === "destroyed") {
       return;
     }
+    deps.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`);
     mirror.lifecycle = "destroyed";
     if (options?.closeLogicalSessions) {
       const subscriberIds = Array.from(mirror.subscribers);
@@ -6870,6 +6936,9 @@ function createTerminalMirrorRuntime(deps) {
     mirror.cursor = null;
     mirror.lastFlushStartedAt = 0;
     mirror.lastFlushCompletedAt = 0;
+    mirror.lastLiveActivityAt = 0;
+    mirror.lastHeadBroadcastAt = 0;
+    mirror.lastResizeAt = 0;
     mirror.lastCaptureDurationMs = 0;
     mirror.lastCanonicalizeDurationMs = 0;
     mirror.lastScrollbackCount = -1;
@@ -6895,6 +6964,16 @@ function createTerminalMirrorRuntime(deps) {
   function reconcileMirrorAdaptiveWidth(mirror) {
     const baselineCols = resolveMirrorBaselineCols(mirror);
     const baselineRows = resolveMirrorBaselineRows(mirror);
+    const widthModes = /* @__PURE__ */ new Set();
+    for (const sessionId of mirror.subscribers) {
+      const sub = sessions2.get(sessionId);
+      if (sub) {
+        widthModes.add(sub.widthMode);
+      }
+    }
+    if (widthModes.size >= MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK) {
+      return;
+    }
     let minCols = 0;
     for (const entry of mirror.adaptiveCols.values()) {
       if (entry.widthMode === "adaptive-phone" && entry.cols > 0) {
@@ -6919,6 +6998,11 @@ function createTerminalMirrorRuntime(deps) {
     if (targetCols === mirror.cols && targetRows === mirror.rows) {
       return;
     }
+    const now = Date.now();
+    if (mirror.lastResizeAt > 0 && now - mirror.lastResizeAt < MIRROR_RESIZE_THROTTLE_MS) {
+      return;
+    }
+    mirror.lastResizeAt = now;
     try {
       deps.runTmux(["resize-window", "-t", mirror.sessionName, "-x", String(targetCols)]);
       mirror.cols = targetCols;
@@ -6937,9 +7021,15 @@ function createTerminalMirrorRuntime(deps) {
     }
   }
   function broadcastBufferHeadToSubscribers(mirror) {
+    const now = Date.now();
+    mirror.lastHeadBroadcastAt = now;
     for (const sessionId of mirror.subscribers) {
       const session = sessions2.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+      if (snapshot && snapshot.backpressure) {
         continue;
       }
       ensureSessionReady(session, mirror);
@@ -6954,23 +7044,25 @@ function createTerminalMirrorRuntime(deps) {
     if (!payload) {
       return;
     }
+    const text = JSON.stringify({ type: "buffer-sync", payload });
+    const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions2.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
         continue;
       }
+      const decision = resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, sessions2, now, 0);
+      if (decision.lane === "slow" && decision.reason === "transport-backpressure") {
+        continue;
+      }
       ensureSessionReady(session, mirror);
-      deps.sendMessage(session, {
-        type: "buffer-sync",
-        payload
-      });
+      deps.sendText(session.transport, text);
     }
   }
   function sendBufferHeadToSession(session, mirror) {
     if (!session.transport || session.transport.readyState !== 1) {
       return;
     }
-    ensureSessionReady(session, mirror);
     deps.sendMessage(session, {
       type: "buffer-head",
       payload: deps.buildBufferHeadPayload(session.id, mirror)
@@ -7015,8 +7107,10 @@ function createTerminalMirrorRuntime(deps) {
       const changedRanges = deps.mirrorBufferChanged(mirror, previousStartIndex, previousLines);
       const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
       const cursorKeysAppChanged = previousCursorKeysApp !== mirror.cursorKeysApp;
-      if (forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged) {
+      const hasLiveActivity = forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged;
+      if (hasLiveActivity) {
         mirror.revision += 1;
+        mirror.lastLiveActivityAt = Date.now();
       }
       if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
         const firstRange = changedRanges[0] || null;
@@ -7287,10 +7381,10 @@ function createTerminalMirrorRuntime(deps) {
     reconcileMirrorAdaptiveWidth(mirror);
     scheduleMirrorLiveSync(mirror, 0);
   }
-  function handleInput(session, data) {
+  async function handleInput(session, data, shouldWrite) {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
-      return;
+      return false;
     }
     if (mirror.lifecycle === "failed") {
       mirror.lifecycle = "ready";
@@ -7299,9 +7393,14 @@ function createTerminalMirrorRuntime(deps) {
     }
     if (mirror.lifecycle === "ready") {
       mirror.consecutiveFailures = 0;
-      deps.writeToLiveMirror(mirror.sessionName, data, false);
-      scheduleMirrorLiveSync(mirror, 0);
+      const wrote = await deps.enqueueLiveMirrorInput(mirror.sessionName, data, false, shouldWrite);
+      if (wrote) {
+        mirror.lastLiveActivityAt = Date.now();
+        scheduleMirrorLiveSync(mirror, 0);
+        return true;
+      }
     }
+    return false;
   }
   return {
     createMirror,
@@ -7311,11 +7410,13 @@ function createTerminalMirrorRuntime(deps) {
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,
+    resolveMirrorLiveSyncDelayForSubscriber,
     startMirror,
     attachTmux,
     handleAdaptiveResize,
     handleInput,
-    reconcileMirrorAdaptiveWidth
+    reconcileMirrorAdaptiveWidth,
+    disposeLiveMirrorInputBatch: (sessionName, reason) => deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`)
   };
 }
 
@@ -7392,8 +7493,11 @@ function createTerminalRuntime(deps) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
       mirror.adaptiveCols.delete(session.id);
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`);
       mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
-      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
+      if (mirror.subscribers.size > 0) {
+        mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      }
     }
     session.mirrorKey = null;
     sessions2.delete(session.id);
@@ -7408,8 +7512,11 @@ function createTerminalRuntime(deps) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
       mirror.adaptiveCols.delete(session.id);
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`);
       mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
-      mirrorRuntime.scheduleMirrorLiveSync(mirror, 0);
+      if (mirror.subscribers.size > 0) {
+        mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      }
     }
     if (notifyClient) {
       deps.sendMessage(session, { type: "closed", payload: { reason } });
@@ -7435,6 +7542,7 @@ function createTerminalRuntime(deps) {
     sessions: sessions2,
     mirrors: mirrors2,
     sendMessage: deps.sendMessage,
+    sendText: deps.sendText,
     sendScheduleStateToSession: deps.sendScheduleStateToSession,
     buildConnectedPayload: deps.buildConnectedPayload,
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
@@ -7450,6 +7558,8 @@ function createTerminalRuntime(deps) {
     mirrorBufferChanged: deps.mirrorBufferChanged,
     mirrorCursorEqual: deps.mirrorCursorEqual,
     writeToLiveMirror: deps.writeToLiveMirror,
+    enqueueLiveMirrorInput: deps.enqueueLiveMirrorInput,
+    disposeLiveMirrorInputBatch: deps.disposeLiveMirrorInputBatch,
     writeToTmuxSession: deps.writeToTmuxSession,
     autoCommandDelayMs: deps.autoCommandDelayMs,
     waitMs: deps.waitMs,
@@ -7470,6 +7580,7 @@ function createTerminalRuntime(deps) {
     detachSessionTransportOnly,
     closeSession,
     destroyMirror: mirrorRuntime.destroyMirror,
+    disposeLiveMirrorInputBatch: (sessionName, reason) => mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
     ensureSessionReady: mirrorRuntime.ensureSessionReady,
     sendBufferHeadToSession: mirrorRuntime.sendBufferHeadToSession,
     refreshMirrorHeadForSession: mirrorRuntime.refreshMirrorHeadForSession,
@@ -8511,6 +8622,7 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
 }
 
 // src/server/terminal-message-runtime.ts
+var MAX_INPUT_PAYLOAD_BYTES = 256 * 1024;
 function createTerminalMessageRuntime(deps) {
   function debugInput(scope, payload) {
     deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
@@ -8541,8 +8653,26 @@ function createTerminalMessageRuntime(deps) {
       payload: reason === "input_stale_transport" ? { message: "input requires the current attached session transport", code: "input_stale_transport" } : { message: "input requires an attached session transport", code: "session_required" }
     });
   }
-  function writeInputIfCurrent(connection, data) {
+  async function writeInputIfCurrent(connection, data) {
     const bytes = Buffer.byteLength(data, "utf8");
+    if (bytes > MAX_INPUT_PAYLOAD_BYTES) {
+      debugInput("drop", {
+        transportId: connection.transportId,
+        sessionId: connection.boundSessionId,
+        reason: "input_too_large",
+        bytes,
+        queueDepth: 0,
+        max: MAX_INPUT_PAYLOAD_BYTES
+      });
+      deps.sendTransportMessage(connection.transport, {
+        type: "error",
+        payload: {
+          message: `input payload exceeds ${MAX_INPUT_PAYLOAD_BYTES} bytes; client must chunk`,
+          code: "input_too_large"
+        }
+      });
+      return;
+    }
     debugInput("receive", {
       transportId: connection.transportId,
       sessionId: connection.boundSessionId,
@@ -8559,7 +8689,14 @@ function createTerminalMessageRuntime(deps) {
       return;
     }
     const startedAt = Date.now();
-    deps.handleInput(inputSession, data);
+    const wrote = await deps.handleInput(inputSession, data, () => {
+      const current = resolveCurrentSessionForInput(connection);
+      return current?.id === inputSession.id;
+    });
+    if (!wrote) {
+      reportInputDrop(connection, "input_stale_transport", bytes);
+      return;
+    }
     debugInput("write", {
       transportId: connection.transportId,
       sessionId: inputSession.id,
@@ -8610,7 +8747,7 @@ function createTerminalMessageRuntime(deps) {
         });
         return;
       }
-      writeInputIfCurrent(connection, text);
+      await writeInputIfCurrent(connection, text);
       return;
     }
     switch (message.type) {
@@ -8780,7 +8917,7 @@ function createTerminalMessageRuntime(deps) {
         break;
       case "input":
         if (typeof message.payload === "string") {
-          writeInputIfCurrent(connection, message.payload);
+          await writeInputIfCurrent(connection, message.payload);
           break;
         }
         if (!session) {
@@ -9537,6 +9674,7 @@ function createTerminalScheduleRuntime(deps) {
 var import_child_process = require("child_process");
 var import_os3 = require("os");
 function createTerminalControlRuntime(deps) {
+  const liveMirrorInputBatches = /* @__PURE__ */ new Map();
   function cleanEnv() {
     const env = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -9589,6 +9727,40 @@ function createTerminalControlRuntime(deps) {
     }
     return result;
   }
+  function runTmuxAsync(args) {
+    return new Promise((resolve4, reject) => {
+      const child = (0, import_child_process.spawn)(deps.tmuxBinary, args, {
+        cwd: process.env.HOME || (0, import_os3.homedir)(),
+        env: cleanEnv(),
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        reject(error);
+      });
+      child.on("close", (code) => {
+        if (code !== 0) {
+          const trimmedStderr = stderr.trim();
+          if (trimmedStderr.includes("no server running on") && args[0] === "list-sessions") {
+            resolve4({ ok: true, stdout: "" });
+            return;
+          }
+          reject(new Error(trimmedStderr || `tmux exited with status ${code ?? "unknown"}`));
+          return;
+        }
+        resolve4({ ok: true, stdout });
+      });
+    });
+  }
   function ensureTmuxSessionAlternateScreenDisabled(sessionName) {
     runTmux2(["set-option", "-t", sessionName, "alternate-screen", "off"]);
   }
@@ -9608,6 +9780,160 @@ function createTerminalControlRuntime(deps) {
       runTmux2(["send-keys", "-t", sessionName, "Enter"]);
     }
     return true;
+  }
+  async function flushPendingLiveMirrorInput(mirrorKey) {
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      return;
+    }
+    if (pending.flushing) {
+      return;
+    }
+    pending.scheduled = false;
+    pending.flushing = true;
+    const items = pending.items.splice(0);
+    const mirror = deps.mirrors.get(mirrorKey);
+    if (!mirror || mirror.lifecycle !== "ready") {
+      for (const item of items) {
+        item.resolve(false);
+      }
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+      return;
+    }
+    const writableItems = [];
+    for (const item of items) {
+      if (item.shouldWrite && !item.shouldWrite()) {
+        item.resolve(false);
+        continue;
+      }
+      writableItems.push(item);
+    }
+    if (writableItems.length === 0) {
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+      return;
+    }
+    const groups = [];
+    let groupPayload = "";
+    let groupItems = [];
+    for (const item of writableItems) {
+      groupPayload += item.payload;
+      groupItems.push(item);
+      if (item.appendEnter) {
+        groups.push({ payload: groupPayload, appendEnter: true, items: groupItems });
+        groupPayload = "";
+        groupItems = [];
+      }
+    }
+    if (groupItems.length > 0) {
+      groups.push({ payload: groupPayload, appendEnter: false, items: groupItems });
+    }
+    const unresolved = new Set(writableItems);
+    const resolveGroup = (group, value) => {
+      for (const item of group.items) {
+        unresolved.delete(item);
+        item.resolve(value);
+      }
+    };
+    const isGroupWritable = (group) => group.items.every((item) => !item.shouldWrite || item.shouldWrite());
+    try {
+      for (const group of groups) {
+        if (!isGroupWritable(group)) {
+          resolveGroup(group, false);
+          continue;
+        }
+        if (group.payload) {
+          await runTmuxAsync(["send-keys", "-t", mirror.sessionName, "-l", "--", group.payload]);
+        }
+        if (group.appendEnter) {
+          if (!isGroupWritable(group)) {
+            resolveGroup(group, false);
+            continue;
+          }
+          await runTmuxAsync(["send-keys", "-t", mirror.sessionName, "Enter"]);
+        }
+        resolveGroup(group, true);
+      }
+    } catch (error) {
+      for (const item of unresolved) {
+        item.reject(error);
+      }
+    } finally {
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+    }
+  }
+  function schedulePendingLiveMirrorInput(mirrorKey) {
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending || pending.scheduled || pending.flushing) {
+      return;
+    }
+    pending.scheduled = true;
+    queueMicrotask(() => flushPendingLiveMirrorInput(mirrorKey));
+  }
+  function enqueueLiveMirrorInput(sessionName, payload, appendEnter2, shouldWrite) {
+    const mirrorKey = deps.getMirrorKey(sessionName);
+    let pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      pending = {
+        items: [],
+        scheduled: false,
+        flushing: false
+      };
+      liveMirrorInputBatches.set(mirrorKey, pending);
+    }
+    const result = new Promise((resolve4, reject) => {
+      pending?.items.push({
+        payload,
+        appendEnter: appendEnter2,
+        shouldWrite,
+        resolve: resolve4,
+        reject
+      });
+    });
+    schedulePendingLiveMirrorInput(mirrorKey);
+    return result;
+  }
+  function disposeLiveMirrorInputBatch(sessionName, reason) {
+    const mirrorKey = deps.getMirrorKey(sessionName);
+    const pending = liveMirrorInputBatches.get(mirrorKey);
+    if (!pending) {
+      return 0;
+    }
+    let evicted = 0;
+    if (!pending.flushing) {
+      const items = pending.items.splice(0);
+      for (const item of items) {
+        item.resolve(false);
+        evicted += 1;
+      }
+      liveMirrorInputBatches.delete(mirrorKey);
+    } else {
+      const remaining = pending.items.splice(0);
+      for (const item of remaining) {
+        item.resolve(false);
+        evicted += 1;
+      }
+    }
+    deps.daemonRuntimeDebug?.("input-dispose", {
+      mirrorKey,
+      reason,
+      evicted
+    });
+    return evicted;
   }
   function listTmuxSessions2() {
     const result = runTmux2(["list-sessions", "-F", "#S"]);
@@ -9630,10 +9956,13 @@ function createTerminalControlRuntime(deps) {
   }
   return {
     runTmux: runTmux2,
+    runTmuxAsync,
     runCommand,
     ensureTmuxSessionAlternateScreenDisabled,
     writeToTmuxSession: writeToTmuxSession2,
     writeToLiveMirror: writeToLiveMirror2,
+    enqueueLiveMirrorInput,
+    disposeLiveMirrorInputBatch,
     listTmuxSessions: listTmuxSessions2,
     createDetachedTmuxSession: createDetachedTmuxSession2,
     renameTmuxSession: renameTmuxSession2
@@ -10283,6 +10612,63 @@ function createRtcBridgeServer(options) {
 
 // src/server/terminal-bridge-runtime.ts
 function createTerminalBridgeRuntime(deps) {
+  const connectionAttachChains = /* @__PURE__ */ new Map();
+  const connectionInputChains = /* @__PURE__ */ new Map();
+  const connectionMessageChains = /* @__PURE__ */ new Map();
+  function decodeRawText(rawData) {
+    return typeof rawData === "string" ? rawData : Buffer.isBuffer(rawData) ? rawData.toString("utf8") : Array.isArray(rawData) ? Buffer.concat(rawData).toString("utf8") : Buffer.from(rawData).toString("utf8");
+  }
+  function resolveMessageLane(rawData, isBinary) {
+    if (isBinary) {
+      return "message";
+    }
+    const text = decodeRawText(rawData);
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.type === "input") {
+        return "input";
+      }
+      if (parsed.type === "session-open" || parsed.type === "connect" || parsed.type === "close") {
+        return "attach";
+      }
+      return "message";
+    } catch {
+      return "input";
+    }
+  }
+  function settleConnectionChain(chains, connectionId, chain) {
+    chains.set(connectionId, chain);
+    chain.finally(() => {
+      if (chains.get(connectionId) === chain) {
+        chains.delete(connectionId);
+      }
+    });
+  }
+  function enqueueConnectionMessage(connection, rawData, isBinary) {
+    const attachPrevious = connectionAttachChains.get(connection.id) || Promise.resolve();
+    const inputPrevious = connectionInputChains.get(connection.id) || Promise.resolve();
+    const messagePrevious = connectionMessageChains.get(connection.id) || Promise.resolve();
+    const lane = resolveMessageLane(rawData, isBinary);
+    const previous = lane === "attach" ? Promise.all([attachPrevious, inputPrevious, messagePrevious]).then(() => void 0) : lane === "input" ? Promise.all([attachPrevious]).then(() => void 0) : Promise.all([attachPrevious, messagePrevious]).then(() => void 0);
+    const next = previous.catch(() => void 0).then(() => deps.handleMessage(connection, rawData, isBinary)).catch((error) => {
+      console.error(
+        `[${deps.logTimePrefix()}] transport ${connection.id} message handling failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+    if (lane === "attach") {
+      settleConnectionChain(connectionAttachChains, connection.id, next);
+      return;
+    }
+    if (lane === "input") {
+      const aggregate = Promise.all([
+        inputPrevious.catch(() => void 0),
+        next.catch(() => void 0)
+      ]).then(() => void 0);
+      settleConnectionChain(connectionInputChains, connection.id, aggregate);
+      return;
+    }
+    settleConnectionChain(connectionMessageChains, connection.id, next);
+  }
   const rtcBridgeServer2 = createRtcBridgeServer({
     onTransportOpen: (transport) => {
       const connection = deps.createTransportConnection(
@@ -10293,7 +10679,7 @@ function createTerminalBridgeRuntime(deps) {
       return {
         onMessage: (_transportId, data, isBinary) => {
           connection.wsAlive = true;
-          void deps.handleMessage(connection, data, isBinary);
+          enqueueConnectionMessage(connection, data, isBinary);
         },
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
@@ -10334,7 +10720,7 @@ function createTerminalBridgeRuntime(deps) {
     });
     ws.on("message", (rawData, isBinary) => {
       connection.wsAlive = true;
-      void deps.handleMessage(connection, rawData, isBinary);
+      enqueueConnectionMessage(connection, rawData, isBinary);
     });
     ws.on("close", (code, rawReason) => {
       const reason = Buffer.isBuffer(rawReason) ? rawReason.toString("utf8") : String(rawReason || "");
@@ -10507,6 +10893,7 @@ var {
 var terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
+  runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
   logTimePrefix
 });
 var terminalRuntime = createTerminalRuntime({
@@ -10515,6 +10902,7 @@ var terminalRuntime = createTerminalRuntime({
   sessions,
   mirrors,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
+  sendText: (transport, text) => terminalTransportRuntime.sendText(transport, text),
   sendScheduleStateToSession: (session, sessionName) => terminalScheduleRuntime.sendScheduleStateToSession(session, sessionName),
   buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin),
   buildBufferHeadPayload: (sessionId, mirror) => buildBufferHeadPayload(sessionId, mirror),
@@ -10538,6 +10926,8 @@ var terminalRuntime = createTerminalRuntime({
   }),
   mirrorCursorEqual,
   writeToLiveMirror: (sessionName, payload, appendEnter2) => terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter2),
+  enqueueLiveMirrorInput: (sessionName, payload, appendEnter2, shouldWrite) => terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter2, shouldWrite),
+  disposeLiveMirrorInputBatch: (sessionName, reason) => terminalControlRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
   writeToTmuxSession: (sessionName, payload, appendEnter2) => terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter2),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve4) => setTimeout(resolve4, delayMs)),
@@ -10568,7 +10958,8 @@ terminalControlRuntime = createTerminalControlRuntime({
   hiddenTmuxSessions: HIDDEN_TMUX_SESSIONS,
   mirrors,
   getMirrorKey,
-  sanitizeSessionName
+  sanitizeSessionName,
+  daemonRuntimeDebug
 });
 var {
   runTmux,

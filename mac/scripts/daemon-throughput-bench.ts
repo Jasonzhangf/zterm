@@ -19,6 +19,9 @@ const NUM_SUBS = Math.max(1, parseInt(args.subs ?? '4', 10));
 const HOST = args.host ?? '127.0.0.1';
 const PORT = parseInt(args.port ?? '3333', 10);
 const DURATION_S = Math.max(3, parseInt(args.duration ?? '10', 10));
+const REQUEST_INTERVAL_MS = Math.max(1, parseInt(args.intervalMs ?? '16', 10));
+const REQUEST_BURST_PER_SUB = Math.max(1, parseInt(args.burstPerSub ?? '6', 10));
+const REQUEST_SYNC = String(args.requestSync ?? 'false') === 'true';
 const LAB_SESSION = 'zterm_tput_bench';
 
 interface SubMetrics {
@@ -27,6 +30,7 @@ interface SubMetrics {
   bufferSyncs: number[];
   connectLatency: number;
   errors: number;
+  lastProgressAt: number;
 }
 
 function sleep(ms: number) {
@@ -67,7 +71,7 @@ async function cleanup() {
 async function wsConnect(subId: number): Promise<{ sessionWs: WebSocket; metrics: SubMetrics }> {
   return new Promise((resolve, reject) => {
     const t0 = now();
-    const metrics: SubMetrics = { id: subId, headProbes: [], bufferSyncs: [], connectLatency: 0, errors: 0 };
+    const metrics: SubMetrics = { id: subId, headProbes: [], bufferSyncs: [], connectLatency: 0, errors: 0, lastProgressAt: now() };
     const controlWs = new WebSocket(makeUrl('control'));
 
     const timer = setTimeout(() => { controlWs.close(); reject(new Error(`sub ${subId} timeout`)); }, 8000);
@@ -76,7 +80,6 @@ async function wsConnect(subId: number): Promise<{ sessionWs: WebSocket; metrics
     controlWs.on('close', () => {});
 
     controlWs.on('open', () => {
-      console.log(`[sub-${subId}] control open -> session-open`);
       controlWs.send(JSON.stringify({ type: 'session-open', payload: { sessionName: LAB_SESSION } }));
     });
 
@@ -84,16 +87,13 @@ async function wsConnect(subId: number): Promise<{ sessionWs: WebSocket; metrics
       try {
         const raw = data.toString();
         const msg = JSON.parse(raw);
-        console.log(`[sub-${subId}] control msg: ${raw.slice(0, 120)}`);
         if (msg.type === 'session-ticket') {
-          console.log(`[sub-${subId}] got session-ticket -> session ws`);
           const sessionWs = new WebSocket(makeUrl('session'));
 
           sessionWs.on('error', () => { metrics.errors++; });
           sessionWs.on('close', () => {});
 
           sessionWs.on('open', () => {
-            console.log(`[sub-${subId}] session ws open -> connect`);
             sessionWs.send(JSON.stringify({
               type: 'connect',
               payload: {
@@ -109,21 +109,25 @@ async function wsConnect(subId: number): Promise<{ sessionWs: WebSocket; metrics
           sessionWs.on('message', (sdata) => {
             try {
               const smsg = JSON.parse(sdata.toString());
-              console.log(`[sub-${subId}] session msg: ${sdata.toString().slice(0, 120)}`);
               if (smsg.type === 'connected') {
                 clearTimeout(timer);
                 controlWs.close();
                 metrics.connectLatency = now() - t0;
-                console.log(`[sub-${subId}] CONNECTED latency=${metrics.connectLatency}ms`);
                 sessionWs.send(JSON.stringify({ type: 'buffer-head-request' }));
               }
               if (smsg.type === 'buffer-head') {
                 metrics.headProbes.push(now() - t0);
-                sessionWs.send(JSON.stringify({ type: 'buffer-sync-request', payload: { knownRevision: 0, localStartIndex: 0, localEndIndex: 0, requestStartIndex: 0, requestEndIndex: 100 } }));
+                metrics.lastProgressAt = now();
+                if (REQUEST_SYNC) {
+                  sessionWs.send(JSON.stringify({ type: 'buffer-sync-request', payload: { knownRevision: 0, localStartIndex: 0, localEndIndex: 0, requestStartIndex: 0, requestEndIndex: 100 } }));
+                }
               }
               if (smsg.type === 'buffer-sync') {
                 metrics.bufferSyncs.push(now() - t0);
-                sessionWs.send(JSON.stringify({ type: 'buffer-head-request' }));
+                metrics.lastProgressAt = now();
+                if (REQUEST_SYNC) {
+                  sessionWs.send(JSON.stringify({ type: 'buffer-head-request' }));
+                }
               }
             } catch { metrics.errors++; }
           });
@@ -161,12 +165,6 @@ async function main() {
     process.exit(1);
   }
 
-  const topSamples: string[] = [];
-  const topInterval = setInterval(async () => {
-    const s = await captureTopSample();
-    if (s) topSamples.push(s);
-  }, 1000);
-
   const subs: Array<{ sessionWs: WebSocket; metrics: SubMetrics }> = [];
   const tStart = now();
 
@@ -181,18 +179,36 @@ async function main() {
     await sleep(100);
   }
 
-  console.log(`\n  [run] ${DURATION_S}s...\n`);
-  while (now() - tStart < DURATION_S * 1000) {
-    await sleep(500);
+  console.log(`\n  [run] ${DURATION_S}s... interval=${REQUEST_INTERVAL_MS}ms burstPerSub=${REQUEST_BURST_PER_SUB}\n`);
+  const requestInterval = setInterval(() => {
     for (const { sessionWs } of subs) {
-      if (sessionWs.readyState === WebSocket.OPEN) {
+      if (sessionWs.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      for (let i = 0; i < REQUEST_BURST_PER_SUB; i += 1) {
         sessionWs.send(JSON.stringify({ type: 'buffer-head-request' }));
       }
     }
-  }
+  }, REQUEST_INTERVAL_MS);
+  await sleep(DURATION_S * 1000);
+  clearInterval(requestInterval);
 
-  await sleep(1000);
-  clearInterval(topInterval);
+  const settleDeadline = now() + 15000;
+  let lastTotalHead = -1;
+  let stableSince = now();
+  while (now() < settleDeadline) {
+    const totalHead = subs.reduce((a, s) => a + s.metrics.headProbes.length, 0);
+    const totalSync = subs.reduce((a, s) => a + s.metrics.bufferSyncs.length, 0);
+    const totalProgress = totalHead + totalSync;
+    if (totalProgress !== lastTotalHead) {
+      lastTotalHead = totalProgress;
+      stableSince = now();
+    }
+    if (now() - stableSince >= 2000) {
+      break;
+    }
+    await sleep(100);
+  }
   for (const { sessionWs } of subs) { sessionWs.close(); }
 
   const tEnd = now();
@@ -208,13 +224,9 @@ async function main() {
   const allErrors = subs.reduce((a, s) => a + s.metrics.errors, 0);
   const lats = subs.map((s) => s.metrics.connectLatency).filter((l) => l > 0);
 
-  console.log(`\nAggregate: subs=${subs.length} elapsed=${elapsedS.toFixed(1)}s headProbes=${totalHead} sync=${totalSync} head/s=${(totalHead/elapsedS).toFixed(1)} sync/s=${(totalSync/elapsedS).toFixed(1)} errors=${allErrors}`);
+  const requestsSent = Math.ceil(DURATION_S * 1000 / REQUEST_INTERVAL_MS) * subs.length * REQUEST_BURST_PER_SUB;
+  console.log(`\nAggregate: subs=${subs.length} elapsed=${elapsedS.toFixed(1)}s sent≈${requestsSent} headProbes=${totalHead} sync=${totalSync} head/s=${(totalHead/elapsedS).toFixed(1)} sync/s=${(totalSync/elapsedS).toFixed(1)} errors=${allErrors}`);
   if (lats.length) { console.log(`Connect latency: avg=${(lats.reduce((a,b)=>a+b,0)/lats.length).toFixed(0)}ms max=${Math.max(...lats)}ms`); }
-
-  if (topSamples.length) {
-    console.log('\n--- top oracle (daemon CPU) ---');
-    topSamples.join('\n').split('\n').filter((l) => l.includes('node')||l.includes('zterm')).slice(0,10).forEach((l) => console.log(' ', l));
-  }
 
   console.log('\n=== done ===\n');
   await cleanup();

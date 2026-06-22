@@ -1,0 +1,899 @@
+[
+  {
+    "at": "2026-06-17T15:42:36.367Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.367Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.449Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.449Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 1,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 0,
+          "t": ""
+        },
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 2,
+          "t": ""
+        },
+        {
+          "i": 3,
+          "t": ""
+        },
+        {
+          "i": 4,
+          "t": ""
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.458Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 2,
+      "startIndex": 1,
+      "endIndex": 5,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 4,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac % printf 'hello-mac-a\\n__mac_loopback_a__\\n'"
+        },
+        {
+          "i": 2,
+          "t": "hello-mac-a"
+        },
+        {
+          "i": 3,
+          "t": "__mac_loopback_a__"
+        },
+        {
+          "i": 4,
+          "t": "fanzhang@Macstudio mac %"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.528Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 2,
+      "startIndex": 1,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 4,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac % printf 'hello-mac-a\\n__mac_loopback_a__\\n'"
+        },
+        {
+          "i": 2,
+          "t": "hello-mac-a"
+        },
+        {
+          "i": 3,
+          "t": "__mac_loopback_a__"
+        },
+        {
+          "i": 4,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.743Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 2,
+      "startIndex": 1,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 4,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 1,
+          "t": "fanzhang@Macstudio mac % printf 'hello-mac-a\\n__mac_loopback_a__\\n'"
+        },
+        {
+          "i": 2,
+          "t": "hello-mac-a"
+        },
+        {
+          "i": 3,
+          "t": "__mac_loopback_a__"
+        },
+        {
+          "i": 4,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 5,
+          "t": ""
+        },
+        {
+          "i": 6,
+          "t": ""
+        },
+        {
+          "i": 7,
+          "t": ""
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.760Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 3,
+      "startIndex": 4,
+      "endIndex": 8,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 7,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 4,
+          "t": "fanzhang@Macstudio mac % printf 'hello-mac-b\\n__mac_loopback_b__\\n'"
+        },
+        {
+          "i": 5,
+          "t": "hello-mac-b"
+        },
+        {
+          "i": 6,
+          "t": "__mac_loopback_b__"
+        },
+        {
+          "i": 7,
+          "t": "fanzhang@Macstudio mac %"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-06-17T15:42:36.825Z",
+    "type": "buffer-sync",
+    "payload": {
+      "revision": 3,
+      "startIndex": 4,
+      "endIndex": 25,
+      "availableStartIndex": 0,
+      "availableEndIndex": 25,
+      "cols": 80,
+      "rows": 24,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 7,
+        "col": 25,
+        "visible": true
+      },
+      "lines": [
+        {
+          "i": 4,
+          "t": "fanzhang@Macstudio mac % printf 'hello-mac-b\\n__mac_loopback_b__\\n'"
+        },
+        {
+          "i": 5,
+          "t": "hello-mac-b"
+        },
+        {
+          "i": 6,
+          "t": "__mac_loopback_b__"
+        },
+        {
+          "i": 7,
+          "t": "fanzhang@Macstudio mac %"
+        },
+        {
+          "i": 8,
+          "t": ""
+        },
+        {
+          "i": 9,
+          "t": ""
+        },
+        {
+          "i": 10,
+          "t": ""
+        },
+        {
+          "i": 11,
+          "t": ""
+        },
+        {
+          "i": 12,
+          "t": ""
+        },
+        {
+          "i": 13,
+          "t": ""
+        },
+        {
+          "i": 14,
+          "t": ""
+        },
+        {
+          "i": 15,
+          "t": ""
+        },
+        {
+          "i": 16,
+          "t": ""
+        },
+        {
+          "i": 17,
+          "t": ""
+        },
+        {
+          "i": 18,
+          "t": ""
+        },
+        {
+          "i": 19,
+          "t": ""
+        },
+        {
+          "i": 20,
+          "t": ""
+        },
+        {
+          "i": 21,
+          "t": ""
+        },
+        {
+          "i": 22,
+          "t": ""
+        },
+        {
+          "i": 23,
+          "t": ""
+        },
+        {
+          "i": 24,
+          "t": ""
+        }
+      ]
+    }
+  }
+]

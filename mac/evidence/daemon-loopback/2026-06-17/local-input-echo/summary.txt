@@ -1,0 +1,5 @@
+case=local-input-echo
+ok=false
+reason=daemon second local-input mirror diverged from tmux truth
+mismatchIndex=0
+generatedAt=2026-06-17T15:42:37.041Z

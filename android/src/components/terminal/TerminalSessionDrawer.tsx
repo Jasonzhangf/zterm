@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 
 export interface TerminalSessionDrawerItem {
   id: string;
@@ -7,6 +7,17 @@ export interface TerminalSessionDrawerItem {
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
   paneLabel?: string | null;
   active?: boolean;
+  /**
+   * 唯一 host 真源键（由 TerminalPage 在投递 drawer items 时显式传入），
+   * 不得由 drawer 内部隐式从 session/bridge 字段派生。
+   * 多机场景下用于 host rail 分组；单机场景可省略。
+   */
+  hostKey?: string;
+  /**
+   * host 展示名（machineName / alias / "default"），由 TerminalPage 注入。
+   * 未传入时回退到 hostKey；不允许 drawer 内部自行拼装。
+   */
+  hostLabel?: string;
 }
 
 export interface TerminalSessionDrawerProps {
@@ -49,10 +60,53 @@ function TerminalSessionDrawerComponent({
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  const visibleSessions = useMemo(
-    () => sessions,
-    [sessions],
-  );
+  const hostGroups = useMemo(() => {
+    const groups = new Map<string, { hostKey: string; hostLabel: string; sessions: TerminalSessionDrawerItem[] }>();
+    for (const session of sessions) {
+      const hostKey = session.hostKey;
+      if (!hostKey) {
+        // 单机场景：未显式提供 hostKey，则归入一个 sentinel "default" 分组。
+        const fallbackKey = 'default';
+        let group = groups.get(fallbackKey);
+        if (!group) {
+          group = { hostKey: fallbackKey, hostLabel: session.hostLabel || '本机', sessions: [] };
+          groups.set(fallbackKey, group);
+        }
+        group.sessions.push(session);
+        continue;
+      }
+      const hostLabel = session.hostLabel || hostKey;
+      let group = groups.get(hostKey);
+      if (!group) {
+        group = { hostKey, hostLabel, sessions: [] };
+        groups.set(hostKey, group);
+      }
+      group.sessions.push(session);
+    }
+    return Array.from(groups.values());
+  }, [sessions]);
+
+  const multiHost = hostGroups.length > 1;
+  const [selectedHostKey, setSelectedHostKey] = useState<string | null>(null);
+
+  const effectiveHostKey = useMemo(() => {
+    if (!multiHost) {
+      return null;
+    }
+    if (selectedHostKey && hostGroups.some((g) => g.hostKey === selectedHostKey)) {
+      return selectedHostKey;
+    }
+    const activeGroup = hostGroups.find((g) => g.sessions.some((s) => s.active));
+    return activeGroup?.hostKey || hostGroups[0]?.hostKey || null;
+  }, [hostGroups, multiHost, selectedHostKey]);
+
+  const visibleSessions = useMemo(() => {
+    if (!multiHost || !effectiveHostKey) {
+      return sessions;
+    }
+    const group = hostGroups.find((g) => g.hostKey === effectiveHostKey);
+    return group?.sessions || [];
+  }, [effectiveHostKey, hostGroups, multiHost, sessions]);
 
   return (
     <>
@@ -157,6 +211,49 @@ function TerminalSessionDrawerComponent({
             左滑收起，点击进入，上下滑动浏览。
           </div>
         </div>
+
+        {multiHost ? (
+          <div
+            data-testid="terminal-session-drawer-host-rail"
+            style={{
+              display: 'flex',
+              gap: '6px',
+              padding: '8px 10px',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              overflowX: 'auto',
+              flexShrink: 0,
+            }}
+          >
+            {hostGroups.map((group) => {
+              const isActive = group.hostKey === effectiveHostKey;
+              return (
+                <button
+                  key={group.hostKey}
+                  type="button"
+                  data-testid={`terminal-session-drawer-host-${group.hostKey}`}
+                  onClick={() => setSelectedHostKey(group.hostKey)}
+                  style={{
+                    flexShrink: 0,
+                    padding: '6px 12px',
+                    borderRadius: '999px',
+                    border: isActive
+                      ? '1px solid rgba(106, 167, 255, 0.9)'
+                      : '1px solid rgba(255,255,255,0.08)',
+                    background: isActive
+                      ? 'rgba(106, 167, 255, 0.16)'
+                      : 'rgba(255,255,255,0.04)',
+                    color: isActive ? '#6aa7ff' : 'rgba(220, 232, 255, 0.7)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {group.hostLabel}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         <div
           data-testid="terminal-session-drawer-list"

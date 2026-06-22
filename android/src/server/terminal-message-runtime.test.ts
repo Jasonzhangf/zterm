@@ -279,6 +279,60 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendBufferHeadToSession).toHaveBeenCalledWith(session, mirror);
   });
 
+  it('sends a buffer-head immediately for each head request without cache window suppression', async () => {
+    const mirror: SessionMirror = {
+      key: 'demo',
+      sessionName: 'demo',
+      scratchBridge: null,
+      lifecycle: 'ready',
+      cols: 120,
+      rows: 40,
+      cursorKeysApp: false,
+      revision: 0,
+      lastScrollbackCount: -1,
+      bufferStartIndex: 0,
+      bufferLines: [],
+      cursor: null,
+      lastFlushStartedAt: 0,
+      lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      lastResizeAt: 0,
+      flushInFlight: false,
+      flushPromise: null,
+      liveSyncTimer: null,
+      consecutiveFailures: 0,
+      adaptiveCols: new Map(),
+      subscribers: new Set(),
+    };
+    const { runtime, sessions, sendBufferHeadToSession } = createRuntime({ mirror });
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'buffer-head-request',
+      payload: {},
+    })));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'buffer-head-request',
+      payload: {},
+    })));
+
+    expect(sendBufferHeadToSession).toHaveBeenCalledTimes(2);
+    expect(sendBufferHeadToSession).toHaveBeenNthCalledWith(
+      1,
+      session,
+      mirror,
+    );
+    expect(sendBufferHeadToSession).toHaveBeenNthCalledWith(
+      2,
+      session,
+      mirror,
+    );
+  });
+
   it('routes debug-snapshot frames to the dedicated client debug snapshot handler', async () => {
     const { runtime, sessions, handleClientDebugSnapshot } = createRuntime();
     const session = createSession();
