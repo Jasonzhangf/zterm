@@ -199,7 +199,11 @@ public class AppUpdatePlugin extends Plugin {
 
             int statusCode = connection.getResponseCode();
             if (statusCode < 200 || statusCode >= 300) {
-                throw new IllegalStateException("下载升级包失败：HTTP " + statusCode);
+                String reasonMessage = connection.getResponseMessage();
+                String detail = "下载升级包失败：HTTP " + statusCode
+                    + (reasonMessage != null && !reasonMessage.isEmpty() ? " " + reasonMessage : "")
+                    + " (URL: " + sourceUrl + ")";
+                throw new IllegalStateException(detail);
             }
 
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -218,7 +222,7 @@ public class AppUpdatePlugin extends Plugin {
 
             String actualSha256 = toHex(digest.digest());
             if (!expectedSha256.isEmpty() && !expectedSha256.equals(actualSha256)) {
-                throw new IllegalStateException("升级包校验失败：SHA-256 不匹配");
+                throw new IllegalStateException("升级包校验失败：SHA-256 不匹配 (expected=" + expectedSha256 + " actual=" + actualSha256 + ", URL: " + sourceUrl + ")");
             }
 
             return targetFile;
@@ -433,4 +437,3 @@ public class AppUpdatePlugin extends Plugin {
         return builder.toString();
     }
 }
-

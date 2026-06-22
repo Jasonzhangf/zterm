@@ -776,6 +776,18 @@ describe('TerminalPage renderer scope', () => {
       keyboardInset: 240,
     });
 
+    await act(async () => {
+      for (let i = 0; i < 50; i += 1) {
+        virtualKeyboard.boundingRect.height = 200 + (i % 5) * 30;
+        for (const listener of geometryListeners) {
+          listener();
+        }
+      }
+      await Promise.resolve();
+    });
+
+    expect(readDebugSnapshotRegistrationCount('terminal-page')).toBe(1);
+
     Object.defineProperty(navigator, 'virtualKeyboard', {
       configurable: true,
       value: originalVirtualKeyboard,

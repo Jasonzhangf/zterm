@@ -219,6 +219,17 @@ ws.on("message", (msg: Buffer | string) => {
   - `http://127.0.0.1:3333/updates/latest.json` 200，APK 200。
   - `http://100.66.1.82:3333/updates/latest.json` 200，返回 apkUrl host 为 `100.66.1.82`，APK 200。
 
+## 2026-06-22 升级包 404 现场复核（0.1.3.1872）
+
+### 现场证据
+- `android/update-dist/latest.json` 当前指向 `zterm-0.1.3.1872.apk`，`apkUrl` 为相对路径。
+- `http://127.0.0.1:3333/updates/latest.json` 返回 200，manifest 与 `0.1.3.1872` 一致。
+- `http://127.0.0.1:3333/updates/zterm-0.1.3.1872.apk` 返回 200。
+
+### 结论
+- 当前 daemon 更新服务侧没有 404。
+- 若手机侧仍报 404，优先怀疑是旧客户端拿到了旧 manifest / 旧 apkUrl，而不是当前 daemon 路由本身失效。
+
 ## 2026-06-22 升级包 404 现场复核
 
 ### 当前核验

@@ -21,10 +21,6 @@ import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
-import {
-  buildRelayInjectedAppUpdatePreferences,
-  deriveRelayUpdateManifestUrl,
-} from './lib/app-update-relay-manifest';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
   connectTraversalRelayDevicesStream,
@@ -95,19 +91,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     importConfig,
   } = useConfigExport();
 
-  // Effective manifest URL: prefer user-saved URL, else derive from Relay wsHostUrl.
-  const effectiveManifestUrl = (() => {
-    const saved = appUpdatePreferences.manifestUrl.trim();
-    if (saved) return saved;
-    const wsHost = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';
-    if (!wsHost) return '';
-    try {
-      return deriveRelayUpdateManifestUrl(wsHost);
-    } catch {
-      return '';
-    }
-  })();
-
   // 同步 Relay 账号 store 变化（login/register/refresh）到 React state；
   // 设备流推送会继续通过 onDevices 覆盖，账号 store 仅作为登录即时快照。
   useEffect(() => {
@@ -136,28 +119,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     return () => window.removeEventListener('traversal-relay-account-change', handler);
   }, [setBridgeSettings]);
 
-  // 登录 Relay 后自动注入 upgrade manifest URL：仅当用户未设置且能从 wsHostUrl 派生时。
-  useEffect(() => {
-    const wsHost = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';
-    if (!wsHost) {
-      return;
-    }
-    if (appUpdatePreferences.manifestUrl.trim()) {
-      return;
-    }
-    try {
-      const derived = deriveRelayUpdateManifestUrl(wsHost);
-      if (!derived) {
-        return;
-      }
-      setAppUpdatePreferences((current) => {
-        const next = buildRelayInjectedAppUpdatePreferences(current, wsHost);
-        return next.manifestUrl === current.manifestUrl ? current : next;
-      });
-    } catch {
-      return;
-    }
-  }, [appUpdatePreferences.manifestUrl, bridgeSettings.traversalRelay?.wsHostUrl, setAppUpdatePreferences]);
+  // relay-derived manifest injection is handled by app-update runtime only.
   const {
     state,
     scheduleStates = {},
@@ -378,7 +340,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     terminalActiveSessionId: terminalActiveSession?.id || null,
     relayConfigured: Boolean(bridgeSettings.traversalRelay?.accessToken),
     runtimeVersionCode,
-    appUpdateStage: (appUpdatePreferences.manifestUrl.trim() || effectiveManifestUrl) ? updateStage : 'idle',
+    appUpdateStage: appUpdatePreferences.manifestUrl.trim() ? updateStage : 'idle',
     updateChecking,
     updateInstalling,
     updateError,

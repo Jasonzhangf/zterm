@@ -2,10 +2,12 @@ import type { BrowserStorageLike } from './browser-storage';
 import {
   APP_UPDATE_STORAGE_KEY,
   DEFAULT_APP_UPDATE_PREFERENCES,
+  DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
   normalizeAppUpdateManifest,
   normalizeAppUpdatePreferences,
   shouldSuppressUpdatePrompt,
   type AppUpdateCheckResult,
+  type AppUpdateInstallContext,
   type AppUpdateManifest,
   type AppUpdatePreferences,
   type AppUpdateRollbackBackup,
@@ -36,6 +38,7 @@ export interface AppUpdateRuntimeSnapshot {
   rollbackBackup: AppUpdateRollbackBackup | null;
   isBackingUp: boolean;
   isRollingBack: boolean;
+  lastInstallContext: AppUpdateInstallContext | null;
 }
 
 export interface AppUpdateRuntimeDeps {
@@ -67,6 +70,7 @@ function createDefaultSnapshot(runtimeVersionCode: number): AppUpdateRuntimeSnap
     rollbackBackup: null,
     isBackingUp: false,
     isRollingBack: false,
+    lastInstallContext: null,
   };
 }
 
@@ -146,6 +150,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           lastError: '未配置升级 manifest URL',
           updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
           availableManifest: null,
         }));
         return { manifest: null, updateAvailable: false, suppressedReason: 'none' };
@@ -212,6 +217,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           checking: false,
           lastError: error instanceof Error ? error.message : '检查更新失败',
           updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
           availableManifest: null,
         }));
         return { manifest: null, updateAvailable: false, suppressedReason: 'none' };
@@ -275,6 +281,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           lastError: '没有可回退的旧版本备份',
           updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
         }));
         return false;
       }
@@ -311,6 +318,12 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           isRollingBack: false,
           lastError: error instanceof Error ? error.message : '回滚失败',
           updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: backup.filePath,
+            capturedAt: deps.now(),
+            reason: error instanceof Error ? error.message : '回滚失败',
+          },
         }));
         return false;
       }
@@ -328,6 +341,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           lastError: '没有可安装的升级包',
           updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
         }));
         return false;
       }
@@ -337,6 +351,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           lastError: '未配置升级 manifest URL',
           updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
         }));
         return false;
       }
@@ -376,12 +391,29 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           latestManifest: installTarget,
           availableManifest: installTarget,
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: installTarget.apkUrl,
+            versionCode: installTarget.versionCode,
+            versionName: installTarget.versionName,
+            sha256Expected: installTarget.sha256,
+            capturedAt: deps.now(),
+          },
         }));
       } catch (error) {
         setSnapshot((current) => ({
           ...current,
           lastError: error instanceof Error ? error.message : '升级清单复核失败',
           updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: target.apkUrl,
+            versionCode: target.versionCode,
+            versionName: target.versionName,
+            sha256Expected: target.sha256,
+            capturedAt: deps.now(),
+            reason: error instanceof Error ? error.message : '升级清单复核失败',
+          },
         }));
         return false;
       }
@@ -395,6 +427,15 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...current,
           lastError: '当前环境不支持应用内安装',
           updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: target.apkUrl,
+            versionCode: target.versionCode,
+            versionName: target.versionName,
+            sha256Expected: target.sha256,
+            capturedAt: deps.now(),
+            reason: '当前环境不支持应用内安装',
+          },
         }));
         return false;
       }
@@ -467,6 +508,15 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           isBackingUp: false,
           lastError: error instanceof Error ? error.message : '下载或安装升级包失败',
           updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: installTarget?.apkUrl || target.apkUrl,
+            versionCode: installTarget?.versionCode || target.versionCode,
+            versionName: installTarget?.versionName || target.versionName,
+            sha256Expected: installTarget?.sha256 || target.sha256,
+            capturedAt: deps.now(),
+            reason: error instanceof Error ? error.message : '下载或安装升级包失败',
+          },
         }));
         return false;
       }

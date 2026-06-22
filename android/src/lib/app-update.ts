@@ -20,6 +20,25 @@ export interface AppUpdateRollbackBackup {
   backedUpAt: number;
 }
 
+export type AppUpdateManifestSource =
+  | 'user-saved'
+  | 'relay-injected'
+  | 'server-connected'
+  | 'manual-override'
+  | 'none';
+
+export interface AppUpdateInstallContext {
+  manifestUrl: string;
+  apkUrl: string;
+  versionCode?: number;
+  versionName?: string;
+  sha256Expected?: string;
+  sha256Actual?: string | null;
+  httpStatus?: number;
+  reason?: string;
+  capturedAt: number;
+}
+
 export interface AppUpdatePreferences {
   manifestUrl: string;
   autoCheckOnLaunch: boolean;
@@ -43,6 +62,12 @@ export const DEFAULT_APP_UPDATE_PREFERENCES: AppUpdatePreferences = {
   ignoreUntilManualCheck: false,
   lastCheckedAt: undefined,
   lastSeenVersionCode: undefined,
+};
+export const DEFAULT_APP_UPDATE_MANIFEST_SOURCE: AppUpdateManifestSource = 'none';
+export const DEFAULT_APP_UPDATE_INSTALL_CONTEXT: AppUpdateInstallContext = {
+  manifestUrl: '',
+  apkUrl: '',
+  capturedAt: 0,
 };
 
 function toFiniteNumber(value: unknown) {
@@ -142,4 +167,3 @@ export function shouldSuppressUpdatePrompt(
   }
   return 'none' as const;
 }
-
