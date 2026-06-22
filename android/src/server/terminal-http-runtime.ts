@@ -299,11 +299,11 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       }
 
       try {
+        // Keep apkUrl exactly as emitted by the build pipeline. Rewriting it
+        // against the current request origin can pin the download target to
+        // localhost, which breaks mobile upgrades when the manifest is checked
+        // through a local daemon endpoint.
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
-        const apkUrl = typeof manifest.apkUrl === 'string' ? manifest.apkUrl : '';
-        if (apkUrl && !/^https?:\/\//.test(apkUrl)) {
-          manifest.apkUrl = `${origin}/updates/${basename(apkUrl)}`;
-        }
         serveJson(response, manifest);
       } catch (error) {
         serveJson(response, { message: `invalid update manifest: ${error instanceof Error ? error.message : String(error)}` }, 500);

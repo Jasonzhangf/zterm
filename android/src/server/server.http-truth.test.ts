@@ -58,4 +58,17 @@ describe('server http route truth gates', () => {
     expect(block).toContain("url.pathname === '/updates/latest.json'");
     expect(block).toContain("url.pathname.startsWith('/updates/')");
   });
+
+  it('does not rewrite apkUrl against the request origin in /updates/latest.json', () => {
+    const source = readHttpRuntimeSource();
+    const block = extractBlock(source, 'function handleHttpRequest(', 9000);
+
+    // Forward gate: the daemon MUST emit apkUrl exactly as written by the
+    // build pipeline. Rewriting it to `${origin}/updates/<file>` pins the
+    // download target to whoever requested the manifest (typically the
+    // client's loopback), which produces HTTP 404 on real devices.
+    expect(block).not.toContain("`${origin}/updates/${basename(apkUrl)}`");
+    expect(block).not.toMatch(/manifest\.apkUrl\s*=\s*`\$\{origin\}\/updates\//);
+    expect(block).toContain("url.pathname === '/updates/latest.json'");
+  });
 });

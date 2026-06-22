@@ -218,3 +218,27 @@ ws.on("message", (msg: Buffer | string) => {
 - HTTP:
   - `http://127.0.0.1:3333/updates/latest.json` 200，APK 200。
   - `http://100.66.1.82:3333/updates/latest.json` 200，返回 apkUrl host 为 `100.66.1.82`，APK 200。
+
+## 2026-06-22 升级包 404 现场复核
+
+### 当前核验
+- `android/update-dist/latest.json` 与 `~/.wterm/updates/latest.json` 目前都指向 `zterm-0.1.3.1869.apk`
+- 对应 APK 文件在两侧都存在
+- `http://127.0.0.1:3333/updates/latest.json` 返回 200
+- `http://127.0.0.1:3333/updates/zterm-0.1.3.1869.apk` 返回 200
+
+### 结论
+- 现阶段服务端升级包发布链路正常，当前 404 不是“包没落盘”导致
+- 若设备端仍报 404，优先怀疑客户端持有旧 manifest / 旧 apkUrl，或请求到了别的更新源
+
+## 2026-06-22 upgrade 404 follow-up
+- 现象：manifest 命中，但安装侧仍可能拿旧 manifestUrl/旧 apkUrl。
+- 当前修复：AppUpdatePlugin 失败信息增强，app-update-runtime 记录 lastInstallContext，App.tsx 移除 relay 二次派生残留。
+- 验证：tsc clean；app-update-runtime 定向红测通过；verify-update-bundle 通过。
+
+## 2026-06-22 升级包 404 真源：daemon 不得改写 manifest apkUrl
+- 现场：`http://127.0.0.1:3333/updates/latest.json` 曾把 `apkUrl` 改成 `http://127.0.0.1:3333/updates/zterm-0.1.3.1871.apk`；手机拿到该绝对 URL 后会指向手机自己的回环地址，导致升级包下载 404。
+- 真源：`android/src/server/terminal-http-runtime.ts::handleHttpRequest('/updates/latest.json')` 历史逻辑会把相对 apkUrl 重写成 `${origin}/updates/<apk>`。
+- 修复：daemon 原样输出 build pipeline 写入的 manifest；唯一允许的 apkUrl 绝对化位置是 client `app-update-runtime.ts` 对 `manifestUrl` 执行 `new URL(payload.apkUrl, manifestUrl).toString()`。
+- 红测：`android/src/server/server.http-truth.test.ts` 禁止 `/updates/latest.json` 路由再次出现 `${origin}/updates/<file>` 重写。
+- 验证：`pnpm exec vitest run src/server/server.http-truth.test.ts` PASS（4/4）；`pnpm run type-check` PASS；`node scripts/verify-update-bundle.mjs` PASS；`bash scripts/zterm-daemon.sh restart` 已重新 stage `~/.wterm/daemon-runtime/server.cjs`；`curl http://127.0.0.1:3333/updates/latest.json` 返回相对 `apkUrl: "zterm-0.1.3.1871.apk"`；`curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1871.apk` 与 `curl -I http://100.66.1.82:3333/updates/zterm-0.1.3.1871.apk` 均为 200。
