@@ -9,6 +9,7 @@ import { SessionScheduleSheet } from '../components/terminal/SessionScheduleShee
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
+import { TerminalSessionDrawer, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import { TerminalTabSwipeSurface } from '../components/terminal/TerminalTabSwipeSurface';
@@ -295,6 +296,24 @@ interface TerminalTabChromeItem {
   sessionName: string;
   customName?: string;
   resolvedPath?: Session['resolvedPath'];
+}
+
+function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
+  switch (state) {
+    case 'connected':
+      return 'connected';
+    case 'connecting':
+    case 'reconnecting':
+      return 'connecting';
+    case 'disconnected':
+      return 'disconnected';
+    case 'closed':
+      return 'closed';
+    case 'error':
+      return 'error';
+    default:
+      return 'idle';
+  }
 }
 
 function terminalPageRenderedSessionUiKey(
@@ -694,6 +713,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalFontSize,
   terminalThemeId,
   terminalWidthMode,
+  allowSessionDrawerSwipe,
   absoluteLineNumbersVisible,
   copySelection,
   onLongPressRow,
@@ -721,6 +741,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   terminalFontSize: number;
   terminalThemeId?: string;
   terminalWidthMode: TerminalWidthMode;
+  allowSessionDrawerSwipe: boolean;
   absoluteLineNumbersVisible: boolean;
   copySelection: {
     active: boolean;
@@ -739,7 +760,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
       key={renderInstanceKey || session.id}
       sessionId={session.id}
       active={sessionIsActive}
-      enabled={terminalWidthMode !== 'mirror-fixed'}
+      enabled={allowSessionDrawerSwipe || terminalWidthMode !== 'mirror-fixed'}
       onSwipeTab={handleSwipeTab}
     >
       <TerminalView
@@ -799,6 +820,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
     terminalKeyboardRequested,
     terminalThemeId,
     terminalWidthMode,
+    allowSessionDrawerSwipe,
     layoutProfile.stage.containerRadius,
     layoutProfile.stage.outerMargin,
     layoutProfile.stage.paneGap,
@@ -1157,6 +1179,7 @@ function TerminalPageComponent({
   const [quickBarHeight, setQuickBarHeight] = useState(TERMINAL_QUICK_BAR_RENDER_LIFT_PX);
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
   const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
@@ -1168,6 +1191,8 @@ function TerminalPageComponent({
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
+  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
+  const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
   const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
@@ -1402,6 +1427,22 @@ function TerminalPageComponent({
   const activeChromeSession = useMemo(() => (
     interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
   ), [activeHeaderSessionUiKey, interactiveSession]);
+  const drawerSessions = useMemo(() => {
+    const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
+    return workspacePanes.flatMap((pane, paneIndex) => (
+      pane.tabs
+        .map((tab) => sessions.find((candidate) => candidate.id === tab.sessionId) || null)
+        .filter((session): session is Session => Boolean(session))
+        .map((session) => ({
+          id: session.id,
+          title: session.customName || session.sessionName,
+          subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
+          status: normalizeDrawerStatus(session.state),
+          paneLabel: `P${paneIndex + 1}`,
+          active: activeSessionIds.has(session.id),
+        }))
+    ));
+  }, [renderedPaneSessions, sessions, workspacePanes]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;
@@ -1421,6 +1462,16 @@ function TerminalPageComponent({
 
   useEffect(() => {
     activeSessionIdRef.current = interactiveSession?.id || null;
+  }, [interactiveSession?.id]);
+
+  useEffect(() => {
+    if (!portraitSessionDrawerEnabled && sessionDrawerOpen) {
+      setSessionDrawerOpen(false);
+    }
+  }, [portraitSessionDrawerEnabled, sessionDrawerOpen]);
+
+  useEffect(() => {
+    setSessionDrawerOpen(false);
   }, [interactiveSession?.id]);
 
   useEffect(() => {
@@ -1737,6 +1788,10 @@ function TerminalPageComponent({
   }, [restoreAndroidTerminalImeRoute]);
 
   const handleSwipeTab = useCallback((sessionId: string, direction: 'previous' | 'next') => {
+    if (portraitSessionDrawerEnabled && direction === 'previous') {
+      setSessionDrawerOpen(true);
+      return;
+    }
     const currentSplitVisible = splitVisibleRef.current;
     const currentSessions = sessionsRef.current;
     const currentActivePaneId = activePaneIdRef.current;
@@ -1759,7 +1814,7 @@ function TerminalPageComponent({
       switchTabInPane(targetPane.id, `tab-${targetSession.id}`);
     }
     onSwitchSession(targetSession.id);
-  }, [findPaneForSession, getPaneSessionIds, onSwitchSession, switchTabInPane]);
+  }, [findPaneForSession, getPaneSessionIds, onSwitchSession, portraitSessionDrawerEnabled, switchTabInPane]);
 
   const handleSaveRemoteScreenshot = useCallback(async () => {
     if (
@@ -2225,7 +2280,6 @@ function TerminalPageComponent({
     };
   }, [updateKeyboardInset]);
 
-  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   useEffect(() => {
     if (!landscape && quickBarCollapsed) {
       setQuickBarCollapsed(false);
@@ -2424,12 +2478,26 @@ function TerminalPageComponent({
     onSwitchSession(sessionId);
   }, [findPaneForSession, onSwitchSession, switchTabInPane, workspace.panes]);
 
+  const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
+    handleSwitchSessionFromChrome(sessionId);
+    setSessionDrawerOpen(false);
+  }, [handleSwitchSessionFromChrome]);
+
+  const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
+    onCloseSession(sessionId, 'session-drawer-close-button');
+  }, [onCloseSession]);
+
   const handleOpenQuickTabPickerForPane = useCallback((paneId?: string) => {
     if (paneId) {
       activatePaneAndSession(paneId);
     }
     onOpenQuickTabPicker(paneId);
   }, [activatePaneAndSession, onOpenQuickTabPicker]);
+
+  const handleOpenQuickTabPickerFromDrawer = useCallback(() => {
+    setSessionDrawerOpen(false);
+    handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined);
+  }, [handleOpenQuickTabPickerForPane, splitVisible, workspace.activePaneId]);
 
   const handleOpenTabManager = useCallback((paneId?: string) => {
     setTabManagerScopePaneId(paneId || null);
@@ -2553,27 +2621,29 @@ function TerminalPageComponent({
         backgroundColor: mobileTheme.colors.shell,
       }}
     >
-      <div>
-        <TerminalHeader
-          sessions={chromeSessions}
-          activeSession={activeChromeSession}
-          topInsetPx={headerTopInsetPx}
-          showBackButton
-          onBack={onOpenConnections}
-          onOpenQuickTabPicker={handleOpenQuickTabPickerForPane}
-          onOpenTabManager={handleOpenTabManager}
-          onSwitchSession={handleSwitchSessionFromChrome}
-          onRenameSession={onRenameSession}
-          onCloseSession={onCloseSession}
-          onForceRelaySession={onForceRelaySession}
-          onUseAutoSession={onUseAutoSession}
-          splitVisible={splitVisible}
-          paneGroups={paneGroups}
-          onAssignSessionToPane={assignSessionToPane}
-          onMoveSessionToOtherPane={moveSessionToOtherPane}
-          onActivatePane={activatePaneAndSession}
-        />
-      </div>
+      {!portraitSessionDrawerEnabled ? (
+        <div>
+          <TerminalHeader
+            sessions={chromeSessions}
+            activeSession={activeChromeSession}
+            topInsetPx={headerTopInsetPx}
+            showBackButton
+            onBack={onOpenConnections}
+            onOpenQuickTabPicker={handleOpenQuickTabPickerForPane}
+            onOpenTabManager={handleOpenTabManager}
+            onSwitchSession={handleSwitchSessionFromChrome}
+            onRenameSession={onRenameSession}
+            onCloseSession={onCloseSession}
+            onForceRelaySession={onForceRelaySession}
+            onUseAutoSession={onUseAutoSession}
+            splitVisible={splitVisible}
+            paneGroups={paneGroups}
+            onAssignSessionToPane={assignSessionToPane}
+            onMoveSessionToOtherPane={moveSessionToOtherPane}
+            onActivatePane={activatePaneAndSession}
+          />
+        </div>
+      ) : null}
       <TerminalNetworkBanner
         connectionIssueVisible={connectionIssueVisible}
         networkOnline={networkOnline}
@@ -2588,6 +2658,43 @@ function TerminalPageComponent({
           overflow: 'hidden',
         }}
       >
+        {portraitSessionDrawerEnabled ? (
+          <>
+            <button
+              type="button"
+              aria-label="返回连接列表"
+              data-testid="terminal-portrait-back-button"
+              onClick={onOpenConnections}
+              style={{
+                position: 'absolute',
+                top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                left: '10px',
+                zIndex: 15,
+                width: '34px',
+                height: '34px',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(10, 16, 26, 0.64)',
+                color: '#dce8ff',
+                fontSize: '18px',
+                lineHeight: 1,
+                boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              ←
+            </button>
+            <TerminalSessionDrawer
+              open={sessionDrawerOpen}
+              topInsetPx={headerTopInsetPx}
+              sessions={drawerSessions}
+              onClose={() => setSessionDrawerOpen(false)}
+              onSelectSession={handleSelectSessionFromDrawer}
+              onCloseSession={handleCloseSessionFromDrawer}
+              onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
+            />
+          </>
+        ) : null}
         <TerminalStageShell
           interactiveSession={interactiveSession}
           sessionBufferStore={sessionBufferStore}
@@ -2612,6 +2719,7 @@ function TerminalPageComponent({
           terminalFontSize={terminalFontSize}
           terminalThemeId={terminalThemeId}
           terminalWidthMode={terminalWidthMode}
+          allowSessionDrawerSwipe={portraitSessionDrawerEnabled}
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
           copySelection={copySelection}
           onLongPressRow={handleLongPressCopyRow}
