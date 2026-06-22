@@ -48,9 +48,9 @@ function createRuntime() {
     sendText: vi.fn(),
     sendScheduleStateToSession,
     buildConnectedPayload: (sessionId: string) => ({ sessionId }),
-    buildBufferHeadPayload: () => ({
-      sessionId: 'session-1',
-      revision: 1,
+    buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
+      sessionId,
+      revision: targetMirror.revision,
       latestEndIndex: 0,
       availableStartIndex: 0,
       availableEndIndex: 0,
@@ -130,6 +130,51 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect.objectContaining({ type: 'connected' }),
     );
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
+  });
+
+  it('fans out the first head request of a revision once, then serves same-revision probes only to the requester', () => {
+    const { runtime, sessions, sendMessage } = createRuntime();
+    const firstSession = createSession('session-1');
+    const secondSession = createSession('session-2');
+    sessions.set(firstSession.id, firstSession);
+    sessions.set(secondSession.id, secondSession);
+
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.revision = 7;
+    mirror.subscribers.add(firstSession.id);
+    mirror.subscribers.add(secondSession.id);
+
+    runtime.sendBufferHeadToSession(firstSession, mirror);
+
+    const firstBroadcastCalls = sendMessage.mock.calls.filter(
+      ([, message]) => (message as { type?: string }).type === 'buffer-head',
+    );
+    expect(firstBroadcastCalls).toHaveLength(2);
+    expect(firstBroadcastCalls).toEqual([
+      [firstSession, expect.objectContaining({ type: 'buffer-head', payload: expect.objectContaining({ sessionId: 'session-1', revision: 7 }) })],
+      [secondSession, expect.objectContaining({ type: 'buffer-head', payload: expect.objectContaining({ sessionId: 'session-2', revision: 7 }) })],
+    ]);
+
+    sendMessage.mockClear();
+
+    runtime.sendBufferHeadToSession(firstSession, mirror);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      firstSession,
+      expect.objectContaining({
+        type: 'buffer-head',
+        payload: expect.objectContaining({
+          sessionId: 'session-1',
+          revision: 7,
+        }),
+      }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      secondSession,
+      expect.objectContaining({ type: 'buffer-head' }),
+    );
   });
 
   it('does not implicitly create a missing tmux session during attach and reports tmux_session_unavailable instead', async () => {

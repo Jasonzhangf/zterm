@@ -242,3 +242,27 @@ ws.on("message", (msg: Buffer | string) => {
 - 修复：daemon 原样输出 build pipeline 写入的 manifest；唯一允许的 apkUrl 绝对化位置是 client `app-update-runtime.ts` 对 `manifestUrl` 执行 `new URL(payload.apkUrl, manifestUrl).toString()`。
 - 红测：`android/src/server/server.http-truth.test.ts` 禁止 `/updates/latest.json` 路由再次出现 `${origin}/updates/<file>` 重写。
 - 验证：`pnpm exec vitest run src/server/server.http-truth.test.ts` PASS（4/4）；`pnpm run type-check` PASS；`node scripts/verify-update-bundle.mjs` PASS；`bash scripts/zterm-daemon.sh restart` 已重新 stage `~/.wterm/daemon-runtime/server.cjs`；`curl http://127.0.0.1:3333/updates/latest.json` 返回相对 `apkUrl: "zterm-0.1.3.1871.apk"`；`curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1871.apk` 与 `curl -I http://100.66.1.82:3333/updates/zterm-0.1.3.1871.apk` 均为 200。
+
+## 2026-06-22 optimization-2 阶段进展：head-request 首次 revision fanout 收口
+- 现状核验：`terminal-message-runtime.ts` 的 `buffer-head-request` 仍经 `sendBufferHeadToSession(session, mirror)` 路由，但过去 `terminal-mirror-runtime.ts::sendBufferHeadToSession()` 是单 session 私有回包路径，8 个订阅者同时探头时会重复走 head fanout。
+- 本轮修复：`android/src/server/terminal-mirror-runtime.ts`
+  - 新增 mirror 级 `WeakMap<SessionMirror, { revision }>` head broadcast cache。
+  - `sendBufferHeadToSession()` 改为：某 revision 第一次 head probe 先 `broadcastBufferHeadToSubscribers(mirror)`，同 revision 后续 probe 只回 requester，不再重复 fanout。
+  - `broadcastBufferHeadToSubscribers()` 广播时写入 revision cache，后续 cursor/body 更新后的广播仍会刷新该 cache。
+- 红测：
+  - `android/src/server/terminal-mirror-runtime.test.ts`
+  - 新增用例：同 revision 第一次 `sendBufferHeadToSession()` 要对两个 subscriber 都发 `buffer-head`；第二次同 revision probe 只回 requester。
+- 验证：
+  - `pnpm exec vitest run src/server/terminal-mirror-runtime.test.ts src/server/terminal-message-runtime.test.ts` PASS。
+  - `pnpm run type-check` PASS。
+  - `pnpm run test:terminal:contracts` PASS（566 tests）。
+  - `bash scripts/zterm-daemon.sh restart` 已重新 stage 新 daemon runtime。
+  - `mac/scripts/daemon-throughput-bench.ts --subs=8 --duration=10`：
+    - aggregate `headProbes=28472`
+    - baseline 文档记录修复前 `17428`
+    - 当前总 probe 数已超过 objective 门槛 `24000`
+  - `./scripts/build-android-debug.sh` PASS，升级包发布：
+    - `android/update-dist/zterm-0.1.3.1872.apk`
+    - `~/.wterm/updates/zterm-0.1.3.1872.apk`
+    - `versionCode=1031872`
+    - `sha256=738535420ee9c618a2aa25c637026b61ee29d5d28d7265c0be1d7836dd92bef8`

@@ -116,10 +116,6 @@ const MIRROR_RESIZE_THROTTLE_MS = 250;
 // mirror to a sub's narrow cols would corrupt another sub's view. Each sub
 // will instead receive a per-sub narrow mirror via buffer-sync truncation.
 const MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK = 2;
-// R14: head requests within this window reuse the last mirror state without
-// triggering another capture. This stops sub N=8 clients hammering daemon
-// with head requests after the head has just been broadcast.
-const MIRROR_HEAD_REQUEST_CACHE_MS = 100;
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -156,6 +152,7 @@ export function resolveMirrorLiveSyncDelayForSubscriber(
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
+  const mirrorHeadBroadcastCache = new WeakMap<SessionMirror, { revision: number }>();
 
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -410,23 +407,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   }
 
   function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
-    // R14: head broadcast dedup. Multiple subs / multiple requests within the
-    // cache window share the same broadcast timestamp; we still send to the
-    // whole fanout but only build the payload once. lastHeadBroadcastAt is the
-    // truth for the next dedup window.
     const now = Date.now();
-    if (
-      mirror.lastHeadBroadcastAt > 0
-      && now - mirror.lastHeadBroadcastAt < MIRROR_HEAD_REQUEST_CACHE_MS
-    ) {
-      return;
-    }
     mirror.lastHeadBroadcastAt = now;
-    // R5: pre-build the typed payload once, dispatch through sendMessage.
-    // sendMessage owns the per-sub transport and runtime-debug surface that
-    // tests still expect; we just stop paying N JSON.stringify per fanout.
-    type HeadMessage = Extract<ServerMessage, { type: 'buffer-head' }>;
-    const perSubMessages: Array<{ sessionId: string; message: HeadMessage }> = [];
+    mirrorHeadBroadcastCache.set(mirror, { revision: mirror.revision });
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (!session || !session.transport || session.transport.readyState !== 1) {
@@ -437,18 +420,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         continue;
       }
       ensureSessionReady(session, mirror);
-      perSubMessages.push({
-        sessionId,
-        message: {
-          type: 'buffer-head',
-          payload: deps.buildBufferHeadPayload(session.id, mirror),
-        },
+      deps.sendMessage(session, {
+        type: 'buffer-head',
+        payload: deps.buildBufferHeadPayload(session.id, mirror),
       });
-    }
-    for (const item of perSubMessages) {
-      const session = sessions.get(item.sessionId);
-      if (!session) continue;
-      deps.sendMessage(session, item.message);
     }
   }
 
@@ -486,18 +461,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!session.transport || session.transport.readyState !== 1) {
       return;
     }
-    // R1+R2: a single sub's head request no longer takes a private fast path
-    // that bypasses the dedup'd broadcast. If the mirror just broadcast a head
-    // within the cache window we skip; otherwise we run the same broadcast
-    // path which serves all healthy subs in one pass with one stringify.
-    const now = Date.now();
-    if (
-      mirror.lastHeadBroadcastAt > 0
-      && now - mirror.lastHeadBroadcastAt < MIRROR_HEAD_REQUEST_CACHE_MS
-    ) {
+    const cached = mirrorHeadBroadcastCache.get(mirror);
+    if (cached?.revision !== mirror.revision) {
+      // R1+R2: the first head probe for a fresh revision fans out once to all
+      // subscribers so N subs do not each trigger their own full head path.
+      // Later probes on the same revision can reply only to the requester.
+      broadcastBufferHeadToSubscribers(mirror);
       return;
     }
-    broadcastBufferHeadToSubscribers(mirror);
+    deps.sendMessage(session, {
+      type: 'buffer-head',
+      payload: deps.buildBufferHeadPayload(session.id, mirror),
+    });
   }
 
   async function refreshMirrorHeadForSession(session: TerminalSession, mirror: SessionMirror) {
