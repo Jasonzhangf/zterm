@@ -16,6 +16,7 @@ export type AppUpdateStage =
   | 'idle'
   | 'checking-manifest'
   | 'awaiting-install-target'
+  | 'refreshing-manifest'
   | 'validating-native-support'
   | 'checking-install-permission'
   | 'awaiting-install-permission'
@@ -331,6 +332,60 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         return false;
       }
 
+      if (!snapshot.preferences.manifestUrl.trim()) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: '未配置升级 manifest URL',
+          updateStage: 'failed',
+        }));
+        return false;
+      }
+
+      setSnapshot((current) => ({
+        ...current,
+        updateStage: 'refreshing-manifest',
+      }));
+
+      let installTarget: AppUpdateManifest;
+      try {
+        const response = await deps.fetchFn(snapshot.preferences.manifestUrl, {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          throw new Error(`升级清单请求失败：HTTP ${response.status}`);
+        }
+
+        const payload = normalizeAppUpdateManifest(await response.json());
+        if (!payload) {
+          throw new Error('升级清单格式无效');
+        }
+
+        installTarget = {
+          ...payload,
+          apkUrl: new URL(payload.apkUrl, snapshot.preferences.manifestUrl).toString(),
+        };
+        if (
+          installTarget.versionCode !== target.versionCode
+          || installTarget.sha256 !== target.sha256.toLowerCase()
+        ) {
+          throw new Error('升级清单已变更，请重新检查更新');
+        }
+
+        setSnapshot((current) => ({
+          ...current,
+          latestManifest: installTarget,
+          availableManifest: installTarget,
+        }));
+      } catch (error) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: error instanceof Error ? error.message : '升级清单复核失败',
+          updateStage: 'failed',
+        }));
+        return false;
+      }
+
       setSnapshot((current) => ({
         ...current,
         updateStage: 'validating-native-support',
@@ -383,14 +438,14 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           updateStage: 'downloading-and-installing',
         }));
         await deps.downloadAndInstall({
-          url: target.apkUrl,
-          sha256: target.sha256,
+          url: installTarget.apkUrl,
+          sha256: installTarget.sha256,
           expectedPackageName: deps.packageName,
         });
 
         const nextPreferences = normalizeAppUpdatePreferences({
           ...snapshot.preferences,
-          skippedVersionCode: target.versionCode,
+          skippedVersionCode: installTarget.versionCode,
           ignoreUntilManualCheck: false,
         });
         persistPreferences(deps.storage, nextPreferences, deps.onError);
@@ -398,6 +453,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         setSnapshot((current) => ({
           ...current,
           preferences: nextPreferences,
+          latestManifest: installTarget,
           availableManifest: null,
           installing: false,
           isBackingUp: false,

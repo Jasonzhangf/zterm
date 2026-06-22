@@ -132,6 +132,17 @@ describe('useAppUpdate', () => {
       autoCheckOnLaunch: false,
       ignoreUntilManualCheck: false,
     }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        buildNumber: 1493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'abc123',
+        notes: [],
+      }),
+    }) as typeof fetch);
 
     const { AppUpdatePlugin } = await import('../plugins/AppUpdatePlugin');
     vi.mocked(AppUpdatePlugin.canRequestPackageInstalls).mockResolvedValue({ allowed: true } as any);

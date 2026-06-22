@@ -157,3 +157,39 @@ ws.on("message", (msg: Buffer | string) => {
 - client optimization-1 还没完成 `TerminalView` 的 split 32ms RAF 节流与 `renderGeometryRevision` effect 收口
 - daemon optimization-2 还没跑 throughput bench，也没交付新 APK
 - 本轮只完成代码 + contracts 闭环，未构建 APK
+
+## 2026-06-22 升级包 404 二次修复
+
+### 现象
+- App 能检查到升级包，但点击升级下载 APK 报 HTTP 404。
+- 现场弹窗仍显示旧版本 `0.1.3.1860`，而当前 daemon 更新目录已发布 `0.1.3.1866+`。
+
+### 根因
+- 文件侧已正常：`~/.wterm/updates/latest.json` 与 versioned APK 均存在。
+- 客户端 `startUpdate(manifest)` 会直接使用 UI 里旧的 `availableManifest/latestManifest`，不会在安装前重新 `no-store` 拉最新 manifest。
+- 因此 UI 手里的旧 `apkUrl` 可以继续被拿去下载，造成 manifest 检查成功但下载旧 APK 404。
+
+### 修复
+- `app-update-runtime.ts`
+  - 新增 `refreshing-manifest` stage。
+  - `startUpdate()` 在 native support / backup / install 前必须重新拉 `snapshot.preferences.manifestUrl`。
+  - 校验最新 manifest 的 `versionCode + sha256` 与用户确认安装的目标一致，否则中止并提示重新检查更新。
+  - 真实下载只使用刚复核的 manifest URL，避免 stale host / stale APK。
+- `app-update-runtime.test.ts`
+  - 红测：旧 install target 被最新 manifest 拒绝，且不会 backup / download。
+  - 正测：同版本同 sha 时安装使用复核后的同源 URL，不使用旧 snapshot apkUrl。
+
+### 验证
+- `cd android && npx tsc --noEmit` PASS。
+- `cd android && pnpm exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx` PASS（12/12）。
+- `cd android && pnpm run test:terminal:contracts` PASS（564/564）。
+- `cd android && ./scripts/build-android-debug.sh` PASS。
+- 新升级包：
+  - `android/update-dist/zterm-0.1.3.1868.apk`
+  - `~/.wterm/updates/zterm-0.1.3.1868.apk`
+  - versionCode `1031868`
+  - sha256 `8f7826a51675465197dae6f3f2256c4ac19035d6ada54c86e73ceb41bba0aa00`
+  - size `5459886`
+- HTTP:
+  - `http://127.0.0.1:3333/updates/latest.json` 200，APK 200。
+  - `http://100.66.1.82:3333/updates/latest.json` 200，返回 apkUrl host 为 `100.66.1.82`，APK 200。
