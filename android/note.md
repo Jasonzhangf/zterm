@@ -277,3 +277,17 @@ ws.on("message", (msg: Buffer | string) => {
     - `~/.wterm/updates/zterm-0.1.3.1872.apk`
     - `versionCode=1031872`
     - `sha256=738535420ee9c618a2aa25c637026b61ee29d5d28d7265c0be1d7836dd92bef8`
+
+## 2026-06-22 session drawer 多机场景 + Android copy-mode 系统菜单
+### session drawer 收口
+- `TerminalSessionDrawerItem` 新增 `hostKey/hostLabel` 显式字段，drawer 内部不再隐式从 bridge 派生
+- `TerminalPage.drawerSessions` 按 `bridgeHost:bridgePort` 注入 hostKey；hostLabel 优先取该 host 上 customName
+- 单机场景：归入 `default` 分组，host rail 不显示
+- 多机场景：host rail pill 切换，default 选中 active session 所在 host
+- 排序：已打开 session 按 pane 顺序排前面，未打开 session 按名字排后面
+- 红测：5/5 PASS（基础 + 多机 rail + 多机切换 + 单 host 无 rail + 顺序保持）
+### Android 拷贝系统菜单拦截
+- 根因：WebView `setOnLongClickListener` 未设置，Android 原生长按触发系统上下文菜单
+- 修复：`MainActivity.onCreate` 设置 `webView.setOnLongClickListener(v -> true)` + `setLongClickable(true)`，由 JS copy-mode 完全接管长按
+- 升级包：zterm-0.1.3.1882.apk，sha256=4f5745d1662ba844017f46f314d3541c0e1bcb6329e74b67d93378936651cd40
+- HTTP 200，update channel 正常
