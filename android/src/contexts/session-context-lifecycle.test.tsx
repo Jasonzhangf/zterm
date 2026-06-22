@@ -217,4 +217,61 @@ describe('session-context-lifecycle', () => {
 
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
   });
+
+  it('uses >=900ms timeout cadence while app foreground truth is false', () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+
+    function Harness() {
+      useSessionContextLifecycle({
+        appForegroundActive: false,
+        state: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: ['s1'],
+        } as any,
+        scheduleStates: {},
+        refs: {
+          foregroundActiveRef: { current: false },
+          stateRef: {
+            current: {
+              sessions: [{ id: 's1', state: 'connected' } as any],
+              activeSessionId: 's1',
+              liveSessionIds: ['s1'],
+            } as any,
+          },
+          scheduleStatesRef: { current: {} },
+          sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+          transportRuntimeStoreRef: { current: { sessions: new Map() } },
+          sessionPullStateRef: { current: new Map() },
+          lastActivatedSessionIdRef: { current: 's1' },
+          lastActiveReentryAtRef: { current: new Map() },
+          lastConnectedBaselineAtRef: { current: new Map() },
+          lastServerActivityAtRef: { current: new Map() },
+          remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+          pingIntervalsRef: { current: new Map() },
+          handshakeTimeoutsRef: { current: new Map() },
+          reconnectRuntimesRef: { current: new Map() },
+          manualCloseRef: { current: new Set() },
+        },
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh: vi.fn(() => true),
+        resolveActiveHeadRefreshTickMs: () => 16,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    render(<Harness />);
+
+    const timeoutDelays = setTimeoutSpy.mock.calls
+      .map((call) => call[1])
+      .filter((delay): delay is number => typeof delay === 'number');
+    expect(timeoutDelays.length).toBeGreaterThan(0);
+    expect(Math.min(...timeoutDelays)).toBeGreaterThanOrEqual(900);
+  });
 });

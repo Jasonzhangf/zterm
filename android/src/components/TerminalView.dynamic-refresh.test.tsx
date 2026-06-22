@@ -3805,8 +3805,10 @@ describe('TerminalView minimal mirror render', () => {
 
     expect(readRenderedRows(view.container)).toContain('row-080');
     expect(readRenderedRows(view.container)).toContain('row-081');
-    expect(scroller.scrollTop).toBe(969);
-    expect(onViewportChange).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(scroller.scrollTop).toBe(969);
+      expect(onViewportChange).toHaveBeenCalled();
+    });
   });
 
   it('keeps follow scroll aligned for a live non-interactive pane when render geometry changes', async () => {
@@ -4056,5 +4058,54 @@ describe('TerminalView minimal mirror render', () => {
       mode: 'follow',
       viewportEndIndex: 30,
     });
+  });
+
+  it('throttles split-visible resize observer bursts to one rAF after the 32ms gate', async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation(() => 1 as any);
+
+    const session = makeSession({ revision: 1, lines: buildRows(24, 'split'), bufferTailEndIndex: 24 });
+
+    render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          splitVisible
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    requestAnimationFrameSpy.mockClear();
+
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+
+    ResizeObserverMock.triggerAll();
+    ResizeObserverMock.triggerAll();
+    ResizeObserverMock.triggerAll();
+
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(31);
+    });
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+    requestAnimationFrameSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

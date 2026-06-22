@@ -129,6 +129,7 @@ export function createSessionInfraFacadeRuntime(options: {
   const deleteSessionSync = (id: string) => {
     deleteSessionSyncRuntime({
       id,
+      manualClose: true,
       applySessionAction,
     });
   };

@@ -37,7 +37,7 @@ export type SessionAction =
   | { type: 'CREATE_SESSION'; session: Session }
   | { type: 'UPDATE_SESSION'; id: string; updates: Partial<Session> }
   | { type: 'MOVE_SESSION'; id: string; toIndex: number }
-  | { type: 'DELETE_SESSION'; id: string }
+  | { type: 'DELETE_SESSION'; id: string; manualClose: true }
   | { type: 'SET_ACTIVE_SESSION'; id: string }
   | { type: 'SET_LIVE_SESSIONS'; ids: string[] }
   | { type: 'SET_SESSION_STATE'; id: string; state: SessionState }

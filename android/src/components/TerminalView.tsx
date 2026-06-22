@@ -93,6 +93,7 @@ interface TerminalViewProps {
     clientX: number,
     clientY: number,
   ) => void;
+  splitVisible?: boolean;
 }
 
 function terminalCellToText(
@@ -173,6 +174,7 @@ function TerminalViewComponent({
   copyEndRowIndex = null,
   copyPreviewRowIndex = null,
   onLongPressRow,
+  splitVisible = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const refreshActive = live ?? active;
@@ -215,6 +217,7 @@ function TerminalViewComponent({
   const pendingFollowScrollSyncRef = useRef(false);
   const pendingFollowViewportRealignRef = useRef(false);
   const recentViewportLayoutChangeRef = useRef(false);
+  const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
   const ignoredProgrammaticScrollTopRef = useRef<number | null>(null);
   const lastSettledScrollTopRef = useRef(0);
@@ -242,7 +245,6 @@ function TerminalViewComponent({
     rowHeightPx: number;
     clientHeightPx: number;
   } | null>(null);
-  const previousPrePaintFollowRealignKeyRef = useRef<string | null>(null);
   const userScrollIntentDeadlineRef = useRef(0);
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
   const [resolvedRowHeight, setResolvedRowHeight] = useState(rowHeight);
@@ -462,6 +464,12 @@ function TerminalViewComponent({
       viewportRows,
     ],
   );
+  const renderGeometryRevisionKey = useMemo(
+    () => `${sessionId || ""}:${renderGeometryRevision}`,
+    [renderGeometryRevision, sessionId],
+  );
+  const lastAppliedRenderGeometryRevisionKeyRef = useRef<string>("");
+  const renderGeometryRevisionRafRef = useRef<number | null>(null);
 
   const focusTerminal = useCallback(() => {
     if (!allowDomFocus) {
@@ -1097,32 +1105,6 @@ function TerminalViewComponent({
   ]);
 
   useLayoutEffect(() => {
-    const followRealignKey = [sessionId || "", renderGeometryRevision].join(
-      ":",
-    );
-    const previousKey = previousPrePaintFollowRealignKeyRef.current;
-    previousPrePaintFollowRealignKeyRef.current = followRealignKey;
-
-    if (previousKey === null || previousKey === followRealignKey) {
-      return;
-    }
-    if (!refreshActive || readingModeRef.current) {
-      return;
-    }
-    syncScrollHostToRenderBottom(followVisualBottomIndex);
-  }, [
-    effectiveBufferEndIndex,
-    followVisualBottomIndex,
-    refreshActive,
-    renderBuffer.startIndex,
-    renderGeometryRevision,
-    rowHeightPx,
-    sessionId,
-    syncScrollHostToRenderBottom,
-    viewportRows,
-  ]);
-
-  useLayoutEffect(() => {
     flushPendingFollowScrollSync();
   }, [
     effectiveBufferEndIndex,
@@ -1192,40 +1174,70 @@ function TerminalViewComponent({
       return;
     }
     runViewportRefreshRef.current();
-    const observer = new ResizeObserver(() => {
-      if (resizeRafTokenRef.current !== null) {
+    const scheduleResizeRefresh = () => {
+      if (resizeRafTokenRef.current !== null || resizeThrottleTimerRef.current !== null) {
         return;
       }
-      resizeRafTokenRef.current = window.requestAnimationFrame(() => {
-        resizeRafTokenRef.current = null;
-        runViewportRefreshRef.current();
-      });
+      const scheduleFrame = () => {
+        resizeRafTokenRef.current = window.requestAnimationFrame(() => {
+          resizeRafTokenRef.current = null;
+          runViewportRefreshRef.current();
+        });
+      };
+      if (splitVisible) {
+        resizeThrottleTimerRef.current = window.setTimeout(() => {
+          resizeThrottleTimerRef.current = null;
+          scheduleFrame();
+        }, 32);
+        return;
+      }
+      scheduleFrame();
+    };
+    const observer = new ResizeObserver(() => {
+      scheduleResizeRefresh();
     });
     observer.observe(host);
     return () => {
       observer.disconnect();
+      if (resizeThrottleTimerRef.current !== null) {
+        window.clearTimeout(resizeThrottleTimerRef.current);
+        resizeThrottleTimerRef.current = null;
+      }
       if (resizeRafTokenRef.current !== null) {
         window.cancelAnimationFrame(resizeRafTokenRef.current);
         resizeRafTokenRef.current = null;
       }
     };
-  }, []);
+  }, [splitVisible]);
 
   useEffect(() => {
-    if (!refreshActive) {
+    if (renderGeometryRevisionRafRef.current !== null) {
       return;
     }
-    emitRenderDemandSignalsForCurrentFrame();
+    renderGeometryRevisionRafRef.current = window.requestAnimationFrame(() => {
+      renderGeometryRevisionRafRef.current = null;
+      if (lastAppliedRenderGeometryRevisionKeyRef.current === renderGeometryRevisionKey) {
+        return;
+      }
+      lastAppliedRenderGeometryRevisionKeyRef.current = renderGeometryRevisionKey;
+      if (!refreshActive || readingModeRef.current) {
+        return;
+      }
+      syncScrollHostToRenderBottom(followVisualBottomIndex);
+      emitRenderDemandSignalsForCurrentFrame();
+    });
+    return () => {
+      if (renderGeometryRevisionRafRef.current !== null) {
+        window.cancelAnimationFrame(renderGeometryRevisionRafRef.current);
+        renderGeometryRevisionRafRef.current = null;
+      }
+    };
   }, [
-    refreshActive,
-    renderBuffer.gapRanges,
-    bufferLines,
-    renderBuffer.startIndex,
-    effectiveBufferEndIndex,
     emitRenderDemandSignalsForCurrentFrame,
-    followDemandAnchorEndIndex,
-    renderGeometryRevision,
-    viewportRows,
+    followVisualBottomIndex,
+    refreshActive,
+    renderGeometryRevisionKey,
+    syncScrollHostToRenderBottom,
   ]);
 
   useEffect(() => {

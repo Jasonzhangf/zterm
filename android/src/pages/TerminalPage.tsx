@@ -779,6 +779,7 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
             : null
         }
         onLongPressRow={onLongPressRow}
+        splitVisible={splitVisible}
       />
     </TerminalTabSwipeSurface>
   ), [

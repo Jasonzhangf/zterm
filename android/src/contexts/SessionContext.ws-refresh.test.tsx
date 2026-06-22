@@ -6785,11 +6785,13 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(statusListener.mock.calls[0]?.[0]).toMatchObject({
         detail: { sessionId: 'session-1', type: 'closed', message: 'tmux session closed' },
       });
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('closed'));
 
       ws.close();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(MockWebSocket.instances).toHaveLength(1);
       expect(statusListener).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('closed'));
     } finally {
       window.removeEventListener('zterm:session-status', statusListener as EventListener);
     }

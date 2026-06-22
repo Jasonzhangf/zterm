@@ -90,9 +90,10 @@ export function createSessionSyncRuntime(options: {
 
 export function deleteSessionSyncRuntime(options: {
   id: string;
+  manualClose: true;
   applySessionAction: (action: SessionAction) => void;
 }) {
-  options.applySessionAction({ type: 'DELETE_SESSION', id: options.id });
+  options.applySessionAction({ type: 'DELETE_SESSION', id: options.id, manualClose: options.manualClose });
 }
 
 export function moveSessionSyncRuntime(options: {

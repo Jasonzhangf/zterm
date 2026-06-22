@@ -8,6 +8,7 @@ import type {
 } from './session-context-core';
 import {
   buildReconnectHandshakeFailurePlan,
+  buildSessionClosedUpdates,
   buildSessionConnectingLabelUpdates,
   buildSessionErrorUpdates,
   buildSessionReconnectingFailureUpdates,
@@ -321,6 +322,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
     ws: BridgeTransportSocket;
   }) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -356,6 +358,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
     },
     onClosed: (reason) => {
       options.reconnectRuntimesRef.current.delete(options.sessionId);
+      options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(reason));
       options.emitSessionStatus(options.sessionId, 'closed', reason);
     },
   };
@@ -378,6 +381,7 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
     ws: BridgeTransportSocket;
   }) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -404,6 +408,7 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
       });
     },
     onClosed: (reason) => {
+      options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(reason));
       options.emitSessionStatus(options.sessionId, 'closed', reason);
     },
   };

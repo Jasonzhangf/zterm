@@ -14,10 +14,6 @@ cd "$ROOT_DIR"
 pnpm run deps:check-wterm-published
 pnpm build
 npx cap sync android
-find "$ROOT_DIR/native/android/capacitor-cordova-android-plugins/src/main" \
-  \( -path "*/res/.gitkeep" -o -path "*/java/.gitkeep" \) \
-  -delete
-
 cd "$ROOT_DIR/native/android"
 ./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources
 ./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug
@@ -29,6 +25,7 @@ echo "[build-android-debug] verify manifests"
 test -f "$ROOT_DIR/update-dist/latest.json"
 test -f "$ROOT_DIR/release-dist/latest.json"
 test -f "$UPDATES_DIR/latest.json"
+WTERM_UPDATES_DIR="$UPDATES_DIR" node ./scripts/verify-update-bundle.mjs
 
 echo "[build-android-debug] APK built and published to update channel"
 echo "- apk: $APK_PATH"

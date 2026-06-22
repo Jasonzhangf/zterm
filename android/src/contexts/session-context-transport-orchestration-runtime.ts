@@ -353,6 +353,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   };
 
+
   const handleReconnectBeforeConnectSend = (sessionId: string, sessionName: string) => {
     handleReconnectBeforeConnectSendRuntime({
       sessionId,
@@ -391,6 +392,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
       reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
       applyTransportOpenConnectedEffects,
       emitSessionStatus,
+      updateSessionSync: (_id, updates) => {
+        options.updateSessionSync(_id, updates);
+      },
     });
   };
 
@@ -405,6 +409,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
       scheduleReconnect,
       applyTransportOpenConnectedEffects,
       emitSessionStatus,
+      updateSessionSync: (_id, updates) => {
+        options.updateSessionSync(_id, updates);
+      },
     });
   };
 

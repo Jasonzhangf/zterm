@@ -332,13 +332,14 @@ export function useSessionContextLifecycle(options: {
       if (cancelled) {
         return;
       }
+      const nextDelay = !options.refs.foregroundActiveRef.current
+        ? 1000
+        : Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId));
       timer = window.setTimeout(() => {
         if (cancelled) {
           return;
         }
         if (!options.refs.foregroundActiveRef.current) {
-          // Background: slow tick to 1s to avoid CPU waste (was via scheduleNext()
-          // which keeps 16ms setTimeout loop). Foreground resets the cadence.
           scheduleNext();
           return;
         }
@@ -359,11 +360,11 @@ export function useSessionContextLifecycle(options: {
           options.ensureActiveSessionFresh({
             sessionId: activeSessionId,
             source: 'active-tick',
-            allowReconnectIfUnavailable: true,
+            allowReconnectIfUnavailable: options.refs.foregroundActiveRef.current,
           });
         }
         scheduleNext();
-      }, Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId)));
+      }, nextDelay);
     };
 
     scheduleNext();
@@ -382,6 +383,15 @@ export function useSessionContextLifecycle(options: {
 
     const scheduleNext = () => {
       if (cancelled) {
+        return;
+      }
+      if (!options.refs.foregroundActiveRef.current) {
+        timer = window.setTimeout(() => {
+          if (cancelled) {
+            return;
+          }
+          scheduleNext();
+        }, 1000);
         return;
       }
       const refreshTargets = buildPassiveVisibleRefreshTargets(options.refs.stateRef.current);
@@ -405,14 +415,6 @@ export function useSessionContextLifecycle(options: {
         if (cancelled) {
           return;
         }
-        if (!options.refs.foregroundActiveRef.current) {
-          scheduleNext();
-          timer = window.setTimeout(() => {
-            if (cancelled) return;
-            scheduleNext();
-          }, 1000);
-          return;
-        }
         if (refreshTargets.length === 0) {
           scheduleNext();
           return;
@@ -432,7 +434,7 @@ export function useSessionContextLifecycle(options: {
           options.ensureActiveSessionFresh({
             sessionId,
             source: 'active-tick',
-            allowReconnectIfUnavailable: true,
+            allowReconnectIfUnavailable: options.refs.foregroundActiveRef.current,
           });
         });
         scheduleNext();

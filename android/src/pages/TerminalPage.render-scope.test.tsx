@@ -7,6 +7,11 @@ import type { Session } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
+const debugSnapshotState = vi.hoisted(() => ({
+  registrations: new Map<string, number>(),
+  producers: new Map<string, () => unknown>(),
+}));
+
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
@@ -41,6 +46,20 @@ vi.mock('../plugins/StoragePermissionPlugin', () => ({
   },
 }));
 
+vi.mock('../lib/client-debug-snapshot', () => ({
+  registerClientDebugSnapshotSource: vi.fn((sourceId: string, producer: () => unknown) => {
+    debugSnapshotState.registrations.set(
+      sourceId,
+      (debugSnapshotState.registrations.get(sourceId) || 0) + 1,
+    );
+    debugSnapshotState.producers.set(sourceId, producer);
+    return () => {
+      debugSnapshotState.producers.delete(sourceId);
+    };
+  }),
+  collectClientDebugSnapshot: vi.fn(() => ({})),
+}));
+
 const renderCounts = new Map<string, number>();
 
 function bumpRenderCount(key: string) {
@@ -49,6 +68,10 @@ function bumpRenderCount(key: string) {
 
 function readRenderCount(key: string) {
   return renderCounts.get(key) || 0;
+}
+
+function readDebugSnapshotRegistrationCount(sourceId: string) {
+  return debugSnapshotState.registrations.get(sourceId) || 0;
 }
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
@@ -220,6 +243,8 @@ function renderTerminalPage(sessions: Session[], activeSession: Session | null) 
 describe('TerminalPage renderer scope', () => {
   beforeEach(() => {
     renderCounts.clear();
+    debugSnapshotState.registrations.clear();
+    debugSnapshotState.producers.clear();
     vi.useFakeTimers();
     const storageBacking = new Map<string, string>();
     const storageShim = {
@@ -706,5 +731,54 @@ describe('TerminalPage renderer scope', () => {
     renderTerminalPage([session1, session2], session1);
 
     expect(screen.getByTestId('terminal-header').getAttribute('data-show-back-button')).toBe('true');
+  });
+
+  it('does not reregister terminal-page snapshot source when keyboardInset changes', async () => {
+    const originalVirtualKeyboard = (navigator as Navigator & { virtualKeyboard?: unknown }).virtualKeyboard;
+    const geometryListeners = new Set<() => void>();
+    const virtualKeyboard = {
+      overlaysContent: false,
+      boundingRect: { height: 0 },
+      addEventListener: vi.fn((event: string, listener: () => void) => {
+        if (event === 'geometrychange') {
+          geometryListeners.add(listener);
+        }
+      }),
+      removeEventListener: vi.fn((event: string, listener: () => void) => {
+        if (event === 'geometrychange') {
+          geometryListeners.delete(listener);
+        }
+      }),
+    };
+    Object.defineProperty(navigator, 'virtualKeyboard', {
+      configurable: true,
+      value: virtualKeyboard,
+    });
+
+    const session1 = makeSession('s1');
+    renderTerminalPage([session1], session1);
+
+    expect(readDebugSnapshotRegistrationCount('terminal-page')).toBe(1);
+
+    await act(async () => {
+      virtualKeyboard.boundingRect.height = 240;
+      for (const listener of geometryListeners) {
+        listener();
+      }
+      await Promise.resolve();
+    });
+
+    expect(readDebugSnapshotRegistrationCount('terminal-page')).toBe(1);
+
+    const producer = debugSnapshotState.producers.get('terminal-page');
+    expect(producer).toBeTypeOf('function');
+    expect(producer?.()).toMatchObject({
+      keyboardInset: 240,
+    });
+
+    Object.defineProperty(navigator, 'virtualKeyboard', {
+      configurable: true,
+      value: originalVirtualKeyboard,
+    });
   });
 });
