@@ -27,11 +27,18 @@ public class MainActivity extends BridgeActivity {
             wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             wv.setVerticalScrollBarEnabled(false);
             wv.setHorizontalScrollBarEnabled(false);
-            // Disable native long-press entirely so the system haptic/selection
-            // does not steal touch events from JS copy-mode handlers.
-            // setLongClickable(false) prevents the WebView from triggering its
-            // own long-press callback while still forwarding touch events to JS.
-            wv.setLongClickable(false);
+            // Block Android WebView native long-press so its floating selection
+            // ActionMode toolbar (全选 / 剪切 / 复制 / 分享) does NOT appear.
+            // JS touch events are received in real-time BEFORE this listener
+            // fires, so the 420ms JS long-press timer in copy-mode still runs
+            // and shows our app-owned copy menu.
+            wv.setLongClickable(true);
+            wv.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    return true;
+                }
+            });
         }
     }
 

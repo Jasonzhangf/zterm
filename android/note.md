@@ -366,3 +366,23 @@ ws.on("message", (msg: Buffer | string) => {
   - 无 server → 创建标准化路径 ~/.wterm/tmux/，设 TMUX_TMPDIR
 - 新增 `runTmuxWithEnv()` helper 用于检测阶段
 - 新增 `detectedSocketDir` 模块级变���控制 cleanEnv 行为
+
+## 2026-06-23 copy 现场复核三：1885 仍弹系统工具栏
+
+### 现场
+- 1885 启用 copy 后长按：系统"全选 / 剪切 / 复制 / 分享 / AI 写作"浮动工具栏仍弹出。
+- 我自己的 JS copy menu 未出现。
+
+### 根因复盘
+- 1885 用 `setLongClickable(false)`：不阻止 WebView 触发文本 selection，Android 仍然进入 ActionMode。
+- 1882 用 `setOnLongClickListener(v -> true)`：会阻止系统 ActionMode。
+- 1889（本轮）回退到 1882 同款 native 配置：`setLongClickable(true)` + `setOnLongClickListener(v -> true)`。
+
+### publish
+- `zterm-0.1.3.1889` (versionCode `1031889`)
+- sha256: `3bb0d14d69d082381b32f42b1697b9d341cef554390880cea6282855505dca7b`
+- HTTP 200, daemon update channel ready
+
+### 缺口
+- Jason 现场复测长按是否弹 JS copy 菜单（4 颗按钮胶囊"设为起点 / 设为终点 / 复制 / 关闭"）。
+- 如果 JS 菜单仍未出现，下一轮直接追 `useTerminalPageCopyRuntime.handleLongPressCopyRow` 和 `TerminalPageCopyMenu` 渲染分支。
