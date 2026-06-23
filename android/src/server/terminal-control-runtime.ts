@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from 'child_process';
+import { mkdirSync } from 'fs';
 import { homedir } from 'os';
+import { join } from 'path';
 import type { SessionMirror } from './terminal-runtime-types';
 
 export interface TerminalControlRuntimeDeps {
@@ -7,6 +9,7 @@ export interface TerminalControlRuntimeDeps {
   defaultSessionName: string;
   hiddenTmuxSessions: Set<string>;
   mirrors: Map<string, SessionMirror>;
+  tmuxSocketDir?: string;
   getMirrorKey: (sessionName: string) => string;
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
@@ -18,6 +21,7 @@ export interface TerminalControlRuntime {
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
   ensureTmuxSessionAlternateScreenDisabled: (sessionName: string) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
+  ensureTmuxServerRunning: () => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   enqueueLiveMirrorInput: (
     sessionName: string,
@@ -44,7 +48,21 @@ export function createTerminalControlRuntime(
     }>;
     scheduled: boolean;
     flushing: boolean;
+
   }>();
+
+  let detectedSocketDir: string | null = null;
+
+  function detectTmuxSocketDir(): string {
+    if (detectedSocketDir) {
+      return detectedSocketDir;
+    }
+    if (deps.tmuxSocketDir) {
+      detectedSocketDir = deps.tmuxSocketDir;
+      return detectedSocketDir;
+    }
+    return join(homedir(), '.wterm', 'tmux');
+  }
 
   function cleanEnv(): Record<string, string> {
     const env: Record<string, string> = {};
@@ -55,6 +73,10 @@ export function createTerminalControlRuntime(
     }
     delete env.TMUX;
     delete env.TMUX_PANE;
+    // Only set TMUX_TMPDIR when we own the tmux server (no pre-existing server found)
+    if (detectedSocketDir) {
+      env.TMUX_TMPDIR = detectedSocketDir;
+    }
     env.TERM = 'xterm-256color';
     env.LANG = env.LANG || 'en_US.UTF-8';
     env.LC_CTYPE = env.LC_CTYPE || env.LANG;
@@ -145,6 +167,60 @@ export function createTerminalControlRuntime(
       });
     });
   }
+
+  function runTmuxWithEnv(args: string[], env: Record<string, string>) {
+    const result = spawnSync(deps.tmuxBinary, args, {
+      encoding: 'utf-8',
+      cwd: process.env.HOME || homedir(),
+      env,
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      const stderr = result.stderr?.trim() || '';
+      if (stderr.includes('no server running on') && args[0] === 'list-sessions') {
+        return { ok: true as const, stdout: '' };
+      }
+      throw new Error(stderr || `tmux exited with status ${result.status}`);
+    }
+    return { ok: true as const, stdout: result.stdout || '' };
+  }
+
+  function ensureTmuxServerRunning() {
+    // Step 1: Check if a tmux server is already running (default path, no TMUX_TMPDIR override)
+    // This preserves existing sessions created by user's interactive tmux usage
+    const baseEnv = cleanEnv();
+    delete baseEnv.TMUX_TMPDIR;
+
+    let existingServer = false;
+    try {
+      runTmuxWithEnv(['list-sessions'], baseEnv);
+      existingServer = true;
+    } catch {
+      // No existing server on default path
+    }
+
+    if (existingServer) {
+      // Reuse existing tmux server — do NOT set TMUX_TMPDIR
+      detectedSocketDir = null;
+      return;
+    }
+
+    // Step 2: No existing server. Use standardized path for persistence across reboots.
+    const socketDir = detectTmuxSocketDir();
+    mkdirSync(socketDir, { recursive: true });
+    try {
+      runTmux(['start-server']);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('already running')) {
+        console.warn(`[terminal-control] tmux start-server: ${message}`);
+      }
+    }
+    runTmux(['list-sessions']);
+  }
+
 
   function ensureTmuxSessionAlternateScreenDisabled(sessionName: string) {
     runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off']);
@@ -377,6 +453,7 @@ export function createTerminalControlRuntime(
 
   return {
     runTmux,
+    ensureTmuxServerRunning,
     runTmuxAsync,
     runCommand,
     ensureTmuxSessionAlternateScreenDisabled,

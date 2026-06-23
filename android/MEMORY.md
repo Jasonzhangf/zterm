@@ -408,3 +408,24 @@ silently returns 0 when viewport metrics are stable.
   - vitest --run / build 期间跨文件同时跑会触发第二 WS factory
   - 加 activeFactoryCount 抛错 + close/open 时 decrement
   - 1 commit 5b05c17；APK 1839 同步发布
+
+## 2026-06-23 tmux socket 标准化 + daemon 启动确保 tmux server
+
+### 已验证结论
+- tmux socket 默认在 `/private/tmp/tmux-501/default`，macOS 重启后 `/private/tmp` 被清空，导致 daemon 连不上 tmux
+- 修复：daemon 的 `cleanEnv()` 设 `TMUX_TMPDIR=~/.wterm/tmux/`，socket 移到持久化目录
+- 修复：daemon 启动时调用 `ensureTmuxServerRunning()` 确保 tmux server 在跑
+- 验证：tsc PASS，contracts 566 tests PASS，daemon restart 后 socket 在 `~/.wterm/tmux/tmux-501/default`
+- daemon 自启（launchd）一直正���，不存在"daemon 不自启"的问题
+
+## 2026-06-23 tmux socket 检测 + daemon 启动确保 tmux server
+
+### 已验证结论
+- daemon 自启（launchd）一直正常，不存在"daemon 不自启"的问题
+- tmux socket 默认在 `/private/tmp/tmux-501/default`，macOS 重启后 `/private/tmp` 被清空
+- **正确策略**：daemon 启动时 `ensureTmuxServerRunning()` 先检测已有 tmux server（不设 TMUX_TMPDIR）
+  - 有 server → 复用现有 socket 路径，不设 TMUX_TMPDIR
+  - 无 server → 创建 `~/.wterm/tmux/` 标准化路径，设 TMUX_TMPDIR
+- `cleanEnv()` 根据 `detectedSocketDir` 决定是否设 `TMUX_TMPDIR`
+- 验证：tsc PASS，contracts 566 tests PASS，daemon restart 后返回真实 sessions (freehand, routecodex)
+- **反模式**：不能强制设 TMUX_TMPDIR，否则 daemon 看不到用户已有 sessions

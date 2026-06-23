@@ -291,3 +291,39 @@ ws.on("message", (msg: Buffer | string) => {
 - 修复：`MainActivity.onCreate` 设置 `webView.setOnLongClickListener(v -> true)` + `setLongClickable(true)`，由 JS copy-mode 完全接管长按
 - 升级包：zterm-0.1.3.1882.apk，sha256=4f5745d1662ba844017f46f314d3541c0e1bcb6329e74b67d93378936651cd40
 - HTTP 200，update channel 正常
+
+## 2026-06-23 daemon 自启 + tmux socket 标准化
+
+### 诊断结果
+- **daemon 自启**：实际已正常工作。launchd plist 存在，`RunAtLoad=true`，进程在跑。误报。
+- **tmux socket 标准化**：默认在 `/private/tmp/tmux-501/default`，系统重启清空。
+- **重启后连不上**：daemon 在跑但 tmux server 没 auto-start。daemon 启动时不自动 `tmux start-server`。
+
+### 改动
+1. `terminal-control-runtime.ts`：
+   - `cleanEnv()` 加 `TMUX_TMPDIR=~/.wterm/tmux/`
+   - 新增 `resolveTmuxSocketDir()` 函数
+   - 新增 `ensureTmuxServerRunning()` — 创建目录 + start-server + list-sessions
+   - deps 新增可选 `tmuxSocketDir`
+2. `server.ts`：
+   - 传入 `tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux')`
+   - 创建 terminalControlRuntime 后立即调用 `ensureTmuxServerRunning()`
+
+### 验证
+- `npx tsc --noEmit` PASS
+- `pnpm run test:terminal:contracts` 50 files / 566 tests PASS
+- daemon restart 后 socket 路径变为 `~/.wterm/tmux/tmux-501/default`
+- `listTmuxSessions()` 正确返回新路径下的 sessions
+- daemon health endpoint 正常
+
+### 剩余风险
+- 现有 tmux sessions 在旧路径 `/private/tmp/tmux-501/` 上，不会被新 daemon 看到
+- 用户需手动迁移旧 sessions 到新路径，或等待旧 tmux server 自然消亡
+
+### 修正：tmux socket 策略
+- **第一版错误**：强制设 `TMUX_TMPDIR=~/.wterm/tmux/` → daemon 重启后创建了新 server 在新路径，看不到用户已有 sessions（freehand, routecodex）
+- **正确方案**：`ensureTmuxServerRunning()` 先检测已有 tmux server（不设 TMUX_TMPDIR）
+  - 有 server → 复用，不设 TMUX_TMPDIR
+  - 无 server → 创建标准化路径 ~/.wterm/tmux/，设 TMUX_TMPDIR
+- 新增 `runTmuxWithEnv()` helper 用于检测阶段
+- 新增 `detectedSocketDir` 模块级变���控制 cleanEnv 行为

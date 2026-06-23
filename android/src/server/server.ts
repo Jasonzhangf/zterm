@@ -201,6 +201,7 @@ terminalControlRuntime = createTerminalControlRuntime({
   tmuxBinary: TMUX_BINARY,
   defaultSessionName: DEFAULT_SESSION_NAME,
   hiddenTmuxSessions: HIDDEN_TMUX_SESSIONS,
+  tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux'),
   mirrors,
   getMirrorKey,
   sanitizeSessionName,
@@ -214,6 +215,9 @@ const {
   createDetachedTmuxSession,
   renameTmuxSession,
 } = terminalControlRuntime;
+
+// Ensure tmux server is running with standardized socket path
+terminalControlRuntime.ensureTmuxServerRunning();
 const terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,
