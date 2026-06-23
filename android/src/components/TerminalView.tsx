@@ -371,6 +371,15 @@ function TerminalViewComponent({
   );
   const startCopyLongPressTouch = useCallback(
     (event: TouchEvent<HTMLDivElement>, rowIndex: number) => {
+      if (typeof console !== 'undefined') {
+        console.log('[CopyTrace] startCopyLongPressTouch fired', {
+          rowIndex,
+          copyModeActive,
+          hasSession: Boolean(sessionId),
+          hasCallback: Boolean(onLongPressRow),
+          touches: event.touches.length,
+        });
+      }
       if (!copyModeActive || !sessionId || !onLongPressRow) {
         return;
       }
@@ -387,11 +396,17 @@ function TerminalViewComponent({
         rowIndex,
       };
       longPressTimerRef.current = window.setTimeout(() => {
+        if (typeof console !== 'undefined') {
+          console.log('[CopyTrace] longPress timer fired', { rowIndex, startX: longPressStartRef.current?.x });
+        }
         longPressTimerRef.current = null;
         const start = longPressStartRef.current;
         longPressStartRef.current = null;
         if (!start) {
           return;
+        }
+        if (typeof console !== 'undefined') {
+          console.log('[CopyTrace] calling onLongPressRow', { sessionId, rowIndex: start.rowIndex });
         }
         onLongPressRow(sessionId, start.rowIndex, start.x, start.y);
       }, 420);

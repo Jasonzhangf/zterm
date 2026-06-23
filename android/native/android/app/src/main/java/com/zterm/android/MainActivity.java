@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
@@ -27,6 +28,15 @@ public class MainActivity extends BridgeActivity {
             wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             wv.setVerticalScrollBarEnabled(false);
             wv.setHorizontalScrollBarEnabled(false);
+            // Pipe JS console.log into Android logcat so copy-mode long-press
+            // traces can be observed during on-device debugging.
+            wv.setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
+                    Log.i("ZTermWeb", cm.message());
+                    return true;
+                }
+            });
             // Block Android WebView native long-press so its floating selection
             // ActionMode toolbar (全选 / 剪切 / 复制 / 分享) does NOT appear.
             // JS touch events are received in real-time BEFORE this listener
