@@ -20,7 +20,7 @@ zterm 的 Android 客户端，基于 Capacitor + @jsonstudio/wtermmod-react。
 ## 快速开始
 
 ```bash
-# 可选：先在 ~/.wterm/config.json 配 daemon 鉴权
+# 可选：先在 ~/.zterm/config.json 配 daemon 鉴权
 pnpm --filter @zterm/android deps:ensure
 pnpm --filter @zterm/android deps:check-wterm-published
 pnpm --filter @zterm/android dev
@@ -50,7 +50,7 @@ pnpm run deps:check-wterm-published
 
 ### daemon 鉴权真源
 
-本地 daemon 默认从 `~/.wterm/config.json` 读取 host / port / auth token：
+本地 daemon 默认从 `~/.zterm/config.json` 读取 host / port / auth token：
 
 ```json
 {
@@ -69,11 +69,11 @@ pnpm run deps:check-wterm-published
 
 客户端会按服务器维度记住 `host + port + authToken`，下次在 session picker / connection form 里自动回填。
 
-运行时文件也统一收敛到 `~/.wterm/`：
+运行时文件也统一收敛到 `~/.zterm/`：
 
-- `~/.wterm/config.json`
-- `~/.wterm/logs/`
-- `~/.wterm/uploads/`
+- `~/.zterm/config.json`
+- `~/.zterm/logs/`
+- `~/.zterm/uploads/`
 
 ### 安装 macOS daemon
 
@@ -123,7 +123,7 @@ pnpm run release:github -- v0.1.1.<build>
 - `release-dist/latest.json`
 - `release-dist/zterm-daemon-<base-version>-darwin-arm64.tar.gz`
 - `release-dist/jsonstudio-zterm-daemon-<base-version>.tgz`
-- `~/.wterm/updates/latest.json` 与 APK，用于 daemon update channel
+- `~/.zterm/updates/latest.json` 与 APK，用于 daemon update channel
 
 ## 当前终端增强能力
 

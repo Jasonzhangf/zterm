@@ -8,7 +8,7 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 BIN_DIR="${HOME}/.local/bin"
-WTERM_HOME="${HOME}/.wterm"
+WTERM_HOME="${HOME}/.zterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 CLI_RUNNER="${WTERM_BIN_DIR}/wterm-daemon-cli"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"

@@ -21,7 +21,7 @@ function createTempHome() {
 
 function writeConfig(homeDir: string, body: unknown) {
   const configPath = getWtermConfigPath(homeDir);
-  mkdirSync(join(homeDir, '.wterm'), { recursive: true });
+  mkdirSync(join(homeDir, '.zterm'), { recursive: true });
   writeFileSync(configPath, JSON.stringify(body, null, 2));
   return configPath;
 }
@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe('daemon config', () => {
-  it('reads auth token and port from ~/.wterm/config.json', () => {
+  it('reads auth token and port from ~/.zterm/config.json', () => {
     const homeDir = createTempHome();
     writeConfig(homeDir, {
       zterm: {
@@ -60,7 +60,7 @@ describe('daemon config', () => {
     expect(config.configFound).toBe(true);
   });
 
-  it('lets env override ~/.wterm/config.json', () => {
+  it('lets env override ~/.zterm/config.json', () => {
     const homeDir = createTempHome();
     writeConfig(homeDir, {
       zterm: {
@@ -125,7 +125,7 @@ describe('daemon config', () => {
     expect(config.daemonHostId).toBe('daemon-host');
   });
 
-  it('uses defaults when ~/.wterm/config.json is absent', () => {
+  it('uses defaults when ~/.zterm/config.json is absent', () => {
     const homeDir = createTempHome();
     const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
 
@@ -147,7 +147,7 @@ describe('daemon config', () => {
 
     expect(daemonHostId1).toBe(daemonHostId2);
     expect(config.daemonHostId).toBe(daemonHostId1);
-    expect(getWtermDaemonIdPath(homeDir)).toContain('.wterm/daemon-id');
+    expect(getWtermDaemonIdPath(homeDir)).toContain('.zterm/daemon-id');
   });
 
   it('prefers relay hostId over local daemon-id when relay is configured', () => {

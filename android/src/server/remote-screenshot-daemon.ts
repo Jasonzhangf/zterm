@@ -12,7 +12,7 @@ export async function captureRemoteScreenshotWithDaemon(
 ): Promise<{ outputPath: string }> {
   return await new Promise<{ outputPath: string }>((resolve, reject) => {
     const daemonBinary = (process.env.ZTERM_DAEMON_NATIVE || '').trim()
-      || join(homedir(), '.wterm', 'bin', 'zterm-daemon');
+      || join(homedir(), '.zterm', 'bin', 'zterm-daemon');
 
     execFile(daemonBinary, ['capture-screen', options.outputPath], {
       timeout: options.timeoutMs,

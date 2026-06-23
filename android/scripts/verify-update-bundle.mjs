@@ -7,7 +7,7 @@ const projectRoot = resolve(import.meta.dirname, '..');
 const updateDistDir = resolve(projectRoot, 'update-dist');
 const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
   ? resolve(process.env.WTERM_UPDATES_DIR)
-  : resolve(homedir(), '.wterm/updates');
+  : resolve(homedir(), '.zterm/updates');
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));

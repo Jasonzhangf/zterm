@@ -10,7 +10,7 @@ PY
 WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 NODE_BIN="$(command -v node)"
 LOG_DIR="${HOME}/.wterm/logs"
-WTERM_HOME="${HOME}/.wterm"
+WTERM_HOME="${HOME}/.zterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 RUNTIME_STATE_DIR="${WTERM_HOME}/run"
 UPLOAD_DIR="${WTERM_HOME}/uploads"
@@ -70,8 +70,8 @@ Usage:
 Behavior:
   - `run` keeps daemon in foreground (for launchd autostart)
   - start/stop/restart manage launchd service if installed, otherwise use a direct background daemon process
-  - host / port / auth token are read from ~/.wterm/config.json
-  - relay account config is written to ~/.wterm/config.json by configure-relay
+  - host / port / auth token are read from ~/.zterm/config.json
+  - relay account config is written to ~/.zterm/config.json by configure-relay
   - env still overrides config when explicitly provided
 EOF
 }
@@ -679,7 +679,7 @@ const { join } = require('node:path');
 const { homedir } = require('node:os');
 
 const dirs = [
-  join(homedir(), '.wterm'),
+  join(homedir(), '.zterm'),
   join(homedir(), 'Downloads', 'zterm'),
 ];
 
@@ -691,7 +691,7 @@ for (const dir of dirs) {
   unlinkSync(probe);
 }
 
-const screenshotProbe = join(homedir(), '.wterm', '.zterm-screenshot-permission-preflight.png');
+const screenshotProbe = join(homedir(), '.zterm', '.zterm-screenshot-permission-preflight.png');
 try {
   execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['capture-screen', screenshotProbe], {
     stdio: 'pipe',

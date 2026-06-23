@@ -43,8 +43,8 @@ describe('zterm daemon service script truth gates', () => {
   it('writes relay config from the global command while preserving daemon config', () => {
     const tempHome = mkdtempSync(join(tmpdir(), 'zterm-daemon-relay-config-'));
     try {
-      const configPath = join(tempHome, '.wterm', 'config.json');
-      mkdirSync(join(tempHome, '.wterm'), { recursive: true });
+      const configPath = join(tempHome, '.zterm', 'config.json');
+      mkdirSync(join(tempHome, '.zterm'), { recursive: true });
       writeFileSync(
         configPath,
         JSON.stringify(
@@ -175,7 +175,7 @@ describe('zterm daemon service script truth gates', () => {
     expect(installBody).toContain('prime_daemon_install_permissions');
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
     expect(preflightBody).toContain('Downloads');
-    expect(preflightBody).toContain('.wterm');
+    expect(preflightBody).toContain('.zterm');
     expect(preflightBody).toContain('.zterm-permission-preflight');
   });
 

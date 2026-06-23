@@ -131,8 +131,8 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 NODE_BIN="$(command -v node)"
-LOG_DIR="${HOME}/.wterm/logs"
-WTERM_HOME="${HOME}/.wterm"
+LOG_DIR="${HOME}/.zterm/logs"
+WTERM_HOME="${HOME}/.zterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 RUNTIME_STATE_DIR="${WTERM_HOME}/run"
 UPLOAD_DIR="${WTERM_HOME}/uploads"
@@ -160,7 +160,7 @@ const path = require('path');
 const DEFAULT_BRIDGE_PORT = 3333;
 const DEFAULT_DAEMON_HOST = '0.0.0.0';
 const home = os.homedir();
-const configPath = path.join(home, '.wterm', 'config.json');
+const configPath = path.join(home, '.zterm', 'config.json');
 let config = {};
 let found = false;
 if (fs.existsSync(configPath)) {
@@ -685,7 +685,7 @@ const { join } = require('node:path');
 const { homedir } = require('node:os');
 
 const dirs = [
-  join(homedir(), '.wterm'),
+  join(homedir(), '.zterm'),
   join(homedir(), 'Downloads', 'zterm'),
 ];
 
@@ -697,7 +697,7 @@ for (const dir of dirs) {
   unlinkSync(probe);
 }
 
-const screenshotProbe = join(homedir(), '.wterm', '.zterm-screenshot-permission-preflight.png');
+const screenshotProbe = join(homedir(), '.zterm', '.zterm-screenshot-permission-preflight.png');
 try {
   execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['capture-screen', screenshotProbe], {
     stdio: 'pipe',
@@ -852,7 +852,7 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"
-INSTALL_ROOT="${HOME}/.wterm/releases/zterm-daemon/${VERSION}"
+INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"
 LOCAL_BIN="${HOME}/.local/bin"
 
 mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}"

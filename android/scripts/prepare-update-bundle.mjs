@@ -18,7 +18,7 @@ const outputDir = resolve(projectRoot, 'update-dist');
 const releaseDistDir = resolve(projectRoot, 'release-dist');
 const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
   ? resolve(process.env.WTERM_UPDATES_DIR)
-  : resolve(homedir(), '.wterm/updates');
+  : resolve(homedir(), '.zterm/updates');
 const latestAliasName = 'zterm-latest-debug.apk';
 
 function computeVersionCode(version, buildNumber) {

@@ -125,7 +125,7 @@ The relay password must come from a local secret manager, shell secret, or CI se
 
 The installer uses these locations:
 
-- runtime/config/logs: \`~/.wterm\`
+- runtime/config/logs: \`~/.zterm\`
 - CLI: npm global bin \`zterm-daemon\`
 - legacy alias: npm global bin \`wterm\`
 - launch agent: \`~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist\`
@@ -138,7 +138,7 @@ zterm-daemon start             # start launchd service
 zterm-daemon status            # direct runtime status
 zterm-daemon stop              # stop launchd service
 zterm-daemon restart           # restart launchd service
-zterm-daemon configure-relay   # write ~/.wterm/config.json mobile.relay from secret input
+zterm-daemon configure-relay   # write ~/.zterm/config.json mobile.relay from secret input
 zterm-daemon install-service   # install and start launchd service
 zterm-daemon uninstall-service # stop and remove launchd service
 zterm-daemon service-status    # launchd service status
@@ -148,7 +148,7 @@ zterm-daemon service-status    # launchd service status
 
 ## Configuration
 
-Optional config file: \`~/.wterm/config.json\`.
+Optional config file: \`~/.zterm/config.json\`.
 
 \`\`\`json
 {

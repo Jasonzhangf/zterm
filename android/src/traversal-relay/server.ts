@@ -87,7 +87,7 @@ function resolveStorePath() {
   if (configured) {
     return configured;
   }
-  const baseDir = asString(process.env.ZTERM_TRAVERSAL_DATA_DIR) || join(homedir(), '.wterm', 'traversal-relay');
+  const baseDir = asString(process.env.ZTERM_TRAVERSAL_DATA_DIR) || join(homedir(), '.zterm', 'traversal-relay');
   return join(baseDir, 'store.json');
 }
 

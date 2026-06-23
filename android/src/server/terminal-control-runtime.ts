@@ -61,7 +61,7 @@ export function createTerminalControlRuntime(
       detectedSocketDir = deps.tmuxSocketDir;
       return detectedSocketDir;
     }
-    return join(homedir(), '.wterm', 'tmux');
+    return join(homedir(), '.zterm', 'tmux');
   }
 
   function cleanEnv(): Record<string, string> {

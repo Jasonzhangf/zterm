@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
 import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
@@ -10,7 +10,8 @@ import {
 
 export const DEFAULT_DAEMON_TERMINAL_CACHE_LINES = 3000;
 
-export const WTERM_HOME_DIRNAME = '.wterm';
+export const WTERM_HOME_DIRNAME = '.zterm';
+export const LEGACY_WTERM_HOME_DIRNAME = '.wterm';
 export const WTERM_CONFIG_FILENAME = 'config.json';
 export const WTERM_UPDATES_DIRNAME = 'updates';
 export const WTERM_DAEMON_ID_FILENAME = 'daemon-id';
@@ -100,8 +101,26 @@ export function getWtermConfigPath(homeDir: string = homedir()) {
   return join(homeDir, WTERM_HOME_DIRNAME, WTERM_CONFIG_FILENAME);
 }
 
+/**
+ * If ~/.zterm doesn't exist but ~/.wterm does (legacy), rename it.
+ * This ensures existing config/data is preserved without manual migration.
+ */
+export function ensureZtermHomeDir(homeDir: string = homedir()) {
+  const ztermHome = join(homeDir, WTERM_HOME_DIRNAME);
+  if (existsSync(ztermHome)) {
+    return ztermHome;
+  }
+  const legacyHome = join(homeDir, LEGACY_WTERM_HOME_DIRNAME);
+  if (existsSync(legacyHome)) {
+    renameSync(legacyHome, ztermHome);
+    return ztermHome;
+  }
+  mkdirSync(ztermHome, { recursive: true });
+  return ztermHome;
+}
+
 export function getWtermHomeDir(homeDir: string = homedir()) {
-  return join(homeDir, WTERM_HOME_DIRNAME);
+  return ensureZtermHomeDir(homeDir);
 }
 
 export function getWtermUpdatesDir(homeDir: string = homedir()) {
