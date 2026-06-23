@@ -276,7 +276,27 @@ ws.on("message", (msg: Buffer | string) => {
 
 ### 本轮处理
 - 移除 `MainActivity` 对整个 `WebView` 的全局 long-click consume，改回只保留滚动条 / overscroll 配置。
-- copy-mode 的“禁系统菜单”继续留在 DOM/React 层做，不在 native WebView 边界全局吞事件。
+- copy-mode 的"禁系统菜单"继续留在 DOM/React 层做，不在 native WebView 边界全局吞事件。
+
+## 2026-06-23 copy 现场复核二：震动但无菜单
+
+### 现象
+- 1882 版本：启用 copy mode 后长按有震动，但菜单不弹出。
+
+### 根因
+- `setOnLongClickListener(v -> true)` 虽然禁了系统菜单，但 Android WebView 仍触发原生长按 haptic + touch 拦截，JS 的 `onTouchStart` 收不到完整 touch 序列，420ms timer 无法正常 fire。
+
+### 修复
+- `MainActivity.java`: 改为 `wv.setLongClickable(false)`。
+  - 不再触发原生长按 haptic / 选择手柄。
+  - touch 事件完整传给 DOM，JS copy-mode `startCopyLongPressTouch` 可以正常启动 420ms timer → `onLongPressRow` → 菜单弹出。
+
+### 验证
+- `cd android && npx tsc --noEmit` PASS
+- `cd android && pnpm run test:terminal:contracts` PASS (566/566)
+- `./scripts/build-android-debug.sh` PASS
+- APK: `zterm-0.1.3.1885` (versionCode `1031885`)
+- 缺口：Jason 现场复测长按菜单是否弹出；真机震动应消失。
   - `sendBufferHeadToSession()` 改为：某 revision 第一次 head probe 先 `broadcastBufferHeadToSubscribers(mirror)`，同 revision 后续 probe 只回 requester，不再重复 fanout。
   - `broadcastBufferHeadToSubscribers()` 广播时写入 revision cache，后续 cursor/body 更新后的广播仍会刷新该 cache。
 - 红测：
