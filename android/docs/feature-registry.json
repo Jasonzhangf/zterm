@@ -637,6 +637,28 @@
         "docs/wiki/mainline-source.md",
         "docs/function-map.md"
       ]
+    },
+    {
+      "feature_id": "terminal.session_drawer",
+      "title": "Session drawer (left reveal, host rail, multi-host grouping, opened-first ordering)",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/components/terminal/TerminalSessionDrawer.tsx"
+      ],
+      "allowed_paths": [
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/"
+      ],
+      "required_gates": [
+        "src/components/terminal/TerminalSessionDrawer.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/function-map.md",
+        "docs/ui-slices.md"
+      ]
     }
   ]
 }
