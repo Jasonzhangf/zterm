@@ -27,10 +27,9 @@ public class MainActivity extends BridgeActivity {
             wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             wv.setVerticalScrollBarEnabled(false);
             wv.setHorizontalScrollBarEnabled(false);
-            // 完全禁用 WebView 原生长按菜单（系统上下文菜单 + 选择手柄）
-            // JS 层通过 copy-mode 接管所有长按逻辑
-            wv.setOnLongClickListener(v -> true);
-            wv.setLongClickable(true);
+            // Do not consume long-press at the native WebView boundary.
+            // Copy-mode blocks native selection/menu inside the DOM so app-owned
+            // row long-press can still reach React handlers on real devices.
         }
     }
 

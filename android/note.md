@@ -258,6 +258,25 @@ ws.on("message", (msg: Buffer | string) => {
 - 现状核验：`terminal-message-runtime.ts` 的 `buffer-head-request` 仍经 `sendBufferHeadToSession(session, mirror)` 路由，但过去 `terminal-mirror-runtime.ts::sendBufferHeadToSession()` 是单 session 私有回包路径，8 个订阅者同时探头时会重复走 head fanout。
 - 本轮修复：`android/src/server/terminal-mirror-runtime.ts`
   - 新增 mirror 级 `WeakMap<SessionMirror, { revision }>` head broadcast cache。
+
+## 2026-06-23 copy 现场复核
+
+### 现象
+- Jason 现场反馈：复制功能在真机上仍不可用。
+
+### 当前确认
+- JS copy-mode 链路仍在：
+  - `TerminalView.tsx` 在 `copyModeActive` 下仍注册 row 级 `onTouchStart/onPointerDown` 长按计时，420ms 后调用 `onLongPressRow(...)`。
+  - `useTerminalPageCopyRuntime.ts` 仍会把选区文本写入 `DeviceClipboardPlugin` / `navigator.clipboard`。
+- 现有 jsdom 红测全绿，但这些测试不覆盖 Android 原生 `WebView` 的长按边界。
+
+### 新怀疑根因
+- `android/native/android/app/src/main/java/com/zterm/android/MainActivity.java` 之前对整个 `WebView` 设置了 `setOnLongClickListener(v -> true)`。
+- 这会在原生边界吞掉真实设备上的长按，导致系统菜单被禁用的同时，DOM copy-mode 长按也可能收不到。
+
+### 本轮处理
+- 移除 `MainActivity` 对整个 `WebView` 的全局 long-click consume，改回只保留滚动条 / overscroll 配置。
+- copy-mode 的“禁系统菜单”继续留在 DOM/React 层做，不在 native WebView 边界全局吞事件。
   - `sendBufferHeadToSession()` 改为：某 revision 第一次 head probe 先 `broadcastBufferHeadToSubscribers(mirror)`，同 revision 后续 probe 只回 requester，不再重复 fanout。
   - `broadcastBufferHeadToSubscribers()` 广播时写入 revision cache，后续 cursor/body 更新后的广播仍会刷新该 cache。
 - 红测：
