@@ -78,7 +78,7 @@ describe('android apk smoke device bridge target parser', () => {
       'zterm:open-tabs7R',
       '[{"sessionId":',
       'd-1778544465921-yq0l9dr6","N*',
-      '1b74bfc3-0e73-4b34-a4fb-bdd312dcf0bf","connectionName":"100.66.1.82  rcc-routecodex","bridgeHost":"100.66.1.82","bridgePort":3333,"daemonHostId":"daemon-Macstudio.l!<-128564413166185',
+      '1b74bfc3-0e73-4b34-a4fb-bdd312dcf0bf","connectionName":"100.66.1.82  demo-route-shell","bridgeHost":"100.66.1.82","bridgePort":3333,"daemonHostId":"daemon-Macstudio.l!<-128564413166185',
       's',
       'r>',
       '0authToken":"w!9-412345!lautoCommand":"","createdAt":!6,493887470},{h%1',
@@ -103,7 +103,7 @@ describe('android apk smoke device bridge target parser', () => {
       'zterm:open-tabs7R',
       '[{"sessionId":',
       'd-1778544465921-yq0l9dr6","N*',
-      '1b74bfc3-0e73-4b34-a4fb-bdd312dcf0bf","connectionName":"100.66.1.82  rcc-routecodex","bridgeHost":"100.66.1.82","bridgePort":3333,"daemonHostId":"daemon-Macstudio.local-128564413166185f",',
+      '1b74bfc3-0e73-4b34-a4fb-bdd312dcf0bf","connectionName":"100.66.1.82  demo-route-shell","bridgeHost":"100.66.1.82","bridgePort":3333,"daemonHostId":"daemon-Macstudio.local-128564413166185f",',
       '0authToken":"w!9-412345!lautoCommand":"","createdAt":1778544465921',
     ].join('\n'));
 

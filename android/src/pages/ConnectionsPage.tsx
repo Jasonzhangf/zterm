@@ -392,6 +392,7 @@ export function ConnectionsPage({
               const hasExplicitSelection = Object.prototype.hasOwnProperty.call(selectedSessionsByGroup, group.id);
               const isOpen = group.liveSessions.length > 0;
               const isFullyOpen = group.liveSessions.length === group.sessions.length;
+              const missingSessions = group.sessions.filter((entry) => entry.missingFromRemoteTruth);
               const actionSessionNames = (hasExplicitSelection ? selectedSessions : group.defaultSessionNames)
                 .filter((sessionName) => group.openableSessions.includes(sessionName));
               const canOpenGroup = actionSessionNames.length > 0;
@@ -450,7 +451,9 @@ export function ConnectionsPage({
                     >
                       {group.sessions.map((entry) => {
                         const checked = selectedSessions.includes(entry.sessionName);
-                        const statusLabel = entry.liveSession
+                        const statusLabel = entry.missingFromRemoteTruth
+                          ? 'Missing on daemon'
+                          : entry.liveSession
                           ? `Open · ${entry.liveSession.state}`
                           : entry.source === 'saved'
                             ? 'Saved in this server'
@@ -464,8 +467,8 @@ export function ConnectionsPage({
                               width: '100%',
                               borderRadius: '14px',
                               padding: '12px 14px',
-                              backgroundColor: entry.liveSession ? tone.accentSoft : '#f6f8fb',
-                              color: mobileTheme.colors.lightText,
+                              backgroundColor: entry.missingFromRemoteTruth ? '#eef1f5' : entry.liveSession ? tone.accentSoft : '#f6f8fb',
+                              color: entry.missingFromRemoteTruth ? mobileTheme.colors.lightMuted : mobileTheme.colors.lightText,
                               textAlign: 'left',
                               display: 'flex',
                               alignItems: 'center',
@@ -478,6 +481,7 @@ export function ConnectionsPage({
                               <input
                                 type="checkbox"
                                 checked={checked}
+                                disabled={entry.missingFromRemoteTruth}
                                 onChange={() => toggleGroupSessionSelection(group, entry.sessionName)}
                                 onClick={(event) => event.stopPropagation()}
                                 style={{ width: '16px', height: '16px', accentColor: mobileTheme.colors.accent, flexShrink: 0 }}
@@ -485,7 +489,7 @@ export function ConnectionsPage({
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
                                 <div style={{ fontWeight: 800 }}>{entry.sessionName}</div>
                                 {entry.host && entry.host.name !== entry.sessionName && (
-                                  <div style={{ fontSize: '12px', color: mobileTheme.colors.lightText, opacity: 0.75 }}>{entry.host.name}</div>
+                                  <div style={{ fontSize: '12px', color: entry.missingFromRemoteTruth ? mobileTheme.colors.lightMuted : mobileTheme.colors.lightText, opacity: 0.75 }}>{entry.host.name}</div>
                                 )}
                                 <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
                                   {statusLabel}
@@ -495,6 +499,7 @@ export function ConnectionsPage({
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
                               {(entry.liveSession || entry.source === 'saved') && (
                                 <button
+                                  disabled={entry.missingFromRemoteTruth}
                                   onClick={(event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
@@ -513,7 +518,8 @@ export function ConnectionsPage({
                                     fontSize: '11px',
                                     fontWeight: 700,
                                     flexShrink: 0,
-                                    cursor: 'pointer',
+                                    cursor: entry.missingFromRemoteTruth ? 'not-allowed' : 'pointer',
+                                    opacity: entry.missingFromRemoteTruth ? 0.45 : 1,
                                   }}
                                 >
                                   {entry.liveSession ? 'Enter' : 'Open'}
@@ -632,6 +638,40 @@ export function ConnectionsPage({
                         >
                           Manage
                         </button>
+                        {missingSessions.length > 0 && (
+                          <button
+                            onClick={() => {
+                              const remainingSessionNames = group.sessions
+                                .filter((entry) => !entry.missingFromRemoteTruth)
+                                .map((entry) => entry.sessionName);
+                              if (remainingSessionNames.length === 0) {
+                                setSelectedSessionsByGroup((current) => ({
+                                  ...current,
+                                  [group.id]: [],
+                                }));
+                                setExpandedGroupIds((current) => current.filter((item) => item !== group.id));
+                                onDeleteServerGroup(group);
+                                return;
+                              }
+                              onSaveServerGroupSelection(group, remainingSessionNames);
+                              setSelectedSessionsByGroup((current) => ({
+                                ...current,
+                                [group.id]: (current[group.id] || []).filter((sessionName) => remainingSessionNames.includes(sessionName)),
+                              }));
+                            }}
+                            style={{
+                              border: 'none',
+                              background: '#eef1f5',
+                              color: mobileTheme.colors.lightMuted,
+                              borderRadius: '12px',
+                              padding: '10px 12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Close missing
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setSelectedSessionsByGroup((current) => ({

@@ -536,7 +536,7 @@ body {
 
   <!-- Quick switch dots (bottom, visible when sheet hidden) -->
   <div class="quick-switch-bar" id="quickBar">
-    <div class="quick-dot pane1 active" data-session="s1" title="rcc (P1)"></div>
+    <div class="quick-dot pane1 active" data-session="s1" title="demo (P1)"></div>
     <div class="quick-dot pane1" data-session="s2" title="android-dev (P1)"></div>
     <div class="quick-dot pane2" data-session="s3" title="server-prod (P2)"></div>
   </div>
@@ -575,7 +575,7 @@ body {
         <div class="session-card active pane-1" data-session="s1">
           <div class="pane-badge">P1</div>
           <div>
-            <div class="session-name">rcc</div>
+            <div class="session-name">demo</div>
             <div class="session-host">100.127.23.27</div>
           </div>
           <div class="session-status">

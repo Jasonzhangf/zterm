@@ -71,6 +71,7 @@ function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHi
     daemonHostId: overrides.daemonHostId,
     authToken: overrides.authToken || 'token-a',
     sessionNames: overrides.sessionNames || ['main', 'logs'],
+    missingSessionNames: overrides.missingSessionNames || [],
     lastOpenedAt: overrides.lastOpenedAt || 30,
   };
 }
@@ -215,7 +216,7 @@ describe('ConnectionsPage', () => {
       <ConnectionsPage
         relayDevices={[makeRelayDevice()]}
         hosts={[makeHost({ daemonHostId: 'mac-studio', sessionName: 'main' })]}
-        sessions={[makeSession({ id: 'live-rcc', daemonHostId: 'daemon-Macstudio.local-128564413166185f', sessionName: 'rcc' })]}
+        sessions={[makeSession({ id: 'live-demo', daemonHostId: 'daemon-Macstudio.local-128564413166185f', sessionName: 'demo' })]}
         sessionGroups={[makeGroup({ daemonHostId: 'mac-studio', sessionNames: ['main'] })]}
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
@@ -235,7 +236,45 @@ describe('ConnectionsPage', () => {
     expect(screen.queryByText(/daemon-Macstudio\.local/)).toBeNull();
     fireEvent.click(screen.getByLabelText('Expand mac-studio sessions'));
     expect(screen.getByText('main')).toBeTruthy();
-    expect(screen.getByText('rcc')).toBeTruthy();
+    expect(screen.getByText('demo')).toBeTruthy();
+  });
+
+  it('greys missing sessions and can close them in one click', () => {
+    const onSaveServerGroupSelection = vi.fn();
+    const onDeleteServerGroup = vi.fn();
+    render(
+      <ConnectionsPage
+        hosts={[makeHost({ daemonHostId: 'daemon-host-1', sessionName: 'main' })]}
+        sessions={[]}
+        sessionGroups={[makeGroup({
+          daemonHostId: 'daemon-host-1',
+          sessionNames: ['main', 'ghost'],
+          missingSessionNames: ['ghost'],
+        })]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={onSaveServerGroupSelection}
+        onDeleteServerGroup={onDeleteServerGroup}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Expand daemon-host-1 sessions'));
+    expect(screen.getByText('ghost')).toBeTruthy();
+    expect(screen.getByText('Close missing')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Close missing'));
+    expect(onSaveServerGroupSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-host-1' }),
+      ['main'],
+    );
+    expect(onDeleteServerGroup).not.toHaveBeenCalled();
   });
 
   it('exits group management after clearing selection and exposes vault placeholder feedback', () => {

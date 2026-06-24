@@ -360,7 +360,7 @@ ws.on("message", (msg: Buffer | string) => {
 - 用户需手动迁移旧 sessions 到新路径，或等待旧 tmux server 自然消亡
 
 ### 修正：tmux socket 策略
-- **第一版错误**：强制设 `TMUX_TMPDIR=~/.wterm/tmux/` → daemon 重启后创建了新 server 在新路径，看不到用户已有 sessions（freehand, routecodex）
+- **第一版错误**：强制设 `TMUX_TMPDIR=~/.wterm/tmux/` → daemon 重启后创建了新 server 在新路径，看不到用户已有 sessions（demo-shell, routecodex）
 - **正确方案**：`ensureTmuxServerRunning()` 先检测已有 tmux server（不设 TMUX_TMPDIR）
   - 有 server → 复用，不设 TMUX_TMPDIR
   - 无 server → 创建标准化路径 ~/.wterm/tmux/，设 TMUX_TMPDIR
@@ -391,15 +391,15 @@ ws.on("message", (msg: Buffer | string) => {
 
 ### 现象
 - 系统重启后 daemon 自动启动（launchd），但客户端 ws list-sessions 返回 []
-- daemon stderr: `failed to release tmux window-size ownership for rcc: no server running on /Users/fanzhang/.zterm/tmux/tmux-501/default`
-- 用户手动 `tmux list-sessions` 仍能看到 `rcc`
+- daemon stderr: `failed to release tmux window-size ownership for demo: no server running on /Users/fanzhang/.zterm/tmux/tmux-501/default`
+- 用户手动 `tmux list-sessions` 仍能看到 `demo`
 
 ### 根因链路
-1. 用户登录后手动启 `tmux` → server 挂在 `/tmp/tmux-501/default`，session `rcc`
+1. 用户登录后手动启 `tmux` → server 挂在 `/tmp/tmux-501/default`，session `demo`
 2. launchd 重启后先于用户登录启动 daemon → 此时 `/tmp/` 下还没有 user tmux server
 3. 旧 `ensureTmuxServerRunning()` 看到默认 socket 没 server → 走 `detectTmuxSocketDir()` → `~/.zterm/tmux` → `mkdir` → `TMUX_TMPDIR=~/.zterm/tmux` → `start-server`
 4. tmux 3.6a 的 `start-server` 是"启动 server 但立刻退出 client"的命令。**没有 live session 时 server 也会跟着退出**。
-5. 用户登录后手动 tmux 启了 `rcc` → 出现在 `/tmp/tmux-501/default` socket
+5. 用户登录后手动 tmux 启了 `demo` → 出现在 `/tmp/tmux-501/default` socket
 6. daemon 用 `TMUX_TMPDIR=~/.zterm/tmux` 找自己的 socket → 找不到 server（因为 start-server 后 server 进程被 abort 了）→ 每次都报 "no server running"
 7. 用户和 daemon 用的是两个 socket，互相看不见
 
@@ -413,7 +413,7 @@ ws.on("message", (msg: Buffer | string) => {
 
 ### 验证
 - daemon 启动后 `tmux list-sessions -S ~/.zterm/tmux/tmux.sock` → 返回 keepalive
-- 客户端 ws list-sessions → 过滤后空（user session `rcc` 在另一个 socket，不在 daemon 控制内；用户需要通过 daemon 客户端新建 tab 才会出现在 daemon socket）
+- 客户端 ws list-sessions → 过滤后空（user session `demo` 在另一个 socket，不在 daemon 控制内；用户需要通过 daemon 客户端新建 tab 才会出现在 daemon socket）
 
 ### 待办
-- 用户手动启的 `rcc` 不会被 daemon 看到。这是有意为之（daemon 不能接管 user-managed tmux server，否则会和用户 shell 抢 PTY）。文档需说明：用户应在 daemon 控制下打开 session，或用 `zterm attach <name>` 把 user session 迁移到 daemon socket
+- 用户手动启的 `demo` 不会被 daemon 看到。这是有意为之（daemon 不能接管 user-managed tmux server，否则会和用户 shell 抢 PTY）。文档需说明：用户应在 daemon 控制下打开 session，或用 `zterm attach <name>` 把 user session 迁移到 daemon socket

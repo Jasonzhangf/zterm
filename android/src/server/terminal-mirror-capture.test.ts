@@ -80,8 +80,8 @@ describe('terminal mirror capture runtime', () => {
       logTimePrefix: () => '2026-05-12 23:55:00',
     });
 
-    expect(() => runtime.readTmuxPaneMetrics('rcc-zterm')).toThrow(
-      'tmux returned invalid pane metrics for rcc-zterm: pane is dead',
+    expect(() => runtime.readTmuxPaneMetrics('demo-zterm')).toThrow(
+      'tmux returned invalid pane metrics for demo-zterm: pane is dead',
     );
   });
 

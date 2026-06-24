@@ -353,12 +353,12 @@ describe('open-tab intent truth', () => {
 
   it('materializes explicit open tabs from persisted truth when runtime transport disappeared', () => {
     const sessions = materializeOpenTabRuntimeSessions([
-      makeTab('rcc-tab', {
+      makeTab('demo-tab', {
         connectionName: 'Mac',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
-        sessionName: 'rcc',
-        customName: 'rcc',
+        sessionName: 'demo',
+        customName: 'demo',
       }),
       makeTab('zterm-tab', {
         sessionName: 'zterm',
@@ -367,13 +367,13 @@ describe('open-tab intent truth', () => {
       makeSession('zterm-tab', { state: 'connected', sessionName: 'zterm' }),
     ]);
 
-    expect(sessions.map((session) => session.id)).toEqual(['rcc-tab', 'zterm-tab']);
+    expect(sessions.map((session) => session.id)).toEqual(['demo-tab', 'zterm-tab']);
     expect(sessions[0]).toEqual(expect.objectContaining({
-      id: 'rcc-tab',
+      id: 'demo-tab',
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
-      sessionName: 'rcc',
-      title: 'rcc',
+      sessionName: 'demo',
+      title: 'demo',
       state: 'closed',
       ws: null,
     }));

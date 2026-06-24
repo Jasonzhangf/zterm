@@ -26,6 +26,9 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
+  const missingSessionNames = Array.isArray(candidate.missingSessionNames)
+    ? candidate.missingSessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+    : [];
 
   if (!bridgeHost || sessionNames.length === 0) {
     return null;
@@ -54,6 +57,7 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
       : undefined,
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     sessionNames: sortedSessionNames,
+    missingSessionNames: [...new Set(missingSessionNames)].filter((item) => sortedSessionNames.includes(item)).sort((a, b) => a.localeCompare(b)),
     lastOpenedAt:
       typeof candidate.lastOpenedAt === 'number' && Number.isFinite(candidate.lastOpenedAt)
         ? candidate.lastOpenedAt
@@ -150,17 +154,16 @@ export function useSessionHistoryStorage() {
         if (!sessionSemanticOwnersMatch(item, target)) {
           return [item];
         }
-        const nextSessionNames = item.sessionNames.filter((sessionName) => normalizedRemoteSessionNames.has(sessionName));
-        if (nextSessionNames.length === item.sessionNames.length) {
+        const nextMissingSessionNames = item.sessionNames.filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName));
+        const currentMissingKey = (item.missingSessionNames || []).join('\u0000');
+        const nextMissingKey = nextMissingSessionNames.join('\u0000');
+        if (currentMissingKey === nextMissingKey) {
           return [item];
         }
         changed = true;
-        if (nextSessionNames.length === 0) {
-          return [];
-        }
         return [{
           ...item,
-          sessionNames: nextSessionNames,
+          missingSessionNames: nextMissingSessionNames,
         }];
       });
       if (!changed) {

@@ -14,6 +14,7 @@ export interface ServerGroupSessionView {
   source: 'saved' | 'history' | 'live';
   lastOpenedAt: number;
   liveSession: Session | null;
+  missingFromRemoteTruth: boolean;
 }
 
 export interface ServerGroupView {
@@ -296,6 +297,7 @@ export function buildConnectionsServerGroups(options: {
         source: current?.source || (resolvedHost ? 'saved' : 'history'),
         lastOpenedAt: Math.max(current?.lastOpenedAt || 0, groupHistory.lastOpenedAt),
         liveSession: liveSessionMap.get(`${group.id}::${sessionName}`) || current?.liveSession || null,
+        missingFromRemoteTruth: (groupHistory.missingSessionNames || []).includes(sessionName),
       });
     }
   }
@@ -316,6 +318,7 @@ export function buildConnectionsServerGroups(options: {
       source: current?.source === 'saved' ? 'saved' : 'live',
       lastOpenedAt: Math.max(current?.lastOpenedAt || 0, liveSession.createdAt),
       liveSession,
+      missingFromRemoteTruth: false,
     });
     group.lastOpenedAt = Math.max(group.lastOpenedAt, liveSession.createdAt);
   }
@@ -343,6 +346,11 @@ export function buildConnectionsServerGroups(options: {
   return [...grouped.values()]
     .map((group) => {
       const groupSessions = [...group.sessionsByName.values()].sort((a, b) => {
+        const aMissing = a.missingFromRemoteTruth ? 1 : 0;
+        const bMissing = b.missingFromRemoteTruth ? 1 : 0;
+        if (aMissing !== bMissing) {
+          return aMissing - bMissing;
+        }
         const aSaved = a.source === 'saved' ? 1 : 0;
         const bSaved = b.source === 'saved' ? 1 : 0;
         if (aSaved !== bSaved) {
@@ -360,7 +368,7 @@ export function buildConnectionsServerGroups(options: {
         .filter((entry): entry is Session => entry !== null);
       const savedSessions = groupSessions.filter((entry) => entry.source === 'saved').map((entry) => entry.sessionName);
       const openableSessions = groupSessions
-        .filter((entry) => entry.liveSession || entry.source === 'saved')
+        .filter((entry) => !entry.missingFromRemoteTruth && (entry.liveSession || entry.source === 'saved'))
         .map((entry) => entry.sessionName);
 
       return {

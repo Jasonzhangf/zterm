@@ -125,7 +125,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     );
   });
 
-  it('prunes stored session names against remote tmux truth for the matching server only', () => {
+  it('marks missing stored session names against remote tmux truth for the matching server only', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
@@ -159,12 +159,16 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     });
 
     expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
-      expect.objectContaining({ daemonHostId: 'daemon-host-a', sessionNames: ['logs', 'main'] }),
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-a',
+        sessionNames: ['logs', 'main', 'stale'],
+        missingSessionNames: ['stale'],
+      }),
       expect.objectContaining({ daemonHostId: 'daemon-host-b', sessionNames: ['other'] }),
     ]));
   });
 
-  it('deletes a stored server group when remote tmux truth no longer contains any selected session', () => {
+  it('marks all stored session names missing when remote tmux truth no longer contains any selected session', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
@@ -189,7 +193,13 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
       );
     });
 
-    expect(result.current.sessionGroups).toEqual([]);
+    expect(result.current.sessionGroups).toEqual([
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-a',
+        sessionNames: ['stale'],
+        missingSessionNames: ['stale'],
+      }),
+    ]);
   });
 
   it('deletes a stored server group explicitly and persists the removal', () => {

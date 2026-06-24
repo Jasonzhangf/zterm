@@ -120,7 +120,7 @@ describe('useTerminalWorkspace explicit pane truth', () => {
   it('keeps persisted pane tabs when a runtime transport is closed but open-tab truth is still present', () => {
     localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
       panes: [
-        { id: 'pane-1', size: 0.5, activeTabId: 'tab-rcc-tab', tabs: [{ id: 'tab-rcc-tab', sessionId: 'rcc-tab' }] },
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-demo-tab', tabs: [{ id: 'tab-demo-tab', sessionId: 'demo-tab' }] },
         { id: 'pane-2', size: 0.5, activeTabId: 'tab-zterm-tab', tabs: [{ id: 'tab-zterm-tab', sessionId: 'zterm-tab' }] },
       ],
       activePaneId: 'pane-1',
@@ -128,30 +128,30 @@ describe('useTerminalWorkspace explicit pane truth', () => {
 
     const { result, rerender } = renderHook(({ sessions }) => useTerminalWorkspace({
       sessions,
-      activeSessionId: 'rcc-tab',
+      activeSessionId: 'demo-tab',
       viewportWidth: 1200,
       viewportHeight: 900,
       maxSplitCount: 4,
     }), {
       initialProps: {
         sessions: [
-          makeSession('rcc-tab'),
+          makeSession('demo-tab'),
           makeSession('zterm-tab'),
         ] as Session[],
       },
     });
 
-    expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['rcc-tab', 'zterm-tab']);
+    expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['demo-tab', 'zterm-tab']);
 
     rerender({
       sessions: [
-        { ...makeSession('rcc-tab'), state: 'closed' },
+        { ...makeSession('demo-tab'), state: 'closed' },
         makeSession('zterm-tab'),
       ],
     });
 
-    expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['rcc-tab', 'zterm-tab']);
-    expect(result.current.activePaneSessionId).toBe('rcc-tab');
+    expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['demo-tab', 'zterm-tab']);
+    expect(result.current.activePaneSessionId).toBe('demo-tab');
   });
 
   it('keeps split pane owner as the single truth instead of overriding it from runtime active session', () => {

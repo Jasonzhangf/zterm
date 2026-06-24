@@ -69,8 +69,8 @@ describe('tmux session picker rows', () => {
   it('uses daemonHostId as the owner match before bridge endpoint', () => {
     expect(tabMatchesTarget(
       {
-        id: 'tab-rcc',
-        sessionName: 'rcc',
+        id: 'tab-demo',
+        sessionName: 'demo',
         bridgeHost: '100.64.0.10',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',

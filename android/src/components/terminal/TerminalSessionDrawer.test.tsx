@@ -12,8 +12,8 @@ describe('TerminalSessionDrawer', () => {
   const sessions = [
     {
       id: 's1',
-      title: 'rcc',
-      subtitle: '100.127.23.27:3333 · rcc',
+      title: 'demo',
+      subtitle: '100.127.23.27:3333 · demo',
       status: 'connected' as const,
       paneLabel: 'P1',
       active: true,
@@ -78,13 +78,13 @@ describe('TerminalSessionDrawer', () => {
     const sessionsWithHosts = [
       {
         id: 's1',
-        title: 'rcc',
-        subtitle: '100.127.23.27:3333 · rcc',
+        title: 'demo',
+        subtitle: '100.127.23.27:3333 · demo',
         status: 'connected' as const,
         paneLabel: 'P1',
         active: true,
         hostKey: '100.127.23.27:3333',
-        hostLabel: 'rcc-machine',
+        hostLabel: 'demo-machine',
       },
       {
         id: 's2',
@@ -94,7 +94,7 @@ describe('TerminalSessionDrawer', () => {
         paneLabel: 'P2',
         active: false,
         hostKey: '100.127.23.27:3333',
-        hostLabel: 'rcc-machine',
+        hostLabel: 'demo-machine',
       },
       {
         id: 's3',
@@ -149,8 +149,8 @@ describe('TerminalSessionDrawer', () => {
     const singleHostSessions = [
       {
         id: 's1',
-        title: 'rcc',
-        subtitle: '100.127.23.27:3333 · rcc',
+        title: 'demo',
+        subtitle: '100.127.23.27:3333 · demo',
         status: 'connected' as const,
         paneLabel: 'P1',
         active: true,

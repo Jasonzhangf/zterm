@@ -444,6 +444,7 @@ export interface SessionGroupHistory {
   daemonHostId?: string;
   authToken?: string;
   sessionNames: string[];
+  missingSessionNames?: string[];
   lastOpenedAt: number;
 }
 

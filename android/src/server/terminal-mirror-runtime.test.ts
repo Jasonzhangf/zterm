@@ -248,7 +248,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => {
-        throw new Error('tmux returned invalid pane metrics for rcc-zterm: pane is dead');
+        throw new Error('tmux returned invalid pane metrics for demo-zterm: pane is dead');
       }),
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
@@ -265,14 +265,14 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     await customRuntime.attachTmux(session, {
-      sessionName: 'rcc-zterm',
+      sessionName: 'demo-zterm',
       cols: 56,
       rows: 56,
     });
 
-    const mirror = mirrors.get('rcc-zterm');
+    const mirror = mirrors.get('demo-zterm');
     expect(mirror?.lifecycle).toBe('failed');
-    expect(session.mirrorKey).toBe('rcc-zterm');
+    expect(session.mirrorKey).toBe('demo-zterm');
     expect(sendMessage).toHaveBeenCalledWith(
       session,
       expect.objectContaining({
@@ -709,8 +709,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     sessions.set(session.id, session);
 
     const mirror: SessionMirror = {
-      key: 'rcc-zterm',
-      sessionName: 'rcc-zterm',
+      key: 'demo-zterm',
+      sessionName: 'demo-zterm',
       scratchBridge: null,
       lifecycle: 'ready',
       cols: 56,
@@ -757,7 +757,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
         cursor: null,
       }),
       buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
-      sanitizeSessionName: (input?: string) => input?.trim() || 'rcc-zterm',
+      sanitizeSessionName: (input?: string) => input?.trim() || 'demo-zterm',
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -772,7 +772,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       assertTmuxSessionExists: vi.fn(),
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => {
-        throw new Error('tmux returned invalid pane metrics for rcc-zterm: pane is dead');
+        throw new Error('tmux returned invalid pane metrics for demo-zterm: pane is dead');
       }),
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
@@ -791,8 +791,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     const ok = await customRuntime.syncMirrorCanonicalBuffer(mirror);
 
     expect(ok).toBe(false);
-    expect(mirrors.get('rcc-zterm')).toBe(mirror);
-    expect(session.mirrorKey).toBe('rcc-zterm');
+    expect(mirrors.get('demo-zterm')).toBe(mirror);
+    expect(session.mirrorKey).toBe('demo-zterm');
     expect(sendMessage).not.toHaveBeenCalledWith(
       session,
       expect.objectContaining({

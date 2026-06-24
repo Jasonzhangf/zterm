@@ -427,7 +427,7 @@ silently returns 0 when viewport metrics are stable.
   - 有 server → 复用现有 socket 路径，不设 TMUX_TMPDIR
   - 无 server → 创建 `~/.wterm/tmux/` 标准化路径，设 TMUX_TMPDIR
 - `cleanEnv()` 根据 `detectedSocketDir` 决定是否设 `TMUX_TMPDIR`
-- 验证：tsc PASS，contracts 566 tests PASS，daemon restart 后返回真实 sessions (freehand, routecodex)
+- 验证：tsc PASS，contracts 566 tests PASS，daemon restart 后返回真实 sessions (demo-shell, routecodex)
 - **反模式**：不能强制设 TMUX_TMPDIR，否则 daemon 看不到用户已有 sessions
 ## 2026-06-24 copy-mode 真机长按修复 — Gate 已锁定
 

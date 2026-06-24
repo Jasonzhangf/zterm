@@ -65,6 +65,7 @@ function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHi
     daemonHostId: overrides.daemonHostId,
     authToken: overrides.authToken || 'token-a',
     sessionNames: overrides.sessionNames || ['main', 'logs'],
+    missingSessionNames: overrides.missingSessionNames || [],
     lastOpenedAt: overrides.lastOpenedAt || 30,
   };
 }
@@ -276,7 +277,7 @@ describe('buildConnectionsServerGroups', () => {
           bridgeHost: '100.64.0.10',
           bridgePort: 3333,
           daemonHostId: 'daemon-Macstudio.local-128564413166185f',
-          sessionName: 'rcc',
+          sessionName: 'demo',
         }),
       ],
       sessionGroups: [
@@ -295,7 +296,7 @@ describe('buildConnectionsServerGroups', () => {
       name: 'mac-studio',
       daemonHostId: 'mac-studio',
     });
-    expect(groups[0]?.sessions.map((entry) => entry.sessionName).sort()).toEqual(['main', 'rcc']);
+    expect(groups[0]?.sessions.map((entry) => entry.sessionName).sort()).toEqual(['demo', 'main']);
   });
 
   it('keeps recently disconnected account daemon devices visible before sessions are known', () => {
