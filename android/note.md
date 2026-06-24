@@ -487,3 +487,18 @@ ws.on("message", (msg: Buffer | string) => {
   - `size=5473918`
 - `curl http://127.0.0.1:3333/updates/latest.json` 返回 `1893`
 - `curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1893.apk` 返回 `HTTP/1.1 200 OK`
+
+### 追加测试设计修正（白盒 + 黑盒）
+- Jason 反馈：之前测试只验证“函数被调用”，不够，必须分白盒与黑盒
+- 白盒：
+  - `TerminalQuickBar.test.tsx`
+  - native + keyboard visible 下，`图片/文件` 点击后必须**在 `Keyboard.hide()` resolve 之前**同步触发隐藏 input 的 `click()`
+  - 这条门专门防 `setTimeout(...) -> input.click()` 这类脱离用户手势上下文的错误实现复活
+- 黑盒：
+  - `TerminalPage.real-quickbar-split.test.tsx`
+  - 通过真实 `TerminalPage -> TerminalQuickBar` 路径点击 `图片/文件`，再用用户侧 `change(file)` 验证 `onImagePaste/onFileAttach` 真正收到目标 session 和文件
+  - `ConnectionsPage.test.tsx`
+  - 通过卡片主体点击验证 missing-session group 不再盲目 open，而是进入 review 展开态并暴露 `Close missing`
+- 当前测试门结果：
+  - `TerminalQuickBar.test.tsx + TerminalPage.real-quickbar-split.test.tsx + ConnectionsPage.test.tsx` PASS（72/72）
+  - `pnpm run type-check` PASS

@@ -81,6 +81,16 @@ function stubVisualViewport(overrides?: Partial<VisualViewport>) {
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("TerminalQuickBar", () => {
   beforeEach(() => {
     cleanup();
@@ -673,9 +683,14 @@ describe("TerminalQuickBar", () => {
     expect(onFileAttach.mock.calls[0][1].name).toBe("archive.zip");
   });
 
-  it("keeps native image and file picker clicks in the same user gesture even when keyboard is visible", async () => {
+  it("keeps native image and file picker clicks synchronous before keyboard hide resolves", async () => {
     vi.useFakeTimers();
     vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+    const hideImage = createDeferred<void>();
+    const hideFile = createDeferred<void>();
+    vi.mocked(Keyboard.hide)
+      .mockImplementationOnce(() => hideImage.promise)
+      .mockImplementationOnce(() => hideFile.promise);
     const onImagePaste = vi.fn();
     const onFileAttach = vi.fn();
     renderQuickBar({
@@ -695,11 +710,17 @@ describe("TerminalQuickBar", () => {
     const fileInputClickSpy = vi.spyOn(fileInput!, "click");
 
     fireEvent.click(screen.getByRole("button", { name: "图片" }));
-    fireEvent.click(screen.getByRole("button", { name: "文件" }));
-
     expect(imageInputClickSpy).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(Keyboard.hide)).toHaveBeenCalledTimes(1);
+    expect(fileInputClickSpy).toHaveBeenCalledTimes(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "文件" }));
     expect(fileInputClickSpy).toHaveBeenCalledTimes(1);
     expect(vi.mocked(Keyboard.hide)).toHaveBeenCalledTimes(2);
+
+    hideImage.resolve();
+    hideFile.resolve();
+    await Promise.resolve();
   });
 
   it("opens image picker directly in landscape without transfer-entry side sheet", () => {

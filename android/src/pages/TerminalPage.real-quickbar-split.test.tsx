@@ -283,4 +283,60 @@ describe('TerminalPage real quickbar split integration', () => {
 
     expect(screen.queryByRole('button', { name: '2 分屏' })).toBeNull();
   });
+
+  it('routes image and file buttons through the real terminal page quickbar path', async () => {
+    setViewport(390, 844);
+    const sessions = [makeSession('s1')];
+    const onImagePaste = vi.fn();
+    const onFileAttach = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onImagePaste={onImagePaste}
+        onFileAttach={onFileAttach}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const inputs = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    );
+    const imageInput = inputs.find((input) => input.accept === 'image/*');
+    const fileInput = inputs.find((input) => input.accept !== 'image/*');
+    expect(imageInput).toBeTruthy();
+    expect(fileInput).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '图片' }));
+    fireEvent.change(imageInput!, {
+      target: {
+        files: [new File(['image'], 'proof.png', { type: 'image/png' })],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '文件' }));
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['archive'], 'archive.zip', { type: 'application/zip' })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(onImagePaste).toHaveBeenCalledWith('s1', expect.any(File));
+      expect(onFileAttach).toHaveBeenCalledWith('s1', expect.any(File));
+    });
+  });
 });
