@@ -7,14 +7,16 @@
       "title": "Terminal copy mode and selection lifecycle",
       "domain": "terminal-ui",
       "owners": [
-        "src/pages/useTerminalPageCopyRuntime.ts"
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java"
       ],
       "allowed_paths": [
         "src/pages/useTerminalPageCopyRuntime.ts",
         "src/pages/TerminalPage.tsx",
         "src/components/TerminalView.tsx",
         "src/components/terminal/VisibleRow.tsx",
-        "src/components/terminal/TerminalHeader.tsx"
+        "src/components/terminal/TerminalHeader.tsx",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java"
       ],
       "forbidden_paths": [
         "src/server/",
