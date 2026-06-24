@@ -707,24 +707,24 @@ function TerminalQuickBarComponent({
     }
   }, [remoteScreenshotStatus]);
 
-  const handleImagePickerButtonClick = useCallback(async () => {
+  const handleImagePickerButtonClick = useCallback(() => {
     const isNativePlatform = Capacitor.isNativePlatform();
     if (isNativePlatform && keyboardVisible) {
-      try { await Keyboard.hide(); } catch {}
-      window.setTimeout(() => { imageInputRef.current?.click(); }, 350);
-      return;
+      imageInputRef.current?.click();
+      void Keyboard.hide().catch(() => {});
+    } else {
+      imageInputRef.current?.click();
     }
-    imageInputRef.current?.click();
   }, [keyboardVisible]);
 
-  const handleFilePickerButtonClick = useCallback(async () => {
+  const handleFilePickerButtonClick = useCallback(() => {
     const isNativePlatform = Capacitor.isNativePlatform();
     if (isNativePlatform && keyboardVisible) {
-      try { await Keyboard.hide(); } catch {}
-      window.setTimeout(() => { fileInputRef.current?.click(); }, 350);
-      return;
+      fileInputRef.current?.click();
+      void Keyboard.hide().catch(() => {});
+    } else {
+      fileInputRef.current?.click();
     }
-    fileInputRef.current?.click();
   }, [keyboardVisible]);
 
 

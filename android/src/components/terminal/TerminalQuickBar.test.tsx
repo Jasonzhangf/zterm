@@ -10,8 +10,22 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard } from "@capacitor/keyboard";
 import { TerminalQuickBar } from "./TerminalQuickBar";
 import { resolveOverlayViewportMetrics } from "./terminal-quickbar-helpers";
+
+vi.mock("@capacitor/core", () => ({
+  Capacitor: {
+    isNativePlatform: vi.fn(() => false),
+  },
+}));
+
+vi.mock("@capacitor/keyboard", () => ({
+  Keyboard: {
+    hide: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 vi.mock("../../plugins/DeviceClipboardPlugin", () => ({
   DeviceClipboardPlugin: {
@@ -106,6 +120,7 @@ describe("TerminalQuickBar", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   function renderQuickBar(
@@ -656,6 +671,35 @@ describe("TerminalQuickBar", () => {
     expect(onImagePaste.mock.calls[0][1].name).toBe("photo.png");
     expect(onFileAttach).toHaveBeenCalledWith("session-1", expect.any(File));
     expect(onFileAttach.mock.calls[0][1].name).toBe("archive.zip");
+  });
+
+  it("keeps native image and file picker clicks in the same user gesture even when keyboard is visible", async () => {
+    vi.useFakeTimers();
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+    const onImagePaste = vi.fn();
+    const onFileAttach = vi.fn();
+    renderQuickBar({
+      keyboardVisible: true,
+      onImagePaste,
+      onFileAttach,
+    });
+
+    const inputs = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    );
+    const imageInput = inputs.find((input) => input.accept === "image/*");
+    const fileInput = inputs.find((input) => input.accept !== "image/*");
+    expect(imageInput).toBeTruthy();
+    expect(fileInput).toBeTruthy();
+    const imageInputClickSpy = vi.spyOn(imageInput!, "click");
+    const fileInputClickSpy = vi.spyOn(fileInput!, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "图片" }));
+    fireEvent.click(screen.getByRole("button", { name: "文件" }));
+
+    expect(imageInputClickSpy).toHaveBeenCalledTimes(1);
+    expect(fileInputClickSpy).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(Keyboard.hide)).toHaveBeenCalledTimes(2);
   });
 
   it("opens image picker directly in landscape without transfer-entry side sheet", () => {

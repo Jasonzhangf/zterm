@@ -448,3 +448,42 @@ ws.on("message", (msg: Buffer | string) => {
 - `scripts/verify-update-bundle.mjs` 返回 `ok: true`
 - `curl http://127.0.0.1:3333/updates/latest.json` 返回 `1892` manifest
 - `curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1892.apk` 返回 `HTTP/1.1 200 OK`
+
+## 2026-06-24 image/file picker regression + missing-session visibility
+
+### 现象
+- `1892`：QuickBar 点“图片/文件”后真机无任何 picker 弹出
+- 缺失 session 的灰色状态和 `Close missing` 虽然代码在，但埋在 group 展开层，卡片主体默认直接 open，用户难以进入缺失态处理路径
+
+### 根因
+- `TerminalQuickBar.tsx` 在 Android native + keyboard visible 路径走了 `Keyboard.hide() -> setTimeout(350) -> input.click()`
+- 这个延迟 click 已脱离用户手势上下文，Android WebView 会吞掉 file/image picker
+- `ConnectionsPage.tsx` 对 missing session group 的 card body 仍绑定“直接 open”，不是“先进入缺失态 review”
+
+### 修复
+- 图片/文件 picker 改为：同一点击栈内立即 `input.click()`，键盘只异步 `Keyboard.hide()`，不再 `setTimeout(350)`
+- missing session group card：
+  - preview / accent 直接显示 `N missing`
+  - card 主体点击优先展开 group，让灰色 session 和 `Close missing` 直接可见
+  - action button 仍保留 `Open/Enter` 语义
+
+### 验证
+- `pnpm exec vitest run src/components/terminal/TerminalQuickBar.test.tsx src/pages/ConnectionsPage.test.tsx` PASS（68/68）
+- 新增门禁：
+  - native + keyboard visible 时，图片/文件按钮点击后必须立刻触发隐藏 file input 的 click，不允许依赖延时 timer
+  - missing-session group card 必须在卡片级暴露 `1 missing`，点击卡片主体进入展开 review，而不是盲目 open
+- `./scripts/build-android-debug.sh` PASS
+- `pnpm run test:terminal:contracts` PASS（566/566）
+- `pnpm run test:common-user-flows` PASS（86/86）
+- `pnpm run test:relay:smoke` PASS
+- 新 APK：
+  - `android/update-dist/zterm-0.1.3.1893.apk`
+  - `android/release-dist/zterm-0.1.3.1893.apk`
+  - `~/.zterm/updates/zterm-0.1.3.1893.apk`
+- 三处 manifest 一致：
+  - `versionName=0.1.3.1893`
+  - `versionCode=1031893`
+  - `sha256=1bdcd1c434acd9400496aa4036090be89bc403008ee709dff6b1d3b5eabc84ca`
+  - `size=5473918`
+- `curl http://127.0.0.1:3333/updates/latest.json` 返回 `1893`
+- `curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1893.apk` 返回 `HTTP/1.1 200 OK`

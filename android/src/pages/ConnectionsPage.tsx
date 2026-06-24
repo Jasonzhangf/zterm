@@ -396,6 +396,10 @@ export function ConnectionsPage({
               const actionSessionNames = (hasExplicitSelection ? selectedSessions : group.defaultSessionNames)
                 .filter((sessionName) => group.openableSessions.includes(sessionName));
               const canOpenGroup = actionSessionNames.length > 0;
+              const missingSessionCount = missingSessions.length;
+              const missingSessionLabel = missingSessionCount > 0
+                ? `${missingSessionCount} missing`
+                : null;
               const tone = getServerColorTone(group);
               return (
                 <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -403,7 +407,9 @@ export function ConnectionsPage({
                     title={`${getGroupTitleName(group)} · ${getSessionCountLabel(group.sessions.length)}`}
                     subtitle={getDaemonSubtitle(group)}
                     preview={
-                      isOpen
+                      missingSessionCount > 0
+                        ? `${missingSessionLabel} · review and close stale sessions`
+                        : isOpen
                         ? `Live now · ${group.liveSessions.length}/${group.sessions.length} sessions open`
                         : group.savedCount > 0
                         ? `Saved ${getSessionCountLabel(group.savedCount)} · last active ${formatRelative(group.lastOpenedAt)}`
@@ -412,7 +418,9 @@ export function ConnectionsPage({
                             : `No sessions reported · last seen ${formatRelative(Date.parse(group.daemonLastSeenAt || '') || 0)}`
                     }
                     accentLabel={
-                      expanded
+                      missingSessionCount > 0
+                        ? `${missingSessionLabel} · review`
+                        : expanded
                         ? `${actionSessionNames.length} selected · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`
                         : `${group.savedCount || group.sessions.length} default · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`
                     }
@@ -422,6 +430,13 @@ export function ConnectionsPage({
                     secondaryLabel={expanded ? '−' : '+'}
                     secondaryAriaLabel={`${expanded ? 'Collapse' : 'Expand'} ${getGroupTitleName(group)} sessions`}
                     onPrimaryAction={() => {
+                      if (missingSessionCount > 0) {
+                        if (!expanded) {
+                          ensureGroupSelection(group);
+                        }
+                        toggleGroupExpanded(group.id);
+                        return;
+                      }
                       openGroupSessions(group, actionSessionNames);
                     }}
                     onActionButton={() => {

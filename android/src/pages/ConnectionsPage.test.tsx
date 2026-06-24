@@ -277,6 +277,38 @@ describe('ConnectionsPage', () => {
     expect(onDeleteServerGroup).not.toHaveBeenCalled();
   });
 
+  it('surfaces missing-session groups on the card and expands them from card tap instead of opening blindly', () => {
+    const onOpenServerGroups = vi.fn();
+    render(
+      <ConnectionsPage
+        hosts={[makeHost({ daemonHostId: 'daemon-host-1', sessionName: 'main' })]}
+        sessions={[]}
+        sessionGroups={[makeGroup({
+          daemonHostId: 'daemon-host-1',
+          sessionNames: ['main', 'ghost'],
+          missingSessionNames: ['ghost'],
+        })]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={onOpenServerGroups}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('1 missing · review and close stale sessions')).toBeTruthy();
+    fireEvent.click(screen.getByText('daemon-host-1 · 2 sessions'));
+    expect(onOpenServerGroups).not.toHaveBeenCalled();
+    expect(screen.getByText('ghost')).toBeTruthy();
+    expect(screen.getByText('Close missing')).toBeTruthy();
+  });
+
   it('exits group management after clearing selection and exposes vault placeholder feedback', () => {
     const onOpenVaults = vi.fn();
 
