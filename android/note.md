@@ -386,3 +386,34 @@ ws.on("message", (msg: Buffer | string) => {
 ### 缺口
 - Jason 现场复测长按是否弹 JS copy 菜单（4 颗按钮胶囊"设为起点 / 设为终点 / 复制 / 关闭"）。
 - 如果 JS 菜单仍未出现，下一轮直接追 `useTerminalPageCopyRuntime.handleLongPressCopyRow` 和 `TerminalPageCopyMenu` 渲染分支。
+
+## 2026-06-24 daemon 重启后 sessions 列表空 - 根因 + 修复
+
+### 现象
+- 系统重启后 daemon 自动启动（launchd），但客户端 ws list-sessions 返回 []
+- daemon stderr: `failed to release tmux window-size ownership for rcc: no server running on /Users/fanzhang/.zterm/tmux/tmux-501/default`
+- 用户手动 `tmux list-sessions` 仍能看到 `rcc`
+
+### 根因链路
+1. 用户登录后手动启 `tmux` → server 挂在 `/tmp/tmux-501/default`，session `rcc`
+2. launchd 重启后先于用户登录启动 daemon → 此时 `/tmp/` 下还没有 user tmux server
+3. 旧 `ensureTmuxServerRunning()` 看到默认 socket 没 server → 走 `detectTmuxSocketDir()` → `~/.zterm/tmux` → `mkdir` → `TMUX_TMPDIR=~/.zterm/tmux` → `start-server`
+4. tmux 3.6a 的 `start-server` 是"启动 server 但立刻退出 client"的命令。**没有 live session 时 server 也会跟着退出**。
+5. 用户登录后手动 tmux 启了 `rcc` → 出现在 `/tmp/tmux-501/default` socket
+6. daemon 用 `TMUX_TMPDIR=~/.zterm/tmux` 找自己的 socket → 找不到 server（因为 start-server 后 server 进程被 abort 了）→ 每次都报 "no server running"
+7. 用户和 daemon 用的是两个 socket，互相看不见
+
+### 修复
+1. `cleanEnv()` 移除 `TMUX_TMPDIR` 设置（避免 launchd 继承污染）
+2. `detectTmuxSocketDir()` → `detectTmuxSocketPath()`，固定 socket 路径为 `~/.zterm/tmux/tmux.sock`（之前是目录）
+3. `runTmux()` / `runTmuxAsync()` 强制 prepend `-S <socketPath>`，避开 `tmux-501` 子目录、跨用户隔离
+4. `ensureTmuxServerRunning()` 改用 `new-session -d -s zterm-daemon-keepalive` 起一个 keepalive session，避免 tmux server 自动退出
+5. `HIDDEN_TMUX_SESSIONS` 加 `zterm-daemon-keepalive`，避免暴露给客户端
+6. launchd runner 加 `-u TMUX_TMPDIR`（防环境变量污染）
+
+### 验证
+- daemon 启动后 `tmux list-sessions -S ~/.zterm/tmux/tmux.sock` → 返回 keepalive
+- 客户端 ws list-sessions → 过滤后空（user session `rcc` 在另一个 socket，不在 daemon 控制内；用户需要通过 daemon 客户端新建 tab 才会出现在 daemon socket）
+
+### 待办
+- 用户手动启的 `rcc` 不会被 daemon 看到。这是有意为之（daemon 不能接管 user-managed tmux server，否则会和用户 shell 抢 PTY）。文档需说明：用户应在 daemon 控制下打开 session，或用 `zterm attach <name>` 把 user session 迁移到 daemon socket

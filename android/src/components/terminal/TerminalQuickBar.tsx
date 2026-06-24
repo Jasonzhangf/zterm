@@ -1467,13 +1467,11 @@ function TerminalQuickBarComponent({
       <button
         key={action.id}
         tabIndex={-1}
-        onPointerDown={(event) => {
-          event.preventDefault();
+    onPointerDown={(event) => {
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
         }}
         onClick={(event) => {
-          event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
           action.onClick();
