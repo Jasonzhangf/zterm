@@ -429,3 +429,34 @@ silently returns 0 when viewport metrics are stable.
 - `cleanEnv()` 根据 `detectedSocketDir` 决定是否设 `TMUX_TMPDIR`
 - 验证：tsc PASS，contracts 566 tests PASS，daemon restart 后返回真实 sessions (freehand, routecodex)
 - **反模式**：不能强制设 TMUX_TMPDIR，否则 daemon 看不到用户已有 sessions
+## 2026-06-24 copy-mode 真机长按修复 — Gate 已锁定
+
+### 根因
+- Android WebView 默认 `setLongClickable(true)`，长按时系统先触发 haptic feedback + selection，JS touch 事件被吞掉。
+- `TerminalView` 的 `startCopyLongPressTouch` 注册在 `onTouchStart`，但 WebView native 层已先拦截了 touch 序列，导致 420ms timer 无法启动，菜单不弹出。
+- 之前的 `setOnLongClickListener(v -> true)` 虽然禁了系统菜单，但 WebView 仍触发 haptic + touch 拦截。
+
+### 修复
+- `MainActivity.java`: `wv.setLongClickable(false)` — 不再触发原生长按 haptic / 选择手柄，touch 事件完整传给 DOM。
+- `terminal.copy_mode` feature 已在 `docs/function-map.md` 注册 `MainActivity.java` 为 owner。
+
+### 验证
+- `cd android && npx tsc --noEmit` PASS
+- `cd android && pnpm run test:terminal:contracts` PASS (566/566)
+- `./scripts/build-android-debug.sh` PASS -> `zterm-0.1.3.1885` (versionCode `1031885`)
+- HTTP: `http://127.0.0.1:3333/updates/zterm-0.1.3.1885.apk` 返回 200
+- Jason 现场确认：0.1.3.1885 长按菜单正常弹出 ✅
+
+### Gate 记录
+- 红测: `system-copy-state-machine.test.tsx` PASS
+- 红测: `system-copy-longpress-regression.test.tsx` PASS
+- 红测: `TerminalView.selection-guard.test.tsx` PASS
+- 红测: `VisibleRow.selection.test.tsx` PASS
+- 红测: `TerminalPage.android-ime.test.tsx` PASS
+- 合约: `test:terminal:contracts` 566/566 PASS
+- 真机: Jason 1885 确认 copy-mode 长按正常
+
+### 反模式
+- Android WebView `setLongClickable(true)` 会在 native 层拦截 touch 序列并触发 haptic，JS `onTouchStart` 收不到完整事件链。
+- 禁用 WebView 原生长按必须用 `setLongClickable(false)`，不能只靠 `setOnLongClickListener(v -> true)`。
+- copy-mode 的"禁系统菜单"应只在 DOM/React 层做（`preventDefault` + `stopPropagation`），不在 native WebView 边界全局吞事件。
