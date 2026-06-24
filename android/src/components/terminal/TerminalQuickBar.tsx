@@ -708,22 +708,42 @@ function TerminalQuickBarComponent({
   }, [remoteScreenshotStatus]);
 
   const handleImagePickerButtonClick = useCallback(() => {
-    const isNativePlatform = Capacitor.isNativePlatform();
-    if (isNativePlatform && keyboardVisible) {
-      imageInputRef.current?.click();
+    const input = imageInputRef.current;
+    if (!input) {
+      return;
+    }
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+    if (Capacitor.isNativePlatform() && keyboardVisible) {
       void Keyboard.hide().catch(() => {});
-    } else {
-      imageInputRef.current?.click();
     }
   }, [keyboardVisible]);
 
   const handleFilePickerButtonClick = useCallback(() => {
-    const isNativePlatform = Capacitor.isNativePlatform();
-    if (isNativePlatform && keyboardVisible) {
-      fileInputRef.current?.click();
+    const input = fileInputRef.current;
+    if (!input) {
+      return;
+    }
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+    if (Capacitor.isNativePlatform() && keyboardVisible) {
       void Keyboard.hide().catch(() => {});
-    } else {
-      fileInputRef.current?.click();
     }
   }, [keyboardVisible]);
 
@@ -1634,7 +1654,21 @@ function TerminalQuickBarComponent({
         ref={imageInputRef}
         type="file"
         accept="image/*"
-        style={{ display: "none" }}
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: 0,
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
           event.currentTarget.value = "";
@@ -1656,7 +1690,21 @@ function TerminalQuickBarComponent({
       <input
         ref={fileInputRef}
         type="file"
-        style={{ display: "none" }}
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: 0,
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
         onChange={async (event) => {
           const file = event.target.files?.[0];
           event.currentTarget.value = "";

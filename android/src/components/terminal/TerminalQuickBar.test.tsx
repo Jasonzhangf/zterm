@@ -723,6 +723,28 @@ describe("TerminalQuickBar", () => {
     await Promise.resolve();
   });
 
+  it("prefers showPicker when the browser exposes a native picker API", () => {
+    const onImagePaste = vi.fn();
+    renderQuickBar({ onImagePaste });
+
+    const imageInput = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ).find((input) => input.accept === "image/*");
+    expect(imageInput).toBeTruthy();
+
+    const showPickerSpy = vi.fn();
+    Object.defineProperty(imageInput!, "showPicker", {
+      configurable: true,
+      value: showPickerSpy,
+    });
+    const clickSpy = vi.spyOn(imageInput!, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "图片" }));
+
+    expect(showPickerSpy).toHaveBeenCalledTimes(1);
+    expect(clickSpy).not.toHaveBeenCalled();
+  });
+
   it("opens image picker directly in landscape without transfer-entry side sheet", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

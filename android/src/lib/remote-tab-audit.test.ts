@@ -189,4 +189,48 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
       expect.anything(),
     );
   });
+
+  it('does not prune session groups when remote fetch result is empty or unknown', async () => {
+    const tab: PersistedOpenTab = {
+      sessionId: 'session-1',
+      hostId: 'host-1',
+      connectionName: 'test-host',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      sessionName: 'my-session',
+      authToken: 'token',
+      createdAt: Date.now(),
+    };
+
+    deps.openTabStateRef.current.tabs = [tab];
+    deps.sessionGroups = [{
+      id: 'group-1',
+      name: 'group',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      authToken: 'token',
+      sessionNames: ['my-session'],
+      lastOpenedAt: Date.now(),
+      missingSessionNames: [],
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+
+    const pruneSpy = vi.fn();
+    deps.pruneSessionGroupSelectionToRemoteTruth = pruneSpy;
+
+    vi.resetModules();
+    vi.doMock('./open-tab-restore', () => ({
+      fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+    }));
+    vi.doMock('./runtime-debug', () => ({
+      runtimeDebug: vi.fn(),
+    }));
+
+    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+    await audit('test-reason', deps);
+
+    expect(pruneSpy).not.toHaveBeenCalled();
+  });
 });

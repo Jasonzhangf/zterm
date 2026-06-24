@@ -259,6 +259,53 @@ ws.on("message", (msg: Buffer | string) => {
 - 本轮修复：`android/src/server/terminal-mirror-runtime.ts`
   - 新增 mirror 级 `WeakMap<SessionMirror, { revision }>` head broadcast cache。
 
+## 2026-06-24 图片/文件 picker 与 missing-session audit 二次收口（1896）
+
+### 用户现场
+- 1892/1893/1894 包在真机上“看起来没变化”：
+  - 点击 `图片` / `文件` 没有任何弹窗
+  - 缺失 session 灰显/一键关闭在现场不可见
+
+### 本轮根因
+- `TerminalQuickBar.tsx`
+  - picker 仍依赖对完全隐藏 `display:none` 的 `input[type=file]` 做程序化 `click()`
+  - Android WebView 下这类 input 很容易直接不弹系统 picker
+  - 旧实现还把 `Keyboard.hide()` 混在同一路径里，真机上更难判断点击链是否丢失
+- `remote-tab-audit.ts`
+  - `fetchRemoteTmuxSessionNamesByOwner()` 返回空数组时，历史逻辑仍会把空数组当成远端真相去 prune
+  - 这会让“远端返回未知/失败”错误投影成“session 不存在”
+
+### 本轮代码修复
+- `android/src/components/terminal/TerminalQuickBar.tsx`
+  - picker 入口改成同手势栈内直接触发：优先 `showPicker()`，否则 `input.click()`
+  - 触发后再异步 `Keyboard.hide()`
+  - 文件 input 从 `display:none` 改成“视觉隐藏但仍在文档流可触发”的样式
+- `android/src/lib/remote-tab-audit.ts`
+  - 远端结果为空数组时不再 prune，也不再把 tab 标成 missing
+
+### 白盒 / 黑盒验证
+- `cd android && pnpm exec vitest run src/components/terminal/TerminalQuickBar.test.tsx src/lib/remote-tab-audit.test.ts src/pages/TerminalPage.real-quickbar-split.test.tsx src/pages/ConnectionsPage.test.tsx`
+  - `PASS (78) FAIL (0)`
+- `cd android && pnpm run type-check`
+  - PASS
+- `cd android && ./scripts/build-android-debug.sh`
+  - PASS
+  - build number: `1896`
+
+### 升级链路证据
+- `android/update-dist/latest.json` 与 `~/.zterm/updates/latest.json` 都指向 `zterm-0.1.3.1896.apk`
+- `android/update-dist/zterm-0.1.3.1896.apk`
+- `android/release-dist/zterm-0.1.3.1896.apk`
+- `~/.zterm/updates/zterm-0.1.3.1896.apk`
+- `curl http://127.0.0.1:3333/updates/latest.json`
+  - 返回 `versionName=0.1.3.1896`
+- `curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1896.apk`
+  - `HTTP/1.1 200 OK`
+
+### 仍待真机确认
+- 自动回归已覆盖“真实 TerminalPage -> QuickBar -> 文件输入 -> onImagePaste/onFileAttach”黑盒链路
+- 但是否完全命中 Jason 手上的那台 Android WebView 行为，仍需 Jason 用 1896 包现场点一次确认
+
 ## 2026-06-23 copy 现场复核
 
 ### 现象
