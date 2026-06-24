@@ -417,3 +417,34 @@ ws.on("message", (msg: Buffer | string) => {
 
 ### 待办
 - 用户手动启的 `demo` 不会被 daemon 看到。这是有意为之（daemon 不能接管 user-managed tmux server，否则会和用户 shell 抢 PTY）。文档需说明：用户应在 daemon 控制下打开 session，或用 `zterm attach <name>` 把 user session 迁移到 daemon socket
+
+## 2026-06-24 APK upgrade path publish audit
+
+### 当前真相
+- `android/.build-meta.json` 已升到 `1891`
+- `android/update-dist/latest.json`、`android/release-dist/latest.json`、`~/.zterm/updates/latest.json` 仍停在 `0.1.3.1890`
+- build 失败点：`src/server/terminal-control-runtime.ts` 残留未使用 import `mkdirSync` / `join`
+
+### 本轮动作
+- 先删掉 TS6133 阻塞 import
+- 然后重跑 `./scripts/build-android-debug.sh`
+- 必须验证 `update-dist` / `release-dist` / `~/.zterm/updates` 三处 manifest 和 versioned APK 一致后，才能宣称新 APK 已进入升级路径
+
+### 验证结果
+- `./scripts/build-android-debug.sh` PASS
+- `pnpm run test:terminal:regression:core` PASS
+- `pnpm run test:terminal:contracts` PASS（50 files / 566 tests）
+- `pnpm run test:common-user-flows` PASS（7 files / 85 tests）
+- `pnpm run test:relay:smoke` PASS
+- `android/update-dist/latest.json` / `android/release-dist/latest.json` / `~/.zterm/updates/latest.json` 已统一到：
+  - `versionName=0.1.3.1892`
+  - `versionCode=1031892`
+  - `sha256=735d9ba8a263ac94d21ba64b604c7e4814eb8d8a2380e1ebe663cfb1020dac57`
+  - `size=5473686`
+- versioned APK 已落三处：
+  - `android/update-dist/zterm-0.1.3.1892.apk`
+  - `android/release-dist/zterm-0.1.3.1892.apk`
+  - `~/.zterm/updates/zterm-0.1.3.1892.apk`
+- `scripts/verify-update-bundle.mjs` 返回 `ok: true`
+- `curl http://127.0.0.1:3333/updates/latest.json` 返回 `1892` manifest
+- `curl -I http://127.0.0.1:3333/updates/zterm-0.1.3.1892.apk` 返回 `HTTP/1.1 200 OK`

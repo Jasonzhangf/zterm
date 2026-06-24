@@ -1,7 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import { mkdirSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
 import type { SessionMirror } from './terminal-runtime-types';
 
 export interface TerminalControlRuntimeDeps {
