@@ -366,6 +366,16 @@ export function buildConnectionsServerGroups(options: {
       const liveSessions = groupSessions
         .map((entry) => entry.liveSession)
         .filter((entry): entry is Session => entry !== null);
+      // When daemon is offline and we have no verified audit result (missingSessionNames is empty
+      // and no live session proves existence), treat ALL non-live sessions as remote-missing.
+      // This ensures they are greyed out in the UI since the daemon can't confirm their existence.
+      if (group.daemonConnected === false) {
+        for (const entry of groupSessions) {
+          if (!entry.liveSession) {
+            entry.missingFromRemoteTruth = true;
+          }
+        }
+      }
       const savedSessions = groupSessions.filter((entry) => entry.source === 'saved').map((entry) => entry.sessionName);
       const openableSessions = groupSessions
         .filter((entry) => !entry.missingFromRemoteTruth && (entry.liveSession || entry.source === 'saved'))
