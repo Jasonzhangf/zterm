@@ -42,6 +42,7 @@ export type SessionAction =
   | { type: 'SET_LIVE_SESSIONS'; ids: string[] }
   | { type: 'SET_SESSION_STATE'; id: string; state: SessionState }
   | { type: 'SET_SESSION_TITLE'; id: string; title: string }
+  | { type: 'SET_SESSION_REMOTE_MISSING'; id: string; remoteMissing: boolean }
   | { type: 'INCREMENT_CONNECTED' }
   | { type: 'DECREMENT_CONNECTED' };
 

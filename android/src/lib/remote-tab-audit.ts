@@ -10,6 +10,7 @@ export interface RemoteTabAuditDeps {
   hostsRef: { current: Host[] };
   remoteOpenTabAuditTokenRef: { current: number };
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
+  markSessionRemoteMissing?: (sessionId: string, remoteMissing: boolean) => void;
 }
 
 function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
@@ -82,4 +83,13 @@ export async function auditOpenTabsAgainstRemoteSessions(
     sessionIds: missingTabs.map((tab) => tab.sessionId),
     targets: missingTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
   });
+
+  // Write remoteMissing back to session context so the drawer can grey out these sessions
+  if (deps.markSessionRemoteMissing) {
+    const missingSessionIds = new Set(missingTabs.map((tab) => tab.sessionId));
+    const allTabSessionIds = new Set(currentTabs.map((tab) => tab.sessionId));
+    for (const sessionId of allTabSessionIds) {
+      deps.markSessionRemoteMissing(sessionId, missingSessionIds.has(sessionId));
+    }
+  }
 }
