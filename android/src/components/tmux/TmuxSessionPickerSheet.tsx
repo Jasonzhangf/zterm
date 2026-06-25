@@ -630,6 +630,7 @@ export function TmuxSessionPickerSheet({
             const { sessionName } = row;
             const selected = selectedSessions.includes(sessionName);
             const active = row.openTab?.id === activeTabId;
+            const missingRemote = !row.remotePresent;
             const openStatus = row.openTab
               ? row.remotePresent
                 ? `Open tab${active ? ' · Active' : ''}`
@@ -643,9 +644,11 @@ export function TmuxSessionPickerSheet({
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
+                  opacity: missingRemote ? 0.42 : 1,
+                  pointerEvents: missingRemote ? 'none' : 'auto',
                 }}
               >
-                {!row.openTab && row.remotePresent ? (
+                {!row.openTab && row.remotePresent && !missingRemote ? (
                   <button
                     onClick={() => toggleSession(sessionName)}
                     aria-label={`Select ${sessionName}`}
@@ -665,31 +668,35 @@ export function TmuxSessionPickerSheet({
                 ) : null}
                 <button
                   onClick={() => {
-                    if (row.openTab) {
+                    if (row.openTab && !missingRemote) {
                       onSwitchOpenTab?.(row.openTab.id);
                       onClose();
                       return;
                     }
-                    toggleSession(sessionName);
+                    if (!missingRemote) {
+                      toggleSession(sessionName);
+                    }
                   }}
                   style={{
                     flex: 1,
                     border: 'none',
                     borderRadius: '18px',
                     padding: '12px 14px',
-                    backgroundColor: row.openTab ? 'rgba(113, 164, 255, 0.16)' : selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                    backgroundColor: missingRemote
+                      ? '#eef1f5'
+                      : row.openTab ? 'rgba(113, 164, 255, 0.16)' : selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
                     color: mobileTheme.colors.lightText,
                     textAlign: 'left',
                     fontWeight: 800,
                   }}
                 >
                   <div data-testid="tmux-session-name">{row.displayName}</div>
-                  <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
-                    {openStatus}
-                    {row.displayName !== sessionName ? ` · ${sessionName}` : ''}
-                  </div>
-                </button>
-                {row.openTab ? (
+                    <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted, marginTop: '4px' }}>
+                      {openStatus}
+                      {row.displayName !== sessionName ? ` · ${sessionName}` : ''}
+                    </div>
+                  </button>
+                {row.openTab && !missingRemote ? (
                   <button
                     onClick={() => {
                       onSwitchOpenTab?.(row.openTab!.id);
@@ -707,7 +714,7 @@ export function TmuxSessionPickerSheet({
                   >
                     Enter
                   </button>
-                ) : (
+                ) : !missingRemote ? (
                   <button
                     onClick={() => onOpenTmuxSession(selectedTarget, sessionName)}
                     style={{
@@ -722,7 +729,8 @@ export function TmuxSessionPickerSheet({
                   >
                     Open
                   </button>
-                )}
+                ) : null}
+                {missingRemote ? null : (
                 <button
                   onClick={() => {
                     if (row.openTab) {
@@ -741,8 +749,10 @@ export function TmuxSessionPickerSheet({
                     color: '#ffffff',
                   }}
                 >
-                  ✎
-                </button>
+                    ✎
+                  </button>
+                )}
+                {missingRemote ? null : (
                 <button
                   onClick={() => {
                     if (row.openTab) {
@@ -761,8 +771,9 @@ export function TmuxSessionPickerSheet({
                     color: mobileTheme.colors.danger,
                   }}
                 >
-                  {row.openTab ? 'Close' : '×'}
-                </button>
+                    {row.openTab ? 'Close' : '×'}
+                  </button>
+                )}
               </div>
             );
           })}
