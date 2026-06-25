@@ -4,9 +4,9 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 
 /**
  * MainActivity - Capacitor main Activity
@@ -28,15 +28,11 @@ public class MainActivity extends BridgeActivity {
             wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             wv.setVerticalScrollBarEnabled(false);
             wv.setHorizontalScrollBarEnabled(false);
-            // Pipe JS console.log into Android logcat so copy-mode long-press
-            // traces can be observed during on-device debugging.
-            wv.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
-                    Log.i("ZTermWeb", cm.message());
-                    return true;
-                }
-            });
+            // Use BridgeWebChromeClient (which implements onShowFileChooser)
+            // so that <input type="file"> triggers the system file picker.
+            // BridgeWebChromeClient already pipes JS console to Capacitor Logger,
+            // which appears in logcat with tag "Console".
+            wv.setWebChromeClient(new BridgeWebChromeClient(getBridge()));
             // Block Android WebView native long-press so its floating selection
             // ActionMode toolbar (全选 / 剪切 / 复制 / 分享) does NOT appear.
             // JS touch events are received in real-time BEFORE this listener
