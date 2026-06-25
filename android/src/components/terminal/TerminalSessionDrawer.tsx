@@ -266,12 +266,14 @@ function TerminalSessionDrawerComponent({
             gap: '8px',
           }}
         >
-          {visibleSessions.map((session) => (
+          {visibleSessions.map((session) => {
+            const unavailable = session.status === 'disconnected' || session.status === 'closed' || session.status === 'error';
+            return (
             <button
               key={session.id}
               type="button"
               data-testid={`terminal-session-drawer-row-${session.id}`}
-              onClick={() => onSelectSession(session.id)}
+              onClick={() => { if (!unavailable) onSelectSession(session.id); }}
               style={{
                 minHeight: '72px',
                 width: '100%',
@@ -288,7 +290,8 @@ function TerminalSessionDrawerComponent({
                 gridTemplateColumns: '1fr auto',
                 gap: '8px',
                 alignItems: 'center',
-                color: '#dce8ff',
+                color: unavailable ? 'rgba(220, 232, 255, 0.35)' : '#dce8ff',
+                opacity: unavailable ? 0.4 : 1,
               }}
             >
               <div style={{ minWidth: 0 }}>
@@ -335,7 +338,7 @@ function TerminalSessionDrawerComponent({
                       background: resolveStatusTone(session.status),
                     }}
                   />
-                  <span>{session.status}</span>
+                  <span>{unavailable ? 'unavailable' : session.status}</span>
                 </div>
               </div>
 
@@ -382,13 +385,15 @@ function TerminalSessionDrawerComponent({
                     color: 'rgba(220, 232, 255, 0.72)',
                     fontSize: '14px',
                     lineHeight: 1,
+                    pointerEvents: 'auto',
                   }}
                 >
                   ×
                 </span>
               </div>
             </button>
-          ))}
+          );
+          })}
         </div>
 
         <div
