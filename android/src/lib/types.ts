@@ -172,6 +172,7 @@ export interface Session {
   daemonHeadEndIndex?: number;
   reconnectAttempt?: number;
   lastError?: string;
+  remoteMissing?: boolean;  // daemon confirms this tmux session no longer exists
   createdAt: number;         // 创建时间戳
 }
 

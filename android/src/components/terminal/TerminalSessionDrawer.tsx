@@ -5,6 +5,7 @@ export interface TerminalSessionDrawerItem {
   title: string;
   subtitle: string;
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
+  remoteMissing?: boolean;
   paneLabel?: string | null;
   active?: boolean;
   /**
@@ -267,7 +268,7 @@ function TerminalSessionDrawerComponent({
           }}
         >
           {visibleSessions.map((session) => {
-            const unavailable = session.status === 'disconnected' || session.status === 'closed' || session.status === 'error';
+            const unavailable = session.remoteMissing || session.status === 'disconnected' || session.status === 'closed' || session.status === 'error';
             return (
             <button
               key={session.id}
