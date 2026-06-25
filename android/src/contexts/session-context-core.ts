@@ -167,6 +167,17 @@ export function reduceSessionAction(state: SessionManagerState, action: SessionA
       });
       return changed ? { ...state, sessions: nextSessions } : state;
     }
+    case 'SET_SESSION_REMOTE_MISSING': {
+      let changed = false;
+      const nextSessions = state.sessions.map((session) => {
+        if (session.id !== action.id || session.remoteMissing === action.remoteMissing) {
+          return session;
+        }
+        changed = true;
+        return { ...session, remoteMissing: action.remoteMissing };
+      });
+      return changed ? { ...state, sessions: nextSessions } : state;
+    }
     case 'INCREMENT_CONNECTED':
       return { ...state, connectedCount: state.connectedCount + 1 };
     case 'DECREMENT_CONNECTED':
