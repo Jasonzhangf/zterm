@@ -217,20 +217,6 @@ function makeDebugMetrics(active: boolean) {
   };
 }
 
-function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHistory {
-  return {
-    id: overrides.id || 'group-1',
-    name: overrides.name || 'server group',
-    bridgeHost: overrides.bridgeHost || '100.127.23.27',
-    bridgePort: overrides.bridgePort || 3333,
-    daemonHostId: overrides.daemonHostId,
-    authToken: overrides.authToken || 'token-a',
-    sessionNames: overrides.sessionNames || ['tmux-s1'],
-    missingSessionNames: overrides.missingSessionNames || [],
-    lastOpenedAt: overrides.lastOpenedAt || 30,
-  };
-}
-
 function renderTerminalPage(
   sessions: Session[],
   activeSession: Session | null,
