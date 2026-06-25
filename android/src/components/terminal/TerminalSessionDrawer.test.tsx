@@ -206,4 +206,33 @@ describe('TerminalSessionDrawer', () => {
     expect(oNode.compareDocumentPosition(aNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(aNode.compareDocumentPosition(zNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it('greys remote-missing sessions and blocks selection', () => {
+    const onSelectSession = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          {
+            id: 'ghost',
+            title: 'ghost',
+            subtitle: '100.127.23.27:3333 · ghost',
+            status: 'connected',
+            remoteMissing: true,
+            active: false,
+            hostKey: '100.127.23.27:3333',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByTestId('terminal-session-drawer-row-ghost');
+    expect(row.textContent).toContain('unavailable');
+    fireEvent.click(row);
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
 });

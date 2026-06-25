@@ -22,6 +22,7 @@ import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
+import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -47,6 +48,7 @@ import {
   type SavedTabList,
   type Session,
   type SessionDebugOverlayMetrics,
+  type SessionGroupHistory,
   type SessionScheduleState,
   type ScheduleJobDraft,
   type TerminalResizeHandler,
@@ -230,6 +232,7 @@ function resolveWindowWidth() {
 
 interface TerminalPageProps {
   sessions: Session[];
+  sessionGroups?: SessionGroupHistory[];
   activeSession: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
@@ -1119,6 +1122,7 @@ function normalizeSavedTabList(input: unknown): SavedTabList | null {
 
 function TerminalPageComponent({
   sessions,
+  sessionGroups = [],
   activeSession,
   getSessionDebugMetrics,
   sessionBufferStore = null,
@@ -1446,7 +1450,7 @@ function TerminalPageComponent({
           title: session.customName || session.sessionName,
           subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
           status: normalizeDrawerStatus(session.state),
-          remoteMissing: Boolean(session.remoteMissing),
+          remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: `P${paneIndex + 1}`,
           active: activeSessionIds.has(session.id),
           hostKey: `${session.bridgeHost}:${session.bridgePort}`,
@@ -1466,7 +1470,7 @@ function TerminalPageComponent({
           title: session.customName || session.sessionName,
           subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
           status: normalizeDrawerStatus(session.state),
-          remoteMissing: Boolean(session.remoteMissing),
+          remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: undefined,
           active: false,
           hostKey,
@@ -1475,7 +1479,7 @@ function TerminalPageComponent({
       });
 
     return [...opened, ...unopened];
-  }, [renderedPaneSessions, sessions, workspacePanes]);
+  }, [renderedPaneSessions, sessionGroups, sessions, workspacePanes]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;

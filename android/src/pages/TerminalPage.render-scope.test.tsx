@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../lib/types';
+import type { Session, SessionGroupHistory } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
@@ -217,10 +217,29 @@ function makeDebugMetrics(active: boolean) {
   };
 }
 
-function renderTerminalPage(sessions: Session[], activeSession: Session | null) {
+function makeGroup(overrides: Partial<SessionGroupHistory> = {}): SessionGroupHistory {
+  return {
+    id: overrides.id || 'group-1',
+    name: overrides.name || 'server group',
+    bridgeHost: overrides.bridgeHost || '100.127.23.27',
+    bridgePort: overrides.bridgePort || 3333,
+    daemonHostId: overrides.daemonHostId,
+    authToken: overrides.authToken || 'token-a',
+    sessionNames: overrides.sessionNames || ['tmux-s1'],
+    missingSessionNames: overrides.missingSessionNames || [],
+    lastOpenedAt: overrides.lastOpenedAt || 30,
+  };
+}
+
+function renderTerminalPage(
+  sessions: Session[],
+  activeSession: Session | null,
+  sessionGroups: SessionGroupHistory[] = [],
+) {
   return render(
     <TerminalPage
       sessions={sessions}
+      sessionGroups={sessionGroups}
       activeSession={activeSession}
       getSessionDebugMetrics={(sessionId) => makeDebugMetrics(activeSession?.id === sessionId)}
       onSwitchSession={vi.fn()}

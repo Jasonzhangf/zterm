@@ -662,6 +662,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         {pageState.kind === 'terminal' && (
           <TerminalPage
             sessions={terminalSessions}
+            sessionGroups={sessionGroups}
             activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
             sessionBufferStore={sessionRenderBufferStore}
