@@ -268,7 +268,7 @@ function TerminalSessionDrawerComponent({
           }}
         >
           {visibleSessions.map((session) => {
-            const unavailable = session.remoteMissing || session.status === 'disconnected' || session.status === 'closed' || session.status === 'error';
+            const unavailable = Boolean(session.remoteMissing);
             return (
             <button
               key={session.id}
