@@ -18,6 +18,7 @@ import {
   resolveTerminalKeyboardInput,
 } from '@zterm/shared/terminal/renderer';
 import { TerminalPageCopyMenu } from './TerminalPageCopyMenu';
+import type { CopySelectionState } from './terminal-copy-selection';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
@@ -421,6 +422,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   effectiveKeyboardLiftPx,
   quickBarHeight,
   terminalChromeBottomPx,
+  copySelection,
 }: {
   visible: boolean;
   session: Session | null;
@@ -448,6 +450,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   effectiveKeyboardLiftPx?: number;
   quickBarHeight?: number;
   terminalChromeBottomPx?: number;
+  copySelection?: CopySelectionState | undefined;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -674,6 +677,18 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>CS</span>
         <span>{copyStartRowIndex ?? '-'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>CE</span>
+        <span>{copySelection?.endRowIndex ?? '-'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>MU</span>
+        <span style={{ color: copySelection?.menu ? '#86efac' : '#fca5a5' }}>
+          {copySelection?.menu
+            ? `x=${copySelection.menu.x} y=${copySelection.menu.y} r=${copySelection.menu.rowIndex}`
+            : 'null'}
+        </span>
       </div>
       <div
         style={{
@@ -2773,14 +2788,15 @@ function TerminalPageComponent({
             onClose={handleCloseCopyMenu}
           />
         ) : null}
-        <TerminalDebugOverlay
-          visible={debugOverlayVisible}
-          session={interactiveSession}
-          visiblePaneSessions={renderedPaneSessions}
-          sessionViewportModeStore={sessionViewportModeStoreRef.current}
-          getSessionDebugMetrics={getSessionDebugMetrics}
-          debugOverlayPos={debugOverlayPos}
-          debugOverlayDragRef={debugOverlayDragRef}
+    <TerminalDebugOverlay
+      visible={debugOverlayVisible}
+      session={interactiveSession}
+      visiblePaneSessions={renderedPaneSessions}
+      sessionViewportModeStore={sessionViewportModeStoreRef.current}
+      copySelection={copySelection}
+      getSessionDebugMetrics={getSessionDebugMetrics}
+      debugOverlayPos={debugOverlayPos}
+      debugOverlayDragRef={debugOverlayDragRef}
           onClose={() => setDebugOverlayVisible(false)}
           onMove={setDebugOverlayPos}
           keyboardInset={keyboardInset}
