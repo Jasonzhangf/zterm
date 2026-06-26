@@ -942,9 +942,30 @@ Inspired by coding-principals skill.
 - 编辑界面使用 position: fixed 全屏覆盖
 
 ## 经验精华（2026-06-08）
+## 经验精华（2026-06-26）— Copy Mode 长按菜单
 
-### QuickBar schedule 生命周期
-- 打开定时发送 sheet 时必须冻结 target `{ sessionId, sessionName, seedText, nonce }`；所有后续操作只用 frozen `sessionId`，禁止切 tab 后重绑 active session。
-- schedule 业务错误必须走 `schedule-error -> scheduleState.error`；socket 未连接、session 缺失、stale job 都要显式 `loading=false + error`，禁止 silent send 或混入 terminal transport failure。
-- floating menu 若保留 clipboard 分支必须给真实 segmented 入口；禁止空 pill/不可达 UI。紧凑化默认删除解释文案、降低 composer 高度、把 `定时/发送` 放同一 action row。
-- `ScheduleEngine` 是定时任务唯一生命周期 owner：每次执行后必须持久化并重排 timer；自然完成/过期任务必须物理删除，避免 `schedules.json` 磁盘孤儿；`dispose()` 后 in-flight run 结束不得复活 timer；`executeJob` throw 必须进入显式 error result。
+### 根因
+copy mode 长按菜单退化原因是 TerminalView 中加了宿主级触摸拦截
+（capture-phase touchstart/pointerdown preventDefault）。copy mode active
+时阻止 WebView 处理触摸事件，但 Android 手势系统因此把长按事件吃掉，
+表现是有震动反馈但 JS 菜单不弹出。
+
+### 修复
+- TerminalView.tsx：移除 preventNativeCopyGestureDefault
+  （pointerDownCapture 拦截）和 preventNativeCallout（host touchstart 拦截）。
+  copy mode 现在只保留 contextmenu 和 selectstart 抑制。
+- TerminalPageStageShell.tsx：修复 JSX 缩进断裂，onLongPressRow/splitVisible
+  之前在 pane-stage 渲染时落到非元素节点上，部分 session 收不到 copy props。
+- 新增端到端红测 copy-longpress-e2e.test.tsx（7 条），覆盖
+  touchstart→420ms→menu 全路径。
+
+### 调试手段
+debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后看 MU
+是 null 还是有坐标，能直接判定定时器是否到达 copy runtime。
+
+### 反模式
+- 禁止在 copy mode 下再加 host-level touchstart/pointerdown preventDefault 拦截。
+- JS 长按的 onTouchStart 和 onPointerDown 同时存在是安全的，系统只会调度一个。
+- 任何 copy mode 手势链路修改，必须先跑 copy-longpress-e2e.test.tsx 全量红测。
+  这 7 条测试锁住"未激活不启动→激活后 420ms 触发→移动取消→menu 状态设置→菜单渲染"。
+
