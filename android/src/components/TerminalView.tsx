@@ -429,15 +429,6 @@ function TerminalViewComponent({
     },
     [cancelCopyLongPress],
   );
-  // Copy-mode native menu blocker: only intercept selection/contextmenu where the
-  // OS / WebView would otherwise show the system callout. We never stopPropagation
-  // here so per-row long-press detection on VisibleRow still runs.
-  const preventNativeCopyGestureDefault = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
-    if (!copyModeActive) {
-      return;
-    }
-    event.preventDefault();
-  }, [copyModeActive]);
   const suppressNativeCopyMenu = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
     if (!copyModeActive) {
       return;
@@ -1086,19 +1077,14 @@ function TerminalViewComponent({
     if (!host || !copyModeActive) {
       return;
     }
-    const preventNativeCallout = (event: Event) => {
-      event.preventDefault();
-    };
     const suppressNativeMenu = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
     };
     const options: AddEventListenerOptions = { capture: true, passive: false };
-    host.addEventListener('touchstart', preventNativeCallout, options);
     host.addEventListener('contextmenu', suppressNativeMenu, options);
     host.addEventListener('selectstart', suppressNativeMenu, options);
     return () => {
-      host.removeEventListener('touchstart', preventNativeCallout, options);
       host.removeEventListener('contextmenu', suppressNativeMenu, options);
       host.removeEventListener('selectstart', suppressNativeMenu, options);
     };
@@ -1366,9 +1352,6 @@ function TerminalViewComponent({
         onActivateInput?.(sessionId);
       }}
       onContextMenu={suppressNativeCopyMenu}
-      onPointerDownCapture={preventNativeCopyGestureDefault}
-      onTouchStartCapture={preventNativeCopyGestureDefault}
-      onMouseDownCapture={preventNativeCopyGestureDefault}
       onScroll={(event) => {
         if (suppressProgrammaticScrollRef.current) {
           return;
@@ -1413,9 +1396,6 @@ function TerminalViewComponent({
         className="term-grid"
         data-cursor-source="cursor-metadata"
         onContextMenu={suppressNativeCopyMenu}
-        onPointerDownCapture={preventNativeCopyGestureDefault}
-        onTouchStartCapture={preventNativeCopyGestureDefault}
-        onMouseDownCapture={preventNativeCopyGestureDefault}
         style={{
           paddingTop: `${termGridPaddingTopPx}px`,
           paddingBottom: `${termGridPaddingBottomPx}px`,

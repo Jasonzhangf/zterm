@@ -50,6 +50,28 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 
+  it('opens quick tab picker from touch interaction on mobile without relying on synthetic click', () => {
+    const onOpenQuickTabPicker = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    const addButton = screen.getByTestId('terminal-session-drawer-add');
+    fireEvent.touchEnd(addButton, {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
+  });
+
   it('closes on overlay click and left swipe gesture', () => {
     const onClose = vi.fn();
 

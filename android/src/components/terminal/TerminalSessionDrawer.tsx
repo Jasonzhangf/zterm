@@ -60,6 +60,12 @@ function TerminalSessionDrawerComponent({
   onOpenQuickTabPicker,
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lastQuickOpenIntentAtRef = useRef(0);
+
+  const triggerQuickOpen = () => {
+    lastQuickOpenIntentAtRef.current = Date.now();
+    onOpenQuickTabPicker();
+  };
 
   const hostGroups = useMemo(() => {
     const groups = new Map<string, { hostKey: string; hostLabel: string; sessions: TerminalSessionDrawerItem[] }>();
@@ -406,7 +412,24 @@ function TerminalSessionDrawerComponent({
           <button
             type="button"
             data-testid="terminal-session-drawer-add"
-            onClick={onOpenQuickTabPicker}
+            onPointerUp={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              triggerQuickOpen();
+            }}
+            onTouchEnd={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              triggerQuickOpen();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (Date.now() - lastQuickOpenIntentAtRef.current < 600) {
+                return;
+              }
+              triggerQuickOpen();
+            }}
             style={{
               width: '100%',
               minHeight: '50px',

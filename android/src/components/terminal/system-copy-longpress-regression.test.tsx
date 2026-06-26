@@ -43,15 +43,10 @@ describe('system copy long-press regression', () => {
     expect(container.querySelector('style')?.textContent || '').toContain('-webkit-touch-callout:none');
   });
 
-  it('copy mode installs native non-passive capture guards for Android WebView long press', () => {
+  it('copy mode installs only contextmenu/selectstart guards without touchstart suppression', () => {
     const addSpy = vi.spyOn(HTMLElement.prototype, 'addEventListener');
     const { unmount } = render(<TerminalView {...baseProps} copyModeActive onLongPressRow={vi.fn()} />);
 
-    expect(addSpy).toHaveBeenCalledWith(
-      'touchstart',
-      expect.any(Function),
-      expect.objectContaining({ capture: true, passive: false }),
-    );
     expect(addSpy).toHaveBeenCalledWith(
       'contextmenu',
       expect.any(Function),
@@ -59,6 +54,11 @@ describe('system copy long-press regression', () => {
     );
     expect(addSpy).toHaveBeenCalledWith(
       'selectstart',
+      expect.any(Function),
+      expect.objectContaining({ capture: true, passive: false }),
+    );
+    expect(addSpy).not.toHaveBeenCalledWith(
+      'touchstart',
       expect.any(Function),
       expect.objectContaining({ capture: true, passive: false }),
     );

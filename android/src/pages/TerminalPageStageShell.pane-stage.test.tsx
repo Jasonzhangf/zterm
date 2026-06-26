@@ -19,6 +19,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
+const terminalViewSpy = vi.fn();
 
 beforeAll(() => {
   (globalThis as any).ResizeObserver = ResizeObserverMock;
@@ -27,6 +28,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  terminalViewSpy.mockClear();
 });
 
 vi.mock('@capacitor/core', () => ({
@@ -58,7 +60,10 @@ vi.mock('../components/terminal/TerminalTabSwipeSurface', () => ({
 }));
 
 vi.mock('../components/TerminalView', () => ({
-  TerminalView: ({ sessionId }: any) => <div data-testid={`terminal-view-${sessionId}`} />,
+  TerminalView: (props: any) => {
+    terminalViewSpy(props);
+    return <div data-testid={`terminal-view-${props.sessionId}`} data-copy-mode={props.copyModeActive ? 'true' : 'false'} />;
+  },
 }));
 
 describe('TerminalStageShell shared PaneStage integration (red baseline)', () => {
@@ -228,5 +233,54 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     const style = shell.getAttribute('style') || '';
     expect(style).toContain('bottom: 310px;');
     expect(style).not.toContain('transform: translateY');
+  });
+
+  it('forwards copy props into TerminalView for active session', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const onLongPressRow = vi.fn();
+
+    render(
+      <TerminalStageShell
+        interactiveSession={{ id: 's1', state: 'connected' } as any}
+        renderedPaneSessions={[{ id: 's1', state: 'connected' } as any]}
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's1' } as any,
+            paneIndex: 0,
+            session: { id: 's1', state: 'connected' } as any,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalImeLiftPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{
+          active: true,
+          sessionId: null,
+          startRowIndex: null,
+          endRowIndex: null,
+          menu: null,
+        }}
+        onLongPressRow={onLongPressRow}
+      />,
+    );
+
+    expect(terminalViewSpy).toHaveBeenCalled();
+    const props = terminalViewSpy.mock.calls[0]?.[0];
+    expect(props.sessionId).toBe('s1');
+    expect(props.copyModeActive).toBe(true);
+    expect(props.onLongPressRow).toBe(onLongPressRow);
+    expect(props.splitVisible).toBe(false);
   });
 });

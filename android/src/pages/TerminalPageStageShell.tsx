@@ -148,9 +148,9 @@ const TerminalStageShell = ReactMemo(
                 ? (copySelection.menu?.rowIndex ?? null)
                 : null
             }
-        onLongPressRow={onLongPressRow}
-        splitVisible={splitVisible}
-      />
+            onLongPressRow={onLongPressRow}
+            splitVisible={splitVisible}
+          />
         </TerminalTabSwipeSurface>
       ),
       [
