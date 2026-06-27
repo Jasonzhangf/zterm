@@ -14,7 +14,9 @@ import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
 import {
   buildTmuxSessionPickerRows,
+  findOpenTabsMissingFromRemote,
   filterActionableTmuxSelections,
+  shouldAutoRefreshTmuxPicker,
 } from './tmux-session-picker-rows';
 
 interface TmuxSessionPickerSheetProps {
@@ -146,7 +148,7 @@ export function TmuxSessionPickerSheet({
   const isEditGroupMode = mode === 'edit-group';
   const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
   const daemonFirst = relayEnabled && relayDevices.length > 0;
-  const showOpenTabState = mode === 'quick-tab';
+  const showOpenTabState = true;
   const unifiedSessionRows = useMemo(() => buildTmuxSessionPickerRows({
     availableSessions,
     openTabs,
@@ -202,6 +204,11 @@ export function TmuxSessionPickerSheet({
     setErrorMessage('');
     try {
       const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(selectedTarget, bridgeSettings));
+      const missingOpenTabs = findOpenTabsMissingFromRemote({
+        availableSessions: sessions,
+        openTabs,
+        target: selectedTarget,
+      });
       setAvailableSessions(sessions);
       setSelectedSessions((current) => {
         const nextRows = buildTmuxSessionPickerRows({
@@ -215,6 +222,9 @@ export function TmuxSessionPickerSheet({
       setDiscoveryState('done');
       setErrorMessage('');
       setLastRefreshedAt(Date.now());
+      missingOpenTabs.forEach((tab) => {
+        onCloseOpenTab?.(tab.id, 'session-picker-remote-missing');
+      });
       onRemoteSessionsRefreshed?.(selectedTarget, sessions);
     } catch (error) {
       setAvailableSessions([]);
@@ -224,6 +234,25 @@ export function TmuxSessionPickerSheet({
       setLastRefreshedAt(null);
     }
   };
+
+  useEffect(() => {
+    if (!shouldAutoRefreshTmuxPicker({
+      open,
+      daemonFirst,
+      target: selectedTarget,
+    })) {
+      return;
+    }
+    void handleRefreshNow();
+  }, [
+    open,
+    daemonFirst,
+    selectedTarget.authToken,
+    selectedTarget.bridgeHost,
+    selectedTarget.bridgePort,
+    selectedTarget.daemonHostId,
+    selectedTarget.relayHostId,
+  ]);
 
   const handleCreateSession = async () => {
     const sessionName = newSessionName.trim();

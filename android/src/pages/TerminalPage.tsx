@@ -247,6 +247,7 @@ interface TerminalPageProps {
   onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string) => void;
+  sessionPickerDebugMode?: string | null;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
   onPaneAttachIntentApplied?: (intent: { sessionIds: string[]; paneId: string; nonce: number }) => void;
   onResize?: TerminalResizeHandler;
@@ -423,6 +424,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   quickBarHeight,
   terminalChromeBottomPx,
   copySelection,
+  sessionDrawerDebug,
 }: {
   visible: boolean;
   session: Session | null;
@@ -451,6 +453,14 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   quickBarHeight?: number;
   terminalChromeBottomPx?: number;
   copySelection?: CopySelectionState | undefined;
+  sessionDrawerDebug?: {
+    open: boolean;
+    lastEvent: string;
+    eventSeq: number;
+    callbackSeq: number;
+    pageCallbackSeq: number;
+    pickerMode: string | null;
+  };
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -690,6 +700,40 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             : 'null'}
         </span>
       </div>
+      {sessionDrawerDebug ? (
+        <div
+          data-testid="terminal-debug-session-drawer"
+          style={{
+            marginTop: '2px',
+            paddingTop: '2px',
+            borderTop: '1px solid rgba(255,255,255,0.10)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+            <span>DR</span>
+            <span style={{ color: sessionDrawerDebug.open ? '#86efac' : '#fca5a5' }}>
+              {sessionDrawerDebug.open ? 'OPEN' : 'CLOSED'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+            <span>EV</span>
+            <span>{sessionDrawerDebug.eventSeq}:{sessionDrawerDebug.lastEvent}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+            <span>CB</span>
+            <span>{sessionDrawerDebug.callbackSeq}/{sessionDrawerDebug.pageCallbackSeq}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+            <span>PM</span>
+            <span style={{ color: sessionDrawerDebug.pickerMode ? '#86efac' : '#fca5a5' }}>
+              {sessionDrawerDebug.pickerMode || '-'}
+            </span>
+          </div>
+        </div>
+      ) : null}
       <div
         style={{
           marginTop: '2px',
@@ -1151,6 +1195,7 @@ function TerminalPageComponent({
   onUseAutoSession,
   onOpenConnections,
   onOpenQuickTabPicker,
+  sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
   onPaneAttachIntentApplied,
   onResize,
@@ -1199,6 +1244,12 @@ function TerminalPageComponent({
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [sessionDrawerDebug, setSessionDrawerDebug] = useState({
+    lastEvent: '-',
+    eventSeq: 0,
+    callbackSeq: 0,
+    pageCallbackSeq: 0,
+  });
   const [tabManagerOpen, setTabManagerOpen] = useState(false);
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
   const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
@@ -1841,6 +1892,11 @@ function TerminalPageComponent({
 
   const handleSwipeTab = useCallback((sessionId: string, direction: 'previous' | 'next') => {
     if (portraitSessionDrawerEnabled && direction === 'previous') {
+      setSessionDrawerDebug((current) => ({
+        ...current,
+        lastEvent: 'page:drawer-open',
+        eventSeq: current.eventSeq + 1,
+      }));
       setSessionDrawerOpen(true);
       return;
     }
@@ -2543,13 +2599,33 @@ function TerminalPageComponent({
     if (paneId) {
       activatePaneAndSession(paneId);
     }
+    setSessionDrawerDebug((current) => ({
+      ...current,
+      lastEvent: 'page:open-picker',
+      eventSeq: current.eventSeq + 1,
+      pageCallbackSeq: current.pageCallbackSeq + 1,
+    }));
     onOpenQuickTabPicker(paneId);
   }, [activatePaneAndSession, onOpenQuickTabPicker]);
 
   const handleOpenQuickTabPickerFromDrawer = useCallback(() => {
+    setSessionDrawerDebug((current) => ({
+      ...current,
+      lastEvent: 'page:drawer-callback',
+      eventSeq: current.eventSeq + 1,
+      callbackSeq: current.callbackSeq + 1,
+    }));
     setSessionDrawerOpen(false);
     handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined);
   }, [handleOpenQuickTabPickerForPane, splitVisible, workspace.activePaneId]);
+
+  const handleSessionDrawerDebugAddEvent = useCallback((eventName: string) => {
+    setSessionDrawerDebug((current) => ({
+      ...current,
+      lastEvent: eventName,
+      eventSeq: current.eventSeq + 1,
+    }));
+  }, []);
 
   const handleOpenTabManager = useCallback((paneId?: string) => {
     setTabManagerScopePaneId(paneId || null);
@@ -2739,11 +2815,13 @@ function TerminalPageComponent({
             <TerminalSessionDrawer
               open={sessionDrawerOpen}
               topInsetPx={headerTopInsetPx}
+              bottomInsetPx={keyboardInset}
               sessions={drawerSessions}
               onClose={() => setSessionDrawerOpen(false)}
               onSelectSession={handleSelectSessionFromDrawer}
               onCloseSession={handleCloseSessionFromDrawer}
               onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
+              onDebugAddEvent={handleSessionDrawerDebugAddEvent}
             />
           </>
         ) : null}
@@ -2808,6 +2886,14 @@ function TerminalPageComponent({
           effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
           quickBarHeight={quickBarHeight}
           terminalChromeBottomPx={terminalChromeBottomPx}
+          sessionDrawerDebug={{
+            open: sessionDrawerOpen,
+            lastEvent: sessionDrawerDebug.lastEvent,
+            eventSeq: sessionDrawerDebug.eventSeq,
+            callbackSeq: sessionDrawerDebug.callbackSeq,
+            pageCallbackSeq: sessionDrawerDebug.pageCallbackSeq,
+            pickerMode: sessionPickerDebugMode,
+          }}
         />
         <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
           {quickBarNode}

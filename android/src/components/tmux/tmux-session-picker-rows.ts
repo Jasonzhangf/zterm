@@ -69,6 +69,34 @@ export function buildTmuxSessionPickerRows(input: {
   return [...daemonRows, ...localOnlyRows];
 }
 
+export function findOpenTabsMissingFromRemote(input: {
+  availableSessions: string[];
+  openTabs: PickerOpenTab[];
+  target: Pick<BridgeTarget, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'>;
+}) {
+  const remoteNames = new Set(input.availableSessions);
+  return input.openTabs.filter((tab) => (
+    tabMatchesTarget(tab, input.target) && !remoteNames.has(tab.sessionName)
+  ));
+}
+
+export function shouldAutoRefreshTmuxPicker(input: {
+  open: boolean;
+  daemonFirst: boolean;
+  target: Pick<BridgeTarget, 'bridgeHost' | 'authToken' | 'daemonHostId' | 'relayHostId'>;
+}) {
+  if (!input.open) {
+    return false;
+  }
+  const bridgeHost = input.target.bridgeHost.trim();
+  const authToken = input.target.authToken?.trim() || '';
+  const relayHostId = input.target.relayHostId?.trim() || input.target.daemonHostId?.trim() || '';
+  if (input.daemonFirst && !relayHostId) {
+    return false;
+  }
+  return Boolean(bridgeHost && authToken);
+}
+
 export function getSelectableTmuxSessionNames(rows: TmuxSessionPickerRow[], includeOpenTabs: boolean) {
   return new Set(
     rows

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTmuxSessionPickerRows,
+  findOpenTabsMissingFromRemote,
   filterActionableTmuxSelections,
+  shouldAutoRefreshTmuxPicker,
   tabMatchesTarget,
 } from './tmux-session-picker-rows';
 
@@ -81,5 +83,67 @@ describe('tmux session picker rows', () => {
         daemonHostId: 'daemon-a',
       },
     )).toBe(true);
+  });
+
+  it('finds only target-owned open tabs missing from the refreshed daemon list', () => {
+    const missing = findOpenTabsMissingFromRemote({
+      availableSessions: ['alpha', 'gamma'],
+      openTabs: [
+        {
+          id: 'tab-alpha',
+          sessionName: 'alpha',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+        },
+        {
+          id: 'tab-beta',
+          sessionName: 'beta',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+        },
+        {
+          id: 'tab-other',
+          sessionName: 'beta',
+          bridgeHost: '100.127.23.99',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-b',
+        },
+      ],
+      target: {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+    });
+
+    expect(missing.map((tab) => tab.id)).toEqual(['tab-beta']);
+  });
+
+  it('auto-refreshes only when the picker has a concrete authenticated target', () => {
+    expect(shouldAutoRefreshTmuxPicker({
+      open: true,
+      daemonFirst: false,
+      target: { bridgeHost: '100.66.1.82', authToken: 'token-a' },
+    })).toBe(true);
+
+    expect(shouldAutoRefreshTmuxPicker({
+      open: true,
+      daemonFirst: false,
+      target: { bridgeHost: '100.66.1.82', authToken: '' },
+    })).toBe(false);
+
+    expect(shouldAutoRefreshTmuxPicker({
+      open: true,
+      daemonFirst: true,
+      target: { bridgeHost: '100.66.1.82', authToken: 'token-a', daemonHostId: '' },
+    })).toBe(false);
+
+    expect(shouldAutoRefreshTmuxPicker({
+      open: true,
+      daemonFirst: true,
+      target: { bridgeHost: '100.66.1.82', authToken: 'token-a', daemonHostId: 'daemon-a' },
+    })).toBe(true);
   });
 });

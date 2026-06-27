@@ -73,6 +73,58 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the add button above the IME inset', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        bottomInsetPx={297}
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-add').style.paddingBottom).toBe('309px');
+  });
+
+  it('logs the add hit target before opening quick tab picker', () => {
+    const onOpenQuickTabPicker = vi.fn();
+    const onDebugAddEvent = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+        onDebugAddEvent={onDebugAddEvent}
+      />,
+    );
+
+    fireEvent.touchStart(screen.getByTestId('terminal-session-drawer-add'), {
+      touches: [{ clientX: 180, clientY: 560 }],
+    });
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    expect(onDebugAddEvent.mock.calls.map(([eventName]) => eventName)).toEqual([
+      'cap:start:terminal-session-drawer-add',
+      'add:capstart:terminal-session-drawer-add',
+      'add:touchstart',
+      'drawer:touchstart',
+      'cap:end:terminal-session-drawer-add',
+      'add:capend:terminal-session-drawer-add',
+      'add:touchend',
+      'add:callback',
+    ]);
+    expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
+  });
+
   it('closes on overlay click and left swipe gesture', () => {
     const onClose = vi.fn();
 

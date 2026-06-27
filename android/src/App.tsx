@@ -674,6 +674,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onUseAutoSession={handleUseAutoSession}
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
+            sessionPickerDebugMode={pickerMode}
             pendingPaneAttachIntent={pendingPaneAttachIntent}
             onPaneAttachIntentApplied={(intent) => {
               setPendingPaneAttachIntent((current) => (

@@ -176,6 +176,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
 - Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机不能依赖 `click` 或 `pointerup`；用按钮自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
+- 若状态浮窗只出现 `drawer:touchstart` 而没有 `add:*`，不要继续猜 `click/pointer/touch`，也不要直接下“遮挡”结论；先加 `cap:start/end:<target>` 确认真实命中节点。`TerminalSessionDrawer` 底部 `New Session` 的语义 owner 应放在整个 footer hit surface，而不是只放在内部可视 button 上。
 
 ### 2.12 Android IME 特殊键门禁
 - Android 输入法特殊键必须同时覆盖两条路径：`ImeAnchor backspace` 事件路径，以及 `ImeAnchor key` payload 路径。
@@ -187,9 +188,11 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.13 Session Picker 统一入口规则
 - `New connection` 入口必须先进入 session picker：先列历史连接，再列当前 tmux sessions，最后才是 clean session / full form
 - session picker 顶部必须支持手动输入 Tailscale IP / token，并在输入后立即尝试拉 tmux sessions
+- session picker 打开时若已有明确 `bridgeHost + authToken`，必须自动刷新 tmux sessions；不要要求每次人工点击 `Connect`
 - tmux session 列表需要支持最小 CRUD（list/create/rename/kill）以及 multi-select 直接开多个 tabs
 - terminal 顶部 `+` 的长按必须复用同一个 session picker，用于 quick new tab；普通点击再回 Connections
 - quick-tab picker 只允许一份 session row projection：daemon tmux session 顺序为主，open tab 状态贴在同一行；daemon refresh 未返回但仍在 OPEN_TABS 的本地 tab 只能追加为 not-reported row，不得隐藏或自动关闭。
+- session picker 的 row projection 现在对所有模式都必须合并 open tab，不只 quick-tab；daemon 成功枚举后目标 owner 下未被报告的本地 open tab 应显式关闭，避免双列表和 stale tab。
 - OPEN_TABS 已打开 tab 不得按 semantic reuse key 自动合并/替换/删除；同名 tmux session 的 runtime duplicate 只能作为 transport fact，不能顶替 persisted open tab 的 `sessionId`。saved tab list 导入可做 import-only semantic 去重。
 
 ### 2.14 Bridge Auth 规则

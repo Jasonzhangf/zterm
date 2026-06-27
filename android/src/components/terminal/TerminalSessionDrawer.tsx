@@ -24,11 +24,13 @@ export interface TerminalSessionDrawerItem {
 export interface TerminalSessionDrawerProps {
   open: boolean;
   topInsetPx?: number;
+  bottomInsetPx?: number;
   sessions: TerminalSessionDrawerItem[];
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
   onOpenQuickTabPicker: () => void;
+  onDebugAddEvent?: (eventName: string) => void;
 }
 
 const DRAWER_WIDTH = 'min(280px, 72vw)';
@@ -53,13 +55,29 @@ function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
 function TerminalSessionDrawerComponent({
   open,
   topInsetPx = 0,
+  bottomInsetPx = 0,
   sessions,
   onClose,
   onSelectSession,
   onCloseSession,
   onOpenQuickTabPicker,
+  onDebugAddEvent,
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const describeEventTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) {
+      return 'unknown';
+    }
+    const testIdOwner = target.closest('[data-testid]') as HTMLElement | null;
+    if (testIdOwner?.dataset.testid) {
+      return testIdOwner.dataset.testid;
+    }
+    if (target.dataset.testid) {
+      return target.dataset.testid;
+    }
+    return target.tagName.toLowerCase();
+  };
 
   const hostGroups = useMemo(() => {
     const groups = new Map<string, { hostKey: string; hostLabel: string; sessions: TerminalSessionDrawerItem[] }>();
@@ -131,7 +149,14 @@ function TerminalSessionDrawerComponent({
       <aside
         aria-hidden={!open}
         data-testid="terminal-session-drawer"
+        onTouchStartCapture={(event) => {
+          onDebugAddEvent?.(`cap:start:${describeEventTarget(event.target)}`);
+        }}
+        onTouchEndCapture={(event) => {
+          onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
+        }}
         onTouchStart={(event) => {
+          onDebugAddEvent?.('drawer:touchstart');
           const touch = event.touches[0];
           if (!touch) {
             touchStartRef.current = null;
@@ -140,6 +165,7 @@ function TerminalSessionDrawerComponent({
           touchStartRef.current = { x: touch.clientX, y: touch.clientY };
         }}
         onTouchEnd={(event) => {
+          onDebugAddEvent?.('drawer:touchend');
           const start = touchStartRef.current;
           touchStartRef.current = null;
           const touch = event.changedTouches[0];
@@ -398,19 +424,42 @@ function TerminalSessionDrawerComponent({
         </div>
 
         <div
+          data-testid="terminal-session-drawer-add"
+          role="button"
+          aria-label="新建 session"
+          tabIndex={-1}
+          onTouchStartCapture={(event) => {
+            onDebugAddEvent?.(`add:capstart:${describeEventTarget(event.target)}`);
+          }}
+          onTouchEndCapture={(event) => {
+            onDebugAddEvent?.(`add:capend:${describeEventTarget(event.target)}`);
+          }}
+          onTouchStart={() => {
+            onDebugAddEvent?.('add:touchstart');
+          }}
+          onTouchEnd={(event) => {
+            onDebugAddEvent?.('add:touchend');
+            event.preventDefault();
+            event.stopPropagation();
+            onDebugAddEvent?.('add:callback');
+            onOpenQuickTabPicker();
+          }}
+          onPointerDown={() => {
+            onDebugAddEvent?.('add:pointerdown');
+          }}
+          onPointerUp={() => {
+            onDebugAddEvent?.('add:pointerup');
+          }}
+          onClick={() => {
+            onDebugAddEvent?.('add:click');
+          }}
           style={{
-            padding: '10px 12px 12px',
+            padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
             borderTop: '1px solid rgba(255,255,255,0.08)',
+            flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            data-testid="terminal-session-drawer-add"
-            onTouchEnd={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenQuickTabPicker();
-            }}
+          <div
             style={{
               width: '100%',
               minHeight: '50px',
@@ -443,7 +492,7 @@ function TerminalSessionDrawerComponent({
               +
             </span>
             <span>New Session</span>
-          </button>
+          </div>
         </div>
       </aside>
     </>

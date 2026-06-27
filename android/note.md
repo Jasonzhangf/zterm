@@ -648,3 +648,27 @@ Need runtime debug to confirm:
 ### 已验证
 - `pnpm exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter=dot` PASS
 - `pnpm exec tsc --noEmit` PASS
+
+## 2026-06-27 session drawer 真机诊断变量 + picker 自动刷新
+
+### 诊断变量
+- `TerminalSessionDrawer` 新增只记录不改变语义的事件探针：`drawer:touchstart/touchend`、`add:touchstart/touchend/pointerdown/pointerup/click/callback`。
+- `TerminalPage` 状态浮窗新增 `DR/EV/CB/PM`：
+  - `DR`: drawer 是否打开
+  - `EV`: 最近事件序号与名称
+  - `CB`: drawer 回调数 / page open-picker 回调数
+  - `PM`: App pickerMode
+- Jason 可先打开“状态”浮窗，再点击 drawer 底部 `New Session`，截图对比点击前后定位事件是否进入、回调是否进入、pickerMode 是否变化。
+- 2026-06-27 真机截图显示 `EV 4:drawer:touchstart`、没有 `add:*`，说明事件进入 drawer 容器但没有进入原 inner button；Jason 明确排除“遮挡导致不弹框”。正确方向不是继续猜 `click/pointer/touch`，而是把语义 owner 放到实际可命中的 footer 触达面，并把 capture target 打进状态浮窗。
+- 修复：`TerminalSessionDrawer` 将 `terminal-session-drawer-add` 从内部 button 上移到整个 footer hit surface；footer 自身作为唯一 `touchend` owner 触发 `onOpenQuickTabPicker()`，同时保留 `cap:start/end:<target>` 与 `add:capstart/capend` 诊断。`bottomInsetPx` 只作为布局避让输入，不再作为根因结论。
+
+### picker 行为
+- session picker 打开后若已有明确 `bridgeHost + authToken`，自动刷新 tmux session，不再要求每次人工点 `Connect`。
+- picker row 统一合并 open tabs，不再只在 quick-tab 模式合并，减少“daemon session 列表 + 已打开 tab 列表”双列表心智。
+- daemon 成功枚举后，目标 owner 下未出现在远端 session 列表中的 open tab 自动用 `session-picker-remote-missing` 关闭。
+
+### 已验证
+- `pnpm exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx src/components/tmux/tmux-session-picker-rows.test.ts --reporter=dot` PASS
+- `pnpm exec tsc --noEmit` PASS
+- `./scripts/build-android-debug.sh` PASS，发布 `0.1.3.1923`。
+- Jason 真机安装验证：drawer 内 `New Session` 点击后 picker 已能弹出，修复生效。
