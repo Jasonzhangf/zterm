@@ -58,15 +58,6 @@ export function useTerminalPageCopyRuntime({
 
   const handleLongPressCopyRow = React.useCallback(
     (sessionId: string, rowIndex: number, clientX: number, clientY: number) => {
-      if (typeof console !== 'undefined') {
-        console.log('[CopyTrace] handleLongPressCopyRow', {
-          sessionId,
-          rowIndex,
-          clientX,
-          clientY,
-          splitVisible,
-        });
-      }
       const targetPane = splitVisible ? findPaneForSession(sessionId) : null;
       if (targetPane) {
         setActivePane(targetPane.id);
@@ -75,25 +66,10 @@ export function useTerminalPageCopyRuntime({
         }
       }
       setCopySelection((current) => {
-        if (typeof console !== 'undefined') {
-          console.log('[CopyTrace] handleLongPressCopyRow setCopySelection', {
-            currentActive: current.active,
-            currentSessionId: current.sessionId,
-            currentMenu: current.menu,
-            targetSessionId: sessionId,
-          });
-        }
         if (
           !current.active ||
           (current.sessionId !== null && current.sessionId !== sessionId)
         ) {
-          if (typeof console !== 'undefined') {
-            console.log('[CopyTrace] handleLongPressCopyRow SKIP - guard returned current', {
-              guardActive: !current.active,
-              guardSessionMismatch:
-                current.sessionId !== null && current.sessionId !== sessionId,
-            });
-          }
           return current;
         }
         return { ...current, sessionId, menu: { x: clientX, y: clientY, rowIndex } };

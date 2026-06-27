@@ -64,6 +64,7 @@ import {
   type ShortcutRow,
   type ShortcutToken,
 } from "./terminal-quickbar-helpers";
+import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
 
@@ -1562,14 +1563,6 @@ function TerminalQuickBarComponent({
     };
   }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
 
-  const quickBarAllowsTarget = (target: HTMLElement | null) => {
-    return Boolean(
-      target?.closest(
-        '[data-quickbar-allow-pointer="true"],input,textarea,button,select,label',
-      ),
-    );
-  };
-
   const shellCollapsed =
     (shellMode === "floating-collapsed" || collapsed) &&
     !floatingMenuOpen &&
@@ -1578,7 +1571,7 @@ function TerminalQuickBarComponent({
 
   const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
-    if (quickBarAllowsTarget(target)) {
+    if (shouldAllowQuickBarShellPointerEvent(target)) {
       return;
     }
     event.stopPropagation();

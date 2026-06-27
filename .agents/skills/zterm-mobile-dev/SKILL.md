@@ -969,3 +969,7 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - 任何 copy mode 手势链路修改，必须先跑 copy-longpress-e2e.test.tsx 全量红测。
   这 7 条测试锁住"未激活不启动→激活后 420ms 触发→移动取消→menu 状态设置→菜单渲染"。
 
+### 经验精华（2026-06-27）— Copy shell boundary
+- QuickBar shell 只应守自己的交互按钮与输入控件，不能把 shell 级 capture 做成 terminal row 手势政策。
+- copy long-press 的 delay / slop 要集中到纯 helper；runtime 只做选择状态，UI shell 只做自己的事件守门。
+- 再次出现“JS 菜单不弹 / 系统长按抢先”时，先查 shell capture 边界，再查 TerminalView 的 long-press timer，最后才看 state machine。

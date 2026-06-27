@@ -564,6 +564,11 @@ tmux truth
 - explicit terminal input 不能只依赖 lifecycle/heartbeat 去发现远端回显；input payload 必须同步发出，首个未完成 `pendingInputTailRefresh` 的 `buffer-head` 请求必须放到 coalesced microtask，后续 burst input 在 pending 清除前合并，禁止每键强制刷 head 或把 head 请求绑回 key event stack。
 - Android 物理键盘不能依赖 DOM textarea focus 路径；native `ImeAnchor key` 必须直接走 shared terminal keyboard resolver 并写入 active session。plain letter 留给 editable/IME 文本路径，Ctrl/Alt 组合键和方向/Esc 等特殊键走硬件 key path；红测必须让 `allowDomFocus=false` 时 `Ctrl+C` 仍到达 terminal input。
 
+## 9. Android copy-mode gate
+- WebView copy-mode 长按有两层 native gate：`setOnLongClickListener(v -> true)` 只管系统 ActionMode / 工具栏，`setLongClickable(false)` 才会停掉原生 haptic / selection 拦截，让 JS `onTouchStart` 的长按计时器真正启动。
+- copy 菜单不出时，先查 native long-clickability，再查 DOM touch 事件链，最后才看 React 菜单状态。
+- DOM 层仍负责 `preventDefault` / `stopPropagation`，但不能指望它单独压住 Android 原生长按行为。
+
 ## 2026-06-01 多 pane closeout 精华
 - 多 pane UI 对齐必须查“生产入口真源”：Mac 当前真实入口是 `ShellWorkspace`，不要只测未接入入口组件；packaged smoke 必须用进程路径证明启动的是 `mac/out/.../ZTerm.app`。
 - Android 接 shared PaneTabs/PaneStage 时，不得丢旧交互合约：header padding、close aria/touch、relay badge button、横向 touch-scroll 抑制、inactive pane first-frame viewport demand 都要进红测。

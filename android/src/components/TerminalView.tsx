@@ -52,6 +52,10 @@ import {
   createTerminalDomInputController,
 } from "@zterm/shared";
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
+import {
+  COPY_LONG_PRESS_DELAY_MS,
+  hasCopyLongPressMovedTooFar,
+} from "./terminal/terminal-copy-gesture";
 import type {
   SessionRenderBufferSnapshot,
   TerminalResizeHandler,
@@ -350,7 +354,7 @@ function TerminalViewComponent({
           return;
         }
         onLongPressRow(sessionId, start.rowIndex, start.x, start.y);
-      }, 420);
+      }, COPY_LONG_PRESS_DELAY_MS);
     },
     [cancelCopyLongPress, copyModeActive, onLongPressRow, sessionId],
   );
@@ -360,10 +364,7 @@ function TerminalViewComponent({
       if (!start) {
         return;
       }
-      if (
-        Math.abs(event.clientX - start.x) > 10 ||
-        Math.abs(event.clientY - start.y) > 10
-      ) {
+      if (hasCopyLongPressMovedTooFar(start, event.clientX, event.clientY)) {
         cancelCopyLongPress();
       }
     },
@@ -371,15 +372,6 @@ function TerminalViewComponent({
   );
   const startCopyLongPressTouch = useCallback(
     (event: TouchEvent<HTMLDivElement>, rowIndex: number) => {
-      if (typeof console !== 'undefined') {
-        console.log('[CopyTrace] startCopyLongPressTouch fired', {
-          rowIndex,
-          copyModeActive,
-          hasSession: Boolean(sessionId),
-          hasCallback: Boolean(onLongPressRow),
-          touches: event.touches.length,
-        });
-      }
       if (!copyModeActive || !sessionId || !onLongPressRow) {
         return;
       }
@@ -396,20 +388,14 @@ function TerminalViewComponent({
         rowIndex,
       };
       longPressTimerRef.current = window.setTimeout(() => {
-        if (typeof console !== 'undefined') {
-          console.log('[CopyTrace] longPress timer fired', { rowIndex, startX: longPressStartRef.current?.x });
-        }
         longPressTimerRef.current = null;
         const start = longPressStartRef.current;
         longPressStartRef.current = null;
         if (!start) {
           return;
         }
-        if (typeof console !== 'undefined') {
-          console.log('[CopyTrace] calling onLongPressRow', { sessionId, rowIndex: start.rowIndex });
-        }
         onLongPressRow(sessionId, start.rowIndex, start.x, start.y);
-      }, 420);
+      }, COPY_LONG_PRESS_DELAY_MS);
     },
     [cancelCopyLongPress, copyModeActive, onLongPressRow, sessionId],
   );
@@ -420,10 +406,7 @@ function TerminalViewComponent({
       if (!start || !touch) {
         return;
       }
-      if (
-        Math.abs(touch.clientX - start.x) > 10 ||
-        Math.abs(touch.clientY - start.y) > 10
-      ) {
+      if (hasCopyLongPressMovedTooFar(start, touch.clientX, touch.clientY)) {
         cancelCopyLongPress();
       }
     },

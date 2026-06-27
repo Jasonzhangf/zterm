@@ -460,3 +460,5 @@ silently returns 0 when viewport metrics are stable.
 - Android WebView `setLongClickable(true)` 会在 native 层拦截 touch 序列并触发 haptic，JS `onTouchStart` 收不到完整事件链。
 - 禁用 WebView 原生长按必须用 `setLongClickable(false)`，不能只靠 `setOnLongClickListener(v -> true)`。
 - copy-mode 的"禁系统菜单"应只在 DOM/React 层做（`preventDefault` + `stopPropagation`），不在 native WebView 边界全局吞事件。
+- 排查顺序固定为：先看 native long-clickability，再看 DOM touch timer，最后看 React 菜单状态；`setOnLongClickListener` 只禁 ActionMode，不等于放行 JS 长按。
+- 2026-06-27 已验证补强：copy 长按 delay/slop 已集中到 `terminal-copy-gesture.ts`，QuickBar shell 事件守门已集中到 `terminal-quickbar-shell-guards.ts`，copy runtime 不再输出 `[CopyTrace]` 生产 console；copy 定向 30 tests PASS，`tsc --noEmit` PASS。
