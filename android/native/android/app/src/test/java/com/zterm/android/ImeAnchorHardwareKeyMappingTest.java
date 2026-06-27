@@ -78,5 +78,41 @@ public class ImeAnchorHardwareKeyMappingTest {
             false,
             false
         ));
+
+        assertEquals("Escape", ImeAnchorPlugin.mapHardwareKeyToKey(
+            KeyEvent.KEYCODE_ESCAPE,
+            false,
+            false,
+            false
+        ));
+        assertEquals("Escape", ImeAnchorPlugin.mapHardwareKeyToCode(
+            KeyEvent.KEYCODE_ESCAPE,
+            false,
+            false
+        ));
+
+        assertEquals("Backspace", ImeAnchorPlugin.mapHardwareKeyToKey(
+            KeyEvent.KEYCODE_DEL,
+            false,
+            false,
+            false
+        ));
+        assertEquals("Backspace", ImeAnchorPlugin.mapHardwareKeyToCode(
+            KeyEvent.KEYCODE_DEL,
+            false,
+            false
+        ));
+
+        assertEquals("Delete", ImeAnchorPlugin.mapHardwareKeyToKey(
+            KeyEvent.KEYCODE_FORWARD_DEL,
+            false,
+            false,
+            false
+        ));
+        assertEquals("Delete", ImeAnchorPlugin.mapHardwareKeyToCode(
+            KeyEvent.KEYCODE_FORWARD_DEL,
+            false,
+            false
+        ));
     }
 }

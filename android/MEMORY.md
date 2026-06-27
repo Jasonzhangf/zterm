@@ -8,6 +8,8 @@
 
 ## Key Decisions
 
+- [2026-06-27] Android 抽屉底部单按钮动作必须只保留一个语义 owner；`pointerup` / `touchend` / `click` 不要叠在同一个按钮上再加时间戳去重。真机上更稳的做法是让按钮只走 `click`，`touch` 只负责手势关闭类交互。已用 `TerminalSessionDrawer` + `TerminalPage.session-drawer` 定向测试锁住。
+- [2026-06-27] Android IME 特殊键要同时锁 `ImeAnchor backspace` 事件路径和 hardware `key` payload 路径；`KEYCODE_DEL` 必须归一为 `Backspace -> \x7f`，`KEYCODE_FORWARD_DEL` 必须归一为 `Delete -> \x1b[3~`，`Escape -> \x1b` 也要在 JS active-session 路由测试中覆盖。已用 `TerminalPage.android-ime.test.tsx` 与 native `ImeAnchorHardwareKeyMappingTest` 验证。
 - [2026-06-11] multi-pane refresh 的一个明确放大器已收口：`SessionContext lifecycle` 的 active tick 只刷新 active session，visible non-active panes 走独立更慢的 passive visible tick；`buildLifecycleRefreshTargets()` 只保留 active，新增 passive visible target / schedule helper。已用 lifecycle、multi-pane-refresh、TerminalPage page tests 和 `tsc --noEmit` 验证。
 - [2026-06-11] `TerminalPage` 的 interaction/live-pane orchestration 必须只有一个 owner；若 `interactiveSession / renderedPaneSessions / livePaneSessionIds / pane attach / chrome switch / swipe tab` 同时散在页面本体和 hook 中，就会形成第二份页面层语义与额外重算。当前唯一 owner 已收口到 `useTerminalPageInteractionRuntime`。
 - [2026-06-12] active tab 切回后输入成功但本地刷新慢的一个真实生命周期缺口是：`resetSessionTransportPullBookkeeping()` 只清 pull state / sync debounce，不清 `pendingInputTailRefreshRef`。旧 input tail pending 会让切回后的第一笔输入失去立即 head-refresh 触发，表现成“远端先动、本地慢刷”。现在切 tab / active re-entry 的 reset 口已统一清理该 pending 输入书账。

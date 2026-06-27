@@ -57,8 +57,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - 说明：`android/evidence/` 是本地证据仓，默认不进 Git 主线；Git 中只保留目录说明文件
 
 ### 2.3 旧文档处理
-- `android/note.md` 是 agent 自己看的工作笔记，不是主真源
-- 新任务不再往 `note.md` 追加流程说明
+- `android/note.md` 是 agent 自己看的工作台，不是主真源
+- 探索过程里的高信号发现、假设、踩坑和回归锁定要写进去；不要把完整流程说明塞进 note
 
 ### 2.4 不在本项目范围
 - screen 集成（用户自行管理）
@@ -172,9 +172,18 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 若 Settings UI 把主题卡片标成“正在使用/Active”，点击卡片就必须立即写入真实持久化存储；不能只停留在本页 draft，否则用户切出去再回来会恢复默认主题，属于典型假状态
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
+### 2.11 Drawer / sheet 交互收口
+- 抽屉底部这类单按钮动作只保留一个语义 owner，默认用 `click`；不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
+- `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
+
+### 2.12 Android IME 特殊键门禁
+- Android 输入法特殊键必须同时覆盖两条路径：`ImeAnchor backspace` 事件路径，以及 `ImeAnchor key` payload 路径。
+- native keyCode 必须显式归一：`KEYCODE_DEL -> Backspace`、`KEYCODE_FORWARD_DEL -> Delete`、`KEYCODE_ESCAPE -> Escape`；JS 层再统一映射到终端序列并路由到当前 active session。
+- 回归测试不能只测中文/文本提交；至少锁 `Escape / Backspace / Delete / Ctrl+C`。
+
 ---
 
-### 2.11 Session Picker 统一入口规则
+### 2.13 Session Picker 统一入口规则
 - `New connection` 入口必须先进入 session picker：先列历史连接，再列当前 tmux sessions，最后才是 clean session / full form
 - session picker 顶部必须支持手动输入 Tailscale IP / token，并在输入后立即尝试拉 tmux sessions
 - tmux session 列表需要支持最小 CRUD（list/create/rename/kill）以及 multi-select 直接开多个 tabs
@@ -182,12 +191,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - quick-tab picker 只允许一份 session row projection：daemon tmux session 顺序为主，open tab 状态贴在同一行；daemon refresh 未返回但仍在 OPEN_TABS 的本地 tab 只能追加为 not-reported row，不得隐藏或自动关闭。
 - OPEN_TABS 已打开 tab 不得按 semantic reuse key 自动合并/替换/删除；同名 tmux session 的 runtime duplicate 只能作为 transport fact，不能顶替 persisted open tab 的 `sessionId`。saved tab list 导入可做 import-only semantic 去重。
 
-### 2.12 Bridge Auth 规则
+### 2.14 Bridge Auth 规则
 - daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override
 - client 的 remembered server / host / picker target 都要携带 `authToken`，并在 websocket 连接阶段透传
 - 验证时必须补一条“无 token 失败 / 正确 token 成功”的证据
 
-### 2.13 跨尺寸布局统一规则
+### 2.15 跨尺寸布局统一规则
 - phone / tablet / foldable / split-screen / future Mac 只允许共享**一套** layout profile 真源；禁止在 `ConnectionsPage` / `ConnectionPropertiesPage` / `TerminalPage` 各自散落 breakpoint
 - 大屏效果优先通过 **单行多列 + 垂直分屏** 的 phone-sized pane 编排获得统一体验；不要先做 desktop-only 页面再回头兼容 mobile
 - future Mac 复用 shared app-layer 的页面、会话、存储和 layout primitives；平台壳只补窗口 / 菜单 / 快捷键 / 原生输入差异

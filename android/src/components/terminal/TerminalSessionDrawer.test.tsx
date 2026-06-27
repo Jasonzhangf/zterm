@@ -50,7 +50,7 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 
-  it('opens quick tab picker from touch interaction on mobile without relying on synthetic click', () => {
+  it('opens quick tab picker from the drawer add button click only', () => {
     const onOpenQuickTabPicker = vi.fn();
 
     render(
@@ -68,7 +68,9 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.touchEnd(addButton, {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
 
+    fireEvent.click(addButton);
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 

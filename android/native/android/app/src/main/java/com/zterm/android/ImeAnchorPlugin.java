@@ -356,6 +356,10 @@ public class ImeAnchorPlugin extends Plugin {
         switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE:
                 return "Escape";
+            case KeyEvent.KEYCODE_DEL:
+                return "Backspace";
+            case KeyEvent.KEYCODE_FORWARD_DEL:
+                return "Delete";
             case KeyEvent.KEYCODE_DPAD_UP:
                 return "ArrowUp";
             case KeyEvent.KEYCODE_DPAD_DOWN:
@@ -378,6 +382,10 @@ public class ImeAnchorPlugin extends Plugin {
         switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE:
                 return "Escape";
+            case KeyEvent.KEYCODE_DEL:
+                return "Backspace";
+            case KeyEvent.KEYCODE_FORWARD_DEL:
+                return "Delete";
             case KeyEvent.KEYCODE_DPAD_UP:
                 return "ArrowUp";
             case KeyEvent.KEYCODE_DPAD_DOWN:

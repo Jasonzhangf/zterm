@@ -1272,11 +1272,15 @@ describe("TerminalPage Android IME bridge", () => {
 
     imeListeners.get("key")?.({ key: "ArrowUp", code: "ArrowUp" });
     imeListeners.get("key")?.({ key: "Escape", code: "Escape" });
+    imeListeners.get("key")?.({ key: "Backspace", code: "Backspace" });
+    imeListeners.get("key")?.({ key: "Delete", code: "Delete" });
     imeListeners.get("key")?.({ key: "c", code: "KeyC", ctrlKey: true });
 
     expect(onTerminalInput).toHaveBeenNthCalledWith(1, "s2", "\u001b[A");
     expect(onTerminalInput).toHaveBeenNthCalledWith(2, "s2", "\u001b");
-    expect(onTerminalInput).toHaveBeenNthCalledWith(3, "s2", "\u0003");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(3, "s2", "\x7f");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(4, "s2", "\u001b[3~");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(5, "s2", "\u0003");
   });
 
   it("uses native ImeAnchor keyboardState to raise terminal chrome on Android", async () => {
