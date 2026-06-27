@@ -211,9 +211,8 @@ describe('TerminalPage portrait session drawer', () => {
     });
     fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    fireEvent.pointerUp(screen.getByTestId('terminal-session-drawer-add'), {
-      pointerId: 1,
-      pointerType: 'touch',
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
     });
     expect(onOpenQuickTabPicker).toHaveBeenCalled();
   });

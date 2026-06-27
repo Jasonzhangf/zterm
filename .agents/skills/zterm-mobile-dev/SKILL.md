@@ -175,7 +175,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.11 Drawer / sheet 交互收口
 - 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
-- Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机优先用单一 `pointerup` owner，并配 `touch-action: manipulation`；不要把它写成 click-only 真源。
+- Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机不能依赖 `click` 或 `pointerup`；用按钮自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
 
 ### 2.12 Android IME 特殊键门禁
 - Android 输入法特殊键必须同时覆盖两条路径：`ImeAnchor backspace` 事件路径，以及 `ImeAnchor key` payload 路径。

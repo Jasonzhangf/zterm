@@ -639,11 +639,11 @@ Need runtime debug to confirm:
 
 ### 重新确认
 - drawer 到 `onOpenQuickTabPicker -> pickerMode='quick-tab'` 的调用链是通的，问题不在 `TerminalPage` / `App` 桥接层。
-- 真机点击 `New Session` 的失败点更像是 Android WebView 下 `click` 没有稳定穿透到这个 drawer 按钮。
+- 真机点击 `New Session` 的失败点更像是 Android WebView 下 `click` / `pointerup` 没有稳定穿透到这个 drawer 按钮。
 
 ### 修复
-- `TerminalSessionDrawer` 底部按钮改成单一 `pointerup` owner，并补 `touch-action: manipulation`。
-- 回归测试从 `click` 改为 `pointerUp`，锁 `TerminalSessionDrawer` 与 `TerminalPage.session-drawer` 两层。
+- `TerminalSessionDrawer` 底部按钮改成自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
+- 回归测试从 `click/pointerUp` 改为 `touchEnd`，锁 `TerminalSessionDrawer` 与 `TerminalPage.session-drawer` 两层。
 
 ### 已验证
 - `pnpm exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter=dot` PASS

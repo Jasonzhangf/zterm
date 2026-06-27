@@ -406,7 +406,7 @@ function TerminalSessionDrawerComponent({
           <button
             type="button"
             data-testid="terminal-session-drawer-add"
-            onPointerUp={(event) => {
+            onTouchEnd={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onOpenQuickTabPicker();
