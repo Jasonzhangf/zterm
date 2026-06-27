@@ -170,6 +170,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - terminal 主题切换的真源是“默认前景/背景 + ANSI 16 色 preset”，不是只换容器背景；主题 id 应持久化到 shared `BridgeSettings`，Settings 只做 preset 选择
 - Android / Mac 若都要支持 terminal 主题，preset 与颜色算法必须下沉到 shared 纯模块，平台 TerminalView 只消费同一份 preset，避免 ANSI 映射再次分叉
 - 若 Settings UI 把主题卡片标成“正在使用/Active”，点击卡片就必须立即写入真实持久化存储；不能只停留在本页 draft，否则用户切出去再回来会恢复默认主题，属于典型假状态
+- `BridgeSettings` 里的 `terminalWidthMode` 是启动排版唯一真源；storage hook 首次 render 必须同步读取 localStorage 并 normalize，禁止先返回默认 `mirror-fixed` 再等 effect 修正，否则 restore/connect 首帧会按错误宽度模式连接。
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
 ### 2.11 Drawer / sheet 交互收口

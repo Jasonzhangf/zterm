@@ -8,6 +8,7 @@
 
 ## Key Decisions
 
+- [2026-06-28] `BridgeSettings` 是 terminal width mode 的启动唯一真源；`useBridgeSettingsStorage` 首次 render 必须同步读取并 normalize localStorage，禁止先返回默认 `mirror-fixed` 再等 effect 异步修正，否则 restore/connect 首帧会用错宽度模式，表现为 `adaptive-phone` 只有重新 save 后才生效。
 - [2026-06-27] Android 抽屉底部单按钮动作必须只保留一个语义 owner；`pointerup` / `touchend` / `click` 不要叠在同一个按钮上再加时间戳去重。`TerminalSessionDrawer` 的 `New Session` 经真机证伪不能依赖 `click` 或 `pointerup`；该按钮应由自身 `touchend` 截断父级 drawer 手势并触发 quick-tab picker。已用 `TerminalSessionDrawer` + `TerminalPage.session-drawer` 定向测试锁住。
 - [2026-06-27] `TerminalSessionDrawer` 的 `New Session` 若状态浮窗显示只收到 `drawer:touchstart` 而没有 `add:*`，不能继续猜 `click/pointer/touch`，也不能直接判定遮挡；必须先用 capture target 确认命中节点。已验证有效修复是把 `New Session` 的语义 owner 从内部 button 上移到整个 footer hit surface，footer 自身作为唯一 `touchend` owner 触发 quick-tab picker，并用 `cap:start/end:<target>` 回归锁住。
 - [2026-06-27] Session picker 默认不应要求人工点 `Connect`：只要有明确 `bridgeHost + authToken`，打开 sheet 就自动刷新 tmux sessions。picker row 必须把 daemon session 与已打开 tab 合并成同一行；daemon 成功枚举后，目标 owner 下未被远端报告的本地 open tab 自动以 `session-picker-remote-missing` 关闭，避免双列表和 stale tab。

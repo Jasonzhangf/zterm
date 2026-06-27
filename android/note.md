@@ -672,3 +672,24 @@ Need runtime debug to confirm:
 - `pnpm exec tsc --noEmit` PASS
 - `./scripts/build-android-debug.sh` PASS，发布 `0.1.3.1923`。
 - Jason 真机安装验证：drawer 内 `New Session` 点击后 picker 已能弹出，修复生效。
+
+## 2026-06-28 adaptive-phone 启动读取缺口
+
+### 现象
+- Settings 中已保存 `terminalWidthMode=adaptive-phone` 后，App 启动第一次进入 terminal 仍按 `mirror-fixed` 宽度连接/排版。
+- 只有重新进入 Settings 并 save 一次后，排版才按手机屏幕宽度生效。
+
+### 根因
+- `packages/shared/src/react/use-bridge-settings-storage.ts` 初始 state 固定为 `DEFAULT_BRIDGE_SETTINGS`，其中 `terminalWidthMode` 默认是 `mirror-fixed`。
+- localStorage 里的真实 `BridgeSettings` 只在 mount 后 `useEffect` 异步读取。
+- SessionProvider / restore / connect 的首帧可能已经消费了默认 `mirror-fixed`，所以启动时没有把已保存的 `adaptive-phone` 带入运行态。
+
+### 修复
+- `useBridgeSettingsStorage` 改为 lazy initializer 同步读取 `localStorage[STORAGE_KEYS.BRIDGE_SETTINGS]` 并 `normalizeBridgeSettings()`，确保第一次 render 就拿到已保存的 `adaptive-phone`。
+- 保留 effect 作为浏览器环境挂载后的同步校正，但不再依赖 effect 才得到首屏设置。
+
+### 已验证
+- `pnpm exec vitest run ../packages/shared/src/react/use-bridge-settings-storage.test.tsx src/hooks/useTerminalShellActions.test.tsx src/lib/terminal-width-mode-manager.test.ts --reporter=dot` PASS。
+- `pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx --reporter=dot` PASS。
+- `pnpm --dir android exec tsc --noEmit` PASS。
+- 已知既有测试不一致：`android/src/lib/bridge-settings.test.ts` 期望 daemon config path 为 `~/.zterm/config.json`，但共享实现返回 `~/.wterm/config.json`；该失败不是本次 adaptive 启动读取改动引入。

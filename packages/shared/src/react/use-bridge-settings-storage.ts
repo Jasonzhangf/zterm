@@ -2,24 +2,33 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_BRIDGE_SETTINGS, normalizeBridgeSettings, type BridgeSettings } from '../connection/bridge-settings';
 import { STORAGE_KEYS } from '../connection/types';
 
+function readStoredBridgeSettings(): BridgeSettings {
+  if (typeof window === 'undefined') {
+    return DEFAULT_BRIDGE_SETTINGS;
+  }
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS);
+    if (!stored) {
+      return DEFAULT_BRIDGE_SETTINGS;
+    }
+
+    return normalizeBridgeSettings(JSON.parse(stored));
+  } catch (error) {
+    console.error('[useBridgeSettingsStorage] Failed to load bridge settings:', error);
+    return DEFAULT_BRIDGE_SETTINGS;
+  }
+}
+
 export function useBridgeSettingsStorage() {
-  const [settings, setSettingsState] = useState<BridgeSettings>(DEFAULT_BRIDGE_SETTINGS);
+  const [settings, setSettingsState] = useState<BridgeSettings>(() => readStoredBridgeSettings());
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    try {
-      const stored = localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS);
-      if (!stored) {
-        return;
-      }
-
-      setSettingsState(normalizeBridgeSettings(JSON.parse(stored)));
-    } catch (error) {
-      console.error('[useBridgeSettingsStorage] Failed to load bridge settings:', error);
-    }
+    setSettingsState(readStoredBridgeSettings());
   }, []);
 
   const setSettings = (next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)) => {
