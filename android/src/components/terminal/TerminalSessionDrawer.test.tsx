@@ -46,11 +46,14 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.click(screen.getByTestId('terminal-session-drawer-row-s2'));
     expect(onSelectSession).toHaveBeenCalledWith('s2');
 
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-add'));
+    fireEvent.pointerUp(screen.getByTestId('terminal-session-drawer-add'), {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 
-  it('opens quick tab picker from the drawer add button click only', () => {
+  it('opens quick tab picker from the drawer add button pointer activation', () => {
     const onOpenQuickTabPicker = vi.fn();
 
     render(
@@ -70,7 +73,10 @@ describe('TerminalSessionDrawer', () => {
     });
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
 
-    fireEvent.click(addButton);
+    fireEvent.pointerUp(addButton, {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
     expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
   });
 

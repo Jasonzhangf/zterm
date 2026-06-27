@@ -173,8 +173,9 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
 ### 2.11 Drawer / sheet 交互收口
-- 抽屉底部这类单按钮动作只保留一个语义 owner，默认用 `click`；不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
+- 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
+- Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机优先用单一 `pointerup` owner，并配 `touch-action: manipulation`；不要把它写成 click-only 真源。
 
 ### 2.12 Android IME 特殊键门禁
 - Android 输入法特殊键必须同时覆盖两条路径：`ImeAnchor backspace` 事件路径，以及 `ImeAnchor key` payload 路径。

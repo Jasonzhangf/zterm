@@ -219,6 +219,36 @@ ws.on("message", (msg: Buffer | string) => {
   - `http://127.0.0.1:3333/updates/latest.json` 200，APK 200。
   - `http://100.66.1.82:3333/updates/latest.json` 200，返回 apkUrl host 为 `100.66.1.82`，APK 200。
 
+## 2026-06-27 session drawer 新 session 按钮回归
+
+### 现象
+- portrait terminal session drawer 底部 `New Session` 按钮在真机上看起来无响应。
+
+### 当前判断
+- 按钮现在同时挂了 `pointerup` / `touchend` / `click`，还加了 600ms 去重。
+- 这类多路事件 + 时间戳门禁在 Android WebView 上容易把真实点击链路吞掉。
+
+### 修复方向
+- 收敛成单一 `click` owner。
+- `touch` 只保留给 drawer 滑动关闭，不再负责 new session 打开。
+
+### 回归锁定
+- 抽屉 add 按钮：`touchEnd` 不再触发打开，`click` 才是唯一语义 owner。
+
+## 2026-06-27 Android IME 特殊键回归
+
+### 现象
+- 输入法/终端键盘里的 `Esc`、`Backspace` 等特殊键在真机上无效。
+
+### 根因判断
+- JS `TerminalPage` 已有 `ImeAnchor` 的 `input / backspace / key` 三条监听。
+- shared renderer 也已能把 `Escape -> \x1b`、`Backspace -> \x7f`、`Delete -> \x1b[3~` 映射成终端序列。
+- Native `ImeAnchorPlugin` 的 hardware key mapping 没锁住 `KEYCODE_DEL` / `KEYCODE_FORWARD_DEL`，部分输入法或硬件路径会把 Backspace/Delete 作为 keyCode 送到 `onKeyDown`，未进入 `backspace` listener。
+
+### 修复方向
+- native mapping 增加 `KEYCODE_DEL -> Backspace`、`KEYCODE_FORWARD_DEL -> Delete`。
+- JS 回归锁住 `ImeAnchor key` payload 的 `Escape / Backspace / Delete / Ctrl+C` 都路由到当前 active session。
+
 ## 2026-06-22 升级包 404 现场复核（0.1.3.1872）
 
 ### 现场证据
@@ -549,3 +579,72 @@ ws.on("message", (msg: Buffer | string) => {
 - 当前测试门结果：
   - `TerminalQuickBar.test.tsx + TerminalPage.real-quickbar-split.test.tsx + ConnectionsPage.test.tsx` PASS（72/72）
   - `pnpm run type-check` PASS
+
+## 2026-06-25: TUI bottom lines not refreshing
+
+### Symptom
+TUI (vim/htop/etc) bottom input area (status line / command line) never refreshes.
+Lines are rendered but content is permanently stale.
+
+### Investigation done
+- TerminalView.tsx → buildTerminalRenderFrame → buildTerminalRenderRows chain traced
+- `followDemandAnchorEndIndex` = `bufferTailAnchorEndIndex` = `max(startIndex, bufferTailEndIndex || effectiveBufferEndIndex)`
+- `followVisualBottomIndex = min(anchor, effectiveBufferEndIndex)`
+- If `bufferTailEndIndex` is stale → `followVisualBottomIndex` stuck → bottom lines outside visible window
+- `projectRenderBuffer` in session-render-gate.ts reuses rows via `rowsEqual` — if buffer revision doesn't change, stale rows persist
+- `applyBufferSyncToSessionBuffer` in shared/terminal-buffer.ts: `bufferTailEndIndex` from `resolveAuthoritativeTailEndIndex` uses `max(current.bufferTailEndIndex, sparseWindow.endIndex)`
+- `trimToCache` limits buffer window to `cacheLines` — could trim bottom if `bufferTailEndIndex` is wrong
+- `renderEndOffset = min(totalRows, visibleStartOffset + viewportRows + overscan)` — if totalRows > bufferLines.length, render tries to extend beyond available data
+
+### Hypothesis
+Most likely: `bufferTailEndIndex` in the render buffer snapshot is stale/frozen, causing `followDemandAnchorEndIndex` to clamp `followVisualBottomIndex` below the actual buffer end. This means the renderer's visible window bottom doesn't reach the latest lines.
+
+### Next steps
+1. Add runtime debug logging to trace `bufferTailEndIndex` vs `effectiveBufferEndIndex` vs `followVisualBottomIndex` at runtime
+2. Check if `bufferTailEndIndex` updates when TUI redraws in place (same line count, different content)
+3. The fix is likely in `@zterm/shared` package — NOT in the Android app layer
+4. Need to verify whether daemon sends updated `availableEndIndex` when content changes without scrolling
+
+### Root cause hypothesis (refined)
+The render buffer store uses `renderBuffersEqual()` to detect changes.
+This checks `revision` first, then `rowsEqual` per-cell.
+If daemon sends updated content for in-place TUI redraw, the chain SHOULD work.
+BUT if daemon's `revision` field doesn't increment for in-place redraws, the render gate's
+`projectRenderBuffer` might short-circuit row comparison and reuse old row references.
+The `reusedRowMask` logic in `projectRenderBuffer` compares `rowsEqual(row, previousProjectedRow)`
+where `row` is from `buffer.lines` (live buffer) and `previousProjectedRow` is from previous render projection.
+If these are reference-equal (from previous clone), the row is marked reused and NOT re-cloned.
+
+Key question: does the live buffer's `lines[offset]` get a NEW cell array reference when content changes in place?
+If `applyBufferSyncToSessionBuffer` creates new cell arrays only when new payload data arrives,
+but the payload's lines cover the same range, the cells SHOULD be new references.
+
+Need runtime debug to confirm:
+1. `session.render-gate.flush.inspect` → liveBuffer vs projected comparison
+2. Whether `bufferTailEndIndex` advances when TUI redraws in place
+3. Whether `effectiveBufferEndIndex` matches actual buffer content length
+
+## 2026-06-25 current audit
+
+- Current uncommitted changes are regression tests and notes for TUI bottom stale repaint, not a new copy-code patch.
+- Copy-mode truth to keep: native WebView long-press is a two-gate problem; `setOnLongClickListener(v -> true)` only suppresses ActionMode, `setLongClickable(false)` is the gate that restores JS long-press delivery.
+
+## 2026-06-27 copy coupling audit
+
+- Repeated copy regressions came from cross-layer gesture ownership drifting into multiple places.
+- Current cleanup direction: copy long-press constants/move threshold live in `terminal-copy-gesture.ts`; QuickBar shell event filtering lives in `terminal-quickbar-shell-guards.ts`; copy runtime owns selection state only.
+- Removed `[CopyTrace]` console logs from runtime path; debug evidence should use structured overlay/log gates, not production console spam.
+
+## 2026-06-27 session drawer New Session 再回归
+
+### 重新确认
+- drawer 到 `onOpenQuickTabPicker -> pickerMode='quick-tab'` 的调用链是通的，问题不在 `TerminalPage` / `App` 桥接层。
+- 真机点击 `New Session` 的失败点更像是 Android WebView 下 `click` 没有稳定穿透到这个 drawer 按钮。
+
+### 修复
+- `TerminalSessionDrawer` 底部按钮改成单一 `pointerup` owner，并补 `touch-action: manipulation`。
+- 回归测试从 `click` 改为 `pointerUp`，锁 `TerminalSessionDrawer` 与 `TerminalPage.session-drawer` 两层。
+
+### 已验证
+- `pnpm exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter=dot` PASS
+- `pnpm exec tsc --noEmit` PASS

@@ -406,7 +406,7 @@ function TerminalSessionDrawerComponent({
           <button
             type="button"
             data-testid="terminal-session-drawer-add"
-            onClick={(event) => {
+            onPointerUp={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onOpenQuickTabPicker();
@@ -424,6 +424,7 @@ function TerminalSessionDrawerComponent({
               gap: '8px',
               fontSize: '14px',
               fontWeight: 760,
+              touchAction: 'manipulation',
             }}
           >
             <span
