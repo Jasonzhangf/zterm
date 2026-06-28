@@ -42,7 +42,7 @@ export interface TerminalLayoutProfile {
 export type TerminalSessionGroupLayoutMode = 'auto' | 'horizontal' | 'vertical';
 export type TerminalSessionGroupLayoutAxis = 'horizontal' | 'vertical';
 
-export const TERMINAL_SESSION_GROUP_WIDE_ASPECT_RATIO = 0.7;
+export const TERMINAL_SESSION_GROUP_WIDE_ASPECT_RATIO = 0.4;
 
 export const TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS: readonly {
   id: TerminalSessionGroupLayoutMode;

@@ -66,8 +66,8 @@ describe('terminal-layout-profile', () => {
 
   it('keeps narrow portrait session groups vertical by aspect ratio', () => {
     expect(resolveTerminalSessionGroupLayoutAxis({
-      viewportWidth: 390,
-      viewportHeight: 844,
+      viewportWidth: 360,
+      viewportHeight: 900,
       mode: 'horizontal',
     })).toBe('vertical');
   });
