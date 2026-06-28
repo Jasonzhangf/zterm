@@ -3,6 +3,59 @@
 - Truth: keep runtime honest; first slice only active pane/tab drives live bridge session
 - Success: type-check + package pass + packaged app visual smoke
 
+## 2026-06-28 infinite session group audit
+- User intent: terminal 的多 session 多 panel 不是传统同屏平权多 pane，而是一个按设备形态变化的 session group viewport/projection。
+- Frozen UI shape:
+  - phone portrait: 上下无限滚，主 panel 占大部分，中间主视图上下各有 peek panel。
+  - tablet portrait: 左右无限滚，主 panel 占大部分，左右各有 peek panel，必须平面并排，不要透视/弧度。
+  - tablet landscape: 仍保留左右相邻 session peek，但中间 workspace 可以同时显示多个 live panel，不把整个横屏变成单窗口。
+- Architecture conclusion:
+  - 不能把无限滚动逻辑塞进 `TerminalView`，renderer 只应管可见窗口。
+  - 不能把它直接做成新的 workspace truth；现有 workspace 仍然只负责 pane/tab ownership。
+  - 应新增一层纯投影：`workspace + sessions + layout profile -> session group viewport slots`。
+  - `Session` / `Type` 维持既有独立真源，不因为新 UI 形态改语义；新增层属于 app-layer layout/projection，只组织多个 session pane 容器如何摆放。
+  - 每个 session pane 仍是容器单元；新设计只是在统一框架里选择 phone portrait vertical、tablet portrait horizontal、tablet landscape workspace+peek 等 presentation mode。
+  - 实际内容组织与屏幕最终渲染之间允许再加一层 virtualization：屏幕外 panel 不渲染 live terminal，只保留 projection/preview identity。
+  - 抽屉切 tab、横屏多分屏、无限屏新设计本质上都是同一批 tab/session pane 的不同 layout；功能组织不变，只是多了一层 presentation framework。
+  - 渲染判定收敛为两类可见性：fully visible slot 才挂 live terminal；partially visible slot 默认只挂轻量 preview/identity；offscreen slot 不渲染。
+  - peek slot 应是同一份 session/workspace projection 的轻量视图，默认不挂 live `TerminalView`，避免额外刷新和输入 owner 冲突。
+  - center/workspace slots 才能承载 live `TerminalView`，且 active/input owner 只能有一个。
+- Main risk:
+  - 现有 `TerminalTabSwipeSurface` 只适合“当前 active session 左右切换 tab”，不适合无限 group 的 wrap navigation。
+  - `splitVisible` / `visiblePaneEntries` / `livePaneSessionIds` 现在把“可见 pane”与“live session”混在一起，新增 session group 时必须拆开，否则很容易把 preview 当 live。
+  - 竖屏/横屏/平板的布局分歧应该由单一 layout resolver 输出 mode，不能在 page 里散落 breakpoint。
+- Recommended implementation slice:
+  1. 新增纯 resolver，输出 `session-group` viewport model 和 slots。
+  2. 新增独立 UI shell，渲染 center live panels + before/after peek panels。
+  3. 再把 gesture owner 从现有 tab swipe 升级为 session group wrap navigation owner。
+  4. 最后才考虑把部分 peek 也升级为真实 live panel，但前提是 owner 边界和输入焦点已经锁住。
+
+## 2026-06-28 fixed slot correction
+- 当前回归已修正：session group 不能按邻居自动补位成 wheel；top / center / bottom 必须是显式槽位，未指定槽位只显示 placeholder，不自动从 session 列表里抓最近项。
+- drawer 长按 / 右键打开 slot menu 后，必须 suppress 下一次 click，避免“打开菜单同时又切 session”的误触。
+- 现在中心槽负责 live terminal，peek 只做 identity + 动画位移；点击 peek 触发滚动切换，不改成自动轮转补位。
+
+## 2026-06-28 phone layout owner audit
+- 当前代码里 `TerminalPage.tsx` 仍内联了一份 `TerminalStageShell`，而外部 `src/pages/TerminalPageStageShell.tsx` 也存在同名 owner 候选；这会让 phone layout 后续改动继续落到双实现。
+- 下一刀应先把页面级渲染统一到单一 stage shell owner，再在该 owner 上做 phone baseline / 竖向 group / 横向 group 的 profile 切换。
+- 手机第一版原则先保 baseline，不做多容器 projection；先锁 `layout profile -> stage shell -> visible slot` 的单链，再展开 peek/projection。
+- 已完成第一刀：
+  - `TerminalPage.tsx` 内联 `TerminalStageShell` 已物理删除，生产入口统一导入 `src/pages/TerminalPageStageShell.tsx`。
+  - `TerminalPageStageShell` 在 portrait / non-split / multi-session 下渲染 phone vertical group：top previous peek + center live terminal + bottom next peek。
+  - peek 只渲染 session identity，不挂 `TerminalView`；center 是唯一 live `TerminalView`。
+  - peek click 直接调用 app-layer session activation，不复用旧 `previous swipe -> drawer` 路径。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/feature-registry-truth.test.ts src/lib/terminal-layout-profile.test.ts src/pages/TerminalPageStageShell.pane-stage.test.tsx src/pages/TerminalPage.session-drawer.test.tsx` -> 17/17 pass。
+  - `./scripts/build-android-debug.sh` -> terminal contracts 50 files / 567 tests pass；common flows 86 tests pass；relay smoke pass；build `0.1.3.1935`。
+  - `node android/scripts/verify-update-bundle.mjs` -> manifest/APK sha/size/latest alias all pass。
+  - update endpoints `127.0.0.1:3333` and `100.66.1.82:3333` for `latest.json` / `zterm-0.1.3.1935.apk` -> HTTP 200。
+
+## 2026-06-28 APK build evidence gate repair
+- Standard build failed before APK because `terminal-buffer-replay.evidence.test.ts` hardcoded `evidence/daemon-mirror/2026-04-27`, while local evidence store no longer had that directory.
+- Regenerated real daemon mirror evidence with `pnpm run daemon:mirror:close-loop`; all 8 cases passed under `evidence/daemon-mirror/2026-06-28`.
+- Fixed replay evidence gate to resolve the latest complete `evidence/daemon-mirror/<date>` directory instead of a stale hardcoded date.
+- Added `src/lib/terminal-buffer-replay.evidence.test.ts` to `terminal.buffer_render` allowed paths because the evidence locator is part of that gate truth.
+
 ## 2026-04-25 Android client refresh initialization audit
 - Symptom: active tab may stay `connecting`, blank, low/0Hz refresh until input/focus side effects.
 - Hypothesis 1: initialization still depended too hard on `connected`; if first live frame arrives before/without clean `connected`, client can self-block.
@@ -617,3 +670,89 @@ APK 内 JS 已被 vite minify 改写变量名（fetchedOwnerKeys → i, remoteSe
 - evidence: 文件已创建 919 行 / 24.6K，已用浏览器打开预览
 
 当前 PaneTabs 组件完全独立于 TerminalHeader，TerminalHeader 只是包装器；session grid 需要在现有 paneGroups 数据结构上叠加新 UI 层
+
+## 2026-06-24T10:45:28.320Z stopless learned
+
+- requestId: openai-responses-orangeai.key1-glm-5.2-20260624T184507224-397800-295
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: copy-mode gate 已锁定并推送：MEMORY.md 记录根因/修复/验证/gate/反模式；function-map.md 和 feature-registry.json 已注册 MainActivity.java 为 copy_mode owner。commit 09d54fa 已推 origin/main。无未完成项。
+- evidence: - tsc --noEmit PASS; test:terminal:contracts 566/566 PASS; Jason 1885 现场确认 ✅
+
+Android WebView 长按的 gate 不只在 JS 层：native setLongClickable 必须显式关闭；function-map 和 feature-registry 必须把 native owner 注册进去，否则后续 agent 改 native 时不知道有 JS 依赖。
+
+## 2026-06-24T12:21:15.786Z stopless learned
+
+- requestId: openai-responses-XLC.key1-glm-5.2-20260624T201956009-398096-591
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: LongClickable 行为已澄清：setOnLongClickListener 只防弹窗不防 haptic/touch 拦截；setLongClickable(false) 已正确应用且 1890 已确认不再震动。
+- evidence: Android WebViewClassic.java checkLongClick 源码路径；1890 版实际真机验证不再震动。
+
+Android WebView 原生长按分两层：setOnLongClickListener 控制回调弹窗，isLongClickable 控制 checkLongClick 是否触发 haptic 和 touch 拦截。JS onTouchStart 完整工作只需前者=false，但必须后者=false 才能禁止 checkLongClick。
+
+## 2026-06-24T14:41:02.982Z stopless learned
+
+- requestId: openai-responses-XLC.key1-glm-5.2-20260624T224024186-398819-1314
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: daemon重启后session可见性问题已修复并推送，QuickBar图片文件按钮也修复
+- evidence: ws list-sessions返回{"type":"sessions","payload":{"sessions":["rcc"]}}; tmux list-sessions显示rcc+zterm-daemon-keepalive; git push成功9d182cf
+
+tmux 3.6a: start-server creates server but exits immediately without live sessions; must use new-session -d for keepalive. TMUX_TMPDIR socket isolation breaks "all sessions visible" requirement; daemon must share system-default socket.
+
+## 2026-06-25T00:12:02.412Z stopless learned
+
+- requestId: openai-responses-orangeai.key1-glm-5.2-20260625T081110114-399758-2253
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: 两个 bug 都已修复并出包。1. 文件/图片 picker: native 层 MainActivity.java 不再用空壳 WebChromeClient 覆盖 BridgeWebChromeClient，onShowFileChooser 恢复工作。2. picker 里远端不存在的 session 现在灰显且禁用操作按钮。
+- evidence: - MainActivity.java: BridgeWebChromeClient(getBridge()) 替代空壳 WebChromeClient (commit b0cebc4 + 7fd01c9)
+- TmuxSessionPickerSheet.tsx: remotePresent=false 的行 opacity:0.42 + pointerEvents:none (commit a3538a1)
+- 1901 包已落到 ~/.zterm/updates + update-dist + release-dist，HTTP 200 可取
+- type-check PASS，build PASS
+
+Android WebView 的 file chooser 链路在 native 层: WebChromeClient.onShowFileChooser() 是唯一入口。如果覆盖了 WebChromeClient 但没实现 onShowFileChooser，React 层的任何 click/showPicker 调用都不会弹系统选择器。这类 native-override 问题在 jsdom 测试里检测不到。下一个坑: 任何 "真机上 React 逻辑改了但不生效" 的场景，先查 native 层有没有覆盖 Capacitor 的默认行为。
+
+## 2026-06-25T00:55:48.079Z stopless learned
+
+- requestId: openai-responses-orangeai.key1-glm-5.2-20260625T085504891-399854-2349
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: 两个 bug 已修复并出包。1902 包含：native 层 BridgeWebChromeClient 恢复文件选择器；daemon 离线时 ConnectionsPage 灰显非 live session；TmuxSessionPickerSheet 里 remotePresent=false 行灰显。
+- evidence: 1. MainActivity.java: BridgeWebChromeClient(getBridge()) 替代空壳 WebChromeClient (commit 7fd01c9)
+2. connections-server-groups.ts: daemonConnected===false 时非 live session missingFromRemoteTruth=true (commit 83e02ce)
+3. TmuxSessionPickerSheet.tsx: remotePresent=false 行 opacity:0.42 + pointerEvents:none (commit a3538a1)
+4. 1902 包已落到 ~/.zterm/updates，HTTP 200 可取
+5. type-check + build + ConnectionsPage test PASS
+
+Android WebView 的 onShowFileChooser 必须由 WebChromeClient 实现才能弹文件选择器；空壳 WebChromeClient 覆盖 Capacitor 的 BridgeWebChromeClient 会切断这个能力。灰显逻辑不能只依赖 audit 结果，daemon 离线时必须直接标记所有非 live session 为 missing。
+
+## 2026-06-25T01:40:07.212Z stopless learned
+
+- requestId: openai-responses-XLC.key1-glm-5.2-20260625T093914856-399906-2401
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: 两个 bug 均已修复并推送出包：1) 图片/文件 picker - native 层 MainActivity.java 修复 BridgeWebChromeClient；2) session 灰显 - TerminalSessionDrawer disconnected/closed/error 行灰显不可点击 + ConnectionsPage daemon 离线灰显 + TmuxSessionPickerSheet remotePresent=false 灰显。1903 包已落到升级路径。
+- evidence: 1. MainActivity.java: BridgeWebChromeClient(getBridge()) 替代空壳 WebChromeClient (commit 7fd01c9)
+2. TerminalSessionDrawer.tsx: unavailable 灰显逻辑 (commit a3f05f7, 1903包已验证 bundle 含 "unavailable")
+3. ConnectionsPage: daemonConnected===false 时 missingFromRemoteTruth=true (commit 83e02ce, 1902包已验证 bundle 含逻辑)
+4. TmuxSessionPickerSheet: missingRemote 灰显 + pointerEvents:none (commit a3538a1, 1901包已包含)
+5. 1903 APK: http://127.0.0.1:3333/updates/zterm-0.1.3.1903.apk HTTP 200
+
+1. Android WebView 的 WebChromeClient 必须实现 onShowFileChooser 才能弹系统文件选择器，否则 input[type=file] 的 click 在 WebView 里就是 no-op——这跟 React 层怎么改都无关
+2. jsdom 黑盒测试对 Android WebView 的文件选择器链路完全无效，因为 jsdom 没有 WebChromeClient
+3. 修改 UI 组件时必须用正确的 JSX 语法（map+return），不能用 apply_patch 里的语句块语法
+4. "左侧列表"必须明确是哪个组件（TerminalSessionDrawer vs ConnectionsPage vs TmuxSessionPickerSheet），不能猜
+
+## 2026-06-25T05:19:31.724Z stopless learned
+
+- requestId: openai-responses-XLC.key1-glm-5.2-20260625T131818331-400123-116
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: APK 1909 已发布，等待 Jason 在设备上验证左侧 drawer 远端缺失 session 灰掉效果
+- evidence: vitest 9 PASS 0 FAIL; tsc --noEmit clean; APK 0.1.3.1909 manifest all checks ok; git log: c09153d + 798c89c
+
+UI 有样式/字段不等于功能已接通；必须追踪真源→投影完整链路，否则只是假修
+
+## 2026-06-25T10:20:15.287Z stopless learned
+
+- requestId: openai-responses-orangeai.key1-glm-5.2-20260625T181923346-400851-844
+- sessionId: 019ef286-581c-7083-a098-5d2692fc9469
+- stopReason: 已定位到 renderer 层 follow mode 的 visibleWindowEndIndex 钳住逻辑可能导致 bottom 不刷新，但需要确认具体复现条件（split模式下方session底部？固定位置还是动态？）才能精确修复
+- evidence: TerminalView.tsx:followDemandAnchorEndIndex = bufferTailAnchorEndIndex; buildTerminalRenderFrame: visibleWindowEndIndex = min(effectiveBufferEndIndex, followVisualBottomIndex); bufferTailEndIndex 在 applyBufferSyncToSessionBuffer 中由 payload.availableEndIndex 决定
+
+bottom lines 不刷新可能有两种根因：1.bufferTailEndIndex 不更新导致 followVisualBottomIndex 卡住 2.projectRenderBuffer dedup 逻辑误判 rowsEqual 导致旧行被复用

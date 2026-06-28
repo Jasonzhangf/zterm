@@ -19,6 +19,7 @@ White-box plan:
 
 - `terminal-layout-profile.test.ts` keeps current single-pane and split profile tokens stable.
 - `TerminalPageStageShell.pane-stage.test.tsx` proves visible pane entries are the only mounted live terminal panes.
+- `TerminalSessionDrawer.test.tsx` proves explicit top / center / bottom slot labels, long-press slot assignment, and click suppression after menu open.
 - `useTerminalWorkspace.test.tsx` proves workspace pane ownership remains explicit and does not resurrect runtime-only sessions.
 
 Module black-box plan:
@@ -26,6 +27,7 @@ Module black-box plan:
 - Phone single active session still mounts one `TerminalView`.
 - Existing visible split panes still mount live `TerminalView` instances.
 - Hidden/offscreen sessions are not mounted by stage shell.
+- Session-group peeks scroll into center with animation, but only the center slot remains live.
 
 Project black-box impact:
 
@@ -35,8 +37,8 @@ Project black-box impact:
 Known gaps:
 
 - No vertical/horizontal infinite group projection yet.
-- No peek preview renderer yet.
 - No cross-screen mode selection yet.
+- Unassigned slot placeholder styling may still need device-level polish.
 
 ## Phase 2: Layout Modes
 
@@ -52,15 +54,17 @@ White-box plan:
 
 - Add pure tests for mode selection.
 - Prove page code consumes mode output instead of local breakpoints.
+- Prove phone portrait vertical group uses one live center terminal and explicit top/bottom slots.
 
 Module black-box plan:
 
 - Phone portrait keeps current behavior until explicitly switched to vertical group mode.
+- Phone portrait vertical group click on a peek activates the explicit slot session without mounting that session live.
 - Tablet portrait and tablet landscape modes are modeled but do not change session truth.
 
 Known gaps:
 
-- Actual multi-slot projection remains out of scope until Phase 3.
+- Tablet projection remains out of scope until Phase 3.
 
 ## Phase 3: Projection And Virtualization
 
@@ -78,11 +82,12 @@ White-box plan:
 - Pure resolver tests for fully visible, partially visible, and offscreen slots.
 - Negative tests proving projection cannot create/close/merge session truth.
 - Negative tests proving partially visible slots do not mount live terminal by default.
+- Negative tests proving unassigned slots stay placeholders instead of auto-filling from session list order.
 
 Module black-box plan:
 
-- Phone portrait: vertical before/center/after slots.
-- Tablet portrait: horizontal before/center/after slots.
+- Phone portrait: vertical top/center/bottom slots.
+- Tablet portrait: horizontal left/center/right slots.
 - Tablet landscape: side peek slots plus multi-pane center workspace.
 
 Project black-box impact:
@@ -93,4 +98,3 @@ Project black-box impact:
 Known gaps:
 
 - Real device gesture and animation validation must be added when behavior is implemented.
-

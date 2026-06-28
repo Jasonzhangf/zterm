@@ -39,4 +39,25 @@ describe('terminal-layout-profile', () => {
     expect(profile.header.outerPadding).toBe('44px 6px 6px');
     expect(profile.quickBar.shellMode).toBe('inline');
   });
+
+  it('uses phone portrait vertical group profile only for non-split portrait group mode', () => {
+    const profile = resolveTerminalLayoutProfile({
+      splitVisible: false,
+      landscape: false,
+      sessionGroupVisible: true,
+      topInsetPx: 16,
+    });
+
+    expect(profile.mode).toBe('phone-portrait-vertical-group');
+    expect(profile.header.outerPadding).toBe('36px 6px 6px');
+
+    const landscapeProfile = resolveTerminalLayoutProfile({
+      splitVisible: false,
+      landscape: true,
+      sessionGroupVisible: true,
+      topInsetPx: 16,
+    });
+
+    expect(landscapeProfile.mode).toBe('single-pane');
+  });
 });

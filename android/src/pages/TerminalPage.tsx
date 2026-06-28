@@ -2,7 +2,6 @@ import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, us
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
-import { TerminalView } from '../components/TerminalView';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type SessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
@@ -12,7 +11,6 @@ import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalSessionDrawer, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
-import { TerminalTabSwipeSurface } from '../components/terminal/TerminalTabSwipeSurface';
 import {
   resolveTerminalCtrlChord,
   resolveTerminalKeyboardInput,
@@ -33,6 +31,7 @@ import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalizat
 import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
+import { TerminalStageShell } from './TerminalPageStageShell';
 import {
   createRemoteScreenshotPreviewRuntime,
   persistRemoteScreenshotCaptureRuntime,
@@ -303,6 +302,14 @@ interface TerminalTabChromeItem {
   resolvedPath?: Session['resolvedPath'];
 }
 
+type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
+
+interface TerminalSessionGroupSlotIds {
+  top: string | null;
+  center: string | null;
+  bottom: string | null;
+}
+
 function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
   switch (state) {
     case 'connected':
@@ -319,46 +326,6 @@ function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSes
     default:
       return 'idle';
   }
-}
-
-function terminalPageRenderedSessionUiKey(
-  session: Session | null | undefined,
-) {
-  if (!session) {
-    return '';
-  }
-  return [
-    session.id,
-    session.hostId,
-    session.connectionName,
-    session.bridgeHost,
-    String(session.bridgePort),
-    session.sessionName,
-    session.customName || '',
-    session.resolvedPath || '',
-  ].join('::');
-}
-
-function terminalPageRenderedSessionsUiKey(sessions: Session[]) {
-  return sessions.map((session) => terminalPageRenderedSessionUiKey(session)).join('||');
-}
-
-function terminalPageCopySelectionUiKey(copySelection: {
-  active: boolean;
-  sessionId: string | null;
-  startRowIndex: number | null;
-  endRowIndex: number | null;
-  menu: { x: number; y: number; rowIndex: number } | null;
-}) {
-  return [
-    copySelection.active ? '1' : '0',
-    copySelection.sessionId || '',
-    copySelection.startRowIndex ?? '',
-    copySelection.endRowIndex ?? '',
-    copySelection.menu?.x ?? '',
-    copySelection.menu?.y ?? '',
-    copySelection.menu?.rowIndex ?? '',
-  ].join('::');
 }
 
 function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {
@@ -400,15 +367,6 @@ function resolveSessionInputEpoch(
   return inputResetEpochBySession?.[sessionId] || 0;
 }
 
-function resolveRenderedSessionsInputEpochKey(
-  inputResetEpochBySession: Record<string, number> | undefined,
-  sessions: Session[],
-) {
-  return sessions
-    .map((session) => `${session.id}:${resolveSessionInputEpoch(inputResetEpochBySession, session.id)}`)
-    .join('||');
-}
-
 function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
   return {
     id: session.id,
@@ -418,6 +376,36 @@ function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
     customName: session.customName,
     resolvedPath: session.resolvedPath,
   };
+}
+
+function resolveTerminalSessionGroupSlotIds(options: {
+  slots: TerminalSessionGroupSlotIds;
+  sessions: Session[];
+  centerSessionId: string | null;
+}): TerminalSessionGroupSlotIds {
+  const sessionIds = new Set(options.sessions.map((session) => session.id));
+  const center = (
+    options.slots.center && sessionIds.has(options.slots.center)
+      ? options.slots.center
+      : options.centerSessionId && sessionIds.has(options.centerSessionId)
+        ? options.centerSessionId
+        : null
+  );
+  const top = (
+    options.slots.top && sessionIds.has(options.slots.top) && options.slots.top !== center
+      ? options.slots.top
+      : null
+  );
+  const bottom = (
+    options.slots.bottom &&
+      sessionIds.has(options.slots.bottom) &&
+      options.slots.bottom !== center &&
+      options.slots.bottom !== top
+      ? options.slots.bottom
+      : null
+  );
+
+  return { top, center, bottom };
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -769,296 +757,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   );
 });
 
-const TerminalStageShell = ReactMemo(function TerminalStageShell({
-  interactiveSession,
-  sessionBufferStore,
-  renderedPaneSessions,
-  visiblePaneEntries,
-  splitVisible,
-  activePaneId,
-  terminalChromeBottomPx,
-  terminalImeLiftPx,
-  inputResetEpochBySession,
-  followResetEpoch,
-  terminalKeyboardRequested,
-  isAndroid,
-  onResize,
-  onTerminalInput,
-  onTerminalWidthModeChange,
-  handleTerminalViewportChange,
-  handleSwipeTab,
-  handleActiveTerminalActivateInput,
-  onActivatePane,
-  focusNonce,
-  terminalFontSize,
-  terminalThemeId,
-  terminalWidthMode,
-  allowSessionDrawerSwipe,
-  absoluteLineNumbersVisible,
-  copySelection,
-  onLongPressRow,
-}: {
-  interactiveSession: Session | null;
-  sessionBufferStore?: SessionRenderBufferStore | null;
-  renderedPaneSessions: Session[];
-  visiblePaneEntries: { pane: AndroidWorkspacePane; paneIndex: number; session: Session }[];
-  splitVisible: boolean;
-  activePaneId: string;
-  terminalChromeBottomPx: number;
-  terminalImeLiftPx: number;
-  inputResetEpochBySession?: Record<string, number>;
-  followResetEpoch?: number;
-  terminalKeyboardRequested: boolean;
-  isAndroid: boolean;
-  onResize?: TerminalResizeHandler;
-  onTerminalInput?: (sessionId: string, data: string) => void;
-  onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
-  handleTerminalViewportChange: TerminalViewportChangeHandler;
-  handleSwipeTab: (sessionId: string, direction: 'previous' | 'next') => void;
-  handleActiveTerminalActivateInput: () => void;
-  onActivatePane?: (paneId: string) => void;
-  focusNonce: number;
-  terminalFontSize: number;
-  terminalThemeId?: string;
-  terminalWidthMode: TerminalWidthMode;
-  allowSessionDrawerSwipe: boolean;
-  absoluteLineNumbersVisible: boolean;
-  copySelection: {
-    active: boolean;
-    sessionId: string | null;
-    startRowIndex: number | null;
-    endRowIndex: number | null;
-    menu: { x: number; y: number; rowIndex: number } | null;
-  };
-  onLongPressRow: (sessionId: string, rowIndex: number, clientX: number, clientY: number) => void;
-}) {
-  const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
-  const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({ splitVisible, landscape }), [landscape, splitVisible]);
-
-  const renderTerminal = useCallback((session: Session, sessionIsActive: boolean, renderInstanceKey?: string) => (
-    <TerminalTabSwipeSurface
-      key={renderInstanceKey || session.id}
-      sessionId={session.id}
-      active={sessionIsActive}
-      enabled={allowSessionDrawerSwipe || terminalWidthMode !== 'mirror-fixed'}
-      onSwipeTab={handleSwipeTab}
-    >
-      <TerminalView
-        sessionId={session.id}
-        sessionBufferStore={sessionBufferStore}
-        active={sessionIsActive}
-        live
-        inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
-        followResetEpoch={sessionIsActive ? followResetEpoch : 0}
-        allowDomFocus={isAndroid ? false : sessionIsActive && terminalKeyboardRequested}
-        domInputOffscreen={isAndroid}
-        onActivateInput={isAndroid && sessionIsActive ? handleActiveTerminalActivateInput : undefined}
-        onResize={sessionIsActive && !isAndroid ? onResize : undefined}
-        onWidthModeChange={sessionIsActive ? onTerminalWidthModeChange : undefined}
-        onInput={sessionIsActive ? onTerminalInput : undefined}
-        onViewportChange={handleTerminalViewportChange}
-        focusNonce={isAndroid ? 0 : sessionIsActive ? focusNonce : 0}
-        fontSize={terminalFontSize}
-        rowHeight={`${Math.max(terminalFontSize + 4, Math.ceil(terminalFontSize * 1.5))}px`}
-        themeId={terminalThemeId || 'default'}
-        widthMode={terminalWidthMode}
-        showAbsoluteLineNumbers={absoluteLineNumbersVisible}
-        copyModeActive={
-          copySelection.active &&
-          (copySelection.sessionId === null ||
-            copySelection.sessionId === session.id)
-        }
-        copyStartRowIndex={
-          copySelection.sessionId === session.id ? copySelection.startRowIndex : null
-        }
-        copyEndRowIndex={
-          copySelection.sessionId === session.id ? copySelection.endRowIndex : null
-        }
-        copyPreviewRowIndex={
-          copySelection.sessionId === session.id
-            ? (copySelection.menu?.rowIndex ?? null)
-            : null
-        }
-        onLongPressRow={onLongPressRow}
-        splitVisible={splitVisible}
-      />
-    </TerminalTabSwipeSurface>
-  ), [
-    absoluteLineNumbersVisible,
-    focusNonce,
-    followResetEpoch,
-    handleActiveTerminalActivateInput,
-    handleSwipeTab,
-    handleTerminalViewportChange,
-    inputResetEpochBySession,
-    isAndroid,
-    onResize,
-    onTerminalInput,
-    onTerminalWidthModeChange,
-    sessionBufferStore,
-    terminalFontSize,
-    terminalKeyboardRequested,
-    terminalThemeId,
-    terminalWidthMode,
-    allowSessionDrawerSwipe,
-    layoutProfile.stage.containerRadius,
-    layoutProfile.stage.outerMargin,
-    layoutProfile.stage.paneGap,
-    layoutProfile.stage.paneRadius,
-    layoutProfile.stage.rowBottomPadding,
-    copySelection,
-    onLongPressRow,
-  ]);
-
-  return (
-    <div
-      data-testid="terminal-stage-shell"
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: `${terminalChromeBottomPx + terminalImeLiftPx}px`,
-        display: 'flex',
-      }}
-    >
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          margin: layoutProfile.stage.outerMargin,
-          borderRadius: layoutProfile.stage.containerRadius,
-          backgroundColor: splitVisible ? 'transparent' : mobileTheme.colors.canvas,
-          overflow: 'hidden',
-          border: splitVisible ? 'none' : `1px solid ${mobileTheme.colors.cardBorder}`,
-          position: 'relative',
-          overscrollBehaviorY: 'contain',
-        }}
-      >
-        {interactiveSession ? (
-          splitVisible ? (
-            <div
-              style={{
-                flex: 1,
-                height: '100%',
-                minHeight: 0,
-                display: 'flex',
-                gap: layoutProfile.stage.paneGap,
-                padding: layoutProfile.stage.rowBottomPadding,
-              }}
-            >
-              {visiblePaneEntries.map(({ pane, session }) => {
-                const paneIsActive = pane.id === activePaneId;
-                const sessionIsActive = session.id === interactiveSession?.id;
-                return (
-                  <div
-                    key={pane.id}
-                    data-testid="terminal-pane-shell"
-                    data-pane-id={pane.id}
-                    onPointerDown={() => onActivatePane?.(pane.id)}
-                      style={{
-                        flex: `${Math.max(0.01, pane.size ?? 1)} 1 0%`,
-                        minWidth: 0,
-                        height: '100%',
-                        minHeight: 0,
-                        display: 'flex',
-                      flexDirection: 'column',
-                      borderRadius: layoutProfile.stage.paneRadius,
-                      backgroundColor: mobileTheme.colors.canvas,
-                      overflow: 'hidden',
-                      border: `1px solid ${mobileTheme.colors.cardBorder}`,
-                      outline: paneIsActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
-                      outlineOffset: paneIsActive ? '-2px' : undefined,
-                      boxSizing: 'border-box',
-                      cursor: !paneIsActive ? 'pointer' : undefined,
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 1,
-                        minHeight: 0,
-                        position: 'relative',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {renderTerminal(session, sessionIsActive, `${pane.id}:${session.id}`)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            renderedPaneSessions.map((session) => {
-              const sessionIsActive = session.id === interactiveSession?.id;
-              return (
-              <div
-                key={session.id}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  visibility: sessionIsActive ? 'visible' : 'hidden',
-                  opacity: sessionIsActive ? 1 : 0,
-                  zIndex: sessionIsActive ? 1 : 0,
-                  pointerEvents: sessionIsActive ? 'auto' : 'none',
-                  overflow: 'hidden',
-                }}
-              >
-                {renderTerminal(session, sessionIsActive, session.id)}
-              </div>
-              );
-            })
-          )
-        ) : (
-          <div
-            style={{
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: mobileTheme.colors.textSecondary,
-              gap: '10px',
-            }}
-          >
-            <div style={{ fontSize: '18px', fontWeight: 700 }}>No terminal attached</div>
-            <div style={{ fontSize: '14px' }}>Go back to Connections and open a host card.</div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}, (prev, next) => (
-  terminalPageRenderedSessionUiKey(prev.interactiveSession) === terminalPageRenderedSessionUiKey(next.interactiveSession)
-  && terminalPageRenderedSessionsUiKey(prev.renderedPaneSessions) === terminalPageRenderedSessionsUiKey(next.renderedPaneSessions)
-  && prev.sessionBufferStore === next.sessionBufferStore
-  && prev.splitVisible === next.splitVisible
-  && prev.activePaneId === next.activePaneId
-  && prev.terminalChromeBottomPx === next.terminalChromeBottomPx
-  && prev.terminalImeLiftPx === next.terminalImeLiftPx
-  && resolveRenderedSessionsInputEpochKey(prev.inputResetEpochBySession, prev.renderedPaneSessions)
-    === resolveRenderedSessionsInputEpochKey(next.inputResetEpochBySession, next.renderedPaneSessions)
-  && prev.followResetEpoch === next.followResetEpoch
-  && prev.terminalKeyboardRequested === next.terminalKeyboardRequested
-  && prev.isAndroid === next.isAndroid
-  && prev.onResize === next.onResize
-  && prev.onTerminalInput === next.onTerminalInput
-  && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
-  && prev.handleTerminalViewportChange === next.handleTerminalViewportChange
-  && prev.handleSwipeTab === next.handleSwipeTab
-  && prev.handleActiveTerminalActivateInput === next.handleActiveTerminalActivateInput
-  && prev.focusNonce === next.focusNonce
-  && prev.terminalFontSize === next.terminalFontSize
-  && prev.terminalThemeId === next.terminalThemeId
-  && prev.terminalWidthMode === next.terminalWidthMode
-  && prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible
-  && terminalPageCopySelectionUiKey(prev.copySelection) === terminalPageCopySelectionUiKey(next.copySelection)
-  && prev.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
-    === next.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
-  && prev.onLongPressRow === next.onLongPressRow
-  && prev.onActivatePane === next.onActivatePane
-));
-
-
 function toPersistedOpenTab(session: Session): PersistedOpenTab {
   return {
     sessionId: session.id,
@@ -1281,6 +979,11 @@ function TerminalPageComponent({
   const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
+  const [sessionGroupSlotIds, setSessionGroupSlotIds] = useState<TerminalSessionGroupSlotIds>(() => ({
+    top: null,
+    center: activeSession?.id || null,
+    bottom: null,
+  }));
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
@@ -1500,6 +1203,34 @@ function TerminalPageComponent({
     handleQuickBarToggleCopyMode,
   } = copyRuntime;
   const uiSessionId = uiSession?.id || null;
+  const effectiveSessionGroupSlotIds = useMemo(() => resolveTerminalSessionGroupSlotIds({
+    slots: sessionGroupSlotIds,
+    sessions,
+    centerSessionId: uiSessionId,
+  }), [sessionGroupSlotIds, sessions, uiSessionId]);
+  const resolveSessionGroupSlot = useCallback((sessionId: string): TerminalSessionGroupSlotName | null => {
+    if (effectiveSessionGroupSlotIds.top === sessionId) {
+      return 'top';
+    }
+    if (effectiveSessionGroupSlotIds.center === sessionId) {
+      return 'center';
+    }
+    if (effectiveSessionGroupSlotIds.bottom === sessionId) {
+      return 'bottom';
+    }
+    return null;
+  }, [effectiveSessionGroupSlotIds]);
+  const sessionGroupSlotSessions = useMemo(() => ({
+    top: effectiveSessionGroupSlotIds.top
+      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.top) || null
+      : null,
+    center: effectiveSessionGroupSlotIds.center
+      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.center) || null
+      : null,
+    bottom: effectiveSessionGroupSlotIds.bottom
+      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.bottom) || null
+      : null,
+  }), [effectiveSessionGroupSlotIds, sessions]);
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
     : (interactiveSession ? [interactiveSession] : []);
@@ -1538,6 +1269,7 @@ function TerminalPageComponent({
           status: normalizeDrawerStatus(session.state),
           remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: `P${paneIndex + 1}`,
+          sessionGroupSlot: resolveSessionGroupSlot(session.id),
           active: activeSessionIds.has(session.id),
           hostKey: `${session.bridgeHost}:${session.bridgePort}`,
           hostLabel: hostLabelByKey.get(`${session.bridgeHost}:${session.bridgePort}`) || `${session.bridgeHost}:${session.bridgePort}`,
@@ -1558,6 +1290,7 @@ function TerminalPageComponent({
           status: normalizeDrawerStatus(session.state),
           remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: undefined,
+          sessionGroupSlot: resolveSessionGroupSlot(session.id),
           active: false,
           hostKey,
           hostLabel: hostLabelByKey.get(hostKey) || hostKey,
@@ -1565,7 +1298,7 @@ function TerminalPageComponent({
       });
 
     return [...opened, ...unopened];
-  }, [renderedPaneSessions, sessionGroups, sessions, workspacePanes]);
+  }, [renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;
@@ -2608,7 +2341,54 @@ function TerminalPageComponent({
 
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
     handleSwitchSessionFromChrome(sessionId);
+    setSessionGroupSlotIds((current) => ({
+      ...current,
+      center: sessionId,
+      top: current.top === sessionId ? current.center : current.top,
+      bottom: current.bottom === sessionId ? current.center : current.bottom,
+    }));
     setSessionDrawerOpen(false);
+  }, [handleSwitchSessionFromChrome]);
+
+  const handleAssignSessionGroupSlot = useCallback((sessionId: string, slot: TerminalSessionGroupSlotName) => {
+    setSessionGroupSlotIds((current) => {
+      const next: TerminalSessionGroupSlotIds = {
+        top: current.top === sessionId ? null : current.top,
+        center: current.center === sessionId ? null : current.center,
+        bottom: current.bottom === sessionId ? null : current.bottom,
+      };
+      next[slot] = sessionId;
+      return next;
+    });
+    if (slot === 'center') {
+      handleSwitchSessionFromChrome(sessionId);
+    }
+  }, [handleSwitchSessionFromChrome]);
+
+  const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
+    setSessionGroupSlotIds((current) => {
+      if (sourceSlot === 'top') {
+        return {
+          top: current.center,
+          center: sessionId,
+          bottom: current.bottom === sessionId ? current.top : current.bottom,
+        };
+      }
+      if (sourceSlot === 'bottom') {
+        return {
+          top: current.top === sessionId ? current.bottom : current.top,
+          center: sessionId,
+          bottom: current.center,
+        };
+      }
+      return {
+        ...current,
+        center: sessionId,
+        top: current.top === sessionId ? current.center : current.top,
+        bottom: current.bottom === sessionId ? current.center : current.bottom,
+      };
+    });
+    handleSwitchSessionFromChrome(sessionId);
   }, [handleSwitchSessionFromChrome]);
 
   const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
@@ -2840,6 +2620,7 @@ function TerminalPageComponent({
               onClose={() => setSessionDrawerOpen(false)}
               onSelectSession={handleSelectSessionFromDrawer}
               onCloseSession={handleCloseSessionFromDrawer}
+              onAssignSessionGroupSlot={handleAssignSessionGroupSlot}
               onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
               onDebugAddEvent={handleSessionDrawerDebugAddEvent}
             />
@@ -2849,6 +2630,7 @@ function TerminalPageComponent({
           interactiveSession={interactiveSession}
           sessionBufferStore={sessionBufferStore}
           renderedPaneSessions={renderedPaneSessions}
+          sessionGroupSlots={sessionGroupSlotSessions}
           visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
@@ -2865,6 +2647,7 @@ function TerminalPageComponent({
           handleSwipeTab={handleSwipeTab}
           handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
           onActivatePane={activatePaneAndSession}
+          onActivateSession={handleActivateSessionGroupSlot}
           focusNonce={focusNonce}
           terminalFontSize={terminalFontSize}
           terminalThemeId={terminalThemeId}

@@ -1,5 +1,7 @@
 import { memo, useMemo, useRef, useState } from 'react';
 
+export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
+
 export interface TerminalSessionDrawerItem {
   id: string;
   title: string;
@@ -7,6 +9,7 @@ export interface TerminalSessionDrawerItem {
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
   remoteMissing?: boolean;
   paneLabel?: string | null;
+  sessionGroupSlot?: TerminalSessionGroupSlotName | null;
   active?: boolean;
   /**
    * 唯一 host 真源键（由 TerminalPage 在投递 drawer items 时显式传入），
@@ -29,6 +32,7 @@ export interface TerminalSessionDrawerProps {
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
+  onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   onOpenQuickTabPicker: () => void;
   onDebugAddEvent?: (eventName: string) => void;
 }
@@ -52,6 +56,34 @@ function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
   }
 }
 
+function resolveSessionGroupSlotTone(slot: TerminalSessionGroupSlotName | null | undefined) {
+  switch (slot) {
+    case 'top':
+      return {
+        label: '上方',
+        color: '#8bd5ff',
+        background: 'rgba(139, 213, 255, 0.14)',
+        border: 'rgba(139, 213, 255, 0.70)',
+      };
+    case 'center':
+      return {
+        label: '中间',
+        color: '#44e2a0',
+        background: 'rgba(68, 226, 160, 0.14)',
+        border: 'rgba(68, 226, 160, 0.72)',
+      };
+    case 'bottom':
+      return {
+        label: '下方',
+        color: '#f5b659',
+        background: 'rgba(245, 182, 89, 0.14)',
+        border: 'rgba(245, 182, 89, 0.72)',
+      };
+    default:
+      return null;
+  }
+}
+
 function TerminalSessionDrawerComponent({
   open,
   topInsetPx = 0,
@@ -60,10 +92,39 @@ function TerminalSessionDrawerComponent({
   onClose,
   onSelectSession,
   onCloseSession,
+  onAssignSessionGroupSlot,
   onOpenQuickTabPicker,
   onDebugAddEvent,
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const [slotMenu, setSlotMenu] = useState<{
+    sessionId: string;
+    title: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
+    if (!onAssignSessionGroupSlot || session.remoteMissing) {
+      return;
+    }
+    suppressNextClickRef.current = true;
+    setSlotMenu({
+      sessionId: session.id,
+      title: session.title,
+      x,
+      y,
+    });
+  };
 
   const describeEventTarget = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) {
@@ -295,22 +356,53 @@ function TerminalSessionDrawerComponent({
         >
           {visibleSessions.map((session) => {
             const unavailable = Boolean(session.remoteMissing);
+            const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot);
             return (
             <button
               key={session.id}
               type="button"
               data-testid={`terminal-session-drawer-row-${session.id}`}
-              onClick={() => { if (!unavailable) onSelectSession(session.id); }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openSlotMenu(session, event.clientX, event.clientY);
+              }}
+              onTouchStart={(event) => {
+                const touch = event.touches[0];
+                if (!touch) {
+                  return;
+                }
+                clearLongPressTimer();
+                longPressTimerRef.current = window.setTimeout(() => {
+                  longPressTimerRef.current = null;
+                  openSlotMenu(session, touch.clientX, touch.clientY);
+                }, 420);
+              }}
+              onTouchMove={clearLongPressTimer}
+              onTouchEnd={clearLongPressTimer}
+              onTouchCancel={clearLongPressTimer}
+              onClick={(event) => {
+                if (suppressNextClickRef.current) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  suppressNextClickRef.current = false;
+                  return;
+                }
+                if (!unavailable) onSelectSession(session.id);
+              }}
               style={{
                 minHeight: '72px',
                 width: '100%',
                 textAlign: 'left',
                 padding: '10px 12px',
                 borderRadius: '12px',
-                border: session.active
+                border: slotTone
+                  ? `1px solid ${slotTone.border}`
+                  : session.active
                   ? '1px solid rgba(106, 167, 255, 0.9)'
                   : '1px solid rgba(255,255,255,0.08)',
-                background: session.active
+                background: slotTone
+                  ? `linear-gradient(90deg, ${slotTone.background}, rgba(255,255,255,0.04))`
+                  : session.active
                   ? 'rgba(106, 167, 255, 0.16)'
                   : 'rgba(255,255,255,0.04)',
                 display: 'grid',
@@ -395,6 +487,24 @@ function TerminalSessionDrawerComponent({
                 ) : (
                   <span />
                 )}
+                {slotTone ? (
+                  <span
+                    data-testid={`terminal-session-drawer-slot-${session.id}`}
+                    style={{
+                      minWidth: '38px',
+                      padding: '3px 7px',
+                      borderRadius: '999px',
+                      background: slotTone.background,
+                      color: slotTone.color,
+                      textAlign: 'center',
+                      fontSize: '10px',
+                      fontWeight: 900,
+                      border: `1px solid ${slotTone.border}`,
+                    }}
+                  >
+                    {slotTone.label}
+                  </span>
+                ) : null}
                 <span
                   aria-label={`关闭 ${session.title}`}
                   onClick={(event) => {
@@ -422,6 +532,69 @@ function TerminalSessionDrawerComponent({
           );
           })}
         </div>
+
+        {slotMenu && onAssignSessionGroupSlot ? (
+          <div
+            data-testid="terminal-session-drawer-slot-menu"
+            style={{
+              position: 'absolute',
+              left: `${Math.min(Math.max(12, slotMenu.x), 190)}px`,
+              top: `${Math.max(72, slotMenu.y - 18)}px`,
+              zIndex: 2,
+              width: '160px',
+              padding: '8px',
+              borderRadius: '14px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(10, 16, 26, 0.96)',
+              boxShadow: '0 14px 30px rgba(0,0,0,0.34)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div
+              style={{
+                padding: '2px 4px 5px',
+                color: 'rgba(220, 232, 255, 0.68)',
+                fontSize: '11px',
+                lineHeight: 1.3,
+              }}
+            >
+              设置 {slotMenu.title} 的位置
+            </div>
+            {([
+              ['top', '放到上方'],
+              ['center', '放到中间'],
+              ['bottom', '放到下方'],
+            ] as const).map(([slot, label]) => {
+              const tone = resolveSessionGroupSlotTone(slot);
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  data-testid={`terminal-session-drawer-slot-menu-${slot}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAssignSessionGroupSlot(slotMenu.sessionId, slot);
+                    suppressNextClickRef.current = true;
+                    setSlotMenu(null);
+                  }}
+                  style={{
+                    height: '34px',
+                    borderRadius: '10px',
+                    border: `1px solid ${tone?.border || 'rgba(255,255,255,0.10)'}`,
+                    background: tone?.background || 'rgba(255,255,255,0.05)',
+                    color: tone?.color || '#dce8ff',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         <div
           data-testid="terminal-session-drawer-add"

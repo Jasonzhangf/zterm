@@ -1,5 +1,5 @@
 export interface TerminalLayoutProfile {
-  mode: 'single-pane' | 'split-default' | 'split-landscape';
+  mode: 'single-pane' | 'phone-portrait-vertical-group' | 'split-default' | 'split-landscape';
   header: {
     outerPadding: string;
     rowGap: string;
@@ -171,16 +171,28 @@ function buildSinglePaneProfile(safeTopInsetPx: number): TerminalLayoutProfile {
   };
 }
 
+function buildPhonePortraitVerticalGroupProfile(safeTopInsetPx: number): TerminalLayoutProfile {
+  return {
+    ...buildSinglePaneProfile(safeTopInsetPx),
+    mode: 'phone-portrait-vertical-group',
+  };
+}
+
 export function resolveTerminalLayoutProfile(options: {
   splitVisible: boolean;
   topInsetPx?: number;
   landscape?: boolean;
+  sessionGroupVisible?: boolean;
 }): TerminalLayoutProfile {
   const safeTopInsetPx = Math.max(0, Math.round(options.topInsetPx || 0));
   if (options.splitVisible) {
     return options.landscape
       ? buildSplitLandscapeProfile(safeTopInsetPx)
       : buildSplitDefaultProfile(safeTopInsetPx);
+  }
+
+  if (options.sessionGroupVisible && !options.landscape) {
+    return buildPhonePortraitVerticalGroupProfile(safeTopInsetPx);
   }
 
   return buildSinglePaneProfile(safeTopInsetPx);

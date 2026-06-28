@@ -60,6 +60,15 @@ Rules:
 - Page components must not grow scattered breakpoints.
 - `TerminalView` must not own layout mode or group navigation.
 
+Current phone slice:
+
+- `phone-portrait-vertical-group` is active when Terminal stage is non-split, portrait, and has a center session slot.
+- The center slot mounts the only live `TerminalView`.
+- Top/bottom slots are explicit slot assignments, not auto-filled neighbors.
+- Unassigned slots render a placeholder identity surface and do not mount terminal content.
+- Peek clicks route to existing app-layer session activation; they do not create, merge, close, or auto-reorder sessions.
+- Drawer long-press / context-menu assignment is the only path that populates top/bottom slots.
+
 ### Phase 3: Projection And Virtualization
 
 Goal: add cross-screen session group projection after the phone baseline and layout modes are stable.
@@ -86,4 +95,3 @@ Rules:
 - Do not turn `Session` or workspace pane membership into layout-mode-specific types.
 - Do not make peek panels live by default.
 - Do not use server, daemon, or buffer manager paths to compensate for UI layout behavior.
-

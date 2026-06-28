@@ -15,7 +15,7 @@
  * 仍用 inline flex split，未切到 shared PaneStage。
  */
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
@@ -29,6 +29,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   terminalViewSpy.mockClear();
+  vi.useRealTimers();
 });
 
 vi.mock('@capacitor/core', () => ({
@@ -282,5 +283,87 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(props.copyModeActive).toBe(true);
     expect(props.onLongPressRow).toBe(onLongPressRow);
     expect(props.splitVisible).toBe(false);
+  });
+
+  it('renders fixed phone portrait session group slots with preview peeks and one live terminal', async () => {
+    vi.useFakeTimers();
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const onActivateSession = vi.fn();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 390 });
+    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 844 });
+    const s1 = {
+      id: 's1',
+      state: 'connected',
+      sessionName: 'alpha',
+      bridgeHost: 'host-a',
+      bridgePort: 3333,
+    } as any;
+    const s2 = {
+      id: 's2',
+      state: 'connected',
+      sessionName: 'beta',
+      bridgeHost: 'host-b',
+      bridgePort: 3333,
+    } as any;
+    const s3 = {
+      id: 's3',
+      state: 'connected',
+      sessionName: 'gamma',
+      bridgeHost: 'host-c',
+      bridgePort: 3333,
+    } as any;
+
+    const { getByTestId, queryAllByTestId } = render(
+      <TerminalStageShell
+        interactiveSession={s2}
+        renderedPaneSessions={[s2]}
+        sessionGroupSlots={{ top: s1, center: s2, bottom: s3 }}
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's2' } as any,
+            paneIndex: 0,
+            session: s2,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalImeLiftPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        onActivateSession={onActivateSession}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    expect(getByTestId('terminal-session-group-stage').getAttribute('data-layout-mode')).toBe('phone-portrait-vertical-group');
+    expect(getByTestId('terminal-session-group-peek-top').textContent).toContain('alpha');
+    expect(getByTestId('terminal-session-group-peek-bottom').textContent).toContain('gamma');
+    expect(queryAllByTestId(/^terminal-view-/).length).toBe(1);
+    expect(terminalViewSpy).toHaveBeenCalledTimes(1);
+    expect(terminalViewSpy.mock.calls[0]?.[0].sessionId).toBe('s2');
+
+    fireEvent.click(getByTestId('terminal-session-group-peek-top'));
+    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(54px)');
+    vi.advanceTimersByTime(180);
+    expect(onActivateSession).toHaveBeenCalledWith('s1', 'top');
+
+    fireEvent.click(getByTestId('terminal-session-group-peek-bottom'));
+    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(-54px)');
+    vi.advanceTimersByTime(180);
+    expect(onActivateSession).toHaveBeenCalledWith('s3', 'bottom');
+    vi.useRealTimers();
   });
 });

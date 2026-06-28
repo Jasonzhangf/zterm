@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalSessionDrawer } from './TerminalSessionDrawer';
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('TerminalSessionDrawer', () => {
@@ -309,5 +310,75 @@ describe('TerminalSessionDrawer', () => {
     expect(row.textContent).toContain('unavailable');
     fireEvent.click(row);
     expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('shows explicit session-group slot labels and opens the slot menu on long press without selecting the row', async () => {
+    vi.useFakeTimers();
+    const onSelectSession = vi.fn();
+    const onAssignSessionGroupSlot = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          {
+            ...sessions[0],
+            sessionGroupSlot: 'top',
+          },
+          {
+            ...sessions[1],
+            sessionGroupSlot: 'bottom',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={onAssignSessionGroupSlot}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-slot-s1').textContent).toContain('上方');
+    expect(screen.getByTestId('terminal-session-drawer-slot-s2').textContent).toContain('下方');
+
+    fireEvent.touchStart(screen.getByTestId('terminal-session-drawer-row-s1'), {
+      touches: [{ clientX: 120, clientY: 220 }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(420);
+    });
+
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu')).toBeTruthy();
+    expect(onSelectSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-center'));
+    expect(onAssignSessionGroupSlot).toHaveBeenCalledWith('s1', 'center');
+    expect(onSelectSession).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('assigns a session to a slot from the context menu', () => {
+    const onAssignSessionGroupSlot = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={onAssignSessionGroupSlot}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-session-drawer-row-s2'), {
+      clientX: 180,
+      clientY: 280,
+    });
+
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-top'));
+    expect(onAssignSessionGroupSlot).toHaveBeenCalledWith('s2', 'top');
   });
 });
