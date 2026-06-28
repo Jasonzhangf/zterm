@@ -987,3 +987,5 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - QuickBar shell 只应守自己的交互按钮与输入控件，不能把 shell 级 capture 做成 terminal row 手势政策。
 - copy long-press 的 delay / slop 要集中到纯 helper；runtime 只做选择状态，UI shell 只做自己的事件守门。
 - 再次出现“JS 菜单不弹 / 系统长按抢先”时，先查 shell capture 边界，再查 TerminalView 的 long-press timer，最后才看 state machine。
+- 再次出现“copy mode 偶发没激活”时，先查 QuickBar `tmux-copy` 入口是否仍是 press-owned；该入口不能只依赖 `click`，必须用 `pointerDown` 激活、`touchEnd` fallback，并对同轮 pointer/touch/click 去重。
+- 如果 press 后慢释放会把 copy mode 误切回去，说明还在用时间窗判定同轮事件；`tmux-copy` 应改成 armed / commit 两段式，press 只 armed，release 才 commit，click 只作 fallback。

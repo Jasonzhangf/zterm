@@ -693,3 +693,20 @@ Need runtime debug to confirm:
 - `pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx --reporter=dot` PASS。
 - `pnpm --dir android exec tsc --noEmit` PASS。
 - 已知既有测试不一致：`android/src/lib/bridge-settings.test.ts` 期望 daemon config path 为 `~/.zterm/config.json`，但共享实现返回 `~/.wterm/config.json`；该失败不是本次 adaptive 启动读取改动引入。
+
+## 2026-06-28 copy mode QuickBar 入口偶发不激活
+
+### 现象
+- Jason 反馈：拷贝功能仍不是每次都能激活。
+
+### 根因判断
+- copy mode 长按菜单链路已有回归锁住，问题更靠前：QuickBar 固定按钮 `tmux-copy` 只在 `click` 中调用 `onToggleCopyMode()`。
+- Android WebView 工具栏按钮的 `click` 合成不稳定时，按下没有进入 copy active；长按 terminal row 后自然不会弹 copy menu。
+
+### 修复
+- `TerminalQuickBar` 为 `tmux-copy` 改成 press-owned armed + release commit：`pointerDown` / `touchStart` 只负责 armed，`pointerUp` / `touchEnd` 只提交一次 copy mode，`click` 只作兜底。
+- 去掉按时间窗判断同一轮 press 的做法，避免长按或慢释放把 copy mode 误切回去。
+
+### 已验证
+- `pnpm exec vitest run src/components/terminal/TerminalQuickBar.test.tsx src/components/terminal/copy-longpress-e2e.test.tsx src/components/terminal/system-copy-state-machine.test.tsx src/components/terminal/system-copy-longpress-regression.test.tsx --reporter=dot` PASS。
+- `pnpm --dir android exec tsc --noEmit` PASS。

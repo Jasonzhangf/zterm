@@ -206,6 +206,7 @@ function TerminalQuickBarComponent({
   const suppressKeyboardClickRef = useRef(false);
   const suppressBubbleClickRef = useRef(false);
   const suppressActionClickRef = useRef<string | null>(null);
+  const tmuxCopyPressActiveRef = useRef(false);
   const repeatLongPressTimerRef = useRef<number | null>(null);
   const repeatIntervalTimerRef = useRef<number | null>(null);
   const pressedRepeatableActionIdRef = useRef<string | null>(null);
@@ -560,6 +561,36 @@ function TerminalQuickBarComponent({
       return true;
     },
     [],
+  );
+
+  const armCopyModePress = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (action.id !== "tmux-copy") {
+        return false;
+      }
+      tmuxCopyPressActiveRef.current = true;
+      return true;
+    },
+    [],
+  );
+
+  const commitCopyModePress = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (action.id !== "tmux-copy") {
+        return false;
+      }
+      if (!tmuxCopyPressActiveRef.current) {
+        return false;
+      }
+      tmuxCopyPressActiveRef.current = false;
+      suppressActionClickRef.current = action.id;
+      if (repeatingActionId) {
+        stopRepeatingAction();
+      }
+      triggerActionSequence(action);
+      return true;
+    },
+    [repeatingActionId, stopRepeatingAction, triggerActionSequence],
   );
 
   const startRepeatingAction = useCallback(
@@ -1346,6 +1377,9 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
+          if (armCopyModePress(action)) {
+            return;
+          }
           if (action.id !== "keyboard") {
             if (!repeatable) {
               return;
@@ -1370,14 +1404,46 @@ function TerminalQuickBarComponent({
         onPointerUp={() => {
           clearRepeatLongPressTimer();
           pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            commitCopyModePress(action);
+          }
         }}
         onPointerCancel={() => {
           clearRepeatLongPressTimer();
           pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
         }}
         onPointerLeave={() => {
           clearRepeatLongPressTimer();
           pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
+        }}
+        onTouchStart={(event) => {
+          if (action.id !== "tmux-copy") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          armCopyModePress(action);
+        }}
+        onTouchEnd={(event) => {
+          if (action.id !== "tmux-copy") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          commitCopyModePress(action);
+        }}
+        onTouchCancel={() => {
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
         }}
         onClick={(event) => {
           event.preventDefault();
@@ -1390,6 +1456,11 @@ function TerminalQuickBarComponent({
           }
           if (suppressActionClickRef.current === action.id) {
             suppressActionClickRef.current = null;
+            return;
+          }
+          if (action.id === "tmux-copy" && tmuxCopyPressActiveRef.current) {
+            tmuxCopyPressActiveRef.current = false;
+            triggerActionSequence(action);
             return;
           }
           if (action.id === "keyboard") {
@@ -1532,6 +1603,7 @@ function TerminalQuickBarComponent({
     () => () => {
       stopRepeatingAction();
       suppressActionClickRef.current = null;
+      tmuxCopyPressActiveRef.current = false;
     },
     [stopRepeatingAction],
   );

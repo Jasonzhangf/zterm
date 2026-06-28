@@ -632,6 +632,63 @@ describe("TerminalQuickBar", () => {
     expect(screen.queryByText("行号")).toBeNull();
   });
 
+  it("activates copy mode from press and suppresses the follow-up click", () => {
+    const onToggleCopyMode = vi.fn();
+
+    renderQuickBar({ onToggleCopyMode });
+
+    const copyButton = screen.getByRole("button", { name: "拷贝" });
+    fireEvent.pointerDown(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.click(copyButton);
+
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("activates copy mode from touch release and suppresses the follow-up click", () => {
+    const onToggleCopyMode = vi.fn();
+
+    renderQuickBar({ onToggleCopyMode });
+
+    const copyButton = screen.getByRole("button", { name: "拷贝" });
+    fireEvent.touchStart(copyButton, {
+      touches: [{ clientX: 20, clientY: 20 }],
+    });
+    fireEvent.touchEnd(copyButton, {
+      changedTouches: [{ clientX: 20, clientY: 20 }],
+    });
+    fireEvent.click(copyButton);
+
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("still activates copy mode after a long press before release", () => {
+    vi.useFakeTimers();
+    const onToggleCopyMode = vi.fn();
+
+    renderQuickBar({ onToggleCopyMode });
+
+    const copyButton = screen.getByRole("button", { name: "拷贝" });
+    fireEvent.pointerDown(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    fireEvent.pointerUp(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.click(copyButton);
+
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps click as a fallback for copy mode when no press event arrives", () => {
+    const onToggleCopyMode = vi.fn();
+
+    renderQuickBar({ onToggleCopyMode });
+
+    fireEvent.click(screen.getByRole("button", { name: "拷贝" }));
+
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
+  });
+
   it("routes image/file entries directly through system pickers and keeps sync on the sheet", async () => {
     const onOpenFileTransfer = vi.fn();
     const onImagePaste = vi.fn();

@@ -8,6 +8,7 @@
 
 ## Key Decisions
 
+- [2026-06-28] copy mode 的 QuickBar 入口不能只依赖 `click`；Android WebView 下工具栏按钮 `click` 合成会偶发漏触发。`tmux-copy` 应由 press-owned 路径激活，但不要用固定时间窗判断同一轮触摸；现在收口为 `pointerDown/touchStart` armed、`pointerUp/touchEnd` commit、`click` fallback 的单轮去重，避免长按/慢释放把 copy mode 误切回去。长按菜单链路仍按 copy-longpress gate 验证。
 - [2026-06-28] `BridgeSettings` 是 terminal width mode 的启动唯一真源；`useBridgeSettingsStorage` 首次 render 必须同步读取并 normalize localStorage，禁止先返回默认 `mirror-fixed` 再等 effect 异步修正，否则 restore/connect 首帧会用错宽度模式，表现为 `adaptive-phone` 只有重新 save 后才生效。
 - [2026-06-27] Android 抽屉底部单按钮动作必须只保留一个语义 owner；`pointerup` / `touchend` / `click` 不要叠在同一个按钮上再加时间戳去重。`TerminalSessionDrawer` 的 `New Session` 经真机证伪不能依赖 `click` 或 `pointerup`；该按钮应由自身 `touchend` 截断父级 drawer 手势并触发 quick-tab picker。已用 `TerminalSessionDrawer` + `TerminalPage.session-drawer` 定向测试锁住。
 - [2026-06-27] `TerminalSessionDrawer` 的 `New Session` 若状态浮窗显示只收到 `drawer:touchstart` 而没有 `add:*`，不能继续猜 `click/pointer/touch`，也不能直接判定遮挡；必须先用 capture target 确认命中节点。已验证有效修复是把 `New Session` 的语义 owner 从内部 button 上移到整个 footer hit surface，footer 自身作为唯一 `touchend` owner 触发 quick-tab picker，并用 `cap:start/end:<target>` 回归锁住。
