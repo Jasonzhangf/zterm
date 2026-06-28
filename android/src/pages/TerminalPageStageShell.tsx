@@ -291,10 +291,10 @@ const TerminalStageShell = ReactMemo(
     const renderSessionGroupPeek = useCallback(
       (session: Session | null, slot: "top" | "bottom") => {
         const title = session
-          ? (session.resolvedPath || session.customName || session.sessionName || session.title || session.id)
+          ? (session.customName || session.sessionName || session.title || session.id)
           : "未指定 session";
         const detail = session
-          ? `${session.customName || session.sessionName || session.id} · ${session.bridgeHost}:${session.bridgePort}`
+          ? `${session.resolvedPath || session.bridgeHost}:${session.bridgePort}`
           : "在左侧抽屉长按 session 后指定到这里";
         return (
         <button
@@ -303,20 +303,20 @@ const TerminalStageShell = ReactMemo(
           onClick={() => { if (session) activateSessionGroupSlot(session, slot); }}
           disabled={!session}
           style={{
-            height: "16%",
-            minHeight: "46px",
-            maxHeight: "78px",
+            height: "13%",
+            minHeight: "42px",
+            maxHeight: "62px",
             width: "100%",
             border: `1px solid ${mobileTheme.colors.cardBorder}`,
-            borderRadius: "16px",
+            borderRadius: "14px",
             background: "linear-gradient(180deg, rgba(24, 35, 55, 0.92), rgba(13, 21, 35, 0.92))",
             color: mobileTheme.colors.textPrimary,
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
             justifyContent: "center",
-            gap: "4px",
-            padding: "9px 12px",
+            gap: "3px",
+            padding: "7px 10px",
             textAlign: "left",
             boxSizing: "border-box",
             overflow: "hidden",
@@ -326,30 +326,41 @@ const TerminalStageShell = ReactMemo(
         >
           <span
             style={{
-              fontSize: "10px",
-              fontWeight: 800,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "rgba(177, 193, 224, 0.66)",
+              display: "flex",
+              alignItems: "baseline",
+              gap: "7px",
+              minWidth: 0,
             }}
           >
-            {slot === "top" ? "Top session" : "Bottom session"}
+            <span
+              style={{
+                flexShrink: 0,
+                fontSize: "10px",
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(177, 193, 224, 0.66)",
+              }}
+            >
+              {slot === "top" ? "Top session" : "Bottom session"}
+            </span>
+            <span
+              style={{
+                minWidth: 0,
+                fontSize: "13px",
+                fontWeight: 820,
+                color: mobileTheme.colors.textPrimary,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {title}
+            </span>
           </span>
           <span
             style={{
-              fontSize: "13px",
-              fontWeight: 800,
-              color: mobileTheme.colors.textPrimary,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {title}
-          </span>
-          <span
-            style={{
-              fontSize: "10px",
+              fontSize: "9.5px",
               color: mobileTheme.colors.textSecondary,
               whiteSpace: "nowrap",
               overflow: "hidden",
@@ -402,8 +413,8 @@ const TerminalStageShell = ReactMemo(
                 minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
-                padding: "14px 0 0",
+                gap: "7px",
+                padding: "24px 0 0",
                 boxSizing: "border-box",
                 transform:
                   slideSlot === "top"

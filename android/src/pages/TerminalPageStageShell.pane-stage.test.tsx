@@ -351,6 +351,8 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(getByTestId('terminal-session-group-stage').getAttribute('data-layout-mode')).toBe('phone-portrait-vertical-group');
     expect(getByTestId('terminal-session-group-peek-top').textContent).toContain('alpha');
     expect(getByTestId('terminal-session-group-peek-bottom').textContent).toContain('gamma');
+    expect(getByTestId('terminal-session-group-peek-top').firstElementChild?.textContent).toContain('Top sessionalpha');
+    expect(getByTestId('terminal-session-group-peek-bottom').firstElementChild?.textContent).toContain('Bottom sessiongamma');
     expect(queryAllByTestId(/^terminal-view-/).length).toBe(1);
     expect(terminalViewSpy).toHaveBeenCalledTimes(1);
     expect(terminalViewSpy.mock.calls[0]?.[0].sessionId).toBe('s2');

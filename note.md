@@ -34,6 +34,7 @@
 - 当前回归已修正：session group 不能按邻居自动补位成 wheel；top / center / bottom 必须是显式槽位，未指定槽位只显示 placeholder，不自动从 session 列表里抓最近项。
 - drawer 长按 / 右键打开 slot menu 后，必须 suppress 下一次 click，避免“打开菜单同时又切 session”的误触。
 - 现在中心槽负责 live terminal，peek 只做 identity + 动画位移；点击 peek 触发滚动切换，不改成自动轮转补位。
+- 二次修正：点击 top/bottom 也不能循环轮转三槽位；点击 top 时 top -> center、旧 center -> bottom、top 清空；点击 bottom 时 bottom -> center、旧 center -> top、bottom 清空。peek 卡片信息压缩为 `Top/Bottom session + session name` 同行，第二行只放路径/host，整体向下避开顶部标题区。
 
 ## 2026-06-28 phone layout owner audit
 - 当前代码里 `TerminalPage.tsx` 仍内联了一份 `TerminalStageShell`，而外部 `src/pages/TerminalPageStageShell.tsx` 也存在同名 owner 候选；这会让 phone layout 后续改动继续落到双实现。

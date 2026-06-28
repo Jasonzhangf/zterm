@@ -302,9 +302,9 @@ interface TerminalTabChromeItem {
   resolvedPath?: Session['resolvedPath'];
 }
 
-type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
+export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
 
-interface TerminalSessionGroupSlotIds {
+export interface TerminalSessionGroupSlotIds {
   top: string | null;
   center: string | null;
   bottom: string | null;
@@ -406,6 +406,33 @@ function resolveTerminalSessionGroupSlotIds(options: {
   );
 
   return { top, center, bottom };
+}
+
+export function resolveTerminalSessionGroupSlotActivation(
+  current: TerminalSessionGroupSlotIds,
+  sessionId: string,
+  sourceSlot?: TerminalSessionGroupSlotName,
+): TerminalSessionGroupSlotIds {
+  if (sourceSlot === 'top') {
+    return {
+      top: null,
+      center: sessionId,
+      bottom: current.center,
+    };
+  }
+  if (sourceSlot === 'bottom') {
+    return {
+      top: current.center,
+      center: sessionId,
+      bottom: null,
+    };
+  }
+  return {
+    ...current,
+    center: sessionId,
+    top: current.top === sessionId ? current.center : current.top,
+    bottom: current.bottom === sessionId ? current.center : current.bottom,
+  };
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -2366,28 +2393,11 @@ function TerminalPageComponent({
   }, [handleSwitchSessionFromChrome]);
 
   const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
-    setSessionGroupSlotIds((current) => {
-      if (sourceSlot === 'top') {
-        return {
-          top: current.center,
-          center: sessionId,
-          bottom: current.bottom === sessionId ? current.top : current.bottom,
-        };
-      }
-      if (sourceSlot === 'bottom') {
-        return {
-          top: current.top === sessionId ? current.bottom : current.top,
-          center: sessionId,
-          bottom: current.center,
-        };
-      }
-      return {
-        ...current,
-        center: sessionId,
-        top: current.top === sessionId ? current.center : current.top,
-        bottom: current.bottom === sessionId ? current.center : current.bottom,
-      };
-    });
+    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotActivation(
+      current,
+      sessionId,
+      sourceSlot,
+    ));
     handleSwitchSessionFromChrome(sessionId);
   }, [handleSwitchSessionFromChrome]);
 

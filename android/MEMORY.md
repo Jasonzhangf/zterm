@@ -8,7 +8,7 @@
 
 ## Key Decisions
 
-- [2026-06-28] mobile session group 的正确语义是显式 top / center / bottom 三槽位，不是从已有 tab/session 列表自动补邻居做 wheel。未指定槽位只渲染 placeholder；drawer 长按/右键的 slot menu 是唯一的槽位分配入口，且 menu 打开后必须 suppress 下一次 click，防止“打开菜单同时又切 session”的误触。
+- [2026-06-28] mobile session group 的正确语义是显式 top / center / bottom 三槽位，不是从已有 tab/session 列表自动补邻居做 wheel，也不是点击后循环轮转。点击 top 时 top -> center、旧 center -> bottom、top 清空；点击 bottom 时 bottom -> center、旧 center -> top、bottom 清空。未指定槽位只渲染 placeholder；drawer 长按/右键的 slot menu 是唯一的槽位分配入口，且 menu 打开后必须 suppress 下一次 click，防止“打开菜单同时又切 session”的误触。
 - [2026-06-28] copy mode 的 QuickBar 入口不能只依赖 `click`；Android WebView 下工具栏按钮 `click` 合成会偶发漏触发。`tmux-copy` 应由 press-owned 路径激活，但不要用固定时间窗判断同一轮触摸；现在收口为 `pointerDown/touchStart` armed、`pointerUp/touchEnd` commit、`click` fallback 的单轮去重，避免长按/慢释放把 copy mode 误切回去。长按菜单链路仍按 copy-longpress gate 验证。
 - [2026-06-28] copy mode 的 QuickBar 入口在 Android WebView 下必须 press-start 立即激活；release commit 仍会漏 `pointerUp/touchEnd`，表现为按钮触达但状态浮窗 `CM OFF`。去重应由显式 press sequence 承担，后续 touch/pointer/click 只消费不二次 toggle。copy mode 行级长按也不得 `stopPropagation()`，否则父级 `TerminalTabSwipeSurface` 收不到右滑起点，session drawer 会被 copy 手势一起锁死。
 - [2026-06-28] copy mode 还有一层 UI 耦合：`TerminalStageShell` 的 `ReactMemo` comparator 必须把 `copySelection` 和 `onLongPressRow` 纳入比较；否则 QuickBar 会先变蓝，但 `TerminalView.copyModeActive` 仍停在旧值，直到点开状态浮窗触发别处 state 更新才“看起来生效”。回归应直接盯 `TerminalView` 的 copy props，不要只看 QuickBar 染色。

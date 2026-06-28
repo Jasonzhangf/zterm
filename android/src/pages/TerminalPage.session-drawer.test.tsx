@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import { TerminalPage, resolveTerminalSessionGroupSlotActivation } from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -215,5 +215,31 @@ describe('TerminalPage portrait session drawer', () => {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
     expect(onOpenQuickTabPicker).toHaveBeenCalled();
+  });
+});
+
+describe('resolveTerminalSessionGroupSlotActivation', () => {
+  it('scrolls top into center without wrapping bottom back to top', () => {
+    expect(resolveTerminalSessionGroupSlotActivation(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's1',
+      'top',
+    )).toEqual({
+      top: null,
+      center: 's1',
+      bottom: 's2',
+    });
+  });
+
+  it('scrolls bottom into center without wrapping top back to bottom', () => {
+    expect(resolveTerminalSessionGroupSlotActivation(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's3',
+      'bottom',
+    )).toEqual({
+      top: 's2',
+      center: 's3',
+      bottom: null,
+    });
   });
 });
