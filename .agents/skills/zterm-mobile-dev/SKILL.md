@@ -212,6 +212,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 若桌面端继续推进多 tab，当前最小真边界应优先写成 `single runtime · multi tabs`：可以维护多个 open target tab，但同一时刻只允许一个 live websocket/runtime；不要把“可切换 tabs”误报成“并发多 live sessions”
 - Jason 新冻结：桌面右侧不要先做抽屉；应收成“固定左 rail + 右侧按比例切 multiple vertical panes”的 split workspace，优先给 `1 / 2 / 3` preset，风格靠近 iTerm2/Tabby，但不要上来做自由拖拽
 - 新冻结：mobile session group 必须拆成两份真相：抽屉显示的 `top / center / bottom` 是用户显式分配的固定槽位，点击 peek 不得改写；stage 只基于当前 focus slot 计算 viewport projection。focus=top 时 viewport 为 `empty / top / center`，focus=bottom 时 viewport 为 `center / bottom / empty`，focus=center 时 viewport 等于固定槽位。focus 必须存 slot name，不能存 session id。抽屉点击 session 只替换当前 focus 槽位：focus=bottom 替换 bottom，focus=top 替换 top，focus=center 替换 center。禁止自动从 session 列表补邻居成 wheel，也禁止点击后循环轮转三槽位。抽屉长按/右键是唯一的槽位分配入口，打开 slot menu 后必须 suppress 下一次 click，避免菜单和 session 激活同时发生。
+- mobile session group 的边界可见性必须走共享 projection helper：竖向 top/center/bottom 与未来横向 left/center/right 都先映射到 `before/center/after` 边界模型。focus 在 before/top 边界时隐藏 before/top peek；focus 在 after/bottom 边界时隐藏 after/bottom peek；center 才显示两侧。UI shell 只消费 projection，不得自己补 top/bottom 或 left/right 局部判断。
 
 ## 三、开发闭环流程
 

@@ -3,10 +3,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
+import { resolveSessionGroupBoundaryProjection } from '../lib/session-group-viewport';
 import {
   TerminalPage,
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
+  resolveTerminalSessionGroupViewportProjection,
 } from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
@@ -253,6 +255,112 @@ describe('resolveTerminalSessionGroupViewportSlots', () => {
       top: 's1',
       center: 's2',
       bottom: 's3',
+    });
+  });
+});
+
+describe('resolveSessionGroupBoundaryProjection', () => {
+  it('hides the before edge and shows only the after edge when focus is before', () => {
+    expect(resolveSessionGroupBoundaryProjection(
+      { before: 's1', center: 's2', after: 's3' },
+      'before',
+    )).toEqual({
+      slots: {
+        before: null,
+        center: 's1',
+        after: 's2',
+      },
+      visible: {
+        before: false,
+        after: true,
+      },
+    });
+  });
+
+  it('shows both edges when focus is center', () => {
+    expect(resolveSessionGroupBoundaryProjection(
+      { before: 's1', center: 's2', after: 's3' },
+      'center',
+    )).toEqual({
+      slots: {
+        before: 's1',
+        center: 's2',
+        after: 's3',
+      },
+      visible: {
+        before: true,
+        after: true,
+      },
+    });
+  });
+
+  it('shows only the before edge when focus is after', () => {
+    expect(resolveSessionGroupBoundaryProjection(
+      { before: 's1', center: 's2', after: 's3' },
+      'after',
+    )).toEqual({
+      slots: {
+        before: 's2',
+        center: 's3',
+        after: null,
+      },
+      visible: {
+        before: true,
+        after: false,
+      },
+    });
+  });
+});
+
+describe('resolveTerminalSessionGroupViewportProjection', () => {
+  it('hides the top peek when the top slot is focused', () => {
+    expect(resolveTerminalSessionGroupViewportProjection(
+      { top: 's1', center: 's2', bottom: 's3' },
+      'top',
+    )).toEqual({
+      slots: {
+        top: null,
+        center: 's1',
+        bottom: 's2',
+      },
+      visible: {
+        top: false,
+        bottom: true,
+      },
+    });
+  });
+
+  it('hides the bottom peek when the bottom slot is focused', () => {
+    expect(resolveTerminalSessionGroupViewportProjection(
+      { top: 's1', center: 's2', bottom: 's3' },
+      'bottom',
+    )).toEqual({
+      slots: {
+        top: 's2',
+        center: 's3',
+        bottom: null,
+      },
+      visible: {
+        top: true,
+        bottom: false,
+      },
+    });
+  });
+
+  it('keeps both peeks visible when the center slot is focused', () => {
+    expect(resolveTerminalSessionGroupViewportProjection(
+      { top: 's1', center: 's2', bottom: 's3' },
+      'center',
+    )).toEqual({
+      slots: {
+        top: 's1',
+        center: 's2',
+        bottom: 's3',
+      },
+      visible: {
+        top: true,
+        bottom: true,
+      },
     });
   });
 });

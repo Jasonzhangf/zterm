@@ -31,7 +31,18 @@ import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalizat
 import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
+import {
+  resolveTerminalSessionGroupSlotReplacement,
+  resolveTerminalSessionGroupViewportProjection,
+  type TerminalSessionGroupSlotIds,
+  type TerminalSessionGroupSlotName,
+} from '../lib/session-group-viewport';
 import { TerminalStageShell } from './TerminalPageStageShell';
+export {
+  resolveTerminalSessionGroupSlotReplacement,
+  resolveTerminalSessionGroupViewportSlots,
+  resolveTerminalSessionGroupViewportProjection,
+} from '../lib/session-group-viewport';
 import {
   createRemoteScreenshotPreviewRuntime,
   persistRemoteScreenshotCaptureRuntime,
@@ -302,14 +313,6 @@ interface TerminalTabChromeItem {
   resolvedPath?: Session['resolvedPath'];
 }
 
-export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
-
-export interface TerminalSessionGroupSlotIds {
-  top: string | null;
-  center: string | null;
-  bottom: string | null;
-}
-
 function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
   switch (state) {
     case 'connected':
@@ -406,41 +409,6 @@ function resolveTerminalSessionGroupSlotIds(options: {
   );
 
   return { top, center, bottom };
-}
-
-export function resolveTerminalSessionGroupViewportSlots(
-  current: TerminalSessionGroupSlotIds,
-  focusSlot: TerminalSessionGroupSlotName,
-): TerminalSessionGroupSlotIds {
-  if (focusSlot === 'top') {
-    return {
-      top: null,
-      center: current.top,
-      bottom: current.center,
-    };
-  }
-  if (focusSlot === 'center') {
-    return current;
-  }
-  return {
-    top: current.center,
-    center: current.bottom,
-    bottom: null,
-  };
-}
-
-export function resolveTerminalSessionGroupSlotReplacement(
-  current: TerminalSessionGroupSlotIds,
-  sessionId: string,
-  targetSlot: TerminalSessionGroupSlotName,
-): TerminalSessionGroupSlotIds {
-  const next: TerminalSessionGroupSlotIds = {
-    top: current.top === sessionId ? null : current.top,
-    center: current.center === sessionId ? null : current.center,
-    bottom: current.bottom === sessionId ? null : current.bottom,
-  };
-  next[targetSlot] = sessionId;
-  return next;
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -1244,7 +1212,7 @@ function TerminalPageComponent({
     sessions,
     centerSessionId: uiSessionId,
   }), [sessionGroupSlotIds, sessions, uiSessionId]);
-  const sessionGroupViewportSlotIds = useMemo(() => resolveTerminalSessionGroupViewportSlots(
+  const sessionGroupViewportProjection = useMemo(() => resolveTerminalSessionGroupViewportProjection(
     effectiveSessionGroupSlotIds,
     sessionGroupFocusSlot,
   ), [effectiveSessionGroupSlotIds, sessionGroupFocusSlot]);
@@ -1261,16 +1229,19 @@ function TerminalPageComponent({
     return null;
   }, [effectiveSessionGroupSlotIds]);
   const sessionGroupViewportSlotSessions = useMemo(() => ({
-    top: sessionGroupViewportSlotIds.top
-      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.top) || null
-      : null,
-    center: sessionGroupViewportSlotIds.center
-      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.center) || null
-      : null,
-    bottom: sessionGroupViewportSlotIds.bottom
-      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.bottom) || null
-      : null,
-  }), [sessionGroupViewportSlotIds, sessions]);
+    slots: {
+      top: sessionGroupViewportProjection.slots.top
+        ? sessions.find((session) => session.id === sessionGroupViewportProjection.slots.top) || null
+        : null,
+      center: sessionGroupViewportProjection.slots.center
+        ? sessions.find((session) => session.id === sessionGroupViewportProjection.slots.center) || null
+        : null,
+      bottom: sessionGroupViewportProjection.slots.bottom
+        ? sessions.find((session) => session.id === sessionGroupViewportProjection.slots.bottom) || null
+        : null,
+    },
+    visible: sessionGroupViewportProjection.visible,
+  }), [sessionGroupViewportProjection, sessions]);
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
     : (interactiveSession ? [interactiveSession] : []);
@@ -2653,7 +2624,7 @@ function TerminalPageComponent({
       interactiveSession={interactiveSession}
       sessionBufferStore={sessionBufferStore}
       renderedPaneSessions={renderedPaneSessions}
-      sessionGroupSlots={sessionGroupViewportSlotSessions}
+      sessionGroupViewport={sessionGroupViewportSlotSessions}
       visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}

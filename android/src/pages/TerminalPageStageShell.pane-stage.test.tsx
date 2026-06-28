@@ -15,7 +15,7 @@
  * 仍用 inline flex split，未切到 shared PaneStage。
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
@@ -319,7 +319,10 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
       <TerminalStageShell
         interactiveSession={s2}
         renderedPaneSessions={[s2]}
-        sessionGroupSlots={{ top: s1, center: s2, bottom: s3 }}
+        sessionGroupViewport={{
+          slots: { top: s1, center: s2, bottom: s3 },
+          visible: { top: true, bottom: true },
+        }}
         visiblePaneEntries={[
           {
             pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's2' } as any,
@@ -367,5 +370,61 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     vi.advanceTimersByTime(180);
     expect(onActivateSession).toHaveBeenCalledWith('s3', 'bottom');
     vi.useRealTimers();
+  });
+
+  it('does not render the bottom peek when the viewport projection says the bottom edge is hidden', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const s2 = {
+      id: 's2',
+      state: 'connected',
+      sessionName: 'beta',
+      bridgeHost: 'host-b',
+      bridgePort: 3333,
+    } as any;
+    const s3 = {
+      id: 's3',
+      state: 'connected',
+      sessionName: 'gamma',
+      bridgeHost: 'host-c',
+      bridgePort: 3333,
+    } as any;
+
+    render(
+      <TerminalStageShell
+        interactiveSession={s3}
+        renderedPaneSessions={[s3]}
+        sessionGroupViewport={{
+          slots: { top: s2, center: s3, bottom: null },
+          visible: { top: true, bottom: false },
+        }}
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's3' } as any,
+            paneIndex: 0,
+            session: s3,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalImeLiftPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-group-peek-top')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-group-peek-bottom')).toBeNull();
   });
 });

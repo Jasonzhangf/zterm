@@ -6,24 +6,20 @@ import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipe
 import { resolveTerminalOrientation } from "../lib/terminal-viewport-metrics";
 import { resolveTerminalLayoutProfile } from "../lib/terminal-layout-profile";
 import { mobileTheme } from "../lib/mobile-ui";
+import {
+  type TerminalSessionGroupSlotName,
+  type TerminalSessionGroupViewportProjection,
+} from "../lib/session-group-viewport";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
 import type { AndroidWorkspacePane, Session, TerminalResizeHandler, TerminalViewportChangeHandler, TerminalWidthMode } from "../lib/types";
 import type { CopySelectionState } from "./useTerminalPageCopyRuntime";
-
-export interface TerminalSessionGroupSlots {
-  top: Session | null;
-  center: Session | null;
-  bottom: Session | null;
-}
-
-type TerminalSessionGroupSlotName = "top" | "center" | "bottom";
 
 const TerminalStageShell = ReactMemo(
   function TerminalStageShell({
     interactiveSession,
     sessionBufferStore,
     renderedPaneSessions,
-    sessionGroupSlots,
+    sessionGroupViewport,
     visiblePaneEntries,
     splitVisible,
     activePaneId,
@@ -53,7 +49,7 @@ const TerminalStageShell = ReactMemo(
     interactiveSession: Session | null;
     sessionBufferStore?: SessionRenderBufferStore | null;
     renderedPaneSessions: Session[];
-    sessionGroupSlots?: TerminalSessionGroupSlots | null;
+    sessionGroupViewport?: TerminalSessionGroupViewportProjection<Session> | null;
     visiblePaneEntries: {
       pane: AndroidWorkspacePane;
       paneIndex: number;
@@ -102,7 +98,7 @@ const TerminalStageShell = ReactMemo(
     const sessionGroupVisible = Boolean(
       !splitVisible &&
         !landscape &&
-        sessionGroupSlots?.center,
+        sessionGroupViewport?.slots.center,
     );
     const paneProfile = useMemo(
       () => resolveTerminalLayoutProfile({
@@ -114,15 +110,16 @@ const TerminalStageShell = ReactMemo(
     );
 
     const sessionGroup = useMemo(() => {
-      if (!sessionGroupVisible || !sessionGroupSlots?.center) {
+      if (!sessionGroupVisible || !sessionGroupViewport?.slots.center) {
         return null;
       }
       return {
-        top: sessionGroupSlots.top,
-        center: sessionGroupSlots.center,
-        bottom: sessionGroupSlots.bottom,
+        top: sessionGroupViewport.slots.top,
+        center: sessionGroupViewport.slots.center,
+        bottom: sessionGroupViewport.slots.bottom,
+        visible: sessionGroupViewport.visible,
       };
-    }, [sessionGroupSlots, sessionGroupVisible]);
+    }, [sessionGroupViewport, sessionGroupVisible]);
 
     const renderTerminal = useCallback(
       (
@@ -289,7 +286,10 @@ const TerminalStageShell = ReactMemo(
     }, []);
 
     const renderSessionGroupPeek = useCallback(
-      (session: Session | null, slot: "top" | "bottom") => {
+      (session: Session | null, slot: "top" | "bottom", visible: boolean) => {
+        if (!visible) {
+          return null;
+        }
         const title = session
           ? (session.customName || session.sessionName || session.title || session.id)
           : "未指定 session";
@@ -425,7 +425,7 @@ const TerminalStageShell = ReactMemo(
                 transition: slideSlot ? "transform 180ms ease-out" : "none",
               }}
             >
-              {renderSessionGroupPeek(sessionGroup.top, "top")}
+              {renderSessionGroupPeek(sessionGroup.top, "top", sessionGroup.visible.top)}
               <div
                 data-testid="terminal-session-group-center"
                 style={{
@@ -440,7 +440,7 @@ const TerminalStageShell = ReactMemo(
               >
                 {renderTerminal(sessionGroup.center, true, `group-center:${sessionGroup.center.id}`)}
               </div>
-              {renderSessionGroupPeek(sessionGroup.bottom, "bottom")}
+              {renderSessionGroupPeek(sessionGroup.bottom, "bottom", sessionGroup.visible.bottom)}
             </div>
           ) : interactiveSession || stageSlots.length > 0 ? (
             <PaneStage
@@ -481,15 +481,17 @@ const TerminalStageShell = ReactMemo(
       terminalPageRenderedSessionsUiKey(next.renderedPaneSessions) &&
     prev.sessionBufferStore === next.sessionBufferStore &&
     terminalPageRenderedSessionsUiKey([
-      prev.sessionGroupSlots?.top,
-      prev.sessionGroupSlots?.center,
-      prev.sessionGroupSlots?.bottom,
+      prev.sessionGroupViewport?.slots.top,
+      prev.sessionGroupViewport?.slots.center,
+      prev.sessionGroupViewport?.slots.bottom,
     ].filter((session): session is Session => Boolean(session))) ===
       terminalPageRenderedSessionsUiKey([
-        next.sessionGroupSlots?.top,
-        next.sessionGroupSlots?.center,
-        next.sessionGroupSlots?.bottom,
+        next.sessionGroupViewport?.slots.top,
+        next.sessionGroupViewport?.slots.center,
+        next.sessionGroupViewport?.slots.bottom,
       ].filter((session): session is Session => Boolean(session))) &&
+    prev.sessionGroupViewport?.visible.top === next.sessionGroupViewport?.visible.top &&
+    prev.sessionGroupViewport?.visible.bottom === next.sessionGroupViewport?.visible.bottom &&
     prev.splitVisible === next.splitVisible &&
     prev.activePaneId === next.activePaneId &&
     prev.terminalChromeBottomPx === next.terminalChromeBottomPx &&

@@ -347,12 +347,15 @@
       "domain": "terminal-ui",
       "owners": [
         "src/lib/terminal-layout-profile.ts",
+        "src/lib/session-group-viewport.ts",
         "src/pages/TerminalPageStageShell.tsx"
       ],
       "allowed_paths": [
         "src/lib/terminal-layout-profile.ts",
         "src/lib/terminal-layout-profile.test.ts",
+        "src/lib/session-group-viewport.ts",
         "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
         "src/pages/TerminalPageStageShell.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
         "src/hooks/useTerminalWorkspace.ts",
@@ -368,6 +371,7 @@
       ],
       "required_gates": [
         "src/lib/terminal-layout-profile.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
         "src/hooks/useTerminalWorkspace.test.tsx",
         "src/lib/feature-registry-truth.test.ts"

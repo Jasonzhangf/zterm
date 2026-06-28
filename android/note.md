@@ -1,3 +1,11 @@
+# 2026-06-28 session group boundary projection
+
+- 当前 session group 需要两层真相：
+  - 固定槽位 truth：drawer 保存 top / center / bottom，不因点击 peek 改写。
+  - viewport projection truth：stage 按 focus slot 只投影可见边界，focus=top 时隐藏 top peek，focus=bottom 时隐藏 bottom peek。
+- 边界可见性要下沉成共享 helper，而不是在 `TerminalStageShell` 里分别写 top/bottom 条件；未来横向 left/right 也复用同一边界投影框架。
+- 这次修复的关键不是“少渲染一个按钮”，而是把“槽位内容”和“边界是否显示”拆成两个独立投影结果，避免再次出现 bottom focus 还渲染 bottom placeholder 的假状态。
+
 # note
 
 ## Input path audit (2026-06-19)
