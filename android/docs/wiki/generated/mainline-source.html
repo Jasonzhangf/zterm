@@ -12,6 +12,10 @@ flowchart TD
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
+  TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
+  LayoutProfile --> StageShell
+  TerminalPage --> SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx"]
+  SessionDrawer --> TerminalPage
   TerminalView --> Renderer["src/lib/session-render-buffer-store.ts"]
   Renderer --> RenderGate["src/lib/session-render-gate.ts"]
 </div>

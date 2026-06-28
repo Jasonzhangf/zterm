@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import type { TerminalBufferPayload, TerminalCell } from './types';
@@ -53,8 +53,50 @@ function deriveRenderRows(options: {
   return rows;
 }
 
+const replayCases = [
+  'codex-live',
+  'daemon-restart-recover',
+  'external-input-echo',
+  'initial-sync',
+  'local-input-echo',
+  'schedule-fire',
+  'top-live',
+  'vim-live',
+] as const;
+
+function hasReplayCaseFiles(caseDir: string) {
+  return [
+    'probe-history.json',
+    'tmux-capture.txt',
+    'tmux-metrics.txt',
+    'step-results.json',
+  ].every((file) => existsSync(join(caseDir, file)));
+}
+
+function resolveLatestReplayRoot() {
+  const root = join(process.cwd(), 'evidence', 'daemon-mirror');
+  const candidates = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+        .reverse()
+    : [];
+  const latest = candidates.find((dateFolder) => (
+    replayCases.every((caseName) => hasReplayCaseFiles(join(root, dateFolder, caseName)))
+  ));
+
+  if (!latest) {
+    throw new Error(`No complete daemon mirror replay evidence found under ${root}`);
+  }
+
+  return join(root, latest);
+}
+
+const replayRoot = resolveLatestReplayRoot();
+
 function loadReplayCase(caseName: string) {
-  const caseDir = join(process.cwd(), 'evidence', 'daemon-mirror', '2026-04-27', caseName);
+  const caseDir = join(replayRoot, caseName);
   const history = JSON.parse(readFileSync(join(caseDir, 'probe-history.json'), 'utf8')) as ProbeHistoryEntry[];
   const tmuxCapture = normalizeCapture(readFileSync(join(caseDir, 'tmux-capture.txt'), 'utf8'));
   const metricsText = readFileSync(join(caseDir, 'tmux-metrics.txt'), 'utf8');
@@ -92,17 +134,6 @@ function replayHistory(
 }
 
 describe('terminal buffer replay evidence gate', () => {
-  const replayCases = [
-    'codex-live',
-    'daemon-restart-recover',
-    'external-input-echo',
-    'initial-sync',
-    'local-input-echo',
-    'schedule-fire',
-    'top-live',
-    'vim-live',
-  ] as const;
-
   it.each(replayCases)('replays %s probe history to the same visible rows as tmux oracle', (caseName) => {
     const replayCase = loadReplayCase(caseName);
     const actual = replayHistory(replayCase.history, replayCase.paneRows, replayCase.paneCols);

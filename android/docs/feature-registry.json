@@ -275,6 +275,7 @@
         "src/contexts/session-context-lifecycle.ts",
         "src/lib/session-render-gate.ts",
         "src/lib/session-render-buffer-store.ts",
+        "src/lib/terminal-buffer-replay.evidence.test.ts",
         "src/server/terminal-mirror-runtime.ts",
         "src/server/terminal-mirror-capture.ts",
         "src/server/terminal-control-runtime.ts"
@@ -336,6 +337,45 @@
       ],
       "truth_sources": [
         "docs/ui-slices.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.session_group_layout",
+      "title": "App-layer session group layout, stage slots, and render policy",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/lib/terminal-layout-profile.ts",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "allowed_paths": [
+        "src/lib/terminal-layout-profile.ts",
+        "src/lib/terminal-layout-profile.test.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "docs/features/terminal-session-group-layout.md",
+        "docs/testing/terminal-session-group-layout-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/components/TerminalView.tsx",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/lib/terminal-layout-profile.test.ts",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/features/terminal-session-group-layout.md",
+        "docs/testing/terminal-session-group-layout-test-design.md",
+        "docs/decisions/0001-cross-platform-layout-profile.md",
         "docs/architecture.md",
         "docs/feature-gates.md"
       ]

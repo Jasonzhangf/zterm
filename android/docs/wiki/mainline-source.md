@@ -15,6 +15,8 @@ flowchart TD
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
+  TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
+  LayoutProfile --> StageShell
   TerminalPage --> SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx"]
   SessionDrawer --> TerminalPage
   TerminalView --> Renderer["src/lib/session-render-buffer-store.ts"]
@@ -65,6 +67,7 @@ flowchart TD
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
 | Terminal renderer | `src/components/TerminalView.tsx`, `src/lib/session-render-buffer-store.ts`, `src/lib/session-render-gate.ts` |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
+| Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (hostKey/hostLabel + opened-first ordering in `drawerSessions` useMemo) |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/terminal-http-runtime.ts` |

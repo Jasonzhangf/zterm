@@ -30,6 +30,7 @@ Do not use another feature owner to compensate for a broken owner. If a feature 
 - `terminal.open_tabs`: prove no daemon audit, transport close, or runtime absence can physically auto-close a client tab.
 - `terminal.buffer_render`: prove buffer-sync apply is the only body repaint path and revision reset does not publish empty black frames over existing content.
 - `terminal.workspace_panes`: prove pane ownership is explicit, split layout does not resurrect runtime-only tabs, and PaneStage remains the split truth.
+- `terminal.session_group_layout`: prove session/tab/pane truth stays unchanged while layout profiles map existing containers to stage slots; Phase 1 must keep phone behavior stable before adding multi-container projection, and future partially-visible slots must not mount live terminal by default.
 - `terminal.interaction_runtime`: prove active tab / pane routing stays isolated and pane attach/switch refuses owner-less targets.
 - `terminal.shell_actions`: prove tab manager scope, quick-picker pane routing, and viewport mode updates stay in shell-actions owner.
 - `terminal.schedule`: prove jobs do not leave orphan timers or store entries and daemon remains the execution truth.
