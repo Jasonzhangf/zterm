@@ -632,20 +632,21 @@ describe("TerminalQuickBar", () => {
     expect(screen.queryByText("行号")).toBeNull();
   });
 
-  it("activates copy mode from press and suppresses the follow-up click", () => {
+  it("activates copy mode immediately from pointer press and suppresses the follow-up click", () => {
     const onToggleCopyMode = vi.fn();
 
     renderQuickBar({ onToggleCopyMode });
 
     const copyButton = screen.getByRole("button", { name: "拷贝" });
     fireEvent.pointerDown(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
     fireEvent.pointerUp(copyButton, { pointerId: 1, clientX: 20, clientY: 20 });
     fireEvent.click(copyButton);
 
     expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
   });
 
-  it("activates copy mode from touch release and suppresses the follow-up click", () => {
+  it("activates copy mode immediately from touch start and suppresses the follow-up click", () => {
     const onToggleCopyMode = vi.fn();
 
     renderQuickBar({ onToggleCopyMode });
@@ -654,6 +655,7 @@ describe("TerminalQuickBar", () => {
     fireEvent.touchStart(copyButton, {
       touches: [{ clientX: 20, clientY: 20 }],
     });
+    expect(onToggleCopyMode).toHaveBeenCalledTimes(1);
     fireEvent.touchEnd(copyButton, {
       changedTouches: [{ clientX: 20, clientY: 20 }],
     });

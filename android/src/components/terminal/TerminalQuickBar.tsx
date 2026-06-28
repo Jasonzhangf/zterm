@@ -207,6 +207,7 @@ function TerminalQuickBarComponent({
   const suppressBubbleClickRef = useRef(false);
   const suppressActionClickRef = useRef<string | null>(null);
   const tmuxCopyPressActiveRef = useRef(false);
+  const tmuxCopySuppressClickRef = useRef(false);
   const repeatLongPressTimerRef = useRef<number | null>(null);
   const repeatIntervalTimerRef = useRef<number | null>(null);
   const pressedRepeatableActionIdRef = useRef<string | null>(null);
@@ -563,26 +564,18 @@ function TerminalQuickBarComponent({
     [],
   );
 
-  const armCopyModePress = useCallback(
+  const triggerCopyModeFromPressStart = useCallback(
     (action: { id: string; label: string; sequence: string }) => {
       if (action.id !== "tmux-copy") {
         return false;
+      }
+      if (tmuxCopyPressActiveRef.current) {
+        tmuxCopySuppressClickRef.current = true;
+        suppressActionClickRef.current = action.id;
+        return true;
       }
       tmuxCopyPressActiveRef.current = true;
-      return true;
-    },
-    [],
-  );
-
-  const commitCopyModePress = useCallback(
-    (action: { id: string; label: string; sequence: string }) => {
-      if (action.id !== "tmux-copy") {
-        return false;
-      }
-      if (!tmuxCopyPressActiveRef.current) {
-        return false;
-      }
-      tmuxCopyPressActiveRef.current = false;
+      tmuxCopySuppressClickRef.current = true;
       suppressActionClickRef.current = action.id;
       if (repeatingActionId) {
         stopRepeatingAction();
@@ -591,6 +584,18 @@ function TerminalQuickBarComponent({
       return true;
     },
     [repeatingActionId, stopRepeatingAction, triggerActionSequence],
+  );
+
+  const finishCopyModePress = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (action.id !== "tmux-copy") {
+        return false;
+      }
+      tmuxCopyPressActiveRef.current = false;
+      suppressActionClickRef.current = action.id;
+      return true;
+    },
+    [],
   );
 
   const startRepeatingAction = useCallback(
@@ -1377,7 +1382,7 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
-          if (armCopyModePress(action)) {
+          if (triggerCopyModeFromPressStart(action)) {
             return;
           }
           if (action.id !== "keyboard") {
@@ -1405,7 +1410,7 @@ function TerminalQuickBarComponent({
           clearRepeatLongPressTimer();
           pressedRepeatableActionIdRef.current = null;
           if (action.id === "tmux-copy") {
-            commitCopyModePress(action);
+            finishCopyModePress(action);
           }
         }}
         onPointerCancel={() => {
@@ -1429,7 +1434,7 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
-          armCopyModePress(action);
+          triggerCopyModeFromPressStart(action);
         }}
         onTouchEnd={(event) => {
           if (action.id !== "tmux-copy") {
@@ -1438,7 +1443,7 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
-          commitCopyModePress(action);
+          finishCopyModePress(action);
         }}
         onTouchCancel={() => {
           if (action.id === "tmux-copy") {
@@ -1458,9 +1463,9 @@ function TerminalQuickBarComponent({
             suppressActionClickRef.current = null;
             return;
           }
-          if (action.id === "tmux-copy" && tmuxCopyPressActiveRef.current) {
+          if (action.id === "tmux-copy" && tmuxCopySuppressClickRef.current) {
             tmuxCopyPressActiveRef.current = false;
-            triggerActionSequence(action);
+            tmuxCopySuppressClickRef.current = false;
             return;
           }
           if (action.id === "keyboard") {
@@ -1604,6 +1609,7 @@ function TerminalQuickBarComponent({
       stopRepeatingAction();
       suppressActionClickRef.current = null;
       tmuxCopyPressActiveRef.current = false;
+      tmuxCopySuppressClickRef.current = false;
     },
     [stopRepeatingAction],
   );

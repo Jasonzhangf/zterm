@@ -989,3 +989,5 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - 再次出现“JS 菜单不弹 / 系统长按抢先”时，先查 shell capture 边界，再查 TerminalView 的 long-press timer，最后才看 state machine。
 - 再次出现“copy mode 偶发没激活”时，先查 QuickBar `tmux-copy` 入口是否仍是 press-owned；该入口不能只依赖 `click`，必须用 `pointerDown` 激活、`touchEnd` fallback，并对同轮 pointer/touch/click 去重。
 - 如果 press 后慢释放会把 copy mode 误切回去，说明还在用时间窗判定同轮事件；`tmux-copy` 应改成 armed / commit 两段式，press 只 armed，release 才 commit，click 只作 fallback。
+- 真机若显示 `CM OFF` 且点击 `拷贝` 不进入 copy mode，不能把入口放在 release commit；Android WebView 仍可能漏 `pointerUp/touchEnd`。`tmux-copy` 必须 press-start 立即触发，用显式 press sequence 消费后续 touch/pointer/click，禁止二次 toggle。
+- copy mode 行级长按不能 `stopPropagation()`；否则父级 `TerminalTabSwipeSurface` 收不到右滑起点，表现为 copy 状态下 session drawer 右滑也失效。

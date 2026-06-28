@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from './TerminalView';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
@@ -38,12 +38,12 @@ class ResizeObserverMock {
 
 function buildRenderBufferSnapshot(): SessionRenderBufferSnapshot {
   return {
-    lines: [],
+    lines: [[{ char: 65, fg: 256, bg: 256, flags: 0, width: 1 }]],
     gapRanges: [],
     startIndex: 0,
-    endIndex: 24,
+    endIndex: 1,
     bufferHeadStartIndex: 0,
-    bufferTailEndIndex: 24,
+    bufferTailEndIndex: 1,
     daemonHeadRevision: 1,
     daemonHeadEndIndex: 24,
     cols: 80,
@@ -164,5 +164,38 @@ describe('TerminalView RAF throttle', () => {
     expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
 
     requestAnimationFrameSpy.mockRestore();
+  });
+
+  it('lets copy-mode row touchstart bubble so the session drawer right-swipe surface still sees it', () => {
+    const onParentTouchStart = vi.fn();
+    const onLongPressRow = vi.fn();
+    const { container } = render(
+      <div
+        style={{ width: '640px', height: '408px' }}
+        onTouchStart={onParentTouchStart}
+      >
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          copyModeActive
+          onLongPressRow={onLongPressRow}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    expect(row).toBeTruthy();
+
+    fireEvent.touchStart(row, {
+      touches: [{ clientX: 40, clientY: 80 }],
+      changedTouches: [{ clientX: 40, clientY: 80 }],
+    });
+
+    expect(onParentTouchStart).toHaveBeenCalledTimes(1);
+    expect(onLongPressRow).not.toHaveBeenCalled();
   });
 });

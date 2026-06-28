@@ -338,8 +338,6 @@ function TerminalViewComponent({
       if (!copyModeActive || !sessionId || !onLongPressRow) {
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
       cancelCopyLongPress();
       longPressStartRef.current = {
         x: event.clientX,
@@ -375,8 +373,6 @@ function TerminalViewComponent({
       if (!copyModeActive || !sessionId || !onLongPressRow) {
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
       cancelCopyLongPress();
       const touch = event.touches[0] ?? event.changedTouches[0];
       if (!touch) {
