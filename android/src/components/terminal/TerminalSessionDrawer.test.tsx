@@ -381,4 +381,41 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-top'));
     expect(onAssignSessionGroupSlot).toHaveBeenCalledWith('s2', 'top');
   });
+
+  it('uses left and right slot labels in horizontal session-group mode', () => {
+    const onAssignSessionGroupSlot = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessionGroupLayoutAxis="horizontal"
+        sessions={[
+          {
+            ...sessions[0],
+            sessionGroupSlot: 'top',
+          },
+          {
+            ...sessions[1],
+            sessionGroupSlot: 'bottom',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={onAssignSessionGroupSlot}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-slot-s1').textContent).toContain('左侧');
+    expect(screen.getByTestId('terminal-session-drawer-slot-s2').textContent).toContain('右侧');
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-session-drawer-row-s2'), {
+      clientX: 180,
+      clientY: 280,
+    });
+
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-top').textContent).toContain('放到左侧');
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-bottom').textContent).toContain('放到右侧');
+  });
 });

@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef, useState } from 'react';
 
 export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
+export type TerminalSessionGroupLayoutAxis = 'vertical' | 'horizontal';
 
 export interface TerminalSessionDrawerItem {
   id: string;
@@ -33,6 +34,7 @@ export interface TerminalSessionDrawerProps {
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
+  sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
   onOpenQuickTabPicker: () => void;
   onDebugAddEvent?: (eventName: string) => void;
 }
@@ -56,11 +58,16 @@ function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
   }
 }
 
-function resolveSessionGroupSlotTone(slot: TerminalSessionGroupSlotName | null | undefined) {
+function resolveSessionGroupSlotTone(
+  slot: TerminalSessionGroupSlotName | null | undefined,
+  axis: TerminalSessionGroupLayoutAxis = 'vertical',
+) {
+  const beforeLabel = axis === 'horizontal' ? '左侧' : '上方';
+  const afterLabel = axis === 'horizontal' ? '右侧' : '下方';
   switch (slot) {
     case 'top':
       return {
-        label: '上方',
+        label: beforeLabel,
         color: '#8bd5ff',
         background: 'rgba(139, 213, 255, 0.14)',
         border: 'rgba(139, 213, 255, 0.70)',
@@ -74,7 +81,7 @@ function resolveSessionGroupSlotTone(slot: TerminalSessionGroupSlotName | null |
       };
     case 'bottom':
       return {
-        label: '下方',
+        label: afterLabel,
         color: '#f5b659',
         background: 'rgba(245, 182, 89, 0.14)',
         border: 'rgba(245, 182, 89, 0.72)',
@@ -93,6 +100,7 @@ function TerminalSessionDrawerComponent({
   onSelectSession,
   onCloseSession,
   onAssignSessionGroupSlot,
+  sessionGroupLayoutAxis = 'vertical',
   onOpenQuickTabPicker,
   onDebugAddEvent,
 }: TerminalSessionDrawerProps) {
@@ -356,7 +364,7 @@ function TerminalSessionDrawerComponent({
         >
           {visibleSessions.map((session) => {
             const unavailable = Boolean(session.remoteMissing);
-            const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot);
+            const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
             <button
               key={session.id}
@@ -563,11 +571,11 @@ function TerminalSessionDrawerComponent({
               设置 {slotMenu.title} 的位置
             </div>
             {([
-              ['top', '放到上方'],
+              ['top', sessionGroupLayoutAxis === 'horizontal' ? '放到左侧' : '放到上方'],
               ['center', '放到中间'],
-              ['bottom', '放到下方'],
+              ['bottom', sessionGroupLayoutAxis === 'horizontal' ? '放到右侧' : '放到下方'],
             ] as const).map(([slot, label]) => {
-              const tone = resolveSessionGroupSlotTone(slot);
+              const tone = resolveSessionGroupSlotTone(slot, sessionGroupLayoutAxis);
               return (
                 <button
                   key={slot}

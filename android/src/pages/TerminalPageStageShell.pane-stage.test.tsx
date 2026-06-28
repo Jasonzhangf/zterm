@@ -354,8 +354,8 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(getByTestId('terminal-session-group-stage').getAttribute('data-layout-mode')).toBe('phone-portrait-vertical-group');
     expect(getByTestId('terminal-session-group-peek-top').textContent).toContain('alpha');
     expect(getByTestId('terminal-session-group-peek-bottom').textContent).toContain('gamma');
-    expect(getByTestId('terminal-session-group-peek-top').firstElementChild?.textContent).toContain('Top sessionalpha');
-    expect(getByTestId('terminal-session-group-peek-bottom').firstElementChild?.textContent).toContain('Bottom sessiongamma');
+    expect(getByTestId('terminal-session-group-peek-top').firstElementChild?.textContent).toContain('上方alpha');
+    expect(getByTestId('terminal-session-group-peek-bottom').firstElementChild?.textContent).toContain('下方gamma');
     expect(queryAllByTestId(/^terminal-view-/).length).toBe(1);
     expect(terminalViewSpy).toHaveBeenCalledTimes(1);
     expect(terminalViewSpy.mock.calls[0]?.[0].sessionId).toBe('s2');
@@ -494,7 +494,71 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
 
     expect(screen.getByTestId('terminal-session-group-stage').getAttribute('data-layout-mode')).toBe('tablet-portrait-horizontal-group');
     expect(screen.getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('flex-direction: row');
-    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('Left session');
-    expect(screen.getByTestId('terminal-session-group-peek-bottom').textContent).toContain('Right session');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('左侧');
+    expect(screen.getByTestId('terminal-session-group-peek-bottom').textContent).toContain('右侧');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('alpha');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('host-a:3333');
+    expect(screen.getByTestId('terminal-session-group-peek-top').getAttribute('style')).toContain('padding: 72px 10px 32px');
+  });
+
+  it('does not render a horizontal side peek when that slot has no assigned session', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 760 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1024 });
+    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 760 });
+    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 1024 });
+    const s2 = {
+      id: 's2',
+      state: 'connected',
+      sessionName: 'beta',
+      bridgeHost: 'host-b',
+      bridgePort: 3333,
+    } as any;
+    const s3 = {
+      id: 's3',
+      state: 'connected',
+      sessionName: 'gamma',
+      bridgeHost: 'host-c',
+      bridgePort: 3333,
+    } as any;
+
+    render(
+      <TerminalStageShell
+        interactiveSession={s2}
+        renderedPaneSessions={[s2]}
+        sessionGroupViewport={{
+          slots: { top: null, center: s2, bottom: s3 },
+          visible: { top: true, bottom: true },
+        }}
+        sessionGroupLayoutAxis="horizontal"
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's2' } as any,
+            paneIndex: 0,
+            session: s2,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalImeLiftPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-session-group-peek-top')).toBeNull();
+    expect(screen.getByTestId('terminal-session-group-peek-bottom')).toBeTruthy();
   });
 });

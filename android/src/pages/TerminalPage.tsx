@@ -2627,6 +2627,7 @@ function TerminalPageComponent({
               onSelectSession={handleSelectSessionFromDrawer}
               onCloseSession={handleCloseSessionFromDrawer}
               onAssignSessionGroupSlot={handleAssignSessionGroupSlot}
+              sessionGroupLayoutAxis={sessionGroupLayoutAxis}
               onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
               onDebugAddEvent={handleSessionDrawerDebugAddEvent}
             />
