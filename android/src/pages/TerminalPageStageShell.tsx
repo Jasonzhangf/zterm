@@ -418,9 +418,9 @@ const TerminalStageShell = ReactMemo(
                 boxSizing: "border-box",
                 transform:
                   slideSlot === "top"
-                    ? "translateY(54px)"
+                    ? "translateY(calc(100% - 76px))"
                     : slideSlot === "bottom"
-                      ? "translateY(-54px)"
+                      ? "translateY(calc(-100% + 76px))"
                       : "translateY(0)",
                 transition: slideSlot ? "transform 180ms ease-out" : "none",
               }}

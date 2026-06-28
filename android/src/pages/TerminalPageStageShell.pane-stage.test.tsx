@@ -358,12 +358,12 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(terminalViewSpy.mock.calls[0]?.[0].sessionId).toBe('s2');
 
     fireEvent.click(getByTestId('terminal-session-group-peek-top'));
-    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(54px)');
+    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(calc(100% - 76px))');
     vi.advanceTimersByTime(180);
     expect(onActivateSession).toHaveBeenCalledWith('s1', 'top');
 
     fireEvent.click(getByTestId('terminal-session-group-peek-bottom'));
-    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(-54px)');
+    expect(getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('translateY(calc(-100% + 76px))');
     vi.advanceTimersByTime(180);
     expect(onActivateSession).toHaveBeenCalledWith('s3', 'bottom');
     vi.useRealTimers();

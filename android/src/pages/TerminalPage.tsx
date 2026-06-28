@@ -408,31 +408,31 @@ function resolveTerminalSessionGroupSlotIds(options: {
   return { top, center, bottom };
 }
 
-export function resolveTerminalSessionGroupSlotActivation(
+export function resolveTerminalSessionGroupViewportSlots(
   current: TerminalSessionGroupSlotIds,
-  sessionId: string,
-  sourceSlot?: TerminalSessionGroupSlotName,
+  focusSessionId: string | null,
 ): TerminalSessionGroupSlotIds {
-  if (sourceSlot === 'top') {
+  if (!focusSessionId) {
+    return current;
+  }
+  if (current.top === focusSessionId) {
     return {
       top: null,
-      center: sessionId,
+      center: current.top,
       bottom: current.center,
     };
   }
-  if (sourceSlot === 'bottom') {
+  if (current.center === focusSessionId) {
+    return current;
+  }
+  if (current.bottom === focusSessionId) {
     return {
       top: current.center,
-      center: sessionId,
+      center: current.bottom,
       bottom: null,
     };
   }
-  return {
-    ...current,
-    center: sessionId,
-    top: current.top === sessionId ? current.center : current.top,
-    bottom: current.bottom === sessionId ? current.center : current.bottom,
-  };
+  return current;
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -1011,6 +1011,9 @@ function TerminalPageComponent({
     center: activeSession?.id || null,
     bottom: null,
   }));
+  const [sessionGroupFocusSessionId, setSessionGroupFocusSessionId] = useState<string | null>(
+    activeSession?.id || null,
+  );
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
@@ -1235,6 +1238,13 @@ function TerminalPageComponent({
     sessions,
     centerSessionId: uiSessionId,
   }), [sessionGroupSlotIds, sessions, uiSessionId]);
+  useEffect(() => {
+    setSessionGroupFocusSessionId(activeSession?.id || null);
+  }, [activeSession?.id]);
+  const sessionGroupViewportSlotIds = useMemo(() => resolveTerminalSessionGroupViewportSlots(
+    effectiveSessionGroupSlotIds,
+    sessionGroupFocusSessionId || uiSessionId,
+  ), [effectiveSessionGroupSlotIds, sessionGroupFocusSessionId, uiSessionId]);
   const resolveSessionGroupSlot = useCallback((sessionId: string): TerminalSessionGroupSlotName | null => {
     if (effectiveSessionGroupSlotIds.top === sessionId) {
       return 'top';
@@ -1247,17 +1257,17 @@ function TerminalPageComponent({
     }
     return null;
   }, [effectiveSessionGroupSlotIds]);
-  const sessionGroupSlotSessions = useMemo(() => ({
-    top: effectiveSessionGroupSlotIds.top
-      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.top) || null
+  const sessionGroupViewportSlotSessions = useMemo(() => ({
+    top: sessionGroupViewportSlotIds.top
+      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.top) || null
       : null,
-    center: effectiveSessionGroupSlotIds.center
-      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.center) || null
+    center: sessionGroupViewportSlotIds.center
+      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.center) || null
       : null,
-    bottom: effectiveSessionGroupSlotIds.bottom
-      ? sessions.find((session) => session.id === effectiveSessionGroupSlotIds.bottom) || null
+    bottom: sessionGroupViewportSlotIds.bottom
+      ? sessions.find((session) => session.id === sessionGroupViewportSlotIds.bottom) || null
       : null,
-  }), [effectiveSessionGroupSlotIds, sessions]);
+  }), [sessionGroupViewportSlotIds, sessions]);
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
     : (interactiveSession ? [interactiveSession] : []);
@@ -2393,11 +2403,9 @@ function TerminalPageComponent({
   }, [handleSwitchSessionFromChrome]);
 
   const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
-    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotActivation(
-      current,
-      sessionId,
-      sourceSlot,
-    ));
+    if (sourceSlot === 'top' || sourceSlot === 'bottom') {
+      setSessionGroupFocusSessionId(sessionId);
+    }
     handleSwitchSessionFromChrome(sessionId);
   }, [handleSwitchSessionFromChrome]);
 
@@ -2636,12 +2644,12 @@ function TerminalPageComponent({
             />
           </>
         ) : null}
-        <TerminalStageShell
-          interactiveSession={interactiveSession}
-          sessionBufferStore={sessionBufferStore}
-          renderedPaneSessions={renderedPaneSessions}
-          sessionGroupSlots={sessionGroupSlotSessions}
-          visiblePaneEntries={visiblePaneEntries}
+    <TerminalStageShell
+      interactiveSession={interactiveSession}
+      sessionBufferStore={sessionBufferStore}
+      renderedPaneSessions={renderedPaneSessions}
+      sessionGroupSlots={sessionGroupViewportSlotSessions}
+      visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
           terminalChromeBottomPx={terminalChromeBottomPx}

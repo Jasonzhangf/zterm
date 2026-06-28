@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
-import { TerminalPage, resolveTerminalSessionGroupSlotActivation } from './TerminalPage';
+import { TerminalPage, resolveTerminalSessionGroupViewportSlots } from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -218,12 +218,11 @@ describe('TerminalPage portrait session drawer', () => {
   });
 });
 
-describe('resolveTerminalSessionGroupSlotActivation', () => {
-  it('scrolls top into center without wrapping bottom back to top', () => {
-    expect(resolveTerminalSessionGroupSlotActivation(
+describe('resolveTerminalSessionGroupViewportSlots', () => {
+  it('projects top into center without mutating the fixed slot map', () => {
+    expect(resolveTerminalSessionGroupViewportSlots(
       { top: 's1', center: 's2', bottom: 's3' },
       's1',
-      'top',
     )).toEqual({
       top: null,
       center: 's1',
@@ -231,15 +230,25 @@ describe('resolveTerminalSessionGroupSlotActivation', () => {
     });
   });
 
-  it('scrolls bottom into center without wrapping top back to bottom', () => {
-    expect(resolveTerminalSessionGroupSlotActivation(
+  it('projects bottom into center without mutating the fixed slot map', () => {
+    expect(resolveTerminalSessionGroupViewportSlots(
       { top: 's1', center: 's2', bottom: 's3' },
       's3',
-      'bottom',
     )).toEqual({
       top: 's2',
       center: 's3',
       bottom: null,
+    });
+  });
+
+  it('keeps fixed slots unchanged when the center slot is focused', () => {
+    expect(resolveTerminalSessionGroupViewportSlots(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's2',
+    )).toEqual({
+      top: 's1',
+      center: 's2',
+      bottom: 's3',
     });
   });
 });
