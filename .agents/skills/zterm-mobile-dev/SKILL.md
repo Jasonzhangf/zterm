@@ -991,3 +991,4 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - 如果 press 后慢释放会把 copy mode 误切回去，说明还在用时间窗判定同轮事件；`tmux-copy` 应改成 armed / commit 两段式，press 只 armed，release 才 commit，click 只作 fallback。
 - 真机若显示 `CM OFF` 且点击 `拷贝` 不进入 copy mode，不能把入口放在 release commit；Android WebView 仍可能漏 `pointerUp/touchEnd`。`tmux-copy` 必须 press-start 立即触发，用显式 press sequence 消费后续 touch/pointer/click，禁止二次 toggle。
 - copy mode 行级长按不能 `stopPropagation()`；否则父级 `TerminalTabSwipeSurface` 收不到右滑起点，表现为 copy 状态下 session drawer 右滑也失效。
+- 如果按钮已经变 active 但 `TerminalView` 里的 copy mode 仍旧不变，先查 `TerminalStageShell` 的 `ReactMemo` comparator 是否漏了 `copySelection` / `onLongPressRow`；不要继续只修 QuickBar。

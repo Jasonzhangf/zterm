@@ -728,3 +728,17 @@ Need runtime debug to confirm:
 ### 已验证
 - `pnpm exec vitest run src/components/terminal/TerminalQuickBar.test.tsx src/components/TerminalView.test.tsx src/components/terminal/TerminalTabSwipeSurface.test.tsx src/components/terminal/copy-longpress-e2e.test.tsx src/components/terminal/system-copy-state-machine.test.tsx src/components/terminal/system-copy-longpress-regression.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter=dot` PASS（79/79）。
 - `pnpm exec tsc --noEmit` PASS。
+
+## 2026-06-28 copy button visible active but TerminalView stale
+
+### 现场
+- 点击底部 `拷贝` 后，QuickBar 已经显示 active，但 `TerminalView` 里的 copy mode 仍停在旧值。
+- 只有点开状态浮窗后，TerminalView 才彻底进入 copy mode，表现像“状态变化被 UI 某层吞掉了”。
+
+### 根因
+- `TerminalStageShell` 是 `ReactMemo`，但 comparator 之前没有比较 `copySelection` 和 `onLongPressRow`。
+- 结果是 QuickBar 先重渲染，`TerminalView.copyModeActive` 还卡在旧 props；等别的状态变化（比如状态浮窗）触发父级刷新，TerminalView 才吃到新 copy props。
+
+### 修复
+- 给 `TerminalStageShell` comparator 增加 `copySelection` 稳定 key 和 `onLongPressRow` 比较。
+- 回归直接盯 `TerminalView.data-copy-mode-active`，不再只看 QuickBar 染色。

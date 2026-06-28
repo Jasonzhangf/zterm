@@ -164,6 +164,7 @@ vi.mock("../components/TerminalView", () => ({
     onResize,
     onWidthModeChange,
     widthMode,
+    copyModeActive,
     copyStartRowIndex,
     copyEndRowIndex,
     copyPreviewRowIndex,
@@ -181,6 +182,7 @@ vi.mock("../components/TerminalView", () => ({
     onResize?: (...args: any[]) => void;
     onWidthModeChange?: (...args: any[]) => void;
     widthMode?: string;
+    copyModeActive?: boolean;
     copyStartRowIndex?: number | null;
     copyEndRowIndex?: number | null;
     copyPreviewRowIndex?: number | null;
@@ -191,6 +193,7 @@ vi.mock("../components/TerminalView", () => ({
       data-has-onresize={onResize ? "true" : "false"}
       data-has-onwidthmodechange={onWidthModeChange ? "true" : "false"}
       data-width-mode={widthMode || "adaptive-phone"}
+      data-copy-mode-active={copyModeActive ? "true" : "false"}
       data-copy-start={copyStartRowIndex ?? ""}
       data-copy-end={copyEndRowIndex ?? ""}
       data-copy-preview={copyPreviewRowIndex ?? ""}
@@ -642,13 +645,17 @@ describe("TerminalPage Android IME bridge", () => {
     );
 
     const quickBar = screen.getByTestId("terminal-quickbar");
+    const terminalView = screen.getByTestId("terminal-view-s1");
     expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("false");
 
     fireEvent.click(screen.getByText("toggle-copy-mode"));
     expect(quickBar.getAttribute("data-copy-mode-active")).toBe("true");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("true");
 
     fireEvent.click(screen.getByText("toggle-copy-mode"));
     expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("false");
   });
 
   it("releases editor mode before keyboard toggle and requests Android IME focus", async () => {

@@ -343,6 +343,24 @@ function terminalPageRenderedSessionsUiKey(sessions: Session[]) {
   return sessions.map((session) => terminalPageRenderedSessionUiKey(session)).join('||');
 }
 
+function terminalPageCopySelectionUiKey(copySelection: {
+  active: boolean;
+  sessionId: string | null;
+  startRowIndex: number | null;
+  endRowIndex: number | null;
+  menu: { x: number; y: number; rowIndex: number } | null;
+}) {
+  return [
+    copySelection.active ? '1' : '0',
+    copySelection.sessionId || '',
+    copySelection.startRowIndex ?? '',
+    copySelection.endRowIndex ?? '',
+    copySelection.menu?.x ?? '',
+    copySelection.menu?.y ?? '',
+    copySelection.menu?.rowIndex ?? '',
+  ].join('::');
+}
+
 function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {
   if (!session) {
     return '';
@@ -1033,8 +1051,10 @@ const TerminalStageShell = ReactMemo(function TerminalStageShell({
   && prev.terminalThemeId === next.terminalThemeId
   && prev.terminalWidthMode === next.terminalWidthMode
   && prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible
+  && terminalPageCopySelectionUiKey(prev.copySelection) === terminalPageCopySelectionUiKey(next.copySelection)
   && prev.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
     === next.visiblePaneEntries.map((entry) => `${entry.pane.id}:${entry.session.id}`).join('||')
+  && prev.onLongPressRow === next.onLongPressRow
   && prev.onActivatePane === next.onActivatePane
 ));
 
