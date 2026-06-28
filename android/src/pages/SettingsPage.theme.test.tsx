@@ -19,6 +19,7 @@ const baseSettings: BridgeSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
   terminalWidthMode: 'mirror-fixed',
+  terminalSessionGroupLayoutMode: 'auto',
   shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,
@@ -168,6 +169,46 @@ describe('SettingsPage terminal theme selection', () => {
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       terminalWidthMode: 'adaptive-phone',
+    }));
+  });
+
+  it('persists session group layout mode through settings save', () => {
+    const onSave = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={onSave}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Vertical' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      terminalSessionGroupLayoutMode: 'vertical',
     }));
   });
 

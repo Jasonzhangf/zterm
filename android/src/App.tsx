@@ -715,6 +715,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onRunScheduleJobNow={runScheduleJobNow}
             terminalThemeId={bridgeSettings.terminalThemeId}
             terminalWidthMode={bridgeSettings.terminalWidthMode}
+            terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
             onSendMessage={sendMessageRaw}
             onFileTransferMessage={onFileTransferMessage}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}

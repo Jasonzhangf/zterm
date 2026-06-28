@@ -427,4 +427,74 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(screen.getByTestId('terminal-session-group-peek-top')).toBeTruthy();
     expect(screen.queryByTestId('terminal-session-group-peek-bottom')).toBeNull();
   });
+
+  it('renders the same fixed slots as left and right peeks when the session group axis is horizontal', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 760 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1024 });
+    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 760 });
+    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 1024 });
+    const s1 = {
+      id: 's1',
+      state: 'connected',
+      sessionName: 'alpha',
+      bridgeHost: 'host-a',
+      bridgePort: 3333,
+    } as any;
+    const s2 = {
+      id: 's2',
+      state: 'connected',
+      sessionName: 'beta',
+      bridgeHost: 'host-b',
+      bridgePort: 3333,
+    } as any;
+    const s3 = {
+      id: 's3',
+      state: 'connected',
+      sessionName: 'gamma',
+      bridgeHost: 'host-c',
+      bridgePort: 3333,
+    } as any;
+
+    render(
+      <TerminalStageShell
+        interactiveSession={s2}
+        renderedPaneSessions={[s2]}
+        sessionGroupViewport={{
+          slots: { top: s1, center: s2, bottom: s3 },
+          visible: { top: true, bottom: true },
+        }}
+        sessionGroupLayoutAxis="horizontal"
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's2' } as any,
+            paneIndex: 0,
+            session: s2,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalImeLiftPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-group-stage').getAttribute('data-layout-mode')).toBe('tablet-portrait-horizontal-group');
+    expect(screen.getByTestId('terminal-session-group-stage').getAttribute('style')).toContain('flex-direction: row');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('Left session');
+    expect(screen.getByTestId('terminal-session-group-peek-bottom').textContent).toContain('Right session');
+  });
 });

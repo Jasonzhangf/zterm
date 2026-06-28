@@ -13,6 +13,7 @@ import {
   upsertBridgeServer,
   type BridgeServerPreset,
   type BridgeSettings,
+  type TerminalSessionGroupLayoutMode,
   type TraversalRelayClientSettings,
 } from '@zterm/shared';
 
@@ -30,7 +31,7 @@ export {
   sortBridgeServers,
   upsertBridgeServer,
 };
-export type { BridgeServerPreset, BridgeSettings, TraversalRelayClientSettings };
+export type { BridgeServerPreset, BridgeSettings, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
 export type TraversalPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 
 export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['ipv6', 'tailscale', 'ipv4', 'rtc-relay'];

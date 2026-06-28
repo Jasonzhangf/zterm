@@ -8,7 +8,7 @@ export const DEFAULT_BRIDGE_PORT = MOBILE_BRIDGE_CONFIG.defaultBridgePort;
 export const DEFAULT_DAEMON_HOST = MOBILE_BRIDGE_CONFIG.daemonHost;
 export const DEFAULT_DAEMON_PORT = MOBILE_BRIDGE_CONFIG.defaultBridgePort;
 export const DEFAULT_TERMINAL_CACHE_LINES = MOBILE_BRIDGE_CONFIG.defaultTerminalCacheLines;
-export const WTERM_CONFIG_DISPLAY_PATH = '~/.wterm/config.json';
+export const WTERM_CONFIG_DISPLAY_PATH = '~/.zterm/config.json';
 
 export function buildDaemonSessionName(port: number = DEFAULT_DAEMON_PORT) {
   return `zterm-daemon-${port}`;

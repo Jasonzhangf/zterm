@@ -4,12 +4,12 @@ import { TerminalView } from "../components/TerminalView";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipeSurface";
 import { resolveTerminalOrientation } from "../lib/terminal-viewport-metrics";
-import { resolveTerminalLayoutProfile } from "../lib/terminal-layout-profile";
-import { mobileTheme } from "../lib/mobile-ui";
 import {
-  type TerminalSessionGroupSlotName,
-  type TerminalSessionGroupViewportProjection,
-} from "../lib/session-group-viewport";
+  resolveTerminalLayoutProfile,
+  type TerminalSessionGroupLayoutAxis,
+} from "../lib/terminal-layout-profile";
+import { mobileTheme } from "../lib/mobile-ui";
+import type { TerminalSessionGroupSlotName, TerminalSessionGroupViewportProjection } from "../lib/session-group-viewport";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
 import type { AndroidWorkspacePane, Session, TerminalResizeHandler, TerminalViewportChangeHandler, TerminalWidthMode } from "../lib/types";
 import type { CopySelectionState } from "./useTerminalPageCopyRuntime";
@@ -20,6 +20,7 @@ const TerminalStageShell = ReactMemo(
     sessionBufferStore,
     renderedPaneSessions,
     sessionGroupViewport,
+    sessionGroupLayoutAxis = "vertical",
     visiblePaneEntries,
     splitVisible,
     activePaneId,
@@ -50,6 +51,7 @@ const TerminalStageShell = ReactMemo(
     sessionBufferStore?: SessionRenderBufferStore | null;
     renderedPaneSessions: Session[];
     sessionGroupViewport?: TerminalSessionGroupViewportProjection<Session> | null;
+    sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
     visiblePaneEntries: {
       pane: AndroidWorkspacePane;
       paneIndex: number;
@@ -105,8 +107,9 @@ const TerminalStageShell = ReactMemo(
         splitVisible,
         landscape,
         sessionGroupVisible,
+        sessionGroupAxis: sessionGroupLayoutAxis,
       }),
-      [landscape, sessionGroupVisible, splitVisible],
+      [landscape, sessionGroupLayoutAxis, sessionGroupVisible, splitVisible],
     );
 
     const sessionGroup = useMemo(() => {
@@ -290,6 +293,9 @@ const TerminalStageShell = ReactMemo(
         if (!visible) {
           return null;
         }
+        const sideLabel = sessionGroupLayoutAxis === "horizontal"
+          ? (slot === "top" ? "Left session" : "Right session")
+          : (slot === "top" ? "Top session" : "Bottom session");
         const title = session
           ? (session.customName || session.sessionName || session.title || session.id)
           : "未指定 session";
@@ -303,10 +309,12 @@ const TerminalStageShell = ReactMemo(
           onClick={() => { if (session) activateSessionGroupSlot(session, slot); }}
           disabled={!session}
           style={{
-            height: "13%",
-            minHeight: "42px",
-            maxHeight: "62px",
-            width: "100%",
+            height: sessionGroupLayoutAxis === "horizontal" ? "100%" : "13%",
+            minHeight: sessionGroupLayoutAxis === "horizontal" ? 0 : "42px",
+            maxHeight: sessionGroupLayoutAxis === "horizontal" ? "none" : "62px",
+            width: sessionGroupLayoutAxis === "horizontal" ? "12%" : "100%",
+            minWidth: sessionGroupLayoutAxis === "horizontal" ? "54px" : undefined,
+            maxWidth: sessionGroupLayoutAxis === "horizontal" ? "82px" : undefined,
             border: `1px solid ${mobileTheme.colors.cardBorder}`,
             borderRadius: "14px",
             background: "linear-gradient(180deg, rgba(24, 35, 55, 0.92), rgba(13, 21, 35, 0.92))",
@@ -342,7 +350,7 @@ const TerminalStageShell = ReactMemo(
                 color: "rgba(177, 193, 224, 0.66)",
               }}
             >
-              {slot === "top" ? "Top session" : "Bottom session"}
+              {sideLabel}
             </span>
             <span
               style={{
@@ -372,8 +380,20 @@ const TerminalStageShell = ReactMemo(
         </button>
       );
       },
-      [activateSessionGroupSlot],
+      [activateSessionGroupSlot, sessionGroupLayoutAxis],
     );
+
+    const sessionGroupContainerTransform = sessionGroupLayoutAxis === "horizontal"
+      ? slideSlot === "top"
+        ? "translateX(calc(100% - 76px))"
+        : slideSlot === "bottom"
+          ? "translateX(calc(-100% + 76px))"
+          : "translateX(0)"
+      : slideSlot === "top"
+        ? "translateY(calc(100% - 76px))"
+        : slideSlot === "bottom"
+          ? "translateY(calc(-100% + 76px))"
+          : "translateY(0)";
 
     return (
       <div
@@ -412,16 +432,11 @@ const TerminalStageShell = ReactMemo(
                 height: "100%",
                 minHeight: 0,
                 display: "flex",
-                flexDirection: "column",
+                flexDirection: sessionGroupLayoutAxis === "horizontal" ? "row" : "column",
                 gap: "7px",
-                padding: "24px 0 0",
+                padding: sessionGroupLayoutAxis === "horizontal" ? "0" : "24px 0 0",
                 boxSizing: "border-box",
-                transform:
-                  slideSlot === "top"
-                    ? "translateY(calc(100% - 76px))"
-                    : slideSlot === "bottom"
-                      ? "translateY(calc(-100% + 76px))"
-                      : "translateY(0)",
+                transform: sessionGroupContainerTransform,
                 transition: slideSlot ? "transform 180ms ease-out" : "none",
               }}
             >
@@ -492,6 +507,7 @@ const TerminalStageShell = ReactMemo(
       ].filter((session): session is Session => Boolean(session))) &&
     prev.sessionGroupViewport?.visible.top === next.sessionGroupViewport?.visible.top &&
     prev.sessionGroupViewport?.visible.bottom === next.sessionGroupViewport?.visible.bottom &&
+    prev.sessionGroupLayoutAxis === next.sessionGroupLayoutAxis &&
     prev.splitVisible === next.splitVisible &&
     prev.activePaneId === next.activePaneId &&
     prev.terminalChromeBottomPx === next.terminalChromeBottomPx &&

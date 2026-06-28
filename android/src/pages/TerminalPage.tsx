@@ -28,7 +28,11 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import { DebugInput, isDebugInputSupported } from '../plugins/DebugInputPlugin';
 import { useTerminalWorkspace } from '../hooks/useTerminalWorkspace';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
-import { resolveTerminalLayoutProfile } from '../lib/terminal-layout-profile';
+import {
+  resolveTerminalLayoutProfile,
+  resolveTerminalSessionGroupLayoutAxis,
+  type TerminalSessionGroupLayoutMode,
+} from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
 import {
@@ -289,6 +293,7 @@ interface TerminalPageProps {
   onRunScheduleJobNow?: (sessionId: string, jobId: string) => void;
   terminalThemeId?: string;
   terminalWidthMode?: TerminalWidthMode;
+  terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
   onSendMessage?: (sessionId: string, msg: any) => void;
   onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
@@ -945,6 +950,7 @@ function TerminalPageComponent({
   onRunScheduleJobNow,
   terminalThemeId,
   terminalWidthMode = 'mirror-fixed',
+  terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
   onSendMessage,
   onFileTransferMessage,
@@ -1042,6 +1048,12 @@ function TerminalPageComponent({
   const shellHeight = keyboardViewportFreezeActive
     ? Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
     : rawShellHeight;
+  const sessionGroupLayoutAxis = resolveTerminalSessionGroupLayoutAxis({
+    viewportWidth,
+    viewportHeight: shellHeight,
+    landscape,
+    mode: terminalSessionGroupLayoutMode,
+  });
 
   useEffect(() => {
     if (!isAndroid) {
@@ -1145,7 +1157,7 @@ function TerminalPageComponent({
     sessions,
     activeSessionId: activeSession?.id || null,
     viewportWidth,
-    viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+    viewportHeight: shellHeight,
     maxSplitCount: 4,
   });
   const availableSplitCount = splitAvailable
@@ -2625,6 +2637,7 @@ function TerminalPageComponent({
       sessionBufferStore={sessionBufferStore}
       renderedPaneSessions={renderedPaneSessions}
       sessionGroupViewport={sessionGroupViewportSlotSessions}
+      sessionGroupLayoutAxis={sessionGroupLayoutAxis}
       visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
@@ -2812,6 +2825,7 @@ function terminalPagePropsEqual(
     && prev.onRunScheduleJobNow === next.onRunScheduleJobNow
     && prev.terminalThemeId === next.terminalThemeId
     && prev.terminalWidthMode === next.terminalWidthMode
+    && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
     && prev.onSendMessage === next.onSendMessage
     && prev.onFileTransferMessage === next.onFileTransferMessage

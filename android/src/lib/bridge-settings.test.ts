@@ -23,6 +23,7 @@ const baseSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark' as const,
   terminalWidthMode: 'mirror-fixed' as const,
+  terminalSessionGroupLayoutMode: 'auto' as const,
   shortcutSmartSort: true,
   servers: [],
   traversalRelay: undefined,
@@ -173,6 +174,23 @@ describe('bridge-settings helpers', () => {
       ...baseSettings,
       terminalWidthMode: 'unknown-mode',
     }).terminalWidthMode).toBe('mirror-fixed');
+  });
+
+  it('normalizes session group layout mode and defaults to auto', () => {
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalSessionGroupLayoutMode: 'horizontal',
+    }).terminalSessionGroupLayoutMode).toBe('horizontal');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalSessionGroupLayoutMode: 'vertical',
+    }).terminalSessionGroupLayoutMode).toBe('vertical');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalSessionGroupLayoutMode: 'unknown-mode' as any,
+    }).terminalSessionGroupLayoutMode).toBe('auto');
   });
 
   it('describes preset identity as bridge entrypoint plus optional daemon identity', () => {

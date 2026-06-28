@@ -1,5 +1,5 @@
 export interface TerminalLayoutProfile {
-  mode: 'single-pane' | 'phone-portrait-vertical-group' | 'split-default' | 'split-landscape';
+  mode: 'single-pane' | 'phone-portrait-vertical-group' | 'tablet-portrait-horizontal-group' | 'split-default' | 'split-landscape';
   header: {
     outerPadding: string;
     rowGap: string;
@@ -38,6 +38,33 @@ export interface TerminalLayoutProfile {
     shellMode: 'inline' | 'floating-collapsed';
   };
 }
+
+export type TerminalSessionGroupLayoutMode = 'auto' | 'horizontal' | 'vertical';
+export type TerminalSessionGroupLayoutAxis = 'horizontal' | 'vertical';
+
+export const TERMINAL_SESSION_GROUP_WIDE_ASPECT_RATIO = 0.7;
+
+export const TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS: readonly {
+  id: TerminalSessionGroupLayoutMode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: 'auto',
+    label: 'Auto',
+    description: '按屏幕宽高比自动选择：窄屏上下，宽屏左右。',
+  },
+  {
+    id: 'horizontal',
+    label: 'Horizontal',
+    description: '宽屏竖屏优先左右滚动；窄屏仍保持上下滚动。',
+  },
+  {
+    id: 'vertical',
+    label: 'Vertical',
+    description: '宽屏竖屏也使用上下滚动；横屏仍保持左右滚动。',
+  },
+] as const;
 
 const PHONE_HEADER_TOUCH_SAFE_OFFSET_PX = 20;
 const PHONE_SPLIT_HEADER_TOUCH_SAFE_OFFSET_PX = 0;
@@ -178,11 +205,46 @@ function buildPhonePortraitVerticalGroupProfile(safeTopInsetPx: number): Termina
   };
 }
 
+function buildTabletPortraitHorizontalGroupProfile(safeTopInsetPx: number): TerminalLayoutProfile {
+  return {
+    ...buildSinglePaneProfile(safeTopInsetPx),
+    mode: 'tablet-portrait-horizontal-group',
+  };
+}
+
+export function normalizeTerminalSessionGroupLayoutMode(input: unknown): TerminalSessionGroupLayoutMode {
+  return input === 'horizontal' || input === 'vertical' ? input : 'auto';
+}
+
+export function resolveTerminalSessionGroupLayoutAxis(options: {
+  viewportWidth: number;
+  viewportHeight: number;
+  landscape?: boolean;
+  mode?: TerminalSessionGroupLayoutMode | null;
+}): TerminalSessionGroupLayoutAxis {
+  const safeWidth = Math.max(0, Math.round(options.viewportWidth || 0));
+  const safeHeight = Math.max(1, Math.round(options.viewportHeight || 1));
+  const landscape = options.landscape ?? safeWidth >= safeHeight;
+  if (landscape) {
+    return 'horizontal';
+  }
+
+  const aspectRatio = safeWidth / safeHeight;
+  if (aspectRatio <= TERMINAL_SESSION_GROUP_WIDE_ASPECT_RATIO) {
+    return 'vertical';
+  }
+
+  return normalizeTerminalSessionGroupLayoutMode(options.mode) === 'vertical'
+    ? 'vertical'
+    : 'horizontal';
+}
+
 export function resolveTerminalLayoutProfile(options: {
   splitVisible: boolean;
   topInsetPx?: number;
   landscape?: boolean;
   sessionGroupVisible?: boolean;
+  sessionGroupAxis?: TerminalSessionGroupLayoutAxis;
 }): TerminalLayoutProfile {
   const safeTopInsetPx = Math.max(0, Math.round(options.topInsetPx || 0));
   if (options.splitVisible) {
@@ -192,7 +254,9 @@ export function resolveTerminalLayoutProfile(options: {
   }
 
   if (options.sessionGroupVisible && !options.landscape) {
-    return buildPhonePortraitVerticalGroupProfile(safeTopInsetPx);
+    return options.sessionGroupAxis === 'horizontal'
+      ? buildTabletPortraitHorizontalGroupProfile(safeTopInsetPx)
+      : buildPhonePortraitVerticalGroupProfile(safeTopInsetPx);
   }
 
   return buildSinglePaneProfile(safeTopInsetPx);

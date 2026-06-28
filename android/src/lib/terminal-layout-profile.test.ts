@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTerminalLayoutProfile } from './terminal-layout-profile';
+import {
+  resolveTerminalLayoutProfile,
+  resolveTerminalSessionGroupLayoutAxis,
+} from './terminal-layout-profile';
 
 describe('terminal-layout-profile', () => {
   it('uses split-landscape profile when split panes are visible in landscape', () => {
@@ -59,5 +62,48 @@ describe('terminal-layout-profile', () => {
     });
 
     expect(landscapeProfile.mode).toBe('single-pane');
+  });
+
+  it('keeps narrow portrait session groups vertical by aspect ratio', () => {
+    expect(resolveTerminalSessionGroupLayoutAxis({
+      viewportWidth: 390,
+      viewportHeight: 844,
+      mode: 'horizontal',
+    })).toBe('vertical');
+  });
+
+  it('defaults wide portrait session groups to horizontal while allowing vertical override', () => {
+    expect(resolveTerminalSessionGroupLayoutAxis({
+      viewportWidth: 760,
+      viewportHeight: 1024,
+      mode: 'auto',
+    })).toBe('horizontal');
+
+    expect(resolveTerminalSessionGroupLayoutAxis({
+      viewportWidth: 760,
+      viewportHeight: 1024,
+      mode: 'vertical',
+    })).toBe('vertical');
+  });
+
+  it('keeps landscape session groups horizontal regardless of the setting', () => {
+    expect(resolveTerminalSessionGroupLayoutAxis({
+      viewportWidth: 1024,
+      viewportHeight: 760,
+      mode: 'vertical',
+    })).toBe('horizontal');
+  });
+
+  it('uses a horizontal group profile for wide portrait group mode', () => {
+    const profile = resolveTerminalLayoutProfile({
+      splitVisible: false,
+      landscape: false,
+      sessionGroupVisible: true,
+      sessionGroupAxis: 'horizontal',
+      topInsetPx: 16,
+    });
+
+    expect(profile.mode).toBe('tablet-portrait-horizontal-group');
+    expect(profile.header.outerPadding).toBe('36px 6px 6px');
   });
 });

@@ -19,6 +19,7 @@ const baseSettings: BridgeSettings = {
   terminalCacheLines: 1000,
   terminalThemeId: 'classic-dark',
   terminalWidthMode: 'mirror-fixed',
+  terminalSessionGroupLayoutMode: 'auto',
   shortcutSmartSort: true,
   servers: [],
   defaultServerId: undefined,

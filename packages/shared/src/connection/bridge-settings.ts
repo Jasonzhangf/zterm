@@ -21,6 +21,7 @@ export interface BridgeServerPreset {
 }
 
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
+export type TerminalSessionGroupLayoutMode = 'auto' | 'horizontal' | 'vertical';
 
 export interface TraversalRelayClientSettings {
   relayBaseUrl: string;
@@ -51,6 +52,7 @@ export interface BridgeSettings {
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
   terminalWidthMode: TerminalWidthMode;
+  terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   /** Working directory for new tmux sessions. Defaults to $HOME on the daemon. */
   cwd?: string;
   shortcutSmartSort: boolean;
@@ -75,6 +77,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
   terminalWidthMode: 'mirror-fixed',
+  terminalSessionGroupLayoutMode: 'auto',
   cwd: undefined,
   shortcutSmartSort: true,
   servers: [],
@@ -358,6 +361,10 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
   const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
   const terminalWidthMode: TerminalWidthMode =
     candidate.terminalWidthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  const terminalSessionGroupLayoutMode: TerminalSessionGroupLayoutMode =
+    candidate.terminalSessionGroupLayoutMode === 'horizontal' || candidate.terminalSessionGroupLayoutMode === 'vertical'
+      ? candidate.terminalSessionGroupLayoutMode
+      : 'auto';
   const mergedServers =
     targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
       ? sortBridgeServers([
@@ -398,6 +405,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     terminalCacheLines,
     terminalThemeId,
     terminalWidthMode,
+    terminalSessionGroupLayoutMode,
     shortcutSmartSort: typeof (candidate as any).shortcutSmartSort === 'boolean' ? (candidate as any).shortcutSmartSort : DEFAULT_BRIDGE_SETTINGS.shortcutSmartSort,
     servers: mergedServers,
     defaultServerId:

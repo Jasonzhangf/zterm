@@ -14,6 +14,10 @@ import {
   TERMINAL_WIDTH_MODE_OPTIONS,
   updateBridgeSettingsTerminalWidthMode,
 } from '../lib/terminal-width-mode-manager';
+import {
+  TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS,
+  normalizeTerminalSessionGroupLayoutMode,
+} from '../lib/terminal-layout-profile';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import { RememberedServersSection } from '../components/settings/RememberedServersSection';
 import { RelayControlSection } from '../components/settings/RelayControlSection';
@@ -280,6 +284,41 @@ export function SettingsPage({
                   key={option.id}
                   type="button"
                   onClick={() => setDraft((current) => updateBridgeSettingsTerminalWidthMode(current, option.id))}
+                  style={{
+                    flex: 1,
+                    minHeight: '48px',
+                    borderRadius: '16px',
+                    border: 'none',
+                    backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
+                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>Session Group Layout</SettingsSectionTitle>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            默认按宽高比决定：手机窄屏保持上下滚动；宽竖屏默认左右滚动。横屏始终左右滚动。
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS.map((option) => {
+              const active = normalizeTerminalSessionGroupLayoutMode(draft.terminalSessionGroupLayoutMode) === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  title={option.description}
+                  onClick={() => setDraft((current) => ({
+                    ...current,
+                    terminalSessionGroupLayoutMode: option.id,
+                  }))}
                   style={{
                     flex: 1,
                     minHeight: '48px',
