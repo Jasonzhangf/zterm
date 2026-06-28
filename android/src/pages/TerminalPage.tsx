@@ -410,29 +410,37 @@ function resolveTerminalSessionGroupSlotIds(options: {
 
 export function resolveTerminalSessionGroupViewportSlots(
   current: TerminalSessionGroupSlotIds,
-  focusSessionId: string | null,
+  focusSlot: TerminalSessionGroupSlotName,
 ): TerminalSessionGroupSlotIds {
-  if (!focusSessionId) {
-    return current;
-  }
-  if (current.top === focusSessionId) {
+  if (focusSlot === 'top') {
     return {
       top: null,
       center: current.top,
       bottom: current.center,
     };
   }
-  if (current.center === focusSessionId) {
+  if (focusSlot === 'center') {
     return current;
   }
-  if (current.bottom === focusSessionId) {
-    return {
-      top: current.center,
-      center: current.bottom,
-      bottom: null,
-    };
-  }
-  return current;
+  return {
+    top: current.center,
+    center: current.bottom,
+    bottom: null,
+  };
+}
+
+export function resolveTerminalSessionGroupSlotReplacement(
+  current: TerminalSessionGroupSlotIds,
+  sessionId: string,
+  targetSlot: TerminalSessionGroupSlotName,
+): TerminalSessionGroupSlotIds {
+  const next: TerminalSessionGroupSlotIds = {
+    top: current.top === sessionId ? null : current.top,
+    center: current.center === sessionId ? null : current.center,
+    bottom: current.bottom === sessionId ? null : current.bottom,
+  };
+  next[targetSlot] = sessionId;
+  return next;
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -1011,9 +1019,7 @@ function TerminalPageComponent({
     center: activeSession?.id || null,
     bottom: null,
   }));
-  const [sessionGroupFocusSessionId, setSessionGroupFocusSessionId] = useState<string | null>(
-    activeSession?.id || null,
-  );
+  const [sessionGroupFocusSlot, setSessionGroupFocusSlot] = useState<TerminalSessionGroupSlotName>('center');
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
@@ -1238,13 +1244,10 @@ function TerminalPageComponent({
     sessions,
     centerSessionId: uiSessionId,
   }), [sessionGroupSlotIds, sessions, uiSessionId]);
-  useEffect(() => {
-    setSessionGroupFocusSessionId(activeSession?.id || null);
-  }, [activeSession?.id]);
   const sessionGroupViewportSlotIds = useMemo(() => resolveTerminalSessionGroupViewportSlots(
     effectiveSessionGroupSlotIds,
-    sessionGroupFocusSessionId || uiSessionId,
-  ), [effectiveSessionGroupSlotIds, sessionGroupFocusSessionId, uiSessionId]);
+    sessionGroupFocusSlot,
+  ), [effectiveSessionGroupSlotIds, sessionGroupFocusSlot]);
   const resolveSessionGroupSlot = useCallback((sessionId: string): TerminalSessionGroupSlotName | null => {
     if (effectiveSessionGroupSlotIds.top === sessionId) {
       return 'top';
@@ -2378,14 +2381,13 @@ function TerminalPageComponent({
 
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
     handleSwitchSessionFromChrome(sessionId);
-    setSessionGroupSlotIds((current) => ({
-      ...current,
-      center: sessionId,
-      top: current.top === sessionId ? current.center : current.top,
-      bottom: current.bottom === sessionId ? current.center : current.bottom,
-    }));
+    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
+      current,
+      sessionId,
+      sessionGroupFocusSlot,
+    ));
     setSessionDrawerOpen(false);
-  }, [handleSwitchSessionFromChrome]);
+  }, [handleSwitchSessionFromChrome, sessionGroupFocusSlot]);
 
   const handleAssignSessionGroupSlot = useCallback((sessionId: string, slot: TerminalSessionGroupSlotName) => {
     setSessionGroupSlotIds((current) => {
@@ -2398,16 +2400,19 @@ function TerminalPageComponent({
       return next;
     });
     if (slot === 'center') {
+      setSessionGroupFocusSlot('center');
       handleSwitchSessionFromChrome(sessionId);
     }
   }, [handleSwitchSessionFromChrome]);
 
   const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
-    if (sourceSlot === 'top' || sourceSlot === 'bottom') {
-      setSessionGroupFocusSessionId(sessionId);
+    void sourceSlot;
+    const fixedSlot = resolveSessionGroupSlot(sessionId);
+    if (fixedSlot) {
+      setSessionGroupFocusSlot(fixedSlot);
     }
     handleSwitchSessionFromChrome(sessionId);
-  }, [handleSwitchSessionFromChrome]);
+  }, [handleSwitchSessionFromChrome, resolveSessionGroupSlot]);
 
   const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
     onCloseSession(sessionId, 'session-drawer-close-button');

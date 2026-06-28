@@ -35,6 +35,7 @@
 - drawer 长按 / 右键打开 slot menu 后，必须 suppress 下一次 click，避免“打开菜单同时又切 session”的误触。
 - 现在中心槽负责 live terminal，peek 只做 identity + 动画位移；点击 peek 触发滚动切换，不改成自动轮转补位。
 - 二次修正：点击 top/bottom 也不能循环轮转三槽位；抽屉固定槽位不变，只改变 stage viewport projection。focus=top 时显示 empty/top/center，focus=bottom 时显示 center/bottom/empty，focus=center 时显示固定 top/center/bottom。peek 卡片信息压缩为 `Top/Bottom session + session name` 同行，第二行只放路径/host，整体向下避开顶部标题区。
+- 三次修正：focus 必须是 slot name，不是 session id。抽屉点击 session 时只替换当前 focus 槽位：focus=bottom 替换 bottom，focus=top 替换 top，focus=center 替换 center；peek 点击只改变 focus，不改写固定槽位。
 
 ## 2026-06-28 phone layout owner audit
 - 当前代码里 `TerminalPage.tsx` 仍内联了一份 `TerminalStageShell`，而外部 `src/pages/TerminalPageStageShell.tsx` 也存在同名 owner 候选；这会让 phone layout 后续改动继续落到双实现。

@@ -3,7 +3,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
-import { TerminalPage, resolveTerminalSessionGroupViewportSlots } from './TerminalPage';
+import {
+  TerminalPage,
+  resolveTerminalSessionGroupSlotReplacement,
+  resolveTerminalSessionGroupViewportSlots,
+} from './TerminalPage';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -222,7 +226,7 @@ describe('resolveTerminalSessionGroupViewportSlots', () => {
   it('projects top into center without mutating the fixed slot map', () => {
     expect(resolveTerminalSessionGroupViewportSlots(
       { top: 's1', center: 's2', bottom: 's3' },
-      's1',
+      'top',
     )).toEqual({
       top: null,
       center: 's1',
@@ -233,7 +237,7 @@ describe('resolveTerminalSessionGroupViewportSlots', () => {
   it('projects bottom into center without mutating the fixed slot map', () => {
     expect(resolveTerminalSessionGroupViewportSlots(
       { top: 's1', center: 's2', bottom: 's3' },
-      's3',
+      'bottom',
     )).toEqual({
       top: 's2',
       center: 's3',
@@ -244,11 +248,49 @@ describe('resolveTerminalSessionGroupViewportSlots', () => {
   it('keeps fixed slots unchanged when the center slot is focused', () => {
     expect(resolveTerminalSessionGroupViewportSlots(
       { top: 's1', center: 's2', bottom: 's3' },
-      's2',
+      'center',
     )).toEqual({
       top: 's1',
       center: 's2',
       bottom: 's3',
+    });
+  });
+});
+
+describe('resolveTerminalSessionGroupSlotReplacement', () => {
+  it('replaces the currently focused bottom slot without changing top or center', () => {
+    expect(resolveTerminalSessionGroupSlotReplacement(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's4',
+      'bottom',
+    )).toEqual({
+      top: 's1',
+      center: 's2',
+      bottom: 's4',
+    });
+  });
+
+  it('replaces the currently focused top slot without changing center or bottom', () => {
+    expect(resolveTerminalSessionGroupSlotReplacement(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's4',
+      'top',
+    )).toEqual({
+      top: 's4',
+      center: 's2',
+      bottom: 's3',
+    });
+  });
+
+  it('moves an already assigned session into the target slot without duplicates', () => {
+    expect(resolveTerminalSessionGroupSlotReplacement(
+      { top: 's1', center: 's2', bottom: 's3' },
+      's1',
+      'bottom',
+    )).toEqual({
+      top: null,
+      center: 's2',
+      bottom: 's1',
     });
   });
 });
