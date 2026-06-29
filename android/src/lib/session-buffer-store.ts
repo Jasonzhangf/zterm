@@ -91,12 +91,12 @@ export function createSessionBufferStore(): SessionBufferStore {
 
   const commitBuffer = (sessionId: string, buffer: SessionBufferState) => {
     const previous = snapshots.get(sessionId);
-    if (previous?.buffer === buffer) {
+    if (previous && sessionBuffersEqual(previous.buffer, buffer)) {
       return false;
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer,
+      buffer: cloneSessionBuffer(buffer),
     });
     notify(sessionId);
     return true;

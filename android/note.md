@@ -20,8 +20,11 @@
 
 - 颜色 palette 已从连续 hue hash 收口为固定 `红 / 黄 / 蓝 / 绿 / 青 / 橙` 区间，避免 drawer 切换时把不同服务器切成同一类紫红色。
 - `server-color.test.ts` 锁住两个真机可见 key：`mac-studio` 与 `100.86.84.63` 不能同色，并禁止 hue 落入紫/粉区。
+- 现场继续发现 Connections 入口页和 terminal drawer 的服务器色不一致；根因是 Connections 页仍按 `bridgeHost:bridgePort` 取 `server-color`，drawer 按 `server-identity` 的 daemon/server key 取色。
+- 修复：Connections 页也改为 `getServerIdentityTone()`；`ConnectionCard` 暴露 `data-server-key` 测试点，回归锁住 daemon-first group 的入口页 server key 和 tone 必须与 drawer 同源。
 - 已验证：
   - `pnpm --dir android exec vitest run src/lib/server-color.test.ts src/lib/server-identity.test.ts src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` PASS（4 files / 25 tests）。
+  - `pnpm --dir android exec vitest run src/pages/ConnectionsPage.test.tsx src/components/terminal/TerminalSessionDrawer.test.tsx src/lib/server-identity.test.ts src/lib/server-color.test.ts --reporter dot` PASS（4 files / 35 tests）。
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
   - `./android/scripts/build-android-debug.sh` PASS，生成 `android/update-dist/zterm-0.1.3.1950.apk` 与 `~/.zterm/updates/zterm-0.1.3.1950.apk`，sha256 `ab5f7f98fae2ad6e643886e46ff6594559e74b1b00ced147aaed9d1040b17546`。
   - `adb devices -l` 当前无在线设备，仍缺真机安装态验证。
@@ -909,3 +912,37 @@ Need runtime debug to confirm:
 ### 修复
 - 给 `TerminalStageShell` comparator 增加 `copySelection` 稳定 key 和 `onLongPressRow` 比较。
 - 回归直接盯 `TerminalView.data-copy-mode-active`，不再只看 QuickBar 染色。
+
+## 2026-06-29 renderer parity / network recovery
+
+### 现象
+- Jason 截图对比 iTerm2 与 ZTerm：ZTerm 终端正文有局部渲染错位/灰块；同时网络变化后 App 卡死，只有杀 App 才恢复。
+
+### 根因与修复
+- 渲染链路先跑本地门禁，`TerminalView.theme.test.tsx` 暴露 mixed ASCII/CJK cell width 红灯：隐藏 glyph probe 在异常布局下会返回整屏宽 `640px`，导致单列 cell 被渲成整屏宽、CJK 两倍整屏宽，色块/反显区域随之错位。
+- 修复在共享 renderer 真源 `packages/shared/src/terminal/renderer.ts`：`measureTerminalViewport()` 拒绝接近整屏宽的 glyph probe 测量，回退到 `fontSize * 0.62` / CJK 2 倍推导；禁止在 Android 页面层补第二份 cell 宽度逻辑。
+- 网络变化卡死修复在 `useOpenTabLifecycleEffects`：前台 `online` 事件只恢复当前 active tab 的 transport，并走现有 resume/audit/follow reset 主线；hidden 状态 online 只记 debug，不扫所有 session。
+
+### 已验证
+- `pnpm --dir packages/shared exec vitest run src/terminal/renderer.test.ts --reporter dot` PASS（16 tests）。
+- `pnpm --dir android exec vitest run src/components/TerminalView.theme.test.tsx src/components/TerminalView.bottom-stale.test.tsx src/App.dynamic-refresh.test.tsx --reporter dot` PASS（3 files / 91 tests）。
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+- `./android/scripts/build-android-debug.sh` PASS：`0.1.3.1952` / `versionCode=1031952`，`android/update-dist/zterm-0.1.3.1952.apk`、`~/.zterm/updates/zterm-0.1.3.1952.apk`、`android/native/android/app/build/outputs/apk/debug/app-debug.apk` sha256 均为 `54f27dcae36fe1a5676d598865cd2048be8e9d1d5eae9ec2f705b28f45929979`。
+- build 链路内 `check-relay-default-address-leak` PASS，`verify-update-bundle` manifest / update / daemon apk 对齐 PASS。
+- `adb devices -l` 当前无在线设备，缺本机 adb install 后真机画面验证。
+
+## 2026-06-29 大面积刷新后空白直到手动滚动
+
+- 现场现象：大面积文件新增/删除时，正文会变空白，只有触摸上下滚动后才恢复刷新。
+- 根因：`session-buffer-store.commitBuffer()` 旧实现按引用判等且直接存 live buffer；上游复用同一个 buffer 对象并原地 mutate 时，store 可能不发布新 truth。
+- 修复：`commitBuffer()` 改成内容判等，并在 store 内 clone buffer，切断 live 引用。
+- 已验证：
+  - `src/lib/session-buffer-store.test.ts`
+  - `src/lib/session-render-gate.test.ts`
+  - `src/lib/session-render-gate.tui-content.test.ts`
+  - `src/contexts/session-context-buffer-runtime.test.ts`
+  - `src/components/TerminalView.dynamic-refresh.test.tsx`
+  - `src/components/TerminalView.bottom-stale.test.tsx`
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+  - `./android/scripts/build-android-debug.sh` PASS，产出 `0.1.3.1953`
+- 记录：以后碰到“滚一下就好”的空白刷新，不先动 scroll，先查 buffer publish 是否被引用短路。

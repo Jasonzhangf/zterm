@@ -967,6 +967,85 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
+  it('realigns scroll synchronously after a large follow update so the viewport does not stay blank until user scrolls', async () => {
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(30),
+      bufferTailEndIndex: 30,
+    });
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: session.buffer.lines,
+            bufferStartIndex: session.buffer.startIndex,
+            bufferEndIndex: session.buffer.endIndex,
+            bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+            bufferGapRanges: session.buffer.gapRanges,
+            revision: session.buffer.revision,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollTop = 0;
+    let currentScrollHeight = 510;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get() {
+        return currentScrollTop;
+      },
+      set(value: number) {
+        currentScrollTop = value;
+      },
+    });
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return currentScrollHeight;
+      },
+    });
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('row-030'));
+    await waitFor(() => expect(currentScrollTop).toBe(102));
+
+    const nextSession = makeSession({
+      revision: 2,
+      lines: buildRows(90),
+      bufferTailEndIndex: 90,
+    });
+    currentScrollHeight = 1530;
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={nextSession.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: nextSession.buffer.lines,
+            bufferStartIndex: nextSession.buffer.startIndex,
+            bufferEndIndex: nextSession.buffer.endIndex,
+            bufferTailEndIndex: nextSession.buffer.bufferTailEndIndex,
+            bufferGapRanges: nextSession.buffer.gapRanges,
+            revision: nextSession.buffer.revision,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('row-090'));
+    await waitFor(() => expect(currentScrollTop).toBe(1122));
+  });
+
   it('rebuilds render rows when a fixed bottom row is replaced inside the same lines container', async () => {
     const session = makeSession({
       revision: 1,

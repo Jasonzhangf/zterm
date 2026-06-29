@@ -256,10 +256,20 @@ describe('session-render-gate', () => {
       gate.scheduleCommit('session-1');
       await flushScheduledRenderCommit();
 
-      const committedAfterNextFrame = renderStore.getSnapshot('session-1').buffer;
-      expect(committedAfterNextFrame.lines[0]?.[0]?.bg).toBe(2);
-      expect(committedAfterNextFrame.gapRanges).toEqual([{ startIndex: 1, endIndex: 2 }]);
-      expect(committedAfterNextFrame.cursor).toEqual({ rowIndex: 1, col: 4, visible: true });
+      const committedAfterUncommittedMutation = renderStore.getSnapshot('session-1').buffer;
+      expect(committedAfterUncommittedMutation.lines[0]?.[0]?.bg).toBe(256);
+      expect(committedAfterUncommittedMutation.gapRanges).toEqual([]);
+      expect(committedAfterUncommittedMutation.cursor).toBeNull();
+
+      liveBufferStore.commitBuffer('session-1', liveBuffer);
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 2, daemonHeadEndIndex: 2 });
+      gate.scheduleCommit('session-1');
+      await flushScheduledRenderCommit();
+
+      const committedAfterExplicitCommit = renderStore.getSnapshot('session-1').buffer;
+      expect(committedAfterExplicitCommit.lines[0]?.[0]?.bg).toBe(2);
+      expect(committedAfterExplicitCommit.gapRanges).toEqual([{ startIndex: 1, endIndex: 2 }]);
+      expect(committedAfterExplicitCommit.cursor).toEqual({ rowIndex: 1, col: 4, visible: true });
     } finally {
       vi.useRealTimers();
     }
@@ -287,11 +297,11 @@ describe('session-render-gate', () => {
         lines: [reusedRow, base.lines[1]!],
         revision: 2,
       };
-      liveBufferStore.commitBuffer('session-1', next);
       reusedRow[0]!.fg = 3;
 
       expect(committedBeforePatch.lines[0]?.[0]?.fg).toBe(256);
 
+      liveBufferStore.commitBuffer('session-1', next);
       gate.scheduleCommit('session-1');
       await flushScheduledRenderCommit();
 

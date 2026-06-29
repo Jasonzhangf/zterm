@@ -10,6 +10,9 @@
 
 - [2026-06-29] 多 daemon / 多服务器 UI 的用户可见身份不能再用 `bridgeHost:bridgePort` 或 telnet/bridge 端口表示；端口只是 transport 配置，不是服务器名。统一真源是 `src/lib/server-identity.ts`：drawer 分组、session group side peek、服务器色调用同一套 server key / display name / tone；UI 层只能消费 projection，禁止各自拼端口当 label。
 - [2026-06-29] zterm 多服务器身份色不能用连续 hue hash 自由漂移；紫/粉区在窄 drawer 里辨识差且视觉噪声高。`server-color.ts` 必须使用固定红/黄/蓝/绿/青/橙 palette，并用回归锁住常见服务器 key 不同色。
+- [2026-06-29] Connections 入口页、terminal drawer、session group peek 必须共用 `server-identity.ts` 的同一 server key/tone。禁止 Connections 页直接按 `bridgeHost:bridgePort` 调 `server-color`，否则同一 daemon 会在入口页和抽屉显示成不同颜色。
+- [2026-06-29] Terminal renderer 的 cell 宽度真源必须来自可信 glyph probe；如果 hidden probe 返回接近整屏宽，必须拒绝并回退到字体估算。单列 cell 被测成 viewport 宽会直接导致 ASCII/CJK、色块、反显区域错位。
+- [2026-06-29] Android 网络从 offline/route-change 回 online 时，生命周期层必须只恢复当前 active tab transport，并复用现有 resume/audit/follow reset 主线；hidden 状态 online 不恢复，不允许扫所有 session 放大卡死风险。
 - [2026-06-29] traversal route health cache 是进程级全局状态；任何会创建 `TraversalSocket` 并断言 WebSocket 实例数量/线路选择的测试，必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache` 或注入隔离 cache。否则前一个用例记录的 failure/auth-failure 会让后续用例无候选路由，表现为 `MockWebSocket.instances` 期望 1 实际 0。
 - [2026-06-29] Android IME / keyboard lift 真源必须只有一份：`terminal-keyboard-lift.ts` 负责 viewport / lift 判断，`TerminalPage.tsx` 只能消费和 re-export，不能再复制 helper。已验证 WebView 已 resize 时 lift 必须为 0，只有 overlay 才按 stable height 计算。
 - [2026-06-29] `test:terminal:contracts` 必须串行文件执行。`SessionContext.ws-refresh.test.tsx` 这类文件会 stub 全局 `WebSocket`，在 vitest 默认 file parallel 下会互相覆盖；contracts gate 需要 `--no-file-parallelism` 才能稳定区分真失败与假红。
@@ -488,3 +491,28 @@ silently returns 0 when viewport metrics are stable.
 - 热修恢复原则：session group stage 回到 1945 行为，`TerminalPageStageShell` 只有 `!splitVisible && !landscape && sessionGroupViewport?.slots.center` 时启用；`TerminalPage` 抽屉选择 session 保持先切 session 再按当前 focus slot 替换槽位。
 - 后续再做横屏/平板左右槽位时必须另开状态机审计和真机验证，不能在竖屏基线上直接改 StageShell gate。
 - Jason 现场确认 `0.1.3.1947` 比 `1946` 明显可用，竖屏显示和滚动恢复到可继续迭代的基线；后续排查应以 `1947` 为新基线，不再沿用 `1946`。
+
+## 2026-06-29 大面积刷新后空白直到手动滚动
+
+### 已验证根因
+- 大面积文件增删会走 `commitBuffer()` 主链，而不是单纯的 `setBuffer()` 读写路径。
+- 旧实现把 live buffer 引用直接存入 store，并在 `previous.buffer === buffer` 时直接短路；只要上游复用同一个 buffer 对象并原地 mutate，store 就可能不发布新 truth。
+- 现场表象就是：行数/元数据在动，但正文不刷，只有用户触摸上下滚动后才重新激活刷新链。
+
+### 修复
+- `session-buffer-store.ts` 的 `commitBuffer()` 改成内容判等，不再按引用判等。
+- store 内部统一存储 `cloneSessionBuffer(buffer)`，切断 caller 的 live 引用。
+
+### 已验证
+- `src/lib/session-buffer-store.test.ts`
+- `src/lib/session-render-gate.test.ts`
+- `src/lib/session-render-gate.tui-content.test.ts`
+- `src/contexts/session-context-buffer-runtime.test.ts`
+- `src/components/TerminalView.dynamic-refresh.test.tsx`
+- `src/components/TerminalView.bottom-stale.test.tsx`
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+- `./android/scripts/build-android-debug.sh` PASS，产出 `0.1.3.1953`
+
+### 防复发规则
+- store / render gate / renderer 的真源必须是不可变快照，不能让 live buffer 对象跨层共享。
+- 任何“滚一下就好”的空白刷新问题，优先查 buffer publish 是否被引用短路，而不是先改 scroll 行为。

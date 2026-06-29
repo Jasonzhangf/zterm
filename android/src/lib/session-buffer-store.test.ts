@@ -24,7 +24,7 @@ describe('session-buffer-store', () => {
     expect(committed.gapRanges).toEqual([]);
   });
 
-  it('commitBuffer reuses immutable authoritative buffer truth by reference', () => {
+  it('commitBuffer publishes same-object content changes and isolates the stored snapshot', () => {
     const store = createSessionBufferStore();
     const buffer = createSessionBufferState({
       lines: ['abc'],
@@ -35,7 +35,16 @@ describe('session-buffer-store', () => {
     });
 
     expect(store.commitBuffer('s1', buffer)).toBe(true);
-    expect(store.getSnapshot('s1').buffer).toBe(buffer);
+    expect(store.getSnapshot('s1').buffer).not.toBe(buffer);
     expect(store.commitBuffer('s1', buffer)).toBe(false);
+
+    buffer.lines[0]![0]!.char = 'z'.codePointAt(0)!;
+    buffer.revision = 2;
+
+    expect(store.commitBuffer('s1', buffer)).toBe(true);
+    expect(String.fromCodePoint(store.getSnapshot('s1').buffer.lines[0]?.[0]?.char || 32)).toBe('z');
+
+    buffer.lines[0]![0]!.char = 'x'.codePointAt(0)!;
+    expect(String.fromCodePoint(store.getSnapshot('s1').buffer.lines[0]?.[0]?.char || 32)).toBe('z');
   });
 });

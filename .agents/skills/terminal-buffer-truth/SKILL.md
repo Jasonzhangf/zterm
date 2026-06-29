@@ -532,6 +532,8 @@ tmux truth
 - 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
 - 若现场看起来像“正文解析错了”，先把 **terminal body** 与 **IME/editor overlay** 分开审；底部灰条/编辑条不属于 daemon buffer truth，不能直接当成 compact wire 正文错误。
 - compact wire 的正文门禁必须覆盖 **ANSI + CJK + reverse + bg span + 中间空格**；只有 body parity 红灯以后，才允许改 contract/renderer，禁止凭截图先回退 codec。
+- 若 iTerm2 与 ZTerm 出现局部错位/灰块，且混合 ASCII/CJK/色块区域异常，优先查 renderer `measureTerminalViewport()` 的 glyph probe 是否把单个字符测成接近整屏宽；cell 宽度必须拒绝异常整屏测量并回退到字体估算，禁止在页面层补第二份宽度逻辑。
+- 网络变化后 App 卡死但杀进程恢复时，先查 lifecycle 是否在前台 `online` 事件恢复 active tab transport；恢复动作只能复用现有 active resume/audit/follow reset 主线，hidden online 不恢复，禁止扫所有 session。
 - 若现场是“点击快捷栏空白区弹出输入法 / 键盘起来后快捷栏被盖住”，先判 **UI shell/QuickBar**，不要误把它当成 renderer 或 buffer 问题；必须先补 shell 区域阻断与 keyboard lift 的红灯测试。
 
 ## 8. 现场判断口径
@@ -563,6 +565,11 @@ tmux truth
 - 若现场要排 Android IME 抬高 / 安装升级 timeout，debug 观测链也必须服从唯一真源：只允许 `client snapshot source -> collectClientDebugSnapshot -> active session WS debug-snapshot -> daemon store` 这一条链；禁止再开第二条 relay/debug transport 或散落页面内临时上报。
 - explicit terminal input 不能只依赖 lifecycle/heartbeat 去发现远端回显；input payload 必须同步发出，首个未完成 `pendingInputTailRefresh` 的 `buffer-head` 请求必须放到 coalesced microtask，后续 burst input 在 pending 清除前合并，禁止每键强制刷 head 或把 head 请求绑回 key event stack。
 - Android 物理键盘不能依赖 DOM textarea focus 路径；native `ImeAnchor key` 必须直接走 shared terminal keyboard resolver 并写入 active session。plain letter 留给 editable/IME 文本路径，Ctrl/Alt 组合键和方向/Esc 等特殊键走硬件 key path；红测必须让 `allowDomFocus=false` 时 `Ctrl+C` 仍到达 terminal input。
+
+## 2026-06-29 buffer publish short-circuit
+
+- 当“大面积刷新后空白、滚一下又恢复”时，优先查 `commitBuffer()` 是否把 live buffer 引用直接塞进 store 并被引用短路。
+- 真源规则：store 必须存不可变快照，commit 只能按内容判等，不能靠对象引用判等；否则上游原地 mutate 会让正文刷新静默失效。
 
 ## 9. Android copy-mode gate
 - WebView copy-mode 长按有两层 native gate：`setOnLongClickListener(v -> true)` 只管系统 ActionMode / 工具栏，`setLongClickable(false)` 才会停掉原生 haptic / selection 拦截，让 JS `onTouchStart` 的长按计时器真正启动。
