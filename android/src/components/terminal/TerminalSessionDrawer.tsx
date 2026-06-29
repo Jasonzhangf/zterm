@@ -1,4 +1,5 @@
 import { memo, useMemo, useRef, useState } from 'react';
+import { getServerIdentityTone } from '../../lib/server-identity';
 
 export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
 export type TerminalSessionGroupLayoutAxis = 'vertical' | 'horizontal';
@@ -313,15 +314,18 @@ function TerminalSessionDrawerComponent({
             data-testid="terminal-session-drawer-host-rail"
             style={{
               display: 'flex',
-              gap: '6px',
-              padding: '8px 10px',
+              flexDirection: 'column',
+              gap: '8px',
+              padding: '10px',
               borderBottom: '1px solid rgba(255,255,255,0.08)',
-              overflowX: 'auto',
+              overflowY: 'auto',
+              overflowX: 'hidden',
               flexShrink: 0,
             }}
           >
             {hostGroups.map((group) => {
               const isActive = group.hostKey === effectiveHostKey;
+              const tone = getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel });
               return (
                 <button
                   key={group.hostKey}
@@ -329,22 +333,39 @@ function TerminalSessionDrawerComponent({
                   data-testid={`terminal-session-drawer-host-${group.hostKey}`}
                   onClick={() => setSelectedHostKey(group.hostKey)}
                   style={{
+                    width: '100%',
                     flexShrink: 0,
-                    padding: '6px 12px',
-                    borderRadius: '999px',
+                    padding: '10px 12px',
+                    borderRadius: '14px',
                     border: isActive
-                      ? '1px solid rgba(106, 167, 255, 0.9)'
-                      : '1px solid rgba(255,255,255,0.08)',
+                      ? `1px solid ${tone.accent}`
+                      : `1px solid ${tone.lightCardBorder}`,
                     background: isActive
-                      ? 'rgba(106, 167, 255, 0.16)'
+                      ? tone.tabActiveBackground
                       : 'rgba(255,255,255,0.04)',
-                    color: isActive ? '#6aa7ff' : 'rgba(220, 232, 255, 0.7)',
+                    color: isActive ? tone.previewText : 'rgba(220, 232, 255, 0.7)',
                     fontSize: '12px',
                     fontWeight: 700,
-                    whiteSpace: 'nowrap',
+                    textAlign: 'left',
                   }}
                 >
-                  {group.hostLabel}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    <span
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '999px',
+                        background: tone.accent,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {group.hostLabel}
+                    </span>
+                    <span style={{ flexShrink: 0, color: 'rgba(220, 232, 255, 0.52)', fontSize: '10px' }}>
+                      {group.sessions.length}
+                    </span>
+                  </div>
                 </button>
               );
             })}

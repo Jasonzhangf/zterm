@@ -21,6 +21,7 @@ import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
+import { buildServerIdentityAliasMap, resolveServerIdentity } from '../lib/server-identity';
 import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
@@ -1246,30 +1247,29 @@ function TerminalPageComponent({
   ), [activeHeaderSessionUiKey, interactiveSession]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
-    const hostLabelByKey = new Map<string, string>();
-    for (const session of sessions) {
-      const hostKey = `${session.bridgeHost}:${session.bridgePort}`;
-      if (hostLabelByKey.has(hostKey)) continue;
-      hostLabelByKey.set(hostKey, session.customName || hostKey);
-    }
+    const serverIdentityAliases = buildServerIdentityAliasMap(sessions);
+    const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, serverIdentityAliases);
 
     // 已打开的 session（按 pane 顺序）
     const opened: TerminalSessionDrawerItem[] = workspacePanes.flatMap((pane, paneIndex) =>
       pane.tabs
         .map((tab) => sessions.find((candidate) => candidate.id === tab.sessionId) || null)
         .filter((session): session is Session => Boolean(session))
-        .map((session) => ({
-          id: session.id,
-          title: session.customName || session.sessionName,
-          subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
-          status: normalizeDrawerStatus(session.state),
-          remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
-          paneLabel: `P${paneIndex + 1}`,
-          sessionGroupSlot: resolveSessionGroupSlot(session.id),
-          active: activeSessionIds.has(session.id),
-          hostKey: `${session.bridgeHost}:${session.bridgePort}`,
-          hostLabel: hostLabelByKey.get(`${session.bridgeHost}:${session.bridgePort}`) || `${session.bridgeHost}:${session.bridgePort}`,
-        })),
+        .map((session) => {
+          const serverIdentity = resolveDrawerServerIdentity(session);
+          return {
+            id: session.id,
+            title: session.customName || session.title || session.sessionName,
+            subtitle: `${serverIdentity.label} · ${session.title || session.sessionName}`,
+            status: normalizeDrawerStatus(session.state),
+            remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
+            paneLabel: `P${paneIndex + 1}`,
+            sessionGroupSlot: resolveSessionGroupSlot(session.id),
+            active: activeSessionIds.has(session.id),
+            hostKey: serverIdentity.key,
+            hostLabel: serverIdentity.label,
+          };
+        }),
     );
 
     // 未打开的 session（按名字排序），排除已打开的
@@ -1278,18 +1278,18 @@ function TerminalPageComponent({
       .filter((s) => !openedIds.has(s.id))
       .sort((a, b) => (a.customName || a.sessionName).localeCompare(b.customName || b.sessionName))
       .map((session) => {
-        const hostKey = `${session.bridgeHost}:${session.bridgePort}`;
+        const serverIdentity = resolveDrawerServerIdentity(session);
         return {
           id: session.id,
-          title: session.customName || session.sessionName,
-          subtitle: `${session.bridgeHost}:${session.bridgePort} · ${session.sessionName}`,
+          title: session.customName || session.title || session.sessionName,
+          subtitle: `${serverIdentity.label} · ${session.title || session.sessionName}`,
           status: normalizeDrawerStatus(session.state),
           remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: undefined,
           sessionGroupSlot: resolveSessionGroupSlot(session.id),
           active: false,
-          hostKey,
-          hostLabel: hostLabelByKey.get(hostKey) || hostKey,
+          hostKey: serverIdentity.key,
+          hostLabel: serverIdentity.label,
         };
       });
 
