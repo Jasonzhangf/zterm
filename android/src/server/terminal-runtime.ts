@@ -66,6 +66,7 @@ interface TerminalRuntimeDeps {
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   runTmux: (args: string[]) => { ok: true; stdout: string };
+  supportsWindowSizeManagement?: boolean;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   logTimePrefix: () => string;
 }
@@ -279,6 +280,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     waitMs: deps.waitMs,
     logTimePrefix: deps.logTimePrefix,
     runTmux: deps.runTmux,
+    supportsWindowSizeManagement: deps.supportsWindowSizeManagement,
     closeLogicalTerminalSession: closeSession,
     getSessionMirror,
   });

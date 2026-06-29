@@ -211,6 +211,33 @@ describe('terminal mirror runtime lifecycle truth', () => {
     );
   });
 
+  it('classifies missing wezterm panes as session unavailable instead of generic sync failure', async () => {
+    const { runtime, sessions, mirrors, sendMessage, captureMirrorAuthoritativeBufferFromTmux } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    captureMirrorAuthoritativeBufferFromTmux.mockImplementation(async () => {
+      throw new Error('wezterm session not found: demo');
+    });
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(mirrors.get('demo')).toBeUndefined();
+    expect(session.mirrorKey).toBeNull();
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'error',
+        payload: expect.objectContaining({
+          code: 'tmux_session_unavailable',
+        }),
+      }),
+    );
+  });
+
   it('keeps the mirror/runtime shell alive and reports initial sync failure when initial capture hits a dead pane target', async () => {
     const { sessions, mirrors, sendMessage } = createRuntime();
     const session = createSession();

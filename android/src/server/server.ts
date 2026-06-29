@@ -47,6 +47,11 @@ import {
   type TerminalControlRuntime,
 } from './terminal-control-runtime';
 import {
+  createWezTermBackendRuntime,
+  createWezTermCommandRunner,
+} from './wezterm-backend';
+import { resolveTerminalBackendKind, resolveWezTermExecutable } from './terminal-backend-selection';
+import {
   createTerminalTransportRuntime,
   type DaemonTransportConnection,
 } from './terminal-transport-runtime';
@@ -64,7 +69,14 @@ const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
 const HOST = DAEMON_CONFIG.host || DEFAULT_DAEMON_HOST;
 
-const TMUX_BINARY = resolveTmuxBinary();
+const TERMINAL_BACKEND_KIND = resolveTerminalBackendKind();
+const TMUX_BINARY = TERMINAL_BACKEND_KIND === 'tmux' ? resolveTmuxBinary() : '';
+const WEZTERM_BACKEND = TERMINAL_BACKEND_KIND === 'wezterm'
+  ? createWezTermBackendRuntime({
+      runner: createWezTermCommandRunner(resolveWezTermExecutable()),
+      maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+    })
+  : null;
 const DEFAULT_SESSION_NAME = process.env.ZTERM_DEFAULT_SESSION || 'zterm';
 const DAEMON_SESSION_NAME = DAEMON_CONFIG.sessionName || buildDaemonSessionName(PORT);
 const HIDDEN_TMUX_SESSIONS = new Set([DAEMON_SESSION_NAME, DEFAULT_DAEMON_SESSION_NAME, 'zterm-daemon-keepalive']);
@@ -132,6 +144,7 @@ const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
   logTimePrefix,
+  wezTermBackend: WEZTERM_BACKEND,
 });
 const terminalRuntime = createTerminalRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
@@ -152,6 +165,12 @@ const terminalRuntime = createTerminalRuntime({
   resolveAttachGeometry,
   readTmuxPaneMetrics: (sessionName) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName),
   assertTmuxSessionExists: (sessionName) => {
+    if (WEZTERM_BACKEND) {
+      if (!WEZTERM_BACKEND.listSessions().some((session) => session.sessionName === sessionName)) {
+        throw new Error(`wezterm session not found: ${sessionName}`);
+      }
+      return;
+    }
     terminalControlRuntime.runTmux(['has-session', '-t', sessionName]);
     terminalControlRuntime.ensureTmuxSessionAlternateScreenDisabled(sessionName);
   },
@@ -174,6 +193,7 @@ const terminalRuntime = createTerminalRuntime({
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
+  supportsWindowSizeManagement: TERMINAL_BACKEND_KIND === 'tmux',
   daemonRuntimeDebug,
   logTimePrefix,
 });
@@ -206,6 +226,7 @@ terminalControlRuntime = createTerminalControlRuntime({
   getMirrorKey,
   sanitizeSessionName,
   daemonRuntimeDebug,
+  wezTermBackend: WEZTERM_BACKEND,
 });
 const {
   runTmux,
@@ -394,6 +415,7 @@ const relayHostClient = createTraversalRelayHostClient({
   config: DAEMON_CONFIG.relay,
   handleRelaySignal,
   closeRelayPeer,
+  listTmuxSessions,
 });
 wss.on('connection', handleWebSocketConnection);
 startHeartbeatLoop();

@@ -269,12 +269,22 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        deps.controlRuntimeDeps.handleAdaptiveResize?.(session, {
-          cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
-            ? message.payload.cols
-            : undefined,
-          widthMode: message.payload?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
-        });
+        try {
+          deps.controlRuntimeDeps.handleAdaptiveResize?.(session, {
+            cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
+              ? message.payload.cols
+              : undefined,
+            widthMode: message.payload?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
+          });
+        } catch (error) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: {
+              message: error instanceof Error ? error.message : 'Resize failed',
+              code: 'resize_failed',
+            },
+          });
+        }
         break;
       case 'buffer-head-request': {
         if (!session) {

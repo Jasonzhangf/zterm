@@ -45,6 +45,18 @@ describe('server control runtime truth gates', () => {
     expect(source).not.toContain('function renameTmuxSession(');
   });
 
+  it('keeps wezterm attach assertion backend-aware instead of falling through tmux has-session', () => {
+    const source = readServerSource();
+    const assertBlock = extractBlock(source, 'assertTmuxSessionExists: (sessionName) => {', 700);
+
+    expect(assertBlock).toContain('if (WEZTERM_BACKEND)');
+    expect(assertBlock).toContain('WEZTERM_BACKEND.listSessions()');
+    expect(assertBlock).toContain("terminalControlRuntime.runTmux(['has-session', '-t', sessionName])");
+    expect(assertBlock.indexOf('WEZTERM_BACKEND.listSessions()')).toBeLessThan(
+      assertBlock.indexOf("terminalControlRuntime.runTmux(['has-session', '-t', sessionName])"),
+    );
+  });
+
   it('keeps tmux/shell control implementations inside dedicated control runtime', () => {
     const source = readControlRuntimeSource();
     const runBlock = extractBlock(source, 'function runTmux(');
@@ -53,7 +65,9 @@ describe('server control runtime truth gates', () => {
     const sessionsBlock = extractBlock(source, 'function listTmuxSessions(');
 
     expect(runBlock).toContain("spawnSync(deps.tmuxBinary, args");
-    expect(runBlock).toContain("stderr.includes('no server running on') && args[0] === 'list-sessions'");
+    expect(runBlock).toContain('isTmuxNoServerForListSessions(stderr, args)');
+    expect(source).toContain("stderr.includes('no server running on')");
+    expect(source).toContain("stderr.includes('error connecting to') && stderr.includes('No such file or directory')");
     expect(mirrorWriteBlock).toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(source).toContain('const liveMirrorInputBatches = new Map<string, {');
     expect(enqueueWriteBlock).toContain('schedulePendingLiveMirrorInput(mirrorKey)');

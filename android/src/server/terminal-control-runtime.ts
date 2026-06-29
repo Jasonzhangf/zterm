@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'child_process';
 import { homedir } from 'os';
 import type { SessionMirror } from './terminal-runtime-types';
+import type { WezTermBackendRuntime } from './wezterm-backend';
 
 export interface TerminalControlRuntimeDeps {
   tmuxBinary: string;
@@ -11,6 +12,7 @@ export interface TerminalControlRuntimeDeps {
   getMirrorKey: (sessionName: string) => string;
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
+  wezTermBackend?: WezTermBackendRuntime | null;
 }
 
 export interface TerminalControlRuntime {
@@ -73,7 +75,18 @@ export function createTerminalControlRuntime(
     return env;
   }
 
+  function isTmuxNoServerForListSessions(stderr: string, args: string[]) {
+    if (args[0] !== 'list-sessions') {
+      return false;
+    }
+    return stderr.includes('no server running on')
+      || (stderr.includes('error connecting to') && stderr.includes('No such file or directory'));
+  }
+
   function runTmux(args: string[]) {
+    if (deps.wezTermBackend) {
+      throw new Error(`wezterm backend does not support tmux command: ${args.join(' ')}`);
+    }
     const result = spawnSync(deps.tmuxBinary, args, {
       encoding: 'utf-8',
       cwd: process.env.HOME || homedir(),
@@ -86,7 +99,7 @@ export function createTerminalControlRuntime(
 
     if (result.status !== 0) {
       const stderr = result.stderr?.trim() || '';
-      if (stderr.includes('no server running on') && args[0] === 'list-sessions') {
+      if (isTmuxNoServerForListSessions(stderr, args)) {
         return { ok: true as const, stdout: '' };
       }
       throw new Error(stderr || `tmux exited with status ${result.status}`);
@@ -114,6 +127,9 @@ export function createTerminalControlRuntime(
   }
 
   function runTmuxAsync(args: string[]) {
+    if (deps.wezTermBackend) {
+      return Promise.reject(new Error(`wezterm backend does not support tmux command: ${args.join(' ')}`));
+    }
     return new Promise<{ ok: true; stdout: string }>((resolve, reject) => {
       const child = spawn(deps.tmuxBinary, args, {
         cwd: process.env.HOME || homedir(),
@@ -140,7 +156,7 @@ export function createTerminalControlRuntime(
       child.on('close', (code) => {
         if (code !== 0) {
           const trimmedStderr = stderr.trim();
-          if (trimmedStderr.includes('no server running on') && args[0] === 'list-sessions') {
+          if (isTmuxNoServerForListSessions(trimmedStderr, args)) {
             resolve({ ok: true, stdout: '' });
             return;
           }
@@ -157,6 +173,9 @@ export function createTerminalControlRuntime(
   // versa. Using a private socket would hide user sessions and break the
   // "all sessions visible" requirement.
   function ensureTmuxServerRunning() {
+    if (deps.wezTermBackend) {
+      return;
+    }
     const keepalive = 'zterm-daemon-keepalive';
     // If server is already running (user's or ours), just ensure keepalive exists
     try {
@@ -180,10 +199,17 @@ export function createTerminalControlRuntime(
 
 
   function ensureTmuxSessionAlternateScreenDisabled(sessionName: string) {
+    if (deps.wezTermBackend) {
+      return;
+    }
     runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off']);
   }
 
   function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
+    if (deps.wezTermBackend) {
+      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter ? '\r' : ''}`);
+      return;
+    }
     runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
     if (appendEnter) {
       runTmux(['send-keys', '-t', sessionName, 'Enter']);
@@ -194,6 +220,10 @@ export function createTerminalControlRuntime(
     const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
     if (!mirror || mirror.lifecycle !== 'ready') {
       return false;
+    }
+    if (deps.wezTermBackend) {
+      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter ? '\r' : ''}`);
+      return true;
     }
     runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
     if (appendEnter) {
@@ -275,6 +305,31 @@ export function createTerminalControlRuntime(
     };
     const isGroupWritable = (group: typeof groups[number]) =>
       group.items.every((item) => !item.shouldWrite || item.shouldWrite());
+
+    if (deps.wezTermBackend) {
+      try {
+        for (const group of groups) {
+          if (!isGroupWritable(group)) {
+            resolveGroup(group, false);
+            continue;
+          }
+          deps.wezTermBackend.writeInput(mirror.sessionName, `${group.payload}${group.appendEnter ? '\r' : ''}`);
+          resolveGroup(group, true);
+        }
+      } catch (error) {
+        for (const item of unresolved) {
+          item.reject(error);
+        }
+      } finally {
+        pending.flushing = false;
+        if (pending.items.length === 0) {
+          liveMirrorInputBatches.delete(mirrorKey);
+        } else {
+          schedulePendingLiveMirrorInput(mirrorKey);
+        }
+      }
+      return;
+    }
 
     try {
       for (const group of groups) {
@@ -384,6 +439,9 @@ export function createTerminalControlRuntime(
   }
 
   function listTmuxSessions() {
+    if (deps.wezTermBackend) {
+      return deps.wezTermBackend.listSessions().map((session) => session.sessionName);
+    }
     const result = runTmux(['list-sessions', '-F', '#S']);
     return result.stdout
       .split('\n')
@@ -392,6 +450,9 @@ export function createTerminalControlRuntime(
   }
 
   function createDetachedTmuxSession(input?: string, cwd?: string) {
+    if (deps.wezTermBackend) {
+      return deps.wezTermBackend.createSession({ sessionName: input, cwd }).sessionName;
+    }
     const sessionName = deps.sanitizeSessionName(input || deps.defaultSessionName);
     const args = ['new-session', '-d', '-s', sessionName];
     if (cwd) {
@@ -402,6 +463,9 @@ export function createTerminalControlRuntime(
   }
 
   function renameTmuxSession(currentName?: string, nextName?: string) {
+    if (deps.wezTermBackend) {
+      throw new Error('wezterm backend does not support tmux rename-session');
+    }
     const sessionName = deps.sanitizeSessionName(currentName);
     const nextSessionName = deps.sanitizeSessionName(nextName);
     runTmux(['rename-session', '-t', sessionName, nextSessionName]);

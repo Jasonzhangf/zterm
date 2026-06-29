@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionMirror } from './terminal-runtime-types';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
+import type { WezTermBackendRuntime } from './wezterm-backend';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
@@ -71,6 +72,38 @@ function createRuntime() {
   return { runtime, mirrors };
 }
 
+function createWezTermRuntime() {
+  const mirrors = new Map<string, SessionMirror>([
+    ['demo', createReadyMirror()],
+  ]);
+  const wezTermBackend: WezTermBackendRuntime = {
+    listSessions: vi.fn(() => [{ sessionName: 'demo', paneId: 9, workspace: 'zterm-demo', title: 'cmd.exe', cwd: 'D:/work', cols: 100, rows: 30 }]),
+    createSession: vi.fn(({ sessionName, cwd } = {}) => ({
+      sessionName: sessionName || 'demo',
+      paneId: 10,
+      workspace: `zterm-${sessionName || 'demo'}`,
+      title: 'cmd.exe',
+      cwd: cwd || 'D:/work',
+      cols: 100,
+      rows: 30,
+    })),
+    readSnapshot: vi.fn(),
+    writeInput: vi.fn(),
+    closeSession: vi.fn(),
+    readCurrentPath: vi.fn(() => 'D:/work'),
+  };
+  const runtime = createTerminalControlRuntime({
+    tmuxBinary: 'tmux',
+    defaultSessionName: 'demo',
+    hiddenTmuxSessions: new Set(),
+    mirrors,
+    getMirrorKey: (sessionName) => sessionName,
+    sanitizeSessionName: (input) => input?.trim() || 'demo',
+    wezTermBackend,
+  });
+  return { runtime, mirrors, wezTermBackend };
+}
+
 async function runSpawnMockImmediately() {
   spawnMock.mockImplementation(() => {
     const child = createFakeChild();
@@ -108,6 +141,29 @@ describe('terminal control runtime input queue', () => {
       '--',
       'abc',
     ]);
+  });
+
+  it('treats tmux 3.6 missing default socket as an empty session list', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: '',
+      stderr: 'error connecting to /private/tmp/tmux-501/default (No such file or directory)',
+    });
+    const { runtime } = createRuntime();
+
+    expect(runtime.listTmuxSessions()).toEqual([]);
+    expect(spawnSyncMock.mock.calls[0]?.[1]).toEqual(['list-sessions', '-F', '#S']);
+  });
+
+  it('does not hide non-list tmux socket errors as empty sessions', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: '',
+      stderr: 'error connecting to /private/tmp/tmux-501/default (No such file or directory)',
+    });
+    const { runtime } = createRuntime();
+
+    expect(() => runtime.writeToTmuxSession('demo', 'x', false)).toThrow(/error connecting to/);
   });
 
   it('does not include stale queued input in a coalesced tmux write', async () => {
@@ -209,5 +265,31 @@ describe('terminal control runtime input queue', () => {
       '--',
       'fresh',
     ]);
+  });
+
+  it('routes list/create/write through wezterm backend without invoking tmux', async () => {
+    const { runtime, wezTermBackend } = createWezTermRuntime();
+
+    expect(runtime.listTmuxSessions()).toEqual(['demo']);
+    expect(runtime.createDetachedTmuxSession('new-demo', 'D:/src')).toBe('new-demo');
+    runtime.writeToTmuxSession('demo', 'echo OK', true);
+    expect(await runtime.enqueueLiveMirrorInput('demo', 'abc', false, () => true)).toBe(true);
+
+    expect(wezTermBackend.listSessions).toHaveBeenCalled();
+    expect(wezTermBackend.createSession).toHaveBeenCalledWith({ sessionName: 'new-demo', cwd: 'D:/src' });
+    expect(wezTermBackend.writeInput).toHaveBeenCalledWith('demo', 'echo OK\r');
+    expect(wezTermBackend.writeInput).toHaveBeenCalledWith('demo', 'abc');
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('throws explicit errors for tmux-only operations in wezterm mode', async () => {
+    const { runtime } = createWezTermRuntime();
+
+    expect(() => runtime.runTmux(['list-sessions'])).toThrow('wezterm backend does not support tmux command: list-sessions');
+    await expect(runtime.runTmuxAsync(['display-message'])).rejects.toThrow(
+      'wezterm backend does not support tmux command: display-message',
+    );
+    expect(() => runtime.renameTmuxSession('a', 'b')).toThrow('wezterm backend does not support tmux rename-session');
   });
 });

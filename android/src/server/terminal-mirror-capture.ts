@@ -18,12 +18,14 @@ import {
 } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 import type { SessionMirror, TmuxCursorState, TmuxPaneMetrics } from './terminal-runtime-types';
+import type { WezTermBackendRuntime } from './wezterm-backend';
 
 export interface TerminalMirrorCaptureDeps {
   resolveMirrorCacheLines: (rows: number) => number;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   logTimePrefix: () => string;
+  wezTermBackend?: WezTermBackendRuntime | null;
 }
 
 export interface TerminalMirrorCaptureRuntime {
@@ -224,6 +226,19 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
+    if (deps.wezTermBackend) {
+      const session = deps.wezTermBackend.listSessions().find((entry) => entry.sessionName === sessionName);
+      if (!session) {
+        throw new Error(`wezterm session not found: ${sessionName}`);
+      }
+      return {
+        paneId: String(session.paneId),
+        tmuxAvailableLineCountHint: session.rows + session.cols,
+        paneRows: session.rows,
+        paneCols: session.cols,
+        alternateOn: false,
+      };
+    }
     const result = deps.runTmux([
       'display-message',
       '-p',
@@ -254,6 +269,9 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   function readTmuxPaneCurrentPath(sessionName: string) {
+    if (deps.wezTermBackend) {
+      return deps.wezTermBackend.readCurrentPath(sessionName);
+    }
     const result = deps.runTmux(['display-message', '-p', '-t', sessionName, '#{pane_current_path}']);
     const currentPath = result.stdout.trim();
     if (!currentPath) {
@@ -402,6 +420,28 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
+    if (deps.wezTermBackend) {
+      const snapshot = await deps.wezTermBackend.readSnapshot(mirror.sessionName);
+      applyMirrorCaptureSnapshot(mirror, {
+        rows: snapshot.rows,
+        cols: snapshot.cols,
+        cursorKeysApp: snapshot.cursorKeysApp,
+        lastScrollbackCount: Math.max(0, snapshot.bufferLines.length - snapshot.rows),
+        bufferStartIndex: snapshot.bufferStartIndex,
+        bufferLines: snapshot.bufferLines,
+        cursor: snapshot.cursor,
+        capturedLineCount: snapshot.bufferLines.length,
+        canonicalLineCount: snapshot.bufferLines.length,
+        totalAvailableLines: snapshot.bufferStartIndex + snapshot.bufferLines.length,
+        visibleTopIndex: Math.max(snapshot.bufferStartIndex, snapshot.bufferStartIndex + snapshot.bufferLines.length - snapshot.rows),
+        captureDurationMs: 0,
+        canonicalizeDurationMs: 0,
+      });
+      mirror.lastCaptureDurationMs = 0;
+      mirror.lastCanonicalizeDurationMs = 0;
+      mirror.pendingStableCaptureSnapshot = null;
+      return true;
+    }
     const snapshot = await captureTmuxMirrorSnapshot(mirror);
     const currentMirrorMatched = currentMirrorMatchesSnapshot(mirror, snapshot);
 

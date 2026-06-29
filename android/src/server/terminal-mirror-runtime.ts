@@ -71,6 +71,7 @@ export interface TerminalMirrorRuntimeDeps {
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
+  supportsWindowSizeManagement?: boolean;
   closeLogicalTerminalSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
@@ -103,6 +104,7 @@ export interface TerminalMirrorRuntime {
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
+  supportsWindowSizeManagement?: boolean;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
@@ -156,7 +158,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return /no server running|can(?:'t| not) find session|no such session|session .*not found/i.test(message);
+    return /no server running|can(?:'t| not) find session|no such session|session .*not found|wezterm session not found/i.test(message);
   }
 
   function resolveMirrorBaselineCols(mirror: SessionMirror) {
@@ -336,6 +338,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
   }
   function reconcileMirrorAdaptiveWidth(mirror: SessionMirror) {
+    if (deps.supportsWindowSizeManagement === false) {
+      return;
+    }
     const baselineCols = resolveMirrorBaselineCols(mirror);
     const baselineRows = resolveMirrorBaselineRows(mirror);
     // R7: enumerate widthMode across all subscribers. If 2+ different
@@ -824,6 +829,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     const nextWidthMode = payload.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
     session.widthMode = nextWidthMode;
+    if (deps.supportsWindowSizeManagement === false) {
+      if (nextWidthMode === 'adaptive-phone' && Number.isFinite(payload.cols) && (payload.cols || 0) > 0) {
+        throw new Error('wezterm backend does not support adaptive window resizing');
+      }
+      scheduleMirrorLiveSync(mirror, 0);
+      return;
+    }
     if (nextWidthMode === 'adaptive-phone' && Number.isFinite(payload.cols) && (payload.cols || 0) > 0) {
       mirror.adaptiveCols.set(session.id, {
         cols: deps.normalizeTerminalCols(payload.cols),
