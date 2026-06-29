@@ -152,6 +152,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 快捷按键编辑器里，组合键默认名必须来自最终组合 preview，而不是第一个被点击的 modifier token；否则 `Ctrl + C` 会被错误保存成 `Ctrl`
 - Android / Mac 若都要消费快捷按键组合规则，编码/反解/默认 label 必须下沉到 shared 纯函数；平台 UI 只保留 token 编辑与展示，禁止再复制一份组合算法
 - Android WebView 若出现“sheet/表单看起来不能滚”，先不要凭截图猜高度；应先附着 `webview_devtools_remote_<pid>` 给目标滚动容器打 `touchstart/touchmove/scrollTop` probe，并用 `adb logcat` 验证 `defaultPrevented` 与 `scrollTop` 是否真实变化，再决定改事件捕获还是布局
+- Android IME / viewport / keyboard lift 计算只能有一个 helper 真源；页面层不得复制 `resolveKeyboardLiftPx` / viewport height 逻辑。若键盘弹起后出现 gap、内容缺失或 quickbar 错位，先确认 WebView 是 overlay 还是 adjustResize：已 resize 时用当前 viewport height 且 lift=0，overlay 时才用 stable height + lift。
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
 - 2026-05-13 新冻结：open-tab runtime switch 必须永远拆成两条语义：

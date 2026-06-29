@@ -25,6 +25,24 @@
   - `~/.wterm` 已不存在，`~/.zterm` 存在并持有 config。
 - 这次固化的边界：以后不能再把“改 PATH / 改安装目录 / 手修 home”当成最终修复，只能回到 daemon 包和发布脚本里修真源。
 
+# 2026-06-29 keyboard IME gap / missing display audit
+
+- 现场截图显示同一 terminal 内容在键盘弹起和未弹起时可见区域不同，键盘弹起后像中间被错误 gap 挤掉。
+- 根因：键盘布局 helper 已有 `terminal-keyboard-lift.ts` 真源，但 `TerminalPage.tsx` 里还保留一份重复实现；页面运行态仍按复制版计算。且旧逻辑在 Android WebView 已经 `adjustResize` 到键盘上方时，仍用 pre-keyboard stable height 再加一层 keyboard lift，导致 shell/stage/quickbar 混用两套高度真相。
+- 修复方向：
+  - 物理移除 `TerminalPage.tsx` 内重复 keyboard helper，实现改为 re-export `terminal-keyboard-lift.ts`。
+  - `terminal-keyboard-lift.ts` 新增 `resolveCurrentLayoutViewportHeight()` 与 `isKeyboardViewportAlreadyResized()`；只有 stable height 明确高于当前 viewport 且 visual bottom 等于当前 viewport 时，判定 WebView 已 resize。
+  - `TerminalPage` 在已 resize 模式下使用当前 viewport height 且 keyboard lift 为 0；只有 overlay 模式才使用 stable height + lift。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/pages/terminal-keyboard-lift.test.ts src/pages/TerminalPage.android-ime.test.tsx src/pages/TerminalPage.foldable-display-change.test.tsx --reporter dot` PASS（3 files / 51 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+- 全量 APK 构建未完成：`./scripts/build-android-debug.sh` 仍被既有 `src/contexts/SessionContext.ws-refresh.test.tsx` 阻断，表现为多条用例 `MockWebSocket.instances` 期望 1 实际 0。这个阻断此前已有记录，不是本次 keyboard layout 修改引入；在该门禁未绿前不能宣称新 APK 已生成。
+
+# 2026-06-29 contracts parallelism blocker
+
+- `android/package.json` 里的 `test:terminal:contracts` 在 vitest 默认多文件并发下会互相覆盖全局 `WebSocket` mock，`SessionContext.ws-refresh.test.tsx` 单跑绿，但合并跑会红。
+- 修复方向：把 contracts gate 改成串行文件执行，再重新跑全量构建，避免把测试隔离问题误判成 runtime 回归。
+
 # 2026-06-29 relay default address APK leak / session group regression
 
 - Relay 默认地址不能在 APK 中以完整文本暴露：默认地址只在运行时由 parts 拼出，Settings 输入框不再预填/placeholder 展示真实默认地址，生产 sourcemap 默认关闭；build 链路新增 `scripts/check-relay-default-address-leak.mjs` 扫 dist / native assets / APK。

@@ -25,7 +25,10 @@ function makeSession(id: string): Session {
   };
 }
 
-vi.mock("@capacitor/core", () => ({ Capacitor: { getPlatform: () => "android" } }));
+vi.mock("@capacitor/core", () => ({
+  Capacitor: { getPlatform: () => "android", isNativePlatform: () => true },
+  registerPlugin: vi.fn(() => ({})),
+}));
 vi.mock("@capacitor/keyboard", () => ({
   Keyboard: {
     addListener: vi.fn(async (n: string, l: (e: any) => void) => { keyboardListeners.set(n, l); return { remove: vi.fn(async () => { keyboardListeners.delete(n); }) }; }),
@@ -35,6 +38,10 @@ vi.mock("@capacitor/keyboard", () => ({
 }));
 vi.mock("../plugins/ImeAnchorPlugin", () => ({
   ImeAnchor: { show: vi.fn(async () => ({})), hide: vi.fn(async () => undefined), blur: vi.fn(async () => undefined), setEditorActive: vi.fn(async () => ({})), addListener: vi.fn(async (n: string, l: (e: any) => void) => { imeListeners.set(n, l); return { remove: vi.fn(async () => { imeListeners.delete(n); }) }; }), },
+}));
+vi.mock("../plugins/DebugInputPlugin", () => ({
+  DebugInput: { addListener: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })) },
+  isDebugInputSupported: () => true,
 }));
 vi.mock("../plugins/DeviceClipboardPlugin", () => ({ DeviceClipboardPlugin: { readText: vi.fn(async () => ({ value: "" })), writeText: vi.fn(async () => undefined) }, isNativeClipboardSupported: () => true }));
 vi.mock("../plugins/StoragePermissionPlugin", () => ({ StoragePermissionPlugin: { check: vi.fn(async () => ({ granted: true, mode: "manage-external-storage" })), request: vi.fn(async () => ({ granted: true, mode: "manage-external-storage" })) } }));

@@ -4,6 +4,67 @@ export function resolveLayoutViewportHeight() {
   return resolveTerminalViewportMetrics().layoutHeight;
 }
 
+export function resolveCurrentLayoutViewportHeight() {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  const visualViewport = window.visualViewport;
+  const visualViewportBottom = Math.max(
+    0,
+    Math.round((visualViewport?.height || 0) + (visualViewport?.offsetTop || 0)),
+  );
+  return Math.max(
+    0,
+    Math.round(
+      Math.max(
+        window.innerHeight || 0,
+        window.document?.documentElement?.clientHeight || 0,
+        visualViewportBottom,
+      ),
+    ),
+  );
+}
+
+export function isKeyboardViewportAlreadyResized(
+  reportedKeyboardInset: number,
+  stableLayoutViewportHeightOverride?: number,
+) {
+  const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
+  if (safeReportedInset <= 0 || typeof window === "undefined") {
+    return false;
+  }
+
+  const visualViewport = window.visualViewport;
+  if (!visualViewport) {
+    return false;
+  }
+
+  const stableLayoutViewportHeight = Math.max(
+    0,
+    Math.round(stableLayoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
+  );
+  const currentLayoutViewportHeight = resolveCurrentLayoutViewportHeight();
+  const visualViewportBottom = Math.max(
+    0,
+    Math.round((visualViewport.height || 0) + (visualViewport.offsetTop || 0)),
+  );
+
+  if (currentLayoutViewportHeight <= 0 || visualViewportBottom <= 0) {
+    return false;
+  }
+
+  const viewportMatchesCurrentLayout =
+    Math.abs(currentLayoutViewportHeight - visualViewportBottom) <= 2;
+  if (!viewportMatchesCurrentLayout) {
+    return false;
+  }
+
+  const stableShowsResize =
+    stableLayoutViewportHeight > currentLayoutViewportHeight + 24;
+
+  return stableShowsResize;
+}
+
 export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
   if (typeof window === "undefined") {
     return isAndroid ? 16 : 0;
@@ -61,22 +122,11 @@ export function resolveKeyboardLiftPx(
   const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
   const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
   const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
-  const currentLayoutViewportHeight = Math.max(
-    0,
-    Math.round(
-      Math.max(window.innerHeight || 0, window.document?.documentElement?.clientHeight || 0),
-    ),
-  );
 
   // Resize-mode truth: on some Android devices the WebView already shrinks the
   // whole layout viewport above the IME (adjustResize-like behavior). In this
   // mode, applying an extra lift causes double-count over-lift for quickbar.
-  const viewportAlreadyResizedByIme =
-    currentLayoutViewportHeight > 0
-    && Math.abs(layoutViewportHeight - currentLayoutViewportHeight) <= 2
-    && Math.abs(currentLayoutViewportHeight - visualViewportBottom) <= 2
-    && safeCappedInset >= 24;
-  if (viewportAlreadyResizedByIme) {
+  if (isKeyboardViewportAlreadyResized(safeCappedInset, layoutViewportHeight)) {
     return 0;
   }
   const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);

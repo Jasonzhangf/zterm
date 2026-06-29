@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  isKeyboardViewportAlreadyResized,
+  resolveCurrentLayoutViewportHeight,
   resolveKeyboardLiftPx,
   resolveTerminalHeaderTopInsetPx,
 } from "./terminal-keyboard-lift";
@@ -61,7 +63,7 @@ describe("terminal-keyboard-lift", () => {
     expect(resolveKeyboardLiftPx(900, 1000)).toBe(500);
   });
 
-  it("does not return zero lift when only the current viewport shrank but the stable layout viewport is still taller", () => {
+  it("does not add lift when WebView has already resized to the keyboard top", () => {
     vi.stubGlobal("window", {
       innerWidth: 1080,
       innerHeight: 620,
@@ -77,6 +79,29 @@ describe("terminal-keyboard-lift", () => {
       },
     });
 
+    expect(resolveCurrentLayoutViewportHeight()).toBe(620);
+    expect(isKeyboardViewportAlreadyResized(320, 900)).toBe(true);
+    expect(resolveKeyboardLiftPx(320, 900)).toBe(0);
+  });
+
+  it("keeps overlay lift when visual viewport shrinks inside a stable layout viewport", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 1080,
+      innerHeight: 900,
+      document: {
+        documentElement: {
+          clientWidth: 1080,
+          clientHeight: 900,
+        },
+      },
+      visualViewport: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveCurrentLayoutViewportHeight()).toBe(900);
+    expect(isKeyboardViewportAlreadyResized(320, 900)).toBe(false);
     expect(resolveKeyboardLiftPx(320, 900)).toBe(280);
   });
 

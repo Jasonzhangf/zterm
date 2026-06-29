@@ -8,6 +8,9 @@
 
 ## Key Decisions
 
+- [2026-06-29] Android IME / keyboard lift 真源必须只有一份：`terminal-keyboard-lift.ts` 负责 viewport / lift 判断，`TerminalPage.tsx` 只能消费和 re-export，不能再复制 helper。已验证 WebView 已 resize 时 lift 必须为 0，只有 overlay 才按 stable height 计算。
+- [2026-06-29] `test:terminal:contracts` 必须串行文件执行。`SessionContext.ws-refresh.test.tsx` 这类文件会 stub 全局 `WebSocket`，在 vitest 默认 file parallel 下会互相覆盖；contracts gate 需要 `--no-file-parallelism` 才能稳定区分真失败与假红。
+
 - [2026-06-29] MacBook Air daemon 安装/启动的真源必须固化在 daemon 包与 service runner 内：npm postinstall / launchd runner 负责自动写 `~/.local/bin/zterm-daemon`、`~/.local/bin/wterm`，写入前先清旧 symlink/file；released runner 在读 config 前负责把旧 `~/.wterm` 迁移到 `~/.zterm`。远端验证已确认 `restart` 后服务正常、health 为 `ok: true`，且不再依赖手工修 PATH 或手工挪目录。
 
 - [2026-06-28] mobile session group 的正确语义必须拆成固定槽位和 viewport projection 两层：drawer 显示的 top / center / bottom 是用户显式分配真相，点击 peek 不得改写；stage 只按当前 focus slot 投影可见窗口。focus=top 时 viewport 为 `empty / top / center`，focus=bottom 时 viewport 为 `center / bottom / empty`，focus=center 时 viewport 等于固定槽位。focus 必须存 slot name，不能存 session id；抽屉点击 session 只替换当前 focus 槽位。禁止从已有 tab/session 列表自动补邻居做 wheel，也禁止点击后循环轮转。未指定槽位只渲染 placeholder；drawer 长按/右键的 slot menu 是唯一的槽位分配入口，且 menu 打开后必须 suppress 下一次 click，防止“打开菜单同时又切 session”的误触。

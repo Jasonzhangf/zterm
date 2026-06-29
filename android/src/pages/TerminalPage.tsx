@@ -34,7 +34,14 @@ import {
   type TerminalSessionGroupLayoutMode,
 } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
-import { resolveTerminalViewportMetrics } from '../lib/terminal-viewport-metrics';
+import {
+  isKeyboardViewportAlreadyResized,
+  resolveCurrentLayoutViewportHeight,
+  resolveKeyboardLiftPx,
+  resolveLayoutViewportHeight,
+  resolveTerminalHeaderTopInsetPx,
+  resolveWindowWidth,
+} from './terminal-keyboard-lift';
 import {
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportProjection,
@@ -175,75 +182,11 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   );
 });
 
-export function resolveKeyboardLiftPx(
-  reportedKeyboardInset: number,
-  layoutViewportHeightOverride?: number,
-) {
-  const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
-  if (safeReportedInset <= 0 || typeof window === 'undefined') {
-    return 0;
-  }
-
-  const resolvedLayoutViewportHeight = Math.max(
-    0,
-    Math.round(layoutViewportHeightOverride ?? resolveLayoutViewportHeight()),
-  );
-  // IME truth: some Android WebView cases keep innerHeight as full layout height
-  // while visual viewport shrinks; others shrink both metrics.
-  // Without explicit override, keep the larger one to avoid under-estimating
-  // occluded bottom and over-lifting terminal chrome.
-  const layoutViewportHeight = layoutViewportHeightOverride == null
-    ? Math.max(resolvedLayoutViewportHeight, Math.max(0, Math.round(window.innerHeight || 0)))
-    : resolvedLayoutViewportHeight;
-
-  const layoutViewportWidth = Math.max(
-    0,
-    Math.round(
-      Math.max(window.innerWidth || 0, window.document?.documentElement?.clientWidth || 0),
-    ),
-  );
-  const keyboardLiftCapRatio = layoutViewportWidth > layoutViewportHeight ? 0.5 : 0.6;
-  const keyboardLiftCapPx = Math.max(0, Math.round(layoutViewportHeight * keyboardLiftCapRatio));
-  const safeCappedInset = keyboardLiftCapPx > 0
-    ? Math.min(safeReportedInset, keyboardLiftCapPx)
-    : safeReportedInset;
-
-  const visualViewport = window.visualViewport;
-  if (!visualViewport) {
-    return safeCappedInset;
-  }
-
-  const visualViewportHeight = Math.max(0, Math.round(visualViewport.height || 0));
-  const visualViewportOffsetTop = Math.max(0, Math.round(visualViewport.offsetTop || 0));
-  const visualViewportBottom = Math.max(0, visualViewportHeight + visualViewportOffsetTop);
-  const occludedBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
-
-  if (occludedBottom <= 0) {
-    return safeCappedInset;
-  }
-
-  return Math.min(safeCappedInset, occludedBottom);
-}
-
-export function resolveLayoutViewportHeight() {
-  return resolveTerminalViewportMetrics().layoutHeight;
-}
-
-export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
-  if (typeof window === 'undefined') {
-    return isAndroid ? 16 : 0;
-  }
-
-  if (!isAndroid) {
-    return Math.max(0, Math.round(window.visualViewport?.offsetTop || 0));
-  }
-
-  return 16;
-}
-
-function resolveWindowWidth() {
-  return resolveTerminalViewportMetrics().layoutWidth;
-}
+export {
+  resolveKeyboardLiftPx,
+  resolveLayoutViewportHeight,
+  resolveTerminalHeaderTopInsetPx,
+};
 
 interface TerminalPageProps {
   sessions: Session[];
@@ -437,6 +380,10 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   effectiveKeyboardLiftPx,
   quickBarHeight,
   terminalChromeBottomPx,
+  layoutMode,
+  landscape,
+  splitVisible,
+  quickBarCollapsed,
   copySelection,
   sessionDrawerDebug,
 }: {
@@ -466,6 +413,10 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   effectiveKeyboardLiftPx?: number;
   quickBarHeight?: number;
   terminalChromeBottomPx?: number;
+  layoutMode?: string;
+  landscape?: boolean;
+  splitVisible?: boolean;
+  quickBarCollapsed?: boolean;
   copySelection?: CopySelectionState | undefined;
   sessionDrawerDebug?: {
     open: boolean;
@@ -685,6 +636,22 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>TB</span>
         <span>{terminalChromeBottomPx ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>LP</span>
+        <span>{layoutMode ?? '?'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>LS</span>
+        <span>{landscape ? 'Y' : 'N'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>SP</span>
+        <span>{splitVisible ? 'Y' : 'N'}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+        <span>QC</span>
+        <span>{quickBarCollapsed ? 'Y' : 'N'}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <span>CH</span>
@@ -1044,9 +1011,15 @@ function TerminalPageComponent({
   }, [quickBarEditorFocused]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
+  const currentShellHeight = resolveCurrentLayoutViewportHeight();
   const keyboardViewportFreezeActive = isAndroid && (terminalKeyboardRequested || keyboardInset > 0);
+  const keyboardViewportAlreadyResized = isAndroid && keyboardViewportFreezeActive
+    ? isKeyboardViewportAlreadyResized(keyboardInset, stableLayoutViewportHeightRef.current)
+    : false;
   const shellHeight = keyboardViewportFreezeActive
-    ? Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
+    ? keyboardViewportAlreadyResized
+      ? currentShellHeight || rawShellHeight
+      : Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
     : rawShellHeight;
   const sessionGroupLayoutAxis = resolveTerminalSessionGroupLayoutAxis({
     viewportWidth,
@@ -2697,6 +2670,10 @@ function TerminalPageComponent({
           effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
           quickBarHeight={quickBarHeight}
           terminalChromeBottomPx={terminalChromeBottomPx}
+          layoutMode={layoutProfile.mode}
+          landscape={landscape}
+          splitVisible={splitVisible}
+          quickBarCollapsed={quickBarCollapsed}
           sessionDrawerDebug={{
             open: sessionDrawerOpen,
             lastEvent: sessionDrawerDebug.lastEvent,

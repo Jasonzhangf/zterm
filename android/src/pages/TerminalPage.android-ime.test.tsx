@@ -1832,7 +1832,7 @@ describe("resolveKeyboardLiftPx", () => {
     });
   });
 
-  it("keeps lift when the stable shell viewport is still taller than the shrunken current viewport", () => {
+  it("does not add lift when the stable shell proves WebView already resized to keyboard top", () => {
     const originalInnerHeight = window.innerHeight;
     const originalDocumentClientHeight = document.documentElement.clientHeight;
     const originalVisualViewport = window.visualViewport;
@@ -1853,7 +1853,7 @@ describe("resolveKeyboardLiftPx", () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320, 900)).toBe(280);
+    expect(resolveKeyboardLiftPx(320, 900)).toBe(0);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
@@ -1930,7 +1930,7 @@ describe("resolveLayoutViewportHeight", () => {
 });
 
 describe("resolveKeyboardLiftPx with stable layout viewport height override", () => {
-  it("uses the pre-keyboard stable layout height when Android shrinks all viewport metrics during IME popup", () => {
+  it("does not use stable layout height as extra lift when Android already resized all viewport metrics", () => {
     const originalInnerHeight = window.innerHeight;
     const originalDocumentClientHeight = document.documentElement.clientHeight;
     const originalVisualViewport = window.visualViewport;
@@ -1951,7 +1951,7 @@ describe("resolveKeyboardLiftPx with stable layout viewport height override", ()
       },
     });
 
-    expect(resolveKeyboardLiftPx(303, 615)).toBe(287);
+    expect(resolveKeyboardLiftPx(303, 615)).toBe(0);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
