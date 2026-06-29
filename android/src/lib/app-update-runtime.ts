@@ -346,47 +346,12 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         return false;
       }
 
-      if (!snapshot.preferences.manifestUrl.trim()) {
-        setSnapshot((current) => ({
-          ...current,
-          lastError: '未配置升级 manifest URL',
-          updateStage: 'failed',
-          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
-        }));
-        return false;
-      }
-
-      setSnapshot((current) => ({
-        ...current,
-        updateStage: 'refreshing-manifest',
-      }));
-
       let installTarget: AppUpdateManifest;
-      try {
-        const response = await deps.fetchFn(snapshot.preferences.manifestUrl, {
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-          throw new Error(`升级清单请求失败：HTTP ${response.status}`);
-        }
-
-        const payload = normalizeAppUpdateManifest(await response.json());
-        if (!payload) {
-          throw new Error('升级清单格式无效');
-        }
-
+      if (manifest) {
         installTarget = {
-          ...payload,
-          apkUrl: new URL(payload.apkUrl, snapshot.preferences.manifestUrl).toString(),
+          ...manifest,
+          apkUrl: new URL(manifest.apkUrl, snapshot.preferences.manifestUrl || manifest.apkUrl).toString(),
         };
-        if (
-          installTarget.versionCode !== target.versionCode
-          || installTarget.sha256 !== target.sha256.toLowerCase()
-        ) {
-          throw new Error('升级清单已变更，请重新检查更新');
-        }
-
         setSnapshot((current) => ({
           ...current,
           latestManifest: installTarget,
@@ -400,22 +365,77 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
             capturedAt: deps.now(),
           },
         }));
-      } catch (error) {
+      } else {
+        if (!snapshot.preferences.manifestUrl.trim()) {
+          setSnapshot((current) => ({
+            ...current,
+            lastError: '未配置升级 manifest URL',
+            updateStage: 'failed',
+            lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
+          }));
+          return false;
+        }
+
         setSnapshot((current) => ({
           ...current,
-          lastError: error instanceof Error ? error.message : '升级清单复核失败',
-          updateStage: 'failed',
-          lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
-            apkUrl: target.apkUrl,
-            versionCode: target.versionCode,
-            versionName: target.versionName,
-            sha256Expected: target.sha256,
-            capturedAt: deps.now(),
-            reason: error instanceof Error ? error.message : '升级清单复核失败',
-          },
+          updateStage: 'refreshing-manifest',
         }));
-        return false;
+
+        try {
+          const response = await deps.fetchFn(snapshot.preferences.manifestUrl, {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          });
+          if (!response.ok) {
+            throw new Error(`升级清单请求失败：HTTP ${response.status}`);
+          }
+
+          const payload = normalizeAppUpdateManifest(await response.json());
+          if (!payload) {
+            throw new Error('升级清单格式无效');
+          }
+
+          installTarget = {
+            ...payload,
+            apkUrl: new URL(payload.apkUrl, snapshot.preferences.manifestUrl).toString(),
+          };
+          if (
+            installTarget.versionCode !== target.versionCode
+            || installTarget.sha256 !== target.sha256.toLowerCase()
+          ) {
+            throw new Error('升级清单已变更，请重新检查更新');
+          }
+
+          setSnapshot((current) => ({
+            ...current,
+            latestManifest: installTarget,
+            availableManifest: installTarget,
+            lastInstallContext: {
+              manifestUrl: snapshot.preferences.manifestUrl,
+              apkUrl: installTarget.apkUrl,
+              versionCode: installTarget.versionCode,
+              versionName: installTarget.versionName,
+              sha256Expected: installTarget.sha256,
+              capturedAt: deps.now(),
+            },
+          }));
+        } catch (error) {
+          setSnapshot((current) => ({
+            ...current,
+            lastError: error instanceof Error ? error.message : '升级清单复核失败',
+            updateStage: 'failed',
+            lastInstallContext: {
+              manifestUrl: snapshot.preferences.manifestUrl,
+              apkUrl: target.apkUrl,
+              versionCode: target.versionCode,
+              versionName: target.versionName,
+              sha256Expected: target.sha256,
+              capturedAt: deps.now(),
+              reason: error instanceof Error ? error.message : '升级清单复核失败',
+            },
+          }));
+          return false;
+        }
       }
 
       setSnapshot((current) => ({

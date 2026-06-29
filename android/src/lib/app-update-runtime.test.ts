@@ -136,30 +136,36 @@ describe('app-update-runtime', () => {
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
   });
 
-  it('records last install context when manifest check fails before install', async () => {
+  it('records last install context when cached manifest revalidation fails before install', async () => {
     const runtime = createRuntime();
     withManifestUrl(runtime);
 
-    fetchFn.mockResolvedValue({
+    fetchFn.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        buildNumber: 1493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'abc123',
+        notes: [],
+      }),
+    });
+    await runtime.checkForUpdates();
+
+    fetchFn.mockResolvedValueOnce({
       ok: false,
       status: 404,
       json: async () => ({}),
     });
 
-    const installed = await runtime.startUpdate({
-      versionName: '0.1.1.1493',
-      versionCode: 1011493,
-      buildNumber: 1493,
-      apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
-      sha256: 'abc123',
-      notes: [],
-    });
+    const installed = await runtime.startUpdate();
 
     expect(installed).toBe(false);
     expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(runtime.getSnapshot().lastInstallContext).toEqual(expect.objectContaining({
       manifestUrl: 'https://example.com/updates/latest.json',
-      apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
+      apkUrl: 'https://example.com/updates/zterm-0.1.1.1493.apk',
       versionCode: 1011493,
       sha256Expected: 'abc123',
     }));
@@ -241,7 +247,7 @@ describe('app-update-runtime', () => {
     expect(runtime.getSnapshot().lastError).toContain('backup failed');
   });
 
-  it('revalidates manifest before install and rejects stale install target', async () => {
+  it('installs the explicit manifest target without revalidating a potentially changed manifest', async () => {
     const runtime = createRuntime();
     withManifestUrl(runtime);
 
@@ -256,6 +262,19 @@ describe('app-update-runtime', () => {
         notes: [],
       }),
     });
+    canRequestPackageInstalls.mockResolvedValue({ allowed: true });
+    backupCurrentApk.mockResolvedValue({
+      versionCode: 1011491,
+      versionName: '0.1.1.1491',
+      filePath: '/tmp/rollback.apk',
+      sha256: 'rollbacksha',
+      backedUpAt: 123456789,
+    });
+    downloadAndInstall.mockResolvedValue({
+      filePath: '/tmp/zterm.apk',
+      sha256: 'abc123',
+      packageName: 'com.zterm.android',
+    });
 
     const installed = await runtime.startUpdate({
       versionName: '0.1.1.1493',
@@ -265,108 +284,65 @@ describe('app-update-runtime', () => {
       sha256: 'abc123',
       notes: [],
     });
+
+    expect(installed).toBe(true);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(downloadAndInstall).toHaveBeenCalledWith({
+      url: 'https://stale.example.com/zterm-0.1.1.1493.apk',
+      sha256: 'abc123',
+      expectedPackageName: 'com.zterm.android',
+    });
+  });
+
+  it('revalidates the cached manifest when install is requested without an explicit target', async () => {
+    const runtime = createRuntime();
+    withManifestUrl(runtime);
+
+    canRequestPackageInstalls.mockResolvedValue({ allowed: true });
+    backupCurrentApk.mockResolvedValue({
+      versionCode: 1011491,
+      versionName: '0.1.1.1491',
+      filePath: '/tmp/rollback.apk',
+      sha256: 'rollbacksha',
+      backedUpAt: 123456789,
+    });
+    downloadAndInstall.mockResolvedValue({
+      filePath: '/tmp/zterm.apk',
+      sha256: 'abc123',
+      packageName: 'com.zterm.android',
+    });
+    fetchFn.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        buildNumber: 1493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'abc123',
+        notes: [],
+      }),
+    });
+
+    await runtime.checkForUpdates();
+
+    fetchFn.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1494',
+        versionCode: 1011494,
+        buildNumber: 1494,
+        apkUrl: 'zterm-0.1.1.1494.apk',
+        sha256: 'newsha',
+        notes: [],
+      }),
+    });
+
+    const installed = await runtime.startUpdate();
 
     expect(installed).toBe(false);
     expect(backupCurrentApk).not.toHaveBeenCalled();
     expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(runtime.getSnapshot().lastError).toBe('升级清单已变更，请重新检查更新');
-  });
-
-  it('keeps the final install url bound to the refreshed manifest host', async () => {
-    const runtime = createRuntime();
-    withManifestUrl(runtime);
-
-    canRequestPackageInstalls.mockResolvedValue({ allowed: true });
-    backupCurrentApk.mockResolvedValue({
-      versionCode: 1011491,
-      versionName: '0.1.1.1491',
-      filePath: '/tmp/rollback.apk',
-      sha256: 'rollbacksha',
-      backedUpAt: 123456789,
-    });
-    downloadAndInstall.mockResolvedValue({
-      filePath: '/tmp/zterm.apk',
-      sha256: 'abc123',
-      packageName: 'com.zterm.android',
-    });
-    fetchFn.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        versionName: '0.1.1.1493',
-        versionCode: 1011493,
-        buildNumber: 1493,
-        apkUrl: 'zterm-0.1.1.1493.apk',
-        sha256: 'abc123',
-        notes: [],
-      }),
-    });
-
-    const installed = await runtime.startUpdate({
-      versionName: '0.1.1.1493',
-      versionCode: 1011493,
-      buildNumber: 1493,
-      apkUrl: 'https://stale.example.com/zterm-0.1.1.1493.apk',
-      sha256: 'abc123',
-      notes: [],
-    });
-
-    expect(installed).toBe(true);
-    expect(downloadAndInstall).toHaveBeenCalledWith({
-      url: 'https://example.com/updates/zterm-0.1.1.1493.apk',
-      sha256: 'abc123',
-      expectedPackageName: 'com.zterm.android',
-    });
-    expect(runtime.getSnapshot().lastInstallContext?.apkUrl).toBe('https://example.com/updates/zterm-0.1.1.1493.apk');
-  });
-
-  it('installs with the freshly revalidated manifest URL instead of stale snapshot apkUrl', async () => {
-    const runtime = createRuntime();
-    withManifestUrl(runtime);
-
-    canRequestPackageInstalls.mockResolvedValue({ allowed: true });
-    backupCurrentApk.mockResolvedValue({
-      versionCode: 1011491,
-      versionName: '0.1.1.1491',
-      filePath: '/tmp/rollback.apk',
-      sha256: 'rollbacksha',
-      backedUpAt: 123456789,
-    });
-    downloadAndInstall.mockResolvedValue({
-      filePath: '/tmp/zterm.apk',
-      sha256: 'abc123',
-      packageName: 'com.zterm.android',
-    });
-    fetchFn.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        versionName: '0.1.1.1493',
-        versionCode: 1011493,
-        buildNumber: 1493,
-        apkUrl: 'zterm-0.1.1.1493.apk',
-        sha256: 'abc123',
-        notes: [],
-      }),
-    });
-
-    const installed = await runtime.startUpdate({
-      versionName: '0.1.1.1493',
-      versionCode: 1011493,
-      buildNumber: 1493,
-      apkUrl: 'https://stale.example.com/zterm-0.1.1.1493.apk',
-      sha256: 'abc123',
-      notes: [],
-    });
-
-    expect(installed).toBe(true);
-    expect(fetchFn).toHaveBeenCalledWith('https://example.com/updates/latest.json', {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    });
-    expect(downloadAndInstall).toHaveBeenCalledWith({
-      url: 'https://example.com/updates/zterm-0.1.1.1493.apk',
-      sha256: 'abc123',
-      expectedPackageName: 'com.zterm.android',
-    });
   });
 
   it('rolls back to previous version and clears rollback backup', async () => {
