@@ -62,6 +62,7 @@ requirePath(resolve(releaseDir, 'support/zterm-daemon'), `missing native zterm-d
 
 rmSync(npmPackageDir, { recursive: true, force: true });
 mkdirSync(resolve(npmPackageDir, 'bin'), { recursive: true });
+mkdirSync(resolve(npmPackageDir, 'support'), { recursive: true });
 
 cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime'), { recursive: true });
 cpSync(resolve(releaseDir, 'support'), resolve(npmPackageDir, 'support'), { recursive: true });
@@ -94,6 +95,41 @@ if [[ "\${1:-}" == "daemon" ]]; then
 fi
 exec "$PACKAGE_ROOT/support/zterm-daemon.sh" "$@"
 `);
+
+writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), `#!/usr/bin/env node
+const { chmodSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
+const { homedir } = require('node:os');
+const { resolve } = require('node:path');
+
+const packageRoot = resolve(__dirname, '..');
+const localBin = resolve(homedir(), '.local/bin');
+
+function writeShim(name, body) {
+  mkdirSync(localBin, { recursive: true });
+  const target = resolve(localBin, name);
+  rmSync(target, { force: true });
+  writeFileSync(target, body);
+  chmodSync(target, 0o755);
+}
+
+writeShim('zterm-daemon', \`#!/usr/bin/env bash
+set -euo pipefail
+exec "\${packageRoot}/support/zterm-daemon.sh" "$@"
+\`);
+
+writeShim('wterm', \`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\\\${1:-}" == "daemon" ]]; then
+  shift
+fi
+exec "\${packageRoot}/support/zterm-daemon.sh" "$@"
+\`);
+
+console.log('[zterm-daemon] installed user shims');
+console.log(\`- \${localBin}/zterm-daemon\`);
+console.log(\`- \${localBin}/wterm\`);
+`);
+chmodSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), 0o755);
 
 writeFileSync(resolve(npmPackageDir, 'README.md'), `# zterm-daemon
 
@@ -210,6 +246,9 @@ writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
   os: [targetOs],
   cpu: [targetArch],
   type: 'commonjs',
+  scripts: {
+    postinstall: 'node support/install-user-shims.cjs',
+  },
   bin: {
     'zterm-daemon': 'bin/zterm-daemon',
     wterm: 'bin/wterm',

@@ -96,6 +96,10 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.10 daemon 收敛规则
 - server 侧启动入口要收敛成单一 daemon CLI，默认监听地址/端口由统一配置真源决定（当前 `0.0.0.0:3333`）
 - relay/account 配置必须走全局发行包入口：先 `install-global.sh` 安装/升级 `~/.local/bin/zterm-daemon`，再用 `zterm-daemon configure-relay` 写 `~/.wterm/config.json -> mobile.relay`；daemon 只读取配置，不承载账号 UX，禁止把手工改散落配置当成最终交付。
+- daemon 全局安装的稳定入口必须由包内脚本自固化：npm postinstall / service runner 要自动生成 `~/.local/bin/zterm-daemon` 与 `~/.local/bin/wterm`，写入前先清旧 symlink/file，released runner 读 config 前要迁移旧 `~/.wterm -> ~/.zterm`。如果只靠手工修 PATH、手工挪目录或改已安装文件，视为未修真源。
+- relay account directory 发布必须来自 daemon truth：`relay-ready` 后由 daemon relay host client 发布 `directory-update`，session catalog 只能来自 tmux 枚举；枚举失败必须显式报错，禁止把失败伪造成空 sessions 的成功目录。
+- relay smoke / 真实链路里 client device 与 daemon device 必须使用不同 `deviceId`；复用同一 id 会让 client metadata 覆盖 daemon directory identity，造成 account directory 假状态。
+- Android relay account directory 的 client 真源是 `account.directory`；旧 `TraversalRelayDeviceSnapshot[]` 只能作为现有 UI 的 adapter projection，禁止在 Connections / Picker / Settings 各自从 legacy devices 反向补 endpoint/session 目录语义。
 - 发行包验证必须覆盖 native runtime 依赖：TURN/RTC 需要 `@roamhq/wrtc` 与当前平台 `@roamhq/wrtc-<platform>-<arch>/wrtc.node` 随 release staging 打包；只在源码环境通过不代表全局安装可启动。
 - 验证过程中产生的临时 tmux session 需要及时清掉，只保留一个明确实验 session，避免把测试垃圾当成真实 session 列表
 - `bridgePort` / daemon 端口 / daemon tmux session 名必须共用同一配置真源；不要在 UI、server、shell script、文案里散落硬编码
@@ -213,6 +217,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Jason 新冻结：桌面右侧不要先做抽屉；应收成“固定左 rail + 右侧按比例切 multiple vertical panes”的 split workspace，优先给 `1 / 2 / 3` preset，风格靠近 iTerm2/Tabby，但不要上来做自由拖拽
 - 新冻结：mobile session group 必须拆成两份真相：抽屉显示的 `top / center / bottom` 是用户显式分配的固定槽位，点击 peek 不得改写；stage 只基于当前 focus slot 计算 viewport projection。focus=top 时 viewport 为 `empty / top / center`，focus=bottom 时 viewport 为 `center / bottom / empty`，focus=center 时 viewport 等于固定槽位。focus 必须存 slot name，不能存 session id。抽屉点击 session 只替换当前 focus 槽位：focus=bottom 替换 bottom，focus=top 替换 top，focus=center 替换 center。禁止自动从 session 列表补邻居成 wheel，也禁止点击后循环轮转三槽位。抽屉长按/右键是唯一的槽位分配入口，打开 slot menu 后必须 suppress 下一次 click，避免菜单和 session 激活同时发生。
 - mobile session group 的边界可见性必须走共享 projection helper：竖向 top/center/bottom 与未来横向 left/center/right 都先映射到 `before/center/after` 边界模型。focus 在 before/top 边界时隐藏 before/top peek；focus 在 after/bottom 边界时隐藏 after/bottom peek；center 才显示两侧。UI shell 只消费 projection，不得自己补 top/bottom 或 left/right 局部判断。
+- 1946 现场证伪：不要在未完成完整状态机审计前改 `TerminalPageStageShell` 的 sessionGroupVisible 条件、不要加 “center-only 不进 group”、不要让横屏强行进入 horizontal group、不要调整抽屉选择 session 的切换顺序；这些会破坏竖屏上中下显示和上下滚动。竖屏恢复包必须回到 1945 行为：`!splitVisible && !landscape && center` 才走当前 mobile group stage。
 - session group layout axis 默认按 aspect ratio：窄竖屏（当前阈值 `width / height <= 0.4`）强制 vertical，上下滚；宽竖屏默认 horizontal，但 Settings 可切 vertical；landscape 永远 horizontal。这个设置只影响 layout projection，禁止改写 drawer 固定槽位、session/tab/pane 真相。
 - 横向 session group side peek 的身份显示必须避开 status bar / 返回按钮：不要把 session 名贴顶部；应放在中部安全区，session 名和 host 至少允许两行，以保证窄侧边仍能识别目标。
 

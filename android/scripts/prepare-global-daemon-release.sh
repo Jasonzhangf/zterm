@@ -141,6 +141,7 @@ RUNTIME_DIR="${PACKAGE_ROOT}/runtime"
 DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
 LAUNCH_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-launchd-run"
+USER_BIN_DIR="${HOME}/.local/bin"
 LAUNCH_AGENT_LABEL="com.zterm.android.zterm-daemon"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
 PREVIOUS_LAUNCH_AGENT_LABEL="com.zterm.android.daemon"
@@ -160,6 +161,11 @@ const path = require('path');
 const DEFAULT_BRIDGE_PORT = 3333;
 const DEFAULT_DAEMON_HOST = '0.0.0.0';
 const home = os.homedir();
+const ztermHome = path.join(home, '.zterm');
+const legacyWtermHome = path.join(home, '.wterm');
+if (!fs.existsSync(ztermHome) && fs.existsSync(legacyWtermHome)) {
+  fs.renameSync(legacyWtermHome, ztermHome);
+}
 const configPath = path.join(home, '.zterm', 'config.json');
 let config = {};
 let found = false;
@@ -562,7 +568,28 @@ stop_direct() {
   echo "zterm daemon stopped: pid=${pid}"
 }
 
+install_user_shims() {
+  mkdir -p "$USER_BIN_DIR"
+  rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"
+  cat > "${USER_BIN_DIR}/zterm-daemon" <<RUNNER
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\$@"
+RUNNER
+  chmod +x "${USER_BIN_DIR}/zterm-daemon"
+  cat > "${USER_BIN_DIR}/wterm" <<RUNNER
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "daemon" ]]; then
+  shift
+fi
+exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\$@"
+RUNNER
+  chmod +x "${USER_BIN_DIR}/wterm"
+}
+
 write_launch_agent() {
+  install_user_shims
   mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"
   cat > "$DIRECT_RUNNER" <<RUNNER
 #!/usr/bin/env bash

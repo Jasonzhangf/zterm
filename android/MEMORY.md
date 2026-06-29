@@ -8,6 +8,8 @@
 
 ## Key Decisions
 
+- [2026-06-29] MacBook Air daemon 安装/启动的真源必须固化在 daemon 包与 service runner 内：npm postinstall / launchd runner 负责自动写 `~/.local/bin/zterm-daemon`、`~/.local/bin/wterm`，写入前先清旧 symlink/file；released runner 在读 config 前负责把旧 `~/.wterm` 迁移到 `~/.zterm`。远端验证已确认 `restart` 后服务正常、health 为 `ok: true`，且不再依赖手工修 PATH 或手工挪目录。
+
 - [2026-06-28] mobile session group 的正确语义必须拆成固定槽位和 viewport projection 两层：drawer 显示的 top / center / bottom 是用户显式分配真相，点击 peek 不得改写；stage 只按当前 focus slot 投影可见窗口。focus=top 时 viewport 为 `empty / top / center`，focus=bottom 时 viewport 为 `center / bottom / empty`，focus=center 时 viewport 等于固定槽位。focus 必须存 slot name，不能存 session id；抽屉点击 session 只替换当前 focus 槽位。禁止从已有 tab/session 列表自动补邻居做 wheel，也禁止点击后循环轮转。未指定槽位只渲染 placeholder；drawer 长按/右键的 slot menu 是唯一的槽位分配入口，且 menu 打开后必须 suppress 下一次 click，防止“打开菜单同时又切 session”的误触。
 - [2026-06-28] mobile session group 的边界可见性必须和槽位 truth 分离：focus=top 时只隐藏 top 边界，focus=bottom 时只隐藏 bottom 边界，center 才显示两侧边界。这个规则已经下沉为共享 viewport projection helper，未来横向 left/right 也必须复用同一边界抽象，禁止在 UI shell 里各自再写一套 top/bottom 或 left/right 的局部 if。
 - [2026-06-28] session group layout axis 的默认真源是 aspect ratio，不是设备名：`width / height <= 0.4` 的窄竖屏强制 vertical，上下滚；宽竖屏默认 horizontal，可在 Settings 切回 vertical；landscape 永远 horizontal。该设置只影响 layout projection，不改 drawer 固定槽位和 session/tab/pane 真相。
@@ -473,3 +475,10 @@ silently returns 0 when viewport metrics are stable.
 - copy-mode 的"禁系统菜单"应只在 DOM/React 层做（`preventDefault` + `stopPropagation`），不在 native WebView 边界全局吞事件。
 - 排查顺序固定为：先看 native long-clickability，再看 DOM touch timer，最后看 React 菜单状态；`setOnLongClickListener` 只禁 ActionMode，不等于放行 JS 长按。
 - 2026-06-27 已验证补强：copy 长按 delay/slop 已集中到 `terminal-copy-gesture.ts`，QuickBar shell 事件守门已集中到 `terminal-quickbar-shell-guards.ts`，copy runtime 不再输出 `[CopyTrace]` 生产 console；copy 定向 30 tests PASS，`tsc --noEmit` PASS。
+
+## 2026-06-29 mobile session group 1946 regression
+
+- APK `0.1.3.1946` 现场证伪：放开横屏 session group、加入 “center-only 不进 group”、调整抽屉切 session 顺序，会破坏竖屏上中下显示和上下滚动；这些不是可保留的正确修复。
+- 热修恢复原则：session group stage 回到 1945 行为，`TerminalPageStageShell` 只有 `!splitVisible && !landscape && sessionGroupViewport?.slots.center` 时启用；`TerminalPage` 抽屉选择 session 保持先切 session 再按当前 focus slot 替换槽位。
+- 后续再做横屏/平板左右槽位时必须另开状态机审计和真机验证，不能在竖屏基线上直接改 StageShell gate。
+- Jason 现场确认 `0.1.3.1947` 比 `1946` 明显可用，竖屏显示和滚动恢复到可继续迭代的基线；后续排查应以 `1947` 为新基线，不再沿用 `1946`。

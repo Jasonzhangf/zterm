@@ -19,6 +19,7 @@ DAEMON_RUNTIME_DIR="${WTERM_HOME}/daemon-runtime"
 DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"
 LAUNCH_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-launchd-run"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
+USER_BIN_DIR="${HOME}/.local/bin"
 DAEMON_ENTRY="${ROOT_DIR}/src/server/server.ts"
 ROOT_NODE_PTY_HELPER_GLOB="${ROOT_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 WORKSPACE_NODE_PTY_HELPER_GLOB="${WORKSPACE_ROOT}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
@@ -279,6 +280,26 @@ wait_for_port_closed() {
 
 reset_launch_crash_guard() {
   rm -f "${RUNTIME_STATE_DIR}/zterm-daemon-launch-crashes.log"
+}
+
+install_user_shims() {
+  mkdir -p "$USER_BIN_DIR"
+  rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"
+cat > "${USER_BIN_DIR}/zterm-daemon" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash "${ROOT_DIR}/scripts/zterm-daemon.sh" "\$@"
+EOF
+  chmod +x "${USER_BIN_DIR}/zterm-daemon"
+cat > "${USER_BIN_DIR}/wterm" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "daemon" ]]; then
+  shift
+fi
+exec bash "${ROOT_DIR}/scripts/zterm-daemon.sh" "\$@"
+EOF
+  chmod +x "${USER_BIN_DIR}/wterm"
 }
 
 read_daemon_pid() {
@@ -556,6 +577,7 @@ stop_direct() {
 }
 
 write_launch_agent() {
+  install_user_shims
   stage_daemon_runtime
   stage_native_daemon_binary
   mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"

@@ -115,6 +115,17 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).toContain('start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run');
   });
 
+  it('migrates legacy ~/.wterm home before reading released daemon config', () => {
+    const script = readReleaseScript();
+    const configBlock = extractBlock(script, "const configPath = path.join(home, '.zterm', 'config.json');", 500);
+
+    expect(script).toContain("const ztermHome = path.join(home, '.zterm');");
+    expect(script).toContain("const legacyWtermHome = path.join(home, '.wterm');");
+    expect(script).toContain('fs.renameSync(legacyWtermHome, ztermHome)');
+    expect(script.indexOf('fs.renameSync(legacyWtermHome, ztermHome)')).toBeLessThan(script.indexOf("const configPath = path.join(home, '.zterm', 'config.json');"));
+    expect(configBlock).toContain("const configPath = path.join(home, '.zterm', 'config.json');");
+  });
+
   it('keeps install-time native RTC dependencies inside the daemon npm package', () => {
     const script = readDaemonNpmPackageScript();
 
@@ -125,6 +136,18 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).toContain('zterm-daemon configure-relay --relay-url');
     expect(script).toContain('--password-stdin');
     expect(script).toContain('passwordSet=true');
+  });
+
+  it('makes npm global installs create stable user-level daemon shims', () => {
+    const script = readDaemonNpmPackageScript();
+
+    expect(script).toContain("writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs')");
+    expect(script).toContain("postinstall: 'node support/install-user-shims.cjs'");
+    expect(script).toContain("writeShim('zterm-daemon'");
+    expect(script).toContain("writeShim('wterm'");
+    expect(script).toContain("resolve(homedir(), '.local/bin')");
+    expect(script).toContain("rmSync(target, { force: true })");
+    expect(script).toContain('exec "\\${packageRoot}/support/zterm-daemon.sh" "$@"');
   });
 
   it('verifies daemon npm tarballs contain native runtime dependencies before release', () => {
@@ -154,6 +177,34 @@ describe('zterm daemon service script truth gates', () => {
     expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
     expect(body).toContain('wait_for_service_unloaded');
     expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
+  });
+
+  it('keeps global CLI shims synchronized when writing launchd service runners', () => {
+    const script = readDaemonScript();
+    const body = extractBlock(script, 'install_user_shims() {', 900);
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 500);
+
+    expect(script).toContain('USER_BIN_DIR="${HOME}/.local/bin"');
+    expect(body).toContain('rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"');
+    expect(body).toContain('${USER_BIN_DIR}/zterm-daemon');
+    expect(body).toContain('${USER_BIN_DIR}/wterm');
+    expect(body).toContain('exec bash "${ROOT_DIR}/scripts/zterm-daemon.sh" "\\$@"');
+    expect(launchBody).toContain('install_user_shims');
+    expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('stage_daemon_runtime'));
+  });
+
+  it('keeps released service runner installs synchronized with user-level shims', () => {
+    const script = readReleaseScript();
+    const body = extractBlock(script, 'install_user_shims() {', 900);
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 500);
+
+    expect(script).toContain('USER_BIN_DIR="${HOME}/.local/bin"');
+    expect(body).toContain('rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"');
+    expect(body).toContain('${USER_BIN_DIR}/zterm-daemon');
+    expect(body).toContain('${USER_BIN_DIR}/wterm');
+    expect(body).toContain('exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\\$@"');
+    expect(launchBody).toContain('install_user_shims');
+    expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('mkdir -p "${HOME}/Library/LaunchAgents"'));
   });
 
   it('does not fallback to tmux session when launchd service start or restart is unhealthy', () => {

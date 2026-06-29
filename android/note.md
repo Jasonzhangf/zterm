@@ -1,3 +1,96 @@
+# 2026-06-28 relay route continuation audit
+
+- 继续 `/goal` 后当前 route gate 先跑通：`route-selector / route-health-cache / config / socket` 共 20 tests PASS。
+- 现有 `socket.test.ts` 仍偏老 reconnect 语义，缺少目标要求的 route health 边界：成功写入 RTT/candidate id、失败/auth failure 后下一轮跳过坏 candidate、TTL 过期后 direct 可重新胜出。
+- `TraversalSocket` 的 `onerror` 会记录 failure/auth-failure health；实际 WebSocket 通常随后 close 才推进候选。需要用测试锁住“failure + close -> next candidate”和“reconnect 重新按 health 选择”的行为，避免 route selector 退化回固定 priority。
+
+# 2026-06-29 relay default login server
+
+- Relay 登录默认地址收敛为 `DEFAULT_TRAVERSAL_RELAY_BASE_URL=https://claw.codewhisper.cc:18443/relay/`，Settings 初始值和输入 placeholder 都使用同一真源。
+- `useTraversalRelayAccount.syncRelay()` 现在在 Relay Base URL 为空时使用默认地址；用户填写自定义地址时仍优先使用用户值，并继续走 `normalizeTraversalRelayBaseUrl()` 补 `/relay/`。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/traversal-relay-client.test.ts src/hooks/useTraversalRelayAccount.test.tsx src/components/settings/RelayControlSection.test.tsx --reporter dot` PASS（3 files / 9 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - relay related gate PASS：16 files / 98 tests。
+
+# 2026-06-29 daemon install / home migration固化
+
+- MacBook Air 上已经确认不是“手工修环境”才能跑，而是 daemon 包内脚本自己生成了稳定用户态入口：
+  - `~/.local/bin/zterm-daemon` 和 `~/.local/bin/wterm` 由 npm postinstall / service runner 自动写入。
+  - 写入前会先移除旧文件或旧 symlink，避免误写到旧目标。
+  - released service runner 在读 config 前会把旧 `~/.wterm` 迁移到 `~/.zterm`。
+- 远端验证结果：
+  - `zterm-daemon restart` 后服务仍是 `com.zterm.android.zterm-daemon`。
+  - `curl http://100.86.84.63:3333/health?token=wterm-4123456` 返回 `ok: true`。
+  - `~/.wterm` 已不存在，`~/.zterm` 存在并持有 config。
+- 这次固化的边界：以后不能再把“改 PATH / 改安装目录 / 手修 home”当成最终修复，只能回到 daemon 包和发布脚本里修真源。
+
+# 2026-06-29 relay default address APK leak / session group regression
+
+- Relay 默认地址不能在 APK 中以完整文本暴露：默认地址只在运行时由 parts 拼出，Settings 输入框不再预填/placeholder 展示真实默认地址，生产 sourcemap 默认关闭；build 链路新增 `scripts/check-relay-default-address-leak.mjs` 扫 dist / native assets / APK。
+- 1946 现场证伪：`TerminalPageStageShell` 放开横屏 session group、加入 “center-only 不进 group”、调整抽屉切 session 顺序，这三处一起把竖屏的上 / 中 / 下显示和滚动逻辑打坏了。1946 不是可保留的正确修复。
+- 1947 热修原则：session group stage 回到 1945 行为，`TerminalPageStageShell` 只有 `!splitVisible && !landscape && sessionGroupViewport?.slots.center` 时才启用当前 mobile group stage；`TerminalPage` 抽屉选择 session 保持先切 session，再按当前 focus slot 替换槽位。当前安装验证目标应是 1947，不是 1946。
+- Jason 现场确认：升级到 1947 后确实比 1946 好，1946 的“完全没办法用”问题已被回退掉；后续新改动必须以 1947 为基线继续做。
+
+## 2026-06-29 1947 基线上的横屏 split 小步修复
+
+- 横屏 split 顶部 tab 点击无效的高风险点：shared `PaneTabs` 在 tab `pointerdown` 前置调用 `onActivatePane()`，Android WebView 下容易在 click 前触发 pane 重渲染，表现为点击 tab 不切换、长按菜单也不稳定。
+- 小步修复：`PaneTabs` 不再在 tab/pane strip 的 `pointerdown` 激活 pane；只在 pane strip 空白区 click 时激活 pane。tab 自身 click/long-press 先交给 `onSelectTab` / `onLongPressTab`。
+- 为横屏底部错位加诊断，不改布局语义：状态浮窗新增 `LP` layout profile、`LS` landscape、`SP` splitVisible、`QC` quickbarCollapsed；配合已有 `SH/VV/QB/TB` 判断是 viewport、profile 还是 quickbar 占位计算错。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/components/terminal/shared-pane-tabs.test.tsx src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx src/pages/TerminalPage.render-scope.test.tsx --reporter dot` PASS（4 files / 48 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+- 未完成：`./scripts/build-android-debug.sh` 仍被当前全量门禁 `src/contexts/SessionContext.ws-refresh.test.tsx` 阻断；失败表现为 32 个用例等待 `MockWebSocket.instances.length === 1` 但收到 0。本次小步 diff 不涉及 `SessionContext`，不能在该门禁未绿时发布新 APK。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/terminal-layout-profile.test.ts src/pages/TerminalPageStageShell.pane-stage.test.tsx src/pages/TerminalPage.session-drawer.test.tsx src/pages/TerminalPage.render-scope.test.tsx --reporter dot` PASS（4 files / 47 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `pnpm --dir android run test:common-user-flows -- --reporter dot` PASS。
+  - `pnpm --dir android run test:relay:smoke` PASS。
+  - Gradle `assembleDebug` PASS。
+  - update bundle PASS：`android/update-dist/zterm-0.1.3.1947.apk`，sha256 `a08283bd365bfcb352cfc37ba35d4ad241eafed9bc183dabb3bad5487004393f`。
+  - `node android/scripts/check-relay-default-address-leak.mjs android/dist android/native/android/app/src/main/assets/public android/update-dist/zterm-0.1.3.1947.apk` PASS。
+- 剩余：`adb devices -l` 无在线设备，缺真机安装态确认；请用 `0.1.3.1947` 复测竖屏显示和上下滚动。
+
+# 2026-06-29 relay directory UI / route smoke slice
+
+- 补齐 route/socket 回归：成功记录 RTT + candidate id；auth failure close 后跳过坏 direct；health TTL 过期后 direct 可以重新胜出。
+- `TraversalRelayDeviceSnapshot` 兼容层保留 directory endpoints/sessions；`BridgeTarget` / `Host` / `resolveTraversalConfigFromHost()` 透传 `relayEndpointCandidates`，避免 UI 打开后丢 route truth。
+- `TmuxSessionPickerSheet` 现在可直接消费 directory session catalog：无本地 bridge preset 时，选中 relay daemon 后显示目录 sessions，Open 回调携带 endpoint candidates；修复默认空数组导致的 render-loop。
+- `Connections` group 现在投影 directory sessions 为显式 `directory` source，并透传 `relayEndpointCandidates` 到 open action；无 saved host 也能形成 openable session。
+- smoke 增加 `routeSelection` 输出和断言：只从 directory endpoint candidates 构造 plan；无 direct endpoint 时不再把 `relayHostId` 伪造成 direct ipv4，selected route 为 `relay-rtc`。
+- route diagnostics UI 已接入 Connections server group projection：`TraversalRouteHealthCache` 提供 TTL-aware `list/snapshot` 读 API；group summary 从 directory endpoint candidates + route health 计算 `Route ...` badge、RTT、last success、last error；Connections 卡片展示同一份 summary，不在 UI 层补路线真相。
+- 验证：
+  - required relay vitest gate PASS：13 files / 89 tests。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `pnpm --dir android exec tsx scripts/traversal-relay-local-smoke.ts` PASS；输出包含 account directory、directory stream snapshot、`routeSelection.selected.path=rtc-relay`、RTC list-sessions。
+  - `./scripts/build-android-debug.sh` PASS；prebuild regression / contracts / common flows / relay smoke 已跑入构建链路。
+  - update bundle PASS：`android/update-dist/zterm-0.1.3.1945.apk`、`~/.zterm/updates/zterm-0.1.3.1945.apk`、debug APK sha256 均为 `2f230f24d99269956f0f6aaa66c46c6c8c6ba3eb8f961fec34d70d7cff2c9761`。
+  - `node android/scripts/verify-update-bundle.mjs` PASS；`http://127.0.0.1:3333/updates/latest.json` 与 `/updates/zterm-0.1.3.1945.apk` 均返回 200。
+  - evidence：`android/evidence/relay-directory/2026-06-29/build-and-install-gap.txt`。
+- 剩余：ADB 当前无在线设备（`adb devices -l` 为空），还缺真实安装态验证与手机 UI 截图/log 证据。
+
+# 2026-06-28 relay directory daemon publish slice
+
+- daemon relay host client 现在在 `relay-ready` 后发布 `directory-update`，目录内容来自 daemon tmux truth：`listTmuxSessions()` -> session snapshots，并至少发布 `relay-rtc:<hostId>` endpoint candidate。
+- `listTmuxSessions()` 是必填注入项，不允许缺失后降级成空 sessions；tmux 枚举失败时只发送显式 `relay-error: directory-update failed: ...`，不发送 success-shaped empty directory。
+- local relay smoke 已扩展为真实闭环：先创建 smoke tmux session，再注册 relay 用户，让 daemon 首次 directory publish 能枚举到目标 session；随后同时验证 `/api/directory` 与 `/ws/devices` 的 `directory-snapshot`。
+- smoke 中 client device 和 daemon device 必须使用不同 `deviceId`；复用同一 id 会把 daemon directory record 的 `deviceName/platform/appVersion` 覆盖成 client metadata，形成假目录。
+- 验证：
+  - `pnpm --dir android exec vitest run src/server/relay-client.test.ts src/traversal-relay/store.test.ts src/traversal-relay/server.test.ts --reporter dot` PASS（10/10）。
+  - `pnpm --dir android exec tsx scripts/traversal-relay-local-smoke.ts` PASS；输出包含 daemon device、client device、relay-rtc endpoint、smoke tmux session、directory stream snapshot、RTC list-sessions。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+
+# 2026-06-28 relay directory client runtime slice
+
+- Android client 现在有唯一 directory runtime owner：`src/lib/relay-account-directory.ts`。它负责 normalize account directory、拒绝 invalid snapshot、投影 daemon machines，以及把 directory 临时投影成 legacy `TraversalRelayDeviceSnapshot[]` 供现有 UI 消费。
+- `traversalRelayLogin()` / `traversalRelayRefreshMe()` 现在要求 relay auth payload 包含合法 `directory`；缺失或非法时直接报错 `relay account directory missing or invalid`，不再把只有 `devices` 的响应当完整成功。
+- `/ws/devices` 的 `directory-snapshot` 现在会写入 `account.directory` 并触发 `onDirectory`，App / account hook 优先用 directory projection 更新 `relayDevices`；旧 `devices` 只保留为本地存储兼容和无 directory 时的 adapter。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/relay-account-directory.test.ts src/lib/traversal-relay-client.test.ts src/hooks/useTraversalRelayAccount.test.tsx src/App.relay-stream-lifecycle.test.tsx src/lib/connections-server-groups.test.ts src/pages/ConnectionsPage.test.tsx --reporter dot` PASS（44/44）。
+  - `pnpm --dir android exec vitest run src/server/relay-client.test.ts src/traversal-relay/store.test.ts src/traversal-relay/server.test.ts src/lib/relay-account-directory.test.ts src/lib/traversal-relay-client.test.ts --reporter dot` PASS（18/18）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `pnpm --dir android exec tsx scripts/traversal-relay-local-smoke.ts` PASS。
+
 # 2026-06-28 session group boundary projection
 
 - 当前 session group 需要两层真相：
@@ -7,6 +100,12 @@
 - 这次修复的关键不是“少渲染一个按钮”，而是把“槽位内容”和“边界是否显示”拆成两个独立投影结果，避免再次出现 bottom focus 还渲染 bottom placeholder 的假状态。
 - session group layout axis 默认必须按 aspect ratio：`width / height <= 0.4` 的窄竖屏强制 vertical，上下滚；宽竖屏默认 horizontal，但设置可切 vertical；landscape 永远 horizontal。这个判断属于 app-layer layout policy，不属于 drawer/session 真相。
 - 横向 side peek 的 session 身份不能贴顶部；状态栏/返回按钮会遮挡。身份应放到中部安全区，标题和 host 允许两行显示。
+
+# 2026-06-28 relay path audit
+
+- 当前 traversal relay server store 只持久化 `users / tokens / devices`，device snapshot 只有 client/daemon 在线状态、daemon hostId/version；没有 account-scoped endpoint candidates、tmux session catalog、route metrics 或可直接消费的 websocket/session access directory。
+- 客户端账号登录只把 relay token/ws/turn 与 devices snapshot 写入本地 account/settings；Connections/Session Picker 仍依赖本地 bridge server preset 才能把在线 daemon 解析成可连接 target。
+- 当前 Auto 线路不是实时 best-route：`buildTraversalPlan()` 只按 `traversalPathPriority` 生成候选，`TraversalSocket` 按顺序串行连接，WS 超时 1800ms、RTC 超时 8000ms；没有 probe scoring、RTT 统计、成功路径 TTL 缓存或 per-device route health truth。
 
 # note
 
