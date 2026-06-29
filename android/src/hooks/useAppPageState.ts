@@ -50,6 +50,7 @@ interface UseAppPageStateOptions {
   updateHost: (id: string, updates: Omit<Host, 'id' | 'createdAt'>) => void;
   deleteHost: (id: string) => void;
   ensureTerminalPageVisible: () => void;
+  syncSavedHostToServerPreset?: (host: Omit<Host, 'id' | 'createdAt'>) => void;
 }
 
 export interface AppPageStateResult {
@@ -74,6 +75,7 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     updateHost,
     deleteHost,
     ensureTerminalPageVisible,
+    syncSavedHostToServerPreset,
   } = options;
 
   const [pageState, setPageState] = useState<AppPageState>(() => readPersistedPageState());
@@ -133,8 +135,9 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     } else {
       addHost(hostData);
     }
+    syncSavedHostToServerPreset?.(hostData);
     setPageState(openConnectionsPage());
-  }, [addHost, editingHost, updateHost]);
+  }, [addHost, editingHost, syncSavedHostToServerPreset, updateHost]);
 
   const handleCancelHostForm = useCallback(() => {
     setPageState(openConnectionsPage());

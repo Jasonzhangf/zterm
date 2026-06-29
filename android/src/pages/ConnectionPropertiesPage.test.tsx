@@ -322,8 +322,9 @@ describe('ConnectionPropertiesPage', () => {
     expect(screen.getByDisplayValue('main')).toBeTruthy();
   });
 
-  it('blocks daemon-first save and discover when selected daemon has no mapped bridge preset', async () => {
+  it('allows first-time daemon bridge binding when selected daemon has no mapped bridge preset', async () => {
     const onSave = vi.fn();
+    tmuxSessionMocks.fetchTmuxSessions.mockResolvedValueOnce(['main']);
     window.localStorage.setItem(
       RELAY_ACCOUNT_STORAGE_KEY,
       JSON.stringify({
@@ -366,18 +367,47 @@ describe('ConnectionPropertiesPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('例如：MacStudio'), { target: { value: ' Relay Missing Map ' } });
     fireEvent.click(screen.getByText('Other Mac'));
+    expect(screen.getByText('这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。')).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet'), {
+      target: { value: '100.86.84.63' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('daemon 的共享 token'), { target: { value: 'token-new' } });
     fireEvent.click(screen.getByText('Connect'));
 
-    const errors = await screen.findAllByText(/当前 daemon 还没有绑定可用 bridge server 预设/i);
-    expect(errors.length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(tmuxSessionMocks.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '100.86.84.63',
+          bridgePort: 3333,
+          authToken: 'token-new',
+          daemonHostId: 'daemon-host-unmapped',
+          relayHostId: 'daemon-host-unmapped',
+          relayDeviceId: 'daemon-device-2',
+        }),
+        bridgeSettings,
+      );
+    });
 
+    await screen.findByText('main');
     fireEvent.click(screen.getByText('Save'));
-    expect(window.alert).toHaveBeenCalledWith('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
-    expect(onSave).not.toHaveBeenCalled();
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Relay Missing Map',
+        bridgeHost: '100.86.84.63',
+        bridgePort: 3333,
+        authToken: 'token-new',
+        daemonHostId: 'daemon-host-unmapped',
+        relayHostId: 'daemon-host-unmapped',
+        relayDeviceId: 'daemon-device-2',
+        sessionName: 'main',
+      }),
+    );
   });
 
-  it('clears stale bridge mapping when switching from a mapped daemon to an unmapped daemon', async () => {
+  it('clears stale bridge mapping when switching from a mapped daemon to an unmapped daemon and allows manual binding', async () => {
     const onSave = vi.fn();
+    tmuxSessionMocks.fetchTmuxSessions.mockResolvedValueOnce(['main']);
     window.localStorage.setItem(
       RELAY_ACCOUNT_STORAGE_KEY,
       JSON.stringify({
@@ -439,13 +469,91 @@ describe('ConnectionPropertiesPage', () => {
 
     fireEvent.click(screen.getByText('Other Mac'));
 
-    expect(await screen.findByText('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。')).toBeTruthy();
+    expect(await screen.findByText('这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。')).toBeTruthy();
     expect(screen.queryByText('bridgeHost: 100.64.0.10')).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet'), {
+      target: { value: '100.86.84.63' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('daemon 的共享 token'), { target: { value: 'token-new' } });
 
     fireEvent.click(screen.getByText('Connect'));
+    await waitFor(() => {
+      expect(tmuxSessionMocks.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '100.86.84.63',
+          bridgePort: 3333,
+          authToken: 'token-new',
+          daemonHostId: 'daemon-host-unmapped',
+          relayHostId: 'daemon-host-unmapped',
+          relayDeviceId: 'daemon-device-2',
+        }),
+        bridgeSettings,
+      );
+    });
+    await screen.findByText('main');
     fireEvent.click(screen.getByText('Save'));
 
-    expect(window.alert).toHaveBeenCalledWith('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Relay Switch',
+        bridgeHost: '100.86.84.63',
+        bridgePort: 3333,
+        authToken: 'token-new',
+        daemonHostId: 'daemon-host-unmapped',
+        relayHostId: 'daemon-host-unmapped',
+        relayDeviceId: 'daemon-device-2',
+        sessionName: 'main',
+      }),
+    );
+  });
+
+  it('blocks daemon-first save until manual bridge host and token are filled', async () => {
+    const onSave = vi.fn();
+    window.localStorage.setItem(
+      RELAY_ACCOUNT_STORAGE_KEY,
+      JSON.stringify({
+        username: 'jason',
+        password: 'pw',
+        relayBaseUrl: 'http://159.75.134.56/relay/',
+        accessToken: 'access-1',
+        user: { id: 'user-1', username: 'jason', createdAt: '2026-05-06T00:00:00Z' },
+        deviceId: 'tablet-1',
+        deviceName: 'Jason Tablet',
+        platform: 'android',
+        relaySettings: bridgeSettings.traversalRelay,
+        devices: [
+          {
+            deviceId: 'daemon-device-2',
+            deviceName: 'Other Mac',
+            platform: 'mac',
+            appVersion: '0.1.1',
+            updatedAt: '2026-05-06T00:00:00Z',
+            client: { connected: true, lastSeenAt: '2026-05-06T00:00:00Z' },
+            daemon: {
+              connected: true,
+              lastSeenAt: '2026-05-06T00:00:00Z',
+              hostId: 'daemon-host-unmapped',
+              version: '1.2.3',
+            },
+          },
+        ],
+        updatedAt: Date.now(),
+      }),
+    );
+
+    render(
+      <ConnectionPropertiesPage
+        bridgeSettings={bridgeSettings}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('例如：MacStudio'), { target: { value: ' Relay Missing Values ' } });
+    fireEvent.click(screen.getByText('Other Mac'));
+    fireEvent.click(screen.getByText('Save'));
+
+    expect(window.alert).toHaveBeenCalledWith('请先填写这个 daemon 对应的 bridge host 和 token。');
     expect(onSave).not.toHaveBeenCalled();
   });
 

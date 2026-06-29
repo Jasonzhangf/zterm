@@ -20,6 +20,7 @@ import { useSessionOpenActions } from './hooks/useSessionOpenActions';
 import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
+import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
@@ -185,6 +186,17 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     updateHost,
     deleteHost,
     ensureTerminalPageVisible,
+    syncSavedHostToServerPreset: (hostData) => {
+      setBridgeSettings((current) => upsertBridgeServer(current, {
+        name: hostData.name,
+        targetHost: hostData.bridgeHost,
+        targetPort: hostData.bridgePort,
+        authToken: hostData.authToken,
+        relayHostId: hostData.daemonHostId || hostData.relayHostId,
+        relayDeviceId: hostData.relayDeviceId,
+        relayDeviceName: hostData.name,
+      }));
+    },
   });
 
   useEffect(() => {

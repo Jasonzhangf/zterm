@@ -1005,3 +1005,8 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - 真机若显示 `CM OFF` 且点击 `拷贝` 不进入 copy mode，不能把入口放在 release commit；Android WebView 仍可能漏 `pointerUp/touchEnd`。`tmux-copy` 必须 press-start 立即触发，用显式 press sequence 消费后续 touch/pointer/click，禁止二次 toggle。
 - copy mode 行级长按不能 `stopPropagation()`；否则父级 `TerminalTabSwipeSurface` 收不到右滑起点，表现为 copy 状态下 session drawer 右滑也失效。
 - 如果按钮已经变 active 但 `TerminalView` 里的 copy mode 仍旧不变，先查 `TerminalStageShell` 的 `ReactMemo` comparator 是否漏了 `copySelection` / `onLongPressRow`；不要继续只修 QuickBar。
+
+### 经验精华（2026-06-29）— daemon-first 首次绑定
+- relay 已登录时，daemon-first 只能把“已映射 preset”当快捷路径，不能把“未映射 daemon”的首次手工绑定藏掉。
+- 当 selected daemon 没有 bridge preset 时，必须直接显示可编辑的 bridgeHost/authToken，并允许 Connect / Save 以“已选 daemon + 已填 host/token”完成首次绑定，再同步写入 server preset 真源。
+- 再次出现“保存后退出但 Connections 没新增服务器”时，先查是不是 form 层把首次绑定入口挡死了，而不是先怀疑存储层。

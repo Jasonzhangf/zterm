@@ -88,6 +88,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     () => findBridgePresetForDaemonHostId(bridgeSettings.servers, selectedDaemonHostId),
     [bridgeSettings.servers, selectedDaemonHostId],
   );
+  const daemonNeedsManualBinding = daemonFirst && Boolean(selectedDaemonHostId) && !daemonBoundServer;
 
   const applyDaemonSelection = (device: TraversalRelayDeviceSnapshot) => {
     const mappedTarget = resolveRelayDeviceBridgeTarget(bridgeSettings.servers, device);
@@ -146,8 +147,8 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
         alert('请先选择一个在线 daemon 设备');
         return;
       }
-      if (!daemonBoundServer || !form.bridgeHost.trim() || !form.authToken.trim()) {
-        alert('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
+      if (!form.bridgeHost.trim() || !form.authToken.trim()) {
+        alert('请先填写这个 daemon 对应的 bridge host 和 token。');
         return;
       }
     } else if (!form.bridgeHost.trim()) {
@@ -201,10 +202,10 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
       return;
     }
 
-    if (daemonFirst && (!daemonBoundServer || !form.bridgeHost.trim() || !form.authToken.trim())) {
+    if (daemonFirst && (!form.bridgeHost.trim() || !form.authToken.trim())) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError('当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。');
+      setSessionDiscoveryError('请先填写这个 daemon 对应的 bridge host 和 token。');
       return;
     }
 
@@ -214,14 +215,14 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     if (!bridgeHost) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先填写 bridge host，再点击 Connect。');
+      setSessionDiscoveryError(daemonFirst ? '请先填写这个 daemon 对应的 bridge host 和 token。' : '先填写 bridge host，再点击 Connect。');
       return;
     }
 
     if (!authToken) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先填写 auth token，再点击 Connect。');
+      setSessionDiscoveryError(daemonFirst ? '请先填写这个 daemon 对应的 bridge host 和 token。' : '先填写 auth token，再点击 Connect。');
       return;
     }
 
@@ -433,6 +434,20 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
                   <div>bridgeHost: {daemonBoundServer.targetHost}</div>
                   <div>bridgePort: {daemonBoundServer.targetPort}</div>
                   <div>authToken: {daemonBoundServer.authToken?.trim() ? '已绑定' : '未绑定'}</div>
+                </div>
+              ) : daemonNeedsManualBinding ? (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  <div style={{ fontSize: '13px', color: mobileTheme.colors.danger, lineHeight: 1.6 }}>
+                    这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。
+                  </div>
+                  <ConnectionSectionFields
+                    bridgeHost={form.bridgeHost}
+                    onBridgeHostChange={handleBridgeHostChange}
+                    bridgePort={form.bridgePort}
+                    onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
+                    authToken={form.authToken}
+                    onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
+                  />
                 </div>
               ) : (
                 <div style={{ fontSize: '13px', color: mobileTheme.colors.danger, lineHeight: 1.6 }}>
