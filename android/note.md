@@ -1,5 +1,31 @@
 # 2026-06-28 relay route continuation audit
 
+# 2026-06-29 multi-daemon UI identity slice
+
+- 本轮 UI 修复收敛到共享 server identity projection：`src/lib/server-identity.ts` 统一产出 server key / display name / color tone，Terminal drawer、session group side peek、TerminalPage drawer projection 不再各自拼 `bridgeHost:bridgePort` 当用户可见服务器名。
+- 颜色修正：`server-color.ts` 不再用连续 hue hash，避免落到紫/粉区；改成固定红/黄/蓝/绿/青/橙 palette，并锁住 `mac-studio` 与 `100.86.84.63` 不能同色。
+- New connection picker 增加显式“新增服务器” CTA；已有 target/session 列表改成“已有服务器”，避免“新增服务器”和“从旧服务器开 session”语义混在一起。
+- Terminal drawer 多 daemon host rail 改为纵向列表；窄抽屉里不再横向滚动 daemon tabs。
+- 横向 side peek 显示 server label + session title，并用 server tone 区分不同服务器；回归锁定不再把 `host:3333` 作为用户可见身份。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/lib/server-identity.test.ts src/components/terminal/TerminalSessionDrawer.test.tsx src/components/tmux/TmuxSessionPickerSheet.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` PASS（4 files / 26 tests）。
+  - `pnpm --dir android exec vitest run src/lib/server-color.test.ts src/lib/server-identity.test.ts src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` PASS（4 files / 25 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `src/contexts/SessionContext.ws-refresh.test.tsx` 先被全局 `defaultTraversalRouteHealthCache` 污染阻断，表现为后续用例 `MockWebSocket.instances` 期望 1 实际 0；修复为该测试 `beforeEach` 清 route health cache 后单跑 PASS（125 tests）。
+  - `node ./scripts/run-terminal-contracts.mjs` PASS（48 files / 551 tests）。
+- `./android/scripts/build-android-debug.sh` PASS，生成 `android/update-dist/zterm-0.1.3.1949.apk` 与 `~/.zterm/updates/zterm-0.1.3.1949.apk`，sha256 `25657725778fd42fcf5f4cc01f08ec1871cf80dd00233f51cdce8040b20e837b`；manifest 校验和 default relay address leak check PASS。
+- `adb devices -l` 无在线设备，缺直接 adb install 真机验证。
+
+## 2026-06-29 server color palette fix
+
+- 颜色 palette 已从连续 hue hash 收口为固定 `红 / 黄 / 蓝 / 绿 / 青 / 橙` 区间，避免 drawer 切换时把不同服务器切成同一类紫红色。
+- `server-color.test.ts` 锁住两个真机可见 key：`mac-studio` 与 `100.86.84.63` 不能同色，并禁止 hue 落入紫/粉区。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/lib/server-color.test.ts src/lib/server-identity.test.ts src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` PASS（4 files / 25 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `./android/scripts/build-android-debug.sh` PASS，生成 `android/update-dist/zterm-0.1.3.1950.apk` 与 `~/.zterm/updates/zterm-0.1.3.1950.apk`，sha256 `ab5f7f98fae2ad6e643886e46ff6594559e74b1b00ced147aaed9d1040b17546`。
+  - `adb devices -l` 当前无在线设备，仍缺真机安装态验证。
+
 - 继续 `/goal` 后当前 route gate 先跑通：`route-selector / route-health-cache / config / socket` 共 20 tests PASS。
 - 现有 `socket.test.ts` 仍偏老 reconnect 语义，缺少目标要求的 route health 边界：成功写入 RTT/candidate id、失败/auth failure 后下一轮跳过坏 candidate、TTL 过期后 direct 可重新胜出。
 - `TraversalSocket` 的 `onerror` 会记录 failure/auth-failure health；实际 WebSocket 通常随后 close 才推进候选。需要用测试锁住“failure + close -> next candidate”和“reconnect 重新按 health 选择”的行为，避免 route selector 退化回固定 priority。
@@ -42,6 +68,20 @@
 
 - `android/package.json` 里的 `test:terminal:contracts` 在 vitest 默认多文件并发下会互相覆盖全局 `WebSocket` mock，`SessionContext.ws-refresh.test.tsx` 单跑绿，但合并跑会红。
 - 修复方向：把 contracts gate 改成串行文件执行，再重新跑全量构建，避免把测试隔离问题误判成 runtime 回归。
+
+# 2026-06-29 macbookair fresh install daemon verification
+
+- macbookair Tailscale 真源：`macbookair.anoa-buri.ts.net` / `100.86.84.63`，当前在线，`tailscale ping` 经 DERP(cn-custom) 约 27-59ms。
+- 已按 fresh install 验证，不只验证旧运行态：
+  - 上传 `android/release-dist/jsonstudio-zterm-daemon-0.1.3.tgz` 到 macbookair `/tmp/`，sha256 `81932fb6d541ea763073a701c395b78a6c482585ed0125ad343a01aff4606fc2`。
+  - 远端执行 `npm uninstall -g @jsonstudio/zterm-daemon` 后再 `npm install -g /tmp/jsonstudio-zterm-daemon-0.1.3.tgz`。
+  - 使用新安装的 `/opt/homebrew/bin/zterm-daemon install-service` 重装同一 launchd service。
+  - fresh install 后 `/health?token=...` 返回 `ok: true`，pid `9254`，uptime 约 23s，证明不是旧进程。
+- 真实 WebSocket 协议验证：
+  - control transport `list-sessions` 返回 `["server"]`。
+  - `session-open` 返回 `session-ticket`。
+  - session transport `connect` 成功，`daemonHostId=macbook-air`。
+  - `buffer-head-request` 后收到 `buffer-sync`，`revision=1`，`cols=160`，`rows=51`，`lineCount=1121`。
 
 # 2026-06-29 relay default address APK leak / session group regression
 

@@ -221,6 +221,9 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 1946 现场证伪：不要在未完成完整状态机审计前改 `TerminalPageStageShell` 的 sessionGroupVisible 条件、不要加 “center-only 不进 group”、不要让横屏强行进入 horizontal group、不要调整抽屉选择 session 的切换顺序；这些会破坏竖屏上中下显示和上下滚动。竖屏恢复包必须回到 1945 行为：`!splitVisible && !landscape && center` 才走当前 mobile group stage。
 - session group layout axis 默认按 aspect ratio：窄竖屏（当前阈值 `width / height <= 0.4`）强制 vertical，上下滚；宽竖屏默认 horizontal，但 Settings 可切 vertical；landscape 永远 horizontal。这个设置只影响 layout projection，禁止改写 drawer 固定槽位、session/tab/pane 真相。
 - 横向 session group side peek 的身份显示必须避开 status bar / 返回按钮：不要把 session 名贴顶部；应放在中部安全区，session 名和 host 至少允许两行，以保证窄侧边仍能识别目标。
+- 多 daemon / 多服务器 UI 身份必须走 `src/lib/server-identity.ts`：用户可见 label 优先是 connection/daemon 名，颜色也按同一 server key；禁止在 drawer、side peek、tab 文案里把 `bridgeHost:bridgePort` 或 telnet/bridge 端口当服务器名。
+- 多服务器身份色必须走 `src/lib/server-color.ts` 的固定红/黄/蓝/绿/青/橙 palette；禁止连续 hue hash 漂到紫/粉区，常见服务器 key 需要测试锁住不同色。
+- traversal route health cache 是进程级全局状态；会创建 `TraversalSocket` 或断言 WebSocket 实例/线路选择的测试必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache`，否则前一用例记录的坏线路会让后续用例不创建 socket，表现为 `MockWebSocket.instances` 为 0。
 
 ## 三、开发闭环流程
 

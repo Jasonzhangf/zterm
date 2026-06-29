@@ -8,6 +8,9 @@
 
 ## Key Decisions
 
+- [2026-06-29] 多 daemon / 多服务器 UI 的用户可见身份不能再用 `bridgeHost:bridgePort` 或 telnet/bridge 端口表示；端口只是 transport 配置，不是服务器名。统一真源是 `src/lib/server-identity.ts`：drawer 分组、session group side peek、服务器色调用同一套 server key / display name / tone；UI 层只能消费 projection，禁止各自拼端口当 label。
+- [2026-06-29] zterm 多服务器身份色不能用连续 hue hash 自由漂移；紫/粉区在窄 drawer 里辨识差且视觉噪声高。`server-color.ts` 必须使用固定红/黄/蓝/绿/青/橙 palette，并用回归锁住常见服务器 key 不同色。
+- [2026-06-29] traversal route health cache 是进程级全局状态；任何会创建 `TraversalSocket` 并断言 WebSocket 实例数量/线路选择的测试，必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache` 或注入隔离 cache。否则前一个用例记录的 failure/auth-failure 会让后续用例无候选路由，表现为 `MockWebSocket.instances` 期望 1 实际 0。
 - [2026-06-29] Android IME / keyboard lift 真源必须只有一份：`terminal-keyboard-lift.ts` 负责 viewport / lift 判断，`TerminalPage.tsx` 只能消费和 re-export，不能再复制 helper。已验证 WebView 已 resize 时 lift 必须为 0，只有 overlay 才按 stable height 计算。
 - [2026-06-29] `test:terminal:contracts` 必须串行文件执行。`SessionContext.ws-refresh.test.tsx` 这类文件会 stub 全局 `WebSocket`，在 vitest 默认 file parallel 下会互相覆盖；contracts gate 需要 `--no-file-parallelism` 才能稳定区分真失败与假红。
 

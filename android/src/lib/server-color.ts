@@ -31,21 +31,44 @@ function hsl(hue: number, saturation: number, lightness: number) {
   return `hsl(${Math.round(clampHue(hue))}, ${saturation}%, ${lightness}%)`;
 }
 
+const SERVER_COLOR_PALETTE = [
+  210, // blue
+  142, // green
+  45,  // yellow
+  12,  // red-orange
+  188, // cyan
+  96,  // lime
+  28,  // orange
+  4,   // red
+  224, // royal blue
+  158, // emerald
+  54,  // amber
+  18,  // warm red
+  198, // teal-blue
+  118, // leaf green
+  36,  // gold-orange
+  0,   // red
+];
+
 export function getServerColorTone(target: { bridgeHost: string; bridgePort: number }): ServerColorTone {
   const key = `${target.bridgeHost.trim()}:${target.bridgePort}`;
+  return getServerColorToneByKey(key);
+}
+
+export function getServerColorToneByKey(key: string): ServerColorTone {
   const hash = hashString(key);
-  const hue = clampHue((hash % 300) + 24);
-  const accent = hsl(hue, 84, 66);
+  const hue = SERVER_COLOR_PALETTE[hash % SERVER_COLOR_PALETTE.length] ?? SERVER_COLOR_PALETTE[0];
+  const accent = hsl(hue, 82, 62);
 
   return {
     key,
     accent,
-    accentSoft: hsla(hue, 86, 64, 0.18),
-    accentMuted: hsla(hue, 76, 60, 0.12),
-    tabActiveBackground: hsla(hue, 88, 68, 0.42),
-    tabIdleBackground: hsla(hue, 72, 58, 0.14),
-    previewBackground: `linear-gradient(135deg, ${hsla(hue, 85, 66, 0.22)} 0%, rgba(17, 20, 32, 0.96) 100%)`,
-    previewText: hsl(hue, 92, 76),
-    lightCardBorder: hsla(hue, 66, 54, 0.24),
+    accentSoft: hsla(hue, 78, 58, 0.18),
+    accentMuted: hsla(hue, 70, 54, 0.12),
+    tabActiveBackground: hsla(hue, 76, 58, 0.34),
+    tabIdleBackground: hsla(hue, 62, 50, 0.12),
+    previewBackground: `linear-gradient(135deg, ${hsla(hue, 78, 58, 0.20)} 0%, rgba(17, 20, 32, 0.96) 100%)`,
+    previewText: hsl(hue, 84, 72),
+    lightCardBorder: hsla(hue, 62, 48, 0.28),
   };
 }
