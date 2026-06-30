@@ -87,4 +87,24 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')?.reasons).toContain('health:unknown');
   });
+
+  it('reprobes the least-bad candidate when every route is currently unhealthy', () => {
+    const cache = new TraversalRouteHealthCache({ now: () => 1000 });
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[0], 'timeout');
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], 'timeout');
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 'timeout');
+
+    const selection = selectBestTraversalRoute({
+      candidates,
+      healthCache: cache,
+      scope: { accountId: 'u1', daemonHostId: 'daemon-a' },
+      traversalPathPriority: ['tailscale', 'ipv4', 'rtc-relay'],
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.diagnostics.every((item) => item.selectable === false)).toBe(true);
+    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
+      health: { status: 'failure', error: 'timeout' },
+    });
+  });
 });

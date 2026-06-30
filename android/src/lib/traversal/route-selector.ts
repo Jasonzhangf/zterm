@@ -28,6 +28,9 @@ const PATH_COST: Record<TraversalResolvedPath, number> = {
   'rtc-relay': 80,
 };
 
+const FAILURE_ROUTE_PENALTY = 500;
+const AUTH_FAILURE_ROUTE_PENALTY = 900;
+
 function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
   const index = priority.indexOf(path);
   return index >= 0 ? index * 5 : 50;
@@ -40,11 +43,11 @@ function healthScore(record: TraversalRouteHealthRecord | null, reasons: string[
   }
   if (record.status === 'auth-failure') {
     reasons.push(`health:auth-failure:${record.error || 'auth failed'}`);
-    return Number.POSITIVE_INFINITY;
+    return AUTH_FAILURE_ROUTE_PENALTY;
   }
   if (record.status === 'failure') {
     reasons.push(`health:failure:${record.error || 'failed'}`);
-    return Number.POSITIVE_INFINITY;
+    return FAILURE_ROUTE_PENALTY;
   }
   reasons.push('health:recent-success');
   if (typeof record.rttMs === 'number' && Number.isFinite(record.rttMs)) {
@@ -66,12 +69,13 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
     const score = PATH_COST[candidate.path]
       + priorityCost(candidate.path, priority)
       + healthScore(health, reasons);
+    const selectable = !health || health.status === 'success';
     reasons.unshift(`path-cost:${PATH_COST[candidate.path]}`, `priority:${priority.indexOf(candidate.path)}`);
     return {
       candidateId: candidate.id,
       path: candidate.path,
       endpoint: candidate.endpoint,
-      selectable: Number.isFinite(score),
+      selectable,
       score,
       reasons,
       ...(health ? { health } : {}),
@@ -79,7 +83,6 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
   });
 
   const selectedDiagnostic = diagnostics
-    .filter((item) => item.selectable)
     .sort((left, right) => left.score - right.score || left.endpoint.localeCompare(right.endpoint))[0] || null;
   const selected = selectedDiagnostic
     ? options.candidates.find((candidate) =>

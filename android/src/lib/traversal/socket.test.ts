@@ -362,4 +362,49 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances[3].url).toContain('240e:1234::10');
     thirdSocket.close(1000, 'test close');
   });
+
+  it('still probes a route when every candidate is currently unhealthy', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    routeHealthCache.recordFailure(
+      { accountId: 'user-1', daemonHostId: 'daemon-1' },
+      {
+        id: 'direct:ipv6:240e:1234::10:3333',
+        kind: 'ws',
+        path: 'ipv6',
+        endpoint: '240e:1234::10:3333',
+        url: 'ws://240e:1234::10:3333',
+      },
+      'timeout',
+    );
+    routeHealthCache.recordFailure(
+      { accountId: 'user-1', daemonHostId: 'daemon-1' },
+      {
+        id: 'direct:ipv4:203.0.113.10:3333',
+        kind: 'ws',
+        path: 'ipv4',
+        endpoint: '203.0.113.10:3333',
+        url: 'ws://203.0.113.10:3333',
+      },
+      'timeout',
+    );
+
+    const socket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
+
+    MockWebSocket.instances[0].triggerOpen();
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'ipv6',
+      resolvedEndpoint: '240e:1234::10:3333',
+    });
+  });
 });

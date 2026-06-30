@@ -1155,3 +1155,9 @@ Need runtime debug to confirm:
 - 右滑 Terminal drawer 是 session/daemon 操作入口：host rail 直接列账号目录里的 daemon；即使某台机器当前没有打开的 runtime session，也能选中该机器。
 - drawer 底部 `New Session` 不再打开通用 picker；它会把当前选中机器的 hostKey 交给 action owner，由 `tmux-create-session` 在该 daemon 上创建一个空白 session，再打开成 tab。
 - 修正版构建：`./android/scripts/build-android-debug.sh` PASS，发布 `0.1.3.1972`，sha256 `789f8b59e151b265f2638e68e2e5d30d4781e12507e36b63f062ca05939a3ae4`；`zterm-latest-debug.apk` 与版本 APK sha 一致。
+
+## 2026-06-30 traversal reconnect dead-end recovery
+
+- 现场“连不上，杀掉才能连通”的真因落在 route selection：`TraversalRouteHealthCache` 记录失败后，`selectBestTraversalRoute()` 以前把 `failure/auth-failure` 当成不可选终态；当同 scope 下所有 candidate 都失败时，`TraversalSocket` 会直接走 `No traversal path succeeded`，进程不重启就不会重新 probe。
+- 修复策略：失败仍保留为强惩罚信号，但不再是绝对不可选；selector 在全失败时仍返回“最不坏”的 candidate 让 socket 继续显式探测，避免把暂时性的网络恢复误判成永久无路可走。
+- 回归锁：需要保留两类测试，一类锁“健康路由优先于失败路由”，一类锁“全失败时仍可重新 probe”，否则很容易再次回到杀 app 才恢复。
