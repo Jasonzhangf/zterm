@@ -472,8 +472,8 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [handleQuickConnectDraft, pickerMode, rememberBridgeTarget, setPageState]);
 
   const handleAddNew = useCallback(() => {
-    openSessionPicker('new-connection');
-  }, [openSessionPicker]);
+    ensureTerminalPageVisible();
+  }, [ensureTerminalPageVisible]);
 
   const resolveRelayDeviceTargetByHostKey = useCallback((hostKey?: string) => {
     const normalizedHostKey = hostKey?.trim();

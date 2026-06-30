@@ -1151,6 +1151,7 @@ Need runtime debug to confirm:
 
 ## 2026-06-30 drawer-owned session creation UI shift
 
-- 新产品语义：Connections 主页面只保留账号/登录/服务器概览入口，不再承担 `New Session` / `New Tab` 创建动作。
+- 新产品语义纠正：Connections 主页面的入口不该消失；入口保留，但语义是“进入/连接服务器 workspace”，不再承担 `New Session` / `New Tab` 创建动作，也不打开 `new-connection` picker。
 - 右滑 Terminal drawer 是 session/daemon 操作入口：host rail 直接列账号目录里的 daemon；即使某台机器当前没有打开的 runtime session，也能选中该机器。
 - drawer 底部 `New Session` 不再打开通用 picker；它会把当前选中机器的 hostKey 交给 action owner，由 `tmux-create-session` 在该 daemon 上创建一个空白 session，再打开成 tab。
+- 修正版构建：`./android/scripts/build-android-debug.sh` PASS，发布 `0.1.3.1972`，sha256 `789f8b59e151b265f2638e68e2e5d30d4781e12507e36b63f062ca05939a3ae4`；`zterm-latest-debug.apk` 与版本 APK sha 一致。

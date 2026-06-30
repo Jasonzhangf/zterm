@@ -438,6 +438,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pickerTarget,
     pickerInitialSessions,
     handleLoadSavedTabList,
+    handleAddNew,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
@@ -622,6 +623,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onDeleteServerGroup={handleDeleteServerGroup}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            onAddNew={handleAddNew}
             onOpenSettings={handleOpenSettingsPage}
             onOpenVaults={handleOpenSettingsPage}
           />

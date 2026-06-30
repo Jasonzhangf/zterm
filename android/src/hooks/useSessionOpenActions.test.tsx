@@ -299,6 +299,18 @@ describe('useSessionOpenActions explicit-open truth', () => {
     );
   });
 
+  it('uses the main page entry to enter the server workspace instead of opening new-connection picker', () => {
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleAddNew();
+    });
+
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    expect(result.current.pickerMode).toBeNull();
+  });
+
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));

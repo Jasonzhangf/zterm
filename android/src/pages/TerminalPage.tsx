@@ -1325,6 +1325,12 @@ function TerminalPageComponent({
 
     return [...opened, ...unopened];
   }, [drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
+  useEffect(() => {
+    if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
+      return;
+    }
+    setSessionDrawerOpen(true);
+  }, [drawerHosts.length, portraitSessionDrawerEnabled, sessionDrawerOpen, sessions.length]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;
