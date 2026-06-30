@@ -560,3 +560,4 @@ silently returns 0 when viewport metrics are stable.
 - Connections 页面卡片主动作必须打开该卡片自己的 picker，不得复用 shared open path 或别的 server 的 target。
 - picker 的唯一真源是当前卡片的 `bridgeHost / bridgePort / daemonHostId / authToken`，history-only group 也应进入 picker，而不是伪装成 runtime open。
 - 回归门禁：同页多 server card 点击必须各自落到各自 target；edit-group picker 打开后必须对 concrete target 自动 `fetchTmuxSessions()` 并回写 `onRemoteSessionsRefreshed()`；picker/列表刷新测试要一起绿。
+- Windows / relay daemon 入口必须额外锁 auth：relay directory 只提供 endpoint/session catalog，不是 daemon auth 真源；Connections card 和 drawer New Session 命中 relay device 时必须从 saved server preset/host 补 `bridgeHost/bridgePort/authToken` 后再 refresh/create。

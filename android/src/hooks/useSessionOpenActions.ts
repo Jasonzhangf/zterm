@@ -484,6 +484,28 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     });
   }, [openSessionPicker]);
 
+  const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
+    const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();
+    if (!daemonHostId) {
+      return target;
+    }
+    const matchedHost = hosts
+      .filter((host) => (host.daemonHostId || host.relayHostId || '').trim() === daemonHostId)
+      .sort((a, b) => Math.max(b.lastConnected || 0, b.createdAt || 0) - Math.max(a.lastConnected || 0, a.createdAt || 0))[0];
+    if (!matchedHost) {
+      return target;
+    }
+    return normalizeBridgeTarget({
+      ...target,
+      bridgeHost: target.bridgeHost || matchedHost.bridgeHost,
+      bridgePort: target.bridgePort || matchedHost.bridgePort,
+      daemonHostId,
+      relayHostId: target.relayHostId || target.daemonHostId || matchedHost.relayHostId || matchedHost.daemonHostId,
+      authToken: target.authToken || matchedHost.authToken,
+      relayEndpointCandidates: target.relayEndpointCandidates || matchedHost.relayEndpointCandidates || [],
+    });
+  }, [hosts]);
+
   const resolveTargetByHostKey = useCallback((hostKey?: string) => {
     const normalizedHostKey = hostKey?.trim();
     if (!normalizedHostKey) {
@@ -495,7 +517,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       || device.deviceName.trim() === normalizedHostKey
     ));
     if (matchedDevice) {
-      return resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice);
+      return enrichTargetFromSavedHosts(resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice));
     }
     const matchedPreset = bridgeSettings.servers.find((server) => (
       server.id.trim() === normalizedHostKey
@@ -529,7 +551,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       });
     }
     return null;
-  }, [bridgeSettings.servers, relayDevices, sessionsRef]);
+  }, [bridgeSettings.servers, enrichTargetFromSavedHosts, relayDevices, sessionsRef]);
 
   const buildBlankSessionName = useCallback(() => {
     const stamp = new Date()

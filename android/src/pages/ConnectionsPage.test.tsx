@@ -798,6 +798,74 @@ it('exits group management and restores the add-server entry', () => {
     );
   });
 
+  it('uses saved server preset auth when a relay directory group opens the picker', () => {
+    const onEditServerGroup = vi.fn();
+
+    render(
+      <ConnectionsPage
+        bridgeSettings={{
+          servers: [{
+            id: 'windows-preset',
+            name: 'Windows',
+            targetHost: '100.75.122.121',
+            targetPort: 3333,
+            authToken: 'token-win',
+            relayHostId: 'windows-daemon',
+          }],
+          traversalPathPriority: ['tailscale', 'rtc-relay'],
+        }}
+        hosts={[]}
+        sessions={[]}
+        sessionGroups={[]}
+        relayDevices={[makeRelayDevice({
+          deviceId: 'windows-device',
+          deviceName: 'Windows PC',
+          platform: 'win32',
+          daemon: {
+            connected: true,
+            lastSeenAt: '2026-06-30T00:00:00.000Z',
+            hostId: 'windows-daemon',
+            version: '0.1.3',
+            endpoints: [{
+              id: 'direct:tailscale:windows-daemon',
+              kind: 'tailscale',
+              host: '100.75.122.121',
+              port: 3333,
+              authRequired: true,
+              lastSeenAt: '2026-06-30T00:00:00.000Z',
+            }],
+            sessions: [{ name: 'main', updatedAt: '2026-06-30T00:00:00.000Z' }],
+          },
+        })]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Windows PC · 1 session'));
+    expect(onEditServerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+        daemonHostId: 'windows-daemon',
+        authToken: 'token-win',
+        relayEndpointCandidates: expect.arrayContaining([
+          expect.objectContaining({ id: 'direct:tailscale:windows-daemon' }),
+        ]),
+      }),
+      ['main'],
+    );
+  });
+
   it('keeps daemonHostId when opening checked sessions from expanded group', () => {
     const onOpenServerGroups = vi.fn();
 

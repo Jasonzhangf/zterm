@@ -935,6 +935,11 @@ android/
 - **动作**: card body tap 只负责 enter/expand group；`Open/Enter` 按钮才负责打开/恢复 session；不可打开的 group 显示 `Details` 并展开，禁止死 `Open`
 - **反模式**: 让卡片 body 和 action button 共用一个 callback，导致点击卡片直接打开或空转而不能进入 group
 
+### 模式: Relay directory 不是 daemon auth 真源
+- **触发信号**: Windows / relay daemon 能在 Mac 上 list/create，但 Android picker 刷新或 drawer New Session 失败、旧 session 仍报 unavailable
+- **动作**: Connections card、drawer hostKey、picker relay device target 必须用 saved server preset/host 补齐 `bridgeHost / bridgePort / authToken` 后再 `fetchTmuxSessions()` / `createTmuxSession()`；directory 只提供 endpoint/session catalog
+- **反模式**: 只拿 relay directory 的 endpoint candidates 当完整 bridge target，会漏 daemon auth token，导致刷新/新建看似“没反应”
+
 ---
 
 Inspired by coding-principals skill.

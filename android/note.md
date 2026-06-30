@@ -1215,3 +1215,11 @@ Need runtime debug to confirm:
 - 通过测试锁住了两个回归：同一页面多 server card 点击各自 target 不串线；history-only group 也只进 picker，不伪装成 runtime open。
 - 已补 edit-group 自动刷新回归：picker 打开后必须对当前 concrete target 调 `fetchTmuxSessions()`，并通过 `onRemoteSessionsRefreshed()` 回写最新 sessions。
 - 已验证：`ConnectionsPage.test.tsx`、`tmux-session-picker-rows.test.ts`、`TmuxSessionPickerSheet.test.tsx`、`tsc --noEmit` 全绿。
+
+## 2026-06-30 Windows session refresh/auth correction
+
+- Jason 真机截图证实 `codex-test` 旧 tab 仍尝试连接，而 Windows 新建/刷新 session 不可用；不能只用 mock 测试判断已修。
+- Mac -> Windows daemon 真实验证：`fetchTmuxSessions()` 返回 `zterm-20260630-115307/default`，`createTmuxSession()` 新建后再次 fetch 能看到新 session；清理测试 pane 后列表恢复到这两个真实 session。
+- Android 根因：relay directory group / drawer hostKey 命中 relay device 时可能只拿 directory target，缺 saved server/preset 的 daemon auth token，导致 Windows direct session refresh/create 不带 token。
+- 修复：Connections card target resolver 使用 saved server preset 补 `bridgeHost/bridgePort/authToken`；drawer New Session 的 relay-device target 用 saved host 补 auth/endpoint。
+- 已验证：Connections/useSessionOpenActions/TmuxSessionPicker/session-picker 定向 48 tests PASS；`tsc --noEmit` PASS；真实 Windows `fetch/create/fetch` PASS。

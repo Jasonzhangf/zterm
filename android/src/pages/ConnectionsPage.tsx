@@ -8,7 +8,7 @@ import { mobileTheme } from '../lib/mobile-ui';
 import { readTraversalRelayAccountState } from '../lib/traversal-relay-client';
 import { getServerIdentityTone } from '../lib/server-identity';
 import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
-import { type BridgeSettings } from '../lib/bridge-settings';
+import { resolveBridgePresetDaemonHostId, type BridgeSettings } from '../lib/bridge-settings';
 import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
@@ -22,7 +22,10 @@ interface ConnectionsGroupTarget {
 }
 
 interface ConnectionsPageProps {
-  bridgeSettings?: Pick<BridgeSettings, 'traversalPathPriority'>;
+  bridgeSettings?: {
+    servers?: BridgeSettings['servers'];
+    traversalPathPriority?: BridgeSettings['traversalPathPriority'];
+  };
   routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'list'>;
   hosts: Host[];
   sessions: Session[];
@@ -326,6 +329,18 @@ export function ConnectionsPage({
           bridgePort: matchedHost.bridgePort,
           authToken: matchedHost.authToken || group.authToken,
           relayEndpointCandidates: group.relayEndpointCandidates || matchedHost.relayEndpointCandidates,
+        };
+      }
+      const matchedPreset = (bridgeSettings?.servers || []).find(
+        (server) => resolveBridgePresetDaemonHostId(server).toLowerCase() === group.daemonHostId!.trim().toLowerCase(),
+      );
+      if (matchedPreset) {
+        return {
+          bridgeHost: matchedPreset.targetHost,
+          bridgePort: matchedPreset.targetPort,
+          daemonHostId: group.daemonHostId,
+          authToken: matchedPreset.authToken || group.authToken,
+          relayEndpointCandidates: group.relayEndpointCandidates,
         };
       }
     }

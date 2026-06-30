@@ -320,6 +320,19 @@ describe('useSessionOpenActions explicit-open truth', () => {
     vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));
     const onSessionsOpenedInPane = vi.fn();
     const harness = createOptions({
+      bridgeSettings: {
+        servers: [{
+          id: 'preset-a',
+          name: 'Machine A',
+          targetHost: '100.75.122.121',
+          targetPort: 3333,
+          authToken: 'token-win',
+          relayHostId: 'daemon-a',
+        }],
+        targetHost: '100.75.122.121',
+        targetPort: 3333,
+        targetAuthToken: 'token-win',
+      },
       relayDevices: [{
         deviceId: 'device-a',
         deviceName: 'Machine A',
@@ -353,7 +366,13 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
     expect(result.current.pickerMode).toBeNull();
     expect(createTmuxSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ daemonHostId: 'daemon-a', relayHostId: 'daemon-a' }),
+      expect.objectContaining({
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-win',
+      }),
       expect.any(Object),
       'work-api',
       { cwd: '~/code/api' },
