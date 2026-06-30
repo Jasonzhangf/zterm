@@ -9,6 +9,12 @@ import type {
 } from './types';
 import { buildTraversalPlan } from './config';
 import type { TraversalSettingsSource, TraversalTargetSource } from './types';
+import { selectBestTraversalRoute } from './route-selector';
+import {
+  defaultTraversalRouteHealthCache,
+  type TraversalRouteHealthCache,
+  type TraversalRouteHealthScope,
+} from './route-health-cache';
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -308,7 +314,7 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private activeAttempt: TraversalAttemptDiagnostic | null = null;
 
-  private nextIndex = 0;
+  private attemptedCandidateKeys = new Set<string>();
 
   private closedByClient = false;
 
@@ -316,15 +322,26 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private reconnectTimer: number | null = null;
 
+  private readonly routeHealthCache: Pick<TraversalRouteHealthCache, 'get' | 'recordSuccess' | 'recordFailure'>;
+
+  private readonly routeHealthScope: TraversalRouteHealthScope;
+
   public constructor(
     target: TraversalTargetSource,
     settings: TraversalSettingsSource,
     options?: {
       overrideUrl?: string;
+      routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'recordSuccess' | 'recordFailure'>;
+      routeHealthScope?: TraversalRouteHealthScope;
     },
   ) {
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     this.candidates = plan.candidates;
+    this.routeHealthCache = options?.routeHealthCache || defaultTraversalRouteHealthCache;
+    this.routeHealthScope = options?.routeHealthScope || {
+      accountId: settings.traversalRelay?.userId,
+      daemonHostId: target.relayHostId || target.daemonHostId,
+    };
     this.diagnostics = {
       mode: plan.mode,
       stage: 'connecting',
@@ -348,20 +365,33 @@ export class TraversalSocket implements BridgeTransportSocket {
     };
   }
 
-  private markAttempt(candidate: TraversalPlanCandidate, stage: TraversalAttemptDiagnostic['stage'], ok: boolean, reason?: string) {
+  private candidateKey(candidate: TraversalPlanCandidate) {
+    return candidate.id || `${candidate.path}:${candidate.endpoint}`;
+  }
+
+  private isAuthFailure(reason?: string) {
+    return /auth|unauthorized|401|403|token/i.test(reason || '');
+  }
+
+  private markAttempt(candidate: TraversalPlanCandidate, stage: TraversalAttemptDiagnostic['stage'], ok: boolean, reason?: string, rttMs?: number, score?: number) {
     if (this.activeAttempt) {
       this.activeAttempt.stage = stage;
       this.activeAttempt.ok = ok;
       this.activeAttempt.reason = reason;
+      this.activeAttempt.rttMs = rttMs ?? this.activeAttempt.rttMs;
+      this.activeAttempt.score = score ?? this.activeAttempt.score;
       return;
     }
     const attempt: TraversalAttemptDiagnostic = {
       kind: candidate.kind,
       path: candidate.path,
       endpoint: candidate.endpoint,
+      candidateId: candidate.id,
       ok,
       stage,
       reason,
+      rttMs,
+      score,
     };
     this.diagnostics.attempts.push(attempt);
     this.activeAttempt = attempt;
@@ -371,6 +401,9 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.diagnostics.stage = 'error';
     this.diagnostics.reason = reason;
     this.onclose?.({ code: 1006, reason });
+    if (!this.closedByClient) {
+      this.scheduleReconnect(reason);
+    }
   }
 
   private clearReconnectTimer() {
@@ -394,7 +427,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       if (this.closedByClient) {
         return;
       }
-      this.nextIndex = 0;
+      this.attemptedCandidateKeys.clear();
       this.connectNext();
     }, delay);
   }
@@ -403,14 +436,25 @@ export class TraversalSocket implements BridgeTransportSocket {
     if (this.closedByClient) {
       return;
     }
-    const candidate = this.candidates[this.nextIndex++];
+    const remainingCandidates = this.candidates.filter((item) => !this.attemptedCandidateKeys.has(this.candidateKey(item)));
+    const selection = selectBestTraversalRoute({
+      candidates: remainingCandidates,
+      healthCache: this.routeHealthCache,
+      scope: this.routeHealthScope,
+    });
+    const candidate = selection.selected;
     if (!candidate) {
       this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');
       return;
     }
+    const selectedDiagnostic = selection.diagnostics.find((item) =>
+      item.path === candidate.path
+      && item.endpoint === candidate.endpoint
+      && item.candidateId === candidate.id);
+    this.attemptedCandidateKeys.add(this.candidateKey(candidate));
 
     this.activeAttempt = null;
-    this.markAttempt(candidate, 'connecting', false);
+    this.markAttempt(candidate, 'connecting', false, undefined, undefined, selectedDiagnostic?.score);
     const backend: Backend = candidate.kind === 'ws'
       ? new WebSocketBackend(candidate)
       : new WebRtcBackend(candidate);
@@ -418,6 +462,7 @@ export class TraversalSocket implements BridgeTransportSocket {
     const timeoutMs = candidate.kind === 'ws' ? WS_CANDIDATE_TIMEOUT_MS : RTC_CANDIDATE_TIMEOUT_MS;
     let settled = false;
     let advanced = false;
+    const startedAt = Date.now();
     const timer = window.setTimeout(() => {
       if (settled || advanced || this.closedByClient) {
         return;
@@ -425,6 +470,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       advanced = true;
       this.diagnostics.reason = `${candidate.kind} connect timeout`;
       this.markAttempt(candidate, 'error', false, this.diagnostics.reason);
+      this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason);
       try {
         backend.close(4000, 'connect timeout');
       } catch (error) {
@@ -443,7 +489,9 @@ export class TraversalSocket implements BridgeTransportSocket {
         window.clearTimeout(timer);
         this.clearReconnectTimer();
         this.reconnectAttempt = 0;
-        this.markAttempt(candidate, 'open', true);
+        const rttMs = Date.now() - startedAt;
+        this.routeHealthCache.recordSuccess(this.routeHealthScope, candidate, rttMs);
+        this.markAttempt(candidate, 'open', true, undefined, rttMs, selectedDiagnostic?.score);
         this.diagnostics.stage = 'open';
         this.diagnostics.reason = undefined;
         this.diagnostics.resolvedPath = candidate.path;
@@ -456,6 +504,11 @@ export class TraversalSocket implements BridgeTransportSocket {
       onerror: (reason) => {
         this.diagnostics.reason = reason || `${candidate.kind} error`;
         this.markAttempt(candidate, 'error', false, this.diagnostics.reason);
+        if (!settled) {
+          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason, {
+            authFailure: this.isAuthFailure(this.diagnostics.reason),
+          });
+        }
         if (settled) {
           this.diagnostics.stage = 'error';
           this.onerror?.();
@@ -470,6 +523,9 @@ export class TraversalSocket implements BridgeTransportSocket {
           window.clearTimeout(timer);
           this.diagnostics.reason = event?.reason || `${candidate.kind} closed`;
           this.markAttempt(candidate, this.diagnostics.stage === 'open' ? 'closed' : 'closed', Boolean(settled), this.diagnostics.reason);
+          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason, {
+            authFailure: this.isAuthFailure(this.diagnostics.reason),
+          });
           this.connectNext();
           return;
         }

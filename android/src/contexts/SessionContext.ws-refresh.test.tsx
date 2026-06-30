@@ -16,6 +16,7 @@ import { useSessionHeadSnapshot } from '../lib/session-head-store';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
+import { defaultTraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
 
 vi.mock('@capacitor/filesystem', () => ({
   Directory: {
@@ -896,6 +897,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     // otherwise accumulate here.
     MockWebSocket.instances.length = 0;
     MockWebSocket.controlInstances.length = 0;
+    defaultTraversalRouteHealthCache.clear();
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -3766,6 +3768,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
         expect(typeof connectMessage?.payload?.openRequestId).toBe('string');
         expect(connectMessage?.payload?.openRequestId).not.toBe('session-1');
+        expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
         expect(connectMessage?.payload?.cols).toBeUndefined();
         expect(connectMessage?.payload?.rows).toBeUndefined();
       });

@@ -1,3 +1,60 @@
+# 2026-06-29 WezTerm TUI / Codex observation
+
+- 远端 Windows 机已实测 `codex` 可直接在 WezTerm mux pane 中运行：`wezterm.exe cli spawn --new-window --workspace codex-test cmd /c codex` 返回 pane `9`。
+- `wezterm.exe cli get-text --pane-id 9 --escapes` 能直接抓到 Codex TUI 当前屏幕，包括欢迎头、提示符和 ANSI 样式；这说明 WezTerm 可作为 TUI 可观测窗口，而不是只能跑普通 shell。
+- 目前可用的观测手段：
+  - `wezterm.exe cli list` 定位 pane / workspace。
+  - `wezterm.exe cli get-text --pane-id <id> --escapes` 抓当前画面。
+  - `wezterm.exe cli get-text --pane-id <id> --start-line -N --escapes` 看 scrollback。
+- 这次只验证了“能跑 + 能观测”，没有把 `send-text` 作为输入真源纳入结论。
+
+# 2026-06-29 WezTerm daemon mainline integration
+
+- 已把 WezTerm backend 从独立 adapter 接入 daemon 主链：`ZTERM_TERMINAL_BACKEND=wezterm` 时走 WezTerm runtime，Windows 默认 WezTerm，其他平台默认 tmux；未知 backend 显式报错，不做 fallback。
+- WezTerm backend owner 仍是 `src/server/wezterm-backend.ts`：负责 `list/spawn/get-text/send-text/kill-pane` 和 sessionName -> paneId 映射；server/control/mirror 只通过 runtime 接口消费。
+- 接入边界：
+  - `send-text --no-paste` 只通过 stdin 写真实 input，禁止把用户输入塞进 args。
+  - `assertTmuxSessionExists` 已改为 backend-aware，WezTerm attach 不再走 tmux `has-session`。
+  - WezTerm 暂不支持 adaptive window resize；resize 不静默吞掉，走显式 error。
+  - `wezterm session not found` 纳入 session unavailable 分类，避免 pane 消失时变成泛化 sync failure。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/server/server.control-truth.test.ts src/server/terminal-backend-selection.test.ts src/server/terminal-mirror-runtime.test.ts src/server/terminal-control-runtime.input-queue.test.ts src/server/terminal-mirror-capture.test.ts src/server/wezterm-backend.test.ts src/server/wezterm-backend-runtime.test.ts src/server/terminal-message-runtime.test.ts --reporter dot` PASS（8 files / 69 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+
+## 2026-06-30 traversal reconnect dead-end recovery / startup width truth
+
+- TraversalSocket 以前在“所有候选都失败且没有可选路径”时直接落入 error 终态，只发一次 `onclose`，不会再进入重试循环；这会把网络恢复场景卡死到必须重启 App 才能重新建连。
+- 修复方向已收口成唯一真源：`finishFailure()` 负责发 close 事件，随后统一走 `scheduleReconnect()`，避免把“全候选失败”当成永久死路。
+- 启动宽度模式链路已再次确认：`useBridgeSettingsStorage` 首 render 同步读 localStorage，`SessionContext` 首次 connect handshake 直接携带 `widthMode`，不需要等后续 resize 才决定。
+  - `pnpm --dir android exec tsx scripts/wezterm-backend-remote-smoke.ts` PASS，Windows host `huawei@100.75.122.121`，snapshot lineCount=3。
+  - `pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts` PASS，cmd/raw input contract OK。
+  - `pnpm --dir android exec tsx scripts/wezterm-daemon-protocol-smoke.ts` PASS，真实 server/WebSocket 主链走 `list -> create -> session-open -> connect -> input -> buffer-sync`。
+
+# 2026-06-29 app update explicit manifest install fix
+
+- 现场截图显示 1950 弹窗点击「立即升级」后停在「升级清单已变更，请重新检查更新」；根因在 `app-update-runtime.startUpdate()`：用户点弹窗按钮时传入了 `availableManifest`，但 runtime 仍强制重新拉 `latest.json` 并要求 versionCode + sha256 与弹窗快照完全一致。服务端发布新 manifest 后，旧弹窗就永远无法继续安装。
+- 修复：`startUpdate(manifest)` 以显式传入的弹窗 manifest 为安装真源，直接进入 native install，不再二次拉 manifest；只有内部无显式 target 的 `startUpdate()` 仍保留 revalidation，继续锁住 cached manifest 过期风险。
+- 回归：
+  - 正向：`installs the explicit manifest target without revalidating a potentially changed manifest`，证明弹窗按钮不会再被新 manifest 卡死。
+  - 反向：`revalidates the cached manifest when install is requested without an explicit target`，证明无显式 target 时仍会拒绝 stale cached manifest。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/app-update-runtime.test.ts src/hooks/useAppUpdate.test.tsx src/lib/app-update-relay-manifest.test.ts --reporter dot` PASS（16 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `./android/scripts/build-android-debug.sh` PASS，生成并发布 `0.1.3.1955`。
+  - `android/update-dist/latest.json` 与 `~/.zterm/updates/latest.json` 均指向 `zterm-0.1.3.1955.apk`，sha256 `e875468be619e67bf3d8c8384ebe713307f1578953b749085d9f447167a0712a`。
+  - `curl http://100.66.1.82:3333/updates/latest.json` 返回 `0.1.3.1955`；`curl -I http://100.66.1.82:3333/updates/zterm-0.1.3.1955.apk` 返回 200。
+
+# 2026-06-29 drawer server identity alias fix
+
+- 现场截图显示 drawer host rail 同一台 `mac-studio` 被拆成两组：`100.66.1.82` 下面 7 个 session，`mac-studio` 下面 1 个 session。根因是部分 session 有 `daemonHostId=mac-studio`，部分历史/open tab 只保留 `bridgeHost=100.66.1.82`，drawer 直接按各自字段分组。
+- 修复：`server-identity.ts` 增加 endpoint alias map。先从带 daemonHostId 的 session 建立 `bridgeHost:bridgePort -> daemonHostId/displayName` 映射，再把同 endpoint 但缺 daemonHostId 的 session 归并到同一个 hostKey/hostLabel。
+- `TerminalPage` drawer projection 改为消费 `resolveServerIdentity(session, aliases)`；`TerminalSessionDrawer` host rail 直接显示注入的 `group.hostLabel`，不再在 UI 层二次 `resolveServerDisplayName()`。
+- 验证：
+  - `pnpm --dir android exec vitest run src/lib/server-identity.test.ts src/components/terminal/TerminalSessionDrawer.test.tsx --reporter dot` PASS（15 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+  - `./android/scripts/build-android-debug.sh` PASS，发布 `0.1.3.1956`。
+  - `curl http://100.66.1.82:3333/updates/latest.json` 返回 `0.1.3.1956`；`curl -I http://100.66.1.82:3333/updates/zterm-0.1.3.1956.apk` 返回 200。
+
 # 2026-06-28 relay route continuation audit
 
 # 2026-06-29 multi-daemon UI identity slice
@@ -85,6 +142,34 @@
   - `session-open` 返回 `session-ticket`。
   - session transport `connect` 成功，`daemonHostId=macbook-air`。
   - `buffer-head-request` 后收到 `buffer-sync`，`revision=1`，`cols=160`，`rows=51`，`lineCount=1121`。
+
+# 2026-06-29 ConnectionPropertiesPage first-bind fix
+
+- 现场问题：手机新增 `macbookair` server 后点 `Save` 退出，但 Connections 里不列出也不保存。
+- 根因：`useAppPageState.handleSaveHost()` 已经能同步写 `bridgeSettings.servers`，但 `ConnectionPropertiesPage` 的 daemon-first 分支把“未映射 daemon”挡在了 preset 前面，首次手工绑定没有入口。
+- 修复：daemon-first 在 selected daemon 没有 preset 时，直接显示可编辑的 bridgeHost/authToken；保存和 Connect 只要求“已选 daemon + 已填 host/token”，不再要求先有 preset。
+- 验证：
+  - `pnpm --dir android exec vitest run src/pages/ConnectionPropertiesPage.test.tsx src/hooks/useAppPageState.test.tsx src/lib/bridge-settings.test.ts src/lib/connections-server-groups.test.ts --reporter dot` PASS（38 tests）。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+
+# 2026-06-29 Windows version gap audit
+
+- 远端 smoke 仍通过：`pnpm --dir android exec tsx scripts/wezterm-backend-remote-smoke.ts` PASS，Windows host `huawei@100.75.122.121`、WezTerm `20240203-110809-5046fc22`、pane snapshot lineCount=3。
+- 当前已有能力只覆盖 WezTerm `list/get-text --escapes -> buildWezTermMirrorSnapshot()`，未接入 daemon 主链。
+- 关键缺口：`server.ts` 启动仍强依赖 tmux backend：`resolveTmuxBinary()`、`ensureTmuxServerRunning()`、`listTmuxSessions`、`attachTmux`、`writeToTmuxSession`、tmux capture 都是主线真源；Windows 没 tmux 时不能基础运行。
+- release/npm 包也偏 macOS：prepare 脚本、shell shim、launchd service、darwin node-pty/wrtc artifact、README 都按 Darwin 固化。Windows 版需要独立 service/install owner，不能复用 launchd 包装。
+
+# 2026-06-29 WezTerm input contract probe
+
+- 方案 A 深测结果：`wezterm cli send-text --no-paste --pane-id <id>` 从 stdin 写原始字节可用；禁止把用户输入塞进 shell 参数。
+- 已验证：
+  - cmd Enter：`echo ZTERM_INPUT_ENTER_OK\r` 执行成功。
+  - cmd Backspace：`echo BAD\x7fOK\r` 实际执行为 `echo BAOK`。
+  - cmd Up Arrow：`\x1b[A\r` 能回放上一条 history。
+  - raw-mode Node TUI 收到 `1b7f1b5b4103`，对应 Esc / DEL / Up Arrow / ETX。
+  - Codex TUI 文本输入可进入输入框，未提交任务。
+- 限制：ETX 能到 raw-mode/TUI，但不能作为 Windows console control event 中断 `cmd.exe /k ping -t 127.0.0.1` 这类子进程。
+- 固化：新增 `scripts/wezterm-backend-input-smoke.ts`，默认测 cmd + raw TUI，`--include-codex` 额外测 Codex TUI；`requireWezTermInputContract()` 只放开 `send-text-no-paste-stdin`。
 
 # 2026-06-29 relay default address APK leak / session group regression
 
@@ -946,3 +1031,56 @@ Need runtime debug to confirm:
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
   - `./android/scripts/build-android-debug.sh` PASS，产出 `0.1.3.1953`
 - 记录：以后碰到“滚一下就好”的空白刷新，不先动 scroll，先查 buffer publish 是否被引用短路。
+
+## 2026-06-29 Windows PC remote access baseline
+
+- Windows PC record found at `~/Documents/server/memory/windows-codex-updated-jason-hw-desktop-2026-03-07.md`.
+- Host truth: `Jason-HW-Desktop`, Tailscale `100.75.122.121`, user `huawei`, MagicDNS `jason-hw-desktop.anoa-buri.ts.net`.
+- Verified from current Mac route:
+  - `tailscale ping 100.75.122.121` PASS via DERP `cn-custom`, about 20ms after path switch.
+  - `ping -c 2 100.75.122.121` PASS, 0% loss.
+  - SSH port 22 open and `ssh huawei@100.75.122.121` works with existing key.
+  - Remote identity: `Jason-HW-Desktop`, `jason-hw-deskto\huawei`, PowerShell `5.1.26100.8115`.
+  - Node available: `C:\Program Files\nodejs\node.exe`, version `24.11.1.0`; `npm.ps1` available.
+  - Tailscale peer API port `58327` open; `3389/5985/5986/3333` did not show as open in this probe.
+  - `wezterm` not found in PATH.
+
+## 2026-06-29 Windows WezTerm portable backend probe
+
+- Downloaded official portable WezTerm to Windows PC:
+  - `D:\zterm-tools\wezterm\WezTerm-windows-20240203-110809-5046fc22.zip`
+  - extracted to `D:\zterm-tools\wezterm\portable\WezTerm-windows-20240203-110809-5046fc22\`
+  - sha256 verified: `57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4`
+- `wezterm.exe --version` returns `wezterm 20240203-110809-5046fc22`.
+- `wezterm cli --prefer-mux list` can auto-start `wezterm-mux-server.exe --daemonize` from SSH and persists across later SSH execs; observed mux PID `30396`.
+- CLI capability verified:
+  - `cli spawn --new-window --workspace ...` creates panes and returns pane ids.
+  - `cli list` enumerates windows/tabs/panes/workspaces.
+  - `cli get-text --pane-id ...` exports pane text.
+  - `cli get-text --escapes` preserves ANSI style output; verified red foreground `\x1b[91m` and green background `\x1b[102m`.
+  - scrollback export works with negative ranges; `get-text --start-line -90 --end-line -1` returned earlier scrollback, and mixed negative/positive range returned scrollback + current screen.
+- Important limitation found:
+  - In pure mux/no GUI-client state, `cli send-text` can put visible text into a pane but did not reliably deliver Enter/control execution through SSH tests. Treat input injection via WezTerm CLI as unproven, not a backend contract.
+  - `get-text` line indexes are relative to scrollback/current screen, not stable daemon absolute line indexes. A ZTerm adapter would need its own poll/diff -> absolute mirror store.
+- Cleanup: test panes `1..6` were removed with `wezterm cli kill-pane`; default pane `0` and downloaded portable files remain.
+
+## 2026-06-29 Windows WezTerm backend initial contract
+
+- Added ZTerm-side initial adapter, not a WezTerm fork:
+  - `src/server/wezterm-backend.ts`
+  - `src/server/wezterm-backend.test.ts`
+  - `scripts/wezterm-backend-remote-smoke.ts`
+  - `docs/decisions/2026-06-29-windows-wezterm-backend-contract.md`
+- Frozen contract:
+  - WezTerm CLI is external source material, not daemon truth.
+  - ZTerm owns absolute `bufferStartIndex`, `revision`, mirror rows, and later `buffer-head / buffer-sync`.
+  - `get-text --escapes` is accepted for buffer snapshot input.
+  - `send-text` remains explicitly forbidden by `requireWezTermInputContract()` until pure-mux execution input is proven.
+  - This initial slice must not modify `server.ts`, `terminal-mirror-runtime.ts`, `terminal-mirror-capture.ts`, or `terminal-control-runtime.ts`.
+- Remote verified on `huawei@100.75.122.121`:
+  - `pnpm --dir android exec tsx scripts/wezterm-backend-remote-smoke.ts` PASS.
+  - Smoke spawned pane `8`, read `ZTERM_WEZTERM_REMOTE_SMOKE`, converted to snapshot `{ revision: 1, bufferStartIndex: 0, lineCount: 3, cols: 80, rows: 24 }`, and cleaned the pane.
+- Local gates:
+  - `pnpm --dir android exec vitest run src/server/wezterm-backend.test.ts --reporter dot` PASS, 5 tests.
+  - `pnpm --dir android exec vitest run src/lib/feature-registry-truth.test.ts --reporter dot` PASS, 4 tests.
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.

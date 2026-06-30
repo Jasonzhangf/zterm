@@ -14,10 +14,16 @@
 - [2026-06-29] Terminal renderer 的 cell 宽度真源必须来自可信 glyph probe；如果 hidden probe 返回接近整屏宽，必须拒绝并回退到字体估算。单列 cell 被测成 viewport 宽会直接导致 ASCII/CJK、色块、反显区域错位。
 - [2026-06-29] Android 网络从 offline/route-change 回 online 时，生命周期层必须只恢复当前 active tab transport，并复用现有 resume/audit/follow reset 主线；hidden 状态 online 不恢复，不允许扫所有 session 放大卡死风险。
 - [2026-06-29] traversal route health cache 是进程级全局状态；任何会创建 `TraversalSocket` 并断言 WebSocket 实例数量/线路选择的测试，必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache` 或注入隔离 cache。否则前一个用例记录的 failure/auth-failure 会让后续用例无候选路由，表现为 `MockWebSocket.instances` 期望 1 实际 0。
+- [2026-06-30] `TraversalSocket` 不能在“所有候选都失败且暂无可选路由”时直接落死为永久 error；`finishFailure()` 必须继续进入 `scheduleReconnect()`，让后续网络恢复时自动重试。相关 reconnect 回归测试必须使用隔离的 route health cache，避免历史 failure 污染路由选择。
 - [2026-06-29] Android IME / keyboard lift 真源必须只有一份：`terminal-keyboard-lift.ts` 负责 viewport / lift 判断，`TerminalPage.tsx` 只能消费和 re-export，不能再复制 helper。已验证 WebView 已 resize 时 lift 必须为 0，只有 overlay 才按 stable height 计算。
 - [2026-06-29] `test:terminal:contracts` 必须串行文件执行。`SessionContext.ws-refresh.test.tsx` 这类文件会 stub 全局 `WebSocket`，在 vitest 默认 file parallel 下会互相覆盖；contracts gate 需要 `--no-file-parallelism` 才能稳定区分真失败与假红。
+- [2026-06-29] WezTerm 可作为 Windows TUI 观测窗口：`wezterm.exe cli spawn --new-window ... cmd /c codex` 能把 `codex` 跑进 mux pane，`wezterm.exe cli get-text --escapes` 可直接抓到当前屏幕和 ANSI 样式；`list` 用于定位 pane，`get-text --start-line -N` 可看 scrollback。此结论只覆盖“运行 + 观测”，不代表 input 已接入 daemon 真源。
+- [2026-06-29] App update 弹窗按钮必须以用户眼前的显式 manifest 为安装真源：`startUpdate(manifest)` 不应再二次拉 `latest.json` 并因服务端刚发布新版而报“升级清单已变更”；二次 revalidation 只保留给无显式 target 的内部 `startUpdate()` 路径。已用正向/反向单测锁住，并发布 `0.1.3.1955` 到 `100.66.1.82:3333/updates/`，APK HTTP 200。
+- [2026-06-29] 多 daemon drawer 分组必须先做 endpoint alias 归一化：同一 `bridgeHost:bridgePort` 上只要任一 session 带 `daemonHostId`，其它只带 IP 的历史/open tab session 也要归入该 daemon identity；否则 UI 会把同一台机器拆成 “IP” 和 “机器名” 两组。`TerminalSessionDrawer` 只能显示注入的 `hostLabel`，禁止在 drawer 内再次从 key/label 推导名称。
 
 - [2026-06-29] MacBook Air daemon 安装/启动的真源必须固化在 daemon 包与 service runner 内：npm postinstall / launchd runner 负责自动写 `~/.local/bin/zterm-daemon`、`~/.local/bin/wterm`，写入前先清旧 symlink/file；released runner 在读 config 前负责把旧 `~/.wterm` 迁移到 `~/.zterm`。远端验证已确认 `restart` 后服务正常、health 为 `ok: true`，且不再依赖手工修 PATH 或手工挪目录。
+
+- [2026-06-29] ConnectionPropertiesPage 的 daemon-first 模式不能把“未映射 daemon”挡成死路：当 relay daemon 已选但没有 bridge preset 时，必须显示可编辑的 bridgeHost/authToken，让用户首次手工绑定后再保存并同步写入 `bridgeSettings.servers`；保存/Connect 都只能要求“已选 daemon + 已填 host/token”，不能再要求先有 preset。
 
 - [2026-06-28] mobile session group 的正确语义必须拆成固定槽位和 viewport projection 两层：drawer 显示的 top / center / bottom 是用户显式分配真相，点击 peek 不得改写；stage 只按当前 focus slot 投影可见窗口。focus=top 时 viewport 为 `empty / top / center`，focus=bottom 时 viewport 为 `center / bottom / empty`，focus=center 时 viewport 等于固定槽位。focus 必须存 slot name，不能存 session id；抽屉点击 session 只替换当前 focus 槽位。禁止从已有 tab/session 列表自动补邻居做 wheel，也禁止点击后循环轮转。未指定槽位只渲染 placeholder；drawer 长按/右键的 slot menu 是唯一的槽位分配入口，且 menu 打开后必须 suppress 下一次 click，防止“打开菜单同时又切 session”的误触。
 - [2026-06-28] mobile session group 的边界可见性必须和槽位 truth 分离：focus=top 时只隐藏 top 边界，focus=bottom 时只隐藏 bottom 边界，center 才显示两侧边界。这个规则已经下沉为共享 viewport projection helper，未来横向 left/right 也必须复用同一边界抽象，禁止在 UI shell 里各自再写一套 top/bottom 或 left/right 的局部 if。
@@ -516,3 +522,18 @@ silently returns 0 when viewport metrics are stable.
 ### 防复发规则
 - store / render gate / renderer 的真源必须是不可变快照，不能让 live buffer 对象跨层共享。
 - 任何“滚一下就好”的空白刷新问题，优先查 buffer publish 是否被引用短路，而不是先改 scroll 行为。
+
+## 2026-06-29 Windows WezTerm backend 初始合约
+
+- Windows 原生 session backend 先做在 ZTerm 侧，不 fork WezTerm；WezTerm CLI 只是外部 mux/buffer source。
+- 已验证 `wezterm cli --prefer-mux spawn/list/get-text --escapes` 可在 `Jason-HW-Desktop` 上产出 pane buffer 和 ANSI 样式，ZTerm adapter 可转换为 daemon-owned absolute mirror snapshot。
+- `wezterm cli --prefer-mux send-text --pane-id <id> --no-paste` 已验证可通过 stdin 写入 Enter / Backspace / arrow escape / raw TUI bytes / Codex TUI text；禁止把真实输入放进 shell args。
+- 已知限制：ETX/Ctrl+C 可到 raw-mode/TUI，但不能当作 Windows console control event 中断 `cmd.exe` 子进程（如 `ping -t`），不得宣称完全键盘等价。
+- 冻结合约文档：`docs/decisions/2026-06-29-windows-wezterm-backend-contract.md`。
+- 必跑门禁：`src/server/wezterm-backend.test.ts`、`src/server/wezterm-backend-runtime.test.ts`、`src/server/terminal-backend-selection.test.ts`、`scripts/wezterm-backend-remote-smoke.ts`、`scripts/wezterm-backend-input-smoke.ts`、`scripts/wezterm-daemon-protocol-smoke.ts`、`tsc --noEmit`。
+
+## 2026-06-30 traversal reconnect dead-end / startup width truth
+
+- `TraversalSocket` 不能在“所有候选都失败且暂无可选路由”时直接落死为永久 error；`finishFailure()` 必须继续进入 `scheduleReconnect()`，让后续网络恢复时自动重试。
+- 相关 reconnect 回归测试必须使用隔离的 route health cache，避免历史 failure 污染路由选择。
+- 首连 handshake 已再次证实会携带 `widthMode`：`SessionContext` 直接用 `BridgeSettings.terminalWidthMode` 生成 connect payload，`useBridgeSettingsStorage` 的同步首 render 保证启动即用，不需要等后续 resize 或二次保存。

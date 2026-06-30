@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TraversalSocket } from './socket';
+import { TraversalRouteHealthCache } from './route-health-cache';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -39,6 +40,10 @@ class MockWebSocket {
     this.onopen?.();
   }
 
+  triggerError() {
+    this.onerror?.();
+  }
+
   triggerClose(code = 1006, reason = 'mock closed') {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.({ code, reason } as CloseEvent);
@@ -70,6 +75,25 @@ async function flushMicrotasks() {
   await Promise.resolve();
 }
 
+function createSocket(
+  customSettings: Partial<typeof settings> & { traversalPathPriority?: string[] } = {},
+  options?: {
+    routeHealthCache?: TraversalRouteHealthCache;
+    routeHealthScope?: { accountId?: string; daemonHostId?: string };
+  },
+) {
+  return new TraversalSocket(target, {
+    ...settings,
+    ...customSettings,
+  } as typeof settings, {
+    routeHealthCache: options?.routeHealthCache || new TraversalRouteHealthCache(),
+    routeHealthScope: options?.routeHealthScope || {
+      accountId: 'user-1',
+      daemonHostId: 'daemon-1',
+    },
+  });
+}
+
 describe('TraversalSocket reconnect', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -87,7 +111,7 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('reconnects quickly after an opened traversal backend closes', async () => {
-    const socket = new TraversalSocket(target, settings);
+    const socket = createSocket();
     await flushMicrotasks();
 
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -108,7 +132,7 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('does not reconnect after the client closes the traversal socket', async () => {
-    const socket = new TraversalSocket(target, settings);
+    const socket = createSocket();
     await flushMicrotasks();
 
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -120,8 +144,32 @@ describe('TraversalSocket reconnect', () => {
     expect(socket.readyState).toBe(MockWebSocket.CLOSED);
   });
 
+  it('retries after all traversal candidates are exhausted before open', async () => {
+    const socket = createSocket({
+      traversalPathPriority: ['ipv4'],
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerClose(1006, 'candidate failed before open');
+
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'connecting',
+      reason: 'candidate failed before open',
+    });
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'connecting',
+      reason: 'candidate failed before open',
+    });
+  });
+
   it('backs off repeated reconnect attempts and resets candidate order from the first path', async () => {
-    const socket = new TraversalSocket(target, settings);
+    const socket = createSocket();
     await flushMicrotasks();
 
     expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
@@ -147,5 +195,141 @@ describe('TraversalSocket reconnect', () => {
       stage: 'connecting',
       path: 'ipv6',
     });
+  });
+
+  it('records successful route health with RTT and candidate id', async () => {
+    vi.setSystemTime(1_000);
+    const routeHealthCache = new TraversalRouteHealthCache({ now: () => Date.now() });
+    const socket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(42);
+    MockWebSocket.instances[0].triggerOpen();
+
+    const diagnostics = socket.getDiagnostics();
+    expect(diagnostics).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'ipv6',
+      resolvedEndpoint: '240e:1234::10:3333',
+    });
+    expect(diagnostics.attempts[0]).toMatchObject({
+      candidateId: 'direct:ipv6:240e:1234::10:3333',
+      path: 'ipv6',
+      stage: 'open',
+      ok: true,
+      rttMs: 42,
+    });
+    expect(routeHealthCache.get(
+      { accountId: 'user-1', daemonHostId: 'daemon-1' },
+      {
+        id: 'direct:ipv6:240e:1234::10:3333',
+        path: 'ipv6',
+        endpoint: '240e:1234::10:3333',
+      },
+    )).toMatchObject({
+      candidateId: 'direct:ipv6:240e:1234::10:3333',
+      path: 'ipv6',
+      status: 'success',
+      rttMs: 42,
+    });
+  });
+
+  it('skips a freshly auth-failed direct candidate and opens the next candidate', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const socket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
+    MockWebSocket.instances[0].triggerClose(1008, '401 unauthorized');
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
+    MockWebSocket.instances[1].triggerOpen();
+
+    const diagnostics = socket.getDiagnostics();
+    expect(diagnostics).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'ipv4',
+      resolvedEndpoint: '203.0.113.10:3333',
+    });
+    expect(diagnostics.attempts.map((item) => ({
+      path: item.path,
+      stage: item.stage,
+      ok: item.ok,
+      reason: item.reason,
+    }))).toEqual([
+      {
+        path: 'ipv6',
+        stage: 'closed',
+        ok: false,
+        reason: '401 unauthorized',
+      },
+      {
+        path: 'ipv4',
+        stage: 'open',
+        ok: true,
+        reason: undefined,
+      },
+    ]);
+  });
+
+  it('allows a failed direct route to win again after health TTL expiry', async () => {
+    let currentTime = 1_000;
+    const routeHealthCache = new TraversalRouteHealthCache({
+      ttlMs: 50,
+      now: () => currentTime,
+    });
+
+    const firstSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+    expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
+    MockWebSocket.instances[0].triggerClose(1008, '401 unauthorized');
+    await flushMicrotasks();
+    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
+    MockWebSocket.instances[1].triggerOpen();
+    firstSocket.close(1000, 'test close');
+
+    const secondSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+    expect(MockWebSocket.instances[2].url).toContain('203.0.113.10');
+    secondSocket.close(1000, 'test close');
+
+    currentTime = 1_051;
+    const thirdSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: {
+        accountId: 'user-1',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[3].url).toContain('240e:1234::10');
+    thirdSocket.close(1000, 'test close');
   });
 });
