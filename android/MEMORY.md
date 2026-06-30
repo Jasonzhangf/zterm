@@ -545,3 +545,18 @@ silently returns 0 when viewport metrics are stable.
 - 单独使用的 `TraversalSocket` 默认仍可 `autoReconnect:true` 自恢复；相关 reconnect 回归测试必须覆盖默认自恢复和外层 owner 模式不自建 backend，并使用隔离 route health cache，避免历史 failure 污染路由选择。
 - 首连 handshake 已再次证实会携带 `widthMode`：`SessionContext` 直接用 `BridgeSettings.terminalWidthMode` 生成 connect payload，`useBridgeSettingsStorage` 的同步首 render 保证启动即用，不需要等后续 resize 或二次保存。
 - 网络 online 恢复不能只走 `resumeActiveSessionTransport` 的 stale-open probe/wait 路径；foreground `online` 必须 active-only 调 `reconnectSession(activeSessionId)`，直接重启外层 session reconnect backoff，且禁止 sweep hidden/all sessions。
+
+## 2026-06-30 Windows daemon multi-machine baseline
+
+- Windows daemon 已确认可从 Tailscale 直连并通过 WebSocket 协议主链工作，且 daemon auth 走 `C:\Users\huawei\.zterm\config.json -> mobile.daemon.authToken` 配置真源，不是硬编码。
+- 当前可用于手机多机测试的 Tailscale IP：
+  - Windows `jason-hw-desktop`: `100.75.122.121`
+  - macbookair: `100.86.84.63`
+- Windows daemon 对外 health/WS 监听为 `0.0.0.0:3333`，验证时应使用同一配置 token，不要把地址或 token 写死到 app 代码里。
+- Windows WezTerm session 必须以持久 shell 为根进程，默认 `cmd.exe /k`；禁止把 TUI（如 `codex`）或 `cmd.exe /c ...` 作为 pane root，否则 TUI 退出会杀掉 pane，表现为手机连接断开。回归必须验证 `shell -> codex -> Ctrl+C -> shell 继续可用`。
+
+## 2026-06-30 Connections card picker truth
+
+- Connections 页面卡片主动作必须打开该卡片自己的 picker，不得复用 shared open path 或别的 server 的 target。
+- picker 的唯一真源是当前卡片的 `bridgeHost / bridgePort / daemonHostId / authToken`，history-only group 也应进入 picker，而不是伪装成 runtime open。
+- 回归门禁：同页多 server card 点击必须各自落到各自 target，picker/列表刷新测试要一起绿。

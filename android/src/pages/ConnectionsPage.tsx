@@ -338,27 +338,18 @@ export function ConnectionsPage({
     };
   };
 
-  const openGroupSessions = (group: ServerGroupView, sessionNames: string[]) => {
-    if (group.liveSessions.length > 0) {
-      onResumeSession(group.liveSessions[0]!.id);
-      return;
-    }
-    if (sessionNames.length === 0) {
-      openGroupEditor(group);
-      return;
-    }
+  const openGroupSessionPicker = (group: ServerGroupView, sessionNames: string[]) => {
     const target = resolveGroupBridgeTarget(group);
-    onOpenServerGroups([
+    onEditServerGroup(
       {
-        name: `${getGroupTitleName(group)} · ${getSessionCountLabel(sessionNames.length)}`,
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
-        daemonHostId: group.daemonHostId,
+        daemonHostId: group.daemonHostId || target.daemonHostId,
         authToken: target.authToken,
         relayEndpointCandidates: target.relayEndpointCandidates,
-        sessionNames,
       },
-    ]);
+      sessionNames,
+    );
   };
 
   return (
@@ -489,7 +480,7 @@ export function ConnectionsPage({
                     }
                     icon="◫"
                     tone={tone}
-                    actionLabel={canOpenGroup ? (isOpen ? 'Enter' : 'Open') : 'Details'}
+                    actionLabel="Sessions"
                     secondaryLabel={expanded ? '−' : '+'}
                     secondaryAriaLabel={`${expanded ? 'Collapse' : 'Expand'} ${getGroupTitleName(group)} sessions`}
                     onPrimaryAction={() => {
@@ -500,10 +491,10 @@ export function ConnectionsPage({
                         toggleGroupExpanded(group.id);
                         return;
                       }
-                      openGroupSessions(group, actionSessionNames);
+                      openGroupSessionPicker(group, actionSessionNames);
                     }}
                     onActionButton={() => {
-                      openGroupSessions(group, actionSessionNames);
+                      openGroupSessionPicker(group, actionSessionNames);
                     }}
                     onSecondaryAction={() => {
                       if (!expanded) {

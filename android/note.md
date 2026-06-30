@@ -1175,3 +1175,42 @@ Need runtime debug to confirm:
 - 现场纠正：Connections 主入口不能只是“进入已有服务器 workspace”；它必须恢复为“新增服务器”入口，打开 `new-connection` picker，再由 picker 区分“新增服务器”和“已有服务器 sessions”。
 - drawer 底部 `New Session` 不能只依赖 relay directory device 解析 hostKey；如果当前 host rail 来自 saved server 或 runtime session identity，也必须能解析成 `BridgeTarget` 并调用 `tmux-create-session` 创建空白 session。
 - 继续纠正：drawer 的 `New Session` 不能点击后直接创建；必须先弹出表单让用户确认 session 名和启动路径，路径默认 `~/`。确认后才发送 `tmux-create-session`，payload 必须带用户确认的 `cwd`。
+
+## 2026-06-30 Windows daemon 可用性复核
+
+- Windows daemon 已验证可用：
+  - `http://100.75.122.121:3333/health?token=...` 返回 `ok: true`
+  - WebSocket 主链已跑通 `list-sessions -> tmux-create-session -> session-open -> connect -> input -> buffer-sync`
+  - 当前 health 显示 `pid=15400`、`wsUrl=ws://100.75.122.121:3333`
+- Windows 鉴权不是硬编码：
+  - `C:\Users\huawei\.zterm\config.json` 已写入 `mobile.daemon.host=0.0.0.0`
+  - `mobile.daemon.port=3333`
+  - `mobile.daemon.authToken` 来自统一配置真源，token 前缀为 `wterm-41...`
+- Tailscale IP：
+  - Windows `jason-hw-desktop` -> `100.75.122.121`
+  - macbookair -> `100.86.84.63`
+- 手机多机管理测试时，直接用这两个 Tailscale IP + 3333 端口即可；不要再走本机名或硬编码地址。
+
+## 2026-06-30 Windows TUI 退出不应断 session
+
+- 现场问题：Windows 上从 Codex/TUI 退出后连接断掉。根因方向不是 Tailscale，而是 Windows WezTerm session 必须以持久 shell 为根进程；如果 pane 根进程是一次性 `cmd.exe /c codex`，Codex 退出就会直接结束 pane，daemon 随后会报告 session unavailable。
+- 已验证真实能力：Windows WezTerm pane 用 `cmd.exe /k` 启动后，通过 stdin 进入 `codex`，再发 Ctrl+C 退出，pane 仍在并回到 `C:\Users\huawei>` prompt；继续发送 `echo ZTERM_AFTER_CODEX` 可成功返回。
+- 修复：`wezterm-backend.ts` 默认 session root 改为 `cmd.exe /k`，新增 `buildWezTermPersistentShellCommand()`，显式拒绝 `cmd.exe /c ...` 作为 session root。
+- 回归：`wezterm-backend-input-smoke.ts --include-codex` 现在验证“shell -> codex -> Ctrl+C -> shell 继续可用”，并处理 Codex update prompt 的 `Skip`。
+- 验证：
+  - `pnpm --dir android exec vitest run src/server/wezterm-backend.test.ts src/server/wezterm-backend-runtime.test.ts src/server/terminal-control-runtime.input-queue.test.ts --reporter dot` PASS（21 tests）
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+  - `pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts --include-codex` PASS，结果 `codex.returnedToShell=true`
+- 已部署到 Windows 当前 task runtime：
+  - 本地 `pnpm --dir android run daemon:prepare-release` 重新生成 `runtime/server.cjs`
+  - 覆盖 Windows `D:\zterm-tools\daemon-runtime-test\runtime\server.cjs` 和 `support\windows\zterm-daemon.ps1`
+  - 仅重启 Scheduled Task `ZTermDaemon`，新 pid `5428`
+  - health `http://100.75.122.121:3333/health?token=...` 返回 `ok: true`
+  - 真实 daemon 协议复测：`tmux-create-session -> session-open -> connect -> codex -> Ctrl+C -> echo ZTERM_DAEMON_CODEX_RETURNED_STRICT` PASS，session transport 仍 open
+
+## 2026-06-30 Connections server card -> exact picker target
+
+- Connections 主卡片点击现在不再走旧的 shared open path；它直接打开该卡片对应的 `onEditServerGroup` picker。
+- picker 真源必须跟随该卡片的 `bridgeHost / bridgePort / daemonHostId / authToken`，不能复用另一个 server 的 target。
+- 通过测试锁住了两个回归：同一页面多 server card 点击各自 target 不串线；history-only group 也只进 picker，不伪装成 runtime open。
+- 已验证：`ConnectionsPage.test.tsx`、`tmux-session-picker-rows.test.ts`、`TmuxSessionPickerSheet.test.tsx`、`tsc --noEmit` 全绿。

@@ -108,6 +108,7 @@ describe('ConnectionsPage', () => {
     const onResumeSession = vi.fn();
     const onCloseSession = vi.fn();
     const onOpenGroupSession = vi.fn();
+    const onEditServerGroup = vi.fn();
     const onSaveServerGroupSelection = vi.fn();
     const onOpenServerGroups = vi.fn();
     const onEdit = vi.fn();
@@ -124,7 +125,7 @@ describe('ConnectionsPage', () => {
         onResumeSession={onResumeSession}
         onCloseSession={onCloseSession}
         onOpenGroupSession={onOpenGroupSession}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={onSaveServerGroupSelection}
         onDeleteServerGroup={vi.fn()}
         onOpenServerGroups={onOpenServerGroups}
@@ -135,8 +136,11 @@ describe('ConnectionsPage', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByText('Enter')[0]);
-    expect(onResumeSession).toHaveBeenCalledWith('live-logs');
+    fireEvent.click(screen.getAllByText('Sessions')[0]);
+    expect(onEditServerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ bridgeHost: '100.64.0.10', bridgePort: 3333 }),
+      expect.arrayContaining(['main', 'logs']),
+    );
     expect(onOpenServerGroups).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getAllByText('+')[0]);
@@ -161,7 +165,7 @@ describe('ConnectionsPage', () => {
       }),
     ]);
 
-    fireEvent.click(screen.getAllByText('Enter')[1]);
+    fireEvent.click(screen.getAllByText('Enter')[0]);
     expect(onResumeSession).toHaveBeenCalledWith('live-logs');
 
     fireEvent.click(screen.getByText('Close'));
@@ -483,8 +487,8 @@ it('exits group management and restores the add-server entry', () => {
     expect(screen.getByText('Vaults are not available yet')).toBeTruthy();
   });
 
-  it('uses card tap to open an openable group and Details only for non-openable groups', () => {
-    const onOpenServerGroups = vi.fn();
+  it('routes card tap to the matching server picker instead of a shared open path', () => {
+    const onEditServerGroup = vi.fn();
 
     render(
       <ConnectionsPage
@@ -494,10 +498,10 @@ it('exits group management and restores the add-server entry', () => {
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={vi.fn()}
         onDeleteServerGroup={vi.fn()}
-        onOpenServerGroups={onOpenServerGroups}
+        onOpenServerGroups={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         onAddNew={vi.fn()}
@@ -506,16 +510,14 @@ it('exits group management and restores the add-server entry', () => {
     );
 
     fireEvent.click(screen.getByText('daemon-host-1 · 1 session'));
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
-      expect.objectContaining({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] }),
-    ]);
-    expect(screen.queryByText('main')).toBeNull();
-
-    onOpenServerGroups.mockClear();
-    fireEvent.click(screen.getAllByText('Open')[0]);
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
-      expect.objectContaining({ daemonHostId: 'daemon-host-1', sessionNames: ['main'] }),
-    ]);
+    expect(onEditServerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-1',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+      }),
+      ['main'],
+    );
   });
 
   it('covers empty-state entry actions: add server and open settings login', () => {
@@ -577,7 +579,7 @@ it('exits group management and restores the add-server entry', () => {
   });
 
   it('groups hosts by daemonHostId first even when bridge endpoint differs', () => {
-    const onOpenServerGroups = vi.fn();
+    const onEditServerGroup = vi.fn();
 
     render(
       <ConnectionsPage
@@ -590,10 +592,10 @@ it('exits group management and restores the add-server entry', () => {
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={vi.fn()}
         onDeleteServerGroup={vi.fn()}
-        onOpenServerGroups={onOpenServerGroups}
+        onOpenServerGroups={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         onAddNew={vi.fn()}
@@ -604,19 +606,21 @@ it('exits group management and restores the add-server entry', () => {
     expect(screen.getByText('daemon-host-1 · 2 sessions')).toBeTruthy();
     expect(screen.getByText('saved · 100.64.0.10:3333')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByText('Open')[0]);
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
+    fireEvent.click(screen.getByText('Sessions'));
+    expect(onEditServerGroup).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: 'daemon-host-1 · 2 sessions',
         daemonHostId: 'daemon-host-1',
-        sessionNames: expect.arrayContaining(['main', 'logs']),
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        authToken: 'token-a',
       }),
-    ]);
+      expect.arrayContaining(['main', 'logs']),
+    );
   });
 
 
   it('opens the newer daemon endpoint instead of a stale saved host endpoint for the same server card', () => {
-    const onOpenServerGroups = vi.fn();
+    const onEditServerGroup = vi.fn();
 
     render(
       <ConnectionsPage
@@ -643,10 +647,10 @@ it('exits group management and restores the add-server entry', () => {
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={vi.fn()}
         onDeleteServerGroup={vi.fn()}
-        onOpenServerGroups={onOpenServerGroups}
+        onOpenServerGroups={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         onAddNew={vi.fn()}
@@ -654,20 +658,20 @@ it('exits group management and restores the add-server entry', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Open'));
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
+    fireEvent.click(screen.getByText('Sessions'));
+    expect(onEditServerGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         daemonHostId: 'daemon-host-1',
         bridgeHost: '100.127.23.27',
         bridgePort: 4444,
-        sessionNames: ['main'],
       }),
-    ]);
+      ['main'],
+    );
   });
 
 
   it('opens with the newer daemon auth token instead of a stale saved host token for the same server card', () => {
-    const onOpenServerGroups = vi.fn();
+    const onEditServerGroup = vi.fn();
 
     render(
       <ConnectionsPage
@@ -696,10 +700,10 @@ it('exits group management and restores the add-server entry', () => {
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenGroupSession={vi.fn()}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={vi.fn()}
         onDeleteServerGroup={vi.fn()}
-        onOpenServerGroups={onOpenServerGroups}
+        onOpenServerGroups={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         onAddNew={vi.fn()}
@@ -707,13 +711,91 @@ it('exits group management and restores the add-server entry', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Open'));
-    expect(onOpenServerGroups).toHaveBeenCalledWith([
+    fireEvent.click(screen.getByText('Sessions'));
+    expect(onEditServerGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         daemonHostId: 'daemon-host-1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 4444,
         authToken: 'token-fresh',
       }),
-    ]);
+      ['main'],
+    );
+  });
+
+  it('keeps each server card pinned to its own bridge target when opening the picker', () => {
+    const onEditServerGroup = vi.fn();
+
+    render(
+      <ConnectionsPage
+        hosts={[
+          makeHost({
+            id: 'host-a',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-a',
+            sessionName: 'main',
+          }),
+          makeHost({
+            id: 'host-b',
+            bridgeHost: '100.75.122.121',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-b',
+            sessionName: 'work',
+          }),
+        ]}
+        sessions={[]}
+        sessionGroups={[
+          makeGroup({
+            id: 'group-a',
+            daemonHostId: 'daemon-a',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            sessionNames: ['main'],
+          }),
+          makeGroup({
+            id: 'group-b',
+            daemonHostId: 'daemon-b',
+            bridgeHost: '100.75.122.121',
+            bridgePort: 3333,
+            sessionNames: ['work'],
+          }),
+        ]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('daemon-a · 1 session'));
+    fireEvent.click(screen.getByText('daemon-b · 1 session'));
+
+    expect(onEditServerGroup).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+      }),
+      ['main'],
+    );
+    expect(onEditServerGroup).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        daemonHostId: 'daemon-b',
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+      }),
+      ['work'],
+    );
   });
 
   it('keeps daemonHostId when opening checked sessions from expanded group', () => {
@@ -955,7 +1037,8 @@ it('exits group management and restores the add-server entry', () => {
     expect(screen.queryByText('1 default · ready')).toBeNull();
   });
 
-  it('does not offer open actions for history-only sessions that no longer have a saved host or live runtime session', () => {
+  it('opens history-only sessions through the matching picker target without synthesizing a runtime open', () => {
+    const onEditServerGroup = vi.fn();
     const onOpenServerGroups = vi.fn();
     const onOpenGroupSession = vi.fn();
     const recentTs = Date.now() - 60_000;
@@ -976,7 +1059,7 @@ it('exits group management and restores the add-server entry', () => {
         onResumeSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenGroupSession={onOpenGroupSession}
-        onEditServerGroup={vi.fn()}
+        onEditServerGroup={onEditServerGroup}
         onSaveServerGroupSelection={vi.fn()}
         onDeleteServerGroup={vi.fn()}
         onOpenServerGroups={onOpenServerGroups}
@@ -990,12 +1073,18 @@ it('exits group management and restores the add-server entry', () => {
     expect(screen.getByText('History only · last active 1 min ago')).toBeTruthy();
     expect(screen.getByText('2 default · history-only')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByText('Details')[0]);
+    fireEvent.click(screen.getByText('Sessions'));
+    expect(onEditServerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-host-1',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        authToken: 'token-a',
+      }),
+      [],
+    );
     expect(onOpenServerGroups).not.toHaveBeenCalled();
-    expect(screen.getByText('gone-a')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('Open checked'));
-    expect(onOpenServerGroups).not.toHaveBeenCalled();
     expect(onOpenGroupSession).not.toHaveBeenCalled();
   });
 
@@ -1039,7 +1128,7 @@ it('exits group management and restores the add-server entry', () => {
       />,
     );
 
-    expect(screen.getAllByText('Open')).toHaveLength(1);
+    expect(screen.getAllByText('Sessions')).toHaveLength(1);
     expect(screen.getByText('daemon-host-1 · 1 session')).toBeTruthy();
     expect(screen.queryByText('100.64.0.10 · 1 session')).toBeNull();
   });
