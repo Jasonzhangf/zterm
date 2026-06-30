@@ -118,6 +118,15 @@ describe('tmux-sessions transport contract', () => {
     createSocket.triggerSessions(['new-tab']);
     await expect(createPromise).resolves.toEqual(['new-tab']);
 
+    const createWithCwdPromise = createTmuxSession(target, bridgeSettings, 'work-api', { cwd: '~/code/api' });
+    const createWithCwdSocket = traversalHarness.MockTraversalSocket.latest();
+    createWithCwdSocket.triggerOpen();
+    expect(createWithCwdSocket.sent).toEqual([
+      JSON.stringify({ type: 'tmux-create-session', payload: { sessionName: 'work-api', cwd: '~/code/api' } }),
+    ]);
+    createWithCwdSocket.triggerSessions(['work-api']);
+    await expect(createWithCwdPromise).resolves.toEqual(['work-api']);
+
     const renamePromise = renameTmuxSession(target, bridgeSettings, 'new-tab', 'renamed-tab');
     const renameSocket = traversalHarness.MockTraversalSocket.latest();
     renameSocket.triggerOpen();

@@ -1166,3 +1166,4 @@ Need runtime debug to confirm:
 
 - 现场纠正：Connections 主入口不能只是“进入已有服务器 workspace”；它必须恢复为“新增服务器”入口，打开 `new-connection` picker，再由 picker 区分“新增服务器”和“已有服务器 sessions”。
 - drawer 底部 `New Session` 不能只依赖 relay directory device 解析 hostKey；如果当前 host rail 来自 saved server 或 runtime session identity，也必须能解析成 `BridgeTarget` 并调用 `tmux-create-session` 创建空白 session。
+- 继续纠正：drawer 的 `New Session` 不能点击后直接创建；必须先弹出表单让用户确认 session 名和启动路径，路径默认 `~/`。确认后才发送 `tmux-create-session`，payload 必须带用户确认的 `cwd`。

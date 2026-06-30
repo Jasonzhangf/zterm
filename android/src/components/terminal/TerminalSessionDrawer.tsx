@@ -43,7 +43,7 @@ export interface TerminalSessionDrawerProps {
   onCloseSession: (sessionId: string) => void;
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
-  onOpenQuickTabPicker: (hostKey?: string) => void;
+  onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
   onDebugAddEvent?: (eventName: string) => void;
 }
 
@@ -122,6 +122,20 @@ function TerminalSessionDrawerComponent({
     x: number;
     y: number;
   } | null>(null);
+  const [newSessionDraft, setNewSessionDraft] = useState<{
+    hostKey?: string;
+    sessionName: string;
+    cwd: string;
+  } | null>(null);
+
+  const buildDefaultSessionName = () => {
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\..+$/, '')
+      .replace('T', '-');
+    return `zterm-${stamp}`;
+  };
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current !== null) {
@@ -216,6 +230,24 @@ function TerminalSessionDrawerComponent({
     const group = hostGroups.find((g) => g.hostKey === effectiveHostKey);
     return group?.sessions || [];
   }, [effectiveHostKey, hostGroups, multiHost, sessions]);
+
+  const openNewSessionDialog = () => {
+    setNewSessionDraft({
+      hostKey: effectiveHostKey || hostGroups[0]?.hostKey,
+      sessionName: buildDefaultSessionName(),
+      cwd: '~/',
+    });
+  };
+
+  const confirmNewSession = () => {
+    const sessionName = newSessionDraft?.sessionName.trim() || '';
+    const cwd = newSessionDraft?.cwd.trim() || '~/';
+    if (!newSessionDraft || !sessionName) {
+      return;
+    }
+    onOpenQuickTabPicker(newSessionDraft.hostKey, { sessionName, cwd });
+    setNewSessionDraft(null);
+  };
 
   return (
     <>
@@ -663,6 +695,123 @@ function TerminalSessionDrawerComponent({
           </div>
         ) : null}
 
+        {newSessionDraft ? (
+          <div
+            data-testid="terminal-session-drawer-new-session-dialog"
+            style={{
+              margin: '8px 10px',
+              padding: '12px',
+              borderRadius: '16px',
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(10, 16, 26, 0.96)',
+              boxShadow: '0 14px 30px rgba(0,0,0,0.28)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div
+              style={{
+                color: '#dce8ff',
+                fontSize: '13px',
+                fontWeight: 850,
+              }}
+            >
+              新建 Session
+            </div>
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px',
+                color: 'rgba(220,232,255,0.68)',
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              名称
+              <input
+                aria-label="新 session 名称"
+                value={newSessionDraft.sessionName}
+                onChange={(event) => setNewSessionDraft((current) => (
+                  current ? { ...current, sessionName: event.target.value } : current
+                ))}
+                style={{
+                  height: '34px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: '#dce8ff',
+                  padding: '0 10px',
+                  fontSize: '13px',
+                }}
+              />
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px',
+                color: 'rgba(220,232,255,0.68)',
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              启动路径
+              <input
+                aria-label="新 session 启动路径"
+                value={newSessionDraft.cwd}
+                placeholder="~/"
+                onChange={(event) => setNewSessionDraft((current) => (
+                  current ? { ...current, cwd: event.target.value } : current
+                ))}
+                style={{
+                  height: '34px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: '#dce8ff',
+                  padding: '0 10px',
+                  fontSize: '13px',
+                }}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setNewSessionDraft(null)}
+                style={{
+                  flex: 1,
+                  height: '34px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(220,232,255,0.78)',
+                  fontWeight: 800,
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={!newSessionDraft.sessionName.trim()}
+                onClick={confirmNewSession}
+                style={{
+                  flex: 1,
+                  height: '34px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(106,167,255,0.35)',
+                  background: newSessionDraft.sessionName.trim() ? 'rgba(106,167,255,0.22)' : 'rgba(255,255,255,0.05)',
+                  color: newSessionDraft.sessionName.trim() ? '#8bd5ff' : 'rgba(220,232,255,0.42)',
+                  fontWeight: 900,
+                }}
+              >
+                创建
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div
           data-testid="terminal-session-drawer-add"
           role="button"
@@ -682,7 +831,7 @@ function TerminalSessionDrawerComponent({
             event.preventDefault();
             event.stopPropagation();
             onDebugAddEvent?.('add:callback');
-            onOpenQuickTabPicker(effectiveHostKey || hostGroups[0]?.hostKey);
+            openNewSessionDialog();
           }}
           onPointerDown={() => {
             onDebugAddEvent?.('add:pointerdown');
@@ -692,6 +841,9 @@ function TerminalSessionDrawerComponent({
           }}
           onClick={() => {
             onDebugAddEvent?.('add:click');
+            if (!newSessionDraft) {
+              openNewSessionDialog();
+            }
           }}
           style={{
             padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,

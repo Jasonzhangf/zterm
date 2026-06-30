@@ -30,6 +30,11 @@ import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 
+interface QuickTabCreateOptions {
+  sessionName?: string;
+  cwd?: string;
+}
+
 interface SessionOpenGroupTarget {
   bridgeHost: string;
   bridgePort: number;
@@ -82,7 +87,7 @@ export interface SessionOpenActionsResult {
   pickerScopePaneId: string | null;
   handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => Promise<void>;
   handleAddNew: () => void;
-  handleOpenQuickTabPicker: (paneId?: string, hostKey?: string) => void;
+  handleOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => void;
@@ -535,13 +540,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     return `zterm-${stamp}`;
   }, []);
 
-  const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string) => {
+  const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => {
     const target = resolveTargetByHostKey(hostKey);
     if (target) {
-      const sessionName = buildBlankSessionName();
+      const sessionName = createOptions?.sessionName?.trim() || buildBlankSessionName();
+      const cwd = createOptions?.cwd?.trim();
       void (async () => {
         try {
-          await createTmuxSession(target, bridgeSettings, sessionName);
+          await createTmuxSession(target, bridgeSettings, sessionName, cwd ? { cwd } : undefined);
           const draft = buildDraftFromTmuxSession(hosts, bridgeSettings.servers, target, sessionName);
           const opened = openDraftAsSession(draft, {
             rememberName: target.bridgeHost || target.daemonHostId || target.relayHostId || hostKey,

@@ -24,6 +24,7 @@
 - [2026-06-30] Windows daemon 的连通性判断不能把“SSH/Tailscale 可达”误当成“应用端口可达”；如果 `22` 可连但 `3333` 不通，先查 Windows 侧监听/绑定/WFP/防火墙/服务暴露链路，不要再归因到 Tailnet 本身。
 - [2026-06-30 superseded] UI 入口语义曾被错误收口为“Connections 主页面只进入/连接服务器 workspace，不打开 `new-connection` picker”。该结论已被现场纠正：主入口必须能新增服务器连接；只保留“Terminal drawer 底部 `New Session` 在当前选中 daemon 上创建空白 session”这一半规则。
 - [2026-06-30 correction] Connections 主页面 FAB 的语义应是“新增服务器”，必须打开 `new-connection` picker；不能被收口成只进入已有 server workspace，否则用户无法新增服务器连接。Terminal drawer 底部 `New Session` 的语义仍是“在当前选中 daemon 上创建空白 session”，但 hostKey 解析必须覆盖 relay directory、saved server preset、runtime session identity，不能只依赖 relayDevices。
+- [2026-06-30 correction] Terminal drawer 底部 `New Session` 不能点击后直接创建；必须先弹出创建表单，让用户确认 session 名和启动路径。启动路径默认 `~/`，用户可补齐为目标路径；确认后才调用 `tmux-create-session`，wire payload 必须携带确认后的 `cwd`。
 - [2026-06-29] 多 daemon drawer 分组必须先做 endpoint alias 归一化：同一 `bridgeHost:bridgePort` 上只要任一 session 带 `daemonHostId`，其它只带 IP 的历史/open tab session 也要归入该 daemon identity；否则 UI 会把同一台机器拆成 “IP” 和 “机器名” 两组。`TerminalSessionDrawer` 只能显示注入的 `hostLabel`，禁止在 drawer 内再次从 key/label 推导名称。
 
 - [2026-06-29] MacBook Air daemon 安装/启动的真源必须固化在 daemon 包与 service runner 内：npm postinstall / launchd runner 负责自动写 `~/.local/bin/zterm-daemon`、`~/.local/bin/wterm`，写入前先清旧 symlink/file；released runner 在读 config 前负责把旧 `~/.wterm` 迁移到 `~/.zterm`。远端验证已确认 `restart` 后服务正常、health 为 `ok: true`，且不再依赖手工修 PATH 或手工挪目录。

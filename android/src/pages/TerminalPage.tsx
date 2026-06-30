@@ -205,7 +205,7 @@ interface TerminalPageProps {
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
-  onOpenQuickTabPicker: (paneId?: string, hostKey?: string) => void;
+  onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   sessionPickerDebugMode?: string | null;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
@@ -2410,7 +2410,7 @@ function TerminalPageComponent({
     onCloseSession(sessionId, 'session-drawer-close-button');
   }, [onCloseSession]);
 
-  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string) => {
+  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
     if (paneId) {
       activatePaneAndSession(paneId);
     }
@@ -2420,10 +2420,10 @@ function TerminalPageComponent({
       eventSeq: current.eventSeq + 1,
       pageCallbackSeq: current.pageCallbackSeq + 1,
     }));
-    onOpenQuickTabPicker(paneId, hostKey);
+    onOpenQuickTabPicker(paneId, hostKey, createOptions);
   }, [activatePaneAndSession, onOpenQuickTabPicker]);
 
-  const handleOpenQuickTabPickerFromDrawer = useCallback((hostKey?: string) => {
+  const handleOpenQuickTabPickerFromDrawer = useCallback((hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
     setSessionDrawerDebug((current) => ({
       ...current,
       lastEvent: 'page:drawer-callback',
@@ -2431,7 +2431,7 @@ function TerminalPageComponent({
       callbackSeq: current.callbackSeq + 1,
     }));
     setSessionDrawerOpen(false);
-    handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined, hostKey);
+    handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined, hostKey, createOptions);
   }, [handleOpenQuickTabPickerForPane, splitVisible, workspace.activePaneId]);
 
   const handleSessionDrawerDebugAddEvent = useCallback((eventName: string) => {

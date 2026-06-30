@@ -344,7 +344,10 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }));
 
     await act(async () => {
-      result.current.handleOpenQuickTabPicker('pane-2', 'daemon-a');
+      result.current.handleOpenQuickTabPicker('pane-2', 'daemon-a', {
+        sessionName: 'work-api',
+        cwd: '~/code/api',
+      });
       await Promise.resolve();
     });
 
@@ -352,13 +355,14 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(createTmuxSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ daemonHostId: 'daemon-a', relayHostId: 'daemon-a' }),
       expect.any(Object),
-      'zterm-20260630-040506',
+      'work-api',
+      { cwd: '~/code/api' },
     );
     expect(harness.spies.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ daemonHostId: 'daemon-a', sessionName: 'zterm-20260630-040506' }),
+      expect.objectContaining({ daemonHostId: 'daemon-a', sessionName: 'work-api' }),
       expect.any(Object),
     );
-    expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:zterm-20260630-040506'], 'pane-2');
+    expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:work-api'], 'pane-2');
     vi.useRealTimers();
   });
 
@@ -399,6 +403,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       }),
       expect.any(Object),
       'zterm-20260630-040506',
+      undefined,
     );
     expect(harness.spies.createSession).toHaveBeenCalledWith(
       expect.objectContaining({

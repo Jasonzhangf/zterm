@@ -29,6 +29,16 @@ describe('TerminalSessionDrawer', () => {
     },
   ];
 
+  function confirmNewSession(sessionName = 'work-api', cwd = '~/code/api') {
+    fireEvent.change(screen.getByLabelText('新 session 名称'), {
+      target: { value: sessionName },
+    });
+    fireEvent.change(screen.getByLabelText('新 session 启动路径'), {
+      target: { value: cwd },
+    });
+    fireEvent.click(screen.getByText('创建'));
+  }
+
   it('renders a single-column session list and routes select/plus actions', () => {
     const onSelectSession = vi.fn();
     const onOpenQuickTabPicker = vi.fn();
@@ -50,10 +60,11 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
-    expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
   });
 
-  it('opens quick tab picker from the drawer add button touch activation', () => {
+  it('opens the new session form before creating from the drawer add button touch activation', () => {
     const onOpenQuickTabPicker = vi.fn();
 
     render(
@@ -71,7 +82,14 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.touchEnd(addButton, {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
-    expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
+
+    confirmNewSession();
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('default', {
+      sessionName: 'work-api',
+      cwd: '~/code/api',
+    });
   });
 
   it('keeps the add button above the IME inset', () => {
@@ -123,7 +141,8 @@ describe('TerminalSessionDrawer', () => {
       'add:touchend',
       'add:callback',
     ]);
-    expect(onOpenQuickTabPicker).toHaveBeenCalledTimes(1);
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
   });
 
   it('closes on overlay click and left swipe gesture', () => {
@@ -222,7 +241,7 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-s3')).toBeTruthy();
   });
 
-  it('lists account hosts without sessions and creates a new session for the selected host', () => {
+  it('lists account hosts without sessions and asks for name/path before creating a new session', () => {
     const onOpenQuickTabPicker = vi.fn();
 
     render(
@@ -256,7 +275,21 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
-    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('daemon-b');
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('新 session 名称'), {
+      target: { value: 'work-api' },
+    });
+    fireEvent.change(screen.getByLabelText('新 session 启动路径'), {
+      target: { value: '~/code/api' },
+    });
+    fireEvent.click(screen.getByText('创建'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('daemon-b', {
+      sessionName: 'work-api',
+      cwd: '~/code/api',
+    });
   });
 
   it('does not show host rail when all sessions share the same hostKey', () => {
