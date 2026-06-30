@@ -231,6 +231,10 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - same-revision merge 也必须遵守“tail 优先稳定”：
   - 若当前本地窗口已经贴着 authoritative tail，且迟到 payload 只覆盖更老的历史、不推进 tail
   - 那么它只能补当前窗口内已有 absolute-index 行，**不得**回拖 `startIndex/endIndex`
+- sparse `buffer-sync` 只能建立在连续 revision 基线上：
+  - 若 client local revision 跳过 daemon 中间 revision，且 incoming payload 没覆盖完整 `[startIndex,endIndex)` 窗口，client 不得把该 sparse diff 合并成本地 body truth
+  - 正确动作是拒绝这次 sparse body apply，清 tail-refresh debounce，并请求当前 authoritative tail window
+  - 否则旧行会作为“未覆盖但保留”的本地 truth 永久存在，表现为大面积刷新时旧内容跟着 buffer 上移
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
 - transport topology 也必须冻结：

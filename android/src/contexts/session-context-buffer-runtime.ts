@@ -65,6 +65,37 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
+function getWireLineIndex(line: TerminalBufferPayload['lines'][number]) {
+  if (!line) {
+    return null;
+  }
+  if ('i' in line && Number.isFinite(line.i)) {
+    return Math.max(0, Math.floor(line.i));
+  }
+  if ('index' in line && Number.isFinite(line.index)) {
+    return Math.max(0, Math.floor(line.index));
+  }
+  return null;
+}
+
+function isSparsePayloadWindow(payload: TerminalBufferPayload) {
+  const startIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const endIndex = Math.max(startIndex, Math.floor(payload.endIndex || startIndex));
+  const windowSize = Math.max(0, endIndex - startIndex);
+  if (windowSize === 0) {
+    return false;
+  }
+  const uniqueLineIndexes = new Set<number>();
+  for (const line of payload.lines || []) {
+    const index = getWireLineIndex(line);
+    if (index === null || index < startIndex || index >= endIndex) {
+      continue;
+    }
+    uniqueLineIndexes.add(index);
+  }
+  return uniqueLineIndexes.size < windowSize;
+}
+
 export function handleBufferHeadRuntime(options: {
   sessionId: string;
   latestRevision: number;
@@ -684,6 +715,52 @@ export function applyIncomingBufferSyncRuntime(options: {
       incomingStartIndex: lowerRevisionPayload.startIndex,
       incomingEndIndex: lowerRevisionPayload.endIndex,
     });
+  }
+
+  const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  const localRevision = Math.max(0, Math.floor(localBuffer.revision || 0));
+  if (
+    localRevision > 0
+    && incomingRevision > localRevision + 1
+    && isSparsePayloadWindow(options.payload)
+  ) {
+    const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+      revision: incomingRevision,
+      latestEndIndex: Number.isFinite(options.payload.availableEndIndex)
+        ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
+        : Math.max(0, Math.floor(options.payload.endIndex || 0)),
+      availableStartIndex: Number.isFinite(options.payload.availableStartIndex)
+        ? Math.max(0, Math.floor(options.payload.availableStartIndex || 0))
+        : undefined,
+      availableEndIndex: Number.isFinite(options.payload.availableEndIndex)
+        ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
+        : undefined,
+      seenAt: Date.now(),
+    };
+    const incomingStartIndex = Math.max(0, Math.floor(options.payload.startIndex || 0));
+    const incomingEndIndex = Math.max(incomingStartIndex, Math.floor(options.payload.endIndex || incomingStartIndex));
+    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.runtimeDebug('session.buffer.sync.revision-gap-sparse-payload', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      localRevision,
+      incomingRevision,
+      incomingStartIndex,
+      incomingEndIndex,
+      incomingWindowSize: Math.max(0, incomingEndIndex - incomingStartIndex),
+      incomingLineCount: Array.isArray(options.payload.lines) ? options.payload.lines.length : 0,
+    });
+    options.requestSessionBufferSync(options.sessionId, {
+      reason: 'buffer-sync-revision-gap-sparse-payload',
+      purpose: 'tail-refresh',
+      sessionOverride: {
+        ...session,
+        daemonHeadRevision: liveHead.revision,
+        daemonHeadEndIndex: liveHead.latestEndIndex,
+      },
+      liveHead,
+    });
+    return;
   }
 
   nextBuffer = applyBufferSyncToSessionBuffer(

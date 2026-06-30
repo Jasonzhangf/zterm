@@ -898,6 +898,14 @@ Need runtime debug to confirm:
 
 ### 修复
 - `TerminalSessionDrawer` 底部按钮改成自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
+
+## 2026-06-30 terminal stale rows during large refresh
+
+- 现场现象：大面积刷新时有两行旧内容被跳过，并随着 buffer 刷新持续上移。
+- 本轮审计排除点：`TerminalView` 行 key 已按 `absoluteIndex`，不是 viewport index；`buildTerminalRenderRows` 的窗口平移最小场景能正确重锚。
+- 可复现根因路径：client 本地 revision 若从 5 直接收到 daemon revision 8 的 sparse `buffer-sync`，当前实现仍把 sparse diff 写入本地 buffer；未覆盖的旧行会被当成本地 truth 保留，之后 sparse diff 继续叠加时旧行就可能永久存在。
+- 修复：`applyIncomingBufferSyncRuntime` 增加 `revision gap + sparse payload` 门禁。发现非连续 revision 且 payload 未覆盖完整窗口时，不 commit 该 sparse diff，不触发 renderer；清掉 tail-refresh debounce 后请求 daemon 当前 authoritative tail window。
+- 反向锁定：连续 revision sparse diff 仍正常 commit/render，不把正常高频 diff 误判为漏帧。
 - 回归测试从 `click/pointerUp` 改为 `touchEnd`，锁 `TerminalSessionDrawer` 与 `TerminalPage.session-drawer` 两层。
 
 ### 已验证

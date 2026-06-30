@@ -71,6 +71,19 @@ function makePayload(revision: number): TerminalBufferPayload {
   };
 }
 
+function makeLine(text: string) {
+  return {
+    index: 0,
+    cells: Array.from(text).map((char) => ({
+      char: char.codePointAt(0) || 32,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    })),
+  };
+}
+
 function makeHeadRuntimeRefs(options: {
   sessions: Session[];
   activeSessionId: string;
@@ -199,6 +212,180 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localRevision: 1,
         localStartIndex: 0,
         localEndIndex: 1,
+      }),
+    );
+  });
+
+  it('does not apply sparse buffer-sync after a revision gap and requests an authoritative tail window', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-100', 'old-101', 'old-102', 'old-103', 'old-104'],
+      startIndex: 100,
+      endIndex: 105,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 105,
+      cols: 80,
+      rows: 24,
+      revision: 5,
+      cacheLines: 1000,
+    });
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 8,
+        startIndex: 103,
+        endIndex: 110,
+        availableStartIndex: 100,
+        availableEndIndex: 110,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-103'), index: 103 },
+          { ...makeLine('new-109'), index: 109 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: {
+          current: new Map([
+            [sessionId, {
+              revision: 8,
+              latestEndIndex: 110,
+              availableStartIndex: 100,
+              availableEndIndex: 110,
+              seenAt: 1,
+            }],
+          ]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-sync-revision-gap-sparse-payload',
+        purpose: 'tail-refresh',
+        liveHead: expect.objectContaining({
+          revision: 8,
+          latestEndIndex: 110,
+        }),
+      }),
+    );
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.revision-gap-sparse-payload',
+      expect.objectContaining({
+        sessionId,
+        incomingRevision: 8,
+        localRevision: 5,
+        incomingLineCount: 2,
+        incomingWindowSize: 7,
+      }),
+    );
+  });
+
+  it('still applies consecutive sparse buffer-sync without forcing a tail refresh', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-100', 'old-101', 'old-102', 'old-103', 'old-104'],
+      startIndex: 100,
+      endIndex: 105,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 105,
+      cols: 80,
+      rows: 24,
+      revision: 7,
+      cacheLines: 1000,
+    });
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 8,
+        startIndex: 103,
+        endIndex: 110,
+        availableStartIndex: 100,
+        availableEndIndex: 110,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-103'), index: 103 },
+          { ...makeLine('new-109'), index: 109 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: {
+          current: new Map([
+            [sessionId, {
+              revision: 8,
+              latestEndIndex: 110,
+              availableStartIndex: 100,
+              availableEndIndex: 110,
+              seenAt: 1,
+            }],
+          ]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-sync-revision-gap-sparse-payload',
       }),
     );
   });
