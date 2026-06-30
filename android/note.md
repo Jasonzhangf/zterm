@@ -1213,4 +1213,5 @@ Need runtime debug to confirm:
 - Connections 主卡片点击现在不再走旧的 shared open path；它直接打开该卡片对应的 `onEditServerGroup` picker。
 - picker 真源必须跟随该卡片的 `bridgeHost / bridgePort / daemonHostId / authToken`，不能复用另一个 server 的 target。
 - 通过测试锁住了两个回归：同一页面多 server card 点击各自 target 不串线；history-only group 也只进 picker，不伪装成 runtime open。
+- 已补 edit-group 自动刷新回归：picker 打开后必须对当前 concrete target 调 `fetchTmuxSessions()`，并通过 `onRemoteSessionsRefreshed()` 回写最新 sessions。
 - 已验证：`ConnectionsPage.test.tsx`、`tmux-session-picker-rows.test.ts`、`TmuxSessionPickerSheet.test.tsx`、`tsc --noEmit` 全绿。

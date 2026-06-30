@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TmuxSessionPickerSheet } from './TmuxSessionPickerSheet';
+
+const tmuxSessionsMock = vi.hoisted(() => ({
+  fetchTmuxSessions: vi.fn(),
+  createTmuxSession: vi.fn(),
+  killTmuxSession: vi.fn(),
+  renameTmuxSession: vi.fn(),
+}));
 
 const refreshRelayDevices = vi.fn();
 const relayDevices = [
@@ -57,6 +64,8 @@ vi.mock('../../hooks/useTraversalRelayDaemonDevices', () => ({
   }),
 }));
 
+vi.mock('../../lib/tmux-sessions', () => tmuxSessionsMock);
+
 const bridgeSettings = {
   signalUrl: '',
   turnServerUrl: '',
@@ -85,6 +94,53 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it('auto-refreshes edit-group sessions for the concrete selected server target', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['win-main', 'win-work']);
+    const onRemoteSessionsRefreshed = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="edit-group"
+        open
+        servers={[]}
+        bridgeSettings={{ ...bridgeSettings, traversalRelay: undefined }}
+        initialTarget={{
+          bridgeHost: '100.75.122.121',
+          bridgePort: 3333,
+          daemonHostId: 'windows-daemon',
+          authToken: 'token-win',
+        }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+        onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '100.75.122.121',
+          bridgePort: 3333,
+          daemonHostId: 'windows-daemon',
+          authToken: 'token-win',
+        }),
+        expect.objectContaining({ transportMode: 'auto' }),
+      );
+    });
+    await waitFor(() => expect(screen.getByText('win-main')).toBeTruthy());
+    expect(screen.getByText('win-work')).toBeTruthy();
+    expect(onRemoteSessionsRefreshed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+        daemonHostId: 'windows-daemon',
+      }),
+      ['win-main', 'win-work'],
+    );
   });
 
   it('opens a directory tmux session without requiring a local bridge preset', () => {
