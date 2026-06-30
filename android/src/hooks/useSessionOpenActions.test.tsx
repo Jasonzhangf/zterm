@@ -8,9 +8,14 @@ import { buildPersistedOpenTabReuseKey, buildPersistedOpenTabReuseKeyVariants } 
 import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
+const createTmuxSessionMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
   resolveRemoteRestorableOpenTabState: (...args: unknown[]) => resolveRemoteRestorableOpenTabStateMock(...args),
+}));
+
+vi.mock('../lib/tmux-sessions', () => ({
+  createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
 }));
 
 function createRef<T>(value: T) {
@@ -75,6 +80,7 @@ function createOptions(overrides: Partial<any> = {}) {
     },
     setBridgeSettings,
     hosts: overrides.hosts || [],
+    relayDevices: overrides.relayDevices || [],
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
@@ -127,6 +133,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
     vi.restoreAllMocks();
     localStorage.clear();
+    createTmuxSessionMock.mockReset();
+    createTmuxSessionMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
     resolveRemoteRestorableOpenTabStateMock.mockImplementation(async ({ tabs, activeSessionId }: any) => ({
       tabs,
@@ -289,6 +297,53 @@ describe('useSessionOpenActions explicit-open truth', () => {
         authToken: 'token-live',
       }),
     );
+  });
+
+  it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));
+    const onSessionsOpenedInPane = vi.fn();
+    const harness = createOptions({
+      relayDevices: [{
+        deviceId: 'device-a',
+        deviceName: 'Machine A',
+        platform: 'win32',
+        appVersion: '0.1.3',
+        updatedAt: '2026-06-30T04:00:00.000Z',
+        client: { connected: false, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+        daemon: {
+          connected: true,
+          lastSeenAt: '2026-06-30T04:00:00.000Z',
+          hostId: 'daemon-a',
+          version: '0.1.3',
+          endpoints: [{ id: 'relay-a', kind: 'relay-rtc', relayHostId: 'daemon-a', authRequired: true, lastSeenAt: '2026-06-30T04:00:00.000Z' }],
+          sessions: [],
+        },
+      }],
+    });
+
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      onSessionsOpenedInPane,
+    }));
+
+    await act(async () => {
+      result.current.handleOpenQuickTabPicker('pane-2', 'daemon-a');
+      await Promise.resolve();
+    });
+
+    expect(result.current.pickerMode).toBeNull();
+    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-a', relayHostId: 'daemon-a' }),
+      expect.any(Object),
+      'zterm-20260630-040506',
+    );
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-a', sessionName: 'zterm-20260630-040506' }),
+      expect.any(Object),
+    );
+    expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:zterm-20260630-040506'], 'pane-2');
+    vi.useRealTimers();
   });
 
   it('deduplicates duplicate tmux session names before multi-open so one semantic tab opens once', () => {

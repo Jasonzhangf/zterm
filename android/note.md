@@ -1148,3 +1148,9 @@ Need runtime debug to confirm:
 - 本轮 Windows runner 真坑再确认：
   - PowerShell 5.1 写 JSON 默认带 BOM，会导致 daemon 读 config 直接报 `Unexpected token '﻿'`。
   - Windows Scheduled Task 不继承交互式 PATH，runner 必须显式探测/固化 WezTerm executable 路径，不能默认 `wezterm.exe` 可见。
+
+## 2026-06-30 drawer-owned session creation UI shift
+
+- 新产品语义：Connections 主页面只保留账号/登录/服务器概览入口，不再承担 `New Session` / `New Tab` 创建动作。
+- 右滑 Terminal drawer 是 session/daemon 操作入口：host rail 直接列账号目录里的 daemon；即使某台机器当前没有打开的 runtime session，也能选中该机器。
+- drawer 底部 `New Session` 不再打开通用 picker；它会把当前选中机器的 hostKey 交给 action owner，由 `tmux-create-session` 在该 daemon 上创建一个空白 session，再打开成 tab。

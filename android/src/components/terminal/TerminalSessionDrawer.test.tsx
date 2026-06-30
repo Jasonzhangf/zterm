@@ -222,6 +222,43 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-s3')).toBeTruthy();
   });
 
+  it('lists account hosts without sessions and creates a new session for the selected host', () => {
+    const onOpenQuickTabPicker = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[
+          { hostKey: 'daemon-a', hostLabel: 'Mac Studio', connected: true },
+          { hostKey: 'daemon-b', hostLabel: 'Windows PC', connected: true },
+        ]}
+        sessions={[
+          {
+            id: 's1',
+            title: 'demo',
+            subtitle: 'Mac Studio · demo',
+            status: 'connected',
+            active: true,
+            hostKey: 'daemon-a',
+            hostLabel: 'Mac Studio',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-daemon-b'));
+    expect(screen.getByTestId('terminal-session-drawer-empty-host').textContent).toContain('没有活跃 session');
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('daemon-b');
+  });
+
   it('does not show host rail when all sessions share the same hostKey', () => {
     const singleHostSessions = [
       {

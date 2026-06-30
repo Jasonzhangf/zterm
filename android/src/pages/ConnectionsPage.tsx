@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionCard } from '../components/connections/ConnectionCard';
-import { ConnectionFab } from '../components/connections/ConnectionFab';
 import { ConnectionsBottomNav } from '../components/connections/ConnectionsBottomNav';
 import { ConnectionsHeader } from '../components/connections/ConnectionsHeader';
 import { buildConnectionsServerGroups, type ServerGroupView } from '../lib/connections-server-groups';
@@ -45,7 +44,7 @@ interface ConnectionsPageProps {
   }>) => void;
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
-  onAddNew: () => void;
+  onAddNew?: () => void;
   onOpenVaults?: () => void;
   onOpenSettings: () => void;
 }
@@ -116,7 +115,6 @@ export function ConnectionsPage({
   onOpenServerGroups,
   onEdit,
   onDelete,
-  onAddNew,
   onOpenVaults,
   onOpenSettings,
 }: ConnectionsPageProps) {
@@ -900,13 +898,12 @@ export function ConnectionsPage({
               }}
             >
               <div style={{ fontSize: '20px', fontWeight: 800, color: mobileTheme.colors.lightText }}>No connections yet</div>
-              <div style={{ lineHeight: 1.6 }}>Use the floating + button to create your first terminal bridge in the new mobile layout.</div>
+              <div style={{ lineHeight: 1.6 }}>Login to Relay in Settings. Servers and live sessions will appear in the terminal drawer after account sync.</div>
             </div>
           </div>
         )}
       </div>
 
-      {!managementMode && <ConnectionFab onClick={onAddNew} />}
       <ConnectionsBottomNav
         activePage="connections"
         onOpenVaults={handleOpenVaults}

@@ -447,7 +447,7 @@ describe('ConnectionsPage', () => {
     expect(screen.getByText('Close missing')).toBeTruthy();
   });
 
-  it('exits group management after clearing selection and exposes vault placeholder feedback', () => {
+  it('exits group management without restoring main-page session creation and exposes vault placeholder feedback', () => {
     const onOpenVaults = vi.fn();
 
     render(
@@ -476,7 +476,7 @@ describe('ConnectionsPage', () => {
 
     fireEvent.click(screen.getByText('Done'));
     expect(screen.queryByText('main')).toBeNull();
-    expect(screen.getByLabelText('新建连接')).toBeTruthy();
+    expect(screen.queryByLabelText('新建连接')).toBeNull();
 
     fireEvent.click(screen.getByText('Vaults'));
     expect(onOpenVaults).toHaveBeenCalledTimes(1);
@@ -518,8 +518,7 @@ describe('ConnectionsPage', () => {
     ]);
   });
 
-  it('covers empty-state entry actions: add new connection and open settings', () => {
-    const onAddNew = vi.fn();
+  it('covers empty-state entry actions: open settings login without main-page session creation', () => {
     const onOpenSettings = vi.fn();
 
     render(
@@ -536,13 +535,11 @@ describe('ConnectionsPage', () => {
         onOpenServerGroups={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
-        onAddNew={onAddNew}
         onOpenSettings={onOpenSettings}
       />,
     );
 
-    fireEvent.click(screen.getByLabelText('新建连接'));
-    expect(onAddNew).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('新建连接')).toBeNull();
 
     fireEvent.click(screen.getByText('Settings'));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);

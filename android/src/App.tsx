@@ -438,7 +438,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pickerTarget,
     pickerInitialSessions,
     handleLoadSavedTabList,
-    handleAddNew,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
@@ -454,6 +453,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     setBridgeSettings,
     hosts,
+    relayDevices,
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
@@ -622,7 +622,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onDeleteServerGroup={handleDeleteServerGroup}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onAddNew={handleAddNew}
             onOpenSettings={handleOpenSettingsPage}
             onOpenVaults={handleOpenSettingsPage}
           />
@@ -704,6 +703,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onUseAutoSession={handleUseAutoSession}
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
+            relayDevices={relayDevices}
             sessionPickerDebugMode={pickerMode}
             pendingPaneAttachIntent={pendingPaneAttachIntent}
             onPaneAttachIntentApplied={(intent) => {

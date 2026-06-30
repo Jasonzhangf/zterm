@@ -26,17 +26,24 @@ export interface TerminalSessionDrawerItem {
   hostLabel?: string;
 }
 
+export interface TerminalSessionDrawerHost {
+  hostKey: string;
+  hostLabel: string;
+  connected?: boolean;
+}
+
 export interface TerminalSessionDrawerProps {
   open: boolean;
   topInsetPx?: number;
   bottomInsetPx?: number;
   sessions: TerminalSessionDrawerItem[];
+  hosts?: TerminalSessionDrawerHost[];
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
-  onOpenQuickTabPicker: () => void;
+  onOpenQuickTabPicker: (hostKey?: string) => void;
   onDebugAddEvent?: (eventName: string) => void;
 }
 
@@ -97,6 +104,7 @@ function TerminalSessionDrawerComponent({
   topInsetPx = 0,
   bottomInsetPx = 0,
   sessions,
+  hosts = [],
   onClose,
   onSelectSession,
   onCloseSession,
@@ -150,7 +158,19 @@ function TerminalSessionDrawerComponent({
   };
 
   const hostGroups = useMemo(() => {
-    const groups = new Map<string, { hostKey: string; hostLabel: string; sessions: TerminalSessionDrawerItem[] }>();
+    const groups = new Map<string, { hostKey: string; hostLabel: string; connected?: boolean; sessions: TerminalSessionDrawerItem[] }>();
+    for (const host of hosts) {
+      const hostKey = host.hostKey.trim();
+      if (!hostKey) {
+        continue;
+      }
+      groups.set(hostKey, {
+        hostKey,
+        hostLabel: host.hostLabel.trim() || hostKey,
+        connected: host.connected,
+        sessions: [],
+      });
+    }
     for (const session of sessions) {
       const hostKey = session.hostKey;
       if (!hostKey) {
@@ -173,7 +193,7 @@ function TerminalSessionDrawerComponent({
       group.sessions.push(session);
     }
     return Array.from(groups.values());
-  }, [sessions]);
+  }, [hosts, sessions]);
 
   const multiHost = hostGroups.length > 1;
   const [selectedHostKey, setSelectedHostKey] = useState<string | null>(null);
@@ -326,6 +346,7 @@ function TerminalSessionDrawerComponent({
             {hostGroups.map((group) => {
               const isActive = group.hostKey === effectiveHostKey;
               const tone = getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel });
+              const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'rgba(220,232,255,0.45)';
               return (
                 <button
                   key={group.hostKey}
@@ -355,7 +376,8 @@ function TerminalSessionDrawerComponent({
                         width: '8px',
                         height: '8px',
                         borderRadius: '999px',
-                        background: tone.accent,
+                        background: statusColor,
+                        boxShadow: `0 0 0 2px ${tone.accentSoft}`,
                         flexShrink: 0,
                       }}
                     />
@@ -558,8 +580,24 @@ function TerminalSessionDrawerComponent({
                 </span>
               </div>
             </button>
-          );
+            );
           })}
+          {visibleSessions.length === 0 && (
+            <div
+              data-testid="terminal-session-drawer-empty-host"
+              style={{
+                margin: '8px 2px',
+                padding: '14px',
+                borderRadius: '14px',
+                border: '1px dashed rgba(220,232,255,0.16)',
+                color: 'rgba(220,232,255,0.62)',
+                fontSize: '12px',
+                lineHeight: 1.5,
+              }}
+            >
+              当前机器没有活跃 session。点击底部 New Session 会在这台机器上创建一个空白 session。
+            </div>
+          )}
         </div>
 
         {slotMenu && onAssignSessionGroupSlot ? (
@@ -644,7 +682,7 @@ function TerminalSessionDrawerComponent({
             event.preventDefault();
             event.stopPropagation();
             onDebugAddEvent?.('add:callback');
-            onOpenQuickTabPicker();
+            onOpenQuickTabPicker(effectiveHostKey || hostGroups[0]?.hostKey);
           }}
           onPointerDown={() => {
             onDebugAddEvent?.('add:pointerdown');

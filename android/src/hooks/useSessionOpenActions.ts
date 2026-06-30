@@ -17,12 +17,14 @@ import {
   buildPreferredTarget,
   buildTransientHostFromDraft,
   normalizeBridgeTarget,
+  resolveRelayDeviceBridgeTarget,
   type BridgeTarget,
   type HostDraft,
 } from '../lib/session-picker';
 import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
-import type { Host, PersistedOpenTab } from '../lib/types';
+import { createTmuxSession } from '../lib/tmux-sessions';
+import type { Host, PersistedOpenTab, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { loadSavedTabList } from '../lib/saved-tab-loader';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
@@ -40,6 +42,7 @@ interface UseSessionOpenActionsOptions {
   bridgeSettings: BridgeSettings;
   setBridgeSettings: Dispatch<SetStateAction<BridgeSettings>>;
   hosts: Host[];
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   deleteSessionGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   setSessionGroupSelection: (group: {
@@ -79,7 +82,7 @@ export interface SessionOpenActionsResult {
   pickerScopePaneId: string | null;
   handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => Promise<void>;
   handleAddNew: () => void;
-  handleOpenQuickTabPicker: (paneId?: string) => void;
+  handleOpenQuickTabPicker: (paneId?: string, hostKey?: string) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => void;
@@ -120,6 +123,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeSettings,
     setBridgeSettings,
     hosts,
+    relayDevices = [],
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
@@ -471,11 +475,64 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     openSessionPicker('new-connection');
   }, [openSessionPicker]);
 
-  const handleOpenQuickTabPicker = useCallback((paneId?: string) => {
+  const resolveRelayDeviceTargetByHostKey = useCallback((hostKey?: string) => {
+    const normalizedHostKey = hostKey?.trim();
+    if (!normalizedHostKey) {
+      return null;
+    }
+    const matchedDevice = relayDevices.find((device) => (
+      device.daemon.hostId.trim() === normalizedHostKey
+      || device.deviceId.trim() === normalizedHostKey
+      || device.deviceName.trim() === normalizedHostKey
+    ));
+    return matchedDevice
+      ? resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice)
+      : null;
+  }, [bridgeSettings.servers, relayDevices]);
+
+  const buildBlankSessionName = useCallback(() => {
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\..+$/, '')
+      .replace('T', '-');
+    return `zterm-${stamp}`;
+  }, []);
+
+  const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string) => {
+    const target = resolveRelayDeviceTargetByHostKey(hostKey);
+    if (target) {
+      const sessionName = buildBlankSessionName();
+      void (async () => {
+        try {
+          await createTmuxSession(target, bridgeSettings, sessionName);
+          const draft = buildDraftFromTmuxSession(hosts, bridgeSettings.servers, target, sessionName);
+          const opened = openDraftAsSession(draft, {
+            rememberName: target.bridgeHost || target.daemonHostId || target.relayHostId || hostKey,
+            activate: true,
+            navigate: true,
+          });
+          if (paneId) {
+            onSessionsOpenedInPane?.([opened.sessionId], paneId);
+          }
+        } catch (error) {
+          window.alert?.(error instanceof Error ? error.message : String(error));
+        }
+      })();
+      return;
+    }
     openSessionPicker('quick-tab', {
       paneId: paneId || null,
     });
-  }, [openSessionPicker]);
+  }, [
+    bridgeSettings,
+    buildBlankSessionName,
+    hosts,
+    onSessionsOpenedInPane,
+    openDraftAsSession,
+    openSessionPicker,
+    resolveRelayDeviceTargetByHostKey,
+  ]);
 
   const closePicker = useCallback(() => {
     setPickerMode(null);

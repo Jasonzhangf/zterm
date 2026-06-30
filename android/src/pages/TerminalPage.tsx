@@ -8,7 +8,7 @@ import { SessionScheduleSheet } from '../components/terminal/SessionScheduleShee
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
-import { TerminalSessionDrawer, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
+import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
 import {
@@ -78,6 +78,7 @@ import {
   type TerminalShortcutAction,
   type TerminalViewportChangeHandler,
   type TerminalWidthMode,
+  type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
 
 type VirtualKeyboardApi = {
@@ -204,7 +205,8 @@ interface TerminalPageProps {
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
-  onOpenQuickTabPicker: (paneId?: string) => void;
+  onOpenQuickTabPicker: (paneId?: string, hostKey?: string) => void;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   sessionPickerDebugMode?: string | null;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
   onPaneAttachIntentApplied?: (intent: { sessionIds: string[]; paneId: string; nonce: number }) => void;
@@ -889,6 +891,7 @@ function TerminalPageComponent({
   onUseAutoSession,
   onOpenConnections,
   onOpenQuickTabPicker,
+  relayDevices = [],
   sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
   onPaneAttachIntentApplied,
@@ -1245,10 +1248,37 @@ function TerminalPageComponent({
   const activeChromeSession = useMemo(() => (
     interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
   ), [activeHeaderSessionUiKey, interactiveSession]);
+  const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap(sessions), [sessions]);
+  const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
+    const hosts = new Map<string, TerminalSessionDrawerHost>();
+    for (const device of relayDevices) {
+      const hostKey = device.daemon.hostId.trim();
+      if (!hostKey) {
+        continue;
+      }
+      hosts.set(hostKey, {
+        hostKey,
+        hostLabel: device.deviceName.trim() || hostKey,
+        connected: device.daemon.connected,
+      });
+    }
+    for (const session of sessions) {
+      const serverIdentity = resolveServerIdentity(session, drawerServerIdentityAliases);
+      if (!serverIdentity.key) {
+        continue;
+      }
+      if (!hosts.has(serverIdentity.key)) {
+        hosts.set(serverIdentity.key, {
+          hostKey: serverIdentity.key,
+          hostLabel: serverIdentity.label,
+        });
+      }
+    }
+    return [...hosts.values()];
+  }, [drawerServerIdentityAliases, relayDevices, sessions]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
-    const serverIdentityAliases = buildServerIdentityAliasMap(sessions);
-    const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, serverIdentityAliases);
+    const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, drawerServerIdentityAliases);
 
     // 已打开的 session（按 pane 顺序）
     const opened: TerminalSessionDrawerItem[] = workspacePanes.flatMap((pane, paneIndex) =>
@@ -1294,7 +1324,7 @@ function TerminalPageComponent({
       });
 
     return [...opened, ...unopened];
-  }, [renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
+  }, [drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
   const activeDraft = sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;
@@ -2374,7 +2404,7 @@ function TerminalPageComponent({
     onCloseSession(sessionId, 'session-drawer-close-button');
   }, [onCloseSession]);
 
-  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string) => {
+  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string) => {
     if (paneId) {
       activatePaneAndSession(paneId);
     }
@@ -2384,10 +2414,10 @@ function TerminalPageComponent({
       eventSeq: current.eventSeq + 1,
       pageCallbackSeq: current.pageCallbackSeq + 1,
     }));
-    onOpenQuickTabPicker(paneId);
+    onOpenQuickTabPicker(paneId, hostKey);
   }, [activatePaneAndSession, onOpenQuickTabPicker]);
 
-  const handleOpenQuickTabPickerFromDrawer = useCallback(() => {
+  const handleOpenQuickTabPickerFromDrawer = useCallback((hostKey?: string) => {
     setSessionDrawerDebug((current) => ({
       ...current,
       lastEvent: 'page:drawer-callback',
@@ -2395,7 +2425,7 @@ function TerminalPageComponent({
       callbackSeq: current.callbackSeq + 1,
     }));
     setSessionDrawerOpen(false);
-    handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined);
+    handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined, hostKey);
   }, [handleOpenQuickTabPickerForPane, splitVisible, workspace.activePaneId]);
 
   const handleSessionDrawerDebugAddEvent = useCallback((eventName: string) => {
@@ -2596,6 +2626,7 @@ function TerminalPageComponent({
               topInsetPx={headerTopInsetPx}
               bottomInsetPx={keyboardInset}
               sessions={drawerSessions}
+              hosts={drawerHosts}
               onClose={() => setSessionDrawerOpen(false)}
               onSelectSession={handleSelectSessionFromDrawer}
               onCloseSession={handleCloseSessionFromDrawer}
