@@ -8,7 +8,7 @@ export function ConnectionFab({ onClick }: ConnectionFabProps) {
   return (
     <button
       onClick={onClick}
-      aria-label="进入服务器"
+      aria-label="新增服务器"
       style={{
         position: 'fixed',
         right: '22px',
@@ -24,7 +24,7 @@ export function ConnectionFab({ onClick }: ConnectionFabProps) {
         cursor: 'pointer',
       }}
     >
-      ↗
+      +
     </button>
   );
 }

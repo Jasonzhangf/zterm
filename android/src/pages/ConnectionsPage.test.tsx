@@ -447,7 +447,7 @@ describe('ConnectionsPage', () => {
     expect(screen.getByText('Close missing')).toBeTruthy();
   });
 
-  it('exits group management and restores server workspace entry without session creation wording', () => {
+it('exits group management and restores the add-server entry', () => {
     const onOpenVaults = vi.fn();
 
     render(
@@ -472,12 +472,11 @@ describe('ConnectionsPage', () => {
 
     fireEvent.click(screen.getByLabelText('Expand daemon-host-1 sessions'));
     expect(screen.getByText('main')).toBeTruthy();
-    expect(screen.queryByLabelText('新建连接')).toBeNull();
+    expect(screen.queryByLabelText('新增服务器')).toBeNull();
 
     fireEvent.click(screen.getByText('Done'));
     expect(screen.queryByText('main')).toBeNull();
-    expect(screen.queryByLabelText('新建连接')).toBeNull();
-    expect(screen.getByLabelText('进入服务器')).toBeTruthy();
+    expect(screen.getByLabelText('新增服务器')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Vaults'));
     expect(onOpenVaults).toHaveBeenCalledTimes(1);
@@ -519,7 +518,7 @@ describe('ConnectionsPage', () => {
     ]);
   });
 
-  it('covers empty-state entry actions: open settings login without main-page session creation', () => {
+  it('covers empty-state entry actions: add server and open settings login', () => {
     const onAddNew = vi.fn();
     const onOpenSettings = vi.fn();
 
@@ -542,9 +541,8 @@ describe('ConnectionsPage', () => {
       />,
     );
 
-    expect(screen.queryByLabelText('新建连接')).toBeNull();
-    expect(screen.getByLabelText('进入服务器')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('进入服务器'));
+    expect(screen.getByLabelText('新增服务器')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('新增服务器'));
     expect(onAddNew).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText('Settings'));

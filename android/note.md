@@ -1161,3 +1161,8 @@ Need runtime debug to confirm:
 - 现场“连不上，杀掉才能连通”的真因落在 route selection：`TraversalRouteHealthCache` 记录失败后，`selectBestTraversalRoute()` 以前把 `failure/auth-failure` 当成不可选终态；当同 scope 下所有 candidate 都失败时，`TraversalSocket` 会直接走 `No traversal path succeeded`，进程不重启就不会重新 probe。
 - 修复策略：失败仍保留为强惩罚信号，但不再是绝对不可选；selector 在全失败时仍返回“最不坏”的 candidate 让 socket 继续显式探测，避免把暂时性的网络恢复误判成永久无路可走。
 - 回归锁：需要保留两类测试，一类锁“健康路由优先于失败路由”，一类锁“全失败时仍可重新 probe”，否则很容易再次回到杀 app 才恢复。
+
+## 2026-06-30 add-server entry / drawer new-session correction
+
+- 现场纠正：Connections 主入口不能只是“进入已有服务器 workspace”；它必须恢复为“新增服务器”入口，打开 `new-connection` picker，再由 picker 区分“新增服务器”和“已有服务器 sessions”。
+- drawer 底部 `New Session` 不能只依赖 relay directory device 解析 hostKey；如果当前 host rail 来自 saved server 或 runtime session identity，也必须能解析成 `BridgeTarget` 并调用 `tmux-create-session` 创建空白 session。

@@ -472,10 +472,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [handleQuickConnectDraft, pickerMode, rememberBridgeTarget, setPageState]);
 
   const handleAddNew = useCallback(() => {
-    ensureTerminalPageVisible();
-  }, [ensureTerminalPageVisible]);
+    openSessionPicker('new-connection', {
+      target: normalizeBridgeTarget(null),
+      initialSelectedSessions: [],
+      paneId: null,
+    });
+  }, [openSessionPicker]);
 
-  const resolveRelayDeviceTargetByHostKey = useCallback((hostKey?: string) => {
+  const resolveTargetByHostKey = useCallback((hostKey?: string) => {
     const normalizedHostKey = hostKey?.trim();
     if (!normalizedHostKey) {
       return null;
@@ -485,10 +489,42 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       || device.deviceId.trim() === normalizedHostKey
       || device.deviceName.trim() === normalizedHostKey
     ));
-    return matchedDevice
-      ? resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice)
-      : null;
-  }, [bridgeSettings.servers, relayDevices]);
+    if (matchedDevice) {
+      return resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice);
+    }
+    const matchedPreset = bridgeSettings.servers.find((server) => (
+      server.id.trim() === normalizedHostKey
+      || server.name.trim() === normalizedHostKey
+      || server.targetHost.trim() === normalizedHostKey
+      || `${server.targetHost.trim()}:${server.targetPort}` === normalizedHostKey
+      || server.relayHostId?.trim() === normalizedHostKey
+    ));
+    if (matchedPreset) {
+      return normalizeBridgeTarget({
+        bridgeHost: matchedPreset.targetHost,
+        bridgePort: matchedPreset.targetPort,
+        daemonHostId: matchedPreset.relayHostId,
+        relayHostId: matchedPreset.relayHostId,
+        authToken: matchedPreset.authToken,
+      });
+    }
+    const matchedSession = sessionsRef.current.find((session) => (
+      session.daemonHostId?.trim() === normalizedHostKey
+      || session.connectionName?.trim() === normalizedHostKey
+      || session.bridgeHost.trim() === normalizedHostKey
+      || `${session.bridgeHost.trim()}:${session.bridgePort}` === normalizedHostKey
+    ));
+    if (matchedSession) {
+      return normalizeBridgeTarget({
+        bridgeHost: matchedSession.bridgeHost,
+        bridgePort: matchedSession.bridgePort,
+        daemonHostId: matchedSession.daemonHostId,
+        relayHostId: matchedSession.daemonHostId,
+        authToken: matchedSession.authToken,
+      });
+    }
+    return null;
+  }, [bridgeSettings.servers, relayDevices, sessionsRef]);
 
   const buildBlankSessionName = useCallback(() => {
     const stamp = new Date()
@@ -500,7 +536,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, []);
 
   const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string) => {
-    const target = resolveRelayDeviceTargetByHostKey(hostKey);
+    const target = resolveTargetByHostKey(hostKey);
     if (target) {
       const sessionName = buildBlankSessionName();
       void (async () => {
@@ -531,7 +567,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     onSessionsOpenedInPane,
     openDraftAsSession,
     openSessionPicker,
-    resolveRelayDeviceTargetByHostKey,
+    resolveTargetByHostKey,
   ]);
 
   const closePicker = useCallback(() => {

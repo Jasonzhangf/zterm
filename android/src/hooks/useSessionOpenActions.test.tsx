@@ -299,7 +299,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     );
   });
 
-  it('uses the main page entry to enter the server workspace instead of opening new-connection picker', () => {
+  it('uses the main page entry to open the new-server connection picker', () => {
     const harness = createOptions();
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
@@ -307,8 +307,12 @@ describe('useSessionOpenActions explicit-open truth', () => {
       result.current.handleAddNew();
     });
 
-    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
-    expect(result.current.pickerMode).toBeNull();
+    expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
+    expect(result.current.pickerMode).toBe('new-connection');
+    expect(result.current.pickerTarget).toEqual(expect.objectContaining({
+      bridgeHost: '',
+      bridgePort: 3333,
+    }));
   });
 
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {
@@ -355,6 +359,57 @@ describe('useSessionOpenActions explicit-open truth', () => {
       expect.any(Object),
     );
     expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:zterm-20260630-040506'], 'pane-2');
+    vi.useRealTimers();
+  });
+
+  it('creates a blank session from drawer saved-server host key without requiring relayDevices', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));
+    const harness = createOptions({
+      bridgeSettings: {
+        servers: [{
+          id: 'preset-a',
+          name: 'Mac Studio',
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+        }],
+        targetHost: '100.66.1.82',
+        targetPort: 3333,
+        targetAuthToken: 'token-a',
+      },
+    });
+
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      result.current.handleOpenQuickTabPicker(undefined, 'mac-studio');
+      await Promise.resolve();
+    });
+
+    expect(result.current.pickerMode).toBeNull();
+    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+      'zterm-20260630-040506',
+    );
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm-20260630-040506',
+      }),
+      expect.any(Object),
+    );
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
