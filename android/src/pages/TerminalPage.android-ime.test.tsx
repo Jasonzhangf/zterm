@@ -164,6 +164,7 @@ vi.mock("../components/TerminalView", () => ({
     onResize,
     onWidthModeChange,
     widthMode,
+    layoutRefreshToken,
     copyModeActive,
     copyStartRowIndex,
     copyEndRowIndex,
@@ -182,6 +183,7 @@ vi.mock("../components/TerminalView", () => ({
     onResize?: (...args: any[]) => void;
     onWidthModeChange?: (...args: any[]) => void;
     widthMode?: string;
+    layoutRefreshToken?: string;
     copyModeActive?: boolean;
     copyStartRowIndex?: number | null;
     copyEndRowIndex?: number | null;
@@ -193,6 +195,7 @@ vi.mock("../components/TerminalView", () => ({
       data-has-onresize={onResize ? "true" : "false"}
       data-has-onwidthmodechange={onWidthModeChange ? "true" : "false"}
       data-width-mode={widthMode || "adaptive-phone"}
+      data-layout-refresh-token={layoutRefreshToken || ""}
       data-copy-mode-active={copyModeActive ? "true" : "false"}
       data-copy-start={copyStartRowIndex ?? ""}
       data-copy-end={copyEndRowIndex ?? ""}
@@ -793,6 +796,49 @@ describe("TerminalPage Android IME bridge", () => {
           .getAttribute("data-has-onwidthmodechange"),
       ).toBe("false");
     });
+  });
+
+  it("sends a local renderer layout refresh token when Android IME changes shell geometry", async () => {
+    const session = makeSession("s1");
+    const onResize = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={onResize}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+    });
+
+    const beforeToken = screen
+      .getByTestId("terminal-view-s1")
+      .getAttribute("data-layout-refresh-token");
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
+
+    await waitFor(() => {
+      const afterToken = screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-layout-refresh-token");
+      expect(afterToken).not.toBe(beforeToken);
+      expect(afterToken).toContain("320");
+    });
+    expect(onResize).not.toHaveBeenCalled();
   });
 
   it("keeps Android adaptive-phone upstream geometry on the width-mode channel instead of the resize channel", async () => {

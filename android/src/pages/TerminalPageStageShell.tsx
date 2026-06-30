@@ -27,6 +27,7 @@ const TerminalStageShell = ReactMemo(
     activePaneId,
     terminalChromeBottomPx,
     terminalImeLiftPx,
+    terminalLayoutRefreshToken,
     inputResetEpochBySession,
     followResetEpoch,
     terminalKeyboardRequested,
@@ -62,6 +63,7 @@ const TerminalStageShell = ReactMemo(
     activePaneId: string;
     terminalChromeBottomPx: number;
     terminalImeLiftPx: number;
+    terminalLayoutRefreshToken?: string;
     inputResetEpochBySession?: Record<string, number>;
     followResetEpoch?: number;
     terminalKeyboardRequested: boolean;
@@ -145,6 +147,7 @@ const TerminalStageShell = ReactMemo(
             live
             inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
             followResetEpoch={sessionIsActive ? followResetEpoch : 0}
+            layoutRefreshToken={terminalLayoutRefreshToken}
             allowDomFocus={
               isAndroid ? false : sessionIsActive && terminalKeyboardRequested
             }
@@ -204,6 +207,7 @@ const TerminalStageShell = ReactMemo(
         onTerminalInput,
         onTerminalWidthModeChange,
         sessionBufferStore,
+        terminalLayoutRefreshToken,
         terminalFontSize,
         terminalKeyboardRequested,
         terminalThemeId,
@@ -554,6 +558,7 @@ const TerminalStageShell = ReactMemo(
     prev.activePaneId === next.activePaneId &&
     prev.terminalChromeBottomPx === next.terminalChromeBottomPx &&
     prev.terminalImeLiftPx === next.terminalImeLiftPx &&
+    prev.terminalLayoutRefreshToken === next.terminalLayoutRefreshToken &&
     resolveRenderedSessionsInputEpochKey(
       prev.inputResetEpochBySession,
       prev.renderedPaneSessions,

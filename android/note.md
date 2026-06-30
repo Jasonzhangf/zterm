@@ -1239,3 +1239,11 @@ Need runtime debug to confirm:
 - 根因：远端 refresh 只存在于 `TmuxSessionPickerSheet`，`handleRemoteSessionsRefreshed()` 只 prune/audit，没有把 fetch 到的 sessionNames 物化进 `sessionGroups` catalog；`TerminalPage` drawer projection 也只消费本地 `sessions`。
 - 修复方向：抽屉打开时按当前 hostKey 调 `fetchTmuxSessions()`，复用 `handleRemoteSessionsRefreshed()` 写入 `sessionGroups`；`TerminalPage` 从 `sessionGroups` 投影 remote-only rows，点击 remote-only row 走 `handleOpenGroupSession()` 打开对应 tmux session。
 - 反耦合点：drawer effect 只依赖稳定 `refreshHostKey`，不能依赖整个 `hostGroups/sessions` 投影，避免 catalog 更新后反复触发远端枚举。
+
+## 2026-07-01 Android IME shell blank refresh
+
+- 现场问题：IME 弹出时 shell 偶发不刷新、变空白，触摸/滚动后又恢复。
+- 真源判断：IME 只改变 UI shell geometry，不属于 daemon/buffer truth；但 stage absolute bottom / shellHeight 变化必须显式驱动 renderer 重新 measure viewport 和 follow 对齐。
+- 根因方向：之前主要依赖 TerminalView host 的 `ResizeObserver` 发现外层高度变化；Android WebView/IME 场景下该回调可能漏或晚到，renderer 停在旧 viewport/scrollTop，表现为空白。
+- 修复：`TerminalPage` 汇总 `shellHeight / terminalChromeBottomPx / terminalImeLiftPx / keyboardInset / terminalKeyboardRequested` 为 `terminalLayoutRefreshToken`，经 `TerminalStageShell` 传给 `TerminalView`；TerminalView 收到 token 后只做本地 `runViewportRefresh()` 和 follow 对齐，不触发 Android upstream `onResize`。
+- 回归：`TerminalPage.android-ime.test.tsx` 锁住 IME show 后 token 改变且 `onResize` 不触发；`TerminalView.dynamic-refresh` / `bottom-stale` 同跑防止 renderer body 回归。

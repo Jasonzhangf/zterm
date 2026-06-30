@@ -2263,6 +2263,13 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const terminalLayoutRefreshToken = [
+    shellHeight,
+    terminalChromeBottomPx,
+    terminalImeLiftPx,
+    keyboardInset,
+    terminalKeyboardRequested ? 'ime-requested' : 'ime-idle',
+  ].join(':');
   // Use a ref to hold the live snapshot lambda so the registration useEffect
   // never needs to re-run. The producer reads ref.current, which is kept fresh
   // every render. This decouples the snapshot source from all reactive deps,
@@ -2736,6 +2743,7 @@ function TerminalPageComponent({
           activePaneId={workspace.activePaneId}
           terminalChromeBottomPx={terminalChromeBottomPx}
           terminalImeLiftPx={terminalImeLiftPx}
+          terminalLayoutRefreshToken={terminalLayoutRefreshToken}
           inputResetEpochBySession={inputResetEpochBySession}
           followResetEpoch={followResetEpoch}
           terminalKeyboardRequested={terminalKeyboardRequested}
