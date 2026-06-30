@@ -48,6 +48,8 @@ interface TmuxSessionPickerSheetProps {
 
 type DiscoveryState = 'idle' | 'loading' | 'done' | 'error';
 
+const EMPTY_SELECTED_SESSIONS: string[] = [];
+
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -75,6 +77,12 @@ function formatRefreshClock(ts?: number | null) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function getDirectorySessionNames(target: BridgeTarget) {
+  return normalizeRemoteTmuxSessionNames(
+    (target.relayTmuxSessions || []).map((session) => session.name),
+  );
+}
+
 export function TmuxSessionPickerSheet({
   mode,
   open,
@@ -83,7 +91,7 @@ export function TmuxSessionPickerSheet({
   openTabs = [],
   activeTabId = null,
   initialTarget,
-  initialSelectedSessions = [],
+  initialSelectedSessions = EMPTY_SELECTED_SESSIONS,
   onClose,
   onSwitchOpenTab,
   onRenameOpenTab,
@@ -172,6 +180,7 @@ export function TmuxSessionPickerSheet({
     const bridgeHost = selectedTarget.bridgeHost.trim();
     const authToken = selectedTarget.authToken?.trim() || '';
     const relayHostId = selectedTarget.relayHostId?.trim() || selectedTarget.daemonHostId?.trim() || '';
+    const directorySessions = getDirectorySessionNames(selectedTarget);
 
     if (daemonFirst && !relayHostId) {
       setAvailableSessions([]);
@@ -182,16 +191,34 @@ export function TmuxSessionPickerSheet({
       return;
     }
 
+    if (daemonFirst && directorySessions.length > 0) {
+      setAvailableSessions(directorySessions);
+      setSelectedSessions((current) => {
+        const nextRows = buildTmuxSessionPickerRows({
+          availableSessions: directorySessions,
+          openTabs,
+          target: selectedTarget,
+          includeOpenTabs: showOpenTabState,
+        });
+        return filterActionableTmuxSelections(current, nextRows, showOpenTabState);
+      });
+      setDiscoveryState('done');
+      setErrorMessage('');
+      setLastRefreshedAt(Date.now());
+      onRemoteSessionsRefreshed?.(selectedTarget, directorySessions);
+      return;
+    }
+
     if (!bridgeHost) {
       setAvailableSessions([]);
       setSelectedSessions([]);
       setDiscoveryState('idle');
-      setErrorMessage(daemonFirst ? '当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。' : '先输入 Tailscale IP / bridge host，再点击 Connect。');
+      setErrorMessage(daemonFirst ? '当前 daemon directory 没有 session catalog 或 endpoint candidates。等待 daemon 重新发布目录。' : '先输入 Tailscale IP / bridge host，再点击 Connect。');
       setLastRefreshedAt(null);
       return;
     }
 
-    if (!authToken) {
+    if (!authToken && !(daemonFirst && selectedTarget.relayEndpointCandidates?.length)) {
       setAvailableSessions([]);
       setSelectedSessions([]);
       setDiscoveryState('idle');
@@ -368,7 +395,9 @@ export function TmuxSessionPickerSheet({
             <div style={{ marginTop: '4px', fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
               {isEditGroupMode
                 ? '先显式 Connect/Refresh，再把这个服务器上要记住的 tmux sessions 勾出来。'
-                : '先输入/选择 Tailscale IP，再拉 tmux sessions。支持多选勾选后一次打开多个 tab。'}
+                : mode === 'new-connection'
+                  ? '先新增一台服务器，再继续选择已有 target 或 clean session。'
+                  : '先输入/选择 Tailscale IP，再拉 tmux sessions。支持多选勾选后一次打开多个 tab。'}
             </div>
           </div>
           <button
@@ -387,6 +416,41 @@ export function TmuxSessionPickerSheet({
             ×
           </button>
         </div>
+
+        {mode === 'new-connection' && (
+          <div
+            style={{
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <SectionTitle
+              title="新增服务器"
+              subtitle="这一步是创建一台新的服务器配置，不和已有服务器混成一个语义。"
+            />
+            <button
+              type="button"
+              data-testid="tmux-session-picker-add-server"
+              onClick={() => onSelectCleanSession(selectedTarget)}
+              style={{
+                border: 'none',
+                borderRadius: '18px',
+                padding: '14px',
+                backgroundColor: mobileTheme.colors.accentSoft,
+                color: mobileTheme.colors.lightText,
+                fontWeight: 800,
+                textAlign: 'left',
+              }}
+            >
+              新增服务器
+            </button>
+          </div>
+        )}
 
         {daemonFirst && (
           <div
@@ -408,10 +472,19 @@ export function TmuxSessionPickerSheet({
               selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
               onSelect={(device) => {
                 const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
+                const directorySessions = getDirectorySessionNames(resolvedTarget);
                 setSelectedTarget((current) => ({
                   ...current,
                   ...resolvedTarget,
                 }));
+                if (directorySessions.length > 0) {
+                  setAvailableSessions(directorySessions);
+                  setSelectedSessions([]);
+                  setDiscoveryState('done');
+                  setErrorMessage('');
+                  setLastRefreshedAt(Date.now());
+                  onRemoteSessionsRefreshed?.(resolvedTarget, directorySessions);
+                }
               }}
               onClear={() =>
                 setSelectedTarget((current) => ({
@@ -437,7 +510,7 @@ export function TmuxSessionPickerSheet({
           }}
         >
           <SectionTitle
-            title="Target"
+            title={mode === 'new-connection' ? '已有服务器' : 'Target'}
             subtitle={
               daemonFirst
                 ? 'bridge host/token 对用户不是一级心智；这里只展示当前 daemon 对应的桥接配置。需要更改时回连接配置页编辑。'
@@ -613,10 +686,19 @@ export function TmuxSessionPickerSheet({
           selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
           onSelect={(device) => {
             const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
+            const directorySessions = getDirectorySessionNames(resolvedTarget);
             setSelectedTarget((current) => ({
               ...current,
               ...resolvedTarget,
             }));
+            if (directorySessions.length > 0) {
+              setAvailableSessions(directorySessions);
+              setSelectedSessions([]);
+              setDiscoveryState('done');
+              setErrorMessage('');
+              setLastRefreshedAt(Date.now());
+              onRemoteSessionsRefreshed?.(resolvedTarget, directorySessions);
+            }
           }}
           onClear={() =>
             setSelectedTarget((current) => ({

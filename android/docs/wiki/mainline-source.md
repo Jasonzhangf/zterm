@@ -54,10 +54,13 @@ flowchart TD
   Shell --> Direct["~/.wterm/run/zterm-daemon.pid"]
   Shell --> Runtime["~/.wterm/daemon-runtime/server.cjs"]
   Shell --> Native["scripts/native/zterm-daemon.swift"]
+  WinShell["scripts/windows/zterm-daemon.ps1"] --> WinTask["Windows Scheduled Task: ZTermDaemon"]
+  WinTask --> Runtime
   Release["scripts/prepare-global-daemon-release.sh"] --> Runtime
   Release --> Install["scripts/install-global-daemon-cli.sh"]
   Install --> GlobalBin["~/.local/bin/zterm-daemon"]
   Npm["scripts/prepare-daemon-npm-package.mjs"] --> PackageBin["package/bin/zterm-daemon"]
+  Npm --> WinShell
 ```
 
 ## Published Source Surfaces
@@ -71,7 +74,7 @@ flowchart TD
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (hostKey/hostLabel + opened-first ordering in `drawerSessions` useMemo) |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/terminal-http-runtime.ts` |
-| Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
+| Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
 | Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |
 

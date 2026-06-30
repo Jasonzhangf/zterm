@@ -8,7 +8,7 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"
-INSTALL_ROOT="${HOME}/.wterm/releases/zterm-daemon/${VERSION}"
+INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"
 LOCAL_BIN="${HOME}/.local/bin"
 
 mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}"

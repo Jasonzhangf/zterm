@@ -2,20 +2,9 @@ import type { BridgeSettings } from './bridge-settings';
 import type { ClientMessage } from './types';
 import { TraversalSocket } from './traversal/socket';
 import type { TraversalTargetSource } from './traversal/types';
+import type { BridgeTarget } from './session-picker';
 
-export interface BridgeTarget {
-  bridgeHost: string;
-  bridgePort: number;
-  daemonHostId?: string;
-  authToken?: string;
-  relayHostId?: string;
-  relayDeviceId?: string;
-  tailscaleHost?: string;
-  ipv6Host?: string;
-  ipv4Host?: string;
-  signalUrl?: string;
-  transportMode?: 'auto' | 'websocket' | 'webrtc';
-}
+export type { BridgeTarget } from './session-picker';
 
 function sendTmuxRequest(
   target: BridgeTarget,

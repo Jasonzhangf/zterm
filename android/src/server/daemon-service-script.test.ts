@@ -16,6 +16,10 @@ function readDaemonNpmPackageScript() {
   return readFileSync(join(process.cwd(), 'scripts', 'prepare-daemon-npm-package.mjs'), 'utf8');
 }
 
+function readWindowsDaemonScript() {
+  return readFileSync(join(process.cwd(), 'scripts', 'windows', 'zterm-daemon.ps1'), 'utf8');
+}
+
 function readReleaseVerifyScript() {
   return readFileSync(join(process.cwd(), 'scripts', 'verify-release-assets.mjs'), 'utf8');
 }
@@ -143,11 +147,52 @@ describe('zterm daemon service script truth gates', () => {
 
     expect(script).toContain("writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs')");
     expect(script).toContain("postinstall: 'node support/install-user-shims.cjs'");
+    expect(script).toContain("bin/zterm-daemon.cjs");
+    expect(script).toContain("bin/wterm.cjs");
+    expect(script).toContain("'zterm-daemon': 'bin/zterm-daemon.cjs'");
+    expect(script).toContain("wterm: 'bin/wterm.cjs'");
     expect(script).toContain("writeShim('zterm-daemon'");
     expect(script).toContain("writeShim('wterm'");
+    expect(script).toContain("writeShim('zterm-daemon.cmd'");
+    expect(script).toContain("writeShim('wterm.cmd'");
     expect(script).toContain("resolve(homedir(), '.local/bin')");
     expect(script).toContain("rmSync(target, { force: true })");
-    expect(script).toContain('exec "\\${packageRoot}/support/zterm-daemon.sh" "$@"');
+    expect(script).toContain('exec node "\\${packageRoot}/bin/zterm-daemon.cjs" "$@"');
+  });
+
+  it('packages a Windows PowerShell daemon runner without duplicating terminal backend truth', () => {
+    const packageScript = readDaemonNpmPackageScript();
+    const windowsScript = readWindowsDaemonScript();
+
+    expect(packageScript).toContain("mkdirSync(resolve(npmPackageDir, 'support/windows')");
+    expect(packageScript).toContain("scripts/windows/zterm-daemon.ps1");
+    expect(packageScript).toContain("support/windows/zterm-daemon.ps1");
+    expect(packageScript).toContain("process.platform === 'win32'");
+    expect(packageScript).toContain("ZTERM_PACKAGE_ROOT: packageRoot");
+    expect(packageScript).toContain("powershell.exe");
+
+    expect(windowsScript).toContain('$RuntimeEntry = Join-Path $PackageRoot "runtime\\server.cjs"');
+    expect(windowsScript).toContain('$TaskName = "ZTermDaemon"');
+    expect(windowsScript).toContain('$FirewallRuleName = "ZTerm Daemon 3333"');
+    expect(windowsScript).toContain('function Write-JsonNoBom');
+    expect(windowsScript).toContain('[System.Text.UTF8Encoding]::new($false)');
+    expect(windowsScript).toContain('[System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)');
+    expect(windowsScript).toContain('Write-JsonNoBom $configPath $config');
+    expect(windowsScript).not.toContain('Set-Content -LiteralPath $configPath -Encoding UTF8');
+    expect(windowsScript).toContain('$env:ZTERM_TERMINAL_BACKEND = "wezterm"');
+    expect(windowsScript).toContain('$env:ZTERM_WEZTERM_EXE = $pathCandidate.Source');
+    expect(windowsScript).toContain('"D:\\zterm-tools\\wezterm\\portable"');
+    expect(windowsScript).toContain('$env:ZTERM_WEZTERM_EXE = $candidate.FullName');
+    expect(windowsScript).toContain('New-NetFirewallRule -DisplayName $FirewallRuleName');
+    expect(windowsScript.indexOf('Ensure-FirewallRule')).toBeLessThan(windowsScript.indexOf('Register-ScheduledTask -TaskName $TaskName'));
+    expect(windowsScript).toContain('Register-ScheduledTask -TaskName $TaskName');
+    expect(windowsScript).toContain('New-ScheduledTaskTrigger -AtLogOn');
+    expect(windowsScript).toContain('Start-Process -FilePath $NodeExe');
+    expect(windowsScript).toContain('Stop-Process -Id $daemonPid');
+    expect(windowsScript).not.toContain('$pid =');
+    expect(windowsScript).not.toContain('Get-Process node');
+    expect(windowsScript).not.toContain('Stop-Process -Name');
+    expect(windowsScript).not.toContain('taskkill /IM');
   });
 
   it('verifies daemon npm tarballs contain native runtime dependencies before release', () => {

@@ -146,9 +146,25 @@ export function measureTerminalViewport(
 
   const latinRect = measureProbeRect('W');
   const cjkRect = measureProbeRect('你');
+  const hostWidthPx = Math.max(1, Math.floor(host.clientWidth || 0));
+  const fallbackCellWidthPx = Math.max(1, fontSize * 0.62);
+  const resolveMeasuredGlyphWidth = (widthPx: number, fallbackPx: number) => {
+    if (!Number.isFinite(widthPx) || widthPx <= 0) {
+      return fallbackPx;
+    }
+    // Some WebView/jsdom/layout states can report the whole terminal width for
+    // the hidden glyph probe. A terminal cell can never be the full viewport.
+    if (widthPx >= hostWidthPx * 0.25) {
+      return fallbackPx;
+    }
+    return widthPx;
+  };
 
-  const latinWidthPx = Math.max(1, latinRect.width || fontSize * 0.62);
-  const cjkHalfWidthPx = Math.max(1, (cjkRect.width || latinWidthPx * 2) / 2);
+  const latinWidthPx = resolveMeasuredGlyphWidth(latinRect.width, fallbackCellWidthPx);
+  const cjkHalfWidthPx = Math.max(
+    1,
+    resolveMeasuredGlyphWidth(cjkRect.width, latinWidthPx * 2) / 2,
+  );
   const cellWidthPx = Math.max(latinWidthPx, cjkHalfWidthPx);
   const measuredRowHeight = Math.max(1, Math.ceil(latinRect.height || parseInt(rowHeight, 10) || 17));
 

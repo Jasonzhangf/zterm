@@ -1098,3 +1098,53 @@ Need runtime debug to confirm:
 - 修复：`useOpenTabLifecycleEffects` 的 foreground `online` 分支改为只对 active tab 调 `reconnectSession(activeSessionId)`，不 sweep all sessions，也不走普通 resume/probe；hidden 状态仍不恢复。
 - 回归：`App.dynamic-refresh.test.tsx` 更新为 online 只 reconnect active tab，且不调用 `resumeActiveSessionTransport` / `reconnectAllSessions`。
 - 验证：`pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/lib/traversal/socket.test.ts --reporter dot` PASS；`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+
+## 2026-06-30 Windows daemon / WezTerm 接入检查
+
+- 已确认 Windows 侧当前有两层事实：
+  - `src/server/wezterm-backend.ts` 只负责把 WezTerm CLI 作为外部 mux/buffer source，ZTerm 自己持有 absolute mirror snapshot 真相。
+  - `scripts/zterm-daemon.sh` 与 `scripts/prepare-global-daemon-release.sh` 仍是 macOS launchd 语义，没有 Windows 自启动安装入口。
+- Android 侧已有 Windows/relay 入口骨架：
+  - `src/lib/traversal/config.ts` 已能按 `win32` 走 `wezterm` backend。
+  - `src/pages/ConnectionsPage.tsx` / `src/lib/connections-server-groups.ts` / `src/lib/relay-account-directory.ts` 已在做目录投影。
+- 当前要补的缺口不是 WezTerm 镜像本身，而是：
+  1. Windows daemon 安装/启动脚本真源；
+  2. Windows daemon 构建/发行包门禁；
+  3. Android 侧把 Windows daemon 作为可投影 server truth 继续锁住测试。
+
+## 2026-06-30 Windows daemon runner 初版验证
+
+- 新增 `scripts/windows/zterm-daemon.ps1`，作为 Windows daemon runner；npm daemon 包通过 `bin/zterm-daemon.cjs` 在 Windows 分流到该 runner，macOS/Linux 仍走 `support/zterm-daemon.sh`。
+- Windows runner 只负责平台壳：
+  - `run/start/stop/restart/status`
+  - `install-service/uninstall-service/service-status` 使用 Windows Scheduled Task `ZTermDaemon`
+  - `configure-relay`
+  - 精确 `TCP/<port>` 入站防火墙规则
+  - 默认 `ZTERM_TERMINAL_BACKEND=wezterm`
+- 真实 Windows 主机 `huawei@100.75.122.121` 验证：
+  - PowerShell 5.1 下脚本 `--help/status` 可运行。
+  - 修复两个真实 PowerShell 兼容问题：`$pid/$Pid` 是只读自动变量；`Start-Process` 不能把 stdout/stderr 指向同一文件；`New-ScheduledTaskSettingsSet` 不支持 `-DisallowStartIfOnBatteries`。
+  - `install-service` 成功注册并启动 `ZTermDaemon`，本机 `http://127.0.0.1:3333/health` OK，PID `21296` 现场可见。
+  - WezTerm backend 真实 smoke PASS：`scripts/wezterm-backend-remote-smoke.ts` 和 `scripts/wezterm-backend-input-smoke.ts` 都通过。
+- 当前未闭环：
+  - Mac -> Windows `100.75.122.121:3333` 仍超时；同机 Windows 访问 `100.75.122.121:3333` 成功，Mac -> Windows `22` 成功。
+  - 已添加普通和 Tailscale interface 端口防火墙规则仍未打通，剩余怀疑点是 Tailscale/Windows WFP/ACL 入站策略，不是 daemon runtime 本身。
+- 本地验证：
+  - `pnpm --dir android exec vitest run src/server/daemon-service-script.test.ts src/lib/feature-registry-truth.test.ts src/server/terminal-backend-selection.test.ts src/server/wezterm-backend.test.ts src/server/wezterm-backend-runtime.test.ts --reporter dot` PASS（33 tests）。
+  - `pnpm --dir android exec tsx scripts/wezterm-daemon-protocol-smoke.ts` PASS。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+
+## 2026-06-30 Windows daemon Android 接入继续排查
+
+- Mac -> Windows Tailscale ping `100.75.122.121` PASS，SSH `:22` PASS；Windows daemon 本机监听 `0.0.0.0:3333`，本机 health OK。
+- Mac -> `http://100.75.122.121:3333/health` / `nc 100.75.122.121 3333` 仍不可达；当前证据指向 Windows/Tailscale 入站过滤层，不是 daemon runtime 未启动。
+- Windows `~/.zterm/config.json` 当前缺失，说明 `configure-relay` 尚未写入 relay account truth；Android 侧 relay directory 目前不会出现这台 Windows daemon。
+- 下一步：先完成 Windows runner 的 relay 配置/发布闭环，再用 relay directory + route selector 验证 Android 从目录选择 Windows daemon；直连 3333 继续作为环境诊断，不作为唯一接入前提。
+
+## 2026-06-30 Windows runner build + artifact checkpoint
+
+- `./android/scripts/build-android-debug.sh` 已产出 `android/release-dist/zterm-0.1.3.1969.apk`，`latest.json` 版本为 `0.1.3.1969`，sha256 `21e1ae43650f4c8c86843dfe1b2b652408c0eb26cc659660bf72450e94152de2`。
+- 构建产物和 `zterm-latest-debug.apk` 的 sha256 一致，说明当前 latest debug 指向这次发布包。
+- 本轮 Windows runner 真坑再确认：
+  - PowerShell 5.1 写 JSON 默认带 BOM，会导致 daemon 读 config 直接报 `Unexpected token '﻿'`。
+  - Windows Scheduled Task 不继承交互式 PATH，runner 必须显式探测/固化 WezTerm executable 路径，不能默认 `wezterm.exe` 可见。

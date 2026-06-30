@@ -4,12 +4,17 @@ import { collectClientDebugSnapshot } from './client-debug-snapshot';
 import { readRuntimeDebugEntries } from './runtime-debug';
 import type { BridgeSettings, TraversalRelayClientSettings } from './bridge-settings';
 import type { TraversalRelayDeviceSnapshot, TraversalRelayUser } from './types';
+import {
+  normalizeRelayAccountDirectory,
+  type RelayAccountDirectory,
+} from './relay-account-directory';
 
 export interface TraversalRelayAuthPayload {
   ok: boolean;
   accessToken?: string;
   user?: TraversalRelayUser;
   devices?: TraversalRelayDeviceSnapshot[];
+  directory?: unknown;
   relayBaseUrl?: string;
   signalBaseUrl?: string;
   turn?: {
@@ -41,6 +46,7 @@ interface RelayDebugRequestPayload {
 
 type RelayDeviceStreamMessage =
   | { type?: 'devices-snapshot' | 'device-updated'; payload?: { devices?: TraversalRelayDeviceSnapshot[] } }
+  | { type?: 'directory-snapshot'; payload?: { directory?: unknown } }
   | { type?: 'relay-error'; reason?: string }
   | { type?: 'client-debug-request'; payload?: RelayDebugRequestPayload };
 
@@ -54,11 +60,13 @@ export interface TraversalRelayAccountState {
   deviceName: string;
   platform: string;
   devices: TraversalRelayDeviceSnapshot[];
+  directory: RelayAccountDirectory | null;
   updatedAt: number;
   relaySettings?: TraversalRelayClientSettings;
 }
 
 const STORAGE_KEY = 'zterm:traversal-relay-account';
+const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'claw', '.', 'codewhisper', '.', 'cc', ':', '18443', '/relay/'] as const;
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -88,6 +96,19 @@ export function normalizeTraversalRelayBaseUrl(input: string) {
     console.error('[traversal-relay-client] Failed to normalize relay base url:', error);
     return '';
   }
+}
+
+export function getDefaultTraversalRelayBaseUrl() {
+  return DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS.join('');
+}
+
+export function isDefaultTraversalRelayBaseUrl(input?: string | null) {
+  return normalizeTraversalRelayBaseUrl(asString(input)) === getDefaultTraversalRelayBaseUrl();
+}
+
+export function resolveTraversalRelayBaseUrl(input?: string | null) {
+  const normalized = normalizeTraversalRelayBaseUrl(asString(input));
+  return normalized || getDefaultTraversalRelayBaseUrl();
 }
 
 function buildHttpUrl(baseUrl: string, path: string) {
@@ -168,11 +189,20 @@ function normalizeStoredState(input: unknown): TraversalRelayAccountState | null
     deviceName: asString(candidate.deviceName).trim() || buildDefaultDeviceName(platform),
     platform,
     devices: Array.isArray(candidate.devices) ? candidate.devices as TraversalRelayDeviceSnapshot[] : [],
+    directory: normalizeRelayAccountDirectory(candidate.directory),
     updatedAt: typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
       ? candidate.updatedAt
       : Date.now(),
     relaySettings: normalizeStoredStateRelaySettings(candidate.relaySettings),
   };
+}
+
+function requireRelayAccountDirectory(input: unknown) {
+  const directory = normalizeRelayAccountDirectory(input);
+  if (!directory) {
+    throw new Error('relay account directory missing or invalid');
+  }
+  return directory;
 }
 
 function normalizeStoredStateRelaySettings(input: unknown): TraversalRelayClientSettings | undefined {
@@ -336,6 +366,7 @@ export async function traversalRelayLogin(options: {
     deviceName: deviceMeta.deviceName,
     platform: deviceMeta.platform,
     devices: Array.isArray(payload.devices) ? payload.devices : [],
+    directory: requireRelayAccountDirectory(payload.directory),
     updatedAt: Date.now(),
     relaySettings: deriveTraversalRelayClientSettings(payload, deviceMeta),
   };
@@ -357,6 +388,7 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
     ...state,
     user: payload.user || state.user,
     devices: Array.isArray(payload.devices) ? payload.devices : state.devices,
+    directory: requireRelayAccountDirectory(payload.directory),
     updatedAt: Date.now(),
     relaySettings: deriveTraversalRelayClientSettings(payload, state) || state.relaySettings,
   };
@@ -370,6 +402,7 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
 export function connectTraversalRelayDevicesStream(options: {
   account: TraversalRelayAccountState;
   onDevices: (devices: TraversalRelayDeviceSnapshot[]) => void;
+  onDirectory?: (directory: RelayAccountDirectory) => void;
   onOpen?: () => void;
   onError?: (message: string) => void;
   onClose?: (event: CloseEvent) => void;
@@ -411,6 +444,20 @@ export function connectTraversalRelayDevicesStream(options: {
         };
         writeTraversalRelayAccountState(nextState);
         options.onDevices(payload.payload.devices);
+        return;
+      }
+      if (payload.type === 'directory-snapshot') {
+        const directory = normalizeRelayAccountDirectory(payload.payload?.directory);
+        if (!directory) {
+          options.onError?.('relay directory snapshot missing or invalid');
+          return;
+        }
+        writeTraversalRelayAccountState({
+          ...options.account,
+          directory,
+          updatedAt: Date.now(),
+        });
+        options.onDirectory?.(directory);
         return;
       }
       if (payload.type === 'relay-error') {

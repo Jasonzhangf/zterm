@@ -196,6 +196,7 @@ describe('TerminalSessionDrawer', () => {
     );
 
     expect(screen.getByTestId('terminal-session-drawer-host-rail')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-rail').style.flexDirection).toBe('column');
     expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
 

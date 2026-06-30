@@ -1,6 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import {
+  normalizeRelayEndpointCandidates,
+  normalizeRelayTmuxSessionSnapshots,
+  type RelayAccountDirectory,
+  type RelayDirectoryDaemon,
+  type RelayDirectoryDevice,
+  type RelayEndpointCandidate,
+  type RelayTmuxSessionSnapshot,
+} from '@zterm/shared/relay-directory';
 
 export interface TraversalRelayUserRecord {
   id: string;
@@ -32,6 +41,9 @@ export interface TraversalRelayDeviceRecord {
   daemonLastSeenAt: string;
   daemonHostId: string;
   daemonVersion: string;
+  daemonDirectoryPublishedAt: string;
+  daemonEndpoints: RelayEndpointCandidate[];
+  daemonSessions: RelayTmuxSessionSnapshot[];
 }
 
 export interface TraversalRelayStoreData {
@@ -59,11 +71,11 @@ export interface TraversalRelayDeviceSnapshot {
     connected: boolean;
     lastSeenAt: string;
   };
-  daemon: {
-    connected: boolean;
-    lastSeenAt: string;
-    hostId: string;
-    version: string;
+    daemon: {
+      connected: boolean;
+      lastSeenAt: string;
+      hostId: string;
+      version: string;
   };
 }
 
@@ -125,6 +137,9 @@ function asStoredDevice(record: Partial<TraversalRelayDeviceRecord>): TraversalR
     daemonLastSeenAt,
     daemonHostId: typeof record.daemonHostId === 'string' ? record.daemonHostId.trim() : '',
     daemonVersion: typeof record.daemonVersion === 'string' ? record.daemonVersion.trim() : '',
+    daemonDirectoryPublishedAt: typeof record.daemonDirectoryPublishedAt === 'string' ? record.daemonDirectoryPublishedAt : '',
+    daemonEndpoints: normalizeRelayEndpointCandidates(record.daemonEndpoints, updatedAt),
+    daemonSessions: normalizeRelayTmuxSessionSnapshots(record.daemonSessions, updatedAt),
   };
 }
 
@@ -156,6 +171,33 @@ function toDeviceSnapshot(record: TraversalRelayDeviceRecord): TraversalRelayDev
       hostId: record.daemonHostId,
       version: record.daemonVersion,
     },
+  };
+}
+
+function toDirectoryDevice(record: TraversalRelayDeviceRecord): RelayDirectoryDevice {
+  const daemon: RelayDirectoryDaemon | null = record.daemonHostId
+    ? {
+        hostId: record.daemonHostId,
+        version: record.daemonVersion,
+        presence: {
+          connected: record.daemonConnected,
+          lastSeenAt: record.daemonLastSeenAt,
+        },
+        endpoints: record.daemonEndpoints,
+        sessions: record.daemonSessions,
+        lastPublishedAt: record.daemonDirectoryPublishedAt || record.daemonLastSeenAt,
+      }
+    : null;
+  return {
+    deviceId: record.deviceId,
+    deviceName: record.deviceName,
+    platform: record.platform,
+    appVersion: record.appVersion,
+    client: {
+      connected: record.clientConnected,
+      lastSeenAt: record.clientLastSeenAt,
+    },
+    daemon,
   };
 }
 
@@ -226,6 +268,9 @@ export class TraversalRelayStore {
       daemonLastSeenAt: '',
       daemonHostId: '',
       daemonVersion: '',
+      daemonDirectoryPublishedAt: '',
+      daemonEndpoints: [],
+      daemonSessions: [],
     };
     this.data.devices.push(device);
     return device;
@@ -338,6 +383,42 @@ export class TraversalRelayStore {
     return toDeviceSnapshot(device);
   }
 
+  public publishDaemonDirectory(options: {
+    userId: string;
+    deviceId: string;
+    hostId: string;
+    deviceName?: string;
+    platform?: string;
+    appVersion?: string;
+    daemonVersion?: string;
+    endpoints?: RelayEndpointCandidate[];
+    sessions?: RelayTmuxSessionSnapshot[];
+    publishedAt?: string;
+  }) {
+    this.requireUserById(options.userId);
+    const hostId = options.hostId.trim();
+    if (!hostId) {
+      throw new Error('hostId is required');
+    }
+    const device = this.getOrCreateDevice(options.userId, options.deviceId);
+    this.patchDeviceIdentity(device, options);
+    const now = stableNow();
+    const publishedAt = options.publishedAt?.trim() || now;
+    device.daemonConnected = true;
+    device.daemonHostId = hostId;
+    device.daemonLastSeenAt = now;
+    device.daemonDirectoryPublishedAt = publishedAt;
+    device.updatedAt = now;
+    device.lastSeenAt = now;
+    if (typeof options.daemonVersion === 'string' && options.daemonVersion.trim()) {
+      device.daemonVersion = options.daemonVersion.trim();
+    }
+    device.daemonEndpoints = normalizeRelayEndpointCandidates(options.endpoints, publishedAt);
+    device.daemonSessions = normalizeRelayTmuxSessionSnapshots(options.sessions, publishedAt);
+    this.persist();
+    return toDirectoryDevice(device);
+  }
+
   public setDaemonConnected(options: {
     userId: string;
     deviceId: string;
@@ -374,6 +455,23 @@ export class TraversalRelayStore {
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))
       .map((entry) => toDeviceSnapshot(entry));
+  }
+
+  public getAccountDirectory(userId: string): RelayAccountDirectory {
+    const user = this.requireUserById(userId);
+    const devices = this.data.devices
+      .filter((entry) => entry.userId === userId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))
+      .map((entry) => toDirectoryDevice(entry));
+    return {
+      schemaVersion: 1,
+      user: {
+        id: user.id,
+        username: user.username,
+      },
+      devices,
+      updatedAt: stableNow(),
+    };
   }
 
   public summary() {

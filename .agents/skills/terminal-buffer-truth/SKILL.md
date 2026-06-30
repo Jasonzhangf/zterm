@@ -52,6 +52,15 @@ tmux truth
   - explicit tab switch / explicit resume 会触发 transport reopen
   - App 层不得再长出第二套 foreground refresh / reconnect 语义
 
+### 0.1 Windows daemon / WezTerm runner 经验
+
+- Windows daemon 只能把 WezTerm 当外部 terminal/mux source；runner 必须显式设置 `ZTERM_TERMINAL_BACKEND=wezterm`，禁止在 Windows 上误走 tmux。
+- 从 SSH 里 `Start-Process node server.cjs` 只能当 direct smoke，不能当持久服务结论；OpenSSH job 生命周期可能带走子进程。持久运行真源必须是 Windows Scheduled Task `ZTermDaemon` 或后续明确的服务 owner。
+- PowerShell 5.1 兼容边界要测试真实机器：`$PID/$pid` 是只读自动变量，`Start-Process` 的 stdout/stderr 不能指向同一文件，`New-ScheduledTaskSettingsSet` 参数集不能按 PowerShell 7 猜。
+- PowerShell 5.1 写 JSON 配置时默认容易带 BOM，daemon 读取会直接炸 `Unexpected token '﻿'`；Windows runner 必须用 no-BOM UTF-8 写配置，不能依赖 `Set-Content -Encoding UTF8` 这种默认行为。
+- Windows Scheduled Task 运行环境不继承交互式 shell 的 PATH；runner 不能假设 `wezterm.exe` 可直接找到，必须显式探测/固化 `ZTERM_WEZTERM_EXE` 或安装目录。
+- Windows direct route 验证必须同时看：本机 `127.0.0.1:<port>`、本机 Tailscale IP `<100.x>:<port>`、远端设备到 `<100.x>:<port>`；前两者成功不等于 Android/Mac 经 Tailscale 可达。
+
 ## 1. daemon server
 
 server / daemon 是独立层，只做：
@@ -570,6 +579,13 @@ tmux truth
 
 - 当“大面积刷新后空白、滚一下又恢复”时，优先查 `commitBuffer()` 是否把 live buffer 引用直接塞进 store 并被引用短路。
 - 真源规则：store 必须存不可变快照，commit 只能按内容判等，不能靠对象引用判等；否则上游原地 mutate 会让正文刷新静默失效。
+
+## 2026-06-29 Windows WezTerm backend boundary
+
+- WezTerm mux 可作为 Windows buffer source，但 `wezterm cli` 输出不是 daemon truth；ZTerm adapter 必须把 `get-text --escapes` 转成自己拥有的 absolute mirror snapshot 后才允许进入 buffer-sync 链。
+- `wezterm cli --prefer-mux send-text --pane-id <id> --no-paste` 只允许通过 stdin 写真实 terminal input，禁止把用户输入塞进 shell args；已验证 Enter / Backspace / arrow escape / raw TUI / Codex TUI text entry。
+- WezTerm backend 是显式 backend selection，不是 tmux fallback；Windows 默认 `wezterm`，非 Windows 默认 `tmux`，未知 backend 必须显式报错。
+- 已知限制：ETX/Ctrl+C 可送到 raw-mode/TUI，但不能当作 Windows console control event 中断 `cmd.exe` 子进程；不要宣称完整键盘等价。
 
 ## 9. Android copy-mode gate
 - WebView copy-mode 长按有两层 native gate：`setOnLongClickListener(v -> true)` 只管系统 ActionMode / 工具栏，`setLongClickable(false)` 才会停掉原生 haptic / selection 拦截，让 JS `onTouchStart` 的长按计时器真正启动。

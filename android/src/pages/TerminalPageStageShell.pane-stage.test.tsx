@@ -497,8 +497,10 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('左侧');
     expect(screen.getByTestId('terminal-session-group-peek-bottom').textContent).toContain('右侧');
     expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('alpha');
-    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('host-a:3333');
-    expect(screen.getByTestId('terminal-session-group-peek-top').getAttribute('style')).toContain('padding: 72px 10px 32px');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).toContain('host-a');
+    expect(screen.getByTestId('terminal-session-group-peek-top').textContent).not.toContain('host-a:3333');
+    expect(screen.getByTestId('terminal-session-group-peek-top').getAttribute('style')).toContain('padding: 68px 10px 26px');
+    expect(screen.getByTestId('terminal-session-group-peek-top').getAttribute('data-server-key')).toBe('host-a:3333');
   });
 
   it('does not render a horizontal side peek when that slot has no assigned session', async () => {

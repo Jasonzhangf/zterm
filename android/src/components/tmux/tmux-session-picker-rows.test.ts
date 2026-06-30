@@ -145,5 +145,16 @@ describe('tmux session picker rows', () => {
       daemonFirst: true,
       target: { bridgeHost: '100.66.1.82', authToken: 'token-a', daemonHostId: 'daemon-a' },
     })).toBe(true);
+
+    expect(shouldAutoRefreshTmuxPicker({
+      open: true,
+      daemonFirst: true,
+      target: {
+        bridgeHost: 'daemon-a',
+        authToken: '',
+        daemonHostId: 'daemon-a',
+        relayTmuxSessions: [{ name: 'main', updatedAt: '2026-06-28T00:00:00.000Z' }],
+      },
+    })).toBe(true);
   });
 });

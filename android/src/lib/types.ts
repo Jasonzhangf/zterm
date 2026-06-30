@@ -5,6 +5,10 @@
  */
 
 import type {
+  RelayEndpointCandidate,
+  RelayTmuxSessionSnapshot,
+} from '@zterm/shared/relay-directory';
+import type {
   BridgeClientMessage,
   BridgeServerMessage,
 } from '@zterm/shared/protocol';
@@ -41,6 +45,7 @@ export interface Host {
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   signalUrl?: string;
   transportMode?: 'auto' | 'websocket' | 'webrtc';
   authType: 'password' | 'key';
@@ -401,6 +406,8 @@ export interface TraversalRelayDeviceSnapshot {
     lastSeenAt: string;
     hostId: string;
     version: string;
+    endpoints?: RelayEndpointCandidate[];
+    sessions?: RelayTmuxSessionSnapshot[];
   };
 }
 

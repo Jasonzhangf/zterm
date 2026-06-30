@@ -3,6 +3,7 @@ import { resolveBridgePresetDaemonHostId, type BridgeServerPreset } from './brid
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import { isLikelyTailscaleHost } from './network-target';
 import type { Host, Session, TraversalRelayDeviceSnapshot } from './types';
+import type { RelayEndpointCandidate, RelayTmuxSessionSnapshot } from '@zterm/shared/relay-directory';
 
 export interface BridgeTarget {
   bridgeHost: string;
@@ -16,6 +17,8 @@ export interface BridgeTarget {
   ipv4Host?: string;
   signalUrl?: string;
   transportMode?: 'auto' | 'websocket' | 'webrtc';
+  relayEndpointCandidates?: RelayEndpointCandidate[];
+  relayTmuxSessions?: RelayTmuxSessionSnapshot[];
 }
 
 export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
@@ -33,6 +36,8 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
     ipv4Host: target?.ipv4Host?.trim() || '',
     signalUrl: target?.signalUrl?.trim() || '',
     transportMode: target?.transportMode || 'auto',
+    relayEndpointCandidates: target?.relayEndpointCandidates || [],
+    relayTmuxSessions: target?.relayTmuxSessions || [],
   };
 }
 
@@ -76,19 +81,36 @@ export function resolveRelayDeviceBridgeTarget(
   presets: BridgeServerPreset[],
   device: TraversalRelayDeviceSnapshot,
 ): BridgeTarget {
-  return (
-    buildDaemonMappedBridgeTarget(presets, {
-      daemonHostId: device.daemon.hostId,
-      relayDeviceId: device.deviceId,
-    }) || {
-      bridgeHost: '',
-      bridgePort: DEFAULT_BRIDGE_PORT,
-      daemonHostId: device.daemon.hostId.trim(),
-      relayHostId: device.daemon.hostId.trim(),
-      relayDeviceId: device.deviceId.trim(),
-      authToken: '',
-    }
-  );
+  const relayEndpointCandidates = device.daemon.endpoints || [];
+  const relayTmuxSessions = device.daemon.sessions || [];
+  const mappedTarget = buildDaemonMappedBridgeTarget(presets, {
+    daemonHostId: device.daemon.hostId,
+    relayDeviceId: device.deviceId,
+  });
+  if (mappedTarget) {
+    return normalizeBridgeTarget({
+      ...mappedTarget,
+      relayEndpointCandidates,
+      relayTmuxSessions,
+    });
+  }
+
+  const preferredDirectEndpoint = relayEndpointCandidates.find((endpoint) =>
+    (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
+    && (endpoint.host?.trim() || endpoint.wsUrl?.trim()));
+  return normalizeBridgeTarget({
+    bridgeHost: preferredDirectEndpoint?.host?.trim()
+      || preferredDirectEndpoint?.wsUrl?.trim()
+      || '',
+    bridgePort: preferredDirectEndpoint?.port || DEFAULT_BRIDGE_PORT,
+    daemonHostId: device.daemon.hostId.trim(),
+    relayHostId: device.daemon.hostId.trim(),
+    relayDeviceId: device.deviceId.trim(),
+    authToken: '',
+    transportMode: 'auto',
+    relayEndpointCandidates,
+    relayTmuxSessions,
+  });
 }
 
 export function buildPreferredTarget(
@@ -178,6 +200,7 @@ export function buildDraftFromTmuxSession(
       ipv4Host: normalizedTarget.ipv4Host || existing.ipv4Host,
       signalUrl: normalizedTarget.signalUrl || existing.signalUrl,
       transportMode: normalizedTarget.transportMode || existing.transportMode,
+      relayEndpointCandidates: normalizedTarget.relayEndpointCandidates || [],
       authType: 'password',
       password: undefined,
       privateKey: undefined,
@@ -205,6 +228,7 @@ export function buildDraftFromTmuxSession(
     ipv4Host: target.ipv4Host || '',
     signalUrl: target.signalUrl || '',
     transportMode: target.transportMode || 'auto',
+    relayEndpointCandidates: target.relayEndpointCandidates || [],
     authType: 'password',
     password: undefined,
     privateKey: undefined,
@@ -230,6 +254,7 @@ export function buildCleanDraft(target: BridgeTarget): HostDraft {
     ipv4Host: target.ipv4Host || '',
     signalUrl: target.signalUrl || '',
     transportMode: target.transportMode || 'auto',
+    relayEndpointCandidates: target.relayEndpointCandidates || [],
     authType: 'password',
     password: undefined,
     privateKey: undefined,

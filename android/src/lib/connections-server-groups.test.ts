@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildConnectionsServerGroups } from './connections-server-groups';
+import { TraversalRouteHealthCache } from './traversal/route-health-cache';
 import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
+import type { TraversalPlanCandidate } from './traversal/types';
 
 function makeHost(overrides: Partial<Host> = {}): Host {
   return {
@@ -325,6 +327,140 @@ describe('buildConnectionsServerGroups', () => {
       daemonConnected: false,
       sessions: [],
     });
+  });
+
+  it('projects relay directory sessions and endpoint candidates without requiring a saved host', () => {
+    const groups = buildConnectionsServerGroups({
+      relayDevices: [
+        makeRelayDevice({
+          deviceId: 'relay-device-a',
+          deviceName: 'relay-mac',
+          daemon: {
+            connected: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+            hostId: 'relay-daemon-a',
+            version: '0.1.3',
+            endpoints: [
+              {
+                id: 'direct:tailscale:relay-daemon-a',
+                kind: 'tailscale',
+                host: 'relay-mac.tailnet.ts.net',
+                port: 3333,
+                authRequired: true,
+                lastSeenAt: '2026-06-28T00:00:00.000Z',
+              },
+            ],
+            sessions: [
+              {
+                name: 'main',
+                cwd: '/Users/jason/project',
+                title: 'main',
+                updatedAt: '2026-06-28T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      ],
+      hosts: [],
+      sessions: [],
+      sessionGroups: [],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      id: 'daemon:relay-daemon-a',
+      relayDeviceTruth: true,
+      relayEndpointCandidates: [
+        expect.objectContaining({ id: 'direct:tailscale:relay-daemon-a' }),
+      ],
+      openableSessions: ['main'],
+      defaultSessionNames: ['main'],
+    });
+    expect(groups[0]?.sessions[0]).toMatchObject({
+      sessionName: 'main',
+      missingFromRemoteTruth: false,
+    });
+  });
+
+  it('projects explainable route diagnostics from directory candidates and route health', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const cache = new TraversalRouteHealthCache({ now: () => 1000 });
+    const relayCandidate = {
+      id: 'relay-rtc:relay-daemon-a',
+      kind: 'rtc',
+      path: 'rtc-relay',
+      endpoint: 'relay-daemon-a',
+      signalUrl: 'wss://relay.example/ws/client?hostId=relay-daemon-a',
+      iceServers: [],
+    } satisfies TraversalPlanCandidate;
+    const tailscaleCandidate = {
+      id: 'direct:tailscale:relay-daemon-a',
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: 'relay-mac.tailnet.ts.net',
+      url: 'ws://relay-mac.tailnet.ts.net',
+    } satisfies TraversalPlanCandidate;
+    cache.recordSuccess({ accountId: 'user-a', daemonHostId: 'relay-daemon-a' }, relayCandidate, 132);
+    cache.recordFailure({ accountId: 'user-a', daemonHostId: 'relay-daemon-a' }, tailscaleCandidate, 'timeout');
+
+    const groups = buildConnectionsServerGroups({
+      accountId: 'user-a',
+      routeHealthCache: cache,
+      traversalPathPriority: ['tailscale', 'rtc-relay', 'ipv4'],
+      relayDevices: [
+        makeRelayDevice({
+          deviceId: 'relay-device-a',
+          deviceName: 'relay-mac',
+          daemon: {
+            connected: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+            hostId: 'relay-daemon-a',
+            version: '0.1.3',
+            endpoints: [
+              {
+                id: 'direct:tailscale:relay-daemon-a',
+                kind: 'tailscale',
+                host: 'relay-mac.tailnet.ts.net',
+                port: 3333,
+                authRequired: true,
+                lastSeenAt: '2026-06-28T00:00:00.000Z',
+              },
+              {
+                id: 'relay-rtc:relay-daemon-a',
+                kind: 'relay-rtc',
+                relayHostId: 'relay-daemon-a',
+                authRequired: true,
+                lastSeenAt: '2026-06-28T00:00:00.000Z',
+              },
+            ],
+            sessions: [
+              {
+                name: 'main',
+                updatedAt: '2026-06-28T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      ],
+      hosts: [],
+      sessions: [],
+      sessionGroups: [],
+    });
+
+    expect(groups[0]?.routeDiagnostics).toMatchObject({
+      badge: 'Route Relay RTC',
+      selectedPath: 'rtc-relay',
+      selectedCandidateId: 'relay-rtc:relay-daemon-a',
+      selectedRttLabel: '132ms',
+      lastSuccessLabel: 'just now',
+      lastErrorLabel: 'timeout · just now',
+    });
+    expect(groups[0]?.routeDiagnostics?.attempts.find((item) => item.candidateId === 'direct:tailscale:relay-daemon-a')).toMatchObject({
+      selectable: false,
+      health: { status: 'failure' },
+    });
+    vi.useRealTimers();
   });
 
   it('removes stale offline account daemon zombies when they have no child sessions', () => {

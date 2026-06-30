@@ -1,5 +1,6 @@
 import type { TraversalRelayDeviceSnapshot } from './types';
 import { readTraversalRelayAccountState } from './traversal-relay-client';
+import { projectRelayDirectoryDeviceSnapshots } from './relay-account-directory';
 
 export function countConnectedTraversalRelayDevices(devices: TraversalRelayDeviceSnapshot[]) {
   return devices.filter((device) => device.daemon.connected || device.client.connected).length;
@@ -10,5 +11,11 @@ export function listOnlineTraversalRelayDaemonDevices(devices: TraversalRelayDev
 }
 
 export function readOnlineTraversalRelayDaemonDevices() {
-  return listOnlineTraversalRelayDaemonDevices(readTraversalRelayAccountState()?.devices || []);
+  const account = readTraversalRelayAccountState();
+  const directoryDevices = projectRelayDirectoryDeviceSnapshots(account?.directory);
+  return listOnlineTraversalRelayDaemonDevices(
+    directoryDevices.length > 0
+      ? directoryDevices
+      : account?.devices || [],
+  );
 }

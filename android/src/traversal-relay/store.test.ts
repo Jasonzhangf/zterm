@@ -123,4 +123,116 @@ describe('TraversalRelayStore', () => {
       online: true,
     });
   });
+
+  it('publishes account directory endpoints and tmux sessions without requiring client presence', () => {
+    const store = createStore();
+    const user = store.register('Jason', 'secret');
+
+    const device = store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      hostId: 'daemon-mac-studio',
+      daemonVersion: '0.1.3-daemon',
+      endpoints: [
+        {
+          id: 'tailscale:mac-studio',
+          kind: 'tailscale',
+          host: 'mac-studio.tailnet.ts.net',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'relay:daemon-mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+      sessions: [
+        { name: 'work', cwd: '/Users/jason/code', title: 'zterm', updatedAt: '2026-06-28T00:00:00.000Z' },
+        { name: 'ops', updatedAt: '2026-06-28T00:00:00.000Z' },
+      ],
+      publishedAt: '2026-06-28T00:00:00.000Z',
+    });
+
+    expect(device).toMatchObject({
+      deviceId: 'mac-studio',
+      daemon: {
+        hostId: 'daemon-mac-studio',
+        version: '0.1.3-daemon',
+        presence: {
+          connected: true,
+        },
+        endpoints: [
+          { id: 'tailscale:mac-studio', kind: 'tailscale', host: 'mac-studio.tailnet.ts.net', port: 3333 },
+          { id: 'relay:daemon-mac-studio', kind: 'relay-rtc', relayHostId: 'daemon-mac-studio' },
+        ],
+        sessions: [
+          { name: 'work', cwd: '/Users/jason/code', title: 'zterm' },
+          { name: 'ops' },
+        ],
+      },
+    });
+
+    const directory = store.getAccountDirectory(user.id);
+    expect(directory).toMatchObject({
+      schemaVersion: 1,
+      user: {
+        id: user.id,
+        username: 'jason',
+      },
+      devices: [
+        {
+          deviceId: 'mac-studio',
+          client: {
+            connected: false,
+          },
+          daemon: {
+            hostId: 'daemon-mac-studio',
+            sessions: [
+              { name: 'work' },
+              { name: 'ops' },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it('keeps last published directory facts when daemon disconnects', () => {
+    const store = createStore();
+    const user = store.register('Jason', 'secret');
+
+    store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'macbook-air',
+      hostId: 'daemon-mba',
+      endpoints: [{ id: 'relay:daemon-mba', kind: 'relay-rtc', relayHostId: 'daemon-mba', authRequired: true, lastSeenAt: '2026-06-28T00:00:00.000Z' }],
+      sessions: [{ name: 'mobile-dev', updatedAt: '2026-06-28T00:00:00.000Z' }],
+    });
+    store.setDaemonConnected({
+      userId: user.id,
+      deviceId: 'macbook-air',
+      hostId: 'daemon-mba',
+      connected: false,
+    });
+
+    const directory = store.getAccountDirectory(user.id);
+    expect(directory.devices[0]).toMatchObject({
+      deviceId: 'macbook-air',
+      daemon: {
+        hostId: 'daemon-mba',
+        presence: {
+          connected: false,
+        },
+        endpoints: [{ id: 'relay:daemon-mba', kind: 'relay-rtc' }],
+        sessions: [{ name: 'mobile-dev' }],
+      },
+    });
+  });
 });

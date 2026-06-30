@@ -5,20 +5,34 @@ import { ConnectionsBottomNav } from '../components/connections/ConnectionsBotto
 import { ConnectionsHeader } from '../components/connections/ConnectionsHeader';
 import { buildConnectionsServerGroups, type ServerGroupView } from '../lib/connections-server-groups';
 import { mobileTheme } from '../lib/mobile-ui';
-import { getServerColorTone } from '../lib/server-color';
+import { readTraversalRelayAccountState } from '../lib/traversal-relay-client';
+import { getServerIdentityTone } from '../lib/server-identity';
 import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
+import { type BridgeSettings } from '../lib/bridge-settings';
 import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
+import type { TraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
+
+interface ConnectionsGroupTarget {
+  bridgeHost: string;
+  bridgePort: number;
+  daemonHostId?: string;
+  authToken?: string;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
+}
 
 interface ConnectionsPageProps {
+  bridgeSettings?: Pick<BridgeSettings, 'traversalPathPriority'>;
+  routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'list'>;
   hosts: Host[];
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
   onResumeSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string, source?: string) => void;
-  onOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
-  onEditServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
-  onSaveServerGroupSelection: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionNames: string[]) => void;
+  onOpenGroupSession: (group: ConnectionsGroupTarget, sessionName: string) => void;
+  onEditServerGroup: (group: ConnectionsGroupTarget, sessionNames: string[]) => void;
+  onSaveServerGroupSelection: (group: ConnectionsGroupTarget, sessionNames: string[]) => void;
   onDeleteServerGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
   onOpenServerGroups: (groups: Array<{
     name: string;
@@ -26,6 +40,7 @@ interface ConnectionsPageProps {
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
   }>) => void;
   onEdit: (host: Host) => void;
@@ -45,6 +60,24 @@ function getGroupTitleName(group: ServerGroupView) {
 
 function getSessionCountLabel(count: number) {
   return count === 1 ? '1 session' : `${count} sessions`;
+}
+
+function getRouteSummaryLabel(group: ServerGroupView) {
+  const routeDiagnostics = group.routeDiagnostics;
+  if (!routeDiagnostics) {
+    return null;
+  }
+  const parts = [routeDiagnostics.badge];
+  if (routeDiagnostics.selectedRttLabel) {
+    parts.push(`RTT ${routeDiagnostics.selectedRttLabel}`);
+  }
+  if (routeDiagnostics.lastSuccessLabel) {
+    parts.push(`last success ${routeDiagnostics.lastSuccessLabel}`);
+  }
+  if (routeDiagnostics.lastErrorLabel) {
+    parts.push(`last error ${routeDiagnostics.lastErrorLabel}`);
+  }
+  return parts.join(' · ');
 }
 
 function getDaemonSubtitle(group: ServerGroupView) {
@@ -68,6 +101,8 @@ function formatRelative(ts?: number) {
 }
 
 export function ConnectionsPage({
+  bridgeSettings,
+  routeHealthCache,
   hosts,
   sessions,
   sessionGroups,
@@ -88,12 +123,16 @@ export function ConnectionsPage({
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [selectedSessionsByGroup, setSelectedSessionsByGroup] = useState<Record<string, string[]>>({});
   const [vaultNoticeVisible, setVaultNoticeVisible] = useState(false);
+  const relayAccount = readTraversalRelayAccountState();
   const serverGroups = useMemo(() => buildConnectionsServerGroups({
     hosts,
     sessions,
     sessionGroups,
     relayDevices,
-  }), [hosts, relayDevices, sessionGroups, sessions]);
+    accountId: relayAccount?.user?.id,
+    traversalPathPriority: bridgeSettings?.traversalPathPriority,
+    routeHealthCache,
+  }), [bridgeSettings?.traversalPathPriority, hosts, relayAccount?.user?.id, relayDevices, routeHealthCache, sessionGroups, sessions]);
   const previousServerGroupsRef = useRef<ServerGroupView[]>(serverGroups);
 
   useEffect(() => {
@@ -238,6 +277,7 @@ export function ConnectionsPage({
       bridgePort: number;
       daemonHostId?: string;
       authToken?: string;
+      relayEndpointCandidates?: RelayEndpointCandidate[];
       sessionNames: string[];
     }> = [];
     let firstLiveSessionId: string | null = null;
@@ -258,6 +298,7 @@ export function ConnectionsPage({
         bridgePort: target.bridgePort,
         daemonHostId: group.daemonHostId,
         authToken: target.authToken,
+        relayEndpointCandidates: target.relayEndpointCandidates,
         sessionNames: nonLiveSessionNames,
       });
     });
@@ -271,19 +312,30 @@ export function ConnectionsPage({
     }
   };
 
-  const resolveGroupBridgeTarget = (group: ServerGroupView): { bridgeHost: string; bridgePort: number; authToken?: string } => {
+  const resolveGroupBridgeTarget = (group: ServerGroupView): ConnectionsGroupTarget => {
     if (group.bridgeHost && group.bridgePort) {
-      return { bridgeHost: group.bridgeHost, bridgePort: group.bridgePort, authToken: group.authToken };
+      return { bridgeHost: group.bridgeHost, bridgePort: group.bridgePort, authToken: group.authToken, relayEndpointCandidates: group.relayEndpointCandidates };
     }
     if (group.daemonHostId) {
       const matchedHost = hosts.find(
         (h) => (h.daemonHostId || h.relayHostId || '').trim().toLowerCase() === group.daemonHostId!.trim().toLowerCase()
       );
       if (matchedHost) {
-        return { bridgeHost: matchedHost.bridgeHost, bridgePort: matchedHost.bridgePort, authToken: matchedHost.authToken || group.authToken };
+        return {
+          bridgeHost: matchedHost.bridgeHost,
+          bridgePort: matchedHost.bridgePort,
+          authToken: matchedHost.authToken || group.authToken,
+          relayEndpointCandidates: group.relayEndpointCandidates || matchedHost.relayEndpointCandidates,
+        };
       }
     }
-    return { bridgeHost: group.bridgeHost || '', bridgePort: group.bridgePort || 0, authToken: group.authToken };
+    return {
+      bridgeHost: group.bridgeHost || group.daemonHostId || '',
+      bridgePort: group.bridgePort || 0,
+      daemonHostId: group.daemonHostId,
+      authToken: group.authToken,
+      relayEndpointCandidates: group.relayEndpointCandidates,
+    };
   };
 
   const openGroupSessions = (group: ServerGroupView, sessionNames: string[]) => {
@@ -303,6 +355,7 @@ export function ConnectionsPage({
         bridgePort: target.bridgePort,
         daemonHostId: group.daemonHostId,
         authToken: target.authToken,
+        relayEndpointCandidates: target.relayEndpointCandidates,
         sessionNames,
       },
     ]);
@@ -400,26 +453,36 @@ export function ConnectionsPage({
               const missingSessionLabel = missingSessionCount > 0
                 ? `${missingSessionCount} missing`
                 : null;
-              const tone = getServerColorTone(group);
+              const routeSummaryLabel = getRouteSummaryLabel(group);
+              const routeBadge = group.routeDiagnostics?.badge || null;
+              const tone = getServerIdentityTone({
+                daemonHostId: group.daemonHostId,
+                bridgeHost: group.bridgeHost,
+                bridgePort: group.bridgePort,
+                connectionName: getGroupTitleName(group),
+              });
+              const previewParts = missingSessionCount > 0
+                ? [`${missingSessionLabel}`, 'review and close stale sessions']
+                : routeSummaryLabel
+                  ? [routeSummaryLabel]
+                  : isOpen
+                    ? [`Live now`, `${group.liveSessions.length}/${group.sessions.length} sessions open`]
+                    : group.savedCount > 0
+                      ? [`Saved ${getSessionCountLabel(group.savedCount)}`, `last active ${formatRelative(group.lastOpenedAt)}`]
+                      : group.sessions.length > 0
+                        ? [`History only`, `last active ${formatRelative(group.lastOpenedAt)}`]
+                        : [`No sessions reported`, `last seen ${formatRelative(Date.parse(group.daemonLastSeenAt || '') || 0)}`];
               return (
                 <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <ConnectionCard
                     title={`${getGroupTitleName(group)} · ${getSessionCountLabel(group.sessions.length)}`}
                     subtitle={getDaemonSubtitle(group)}
-                    preview={
-                      missingSessionCount > 0
-                        ? `${missingSessionLabel} · review and close stale sessions`
-                        : isOpen
-                        ? `Live now · ${group.liveSessions.length}/${group.sessions.length} sessions open`
-                        : group.savedCount > 0
-                        ? `Saved ${getSessionCountLabel(group.savedCount)} · last active ${formatRelative(group.lastOpenedAt)}`
-                          : group.sessions.length > 0
-                            ? `History only · last active ${formatRelative(group.lastOpenedAt)}`
-                            : `No sessions reported · last seen ${formatRelative(Date.parse(group.daemonLastSeenAt || '') || 0)}`
-                    }
+                    preview={previewParts.join(' · ')}
                     accentLabel={
                       missingSessionCount > 0
                         ? `${missingSessionLabel} · review`
+                        : routeBadge
+                          ? `${routeBadge}${group.routeDiagnostics?.selectedRttLabel ? ` · ${group.routeDiagnostics.selectedRttLabel}` : ''}`
                         : expanded
                         ? `${actionSessionNames.length} selected · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`
                         : `${group.savedCount || group.sessions.length} default · ${canOpenGroup ? (isFullyOpen ? 'ready' : isOpen ? 'partial' : 'restore') : 'history-only'}`

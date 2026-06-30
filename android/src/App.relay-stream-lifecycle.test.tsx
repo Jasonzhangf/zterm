@@ -277,6 +277,7 @@ function setupRelayAccount(enabled: boolean) {
       deviceName: 'ZTerm Android',
       platform: 'android',
       devices: [],
+      directory: null,
       updatedAt: 1,
     });
   } else {
@@ -330,6 +331,7 @@ describe('App relay device stream reconnect lifecycle', () => {
       onOpen?: () => void;
       onClose?: (event: CloseEvent) => void;
       onDevices?: (devices: unknown[]) => void;
+      onDirectory?: (directory: unknown) => void;
     }) => {
       const socket = new MockRelayWebSocket();
       socket.onopen = () => options.onOpen?.();
@@ -338,6 +340,9 @@ describe('App relay device stream reconnect lifecycle', () => {
         const payload = JSON.parse(String(event.data));
         if (Array.isArray(payload.payload?.devices)) {
           options.onDevices?.(payload.payload.devices);
+        }
+        if (payload.payload?.directory) {
+          options.onDirectory?.(payload.payload.directory);
         }
       };
       return socket;

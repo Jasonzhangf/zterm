@@ -1,5 +1,6 @@
 import type { BridgeSettings } from '../bridge-settings';
 import type { Host } from '../types';
+import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 export type TraversalTransportMode = 'auto' | 'websocket' | 'webrtc';
 export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
@@ -14,9 +15,12 @@ export interface TraversalAttemptDiagnostic {
   kind: 'ws' | 'rtc';
   path: TraversalResolvedPath;
   endpoint: string;
+  candidateId?: string;
   ok: boolean;
   stage: 'connecting' | 'open' | 'closed' | 'error';
   reason?: string;
+  rttMs?: number;
+  score?: number;
 }
 
 export interface TraversalDiagnostics {
@@ -47,12 +51,40 @@ export interface TraversalTargetSource {
   tailscaleHost?: Host['tailscaleHost'];
   ipv6Host?: Host['ipv6Host'];
   ipv4Host?: Host['ipv4Host'];
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   signalUrl?: Host['signalUrl'];
   transportMode?: Host['transportMode'];
 }
 
 export interface TraversalPlanCandidateBase {
+  id?: string;
   endpoint: string;
+}
+
+export interface TraversalRouteHealthRecord {
+  key: string;
+  path: TraversalResolvedPath;
+  endpoint: string;
+  candidateId?: string;
+  status: 'success' | 'failure' | 'auth-failure';
+  updatedAt: number;
+  rttMs?: number;
+  error?: string;
+}
+
+export interface TraversalRouteSelectionDiagnostic {
+  candidateId?: string;
+  path: TraversalResolvedPath;
+  endpoint: string;
+  selectable: boolean;
+  score: number;
+  reasons: string[];
+  health?: TraversalRouteHealthRecord;
+}
+
+export interface TraversalRouteSelection {
+  selected: TraversalPlanCandidate | null;
+  diagnostics: TraversalRouteSelectionDiagnostic[];
 }
 
 export interface WebSocketTraversalCandidate extends TraversalPlanCandidateBase {

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import type { TraversalRelayClientSettings } from '../lib/bridge-settings';
 import {
   readTraversalRelayAccountState,
+  resolveTraversalRelayBaseUrl,
   traversalRelayLogin,
   traversalRelayRefreshMe,
   traversalRelayRegister,
   writeTraversalRelayAccountState,
   type TraversalRelayAccountState,
 } from '../lib/traversal-relay-client';
+import { projectRelayDirectoryDeviceSnapshots } from '../lib/relay-account-directory';
 import type { TraversalRelayDeviceSnapshot } from '../lib/types';
 
 interface RelayDraftAccount {
@@ -20,31 +22,41 @@ function buildFallbackRefreshAccount(
   draft: RelayDraftAccount,
   relaySettings?: TraversalRelayClientSettings,
 ): TraversalRelayAccountState {
+  const relayBaseUrl = resolveTraversalRelayBaseUrl(draft.relayBaseUrl || relaySettings?.relayBaseUrl);
   return {
     username: draft.username.trim(),
     password: draft.password,
-    relayBaseUrl: draft.relayBaseUrl.trim(),
+    relayBaseUrl,
     accessToken: relaySettings?.accessToken || '',
     user: null,
     deviceId: relaySettings?.deviceId || 'zterm-android',
     deviceName: relaySettings?.deviceName || 'ZTerm Android',
     platform: relaySettings?.platform || 'android',
     devices: [],
+    directory: null,
     updatedAt: Date.now(),
     relaySettings,
   };
+}
+
+function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState | null) {
+  if (!account) {
+    return [];
+  }
+  const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
+  return directoryDevices.length > 0 ? directoryDevices : account.devices;
 }
 
 export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayClientSettings) {
   const [account, setAccount] = useState<TraversalRelayAccountState | null>(() => readTraversalRelayAccountState());
   const [relayStatus, setRelayStatus] = useState('');
   const [relayBusy, setRelayBusy] = useState<'login' | 'register' | 'refresh' | null>(null);
-  const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => account?.devices || []);
+  const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => projectRelayDevicesFromAccountState(account));
 
   const refreshLocalAccount = useCallback(() => {
     const nextAccount = readTraversalRelayAccountState();
     setAccount(nextAccount);
-    setRelayDevices(nextAccount?.devices || []);
+    setRelayDevices(projectRelayDevicesFromAccountState(nextAccount));
     return nextAccount;
   }, []);
 
@@ -57,11 +69,7 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     draft: RelayDraftAccount,
     relaySettings?: TraversalRelayClientSettings,
   ) => {
-    const baseUrl = draft.relayBaseUrl.trim();
-    if (!baseUrl) {
-      setRelayStatus('先填写 Relay Base URL');
-      return null;
-    }
+    const baseUrl = resolveTraversalRelayBaseUrl(draft.relayBaseUrl || relaySettings?.relayBaseUrl);
     setRelayBusy(mode);
     setRelayStatus(mode === 'register' ? '注册中…' : mode === 'login' ? '登录中…' : '刷新中…');
     try {
@@ -95,7 +103,7 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
 
       writeTraversalRelayAccountState(nextAccount);
       setAccount(nextAccount);
-      setRelayDevices(nextAccount.devices);
+      setRelayDevices(projectRelayDevicesFromAccountState(nextAccount));
       setRelayStatus(`已登录 ${nextAccount.user?.username || draft.username} · device=${nextAccount.deviceId}`);
       return {
         account: nextAccount,

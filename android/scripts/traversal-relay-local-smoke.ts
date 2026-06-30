@@ -8,6 +8,8 @@ import { randomUUID } from 'crypto';
 import { setTimeout as delay } from 'timers/promises';
 import { WebSocket } from 'ws';
 import wrtc from '@roamhq/wrtc';
+import { buildTraversalPlan } from '../src/lib/traversal/config';
+import { selectBestTraversalRoute } from '../src/lib/traversal/route-selector';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -19,6 +21,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const androidDir = join(scriptDir, '..');
 const relayHostId = `local-smoke-${Date.now()}`;
 const relayDeviceId = `device-${Date.now()}`;
+const relayClientDeviceId = `client-${Date.now()}`;
 const relayDeviceName = 'local-smoke-daemon';
 const relayUsername = `smoke-${Date.now()}`;
 const relayPassword = `smoke-${randomUUID()}`;
@@ -152,10 +155,153 @@ async function waitForDaemonRelayRegistration(timeoutMs = 15_000) {
   throw new Error('daemon relay registration timeout');
 }
 
+function directoryContainsSmokeSession(directory: any) {
+  return Array.isArray(directory?.devices)
+    && directory.devices.some((device: any) =>
+      device?.deviceId === relayDeviceId
+      && device?.daemon?.hostId === relayHostId
+      && Array.isArray(device?.daemon?.endpoints)
+      && device.daemon.endpoints.some((endpoint: any) =>
+        endpoint?.kind === 'relay-rtc'
+        && endpoint?.relayHostId === relayHostId)
+      && Array.isArray(device?.daemon?.sessions)
+      && device.daemon.sessions.some((session: any) => session?.name === tmuxSession));
+}
+
+async function waitForAccountDirectory(timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastPayload: unknown = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${relayUrl}/api/directory`, {
+      headers: {
+        authorization: `Bearer ${globalAccessToken}`,
+      },
+    });
+    const payload = await response.json();
+    lastPayload = payload;
+    if (response.ok && directoryContainsSmokeSession(payload.directory)) {
+      return payload.directory;
+    }
+    await delay(250);
+  }
+  throw new Error(`account directory timeout: ${JSON.stringify(lastPayload)}`);
+}
+
+async function waitForDirectoryStreamSnapshot(socket: WebSocket, timeoutMs = 10_000) {
+  socket.send(JSON.stringify({
+    type: 'devices-request',
+    payload: {
+      deviceId: relayClientDeviceId,
+      deviceName: 'local-smoke-client',
+      platform: 'smoke-client',
+      appVersion: 'smoke',
+    },
+  }));
+
+  return await new Promise<unknown>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('directory stream snapshot timeout'));
+    }, timeoutMs);
+    timeout.unref?.();
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.off('message', handleMessage);
+      socket.off('error', handleError);
+      socket.off('close', handleClose);
+    };
+
+    const handleMessage = (raw: unknown) => {
+      try {
+        const payload = JSON.parse(String(raw)) as { type?: string; payload?: { directory?: unknown } };
+        const directory = payload.payload?.directory;
+        if (payload.type === 'directory-snapshot' && directoryContainsSmokeSession(directory)) {
+          cleanup();
+          resolve(directory);
+        }
+      } catch (error) {
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    const handleError = () => {
+      cleanup();
+      reject(new Error('directory stream websocket error'));
+    };
+
+    const handleClose = () => {
+      cleanup();
+      reject(new Error('directory stream websocket closed before directory snapshot'));
+    };
+
+    socket.on('message', handleMessage);
+    socket.on('error', handleError);
+    socket.on('close', handleClose);
+  });
+}
+
+function selectSmokeRouteFromDirectory(directory: any) {
+  const daemonDevice = Array.isArray(directory?.devices)
+    ? directory.devices.find((device: any) => device?.daemon?.hostId === relayHostId)
+    : null;
+  const endpoints = daemonDevice?.daemon?.endpoints || [];
+  const relayWsBase = relayUrl.replace(/^http/, 'ws');
+  const plan = buildTraversalPlan(
+    {
+      bridgeHost: '',
+      bridgePort: daemonPort,
+      relayHostId,
+      daemonHostId: relayHostId,
+      relayEndpointCandidates: endpoints,
+      transportMode: 'auto',
+    },
+    {
+      signalUrl: '',
+      turnServerUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      transportMode: 'auto',
+      traversalPathPriority: ['tailscale', 'ipv6', 'ipv4', 'rtc-relay'],
+      traversalRelay: {
+        relayBaseUrl: relayUrl,
+        accessToken: globalAccessToken,
+        userId: String(directory?.user?.id || ''),
+        username: String(directory?.user?.username || relayUsername),
+        deviceId: relayClientDeviceId,
+        deviceName: 'local-smoke-client',
+        platform: 'smoke-client',
+        wsDevicesUrl: `${relayWsBase}/ws/devices`,
+        wsHostUrl: `${relayWsBase}/ws/host`,
+        wsClientUrl: `${relayWsBase}/ws/client`,
+        turnUrl: 'turn:127.0.0.1:3478?transport=udp',
+        turnUsername: 'smoke-turn',
+        turnCredential: 'smoke-turn',
+        updatedAt: Date.now(),
+      },
+    },
+  );
+  const selection = selectBestTraversalRoute({
+    candidates: plan.candidates,
+    scope: {
+      accountId: String(directory?.user?.id || ''),
+      daemonHostId: relayHostId,
+    },
+  });
+  if (!selection.selected) {
+    throw new Error(`route selection failed: ${JSON.stringify(selection.diagnostics)}`);
+  }
+  return {
+    selected: selection.selected,
+    diagnostics: selection.diagnostics,
+  };
+}
+
 async function connectDeviceStream(accessToken: string) {
   return await new Promise<{ socket: WebSocket; firstSnapshot: unknown[] }>((resolve, reject) => {
     const socket = new WebSocket(
-      `ws://127.0.0.1:${relayPort}/ws/devices?token=${encodeURIComponent(accessToken)}&deviceId=${encodeURIComponent(relayDeviceId)}&deviceName=${encodeURIComponent('local-smoke-client')}&platform=smoke-client&appVersion=smoke`,
+      `ws://127.0.0.1:${relayPort}/ws/devices?token=${encodeURIComponent(accessToken)}&deviceId=${encodeURIComponent(relayClientDeviceId)}&deviceName=${encodeURIComponent('local-smoke-client')}&platform=smoke-client&appVersion=smoke`,
     );
     const timeout = setTimeout(() => {
       reject(new Error('device stream timeout'));
@@ -185,7 +331,7 @@ async function connectDeviceStream(accessToken: string) {
       socket.send(JSON.stringify({
         type: 'device-meta',
         payload: {
-          deviceId: relayDeviceId,
+          deviceId: relayClientDeviceId,
           deviceName: 'local-smoke-client',
           platform: 'smoke-client',
           appVersion: 'smoke',
@@ -353,10 +499,6 @@ async function main() {
 
   try {
     await waitForHealth(`${relayUrl}/health`, 'relay');
-    const accessToken = await registerAndLogin();
-    globalAccessToken = accessToken;
-    const deviceStream = await connectDeviceStream(accessToken);
-
     const tmuxCreate = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, 'printf "relay smoke ready\\n"; exec bash'], {
       encoding: 'utf-8',
     });
@@ -364,7 +506,13 @@ async function main() {
       throw new Error(`tmux new-session failed: ${tmuxCreate.stderr || tmuxCreate.stdout}`);
     }
 
+    const accessToken = await registerAndLogin();
+    globalAccessToken = accessToken;
+    const deviceStream = await connectDeviceStream(accessToken);
     const daemonRegistration = await waitForDaemonRelayRegistration();
+    const accountDirectory = await waitForAccountDirectory();
+    const directoryStreamSnapshot = await waitForDirectoryStreamSnapshot(deviceStream.socket);
+    const routeSelection = selectSmokeRouteFromDirectory(accountDirectory);
     const rtcResult = await rtcClientSmoke(accessToken);
     closeResource('device stream socket', () => deviceStream.socket.close());
 
@@ -373,10 +521,14 @@ async function main() {
       relayUrl,
       relayHostId,
       relayDeviceId,
+      relayClientDeviceId,
       relayUsername,
       tmuxSession,
       daemonRegistration,
+      accountDirectory,
       deviceStreamSnapshot: deviceStream.firstSnapshot,
+      directoryStreamSnapshot,
+      routeSelection,
       rtcResult,
     }, null, 2)}\n`);
   } finally {

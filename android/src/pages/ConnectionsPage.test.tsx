@@ -2,7 +2,11 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { writeTraversalRelayAccountState } from '../lib/traversal-relay-client';
+import { getServerIdentityTone } from '../lib/server-identity';
+import { TraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
 import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { TraversalPlanCandidate } from '../lib/traversal/types';
 import { ConnectionsPage } from './ConnectionsPage';
 
 function makeHost(overrides: Partial<Host> = {}): Host {
@@ -96,6 +100,8 @@ function makeRelayDevice(overrides: Partial<TraversalRelayDeviceSnapshot> = {}):
 describe('ConnectionsPage', () => {
   afterEach(() => {
     cleanup();
+    writeTraversalRelayAccountState(null);
+    vi.useRealTimers();
   });
 
   it('covers grouped server usage: open defaults, manage selection, open single sessions, and route edit/delete', () => {
@@ -237,6 +243,138 @@ describe('ConnectionsPage', () => {
     fireEvent.click(screen.getByLabelText('Expand mac-studio sessions'));
     expect(screen.getByText('main')).toBeTruthy();
     expect(screen.getByText('demo')).toBeTruthy();
+  });
+
+  it('uses the same server identity tone as the drawer for daemon-first groups', () => {
+    render(
+      <ConnectionsPage
+        relayDevices={[makeRelayDevice()]}
+        hosts={[makeHost({ daemonHostId: 'mac-studio', sessionName: 'main' })]}
+        sessions={[makeSession({ id: 'live-demo', daemonHostId: 'daemon-Macstudio.local-128564413166185f', sessionName: 'demo' })]}
+        sessionGroups={[makeGroup({ daemonHostId: 'mac-studio', sessionNames: ['main'] })]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const card = screen.getByTestId('connection-card');
+    const tone = getServerIdentityTone({
+      daemonHostId: 'mac-studio',
+      bridgeHost: '100.64.0.10',
+      bridgePort: 3333,
+      connectionName: 'mac-studio',
+    });
+    const probe = document.createElement('div');
+    probe.style.border = `1px solid ${tone.lightCardBorder}`;
+    document.body.appendChild(probe);
+
+    expect(card.getAttribute('data-server-key')).toBe('mac-studio');
+    expect(window.getComputedStyle(card).borderTopColor).toBe(window.getComputedStyle(probe).borderTopColor);
+    document.body.removeChild(probe);
+  });
+
+  it('shows route badge, RTT, last error, and last success for relay directory machines', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    writeTraversalRelayAccountState({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'http://relay.test/relay/',
+      accessToken: 'token',
+      user: { id: 'user-a', username: 'jason', createdAt: '2026-06-28T00:00:00.000Z' },
+      deviceId: 'android-device',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 1000,
+    });
+    const routeHealthCache = new TraversalRouteHealthCache({ now: () => 1000 });
+    const relayCandidate = {
+      id: 'relay-rtc:relay-daemon-a',
+      kind: 'rtc',
+      path: 'rtc-relay',
+      endpoint: 'relay-daemon-a',
+      signalUrl: 'wss://relay.example/ws/client?hostId=relay-daemon-a',
+      iceServers: [],
+    } satisfies TraversalPlanCandidate;
+    const directCandidate = {
+      id: 'direct:tailscale:relay-daemon-a',
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: 'relay-mac.tailnet.ts.net',
+      url: 'ws://relay-mac.tailnet.ts.net',
+    } satisfies TraversalPlanCandidate;
+    routeHealthCache.recordSuccess({ accountId: 'user-a', daemonHostId: 'relay-daemon-a' }, relayCandidate, 144);
+    routeHealthCache.recordFailure({ accountId: 'user-a', daemonHostId: 'relay-daemon-a' }, directCandidate, 'timeout');
+
+    render(
+      <ConnectionsPage
+        bridgeSettings={{ traversalPathPriority: ['tailscale', 'rtc-relay', 'ipv4'] }}
+        routeHealthCache={routeHealthCache}
+        relayDevices={[
+          makeRelayDevice({
+            deviceId: 'relay-device-a',
+            deviceName: 'relay-mac',
+            daemon: {
+              connected: true,
+              lastSeenAt: '2026-06-28T00:00:00.000Z',
+              hostId: 'relay-daemon-a',
+              version: '0.1.3',
+              endpoints: [
+                {
+                  id: 'direct:tailscale:relay-daemon-a',
+                  kind: 'tailscale',
+                  host: 'relay-mac.tailnet.ts.net',
+                  port: 3333,
+                  authRequired: true,
+                  lastSeenAt: '2026-06-28T00:00:00.000Z',
+                },
+                {
+                  id: 'relay-rtc:relay-daemon-a',
+                  kind: 'relay-rtc',
+                  relayHostId: 'relay-daemon-a',
+                  authRequired: true,
+                  lastSeenAt: '2026-06-28T00:00:00.000Z',
+                },
+              ],
+              sessions: [
+                {
+                  name: 'main',
+                  updatedAt: '2026-06-28T00:00:00.000Z',
+                },
+              ],
+            },
+          }),
+        ]}
+        hosts={[]}
+        sessions={[]}
+        sessionGroups={[]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Route Relay RTC · RTT 144ms · last success just now · last error timeout · just now/)).toBeTruthy();
+    expect(screen.getByText('Route Relay RTC · 144ms')).toBeTruthy();
   });
 
   it('greys missing sessions and can close them in one click', () => {

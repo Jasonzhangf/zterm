@@ -1,0 +1,38 @@
+{
+  "name": "@jsonstudio/zterm-relay-server",
+  "version": "0.1.3",
+  "description": "ZTerm public traversal relay server for device presence, signaling, and TURN credential delivery.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Jasonzhangf/zterm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jasonzhangf/zterm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Jasonzhangf/zterm/issues"
+  },
+  "type": "commonjs",
+  "bin": {
+    "zterm-relay-server": "bin/zterm-relay-server"
+  },
+  "files": [
+    "bin",
+    "runtime",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "zterm",
+    "relay",
+    "turn",
+    "webrtc",
+    "signaling"
+  ]
+}

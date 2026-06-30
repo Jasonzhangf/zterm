@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import type { RelayEndpointCandidate, RelayTmuxSessionSnapshot } from '@zterm/shared/relay-directory';
 import type { SignalMessage } from './rtc-bridge';
 
 interface TraversalRelayRuntimeConfig {
@@ -17,14 +18,26 @@ interface CreateTraversalRelayHostClientOptions {
   config: TraversalRelayRuntimeConfig | null;
   handleRelaySignal: (peerId: string, message: SignalMessage, emitSignal: (message: SignalMessage) => void) => Promise<void>;
   closeRelayPeer: (peerId: string, reason: string) => void;
+  listTmuxSessions: () => string[];
+  now?: () => string;
 }
 
 interface RelayHostEnvelope {
-  type: 'relay-ready' | 'relay-signal' | 'relay-peer-close' | 'relay-error';
+  type: 'relay-ready' | 'relay-signal' | 'relay-peer-close' | 'relay-error' | 'directory-update';
   peerId?: string;
   reason?: string;
   message?: SignalMessage;
   hostId?: string;
+  directory?: {
+    endpoints?: RelayEndpointCandidate[];
+    sessions?: RelayTmuxSessionSnapshot[];
+    publishedAt?: string;
+  };
+}
+
+interface RelayDirectoryPublisherSocket {
+  readyState: number;
+  send: (payload: string) => void;
 }
 
 function asString(value: unknown) {
@@ -51,6 +64,85 @@ function buildWsUrl(base: string, relativePath: string) {
     url.protocol = 'wss:';
   }
   return url;
+}
+
+export function buildRelayEndpointCandidates(
+  config: TraversalRelayRuntimeConfig,
+  now: string,
+): RelayEndpointCandidate[] {
+  return [
+    {
+      id: `relay-rtc:${config.hostId}`,
+      kind: 'relay-rtc',
+      relayHostId: config.hostId,
+      authRequired: true,
+      lastSeenAt: now,
+    },
+  ];
+}
+
+export function buildRelayTmuxSessionSnapshots(
+  sessionNames: string[],
+  now: string,
+): RelayTmuxSessionSnapshot[] {
+  const seen = new Set<string>();
+  const sessions: RelayTmuxSessionSnapshot[] = [];
+  for (const rawName of sessionNames) {
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    sessions.push({
+      name,
+      updatedAt: now,
+    });
+  }
+  return sessions;
+}
+
+export function buildRelayDirectoryUpdateEnvelope(options: {
+  config: TraversalRelayRuntimeConfig;
+  sessionNames: string[];
+  now: string;
+}): RelayHostEnvelope {
+  return {
+    type: 'directory-update',
+    directory: {
+      endpoints: buildRelayEndpointCandidates(options.config, options.now),
+      sessions: buildRelayTmuxSessionSnapshots(options.sessionNames, options.now),
+      publishedAt: options.now,
+    },
+  };
+}
+
+export function publishRelayDirectoryUpdate(options: {
+  socket: RelayDirectoryPublisherSocket;
+  config: TraversalRelayRuntimeConfig;
+  listTmuxSessions: () => string[];
+  now: () => string;
+}) {
+  try {
+    const now = options.now();
+    const envelope = buildRelayDirectoryUpdateEnvelope({
+      config: options.config,
+      sessionNames: options.listTmuxSessions(),
+      now,
+    });
+    if (options.socket.readyState === WebSocket.OPEN) {
+      options.socket.send(JSON.stringify(envelope));
+    }
+    return { ok: true as const, envelope };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (options.socket.readyState === WebSocket.OPEN) {
+      options.socket.send(JSON.stringify({
+        type: 'relay-error',
+        reason: `directory-update failed: ${reason}`,
+      } satisfies RelayHostEnvelope));
+    }
+    return { ok: false as const, reason };
+  }
 }
 
 async function login(config: TraversalRelayRuntimeConfig) {
@@ -136,6 +228,19 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           const envelope = JSON.parse(String(rawData)) as RelayHostEnvelope;
           if (envelope.type === 'relay-ready') {
             console.log(`[${new Date().toISOString()}] traversal relay ready for host ${envelope.hostId || config.hostId}`);
+            const publishResult = publishRelayDirectoryUpdate({
+              socket: nextSocket,
+              config,
+              listTmuxSessions: options.listTmuxSessions,
+              now: options.now || (() => new Date().toISOString()),
+            });
+            if (publishResult.ok) {
+              console.log(
+                `[${new Date().toISOString()}] traversal relay directory published: host=${config.hostId} endpoints=${publishResult.envelope.directory?.endpoints?.length || 0} sessions=${publishResult.envelope.directory?.sessions?.length || 0}`,
+              );
+            } else {
+              console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
+            }
             return;
           }
           if (envelope.type === 'relay-peer-close' && envelope.peerId) {

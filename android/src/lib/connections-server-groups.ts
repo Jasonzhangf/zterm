@@ -3,7 +3,12 @@ import {
   buildSessionSemanticOwnerKey,
   sessionSemanticOwnersMatch,
 } from './session-semantic-identity';
+import { defaultTraversalRouteHealthCache } from './traversal/route-health-cache';
+import { buildRouteDiagnosticsSummary, type RouteDiagnosticsSummary } from './traversal/route-diagnostics';
+import type { TraversalRouteHealthCache } from './traversal/route-health-cache';
 import type { Host, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
+import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
+import type { TraversalResolvedPath } from './traversal/types';
 
 const STALE_OFFLINE_DAEMON_WITHOUT_SESSIONS_MS = 30 * 60_000;
 
@@ -11,7 +16,7 @@ export interface ServerGroupSessionView {
   id: string;
   sessionName: string;
   host?: Host;
-  source: 'saved' | 'history' | 'live';
+  source: 'saved' | 'history' | 'live' | 'directory';
   lastOpenedAt: number;
   liveSession: Session | null;
   missingFromRemoteTruth: boolean;
@@ -27,6 +32,7 @@ export interface ServerGroupView {
   daemonVersion?: string;
   daemonLastSeenAt?: string;
   relayDeviceTruth?: boolean;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   authToken?: string;
   sessions: ServerGroupSessionView[];
   defaultSessionNames: string[];
@@ -34,6 +40,7 @@ export interface ServerGroupView {
   liveSessions: Session[];
   savedCount: number;
   openableSessions: string[];
+  routeDiagnostics?: RouteDiagnosticsSummary;
 }
 
 interface MutableServerGroup {
@@ -46,10 +53,21 @@ interface MutableServerGroup {
   daemonVersion?: string;
   daemonLastSeenAt?: string;
   relayDeviceTruth?: boolean;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   authToken?: string;
   sessionsByName: Map<string, ServerGroupSessionView>;
   hostsBySessionName: Map<string, Host>;
   lastOpenedAt: number;
+}
+
+interface BuildConnectionsServerGroupsOptions {
+  hosts: Host[];
+  sessions: Session[];
+  sessionGroups: SessionGroupHistory[];
+  relayDevices?: TraversalRelayDeviceSnapshot[];
+  accountId?: string;
+  routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'list'>;
+  traversalPathPriority?: TraversalResolvedPath[];
 }
 
 function normalizeDaemonAlias(input?: string | null) {
@@ -235,13 +253,9 @@ function ensureGroup(
   return created;
 }
 
-export function buildConnectionsServerGroups(options: {
-  hosts: Host[];
-  sessions: Session[];
-  sessionGroups: SessionGroupHistory[];
-  relayDevices?: TraversalRelayDeviceSnapshot[];
-}): ServerGroupView[] {
+export function buildConnectionsServerGroups(options: BuildConnectionsServerGroupsOptions): ServerGroupView[] {
   const { hosts, sessions, sessionGroups } = options;
+  const routeHealthCache = options.routeHealthCache || defaultTraversalRouteHealthCache;
   const canonicalizeDaemonHostId = buildRelayDaemonCanonicalizer(options.relayDevices);
   const liveSessionMap = buildLiveSessionMapWithCanonicalizer(sessions, canonicalizeDaemonHostId);
   const grouped = new Map<string, MutableServerGroup>();
@@ -257,7 +271,24 @@ export function buildConnectionsServerGroups(options: {
     group.daemonVersion = device.daemon.version;
     group.daemonLastSeenAt = device.daemon.lastSeenAt;
     group.relayDeviceTruth = true;
+    group.relayEndpointCandidates = device.daemon.endpoints || [];
     group.lastOpenedAt = Math.max(group.lastOpenedAt, Date.parse(device.daemon.lastSeenAt) || 0);
+    for (const session of device.daemon.sessions || []) {
+      const sessionName = session.name.trim();
+      if (!sessionName) {
+        continue;
+      }
+      const current = group.sessionsByName.get(sessionName);
+      group.sessionsByName.set(sessionName, {
+        id: `${group.id}:${sessionName}`,
+        sessionName,
+        host: current?.host || group.hostsBySessionName.get(sessionName),
+        source: current?.source || 'directory',
+        lastOpenedAt: Math.max(current?.lastOpenedAt || 0, Date.parse(session.updatedAt) || group.lastOpenedAt),
+        liveSession: current?.liveSession || null,
+        missingFromRemoteTruth: false,
+      });
+    }
   }
 
   for (const host of hosts) {
@@ -378,8 +409,16 @@ export function buildConnectionsServerGroups(options: {
       }
       const savedSessions = groupSessions.filter((entry) => entry.source === 'saved').map((entry) => entry.sessionName);
       const openableSessions = groupSessions
-        .filter((entry) => !entry.missingFromRemoteTruth && (entry.liveSession || entry.source === 'saved'))
+        .filter((entry) => !entry.missingFromRemoteTruth && (entry.liveSession || entry.source === 'saved' || entry.source === 'directory'))
         .map((entry) => entry.sessionName);
+
+      const routeDiagnostics = buildRouteDiagnosticsSummary({
+        accountId: options.accountId,
+        daemonHostId: group.daemonHostId,
+        endpointCandidates: group.relayEndpointCandidates,
+        traversalPathPriority: options.traversalPathPriority,
+        routeHealthCache,
+      });
 
       return {
         id: group.id,
@@ -391,6 +430,7 @@ export function buildConnectionsServerGroups(options: {
         daemonVersion: group.daemonVersion,
         daemonLastSeenAt: group.daemonLastSeenAt,
         relayDeviceTruth: group.relayDeviceTruth,
+        relayEndpointCandidates: group.relayEndpointCandidates,
         authToken: group.authToken,
         sessions: groupSessions,
         defaultSessionNames: savedSessions.length > 0 ? savedSessions : groupSessions.map((entry) => entry.sessionName),
@@ -398,6 +438,7 @@ export function buildConnectionsServerGroups(options: {
         liveSessions,
         savedCount: savedSessions.length,
         openableSessions,
+        routeDiagnostics: routeDiagnostics || undefined,
       };
     })
     .filter((group) => (group.relayDeviceTruth || group.sessions.length > 0) && !isStaleOfflineDaemonWithoutSessions(group))

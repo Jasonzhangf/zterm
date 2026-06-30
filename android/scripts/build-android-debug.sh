@@ -13,6 +13,7 @@ cd "$ROOT_DIR"
 "$SCRIPT_DIR/ensure-pnpm-install.sh"
 pnpm run deps:check-wterm-published
 pnpm build
+rm -rf "$ROOT_DIR/native/android/app/src/main/assets/public/assets"
 npx cap sync android
 cd "$ROOT_DIR/native/android"
 ./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources
@@ -20,6 +21,7 @@ cd "$ROOT_DIR/native/android"
 
 cd "$ROOT_DIR"
 WTERM_UPDATES_DIR="$UPDATES_DIR" node ./scripts/prepare-update-bundle.mjs "$APK_PATH"
+node ./scripts/check-relay-default-address-leak.mjs "$ROOT_DIR/dist" "$ROOT_DIR/native/android/app/src/main/assets/public" "$APK_PATH"
 
 echo "[build-android-debug] verify manifests"
 test -f "$ROOT_DIR/update-dist/latest.json"

@@ -13,6 +13,7 @@ export * from './connection/bridge-url';
 export * from './connection/bridge-endpoint';
 export * from './connection/tmux-sessions';
 export * from './connection/protocol';
+export * from './connection/relay-directory';
 export * from './connection/bridge-connection';
 export * from './react/use-host-storage';
 export * from './react/use-bridge-settings-storage';

@@ -160,11 +160,11 @@ export function RelayControlSection({
           type="url"
           value={relayBaseUrl}
           onChange={(event) => onRelayBaseUrlChange(event.target.value)}
-          placeholder="https://coder2.codewhisper.cc"
+          placeholder="https://your-relay.example.com/relay/"
           style={settingsInputStyle()}
         />
         <div style={{ marginTop: '6px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
-          只填基础地址即可，客户端会自动补齐 relay 路径。
+          不填会使用内置默认 relay 登录地址；自定义时只填基础地址即可，客户端会自动补齐 relay 路径。
         </div>
       </div>
 

@@ -83,7 +83,7 @@ export function findOpenTabsMissingFromRemote(input: {
 export function shouldAutoRefreshTmuxPicker(input: {
   open: boolean;
   daemonFirst: boolean;
-  target: Pick<BridgeTarget, 'bridgeHost' | 'authToken' | 'daemonHostId' | 'relayHostId'>;
+  target: Pick<BridgeTarget, 'bridgeHost' | 'authToken' | 'daemonHostId' | 'relayHostId' | 'relayTmuxSessions'>;
 }) {
   if (!input.open) {
     return false;
@@ -93,6 +93,9 @@ export function shouldAutoRefreshTmuxPicker(input: {
   const relayHostId = input.target.relayHostId?.trim() || input.target.daemonHostId?.trim() || '';
   if (input.daemonFirst && !relayHostId) {
     return false;
+  }
+  if (input.daemonFirst && (input.target.relayTmuxSessions || []).length > 0) {
+    return true;
   }
   return Boolean(bridgeHost && authToken);
 }

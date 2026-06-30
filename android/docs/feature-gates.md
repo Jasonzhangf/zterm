@@ -34,3 +34,7 @@ Do not use another feature owner to compensate for a broken owner. If a feature 
 - `terminal.interaction_runtime`: prove active tab / pane routing stays isolated and pane attach/switch refuses owner-less targets.
 - `terminal.shell_actions`: prove tab manager scope, quick-picker pane routing, and viewport mode updates stay in shell-actions owner.
 - `terminal.schedule`: prove jobs do not leave orphan timers or store entries and daemon remains the execution truth.
+- `relay.account_directory`: prove relay server stores only account directory / presence / signaling facts, daemon publishes tmux/session truth snapshots, and Android consumes directory truth without requiring a local bridge preset.
+- `relay.route_selection`: prove Auto route is chosen from explicit candidates plus probe/score/TTL diagnostics; user priority is only a weight, and unreachable/auth-failed candidates cannot be selected.
+- `relay.directory_ui`: prove Connections and Session Picker project relay directory machines/sessions directly; local bridge preset remains pin/cache/alias and must not be required for relay daemon connectivity.
+- `daemon.windows_wezterm_backend`: prove Windows WezTerm CLI is only an external source, not daemon truth; `get-text --escapes` must be converted to ZTerm-owned absolute mirror snapshots, and `send-text` input must remain forbidden until a pure-mux execution contract is verified.

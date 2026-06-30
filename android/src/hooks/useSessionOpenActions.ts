@@ -24,8 +24,17 @@ import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-sta
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import type { Host, PersistedOpenTab } from '../lib/types';
 import { loadSavedTabList } from '../lib/saved-tab-loader';
+import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
+
+interface SessionOpenGroupTarget {
+  bridgeHost: string;
+  bridgePort: number;
+  daemonHostId?: string;
+  authToken?: string;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
+}
 
 interface UseSessionOpenActionsOptions {
   bridgeSettings: BridgeSettings;
@@ -73,13 +82,14 @@ export interface SessionOpenActionsResult {
   handleOpenQuickTabPicker: (paneId?: string) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
-  handleOpenGroupSession: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => void;
+  handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => void;
   handleOpenServerGroups: (groups: Array<{
     name: string;
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
   }>) => void;
   handleEditServerGroup: (group: {
@@ -87,6 +97,7 @@ export interface SessionOpenActionsResult {
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionNames: string[]) => void;
   handleSaveServerGroupSelection: (group: {
     bridgeHost: string;
@@ -298,7 +309,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleQuickConnectDraft(draft, target.bridgeHost);
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
-  const handleOpenGroupSession = useCallback((group: { bridgeHost: string; bridgePort: number; daemonHostId?: string; authToken?: string }, sessionName: string) => {
+  const handleOpenGroupSession = useCallback((group: SessionOpenGroupTarget, sessionName: string) => {
     handleQuickConnectDraft(
       {
         name: `${group.bridgeHost} · ${sessionName}`,
@@ -307,6 +318,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         daemonHostId: group.daemonHostId,
         sessionName,
         authToken: group.authToken || '',
+        relayEndpointCandidates: group.relayEndpointCandidates || [],
         authType: 'password',
         password: undefined,
         privateKey: undefined,
@@ -324,6 +336,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionNames: string[]) => {
     openSessionPicker('edit-group', {
       target: {
@@ -331,6 +344,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgePort: group.bridgePort,
         daemonHostId: group.daemonHostId,
         authToken: group.authToken,
+        relayEndpointCandidates: group.relayEndpointCandidates || [],
       },
       initialSelectedSessions: sessionNames,
     });
@@ -366,6 +380,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
   }>) => {
     let activeSessionId: string | null = null;
@@ -386,6 +401,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             bridgePort: group.bridgePort,
             daemonHostId: group.daemonHostId,
             authToken: group.authToken,
+            relayEndpointCandidates: group.relayEndpointCandidates || [],
           },
           sessionName,
         );

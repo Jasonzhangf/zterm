@@ -7,6 +7,10 @@ import {
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
+import {
+  isDefaultTraversalRelayBaseUrl,
+  normalizeTraversalRelayBaseUrl,
+} from '../lib/traversal-relay-client';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -68,6 +72,11 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
   }
 }
 
+function normalizeRelayBaseUrlFieldValue(value?: string | null) {
+  const normalized = normalizeTraversalRelayBaseUrl(value || '');
+  return normalized && isDefaultTraversalRelayBaseUrl(normalized) ? '' : normalized;
+}
+
 export function SettingsPage({
   settings,
   currentVersionName,
@@ -96,7 +105,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
-  const [relayBaseUrl, setRelayBaseUrl] = useState(settings.traversalRelay?.relayBaseUrl || '');
+  const [relayBaseUrl, setRelayBaseUrl] = useState(() => normalizeRelayBaseUrlFieldValue(settings.traversalRelay?.relayBaseUrl));
   const [relayUsername, setRelayUsername] = useState('');
   const [relayPassword, setRelayPassword] = useState('');
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
@@ -121,7 +130,7 @@ export function SettingsPage({
 
   useEffect(() => {
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
-    setRelayBaseUrl(settings.traversalRelay?.relayBaseUrl || '');
+    setRelayBaseUrl(normalizeRelayBaseUrlFieldValue(settings.traversalRelay?.relayBaseUrl));
   }, [settings]);
 
   useEffect(() => {
@@ -130,7 +139,7 @@ export function SettingsPage({
     }
     setRelayUsername(relayAccount.username);
     setRelayPassword(relayAccount.password);
-    setRelayBaseUrl(relayAccount.relayBaseUrl);
+    setRelayBaseUrl(normalizeRelayBaseUrlFieldValue(relayAccount.relayBaseUrl));
   }, [relayAccount]);
 
   const handleRelaySync = async (mode: 'login' | 'register' | 'refresh') => {

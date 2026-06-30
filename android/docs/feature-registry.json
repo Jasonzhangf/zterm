@@ -474,6 +474,134 @@
       ]
     },
     {
+      "feature_id": "relay.account_directory",
+      "title": "Relay account-scoped machine, endpoint, and session directory",
+      "domain": "relay",
+      "owners": [
+        "src/traversal-relay/store.ts",
+        "src/traversal-relay/server.ts",
+        "src/server/relay-client.ts",
+        "src/lib/relay-account-directory.ts",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "allowed_paths": [
+        "src/traversal-relay/store.ts",
+        "src/traversal-relay/server.ts",
+        "src/traversal-relay/store.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/server/relay-client.ts",
+        "src/server/relay-client.test.ts",
+        "src/server/daemon-config.ts",
+        "src/server/daemon-config.test.ts",
+        "src/lib/relay-account-directory.ts",
+        "src/lib/relay-account-directory.test.ts",
+        "src/lib/traversal-relay-client.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "scripts/traversal-relay-local-smoke.ts",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/contexts/session-context-buffer-runtime.ts"
+      ],
+      "required_gates": [
+        "src/traversal-relay/store.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/server/relay-client.test.ts",
+        "src/lib/relay-account-directory.test.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "scripts/traversal-relay-local-smoke.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/architecture.md"
+      ]
+    },
+    {
+      "feature_id": "relay.route_selection",
+      "title": "Relay and direct traversal best-route selection",
+      "domain": "relay",
+      "owners": [
+        "src/lib/traversal/route-selector.ts",
+        "src/lib/traversal/route-health-cache.ts",
+        "src/lib/traversal/config.ts",
+        "src/lib/traversal/socket.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/traversal/route-selector.ts",
+        "src/lib/traversal/route-selector.test.ts",
+        "src/lib/traversal/route-health-cache.ts",
+        "src/lib/traversal/route-health-cache.test.ts",
+        "src/lib/traversal/config.ts",
+        "src/lib/traversal/config.test.ts",
+        "src/lib/traversal/socket.ts",
+        "src/lib/traversal/socket.test.ts",
+        "src/lib/traversal/types.ts",
+        "src/lib/bridge-settings.ts",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/traversal-relay/server.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/lib/traversal/route-selector.test.ts",
+        "src/lib/traversal/route-health-cache.test.ts",
+        "src/lib/traversal/config.test.ts",
+        "src/lib/traversal/socket.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "relay.directory_ui",
+      "title": "Relay directory projection in Connections and Session Picker",
+      "domain": "relay-ui",
+      "owners": [
+        "src/lib/connections-server-groups.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/pages/ConnectionsPage.tsx"
+      ],
+      "allowed_paths": [
+        "src/lib/connections-server-groups.ts",
+        "src/lib/connections-server-groups.test.ts",
+        "src/lib/session-picker.ts",
+        "src/lib/session-picker.test.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/components/connection-form/RelayDevicePicker.tsx",
+        "src/components/settings/RelayControlSection.tsx",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx",
+        "src/lib/relay-account-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/lib/connections-server-groups.test.ts",
+        "src/lib/session-picker.test.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
       "feature_id": "daemon.file_transfer",
       "title": "Daemon file transfer and client transfer message runtime",
       "domain": "daemon-file-transfer",
@@ -540,12 +668,47 @@
       ]
     },
     {
+      "feature_id": "daemon.windows_wezterm_backend",
+      "title": "Windows WezTerm mux adapter and buffer contract",
+      "domain": "daemon-windows",
+      "owners": [
+        "src/server/wezterm-backend.ts",
+        "scripts/wezterm-backend-remote-smoke.ts"
+      ],
+      "allowed_paths": [
+        "src/server/wezterm-backend.ts",
+        "src/server/wezterm-backend.test.ts",
+        "scripts/wezterm-backend-remote-smoke.ts",
+        "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/feature-registry.json",
+        "note.md",
+        "MEMORY.md"
+      ],
+      "forbidden_paths": [
+        "src/server/server.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/terminal-control-runtime.ts"
+      ],
+      "required_gates": [
+        "src/server/wezterm-backend.test.ts",
+        "scripts/wezterm-backend-remote-smoke.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
       "feature_id": "daemon.cli_shell",
       "owners": [
         "scripts/zterm-daemon.sh"
       ],
       "allowed_paths": [
         "scripts/zterm-daemon.sh",
+        "scripts/windows/zterm-daemon.ps1",
         "scripts/native/zterm-daemon.swift",
         "scripts/install-global-daemon-cli.sh",
         "scripts/prepare-global-daemon-release.sh",

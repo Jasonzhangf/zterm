@@ -9,6 +9,7 @@ import {
   type TerminalSessionGroupLayoutAxis,
 } from "../lib/terminal-layout-profile";
 import { mobileTheme } from "../lib/mobile-ui";
+import { getServerIdentityTone, resolveServerDisplayName, resolveServerIdentityKey } from "../lib/server-identity";
 import type { TerminalSessionGroupSlotName, TerminalSessionGroupViewportProjection } from "../lib/session-group-viewport";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
 import type { AndroidWorkspacePane, Session, TerminalResizeHandler, TerminalViewportChangeHandler, TerminalWidthMode } from "../lib/types";
@@ -296,12 +297,16 @@ const TerminalStageShell = ReactMemo(
         const sideLabel = sessionGroupLayoutAxis === "horizontal"
           ? (slot === "top" ? "左侧" : "右侧")
           : (slot === "top" ? "上方" : "下方");
-        const title = session.customName || session.sessionName || session.title || session.id;
-        const detail = `${session.resolvedPath || session.bridgeHost}:${session.bridgePort}`;
+        const serverTone = getServerIdentityTone(session);
+        const serverKey = resolveServerIdentityKey(session);
+        const serverLabel = resolveServerDisplayName(session);
+        const title = session.customName || session.title || session.sessionName || session.id;
+        const detail = session.sessionName || session.title || session.id;
         return (
         <button
           type="button"
           data-testid={`terminal-session-group-peek-${slot}`}
+          data-server-key={serverKey}
           onClick={() => { if (session) activateSessionGroupSlot(session, slot); }}
           disabled={!session}
           style={{
@@ -311,16 +316,16 @@ const TerminalStageShell = ReactMemo(
             width: sessionGroupLayoutAxis === "horizontal" ? "clamp(92px, 13vw, 136px)" : "100%",
             minWidth: sessionGroupLayoutAxis === "horizontal" ? "92px" : undefined,
             maxWidth: sessionGroupLayoutAxis === "horizontal" ? "136px" : undefined,
-            border: `1px solid ${mobileTheme.colors.cardBorder}`,
+            border: `1px solid ${serverTone.lightCardBorder}`,
             borderRadius: "14px",
-            background: "linear-gradient(180deg, rgba(24, 35, 55, 0.92), rgba(13, 21, 35, 0.92))",
+            background: serverTone.previewBackground,
             color: mobileTheme.colors.textPrimary,
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
             justifyContent: "center",
             gap: sessionGroupLayoutAxis === "horizontal" ? "9px" : "5px",
-            padding: sessionGroupLayoutAxis === "horizontal" ? "72px 10px 32px" : "7px 10px",
+            padding: sessionGroupLayoutAxis === "horizontal" ? "68px 10px 26px" : "7px 10px",
             textAlign: "left",
             boxSizing: "border-box",
             overflow: "hidden",
@@ -329,27 +334,27 @@ const TerminalStageShell = ReactMemo(
           }}
         >
           <span
-            style={{
-              display: "flex",
-              flexDirection: sessionGroupLayoutAxis === "horizontal" ? "column" : "row",
-              alignItems: sessionGroupLayoutAxis === "horizontal" ? "flex-start" : "baseline",
-              gap: sessionGroupLayoutAxis === "horizontal" ? "6px" : "7px",
-              minWidth: 0,
-            }}
-          >
-            <span
               style={{
-                flexShrink: 0,
-                fontSize: "10px",
-                fontWeight: 800,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "rgba(177, 193, 224, 0.66)",
+                display: "flex",
+                flexDirection: sessionGroupLayoutAxis === "horizontal" ? "column" : "row",
+                alignItems: sessionGroupLayoutAxis === "horizontal" ? "flex-start" : "baseline",
+                gap: sessionGroupLayoutAxis === "horizontal" ? "6px" : "7px",
+                minWidth: 0,
               }}
             >
-              {sideLabel}
-            </span>
-            <span
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: serverTone.previewText,
+                }}
+              >
+                {sideLabel}
+              </span>
+              <span
               style={{
                 minWidth: 0,
                 fontSize: sessionGroupLayoutAxis === "horizontal" ? "15px" : "13px",
@@ -363,9 +368,39 @@ const TerminalStageShell = ReactMemo(
                 WebkitBoxOrient: sessionGroupLayoutAxis === "horizontal" ? "vertical" : undefined,
                 WebkitLineClamp: sessionGroupLayoutAxis === "horizontal" ? 2 : undefined,
                 lineHeight: sessionGroupLayoutAxis === "horizontal" ? 1.12 : undefined,
+                }}
+              >
+                {title}
+              </span>
+            </span>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              minWidth: 0,
+            }}
+          >
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "999px",
+                background: serverTone.accent,
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                minWidth: 0,
+                fontSize: sessionGroupLayoutAxis === "horizontal" ? "10.5px" : "9.5px",
+                color: serverTone.previewText,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
-              {title}
+              {serverLabel}
             </span>
           </span>
           <span

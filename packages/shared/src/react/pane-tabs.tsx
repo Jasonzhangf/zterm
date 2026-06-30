@@ -155,7 +155,11 @@ export function PaneTabs(props: PaneTabsProps) {
         ) : null}
 
         <div
-          onPointerDown={() => onActivatePane(paneId)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              onActivatePane(paneId);
+            }
+          }}
           style={{
             flex: '1 1 0%',
             minWidth: 0,

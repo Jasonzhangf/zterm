@@ -293,4 +293,56 @@ describe('SettingsPage terminal theme selection', () => {
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
     expect(screen.getByRole('button', { name: '○Daemon Debug 已关闭' })).toBeTruthy();
   });
+
+  it('hides the built-in relay base url in the settings field and keeps the field empty', () => {
+    render(
+      <SettingsPage
+        settings={{
+          ...baseSettings,
+          traversalRelay: {
+            relayBaseUrl: 'https://claw.codewhisper.cc:18443/relay/',
+            accessToken: 'token',
+            userId: 'u1',
+            username: 'jason',
+            deviceId: 'tablet-1',
+            deviceName: 'Jason Tablet',
+            platform: 'android',
+            wsDevicesUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/devices',
+            wsHostUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/host',
+            wsClientUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/client',
+            turnUrl: '',
+            turnUsername: '',
+            turnCredential: '',
+            updatedAt: 1,
+          },
+        }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('https://your-relay.example.com/relay/') as HTMLInputElement;
+    expect(input.value).toBe('');
+  });
 });

@@ -63,37 +63,72 @@ requirePath(resolve(releaseDir, 'support/zterm-daemon'), `missing native zterm-d
 rmSync(npmPackageDir, { recursive: true, force: true });
 mkdirSync(resolve(npmPackageDir, 'bin'), { recursive: true });
 mkdirSync(resolve(npmPackageDir, 'support'), { recursive: true });
+mkdirSync(resolve(npmPackageDir, 'support/windows'), { recursive: true });
 
 cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime'), { recursive: true });
 cpSync(resolve(releaseDir, 'support'), resolve(npmPackageDir, 'support'), { recursive: true });
 copyFileSync(resolve(releaseDir, 'VERSION'), resolve(npmPackageDir, 'VERSION'));
 copyFileSync(resolve(workspaceRoot, 'LICENSE'), resolve(npmPackageDir, 'LICENSE'));
+copyFileSync(resolve(projectRoot, 'scripts/windows/zterm-daemon.ps1'), resolve(npmPackageDir, 'support/windows/zterm-daemon.ps1'));
 
-writeExecutable(resolve(npmPackageDir, 'bin/zterm-daemon'), `#!/usr/bin/env bash
-set -euo pipefail
-SOURCE="\${BASH_SOURCE[0]}"
-while [[ -L "$SOURCE" ]]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-PACKAGE_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
-exec "$PACKAGE_ROOT/support/zterm-daemon.sh" "$@"
+writeExecutable(resolve(npmPackageDir, 'bin/zterm-daemon.cjs'), `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process');
+const { existsSync } = require('node:fs');
+const { resolve } = require('node:path');
+
+const packageRoot = resolve(__dirname, '..');
+const args = process.argv.slice(2);
+
+function run(command, commandArgs, extraEnv) {
+  const result = spawnSync(command, commandArgs, {
+    stdio: 'inherit',
+    env: { ...process.env, ...extraEnv },
+    windowsHide: true,
+  });
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  process.exit(result.status === null ? 1 : result.status);
+}
+
+if (process.platform === 'win32') {
+  const script = resolve(packageRoot, 'support/windows/zterm-daemon.ps1');
+  if (!existsSync(script)) {
+    console.error('missing Windows daemon runner: ' + script);
+    process.exit(1);
+  }
+  run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args], {
+    ZTERM_PACKAGE_ROOT: packageRoot,
+  });
+}
+
+const script = resolve(packageRoot, 'support/zterm-daemon.sh');
+if (!existsSync(script)) {
+  console.error('missing daemon runner: ' + script);
+  process.exit(1);
+}
+run(script, args, {});
 `);
 
-writeExecutable(resolve(npmPackageDir, 'bin/wterm'), `#!/usr/bin/env bash
-set -euo pipefail
-SOURCE="\${BASH_SOURCE[0]}"
-while [[ -L "$SOURCE" ]]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-PACKAGE_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
-if [[ "\${1:-}" == "daemon" ]]; then
-  shift
-fi
-exec "$PACKAGE_ROOT/support/zterm-daemon.sh" "$@"
+writeExecutable(resolve(npmPackageDir, 'bin/wterm.cjs'), `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process');
+const { resolve } = require('node:path');
+
+const args = process.argv.slice(2);
+if (args[0] === 'daemon') {
+  args.shift();
+}
+const target = resolve(__dirname, 'zterm-daemon.cjs');
+const result = spawnSync(process.execPath, [target, ...args], {
+  stdio: 'inherit',
+  windowsHide: true,
+});
+if (result.error) {
+  console.error(result.error.message);
+  process.exit(1);
+}
+process.exit(result.status === null ? 1 : result.status);
 `);
 
 writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), `#!/usr/bin/env node
@@ -103,6 +138,7 @@ const { resolve } = require('node:path');
 
 const packageRoot = resolve(__dirname, '..');
 const localBin = resolve(homedir(), '.local/bin');
+const isWindows = process.platform === 'win32';
 
 function writeShim(name, body) {
   mkdirSync(localBin, { recursive: true });
@@ -112,35 +148,42 @@ function writeShim(name, body) {
   chmodSync(target, 0o755);
 }
 
-writeShim('zterm-daemon', \`#!/usr/bin/env bash
+if (isWindows) {
+  writeShim('zterm-daemon.cmd', \`@echo off
+node "\${packageRoot}\\\\bin\\\\zterm-daemon.cjs" %*
+\`);
+  writeShim('wterm.cmd', \`@echo off
+node "\${packageRoot}\\\\bin\\\\wterm.cjs" %*
+\`);
+} else {
+  writeShim('zterm-daemon', \`#!/usr/bin/env bash
 set -euo pipefail
-exec "\${packageRoot}/support/zterm-daemon.sh" "$@"
+exec node "\${packageRoot}/bin/zterm-daemon.cjs" "$@"
 \`);
 
-writeShim('wterm', \`#!/usr/bin/env bash
+  writeShim('wterm', \`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "\\\${1:-}" == "daemon" ]]; then
-  shift
-fi
-exec "\${packageRoot}/support/zterm-daemon.sh" "$@"
+exec node "\${packageRoot}/bin/wterm.cjs" "$@"
 \`);
+}
 
 console.log('[zterm-daemon] installed user shims');
-console.log(\`- \${localBin}/zterm-daemon\`);
-console.log(\`- \${localBin}/wterm\`);
+console.log(\`- \${resolve(localBin, isWindows ? 'zterm-daemon.cmd' : 'zterm-daemon')}\`);
+console.log(\`- \${resolve(localBin, isWindows ? 'wterm.cmd' : 'wterm')}\`);
 `);
 chmodSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), 0o755);
 
 writeFileSync(resolve(npmPackageDir, 'README.md'), `# zterm-daemon
 
-ZTerm daemon for macOS. It runs the local WebSocket bridge used by the ZTerm Android app to connect to local tmux sessions, transfer files, and capture remote screenshots through the installed daemon permission owner.
+ZTerm daemon for macOS and Windows. It runs the local WebSocket bridge used by the ZTerm Android app to connect to local terminal sessions. macOS uses tmux; Windows uses WezTerm mux through the ZTerm WezTerm backend adapter.
 
 ## Requirements
 
-- macOS ${targetArch}
+- ${targetOs} ${targetArch}
 - Node.js 20+
-- tmux available on PATH
-- For remote screenshot: grant Screen Recording permission to the installed \`zterm-daemon\` native binary when macOS prompts
+- macOS: tmux available on PATH
+- Windows: WezTerm available on PATH, or set \`ZTERM_WEZTERM_EXE\` to the portable \`wezterm.exe\`
+- macOS remote screenshot: grant Screen Recording permission to the installed \`zterm-daemon\` native binary when macOS prompts
 
 ## Install
 
@@ -164,20 +207,21 @@ The installer uses these locations:
 - runtime/config/logs: \`~/.zterm\`
 - CLI: npm global bin \`zterm-daemon\`
 - legacy alias: npm global bin \`wterm\`
-- launch agent: \`~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist\`
+- macOS launch agent: \`~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist\`
+- Windows scheduled task: \`ZTermDaemon\`
 
 ## Commands
 
 \`\`\`bash
 zterm-daemon run               # run in foreground
-zterm-daemon start             # start launchd service
+zterm-daemon start             # start launchd service on macOS, scheduled task/direct process on Windows
 zterm-daemon status            # direct runtime status
-zterm-daemon stop              # stop launchd service
-zterm-daemon restart           # restart launchd service
+zterm-daemon stop              # stop service or direct process
+zterm-daemon restart           # restart service or direct process
 zterm-daemon configure-relay   # write ~/.zterm/config.json mobile.relay from secret input
-zterm-daemon install-service   # install and start launchd service
-zterm-daemon uninstall-service # stop and remove launchd service
-zterm-daemon service-status    # launchd service status
+zterm-daemon install-service   # install and start launchd service or Windows scheduled task
+zterm-daemon uninstall-service # stop and remove service
+zterm-daemon service-status    # service status
 \`\`\`
 
 \`wterm daemon <command>\` is kept as a compatibility alias.
@@ -220,6 +264,7 @@ Environment variables override config:
 - \`ZTERM_PORT\`
 - \`ZTERM_AUTH_TOKEN\`
 - \`ZTERM_DAEMON_SESSION\`
+- \`ZTERM_WEZTERM_EXE\` on Windows
 
 ## Android connection
 
@@ -250,8 +295,8 @@ writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
     postinstall: 'node support/install-user-shims.cjs',
   },
   bin: {
-    'zterm-daemon': 'bin/zterm-daemon',
-    wterm: 'bin/wterm',
+    'zterm-daemon': 'bin/zterm-daemon.cjs',
+    wterm: 'bin/wterm.cjs',
   },
   files: [
     'bin',

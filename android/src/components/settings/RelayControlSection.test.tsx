@@ -73,6 +73,7 @@ describe('RelayControlSection relay diagnostics', () => {
       />,
     );
 
+    expect(screen.getByPlaceholderText('https://your-relay.example.com/relay/')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'TURN relay-only 测试 Mac Studio' }));
 
     await waitFor(() => expect(runTraversalRelayTurnDiagnostic).toHaveBeenCalledWith({

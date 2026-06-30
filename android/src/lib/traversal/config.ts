@@ -13,6 +13,7 @@ import type {
   TraversalTransportMode,
   WebSocketTraversalCandidate,
 } from './types';
+import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 function isLikelyIpv6Host(host?: string | null) {
   const value = host?.trim() || '';
@@ -99,6 +100,7 @@ function addDirectCandidate(
   bridgePort: number,
   authToken?: string,
   overrideUrl?: string,
+  candidateId?: string,
 ) {
   const rawHost = bridgeHost.trim();
   if (!rawHost || (path !== 'tailscale' && path !== 'ipv6' && path !== 'ipv4')) {
@@ -111,11 +113,51 @@ function addDirectCandidate(
   }
   seenUrls.add(url);
   candidates.push({
+    id: candidateId || `direct:${path}:${resolved.displayEndpoint}`,
     kind: 'ws',
     path,
     endpoint: resolved.displayEndpoint,
     url,
   });
+}
+
+function resolveWsUrlHost(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.host || parsed.hostname;
+  } catch {
+    return '';
+  }
+}
+
+function addDirectoryDirectCandidate(
+  candidates: WebSocketTraversalCandidate[],
+  seenUrls: Set<string>,
+  endpoint: RelayEndpointCandidate,
+  target: TraversalTargetSource,
+) {
+  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+    return;
+  }
+  const host = endpoint.host?.trim()
+    || (endpoint.wsUrl ? resolveWsUrlHost(endpoint.wsUrl) : '')
+    || '';
+  const port = endpoint.port || target.bridgePort;
+  addDirectCandidate(
+    candidates,
+    seenUrls,
+    endpoint.kind,
+    host,
+    port,
+    target.authToken,
+    endpoint.wsUrl,
+    endpoint.id,
+  );
+}
+
+function resolveDirectoryRelayEndpoint(target: TraversalTargetSource) {
+  return target.relayEndpointCandidates
+    ?.find((endpoint) => endpoint.kind === 'relay-rtc' && endpoint.relayHostId?.trim()) || null;
 }
 
 export function buildTraversalPlan(
@@ -132,6 +174,7 @@ export function buildTraversalPlan(
     return {
       mode,
       candidates: [{
+        id: `override:${overrideUrl}`,
         kind: 'ws',
         path: inferDirectPath(target.bridgeHost) || 'ipv4',
         endpoint: overrideUrl,
@@ -158,6 +201,11 @@ export function buildTraversalPlan(
         continue;
       }
       addDirectCandidate(wsCandidates, seenWsUrls, path, directCandidates[path], target.bridgePort, target.authToken);
+      for (const endpoint of target.relayEndpointCandidates || []) {
+        if (endpoint.kind === path) {
+          addDirectoryDirectCandidate(wsCandidates, seenWsUrls, endpoint, target);
+        }
+      }
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
     if (legacyPath) {
@@ -169,7 +217,8 @@ export function buildTraversalPlan(
   if (mode !== 'websocket') {
     const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
-    const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || '';
+    const directoryRelayEndpoint = resolveDirectoryRelayEndpoint(target);
+    const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || directoryRelayEndpoint?.relayHostId?.trim() || '';
     const iceServers = buildIceServers(settings);
     const signalUrl = normalizeSignalUrl(
       relaySignalUrl || target.signalUrl?.trim() || settings.signalUrl?.trim() || '',
@@ -184,6 +233,7 @@ export function buildTraversalPlan(
         parsedSignalUrl.searchParams.set('hostId', relayHostId);
       }
       rtcCandidates.push({
+        id: directoryRelayEndpoint?.id || `relay-rtc:${relayHostId || parsedSignalUrl.toString()}`,
         kind: 'rtc',
         path: 'rtc-relay',
         endpoint: target.bridgeHost.trim() || target.ipv4Host?.trim() || target.ipv6Host?.trim() || target.tailscaleHost?.trim() || 'rtc',
@@ -216,6 +266,7 @@ export function resolveTraversalConfigFromHost(
       tailscaleHost: host.tailscaleHost,
       ipv6Host: host.ipv6Host,
       ipv4Host: host.ipv4Host,
+      relayEndpointCandidates: host.relayEndpointCandidates,
       signalUrl: host.signalUrl,
       transportMode: host.transportMode,
     } satisfies TraversalTargetSource,

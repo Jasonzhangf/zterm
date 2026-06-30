@@ -25,6 +25,7 @@ function computeVersionCode(version: string, buildNumber: number) {
 }
 
 const appVersionCode = computeVersionCode(pkg.version, Number.parseInt(appBuildNumber, 10));
+const enableSourcemap = process.env.ZTERM_BUILD_SOURCEMAP === 'true';
 
 export default defineConfig({
   plugins: [react()],
@@ -48,6 +49,6 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: enableSourcemap,
   },
 });

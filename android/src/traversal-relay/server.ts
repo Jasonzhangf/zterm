@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
+import type { RelayEndpointCandidate, RelayTmuxSessionSnapshot } from '@zterm/shared/relay-directory';
 import { TraversalRelayClientDebugStore } from './client-debug-store';
 import { TraversalRelayStore, type TraversalRelayPublicUser } from './store';
 
@@ -13,11 +14,16 @@ interface SignalMessage {
 }
 
 interface RelayHostEnvelope {
-  type: 'relay-ready' | 'relay-signal' | 'relay-peer-close' | 'relay-error';
+  type: 'relay-ready' | 'relay-signal' | 'relay-peer-close' | 'relay-error' | 'directory-update';
   peerId?: string;
   message?: SignalMessage;
   reason?: string;
   hostId?: string;
+  directory?: {
+    endpoints?: RelayEndpointCandidate[];
+    sessions?: RelayTmuxSessionSnapshot[];
+    publishedAt?: string;
+  };
 }
 
 interface DevicePresenceInputEnvelope {
@@ -35,7 +41,7 @@ interface DevicePresenceInputEnvelope {
 }
 
 interface DevicePresenceOutputEnvelope {
-  type: 'devices-snapshot' | 'device-updated' | 'relay-error' | 'client-debug-request';
+  type: 'devices-snapshot' | 'device-updated' | 'directory-snapshot' | 'relay-error' | 'client-debug-request';
   payload?: Record<string, unknown>;
   reason?: string;
 }
@@ -550,6 +556,7 @@ function buildAuthPayload(request: IncomingMessage, user: TraversalRelayPublicUs
     accessToken,
     user,
     devices: store.listDevices(user.id),
+    directory: store.getAccountDirectory(user.id),
     turn: TURN_CONFIG,
     relayBaseUrl: buildPublicBaseUrl(request),
     signalBaseUrl: buildPublicBaseUrl(request),
@@ -563,6 +570,7 @@ function buildAuthPayload(request: IncomingMessage, user: TraversalRelayPublicUs
 
 function broadcastDevices(userId: string) {
   const devices = store.listDevices(userId);
+  const directory = store.getAccountDirectory(userId);
   for (const connection of deviceStreams.values()) {
     if (connection.userId !== userId) {
       continue;
@@ -570,6 +578,10 @@ function broadcastDevices(userId: string) {
     sendDeviceEnvelope(connection.socket, {
       type: 'devices-snapshot',
       payload: { devices },
+    });
+    sendDeviceEnvelope(connection.socket, {
+      type: 'directory-snapshot',
+      payload: { directory },
     });
   }
 }
@@ -645,6 +657,21 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
       ok: true,
       user,
       devices: store.listDevices(user.id),
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/directory')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    serveJson(response, {
+      ok: true,
+      user,
+      directory: store.getAccountDirectory(user.id),
     });
     return;
   }
@@ -850,6 +877,22 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
   ws.on('message', (raw) => {
     try {
       const envelope = JSON.parse(String(raw)) as RelayHostEnvelope;
+      if (envelope.type === 'directory-update') {
+        store.publishDaemonDirectory({
+          userId: user.id,
+          deviceId,
+          hostId,
+          deviceName,
+          platform,
+          appVersion,
+          daemonVersion,
+          endpoints: envelope.directory?.endpoints,
+          sessions: envelope.directory?.sessions,
+          publishedAt: envelope.directory?.publishedAt,
+        });
+        broadcastDevices(user.id);
+        return;
+      }
       if (!envelope.peerId) {
         return;
       }
@@ -985,6 +1028,10 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
     type: 'devices-snapshot',
     payload: { devices: store.listDevices(user.id) },
   });
+  sendDeviceEnvelope(ws, {
+    type: 'directory-snapshot',
+    payload: { directory: store.getAccountDirectory(user.id) },
+  });
 
   ws.on('message', (raw) => {
     try {
@@ -1004,6 +1051,10 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
           sendDeviceEnvelope(ws, {
             type: 'devices-snapshot',
             payload: { devices: store.listDevices(user.id) },
+          });
+          sendDeviceEnvelope(ws, {
+            type: 'directory-snapshot',
+            payload: { directory: store.getAccountDirectory(user.id) },
           });
         }
         return;

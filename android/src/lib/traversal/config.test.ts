@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildTraversalPlan } from './config';
+import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
+import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
   it('orders auto paths as ipv6 -> tailscale -> ipv4 -> relay', () => {
@@ -45,6 +46,7 @@ describe('buildTraversalPlan', () => {
         transportMode: 'auto',
       },
       {
+        ...DEFAULT_BRIDGE_SETTINGS,
         signalUrl: '',
         turnServerUrl: '',
         turnUsername: '',
@@ -86,6 +88,7 @@ describe('buildTraversalPlan', () => {
         authToken: 'token',
       },
       {
+        ...DEFAULT_BRIDGE_SETTINGS,
         signalUrl: '',
         turnServerUrl: 'turn:turn.example.com:3478?transport=udp',
         turnUsername: 'alice',
@@ -132,6 +135,7 @@ describe('buildTraversalPlan', () => {
         transportMode: 'websocket',
       },
       {
+        ...DEFAULT_BRIDGE_SETTINGS,
         signalUrl: '',
         turnServerUrl: '',
         turnUsername: '',
@@ -281,6 +285,118 @@ describe('buildTraversalPlan', () => {
       path: 'rtc-relay',
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
     });
+  });
+
+  it('builds route candidates from relay directory endpoints without local bridge preset', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: 'token-a',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'direct:tailscale:daemon-host-a',
+            kind: 'tailscale',
+            host: 'mac.tailnet.ts.net',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T10:00:00.000Z',
+          },
+          {
+            id: 'relay-rtc:daemon-host-a',
+            kind: 'relay-rtc',
+            relayHostId: 'daemon-host-a',
+            authRequired: true,
+            lastSeenAt: '2026-06-28T10:00:00.000Z',
+          },
+        ],
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalPathPriority: ['tailscale', 'rtc-relay', 'ipv6', 'ipv4'],
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      id: 'direct:tailscale:daemon-host-a',
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: 'mac.tailnet.ts.net:3333',
+      url: 'ws://mac.tailnet.ts.net:3333/?token=token-a',
+    }));
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      id: 'relay-rtc:daemon-host-a',
+      kind: 'rtc',
+      path: 'rtc-relay',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+    }));
+  });
+
+  it('preserves relay directory endpoint candidates when resolving traversal config from a saved host draft', () => {
+    const resolved = resolveTraversalConfigFromHost(
+      {
+        id: 'host-1',
+        createdAt: 1,
+        name: 'Relay main',
+        bridgeHost: 'daemon-host-a',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        relayDeviceId: 'device-a',
+        sessionName: 'main',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        relayEndpointCandidates: [
+          {
+            id: 'direct:tailscale:daemon-host-a',
+            kind: 'tailscale',
+            host: 'mac.tailnet.ts.net',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T10:00:00.000Z',
+          },
+        ],
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalPathPriority: ['tailscale', 'rtc-relay', 'ipv6', 'ipv4'],
+      },
+    );
+
+    expect(resolved.target.relayEndpointCandidates).toEqual([
+      expect.objectContaining({
+        id: 'direct:tailscale:daemon-host-a',
+        kind: 'tailscale',
+        host: 'mac.tailnet.ts.net',
+      }),
+    ]);
   });
 
   it('fails fast in webrtc relay mode when no relay daemon device is selected', () => {

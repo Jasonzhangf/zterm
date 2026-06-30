@@ -207,4 +207,61 @@ describe('session-picker relay truth', () => {
       }),
     );
   });
+
+  it('resolves an unmapped relay directory device into an openable route target with endpoint candidates and sessions', () => {
+    const device: TraversalRelayDeviceSnapshot = {
+      deviceId: 'daemon-device-c',
+      deviceName: 'Directory Daemon',
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      client: {
+        connected: true,
+        lastSeenAt: '2026-06-28T00:00:00.000Z',
+      },
+      daemon: {
+        hostId: 'daemon-host-c',
+        connected: true,
+        lastSeenAt: '2026-06-28T00:00:00.000Z',
+        version: '0.1.0',
+        endpoints: [
+          {
+            id: 'direct:tailscale:daemon-host-c',
+            kind: 'tailscale',
+            host: 'mac.tailnet.ts.net',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+          },
+          {
+            id: 'relay-rtc:daemon-host-c',
+            kind: 'relay-rtc',
+            relayHostId: 'daemon-host-c',
+            authRequired: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+          },
+        ],
+        sessions: [
+          {
+            name: 'main',
+            cwd: '/Users/jason/project',
+            title: 'main',
+            updatedAt: '2026-06-28T00:00:00.000Z',
+          },
+        ],
+      },
+      updatedAt: '2026-06-28T00:00:00.000Z',
+    };
+
+    expect(resolveRelayDeviceBridgeTarget([], device)).toEqual(
+      expect.objectContaining({
+        bridgeHost: 'mac.tailnet.ts.net',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-c',
+        relayHostId: 'daemon-host-c',
+        relayDeviceId: 'daemon-device-c',
+        relayEndpointCandidates: device.daemon.endpoints,
+        relayTmuxSessions: device.daemon.sessions,
+      }),
+    );
+  });
 });

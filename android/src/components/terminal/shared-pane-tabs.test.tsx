@@ -195,4 +195,33 @@ describe('shared PaneTabs in Android jsdom (red baseline)', () => {
     );
     expect(c2.querySelector('[data-testid="pane-badge-p1"]')).toBeTruthy();
   });
+
+  it('does not activate pane on tab pointerdown before tab selection', () => {
+    const profile = resolvePaneProfile({ platform: 'phone', splitVisible: true, topInsetPx: 0 });
+    const onActivatePane = vi.fn();
+    const onSelectTab = vi.fn();
+    const { container } = render(
+      <PaneTabs
+        platform="phone"
+        profile={profile}
+        paneId="p1"
+        paneIndex={0}
+        isActivePane={false}
+        tabs={makeTabs({ id: 't1', isActive: true })}
+        onSelectTab={onSelectTab}
+        onCloseTab={vi.fn()}
+        onActivatePane={onActivatePane}
+      />,
+    );
+
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement | null;
+    expect(tab).toBeTruthy();
+
+    fireEvent.pointerDown(tab!);
+    expect(onActivatePane).not.toHaveBeenCalled();
+
+    fireEvent.click(tab!);
+    expect(onSelectTab).toHaveBeenCalledWith('t1');
+    expect(onActivatePane).not.toHaveBeenCalled();
+  });
 });

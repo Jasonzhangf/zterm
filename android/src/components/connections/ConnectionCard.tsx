@@ -59,6 +59,8 @@ export function ConnectionCard({
 
   return (
     <div
+      data-testid="connection-card"
+      data-server-key={tone?.key || ''}
       onContextMenu={(event) => {
         if (!onLongPress) {
           return;

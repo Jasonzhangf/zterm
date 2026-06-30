@@ -31,6 +31,7 @@ import {
 } from './lib/traversal-relay-client';
 import { collectClientDebugSnapshot, registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { runtimeDebug } from './lib/runtime-debug';
+import { projectRelayDirectoryDeviceSnapshots } from './lib/relay-account-directory';
 import { openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
@@ -48,6 +49,14 @@ function computeRelayDeviceStreamReconnectDelay(attempt: number) {
   );
 }
 
+function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTraversalRelayAccountState>) {
+  if (!account) {
+    return [];
+  }
+  const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
+  return directoryDevices.length > 0 ? directoryDevices : account.devices || [];
+}
+
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
   setBridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['setSettings'];
@@ -57,7 +66,7 @@ interface AppContentProps {
 
 export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActiveChange }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
-  const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => readTraversalRelayAccountState()?.devices || []);
+  const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => projectRelayDevicesFromAccountState(readTraversalRelayAccountState()));
   const relayDeviceSocketRef = useRef<WebSocket | null>(null);
   const relayDeviceReconnectTimerRef = useRef<number | null>(null);
   const relayDeviceStreamGenerationRef = useRef(0);
@@ -98,7 +107,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     if (typeof window === 'undefined') return;
     const handler = () => {
       const next = readTraversalRelayAccountState();
-      setRelayDevices(next?.devices || []);
+      setRelayDevices(projectRelayDevicesFromAccountState(next));
       const nextRelay = next?.relaySettings;
       if (!nextRelay) {
         return;
@@ -222,7 +231,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       setRelayDevices([]);
       return;
     }
-    setRelayDevices(account.devices || []);
+    setRelayDevices(projectRelayDevicesFromAccountState(account));
 
     const scheduleReconnect = (reason: string) => {
       if (disposed || relayDeviceStreamGenerationRef.current !== generation || relayDeviceReconnectTimerRef.current !== null) {
@@ -249,6 +258,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         },
         onDevices: (devices) => {
           setRelayDevices(devices);
+        },
+        onDirectory: (directory) => {
+          const directoryDevices = projectRelayDirectoryDeviceSnapshots(directory);
+          if (directoryDevices.length > 0) {
+            setRelayDevices(directoryDevices);
+          }
         },
         onError: (message) => {
           runtimeDebug('relay.device-stream.error', { message });
@@ -593,6 +608,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
+            bridgeSettings={bridgeSettings}
             hosts={hosts}
             sessions={terminalSessions}
             sessionGroups={sessionGroups}
