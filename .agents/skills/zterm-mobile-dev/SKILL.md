@@ -200,6 +200,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - quick-tab picker 只允许一份 session row projection：daemon tmux session 顺序为主，open tab 状态贴在同一行；daemon refresh 未返回但仍在 OPEN_TABS 的本地 tab 只能追加为 not-reported row，不得隐藏或自动关闭。
 - session picker 的 row projection 现在对所有模式都必须合并 open tab，不只 quick-tab；daemon 成功枚举后目标 owner 下未被报告的本地 open tab 应显式关闭，避免双列表和 stale tab。
 - OPEN_TABS 已打开 tab 不得按 semantic reuse key 自动合并/替换/删除；同名 tmux session 的 runtime duplicate 只能作为 transport fact，不能顶替 persisted open tab 的 `sessionId`。saved tab list 导入可做 import-only semantic 去重。
+- Terminal drawer 不能维护第二份远端 session 列表；打开抽屉时按稳定 hostKey 触发 `fetchTmuxSessions()`，结果必须回写同一个 `sessionGroups` catalog，再由 drawer 投影 remote-only rows。禁止让 drawer effect 依赖整个投影列表，否则 catalog 更新会反复触发枚举。
 
 ### 2.14 Bridge Auth 规则
 - daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override

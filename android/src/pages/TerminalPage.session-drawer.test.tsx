@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import { resolveSessionGroupBoundaryProjection } from '../lib/session-group-viewport';
@@ -220,7 +220,74 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+    fireEvent.click(screen.getByText('创建'));
     expect(onOpenQuickTabPicker).toHaveBeenCalled();
+  });
+
+  it('refreshes drawer host sessions and opens remote-only sessions from the drawer', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onRefreshDrawerHostSessions = vi.fn();
+    const onOpenDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1', 'remote-beta'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onRefreshDrawerHostSessions={onRefreshDrawerHostSessions}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    const resolvedSwipeSurface = swipeSurface!;
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchMove(resolvedSwipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(onRefreshDrawerHostSessions).toHaveBeenCalledWith('daemon-a'));
+    expect(screen.getByText('remote-beta')).toBeTruthy();
+    fireEvent.click(screen.getByText('remote-beta'));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      {
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['tmux-s1', 'remote-beta'],
+      },
+      'remote-beta',
+    );
   });
 });
 

@@ -22,6 +22,7 @@ import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { buildServerIdentityAliasMap, resolveServerIdentity } from '../lib/server-identity';
+import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
@@ -206,6 +207,15 @@ interface TerminalPageProps {
   onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
+  onOpenDrawerRemoteSession?: (target: {
+    name: string;
+    bridgeHost: string;
+    bridgePort: number;
+    daemonHostId?: string;
+    authToken?: string;
+    sessionNames: string[];
+  }, sessionName: string) => void;
+  onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   sessionPickerDebugMode?: string | null;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
@@ -891,6 +901,8 @@ function TerminalPageComponent({
   onUseAutoSession,
   onOpenConnections,
   onOpenQuickTabPicker,
+  onOpenDrawerRemoteSession,
+  onRefreshDrawerHostSessions,
   relayDevices = [],
   sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
@@ -1276,6 +1288,69 @@ function TerminalPageComponent({
     }
     return [...hosts.values()];
   }, [drawerServerIdentityAliases, relayDevices, sessions]);
+  const drawerRemoteSessions = useMemo(() => {
+    const localReuseKeys = new Set(sessions.map((session) => buildSessionSemanticReuseKey({
+      daemonHostId: session.daemonHostId,
+      bridgeHost: session.bridgeHost,
+      bridgePort: session.bridgePort,
+      sessionName: session.sessionName,
+    })));
+    const targets = new Map<string, {
+      target: {
+        name: string;
+        bridgeHost: string;
+        bridgePort: number;
+        daemonHostId?: string;
+        authToken?: string;
+        sessionNames: string[];
+      };
+      sessionName: string;
+    }>();
+    const items: TerminalSessionDrawerItem[] = [];
+    for (const group of sessionGroups) {
+      const missing = new Set(group.missingSessionNames || []);
+      const ownerKey = buildSessionSemanticOwnerKey(group);
+      const serverIdentity = resolveServerIdentity(group, drawerServerIdentityAliases);
+      for (const sessionName of group.sessionNames) {
+        if (!sessionName || missing.has(sessionName)) {
+          continue;
+        }
+        const reuseKey = buildSessionSemanticReuseKey({
+          daemonHostId: group.daemonHostId,
+          bridgeHost: group.bridgeHost,
+          bridgePort: group.bridgePort,
+          sessionName,
+        });
+        if (localReuseKeys.has(reuseKey)) {
+          continue;
+        }
+        const id = `remote:${ownerKey}::session:${sessionName}`;
+        targets.set(id, {
+          target: {
+            name: group.name,
+            bridgeHost: group.bridgeHost,
+            bridgePort: group.bridgePort,
+            daemonHostId: group.daemonHostId,
+            authToken: group.authToken,
+            sessionNames: group.sessionNames,
+          },
+          sessionName,
+        });
+        items.push({
+          id,
+          title: sessionName,
+          subtitle: `${serverIdentity.label} · ${sessionName}`,
+          status: 'idle',
+          paneLabel: undefined,
+          sessionGroupSlot: null,
+          active: false,
+          hostKey: serverIdentity.key,
+          hostLabel: serverIdentity.label,
+        });
+      }
+    }
+    return { items, targets };
+  }, [drawerServerIdentityAliases, sessionGroups, sessions]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
     const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, drawerServerIdentityAliases);
@@ -1323,8 +1398,8 @@ function TerminalPageComponent({
         };
       });
 
-    return [...opened, ...unopened];
-  }, [drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
+    return [...opened, ...unopened, ...drawerRemoteSessions.items];
+  }, [drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -2372,6 +2447,12 @@ function TerminalPageComponent({
   }, [findPaneForSession, onSwitchSession, switchTabInPane, workspace.panes]);
 
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
+    const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
+    if (remoteTarget) {
+      onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+      setSessionDrawerOpen(false);
+      return;
+    }
     handleSwitchSessionFromChrome(sessionId);
     setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
       current,
@@ -2379,7 +2460,7 @@ function TerminalPageComponent({
       sessionGroupFocusSlot,
     ));
     setSessionDrawerOpen(false);
-  }, [handleSwitchSessionFromChrome, sessionGroupFocusSlot]);
+  }, [drawerRemoteSessions.targets, handleSwitchSessionFromChrome, onOpenDrawerRemoteSession, sessionGroupFocusSlot]);
 
   const handleAssignSessionGroupSlot = useCallback((sessionId: string, slot: TerminalSessionGroupSlotName) => {
     setSessionGroupSlotIds((current) => {
@@ -2639,6 +2720,7 @@ function TerminalPageComponent({
               onAssignSessionGroupSlot={handleAssignSessionGroupSlot}
               sessionGroupLayoutAxis={sessionGroupLayoutAxis}
               onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
+              onRefreshHostSessions={onRefreshDrawerHostSessions}
               onDebugAddEvent={handleSessionDrawerDebugAddEvent}
             />
           </>
@@ -2814,6 +2896,9 @@ function terminalPagePropsEqual(
     && prev.onCloseSession === next.onCloseSession
     && prev.onOpenConnections === next.onOpenConnections
     && prev.onOpenQuickTabPicker === next.onOpenQuickTabPicker
+    && prev.onOpenDrawerRemoteSession === next.onOpenDrawerRemoteSession
+    && prev.onRefreshDrawerHostSessions === next.onRefreshDrawerHostSessions
+    && prev.sessionGroups === next.sessionGroups
     && prev.onResize === next.onResize
     && prev.onTerminalInput === next.onTerminalInput
     && prev.onTerminalViewportChange === next.onTerminalViewportChange

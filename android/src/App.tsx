@@ -449,6 +449,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleDeleteServerGroup,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
+    handleRefreshDrawerHostSessions,
     closePicker,
   } = useSessionOpenActions({
     bridgeSettings,
@@ -705,6 +706,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onUseAutoSession={handleUseAutoSession}
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
+            onOpenDrawerRemoteSession={handleOpenGroupSession}
+            onRefreshDrawerHostSessions={handleRefreshDrawerHostSessions}
             relayDevices={relayDevices}
             sessionPickerDebugMode={pickerMode}
             pendingPaneAttachIntent={pendingPaneAttachIntent}

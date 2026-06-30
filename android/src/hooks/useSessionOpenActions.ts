@@ -23,7 +23,7 @@ import {
 } from '../lib/session-picker';
 import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
-import { createTmuxSession } from '../lib/tmux-sessions';
+import { createTmuxSession, fetchTmuxSessions } from '../lib/tmux-sessions';
 import type { Host, PersistedOpenTab, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { loadSavedTabList } from '../lib/saved-tab-loader';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
@@ -120,6 +120,7 @@ export interface SessionOpenActionsResult {
   }) => void;
   handleSelectCleanSession: (target: BridgeTarget) => void;
   handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[]) => void;
+  handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<void>;
   closePicker: () => void;
 }
 
@@ -448,15 +449,26 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }, options);
   }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, renameSessionRef]);
   const handleRemoteSessionsRefreshed = useCallback((target: BridgeTarget, sessionNames: string[]) => {
+    const normalizedSessionNames = normalizeRemoteTmuxSessionNames(sessionNames);
+    if (normalizedSessionNames.length > 0) {
+      setSessionGroupSelection({
+        name: target.daemonHostId || target.relayHostId || target.bridgeHost,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId || target.relayHostId,
+        authToken: target.authToken,
+        sessionNames: normalizedSessionNames,
+      });
+    }
     pruneSessionGroupSelectionToRemoteTruth({
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
       daemonHostId: target.daemonHostId || target.relayHostId,
-    }, normalizeRemoteTmuxSessionNames(sessionNames));
+    }, normalizedSessionNames);
     void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
       console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
     });
-  }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth]);
+  }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth, setSessionGroupSelection]);
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
@@ -598,6 +610,15 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     resolveTargetByHostKey,
   ]);
 
+  const handleRefreshDrawerHostSessions = useCallback(async (hostKey?: string) => {
+    const target = resolveTargetByHostKey(hostKey);
+    if (!target) {
+      return;
+    }
+    const sessionNames = await fetchTmuxSessions(target, bridgeSettings);
+    handleRemoteSessionsRefreshed(target, sessionNames);
+  }, [bridgeSettings, handleRemoteSessionsRefreshed, resolveTargetByHostKey]);
+
   const closePicker = useCallback(() => {
     setPickerMode(null);
     setPickerScopePaneId(null);
@@ -620,6 +641,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleDeleteServerGroup,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
+    handleRefreshDrawerHostSessions,
     closePicker,
   };
 }

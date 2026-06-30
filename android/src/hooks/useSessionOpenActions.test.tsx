@@ -9,6 +9,7 @@ import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch'
 
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
+const fetchTmuxSessionsMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
   resolveRemoteRestorableOpenTabState: (...args: unknown[]) => resolveRemoteRestorableOpenTabStateMock(...args),
@@ -16,6 +17,7 @@ vi.mock('../lib/open-tab-restore', () => ({
 
 vi.mock('../lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
+  fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
 }));
 
 function createRef<T>(value: T) {
@@ -135,6 +137,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     localStorage.clear();
     createTmuxSessionMock.mockReset();
     createTmuxSessionMock.mockResolvedValue([]);
+    fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionsMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
     resolveRemoteRestorableOpenTabStateMock.mockImplementation(async ({ tabs, activeSessionId }: any) => ({
       tabs,
@@ -605,6 +609,56 @@ describe('useSessionOpenActions explicit-open truth', () => {
       } as any, ['beta', 'alpha', 'beta']);
     });
 
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      {
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+      },
+      ['alpha', 'beta'],
+    );
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith({
+      name: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: undefined,
+      sessionNames: ['alpha', 'beta'],
+    });
+    expect(auditOpenTabsAgainstRemoteSessions).toHaveBeenCalledWith('session-picker-refresh');
+  });
+
+  it('refreshes drawer host sessions through the same remote catalog owner', async () => {
+    const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+    const harness = createOptions();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['beta', 'alpha', 'beta']);
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      auditOpenTabsAgainstRemoteSessions,
+    }));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+    );
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith({
+      name: 'daemon-a',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['alpha', 'beta'],
+    });
     expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
       {
         bridgeHost: '100.127.23.27',

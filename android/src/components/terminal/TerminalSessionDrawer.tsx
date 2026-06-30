@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { getServerIdentityTone } from '../../lib/server-identity';
 
 export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
@@ -44,6 +44,7 @@ export interface TerminalSessionDrawerProps {
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
   onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
+  onRefreshHostSessions?: (hostKey?: string) => void;
   onDebugAddEvent?: (eventName: string) => void;
 }
 
@@ -111,6 +112,7 @@ function TerminalSessionDrawerComponent({
   onAssignSessionGroupSlot,
   sessionGroupLayoutAxis = 'vertical',
   onOpenQuickTabPicker,
+  onRefreshHostSessions,
   onDebugAddEvent,
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -230,6 +232,16 @@ function TerminalSessionDrawerComponent({
     const group = hostGroups.find((g) => g.hostKey === effectiveHostKey);
     return group?.sessions || [];
   }, [effectiveHostKey, hostGroups, multiHost, sessions]);
+  const refreshHostKey = effectiveHostKey || hostGroups[0]?.hostKey;
+
+  useEffect(() => {
+    if (!open || !onRefreshHostSessions || !refreshHostKey) {
+      return;
+    }
+    void Promise.resolve(onRefreshHostSessions(refreshHostKey)).catch((error) => {
+      console.error('[TerminalSessionDrawer] Failed to refresh host sessions:', error);
+    });
+  }, [onRefreshHostSessions, open, refreshHostKey]);
 
   const openNewSessionDialog = () => {
     setNewSessionDraft({

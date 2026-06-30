@@ -1232,3 +1232,10 @@ Need runtime debug to confirm:
 - 修复：`wezterm-backend.ts` 改用 `list --format json` 解析 pane + cursor metadata，并在 `readSnapshot()` 中保留完整 pane record；cursor 作为独立 metadata 写入 snapshot，不写入 cells。
 - 真实 daemon 验证：覆盖 Windows 当前 runtime 后通过 `support/windows/zterm-daemon.ps1 start` 启动，health `pid=23312`；WebSocket 主链 `list-sessions -> session-open -> connect -> buffer-head` 返回 `cursor={"rowIndex":0,"col":16,"visible":true}`。
 - 发布路径缺口已发现并修包 metadata：`jsonstudio-zterm-daemon-0.1.3.tgz` 之前 `os/cpu=darwin/arm64`，Windows `npm install -g` 会 `EBADPLATFORM`；已改为允许 `darwin/win32` + `arm64/x64`。后续还需要专门验证 clean npm global install + service install；本轮 Windows 临时 tgz 文件遇到 `EBUSY`，未完成 fresh install 闭环。
+
+## 2026-07-01 Terminal drawer session auto-refresh
+
+- 现场问题：抽屉打开后不是最新 session 列表，只能看到本地已打开/已保存的 tab；远端 daemon 新增 session 不会自动进入抽屉。
+- 根因：远端 refresh 只存在于 `TmuxSessionPickerSheet`，`handleRemoteSessionsRefreshed()` 只 prune/audit，没有把 fetch 到的 sessionNames 物化进 `sessionGroups` catalog；`TerminalPage` drawer projection 也只消费本地 `sessions`。
+- 修复方向：抽屉打开时按当前 hostKey 调 `fetchTmuxSessions()`，复用 `handleRemoteSessionsRefreshed()` 写入 `sessionGroups`；`TerminalPage` 从 `sessionGroups` 投影 remote-only rows，点击 remote-only row 走 `handleOpenGroupSession()` 打开对应 tmux session。
+- 反耦合点：drawer effect 只依赖稳定 `refreshHostKey`，不能依赖整个 `hostGroups/sessions` 投影，避免 catalog 更新后反复触发远端枚举。
