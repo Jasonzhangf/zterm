@@ -1,7 +1,7 @@
 {
   "name": "@jsonstudio/zterm-daemon",
   "version": "0.1.3",
-  "description": "ZTerm macOS daemon for Android tmux bridge, file transfer, and remote screenshot capture.",
+  "description": "ZTerm daemon for Android terminal bridge, file transfer, relay, and remote screenshot support.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/Jasonzhangf/zterm#readme",
   "repository": {
@@ -12,10 +12,12 @@
     "url": "https://github.com/Jasonzhangf/zterm/issues"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "win32"
   ],
   "cpu": [
-    "arm64"
+    "arm64",
+    "x64"
   ],
   "type": "commonjs",
   "scripts": {

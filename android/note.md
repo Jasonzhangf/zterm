@@ -1223,3 +1223,12 @@ Need runtime debug to confirm:
 - Android 根因：relay directory group / drawer hostKey 命中 relay device 时可能只拿 directory target，缺 saved server/preset 的 daemon auth token，导致 Windows direct session refresh/create 不带 token。
 - 修复：Connections card target resolver 使用 saved server preset 补 `bridgeHost/bridgePort/authToken`；drawer New Session 的 relay-device target 用 saved host 补 auth/endpoint。
 - 已验证：Connections/useSessionOpenActions/TmuxSessionPicker/session-picker 定向 48 tests PASS；`tsc --noEmit` PASS；真实 Windows `fetch/create/fetch` PASS。
+
+## 2026-06-30 Windows WezTerm cursor audit
+
+- 现场问题：Windows sessions 已能连接，但手机 terminal 没有光标。
+- 真源追踪：Android renderer / buffer manager 已支持 `cursor` metadata；`TerminalView` 只消费 `renderBuffer.cursor`，不 invent cursor。丢失点在 WezTerm backend：`WezTermMirrorSnapshot.cursor` 被硬编码为 `null`。
+- WezTerm 真实接口验证：`wezterm.exe cli list --format json` 在 `100.75.122.121` 返回 `cursor_x/cursor_y/cursor_visibility/top_row`；`get-text --escapes` 只给正文/样式，不给 cursor。
+- 修复：`wezterm-backend.ts` 改用 `list --format json` 解析 pane + cursor metadata，并在 `readSnapshot()` 中保留完整 pane record；cursor 作为独立 metadata 写入 snapshot，不写入 cells。
+- 真实 daemon 验证：覆盖 Windows 当前 runtime 后通过 `support/windows/zterm-daemon.ps1 start` 启动，health `pid=23312`；WebSocket 主链 `list-sessions -> session-open -> connect -> buffer-head` 返回 `cursor={"rowIndex":0,"col":16,"visible":true}`。
+- 发布路径缺口已发现并修包 metadata：`jsonstudio-zterm-daemon-0.1.3.tgz` 之前 `os/cpu=darwin/arm64`，Windows `npm install -g` 会 `EBADPLATFORM`；已改为允许 `darwin/win32` + `arm64/x64`。后续还需要专门验证 clean npm global install + service install；本轮 Windows 临时 tgz 文件遇到 `EBUSY`，未完成 fresh install 闭环。

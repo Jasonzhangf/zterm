@@ -587,6 +587,7 @@ tmux truth
 ## 2026-06-29 Windows WezTerm backend boundary
 
 - WezTerm mux 可作为 Windows buffer source，但 `wezterm cli` 输出不是 daemon truth；ZTerm adapter 必须把 `get-text --escapes` 转成自己拥有的 absolute mirror snapshot 后才允许进入 buffer-sync 链。
+- WezTerm cursor 不在 `get-text --escapes` 正文里；Windows backend 必须从 `wezterm cli list --format json` 读取 `cursor_x/cursor_y/cursor_visibility`，并作为独立 metadata 进入 mirror snapshot / `buffer-head.cursor`。
 - `wezterm cli --prefer-mux send-text --pane-id <id> --no-paste` 只允许通过 stdin 写真实 terminal input，禁止把用户输入塞进 shell args；已验证 Enter / Backspace / arrow escape / raw TUI / Codex TUI text entry。
 - WezTerm backend 是显式 backend selection，不是 tmux fallback；Windows 默认 `wezterm`，非 Windows 默认 `tmux`，未知 backend 必须显式报错。
 - 已知限制：ETX/Ctrl+C 可送到 raw-mode/TUI，但不能当作 Windows console control event 中断 `cmd.exe` 子进程；不要宣称完整键盘等价。

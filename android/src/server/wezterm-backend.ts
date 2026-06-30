@@ -12,6 +12,10 @@ export interface WezTermPaneRecord {
   rows: number;
   title: string;
   cwd: string;
+  cursorX?: number;
+  cursorY?: number;
+  cursorVisibility?: 'Visible' | 'Hidden' | 'Steady' | string;
+  topRow?: number;
 }
 
 export interface WezTermMirrorSnapshot {
@@ -21,7 +25,11 @@ export interface WezTermMirrorSnapshot {
   cols: number;
   rows: number;
   cursorKeysApp: false;
-  cursor: null;
+  cursor: {
+    rowIndex: number;
+    col: number;
+    visible: boolean;
+  } | null;
 }
 
 export interface WezTermInputContract {
@@ -100,6 +108,23 @@ export interface BuildWezTermMirrorSnapshotOptions {
   maxMirrorLines?: number;
 }
 
+interface WezTermJsonPaneRow {
+  window_id?: number;
+  tab_id?: number;
+  pane_id?: number;
+  workspace?: string;
+  size?: {
+    rows?: number;
+    cols?: number;
+  };
+  title?: string;
+  cwd?: string;
+  cursor_x?: number;
+  cursor_y?: number;
+  cursor_visibility?: string;
+  top_row?: number;
+}
+
 function parsePositiveInteger(value: string, label: string) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -120,6 +145,46 @@ function parseSize(value: string) {
 }
 
 export function parseWezTermPaneList(raw: string): WezTermPaneRecord[] {
+  const trimmedRaw = raw.trim();
+  if (!trimmedRaw) {
+    return [];
+  }
+  if (trimmedRaw.startsWith('[')) {
+    const parsed = JSON.parse(trimmedRaw) as WezTermJsonPaneRow[];
+    if (!Array.isArray(parsed)) {
+      throw new Error('invalid wezterm pane list json');
+    }
+    return parsed.map((pane) => {
+      const rows = pane.size?.rows;
+      const cols = pane.size?.cols;
+      if (
+        !Number.isFinite(pane.window_id)
+        || !Number.isFinite(pane.tab_id)
+        || !Number.isFinite(pane.pane_id)
+        || !Number.isFinite(rows)
+        || !Number.isFinite(cols)
+        || !pane.workspace
+        || !pane.title
+        || !pane.cwd
+      ) {
+        throw new Error(`invalid wezterm pane json row: ${JSON.stringify(pane)}`);
+      }
+      return {
+        winId: parsePositiveInteger(String(pane.window_id), 'winId'),
+        tabId: parsePositiveInteger(String(pane.tab_id), 'tabId'),
+        paneId: parsePositiveInteger(String(pane.pane_id), 'paneId'),
+        workspace: pane.workspace,
+        cols: parsePositiveInteger(String(cols), 'cols'),
+        rows: parsePositiveInteger(String(rows), 'rows'),
+        title: pane.title,
+        cwd: pane.cwd,
+        cursorX: Number.isFinite(pane.cursor_x) ? Math.max(0, Math.floor(pane.cursor_x || 0)) : undefined,
+        cursorY: Number.isFinite(pane.cursor_y) ? Math.max(0, Math.floor(pane.cursor_y || 0)) : undefined,
+        cursorVisibility: typeof pane.cursor_visibility === 'string' ? pane.cursor_visibility : undefined,
+        topRow: Number.isFinite(pane.top_row) ? Math.max(0, Math.floor(pane.top_row || 0)) : undefined,
+      };
+    });
+  }
   const lines = raw
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
@@ -151,6 +216,31 @@ export function parseWezTermPaneList(raw: string): WezTermPaneRecord[] {
       cwd: cwdParts.join(' '),
     };
   });
+}
+
+function normalizeWezTermCursor(options: {
+  pane: WezTermPaneRecord;
+  bufferStartIndex: number;
+  availableEndIndex: number;
+}) {
+  if (typeof options.pane.cursorX !== 'number' || typeof options.pane.cursorY !== 'number') {
+    return null;
+  }
+  const safePaneRows = Math.max(1, Math.floor(options.pane.rows || 1));
+  const safeBufferStartIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
+  const safeAvailableEndIndex = Math.max(safeBufferStartIndex, Math.floor(options.availableEndIndex || 0));
+  if (safeAvailableEndIndex <= safeBufferStartIndex) {
+    return null;
+  }
+  const visibleTopIndex = Math.max(safeBufferStartIndex, safeAvailableEndIndex - safePaneRows);
+  return {
+    rowIndex: Math.max(
+      visibleTopIndex,
+      Math.min(safeAvailableEndIndex - 1, visibleTopIndex + Math.max(0, Math.floor(options.pane.cursorY || 0))),
+    ),
+    col: Math.max(0, Math.floor(options.pane.cursorX || 0)),
+    visible: options.pane.cursorVisibility !== 'Hidden',
+  };
 }
 
 function stripAnsiControlSequences(line: string) {
@@ -200,6 +290,7 @@ export async function buildWezTermMirrorSnapshot(
     nextLineCount: canonicalLines.length,
     trimmedLineCount,
   });
+  const availableEndIndex = bufferStartIndex + trimmed.lines.length;
 
   return {
     revision: Math.max(0, Math.floor(options.revision || 0)),
@@ -208,7 +299,11 @@ export async function buildWezTermMirrorSnapshot(
     cols: options.pane.cols,
     rows: options.pane.rows,
     cursorKeysApp: false,
-    cursor: null,
+    cursor: normalizeWezTermCursor({
+      pane: options.pane,
+      bufferStartIndex,
+      availableEndIndex,
+    }),
   };
 }
 
@@ -221,7 +316,7 @@ export function buildWezTermSendTextArgs(paneId: number): string[] {
 }
 
 export function buildWezTermListArgs(): string[] {
-  return ['cli', '--prefer-mux', 'list'];
+  return ['cli', '--prefer-mux', 'list', '--format', 'json'];
 }
 
 export function buildWezTermSpawnArgs(input: {
@@ -242,6 +337,19 @@ export function buildWezTermSpawnArgs(input: {
   }
   args.push('--', ...input.command);
   return args;
+}
+
+export function buildWezTermPersistentShellCommand(command?: string[]): string[] {
+  const candidate = command?.filter((item) => item.trim());
+  if (!candidate?.length) {
+    return ['cmd.exe', '/k'];
+  }
+  const executable = candidate[0]?.trim().toLowerCase() || '';
+  const firstArg = candidate[1]?.trim().toLowerCase() || '';
+  if ((executable === 'cmd' || executable === 'cmd.exe') && firstArg === '/c') {
+    throw new Error('wezterm sessions must use a persistent shell; cmd.exe /c would close the pane when the child process exits');
+  }
+  return candidate;
 }
 
 export function buildWezTermGetTextArgs(input: {
@@ -306,7 +414,7 @@ function pickSpawnPaneId(output: string) {
 
 export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOptions): WezTermBackendRuntime {
   const workspacePrefix = options.workspacePrefix || 'zterm-';
-  const defaultCommand = options.defaultCommand || ['cmd.exe'];
+  const defaultCommand = buildWezTermPersistentShellCommand(options.defaultCommand);
   const maxMirrorLines = options.maxMirrorLines || 1000;
   const sessionPaneIds = new Map<string, number>();
   const snapshotState = new Map<string, {
@@ -321,6 +429,15 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
 
   function listSessions() {
     return listPaneRecords().map((pane) => paneToBackendSession(pane, workspacePrefix));
+  }
+
+  function resolvePaneRecord(sessionName: string) {
+    const session = resolveSession(sessionName);
+    const pane = listPaneRecords().find((candidate) => candidate.paneId === session.paneId);
+    if (!pane) {
+      throw new Error(`wezterm session not found: ${session.sessionName}`);
+    }
+    return pane;
   }
 
   function resolveSession(sessionName: string) {
@@ -346,7 +463,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
     const paneId = pickSpawnPaneId(options.runner.run(buildWezTermSpawnArgs({
       workspace,
       cwd: input?.cwd,
-      command: input?.command?.length ? input.command : defaultCommand,
+      command: input?.command?.length ? buildWezTermPersistentShellCommand(input.command) : defaultCommand,
     })));
     sessionPaneIds.set(sessionName, paneId);
     const pane = listPaneRecords().find((candidate) => candidate.paneId === paneId);
@@ -358,6 +475,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
 
   async function readSnapshot(sessionName: string) {
     const session = resolveSession(sessionName);
+    const pane = resolvePaneRecord(session.sessionName);
     const state = snapshotState.get(session.sessionName) || {
       revision: 0,
       previousStartIndex: 0,
@@ -365,16 +483,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
     };
     const text = options.runner.run(buildWezTermGetTextArgs({ paneId: session.paneId }));
     const snapshot = await buildWezTermMirrorSnapshot({
-      pane: {
-        winId: 0,
-        tabId: 0,
-        paneId: session.paneId,
-        workspace: session.workspace,
-        cols: session.cols,
-        rows: session.rows,
-        title: session.title,
-        cwd: session.cwd,
-      },
+      pane,
       revision: state.revision + 1,
       previousStartIndex: state.previousStartIndex,
       previousLineCount: state.previousLineCount,

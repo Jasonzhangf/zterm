@@ -10241,6 +10241,37 @@ function parseSize(value) {
   };
 }
 function parseWezTermPaneList(raw) {
+  const trimmedRaw = raw.trim();
+  if (!trimmedRaw) {
+    return [];
+  }
+  if (trimmedRaw.startsWith("[")) {
+    const parsed = JSON.parse(trimmedRaw);
+    if (!Array.isArray(parsed)) {
+      throw new Error("invalid wezterm pane list json");
+    }
+    return parsed.map((pane) => {
+      const rows = pane.size?.rows;
+      const cols = pane.size?.cols;
+      if (!Number.isFinite(pane.window_id) || !Number.isFinite(pane.tab_id) || !Number.isFinite(pane.pane_id) || !Number.isFinite(rows) || !Number.isFinite(cols) || !pane.workspace || !pane.title || !pane.cwd) {
+        throw new Error(`invalid wezterm pane json row: ${JSON.stringify(pane)}`);
+      }
+      return {
+        winId: parsePositiveInteger(String(pane.window_id), "winId"),
+        tabId: parsePositiveInteger(String(pane.tab_id), "tabId"),
+        paneId: parsePositiveInteger(String(pane.pane_id), "paneId"),
+        workspace: pane.workspace,
+        cols: parsePositiveInteger(String(cols), "cols"),
+        rows: parsePositiveInteger(String(rows), "rows"),
+        title: pane.title,
+        cwd: pane.cwd,
+        cursorX: Number.isFinite(pane.cursor_x) ? Math.max(0, Math.floor(pane.cursor_x || 0)) : void 0,
+        cursorY: Number.isFinite(pane.cursor_y) ? Math.max(0, Math.floor(pane.cursor_y || 0)) : void 0,
+        cursorVisibility: typeof pane.cursor_visibility === "string" ? pane.cursor_visibility : void 0,
+        topRow: Number.isFinite(pane.top_row) ? Math.max(0, Math.floor(pane.top_row || 0)) : void 0
+      };
+    });
+  }
   const lines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
   if (lines.length === 0) {
     return [];
@@ -10264,6 +10295,26 @@ function parseWezTermPaneList(raw) {
       cwd: cwdParts.join(" ")
     };
   });
+}
+function normalizeWezTermCursor(options) {
+  if (typeof options.pane.cursorX !== "number" || typeof options.pane.cursorY !== "number") {
+    return null;
+  }
+  const safePaneRows = Math.max(1, Math.floor(options.pane.rows || 1));
+  const safeBufferStartIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
+  const safeAvailableEndIndex = Math.max(safeBufferStartIndex, Math.floor(options.availableEndIndex || 0));
+  if (safeAvailableEndIndex <= safeBufferStartIndex) {
+    return null;
+  }
+  const visibleTopIndex = Math.max(safeBufferStartIndex, safeAvailableEndIndex - safePaneRows);
+  return {
+    rowIndex: Math.max(
+      visibleTopIndex,
+      Math.min(safeAvailableEndIndex - 1, visibleTopIndex + Math.max(0, Math.floor(options.pane.cursorY || 0)))
+    ),
+    col: Math.max(0, Math.floor(options.pane.cursorX || 0)),
+    visible: options.pane.cursorVisibility !== "Hidden"
+  };
 }
 function stripAnsiControlSequences(line) {
   return line.replace(/\x1b\[[0-9;:]*[A-Za-z]/g, "");
@@ -10300,6 +10351,7 @@ async function buildWezTermMirrorSnapshot(options) {
     nextLineCount: canonicalLines.length,
     trimmedLineCount
   });
+  const availableEndIndex = bufferStartIndex + trimmed.lines.length;
   return {
     revision: Math.max(0, Math.floor(options.revision || 0)),
     bufferStartIndex,
@@ -10307,7 +10359,11 @@ async function buildWezTermMirrorSnapshot(options) {
     cols: options.pane.cols,
     rows: options.pane.rows,
     cursorKeysApp: false,
-    cursor: null
+    cursor: normalizeWezTermCursor({
+      pane: options.pane,
+      bufferStartIndex,
+      availableEndIndex
+    })
   };
 }
 function buildWezTermSendTextArgs(paneId) {
@@ -10318,7 +10374,7 @@ function buildWezTermSendTextArgs(paneId) {
   return ["cli", "--prefer-mux", "send-text", "--pane-id", String(normalizedPaneId), "--no-paste"];
 }
 function buildWezTermListArgs() {
-  return ["cli", "--prefer-mux", "list"];
+  return ["cli", "--prefer-mux", "list", "--format", "json"];
 }
 function buildWezTermSpawnArgs(input) {
   const workspace = input.workspace.trim();
@@ -10334,6 +10390,18 @@ function buildWezTermSpawnArgs(input) {
   }
   args.push("--", ...input.command);
   return args;
+}
+function buildWezTermPersistentShellCommand(command) {
+  const candidate = command?.filter((item) => item.trim());
+  if (!candidate?.length) {
+    return ["cmd.exe", "/k"];
+  }
+  const executable = candidate[0]?.trim().toLowerCase() || "";
+  const firstArg = candidate[1]?.trim().toLowerCase() || "";
+  if ((executable === "cmd" || executable === "cmd.exe") && firstArg === "/c") {
+    throw new Error("wezterm sessions must use a persistent shell; cmd.exe /c would close the pane when the child process exits");
+  }
+  return candidate;
 }
 function buildWezTermGetTextArgs(input) {
   const normalizedPaneId = Math.max(0, Math.floor(input.paneId));
@@ -10386,7 +10454,7 @@ function pickSpawnPaneId(output) {
 }
 function createWezTermBackendRuntime(options) {
   const workspacePrefix = options.workspacePrefix || "zterm-";
-  const defaultCommand = options.defaultCommand || ["cmd.exe"];
+  const defaultCommand = buildWezTermPersistentShellCommand(options.defaultCommand);
   const maxMirrorLines = options.maxMirrorLines || 1e3;
   const sessionPaneIds = /* @__PURE__ */ new Map();
   const snapshotState = /* @__PURE__ */ new Map();
@@ -10395,6 +10463,14 @@ function createWezTermBackendRuntime(options) {
   }
   function listSessions() {
     return listPaneRecords().map((pane) => paneToBackendSession(pane, workspacePrefix));
+  }
+  function resolvePaneRecord(sessionName) {
+    const session = resolveSession(sessionName);
+    const pane = listPaneRecords().find((candidate) => candidate.paneId === session.paneId);
+    if (!pane) {
+      throw new Error(`wezterm session not found: ${session.sessionName}`);
+    }
+    return pane;
   }
   function resolveSession(sessionName) {
     const normalizedSessionName = sanitizeWezTermSessionName(sessionName, "");
@@ -10416,7 +10492,7 @@ function createWezTermBackendRuntime(options) {
     const paneId = pickSpawnPaneId(options.runner.run(buildWezTermSpawnArgs({
       workspace,
       cwd: input?.cwd,
-      command: input?.command?.length ? input.command : defaultCommand
+      command: input?.command?.length ? buildWezTermPersistentShellCommand(input.command) : defaultCommand
     })));
     sessionPaneIds.set(sessionName, paneId);
     const pane = listPaneRecords().find((candidate) => candidate.paneId === paneId);
@@ -10427,6 +10503,7 @@ function createWezTermBackendRuntime(options) {
   }
   async function readSnapshot(sessionName) {
     const session = resolveSession(sessionName);
+    const pane = resolvePaneRecord(session.sessionName);
     const state = snapshotState.get(session.sessionName) || {
       revision: 0,
       previousStartIndex: 0,
@@ -10434,16 +10511,7 @@ function createWezTermBackendRuntime(options) {
     };
     const text = options.runner.run(buildWezTermGetTextArgs({ paneId: session.paneId }));
     const snapshot = await buildWezTermMirrorSnapshot({
-      pane: {
-        winId: 0,
-        tabId: 0,
-        paneId: session.paneId,
-        workspace: session.workspace,
-        cols: session.cols,
-        rows: session.rows,
-        title: session.title,
-        cwd: session.cwd
-      },
+      pane,
       revision: state.revision + 1,
       previousStartIndex: state.previousStartIndex,
       previousLineCount: state.previousLineCount,

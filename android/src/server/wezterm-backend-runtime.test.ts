@@ -34,12 +34,23 @@ function createRunner(): MockWezTermRunner {
     panes,
     run: vi.fn((args: string[]): string => {
       const command = args.join(' ');
-      if (command === 'cli --prefer-mux list') {
-        return [
-          'WINID TABID PANEID WORKSPACE SIZE TITLE CWD',
-          ...runner.panes.map((pane) =>
-            `1 1 ${pane.paneId} ${pane.workspace} ${pane.size} ${pane.title} ${pane.cwd}`),
-        ].join('\n');
+      if (command === 'cli --prefer-mux list --format json') {
+        return JSON.stringify(runner.panes.map((pane) => ({
+          window_id: 1,
+          tab_id: 1,
+          pane_id: pane.paneId,
+          workspace: pane.workspace,
+          size: {
+            rows: Number(pane.size.split('x')[1]),
+            cols: Number(pane.size.split('x')[0]),
+          },
+          title: pane.title,
+          cwd: pane.cwd,
+          cursor_x: 4,
+          cursor_y: 2,
+          cursor_visibility: 'Visible',
+          top_row: 0,
+        })));
       }
       if (args[0] === 'cli' && args[2] === 'spawn') {
         const workspace = args[args.indexOf('--workspace') + 1]!;
@@ -133,6 +144,11 @@ describe('wezterm backend runtime', () => {
     const first = await runtime.readSnapshot('demo-shell');
     expect(first.revision).toBe(1);
     expect(first.bufferLines.map((row) => row.map((cell) => String.fromCodePoint(cell.char)).join(''))).toContain('CREATED_READY');
+    expect(first.cursor).toMatchObject({
+      col: 4,
+      visible: true,
+    });
+    expect(first.cursor?.rowIndex).toBeGreaterThanOrEqual(0);
 
     runtime.writeInput('demo-shell', Buffer.from('echo INPUT_OK\r', 'utf8'));
     expect(runner.runWithInput).toHaveBeenCalledWith(
@@ -167,11 +183,21 @@ describe('wezterm backend runtime', () => {
       'D:/work/project',
       '--',
       'cmd.exe',
+      '/k',
     ]);
     expect(runner.runWithInput).toHaveBeenCalledWith(
       ['cli', '--prefer-mux', 'send-text', '--pane-id', '8', '--no-paste'],
       'echo STDIN_ONLY\r',
     );
+  });
+
+  it('rejects one-shot cmd /c panes because TUI exit would terminate the session', () => {
+    const runtime = createWezTermBackendRuntime({ runner: createRunner() });
+
+    expect(() => runtime.createSession({
+      sessionName: 'bad codex',
+      command: ['cmd.exe', '/c', 'codex'],
+    })).toThrow('wezterm sessions must use a persistent shell');
   });
 
   it('throws explicit errors for missing sessions instead of falling back to another pane', async () => {

@@ -278,7 +278,7 @@ Remote screenshot permission belongs to the installed native \`zterm-daemon\` bi
 writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
   name: npmPackageName,
   version,
-  description: 'ZTerm macOS daemon for Android tmux bridge, file transfer, and remote screenshot capture.',
+  description: 'ZTerm daemon for Android terminal bridge, file transfer, relay, and remote screenshot support.',
   license: 'Apache-2.0',
   homepage: 'https://github.com/Jasonzhangf/zterm#readme',
   repository: {
@@ -288,8 +288,8 @@ writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
   bugs: {
     url: 'https://github.com/Jasonzhangf/zterm/issues',
   },
-  os: [targetOs],
-  cpu: [targetArch],
+  os: ['darwin', 'win32'],
+  cpu: ['arm64', 'x64'],
   type: 'commonjs',
   scripts: {
     postinstall: 'node support/install-user-shims.cjs',

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildWezTermPersistentShellCommand,
   buildWezTermSendTextArgs,
   buildWezTermMirrorSnapshot,
   parseWezTermPaneList,
@@ -38,6 +39,41 @@ WINID TABID PANEID WORKSPACE    SIZE  TITLE          CWD
     ]);
   });
 
+  it('parses wezterm cli list json with cursor metadata', () => {
+    const panes = parseWezTermPaneList(JSON.stringify([
+      {
+        window_id: 7,
+        tab_id: 8,
+        pane_id: 9,
+        workspace: 'zterm-demo',
+        size: { rows: 24, cols: 80 },
+        title: 'cmd.exe',
+        cwd: 'file:///C:/Users/huawei/',
+        cursor_x: 12,
+        cursor_y: 3,
+        cursor_visibility: 'Visible',
+        top_row: 0,
+      },
+    ]));
+
+    expect(panes).toEqual([
+      {
+        winId: 7,
+        tabId: 8,
+        paneId: 9,
+        workspace: 'zterm-demo',
+        cols: 80,
+        rows: 24,
+        title: 'cmd.exe',
+        cwd: 'file:///C:/Users/huawei/',
+        cursorX: 12,
+        cursorY: 3,
+        cursorVisibility: 'Visible',
+        topRow: 0,
+      },
+    ]);
+  });
+
   it('rejects malformed pane list rows instead of guessing a backend truth', () => {
     expect(() => parseWezTermPaneList(`
 WINID TABID PANEID WORKSPACE SIZE TITLE CWD
@@ -46,27 +82,50 @@ oops
   });
 
   it('materializes get-text output into a daemon-owned absolute mirror snapshot', async () => {
-    const panes = parseWezTermPaneList(`
-WINID TABID PANEID WORKSPACE SIZE  TITLE   CWD
-    6     6      6 demo      80x24 cmd.exe file:///C:/Users/huawei/
-`);
+    const panes = parseWezTermPaneList(JSON.stringify([
+      {
+        window_id: 6,
+        tab_id: 6,
+        pane_id: 6,
+        workspace: 'demo',
+        size: { rows: 24, cols: 80 },
+        title: 'cmd.exe',
+        cwd: 'file:///C:/Users/huawei/',
+        cursor_x: 16,
+        cursor_y: 3,
+        cursor_visibility: 'Visible',
+        top_row: 0,
+      },
+    ]));
     const snapshot = await buildWezTermMirrorSnapshot({
       pane: panes[0]!,
       revision: 3,
       previousStartIndex: 40,
       previousLineCount: 20,
-      getTextEscapes: '\x1b[91mZTERM_RED\n\x1b[30m\x1b[102mZTERM_GREEN_BG\n\x1b[39m\x1b[49m',
+      getTextEscapes: Array.from({ length: 24 }, (_item, index) => {
+        if (index === 0) {
+          return '\x1b[91mZTERM_RED';
+        }
+        if (index === 3) {
+          return '\x1b[91mZTERM_CURSOR_ROW';
+        }
+        return `ROW_${index + 1}`;
+      }).join('\n'),
     });
 
     expect(snapshot.revision).toBe(3);
     expect(snapshot.bufferStartIndex).toBe(40);
-    expect(snapshot.bufferLines).toHaveLength(2);
+    expect(snapshot.bufferLines).toHaveLength(24);
     expect(snapshot.bufferLines[0]?.map((cell) => String.fromCodePoint(cell.char)).join('')).toBe('ZTERM_RED');
-    expect(snapshot.bufferLines[0]?.[0]).toMatchObject({ fg: 9, bg: 256 });
-    expect(snapshot.bufferLines[1]?.map((cell) => String.fromCodePoint(cell.char)).join('')).toBe('ZTERM_GREEN_BG');
-    expect(snapshot.bufferLines[1]?.[0]).toMatchObject({ fg: 0, bg: 10 });
+    expect(snapshot.bufferLines[3]?.map((cell) => String.fromCodePoint(cell.char)).join('')).toBe('ZTERM_CURSOR_ROW');
+    expect(snapshot.bufferLines[3]?.[0]).toMatchObject({ fg: 9, bg: 256 });
     expect(snapshot.cols).toBe(80);
     expect(snapshot.rows).toBe(24);
+    expect(snapshot.cursor).toEqual({
+      rowIndex: 43,
+      col: 16,
+      visible: true,
+    });
   });
 
   it('advances the absolute start only when the bounded capture window drops old lines', async () => {
@@ -110,5 +169,14 @@ WINID TABID PANEID WORKSPACE SIZE TITLE CWD
         'Ctrl+C is delivered as ETX to raw-mode programs, but does not interrupt cmd.exe ping as a Windows console control event',
       ],
     });
+  });
+
+  it('requires Windows sessions to be rooted in a persistent shell', () => {
+    expect(buildWezTermPersistentShellCommand()).toEqual(['cmd.exe', '/k']);
+    expect(buildWezTermPersistentShellCommand(['cmd.exe', '/k'])).toEqual(['cmd.exe', '/k']);
+    expect(buildWezTermPersistentShellCommand(['powershell.exe', '-NoLogo'])).toEqual(['powershell.exe', '-NoLogo']);
+    expect(() => buildWezTermPersistentShellCommand(['cmd.exe', '/c', 'codex'])).toThrow(
+      'wezterm sessions must use a persistent shell',
+    );
   });
 });

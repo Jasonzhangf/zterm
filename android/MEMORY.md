@@ -561,3 +561,10 @@ silently returns 0 when viewport metrics are stable.
 - picker 的唯一真源是当前卡片的 `bridgeHost / bridgePort / daemonHostId / authToken`，history-only group 也应进入 picker，而不是伪装成 runtime open。
 - 回归门禁：同页多 server card 点击必须各自落到各自 target；edit-group picker 打开后必须对 concrete target 自动 `fetchTmuxSessions()` 并回写 `onRemoteSessionsRefreshed()`；picker/列表刷新测试要一起绿。
 - Windows / relay daemon 入口必须额外锁 auth：relay directory 只提供 endpoint/session catalog，不是 daemon auth 真源；Connections card 和 drawer New Session 命中 relay device 时必须从 saved server preset/host 补 `bridgeHost/bridgePort/authToken` 后再 refresh/create。
+
+## 2026-06-30 Windows WezTerm cursor truth
+
+- Windows WezTerm backend 的 cursor 真源来自 `wezterm cli list --format json` 的 `cursor_x/cursor_y/cursor_visibility`，不是 `get-text --escapes`。
+- daemon 必须把 WezTerm cursor 作为独立 metadata 写入 `WezTermMirrorSnapshot.cursor` / `buffer-head.cursor`，禁止把 cursor 样式写进 `TerminalCell`。
+- 已验证真实 Windows daemon `100.75.122.121:3333` 在 `session-open -> connect -> buffer-head` 返回 `cursor={"rowIndex":0,"col":16,"visible":true}`；若手机仍无光标，下一步查 Android 是否消费了该 `buffer-head.cursor`。
+- daemon npm 包不能再只声明 `os/cpu=darwin/arm64`；Windows fresh install 需要允许 `win32/x64`，否则 `npm install -g` 会在平台检查阶段失败。

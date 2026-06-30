@@ -94,6 +94,16 @@ function assertIncludes(value: string, expected: string, label: string) {
   }
 }
 
+async function dismissCodexUpdatePromptIfPresent(paneId: number) {
+  const text = getText(paneId);
+  if (!text.includes('Update available') || !text.includes('Skip')) {
+    return false;
+  }
+  sendInput(paneId, '2\r');
+  await sleep(1000);
+  return true;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -161,14 +171,23 @@ async function verifyRawTuiBytes() {
 }
 
 async function verifyCodexTextEntry() {
-  const paneId = spawnPane('zterm-input-codex', ['cmd.exe', '/c', 'codex']);
+  const paneId = spawnPane('zterm-input-codex', ['cmd.exe', '/k', 'echo ZTERM_CODEX_SHELL_READY']);
   try {
+    await sleep(1000);
+    sendInput(paneId, 'codex\r');
     await sleep(4000);
+    await dismissCodexUpdatePromptIfPresent(paneId);
     sendInput(paneId, 'ZTERM_CODEX_INPUT_PROBE');
     await sleep(1000);
     const text = getText(paneId);
     assertIncludes(text, 'ZTERM_CODEX_INPUT_PROBE', 'codex text entry');
-    return { paneId, ok: true };
+    sendInput(paneId, Buffer.from([0x03]));
+    await sleep(2000);
+    sendInput(paneId, 'echo ZTERM_CODEX_RETURNED_TO_SHELL\r');
+    await sleep(1000);
+    const afterExitText = getText(paneId);
+    assertIncludes(afterExitText, 'ZTERM_CODEX_RETURNED_TO_SHELL', 'codex returns to shell');
+    return { paneId, ok: true, returnedToShell: true };
   } finally {
     killPane(paneId);
   }
