@@ -537,3 +537,4 @@ silently returns 0 when viewport metrics are stable.
 - `TraversalSocket` 不能在“所有候选都失败且暂无可选路由”时直接落死为永久 error；但 session transport 已有外层 `SessionContext` reconnect runtime owner，所以 App session/control transport 创建 `TraversalSocket` 时必须设置 `autoReconnect:false`，避免内外两层同时新建 transport。
 - 单独使用的 `TraversalSocket` 默认仍可 `autoReconnect:true` 自恢复；相关 reconnect 回归测试必须覆盖默认自恢复和外层 owner 模式不自建 backend，并使用隔离 route health cache，避免历史 failure 污染路由选择。
 - 首连 handshake 已再次证实会携带 `widthMode`：`SessionContext` 直接用 `BridgeSettings.terminalWidthMode` 生成 connect payload，`useBridgeSettingsStorage` 的同步首 render 保证启动即用，不需要等后续 resize 或二次保存。
+- 网络 online 恢复不能只走 `resumeActiveSessionTransport` 的 stale-open probe/wait 路径；foreground `online` 必须 active-only 调 `reconnectSession(activeSessionId)`，直接重启外层 session reconnect backoff，且禁止 sweep hidden/all sessions。

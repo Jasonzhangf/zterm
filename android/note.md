@@ -1091,3 +1091,10 @@ Need runtime debug to confirm:
 - 最终修复：`TraversalSocket` 增加 `autoReconnect` 选项，默认 `true`；`SessionContext` 通过 `buildTraversalSocketForHostRuntime()` 创建 app session/control transport 时传 `autoReconnect:false`，由外层 session reconnect runtime 唯一拥有重连调度。
 - 回归锁定：`socket.test.ts` 覆盖默认全候选耗尽后自恢复，以及 `autoReconnect:false` 时只尝试完当前候选轮、不延时自建下一轮 backend；`SessionContext.ws-refresh.test.tsx` 全量 125 tests PASS，证明不再破坏 stale probe wait window。
 - 构建验证：`./android/scripts/build-android-debug.sh` PASS，最终发布 `0.1.3.1967`，sha256 `b4cb983aced634b8549e995813cf313431206dc241616da0aaa60f07438de0dc`；`verify-update-bundle` PASS；`check-relay-default-address-leak` PASS。
+
+## 2026-06-30 online recovery active reconnect
+
+- 现场截图显示 `No traversal path succeeded` 后网络变化仍卡死在 reconnecting；当前 online 事件只调用 `resumeActiveSessionTransport(activeSessionId)`，会走 stale-open probe / wait 路径，不保证重启 session reconnect backoff。
+- 修复：`useOpenTabLifecycleEffects` 的 foreground `online` 分支改为只对 active tab 调 `reconnectSession(activeSessionId)`，不 sweep all sessions，也不走普通 resume/probe；hidden 状态仍不恢复。
+- 回归：`App.dynamic-refresh.test.tsx` 更新为 online 只 reconnect active tab，且不调用 `resumeActiveSessionTransport` / `reconnectAllSessions`。
+- 验证：`pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/lib/traversal/socket.test.ts --reporter dot` PASS；`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。

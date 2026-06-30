@@ -980,7 +980,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.sendInput).toHaveBeenCalledWith('s1', 'typed-from-terminal');
   });
 
-  it('ignores plain online noise and only resumes on real foreground restore', async () => {
+  it('reconnects only the active tab on foreground online recovery without sweeping all sessions', async () => {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -992,8 +992,37 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
-    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.reconnectSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('does not resume transports for online events while the app is hidden', async () => {
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      window.dispatchEvent(new Event('online'));
+    });
+
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('keeps foreground restore separate from online recovery', async () => {
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
 
     act(() => {
       Object.defineProperty(document, 'visibilityState', {

@@ -9,12 +9,13 @@ export type OpenTabAuditReason =
   | 'visibilitychange'
   | 'resume'
   | 'appStateChange'
+  | 'online'
   | 'connect'
   | 'session-picker-refresh'
   | 'connections-page-open'
   | 'session-status-closed';
 
-type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange'>;
+type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange' | 'online'>;
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
@@ -25,6 +26,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
+  reconnectSession: (sessionId: string) => void;
   bumpFollowResetEpoch: () => void;
 }
 
@@ -35,6 +37,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
+    reconnectSession,
     bumpFollowResetEpoch,
   } = options;
 
@@ -75,6 +78,21 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       notifyResume('resume');
     };
 
+    const onNetworkOnline = () => {
+      if (document.visibilityState === 'hidden') {
+        runtimeDebug('app.network.online.hidden', {});
+        return;
+      }
+      onForegroundActiveChange?.(true);
+      foregroundRefreshRuntimeRef.current.wasHidden = false;
+      runtimeDebug('app.network.online', {});
+      const activeSessionId = openTabStateRef.current.activeSessionId;
+      if (activeSessionId) {
+        reconnectSession(activeSessionId);
+      }
+      notifyResume('online');
+    };
+
     const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       runtimeDebug('app.capacitor.appStateChange', {
         isActive,
@@ -92,6 +110,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     document.addEventListener('visibilitychange', onVisibilityChange);
     document.addEventListener('resume', onDocumentResume as EventListener);
     document.addEventListener('pause', markHidden as EventListener);
+    window.addEventListener('online', onNetworkOnline);
 
     return () => {
       void Promise.resolve(appStateListenerHandle)
@@ -102,6 +121,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       document.removeEventListener('visibilitychange', onVisibilityChange);
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
+      window.removeEventListener('online', onNetworkOnline);
     };
   }, [
     auditOpenTabsAgainstRemoteSessions,
@@ -109,6 +129,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     foregroundRefreshRuntimeRef,
     openTabStateRef,
     onForegroundActiveChange,
+    reconnectSession,
     sessionsRef,
   ]);
 

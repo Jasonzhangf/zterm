@@ -70,6 +70,7 @@ interface UseOpenTabRuntimeOptions {
   switchSession: (sessionId: string) => void;
   moveSession: (sessionId: string, toIndex: number) => void;
   renameSession: (sessionId: string, name: string) => void;
+  reconnectSession: (sessionId: string) => void;
   resumeActiveSessionTransport: (sessionId: string) => boolean;
   clearSessionDraft: (sessionId: string) => void;
   ensureTerminalPageVisible: () => void;
@@ -131,6 +132,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     switchSession,
     moveSession,
     renameSession,
+    reconnectSession,
     resumeActiveSessionTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
@@ -460,6 +462,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
+    reconnectSession,
     bumpFollowResetEpoch,
   });
 
