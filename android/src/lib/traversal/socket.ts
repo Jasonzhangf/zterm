@@ -326,6 +326,8 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private readonly routeHealthScope: TraversalRouteHealthScope;
 
+  private readonly autoReconnect: boolean;
+
   public constructor(
     target: TraversalTargetSource,
     settings: TraversalSettingsSource,
@@ -333,6 +335,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       overrideUrl?: string;
       routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'recordSuccess' | 'recordFailure'>;
       routeHealthScope?: TraversalRouteHealthScope;
+      autoReconnect?: boolean;
     },
   ) {
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
@@ -342,6 +345,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       accountId: settings.traversalRelay?.userId,
       daemonHostId: target.relayHostId || target.daemonHostId,
     };
+    this.autoReconnect = options?.autoReconnect !== false;
     this.diagnostics = {
       mode: plan.mode,
       stage: 'connecting',
@@ -401,7 +405,7 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.diagnostics.stage = 'error';
     this.diagnostics.reason = reason;
     this.onclose?.({ code: 1006, reason });
-    if (!this.closedByClient) {
+    if (this.autoReconnect && !this.closedByClient) {
       this.scheduleReconnect(reason);
     }
   }
@@ -537,7 +541,9 @@ export class TraversalSocket implements BridgeTransportSocket {
             this.diagnostics.reason = event.reason;
           }
           this.onclose?.(event);
-          this.scheduleReconnect(reason);
+          if (this.autoReconnect) {
+            this.scheduleReconnect(reason);
+          }
           return;
         }
         this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';

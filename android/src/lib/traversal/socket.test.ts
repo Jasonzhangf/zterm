@@ -80,6 +80,7 @@ function createSocket(
   options?: {
     routeHealthCache?: TraversalRouteHealthCache;
     routeHealthScope?: { accountId?: string; daemonHostId?: string };
+    autoReconnect?: boolean;
   },
 ) {
   return new TraversalSocket(target, {
@@ -91,6 +92,7 @@ function createSocket(
       accountId: 'user-1',
       daemonHostId: 'daemon-1',
     },
+    autoReconnect: options?.autoReconnect,
   });
 }
 
@@ -166,6 +168,34 @@ describe('TraversalSocket reconnect', () => {
       stage: 'connecting',
       reason: 'candidate failed before open',
     });
+  });
+
+  it('does not self-reconnect when an outer session runtime owns reconnect scheduling', async () => {
+    const socket = createSocket({
+      traversalPathPriority: ['ipv4'],
+    }, {
+      autoReconnect: false,
+    });
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerClose(1006, 'candidate failed before open');
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].triggerClose(1006, 'candidate failed before open');
+
+    expect(onclose).toHaveBeenCalledWith({ code: 1006, reason: 'candidate failed before open' });
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'error',
+      reason: 'candidate failed before open',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(2);
   });
 
   it('backs off repeated reconnect attempts and resets candidate order from the first path', async () => {

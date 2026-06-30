@@ -1084,3 +1084,10 @@ Need runtime debug to confirm:
   - `pnpm --dir android exec vitest run src/server/wezterm-backend.test.ts --reporter dot` PASS, 5 tests.
   - `pnpm --dir android exec vitest run src/lib/feature-registry-truth.test.ts --reporter dot` PASS, 4 tests.
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.
+
+## 2026-06-30 traversal reconnect owner split / APK build 1967
+
+- 初始修复把 `TraversalSocket.finishFailure()` 接到内部 `scheduleReconnect()` 后，单独 socket 能自恢复，但 `SessionContext` 全量 contract 暴露出双重 owner：外层 session reconnect runtime 已经会在 `onclose -> finalizeFailure(..., true)` 后排队重连，内部 socket 又自建 backend，导致 stale probe 等待窗口内多出第 3 个 WebSocket。
+- 最终修复：`TraversalSocket` 增加 `autoReconnect` 选项，默认 `true`；`SessionContext` 通过 `buildTraversalSocketForHostRuntime()` 创建 app session/control transport 时传 `autoReconnect:false`，由外层 session reconnect runtime 唯一拥有重连调度。
+- 回归锁定：`socket.test.ts` 覆盖默认全候选耗尽后自恢复，以及 `autoReconnect:false` 时只尝试完当前候选轮、不延时自建下一轮 backend；`SessionContext.ws-refresh.test.tsx` 全量 125 tests PASS，证明不再破坏 stale probe wait window。
+- 构建验证：`./android/scripts/build-android-debug.sh` PASS，最终发布 `0.1.3.1967`，sha256 `b4cb983aced634b8549e995813cf313431206dc241616da0aaa60f07438de0dc`；`verify-update-bundle` PASS；`check-relay-default-address-leak` PASS。

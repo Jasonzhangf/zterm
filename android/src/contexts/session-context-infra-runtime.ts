@@ -346,7 +346,10 @@ export function buildTraversalSocketForHostRuntime(options: {
       return options.wsUrl;
     }
   })();
-  return new TraversalSocket(traversal.target, traversal.settings, { overrideUrl });
+  return new TraversalSocket(traversal.target, traversal.settings, {
+    overrideUrl,
+    autoReconnect: false,
+  });
 }
 
 export function applyTransportDiagnosticsRuntime(options: {
