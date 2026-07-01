@@ -46,3 +46,4 @@
 - [2026-06-02] Mac dev Electron 的 CDP `Input.dispatchKeyEvent` 与 `webContents.sendInputEvent` 在 vite HMR dev build 下不可靠地触发 React onKeyDown；输入回显必须用真键盘或 packaged app 验证，不要把自动化失败当链路 bug。
 - [2026-06-02] Mac dev automation 反模式：不要在 main 端对所有 local tmux session 注入 input。即使是用于验证，旁路路径必须只针对 active client（manager.clients 唯一项），否则会污染其他用户工作 session。
 - [2026-06-02] Mac input verification 硬规则：严禁在 main 端对 local tmux manager 列出/已知的所有 session 写 input（即使有"只写一次"的意图）。只能对当前 active client（`manager.clients` 唯一项、`payload.clientId` 命中、且 `sessionName` 是本次 smoke 专用 session，如 `zterm_mac_color`）发 input。触发信号：CDP `Input.dispatchKeyEvent` / `webContents.sendInputEvent` 失败后想用"广播 tmux send-keys"兜底。
+- [2026-07-01] Mac desktop workspace Slice 1 已验证的入口真相：`App.tsx` 只渲染 `MacDesktopApp`；旧 `ShellWorkspace` 只能通过明确命名的 `MacWorkspaceTransitionalShell` 被临时消费。后续不得再让 `App` 直连 `ShellWorkspace`，也不得把单 runtime 的 `MacAppShell/MacPaneWorkbench` 接成 production root。

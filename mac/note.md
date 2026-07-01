@@ -17,3 +17,16 @@
 - [2026-06-02] 单实例收口后：唯一 dev Electron (PID 36349, port 9340)，唯一 tmux `zterm_mac_color`，颜色 + 底部已真实截图；输入回显需 Jason 手测或在 packaged app 里跑。
 - [2026-06-02 22:50] 严重反模式：曾为绕过 React keydown 自动化失败，在 main.ts 给"所有 local tmux session" 写 input。这种写法对环境有破坏性，已撤并禁止。
 - 后续调试时只能在 main 端**只**针对当前 active session（用 manager.clients 唯一 client）做注入；不能对所有 session 写。
+
+## 2026-07-01 Mac iTerm2 gap review
+- 当前真实入口仍是 `mac/src/App.tsx -> ShellWorkspace`，但 `mac/docs/spec.md` / `mac/docs/architecture.md` 已把旧 `ShellWorkspace` 明确列为废止方向；主入口与架构文档不一致。
+- `ShellWorkspace` 已有 split tree、per-resource runtime registry、local tmux/remote runtime，能比旧 `MacAppShell` 更接近多 live pane；但新版 `MacAppShell/MacPaneWorkbench` 仍是旁路，且其设计是单 runtime 传入所有 panes，不适合 iTerm2 式独立 pane。
+- Electron main 只创建一个业务 `BrowserWindow`，activate 仅在无窗口时恢复；没有 New Window / 多窗口 workspace owner / window-scoped persistence。
+- 多服务器管理仍停在 QuickConnect modal：remembered servers 是小卡片，remote sessions 需要手动加载；没有类似 Android 抽屉的 server directory / live session catalog / server 色彩身份 / 多 daemon 分组。
+- 视觉 gap：全局仍使用 Inter/system 字体、圆角卡片、状态栏和每 pane 常驻 split/open 控件，终端主空间被 chrome 占用；缺 iTerm2/现代桌面终端的紧凑 tab strip、可隐藏 toolbar、profile/status/badge 体系。
+
+## 2026-07-01 Mac desktop workspace Slice 1 entrypoint
+- 已按 `docs/goals/mac-desktop-workspace-slice1-plan.md` 做 Slice 1：`mac/src/App.tsx` 只渲染 `MacDesktopApp`，不再直接依赖 `ShellWorkspace`。
+- 旧 `ShellWorkspace` 暂时只通过 `MacWorkspaceTransitionalShell` 被生产入口消费，命名明确为 transitional；本轮不改 runtime、不接多窗口、不接 server rail。
+- `MacAppShell/MacPaneWorkbench` 未接入 production entrypoint，避免把单 runtime 多 pane 争用路径作为新主线。
+- targeted 验证：`pnpm --filter @zterm/mac test -- MacDesktopApp App.test` PASS（2 files / 2 tests）。

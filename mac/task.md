@@ -5,13 +5,16 @@
 - [x] T1 以 Android contract model 重写 Mac spec / architecture / dev-workflow
 - [x] T2 建立 `mac/task.md` / `mac/CACHE.md`
 - [x] T3 记录本轮第一刀 ownership 切法与验证结论
+- [x] T4 新增 `mac/docs/desktop-workspace-plan.md`，冻结多窗口 / 多服务器 / pane-tab-runtime owner 设计
+- [x] T5 修正入口实现，使代码与当前 spec 的 production entrypoint 一致
 
 ## Epic-002 App shell first cut
 
 - [x] T1 停止以旧 `ShellWorkspace` 作为主入口
-- [ ] T2 建立新的 terminal-first app shell
+- [x] T2 建立新的 `MacDesktopApp` production entrypoint
 - [x] T3 建立 minimal launcher / editor / active tab 闭环
 - [x] T4 接回真实 runtime 并验证 terminal surface
+- [ ] T5 物理删除或迁移 `MacAppShell/MacPaneWorkbench` 与 `ShellWorkspace` 的重复生产语义
 
 ## Epic-003 Runtime contract cutover
 
@@ -21,15 +24,20 @@
 - [ ] T2 切出 Mac session head / buffer worker adapter（进行中：已接入 head-driven follow sync）
 - [ ] T3 让 renderer 只消费新的 projection contract
 - [ ] T4 删除旧 workspace/runtime 编排残留
+- [ ] T5 新增 `MacRuntimeRegistry`，按 `runtimeKey -> TerminalRuntimeController` 管理独立 live pane runtime
 
-## Epic-004 Desktop capabilities after contract
+## Epic-004 Desktop workspace after contract
 
-对应 Android Epic-003/004/005/006，将 Android 已验证功能同步到 Mac。
+对应 `mac/docs/desktop-workspace-plan.md`，先做 owner 和 CI gate，再做桌面能力。
 设计原则：**复用 shared 公共层，平台壳只补桌面特有能力，禁止复制第二套真相**。
 
 - [x] T0 shared compact wire 类型 + normalizeWireLines + replayBufferSyncHistory（packages/shared）
 - [x] T1 mac/scripts/daemon-loopback.ts 回环测试（initial-sync + local-input-echo 2/2 PASS）
 - [x] T2 mac/scripts/run-daemon-loopback.sh runner
+- [ ] T3 `MacWorkspaceStore`：window/workspace/pane/tab 纯状态模型 + split/resize/move/activate 单测
+- [ ] T4 `MacServerDirectory`：左侧多服务器 rail + live session projection + refresh 不改 open tabs 的反向测试
+- [ ] T5 `MacWindowManager`：Electron New Window + windowId + window-scoped workspace persistence + packaged smoke
+- [ ] T6 Profiles / arrangements：profile 不含 live runtime，arrangement 不含 buffer truth
 
 ### P0 终端体验基础（Epic-004.A 核心连接 + 终端）
 

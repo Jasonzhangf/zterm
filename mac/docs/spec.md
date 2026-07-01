@@ -1,10 +1,14 @@
 # zterm Mac Spec
 
-## 目标
+## Product Goal
 
-按 **与 Android 相同的 terminal 契约模型**，完全重写 Mac 客户端。
+Build the Mac client as a terminal-first desktop workspace for multiple servers, multiple OS windows, tabs, and split panes.
 
-唯一允许的主链是：
+The canonical design document is:
+
+- `mac/docs/desktop-workspace-plan.md`
+
+Mac must keep the same terminal contract model as Android:
 
 ```text
 Server(session truth)
@@ -13,57 +17,66 @@ Server(session truth)
 -> UI Shell
 ```
 
-Mac 不能再维护第二套 desktop-only terminal 真相；只能在 **平台壳** 上补桌面能力（窗口、菜单、快捷键、后续 split/tab 管理），不能改写 buffer/render ownership。
+Desktop features are platform shell features. They must not create a second terminal buffer, renderer, transport, or daemon truth.
 
-## 当前阶段目标（Phase 1）
+## Target Hierarchy
 
-先切掉旧的 demo shell / workspace 编排，建立新的 **terminal-first 单工作区骨架**：
+```text
+App
+-> Window
+-> Workspace
+-> PaneTree
+-> Pane
+-> Tab
+-> RuntimeSession
+```
 
-- Electron 壳继续保留
-- App-level 入口改成新的 terminal-first workbench
-- 空态只显示一个干净的 terminal workspace + `Open connection`
-- 连接入口改成轻量 launcher / editor
-- active connection 只服务一个 terminal surface
-- terminal surface 继续走真实 runtime，不允许静态假 terminal 占位
-- 先证明新的 app shell / tab ownership / runtime ownership 成立，再继续切 buffer worker / split / local tmux
+Rules:
 
-## 范围
+- A window owns one workspace.
+- A workspace owns pane tree layout and pane/tab identity.
+- A pane owns its tab list and active tab.
+- A tab may reference a runtime key.
+- Runtime state is owned by the runtime registry, not by UI records.
+- Server directory projections cannot create or close workspace tabs.
 
-- Electron main / preload 继续作为平台壳
-- Mac renderer 完全切离旧 `ShellWorkspace` 主编排
-- 新的 app shell：
-  - terminal-first header
-  - minimal tab strip
-  - launcher / editor overlay
-  - 单 terminal surface
-- saved hosts / bridge settings 继续复用 shared truth
-- active terminal 继续连接真实 websocket runtime
-- 证据继续落到 `mac/evidence/`
+## Current Baseline
 
-## 暂不范围（本阶段不宣称）
+Current code does not yet satisfy this spec:
 
-- 多 pane vertical split closeout
-- local tmux closeout
-- schedule modal closeout
-- 多 live session 并发
-- packaged app 的完整桌面交互 polish
-- 新 buffer worker / server head 协议最终收口
+- `mac/src/App.tsx` still renders `ShellWorkspace`.
+- `ShellWorkspace` contains useful split-tree and per-resource runtime registry behavior, but it is an all-in-one transitional owner.
+- `MacAppShell/MacPaneWorkbench` is not the production entrypoint and currently uses one runtime across panes.
+- Electron creates one business `BrowserWindow`.
+- Multi-server management is still modal-first via `QuickConnectSheet`.
 
-## 契约要求
+This mismatch is intentional debt to remove in the implementation slices. Do not claim the Mac desktop workspace is complete until the slices in `desktop-workspace-plan.md` are verified.
 
-1. server truth 只认 tmux / daemon session truth
-2. client buffer 只能是 sparse absolute-index mirror
-3. renderer 只能消费 index window，不能直接驱动 transport
-4. UI shell 只改呈现，不改内容真相
-5. Mac 侧禁止再回到“workspace/shell 组件顺手维护 terminal 状态”的旧方向
+## In Scope
 
-## 本轮验收标准
+- One production renderer entrypoint.
+- Explicit window/workspace/pane/tab/runtime owners.
+- Persistent server rail for multi-server management.
+- Independent live runtime sessions per visible pane/tab resource key.
+- OS-level new window support.
+- Compact terminal-first desktop UI.
+- Profiles and arrangements after owner boundaries are verified.
 
-1. `mac/docs/spec.md / architecture.md / dev-workflow.md` 已按 contract model 重写
-2. `mac/task.md / mac/CACHE.md` 建立本轮 rewrite 追踪
-3. `pnpm --filter @zterm/mac type-check` 通过
-4. `pnpm --filter @zterm/mac build` 通过
-5. Mac renderer 入口已切到新的 terminal-first shell，不再依赖旧 `ShellWorkspace` 作为主入口
-6. 空态可打开 launcher
-7. 选中 saved host 或新建 host 后，active tab 能进入真实 terminal runtime
-8. 本轮报告只宣称“app shell 第一刀 + ownership 重置完成”；不宣称 buffer worker / split closeout
+## Out Of Scope Until Owner Gates Pass
+
+- Broadcast input.
+- Full iTerm2 feature parity.
+- Desktop-only terminal protocol changes.
+- Visual polish without owner/test coverage.
+- Any fallback path that masks runtime or transport failures.
+
+## Acceptance Gates
+
+Minimum gates for docs-only design changes:
+
+```bash
+pnpm --filter @zterm/mac type-check
+pnpm --filter @zterm/mac build
+```
+
+Runtime-affecting slices must also satisfy `mac/docs/dev-workflow.md` and the gate matrix in `mac/docs/desktop-workspace-plan.md`.
