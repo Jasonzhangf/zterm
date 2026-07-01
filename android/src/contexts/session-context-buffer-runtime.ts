@@ -96,6 +96,36 @@ function isSparsePayloadWindow(payload: TerminalBufferPayload) {
   return uniqueLineIndexes.size < windowSize;
 }
 
+function resolvePostApplyVisibleRange(options: {
+  session: Session;
+  previousBuffer: SessionBufferState;
+  nextBuffer: SessionBufferState;
+  visibleRange: TerminalVisibleRange | null;
+}) {
+  const visibleRange = options.visibleRange;
+  if (!visibleRange) {
+    return buildDefaultSessionVisibleRange(options.session, undefined, options.nextBuffer);
+  }
+  const previousTailEndIndex = Math.max(
+    0,
+    Math.floor(options.previousBuffer.bufferTailEndIndex || options.previousBuffer.endIndex || 0),
+  );
+  const previousHasLocalWindow = Math.max(
+    0,
+    Math.floor(options.previousBuffer.endIndex || 0),
+  ) > Math.max(0, Math.floor(options.previousBuffer.startIndex || 0));
+  const nextTailEndIndex = Math.max(
+    0,
+    Math.floor(options.nextBuffer.bufferTailEndIndex || options.nextBuffer.endIndex || 0),
+  );
+  const visibleEndIndex = Math.max(0, Math.floor(visibleRange.endIndex || 0));
+  const wasFollowingPreviousTail = previousHasLocalWindow && visibleEndIndex >= previousTailEndIndex - 1;
+  if (!wasFollowingPreviousTail || nextTailEndIndex === previousTailEndIndex) {
+    return visibleRange;
+  }
+  return buildDefaultSessionVisibleRange(options.session, visibleRange, options.nextBuffer);
+}
+
 export function handleBufferHeadRuntime(options: {
   sessionId: string;
   latestRevision: number;
@@ -855,8 +885,12 @@ export function applyIncomingBufferSyncRuntime(options: {
     daemonHeadRevision: liveHead?.revision ?? session.daemonHeadRevision,
     daemonHeadEndIndex: liveHead?.latestEndIndex ?? session.daemonHeadEndIndex,
   };
-  const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId)
-    || buildDefaultSessionVisibleRange(nextSession);
+  const visibleRange = resolvePostApplyVisibleRange({
+    session: nextSession,
+    previousBuffer: localBuffer,
+    nextBuffer,
+    visibleRange: options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null,
+  });
 
   if (shouldCatchUpFollowTailAfterBufferApply(nextSession, visibleRange, {
     forceSameEndRefresh:

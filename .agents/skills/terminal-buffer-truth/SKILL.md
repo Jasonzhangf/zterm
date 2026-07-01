@@ -580,6 +580,7 @@ tmux truth
 - Android 物理键盘不能依赖 DOM textarea focus 路径；native `ImeAnchor key` 必须直接走 shared terminal keyboard resolver 并写入 active session。plain letter 留给 editable/IME 文本路径，Ctrl/Alt 组合键和方向/Esc 等特殊键走硬件 key path；红测必须让 `allowDomFocus=false` 时 `Ctrl+C` 仍到达 terminal input。
 - Android IME 改变 shell geometry 时，IME 只能影响外层容器 / quickbar 位置，不能进入 TerminalView 内容 viewport 计算链；页面层必须冻结 terminal content geometry，禁止用 IME 高度生成 renderer layout refresh / viewport demand，也禁止触发 upstream `onResize` 改 tmux rows。
 - 大面积刷新若遇到 revision-gap sparse payload，client 必须拒绝合并错误 sparse body 并请求 authoritative tail；同时应 schedule 当前稳定 local buffer 的 render commit，把已确认 truth 重推给 renderer。禁止把 sparse payload 当 fallback 成功，也禁止等待 tail 期间让 renderer 没有任何稳定帧信号。
+- 大面积刷新若是 contiguous sparse tail jump，post-apply visible-gap repair 必须先判断是否已有本地窗口且旧 visible range 是否贴旧 tail：已有窗口且贴旧 tail 代表 follow，应改用新 tail 默认 visible range 查 gap；初始 sparse 首帧或不贴旧 tail 代表 reading/未定，必须保留旧 visible range，禁止吞掉 renderer 后续 reading-gap 请求或把用户历史阅读位置重解释成新 tail。
 
 ## 2026-06-29 buffer publish short-circuit
 

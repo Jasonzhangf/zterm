@@ -533,6 +533,12 @@ silently returns 0 when viewport metrics are stable.
 - store / render gate / renderer 的真源必须是不可变快照，不能让 live buffer 对象跨层共享。
 - 任何“滚一下就好”的空白刷新问题，优先查 buffer publish 是否被引用短路，而不是先改 scroll 行为。
 
+## 2026-07-01 大面积 sparse tail 推进后的 follow 空白
+
+- 已验证补充根因：当旧 visible range 正贴着旧 tail（follow），新 `buffer-sync` 用 sparse payload 把 tail 大幅推进后，post-apply gap repair 不能继续拿旧 visible range 判断；旧区可能完整，但下一帧 renderer 会贴到新 tail，而新 tail 可见区可能全是 gap，表现为空白直到手动滚动触发新的 visible range。
+- 修复规则：`buffer-sync apply` 后若已有本地窗口且旧 visible end 贴旧 `bufferTailEndIndex`，必须用新 buffer 的默认 tail visible range 做 visible-gap repair；初始 sparse 首帧或旧 visible range 不贴旧 tail 时必须保留旧 range，禁止吞掉 renderer 后续 reading-gap 请求或擅自拉回底部。
+- 回归门禁：正向锁 `sparse tail jump -> request visible-range-repair-catchup`；反向锁 `reading range -> not reinterpreted as tail`；renderer 另锁 absolute window 大跳仍同步贴尾。
+
 ## 2026-06-29 Windows WezTerm backend 初始合约
 
 - Windows 原生 session backend 先做在 ZTerm 侧，不 fork WezTerm；WezTerm CLI 只是外部 mux/buffer source。

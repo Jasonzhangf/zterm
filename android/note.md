@@ -1,3 +1,9 @@
+# 2026-07-01 large refresh blank follow audit
+
+- 现场仍复现“大面积刷新后空白，触摸/滚动后恢复”。IME 越层修复后仍存在，说明根因不应继续从 keyboard/layout token 补。
+- 当前怀疑链路：`buffer-sync apply -> render gate publish -> TerminalView follow scroll/renderBottomIndex`。需要红测覆盖本地 buffer absolute window 大跳（例如 `[0,30)` 到 `[500,590)`）时，不触摸也必须贴到新 tail，不能停在空白窗口。
+- 验证结果：absolute window 大跳 renderer 测试已绿，单纯贴尾不是缺口；真正红测是 contiguous sparse tail jump 后旧 visibleRange 仍指向旧 tail，post-apply repair 没检查新 tail gap。修复为旧 visibleRange 贴旧 tail 时用新 tail 默认 visibleRange 做 gap repair；reading 区保留旧 visibleRange。
+
 # 2026-06-29 WezTerm TUI / Codex observation
 
 - 远端 Windows 机已实测 `codex` 可直接在 WezTerm mux pane 中运行：`wezterm.exe cli spawn --new-window --workspace codex-test cmd /c codex` 返回 pane `9`。
