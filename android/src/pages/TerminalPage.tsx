@@ -37,8 +37,6 @@ import {
 } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import {
-  isKeyboardViewportAlreadyResized,
-  resolveCurrentLayoutViewportHeight,
   resolveKeyboardLiftPx,
   resolveLayoutViewportHeight,
   resolveTerminalHeaderTopInsetPx,
@@ -1027,15 +1025,9 @@ function TerminalPageComponent({
   }, [quickBarEditorFocused]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
-  const currentShellHeight = resolveCurrentLayoutViewportHeight();
   const keyboardViewportFreezeActive = isAndroid && (terminalKeyboardRequested || keyboardInset > 0);
-  const keyboardViewportAlreadyResized = isAndroid && keyboardViewportFreezeActive
-    ? isKeyboardViewportAlreadyResized(keyboardInset, stableLayoutViewportHeightRef.current)
-    : false;
   const shellHeight = keyboardViewportFreezeActive
-    ? keyboardViewportAlreadyResized
-      ? currentShellHeight || rawShellHeight
-      : Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
+    ? Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
     : rawShellHeight;
   const sessionGroupLayoutAxis = resolveTerminalSessionGroupLayoutAxis({
     viewportWidth,
@@ -2263,13 +2255,6 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  const terminalLayoutRefreshToken = [
-    shellHeight,
-    terminalChromeBottomPx,
-    terminalImeLiftPx,
-    keyboardInset,
-    terminalKeyboardRequested ? 'ime-requested' : 'ime-idle',
-  ].join(':');
   // Use a ref to hold the live snapshot lambda so the registration useEffect
   // never needs to re-run. The producer reads ref.current, which is kept fresh
   // every render. This decouples the snapshot source from all reactive deps,
@@ -2742,8 +2727,6 @@ function TerminalPageComponent({
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
           terminalChromeBottomPx={terminalChromeBottomPx}
-          terminalImeLiftPx={terminalImeLiftPx}
-          terminalLayoutRefreshToken={terminalLayoutRefreshToken}
           inputResetEpochBySession={inputResetEpochBySession}
           followResetEpoch={followResetEpoch}
           terminalKeyboardRequested={terminalKeyboardRequested}

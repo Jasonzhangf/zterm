@@ -10,7 +10,8 @@
 
 - [2026-06-29] 多 daemon / 多服务器 UI 的用户可见身份不能再用 `bridgeHost:bridgePort` 或 telnet/bridge 端口表示；端口只是 transport 配置，不是服务器名。统一真源是 `src/lib/server-identity.ts`：drawer 分组、session group side peek、服务器色调用同一套 server key / display name / tone；UI 层只能消费 projection，禁止各自拼端口当 label。
 - [2026-07-01] Terminal drawer 的远端 session 列表真源必须是 `sessionGroups` catalog，而不是 drawer 自己维护第二份列表。打开 drawer 只按稳定 hostKey 触发远端枚举，refresh 结果通过 `handleRemoteSessionsRefreshed()` 写回 catalog；drawer 再投影 remote-only rows，并点击后复用 group session open 主链。
-- [2026-07-01] Android IME 改变 shell 几何时不能只依赖 WebView `ResizeObserver` 触发 renderer 刷新；页面层必须把 `shellHeight / terminalChromeBottomPx / terminalImeLiftPx / keyboardInset` 汇成本地 layout refresh token 传给 `TerminalView`。TerminalView 只做本地 viewport measure / follow 对齐 / viewport demand，不允许通过 Android `onResize` 改写 upstream tmux rows。
+- [2026-07-01 correction] Android IME 改变 shell 几何时不能进入 TerminalView 内容 viewport 计算链；IME 只允许影响外层容器 / quickbar 位置。terminal content geometry 必须保持 stable layout height 和 chrome bottom，不得把 `keyboardInset/terminalImeLiftPx` 汇成 renderer layout refresh / viewport demand，也不得通过 Android `onResize` 改写 upstream tmux rows。
+- [2026-07-01] 大面积刷新遇到 revision-gap sparse payload 时，client 仍必须拒绝合并该 sparse body 并请求 authoritative tail；但拒绝时要立即 schedule 当前稳定 local buffer 的 render commit，避免等待 tail 期间 renderer 无新信号而停在空白态。这个动作不改变 buffer truth，只重推已确认 truth。
 - [2026-06-29] zterm 多服务器身份色不能用连续 hue hash 自由漂移；紫/粉区在窄 drawer 里辨识差且视觉噪声高。`server-color.ts` 必须使用固定红/黄/蓝/绿/青/橙 palette，并用回归锁住常见服务器 key 不同色。
 - [2026-06-29] Connections 入口页、terminal drawer、session group peek 必须共用 `server-identity.ts` 的同一 server key/tone。禁止 Connections 页直接按 `bridgeHost:bridgePort` 调 `server-color`，否则同一 daemon 会在入口页和抽屉显示成不同颜色。
 - [2026-06-29] Terminal renderer 的 cell 宽度真源必须来自可信 glyph probe；如果 hidden probe 返回接近整屏宽，必须拒绝并回退到字体估算。单列 cell 被测成 viewport 宽会直接导致 ASCII/CJK、色块、反显区域错位。

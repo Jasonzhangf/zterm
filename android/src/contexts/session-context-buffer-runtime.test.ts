@@ -287,7 +287,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
 
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
-    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
     expect(requestSessionBufferSync).toHaveBeenCalledWith(
       sessionId,
       expect.objectContaining({

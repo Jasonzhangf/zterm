@@ -74,7 +74,6 @@ interface TerminalViewProps {
   live?: boolean;
   inputResetEpoch?: number;
   followResetEpoch?: number;
-  layoutRefreshToken?: string;
   allowDomFocus?: boolean;
   domInputOffscreen?: boolean;
   onInput?: (sessionId: string, data: string) => void;
@@ -161,7 +160,6 @@ function TerminalViewComponent({
   live,
   inputResetEpoch = 0,
   followResetEpoch = 0,
-  layoutRefreshToken = "",
   allowDomFocus = true,
   domInputOffscreen = false,
   onInput,
@@ -1052,17 +1050,6 @@ function TerminalViewComponent({
     }
     runViewportRefresh();
   }, [consumeViewportRefreshTrigger, runViewportRefresh]);
-
-  useLayoutEffect(() => {
-    if (!layoutRefreshToken) {
-      return;
-    }
-    runViewportRefresh();
-    alignRenderBottomToFollow({
-      resetReportedViewport: true,
-      immediateScrollSync: true,
-    });
-  }, [alignRenderBottomToFollow, layoutRefreshToken, runViewportRefresh]);
 
   useEffect(() => {
     const host = containerRef.current;

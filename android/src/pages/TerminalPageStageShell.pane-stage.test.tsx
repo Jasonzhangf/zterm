@@ -78,7 +78,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="pane-main"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -111,7 +110,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -145,7 +143,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -181,7 +178,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -203,7 +199,7 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(ids).toContain('p2');
   });
 
-  it('shrinks stage bottom when IME is visible', async () => {
+  it('keeps stage bottom tied to chrome only when IME is visible', async () => {
     const { TerminalStageShell } = await import('./TerminalPageStageShell');
     const { getByTestId } = render(
       <TerminalStageShell
@@ -213,7 +209,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="pane-main"
         terminalChromeBottomPx={30}
-        terminalImeLiftPx={280}
         terminalKeyboardRequested
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -232,7 +227,8 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
 
     const shell = getByTestId('terminal-stage-shell');
     const style = shell.getAttribute('style') || '';
-    expect(style).toContain('bottom: 310px;');
+    expect(style).toContain('bottom: 30px;');
+    expect(style).not.toContain('bottom: 310px;');
     expect(style).not.toContain('transform: translateY');
   });
 
@@ -254,7 +250,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -333,7 +328,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -407,7 +401,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -475,7 +468,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}
@@ -543,7 +535,6 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
         splitVisible={false}
         activePaneId="p1"
         terminalChromeBottomPx={0}
-        terminalImeLiftPx={0}
         terminalKeyboardRequested={false}
         isAndroid
         handleTerminalViewportChange={vi.fn()}

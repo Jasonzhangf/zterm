@@ -750,6 +750,7 @@ export function applyIncomingBufferSyncRuntime(options: {
       incomingWindowSize: Math.max(0, incomingEndIndex - incomingStartIndex),
       incomingLineCount: Array.isArray(options.payload.lines) ? options.payload.lines.length : 0,
     });
+    options.scheduleSessionRenderCommit(options.sessionId);
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-revision-gap-sparse-payload',
       purpose: 'tail-refresh',

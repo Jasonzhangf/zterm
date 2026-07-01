@@ -26,8 +26,6 @@ const TerminalStageShell = ReactMemo(
     splitVisible,
     activePaneId,
     terminalChromeBottomPx,
-    terminalImeLiftPx,
-    terminalLayoutRefreshToken,
     inputResetEpochBySession,
     followResetEpoch,
     terminalKeyboardRequested,
@@ -62,8 +60,6 @@ const TerminalStageShell = ReactMemo(
     splitVisible: boolean;
     activePaneId: string;
     terminalChromeBottomPx: number;
-    terminalImeLiftPx: number;
-    terminalLayoutRefreshToken?: string;
     inputResetEpochBySession?: Record<string, number>;
     followResetEpoch?: number;
     terminalKeyboardRequested: boolean;
@@ -147,7 +143,6 @@ const TerminalStageShell = ReactMemo(
             live
             inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
             followResetEpoch={sessionIsActive ? followResetEpoch : 0}
-            layoutRefreshToken={terminalLayoutRefreshToken}
             allowDomFocus={
               isAndroid ? false : sessionIsActive && terminalKeyboardRequested
             }
@@ -207,7 +202,6 @@ const TerminalStageShell = ReactMemo(
         onTerminalInput,
         onTerminalWidthModeChange,
         sessionBufferStore,
-        terminalLayoutRefreshToken,
         terminalFontSize,
         terminalKeyboardRequested,
         terminalThemeId,
@@ -449,7 +443,7 @@ const TerminalStageShell = ReactMemo(
           top: 0,
           left: 0,
           right: 0,
-          bottom: `${terminalChromeBottomPx + terminalImeLiftPx}px`,
+          bottom: `${terminalChromeBottomPx}px`,
           display: "flex",
         }}
       >
@@ -557,8 +551,6 @@ const TerminalStageShell = ReactMemo(
     prev.splitVisible === next.splitVisible &&
     prev.activePaneId === next.activePaneId &&
     prev.terminalChromeBottomPx === next.terminalChromeBottomPx &&
-    prev.terminalImeLiftPx === next.terminalImeLiftPx &&
-    prev.terminalLayoutRefreshToken === next.terminalLayoutRefreshToken &&
     resolveRenderedSessionsInputEpochKey(
       prev.inputResetEpochBySession,
       prev.renderedPaneSessions,

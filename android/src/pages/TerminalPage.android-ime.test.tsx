@@ -164,7 +164,6 @@ vi.mock("../components/TerminalView", () => ({
     onResize,
     onWidthModeChange,
     widthMode,
-    layoutRefreshToken,
     copyModeActive,
     copyStartRowIndex,
     copyEndRowIndex,
@@ -183,7 +182,6 @@ vi.mock("../components/TerminalView", () => ({
     onResize?: (...args: any[]) => void;
     onWidthModeChange?: (...args: any[]) => void;
     widthMode?: string;
-    layoutRefreshToken?: string;
     copyModeActive?: boolean;
     copyStartRowIndex?: number | null;
     copyEndRowIndex?: number | null;
@@ -195,7 +193,6 @@ vi.mock("../components/TerminalView", () => ({
       data-has-onresize={onResize ? "true" : "false"}
       data-has-onwidthmodechange={onWidthModeChange ? "true" : "false"}
       data-width-mode={widthMode || "adaptive-phone"}
-      data-layout-refresh-token={layoutRefreshToken || ""}
       data-copy-mode-active={copyModeActive ? "true" : "false"}
       data-copy-start={copyStartRowIndex ?? ""}
       data-copy-end={copyEndRowIndex ?? ""}
@@ -751,55 +748,6 @@ describe("TerminalPage Android IME bridge", () => {
 
   it("does not pass upstream terminal resize on Android, even when keyboard visibility changes", async () => {
     const session = makeSession("s1");
-
-    render(
-      <TerminalPage
-        sessions={[session]}
-        activeSession={session}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
-    });
-
-    const terminalView = screen.getByTestId("terminal-view-s1");
-    expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
-    expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
-      "false",
-    );
-
-    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
-
-    await waitFor(() => {
-      expect(
-        screen
-          .getByTestId("terminal-view-s1")
-          .getAttribute("data-has-onresize"),
-      ).toBe("false");
-      expect(
-        screen
-          .getByTestId("terminal-view-s1")
-          .getAttribute("data-has-onwidthmodechange"),
-      ).toBe("false");
-    });
-  });
-
-  it("sends a local renderer layout refresh token when Android IME changes shell geometry", async () => {
-    const session = makeSession("s1");
     const onResize = vi.fn();
 
     render(
@@ -826,17 +774,28 @@ describe("TerminalPage Android IME bridge", () => {
       expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
     });
 
-    const beforeToken = screen
-      .getByTestId("terminal-view-s1")
-      .getAttribute("data-layout-refresh-token");
+    const terminalView = screen.getByTestId("terminal-view-s1");
+    const stage = screen.getByTestId("terminal-stage-shell");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 30px;");
+    expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
+    expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
+      "false",
+    );
+
     keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
 
     await waitFor(() => {
-      const afterToken = screen
-        .getByTestId("terminal-view-s1")
-        .getAttribute("data-layout-refresh-token");
-      expect(afterToken).not.toBe(beforeToken);
-      expect(afterToken).toContain("320");
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 30px;");
+      expect(
+        screen
+          .getByTestId("terminal-view-s1")
+          .getAttribute("data-has-onresize"),
+      ).toBe("false");
+      expect(
+        screen
+          .getByTestId("terminal-view-s1")
+          .getAttribute("data-has-onwidthmodechange"),
+      ).toBe("false");
     });
     expect(onResize).not.toHaveBeenCalled();
   });
@@ -968,7 +927,7 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("keeps terminal stage shell lifted while quick bar editor owns focus and Android keyboard is visible", async () => {
+  it("keeps terminal content geometry stable while quick bar editor owns focus and Android keyboard is visible", async () => {
     const session = makeSession("s1");
 
     render(
@@ -1009,9 +968,10 @@ describe("TerminalPage Android IME bridge", () => {
     });
 
     await waitFor(() => {
-      const lifted = stage.getAttribute("style") || "";
-      expect(lifted).toContain("bottom: 310px;");
-      expect(lifted).not.toContain("transform: translateY");
+      const stable = stage.getAttribute("style") || "";
+      expect(stable).toContain("bottom: 30px;");
+      expect(stable).not.toContain("bottom: 310px;");
+      expect(stable).not.toContain("transform: translateY");
     });
   });
 
@@ -1421,7 +1381,7 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("shrinks the terminal stage from the bottom instead of translating the whole page when keyboard is visible", async () => {
+  it("keeps terminal stage content geometry stable while only the quick bar moves when keyboard is visible", async () => {
     const session = makeSession("s1");
 
     render(
@@ -1463,7 +1423,8 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute("style") || "";
-      expect(style).toContain("bottom: 350px;");
+      expect(style).toContain("bottom: 30px;");
+      expect(style).not.toContain("bottom: 350px;");
       expect(style).not.toContain("transform: translateY");
       expect(quickBarShell.getAttribute("style") || "").toContain(
         "bottom: 320px;",

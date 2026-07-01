@@ -1247,3 +1247,10 @@ Need runtime debug to confirm:
 - 根因方向：之前主要依赖 TerminalView host 的 `ResizeObserver` 发现外层高度变化；Android WebView/IME 场景下该回调可能漏或晚到，renderer 停在旧 viewport/scrollTop，表现为空白。
 - 修复：`TerminalPage` 汇总 `shellHeight / terminalChromeBottomPx / terminalImeLiftPx / keyboardInset / terminalKeyboardRequested` 为 `terminalLayoutRefreshToken`，经 `TerminalStageShell` 传给 `TerminalView`；TerminalView 收到 token 后只做本地 `runViewportRefresh()` 和 follow 对齐，不触发 Android upstream `onResize`。
 - 回归：`TerminalPage.android-ime.test.tsx` 锁住 IME show 后 token 改变且 `onResize` 不触发；`TerminalView.dynamic-refresh` / `bottom-stale` 同跑防止 renderer body 回归。
+
+### Correction
+
+- Jason 进一步确认：IME 理论上只应影响容器，不应影响内容；因此上面的 `terminalLayoutRefreshToken -> TerminalView viewport refresh` 方向仍然过界。
+- 修正方向：移除 `layoutRefreshToken` 内容链；IME 活跃时 `shellHeight` 继续冻结 stable layout height，`TerminalStageShell` 的 content bottom 只保留 quickbar chrome，不叠加 `terminalImeLiftPx`。QuickBar 仍可按 keyboard inset/lift 移动，但 terminal 内容 viewport 不因 IME 变矮。
+- 大面积刷新仍空白的补充修复：revision-gap sparse payload 仍然拒绝合并，并继续请求 authoritative tail；但拒绝时立即 `scheduleSessionRenderCommit(sessionId)`，把当前稳定本地 buffer truth 重新推给 renderer，避免等待 tail 期间 UI 没有 render 信号而停在空白态。
+- 回归更新：`TerminalPage.android-ime.test.tsx` 和 `TerminalPageStageShell.pane-stage.test.tsx` 反向锁住 IME 不再压缩 terminal content bottom；`session-context-buffer-runtime.test.ts` 锁住 sparse-reject 不写错误 payload 但会重推稳定 render。
