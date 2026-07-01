@@ -1,3 +1,9 @@
+# 2026-07-01 Android bottom chrome / drawer close audit
+
+- 现场“不同手机/IME 抬起后底部输入框看不见”不是 buffer/renderer 真源问题；本轮定位到 UI shell chrome 计算漏算 `TerminalQuickBarShell` 自身的 `TERMINAL_QUICK_BAR_RENDER_LIFT_PX=30`。`TerminalPage` 以前只把 `quickBarHeight` 交给 `TerminalStageShell.bottom`，quickbar shell 又额外 bottom 30px，导致终端底部可能被 quickbar shell 覆盖。
+- 修复方向：`terminalChromeBottomPx = quickBarHeight + layoutProfile.quickBar.touchSafeOffsetPx + TERMINAL_QUICK_BAR_RENDER_LIFT_PX`；IME overlay 场景下 `terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx`，QuickBar shell 同样只消费一次 `terminalImeLiftPx` 上台；TerminalView / upstream resize 仍保持关闭，避免 keyboard 高度进入 daemon/renderer 内容真相。
+- 抽屉 session row close 现场不生效的高风险点：原实现是外层 row `<button>` 内嵌关闭 `<span>`，属于交互元素嵌套/命中语义不清。修复方向是 row container 改成非交互 `div`，选择区和关闭区分别是独立 button；关闭按钮只调用 `onCloseSession`，不触发 select。
+
 # 2026-07-01 large refresh blank follow audit
 
 - 现场仍复现“大面积刷新后空白，触摸/滚动后恢复”。IME 越层修复后仍存在，说明根因不应继续从 keyboard/layout token 补。
@@ -1257,6 +1263,10 @@ Need runtime debug to confirm:
 ### Correction
 
 - Jason 进一步确认：IME 理论上只应影响容器，不应影响内容；因此上面的 `terminalLayoutRefreshToken -> TerminalView viewport refresh` 方向仍然过界。
-- 修正方向：移除 `layoutRefreshToken` 内容链；IME 活跃时 `shellHeight` 继续冻结 stable layout height，`TerminalStageShell` 的 content bottom 只保留 quickbar chrome，不叠加 `terminalImeLiftPx`。QuickBar 仍可按 keyboard inset/lift 移动，但 terminal 内容 viewport 不因 IME 变矮。
+- 修正方向：移除 `layoutRefreshToken` 内容链；IME 活跃时 `shellHeight` 继续冻结 stable layout height，`TerminalStageShell` 作为 UI shell 容器可以叠加 `terminalImeLiftPx` 做底部裁切，QuickBar 同步上台；但 TerminalView 不接收 IME layout token，不触发 Android upstream resize，也不把 keyboard 高度写回 daemon/tmux。
 - 大面积刷新仍空白的补充修复：revision-gap sparse payload 仍然拒绝合并，并继续请求 authoritative tail；但拒绝时立即 `scheduleSessionRenderCommit(sessionId)`，把当前稳定本地 buffer truth 重新推给 renderer，避免等待 tail 期间 UI 没有 render 信号而停在空白态。
 - 回归更新：`TerminalPage.android-ime.test.tsx` 和 `TerminalPageStageShell.pane-stage.test.tsx` 反向锁住 IME 不再压缩 terminal content bottom；`session-context-buffer-runtime.test.ts` 锁住 sparse-reject 不写错误 payload 但会重推稳定 render。
+
+# 2026-07-01 IME container lift regression
+- 现场截图显示键盘弹起后 quickbar 上台但 terminal stage 容器仍按未抬起区域占位，底部被 quickbar/IME 盖住。已锁定唯一 owner：`TerminalPage` 只在 UI shell 层计算 `terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx`；`TerminalStageShell` 只消费 bottom 裁切；`TerminalView` 不拿 IME token、不触发 `onResize`。
+- 回归验证：`TerminalPage.android-ime.test.tsx` 锁住 stage 跟随 IME 上台且 `onResize` 不触发；`TerminalPageStageShell.pane-stage.test.tsx`、`TerminalView.dynamic-refresh.test.tsx`、`TerminalView.bottom-stale.test.tsx` 同跑，防止 shell 修复越界到 renderer 内容链。

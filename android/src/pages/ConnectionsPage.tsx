@@ -315,6 +315,35 @@ export function ConnectionsPage({
     }
   };
 
+  const openServerGroupSessions = (group: ServerGroupView, sessionNames: string[]) => {
+    const liveNames = new Set(group.liveSessions.map((session) => session.sessionName));
+    const nonLiveSessionNames = sessionNames.filter((sessionName) => !liveNames.has(sessionName));
+    const firstLiveSessionId =
+      group.sessions.find((entry) => sessionNames.includes(entry.sessionName) && entry.liveSession)?.liveSession?.id
+      || group.liveSessions[0]?.id
+      || null;
+
+    if (nonLiveSessionNames.length > 0) {
+      const target = resolveGroupBridgeTarget(group);
+      onOpenServerGroups([
+        {
+          name: `${getGroupTitleName(group)} · ${getSessionCountLabel(nonLiveSessionNames.length)}`,
+          bridgeHost: target.bridgeHost,
+          bridgePort: target.bridgePort,
+          daemonHostId: group.daemonHostId || target.daemonHostId,
+          authToken: target.authToken,
+          relayEndpointCandidates: target.relayEndpointCandidates,
+          sessionNames: nonLiveSessionNames,
+        },
+      ]);
+      return;
+    }
+
+    if (firstLiveSessionId) {
+      onResumeSession(firstLiveSessionId);
+    }
+  };
+
   const resolveGroupBridgeTarget = (group: ServerGroupView): ConnectionsGroupTarget => {
     if (group.bridgeHost && group.bridgePort) {
       return { bridgeHost: group.bridgeHost, bridgePort: group.bridgePort, authToken: group.authToken, relayEndpointCandidates: group.relayEndpointCandidates };
@@ -495,7 +524,7 @@ export function ConnectionsPage({
                     }
                     icon="◫"
                     tone={tone}
-                    actionLabel="Sessions"
+                    actionLabel="Enter"
                     secondaryLabel={expanded ? '−' : '+'}
                     secondaryAriaLabel={`${expanded ? 'Collapse' : 'Expand'} ${getGroupTitleName(group)} sessions`}
                     onPrimaryAction={() => {
@@ -506,10 +535,10 @@ export function ConnectionsPage({
                         toggleGroupExpanded(group.id);
                         return;
                       }
-                      openGroupSessionPicker(group, actionSessionNames);
+                      openServerGroupSessions(group, actionSessionNames);
                     }}
                     onActionButton={() => {
-                      openGroupSessionPicker(group, actionSessionNames);
+                      openServerGroupSessions(group, actionSessionNames);
                     }}
                     onSecondaryAction={() => {
                       if (!expanded) {
@@ -709,7 +738,7 @@ export function ConnectionsPage({
                           None
                         </button>
                         <button
-                          onClick={() => onEditServerGroup(group, actionSessionNames)}
+                          onClick={() => openGroupSessionPicker(group, actionSessionNames)}
                           style={{
                             border: 'none',
                             background: '#eef5ff',

@@ -453,9 +453,8 @@ function TerminalSessionDrawerComponent({
             const unavailable = Boolean(session.remoteMissing);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
-            <button
+            <div
               key={session.id}
-              type="button"
               data-testid={`terminal-session-drawer-row-${session.id}`}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -475,20 +474,13 @@ function TerminalSessionDrawerComponent({
               onTouchMove={clearLongPressTimer}
               onTouchEnd={clearLongPressTimer}
               onTouchCancel={clearLongPressTimer}
-              onClick={(event) => {
-                if (suppressNextClickRef.current) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  suppressNextClickRef.current = false;
-                  return;
-                }
+              onClick={() => {
                 if (!unavailable) onSelectSession(session.id);
               }}
               style={{
                 minHeight: '72px',
                 width: '100%',
-                textAlign: 'left',
-                padding: '10px 12px',
+                padding: 0,
                 borderRadius: '12px',
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
@@ -506,8 +498,32 @@ function TerminalSessionDrawerComponent({
                 alignItems: 'center',
                 color: unavailable ? 'rgba(220, 232, 255, 0.35)' : '#dce8ff',
                 opacity: unavailable ? 0.4 : 1,
+                overflow: 'hidden',
               }}
             >
+                <button
+                  type="button"
+                  data-testid={`terminal-session-drawer-select-${session.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (suppressNextClickRef.current) {
+                      event.preventDefault();
+                      suppressNextClickRef.current = false;
+                      return;
+                    }
+                    if (!unavailable) onSelectSession(session.id);
+                  }}
+                  style={{
+                  height: '100%',
+                  minHeight: '72px',
+                  minWidth: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'inherit',
+                  textAlign: 'left',
+                  padding: '10px 0 10px 12px',
+                }}
+              >
               <div style={{ minWidth: 0 }}>
                 <div
                   style={{
@@ -555,6 +571,7 @@ function TerminalSessionDrawerComponent({
                   <span>{unavailable ? 'unavailable' : session.status}</span>
                 </div>
               </div>
+              </button>
 
               <div
                 style={{
@@ -600,9 +617,12 @@ function TerminalSessionDrawerComponent({
                     {slotTone.label}
                   </span>
                 ) : null}
-                <span
+                <button
+                  type="button"
                   aria-label={`关闭 ${session.title}`}
+                  data-testid={`terminal-session-drawer-close-${session.id}`}
                   onClick={(event) => {
+                    event.preventDefault();
                     event.stopPropagation();
                     onCloseSession(session.id);
                   }}
@@ -613,6 +633,7 @@ function TerminalSessionDrawerComponent({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    border: 'none',
                     background: 'rgba(255,255,255,0.06)',
                     color: 'rgba(220, 232, 255, 0.72)',
                     fontSize: '14px',
@@ -621,9 +642,9 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   ×
-                </span>
+                </button>
               </div>
-            </button>
+            </div>
             );
           })}
           {visibleSessions.length === 0 && (

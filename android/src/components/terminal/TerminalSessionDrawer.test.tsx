@@ -64,6 +64,30 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
   });
 
+  it('routes row close button to close only without selecting the session', () => {
+    const onSelectSession = vi.fn();
+    const onCloseSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={onCloseSession}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    expect(onCloseSession).toHaveBeenCalledWith('s1');
+    expect(onSelectSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'));
+    expect(onSelectSession).toHaveBeenCalledWith('s2');
+    expect(onCloseSession).toHaveBeenCalledTimes(1);
+  });
+
   it('opens the new session form before creating from the drawer add button touch activation', () => {
     const onOpenQuickTabPicker = vi.fn();
 

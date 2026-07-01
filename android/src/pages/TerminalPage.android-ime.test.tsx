@@ -121,6 +121,7 @@ TerminalQuickBar: ({
   onEditorDomFocusChange,
   onToggleKeyboard,
   onToggleCopyMode,
+  onMeasuredHeightChange,
   keyboardVisible,
   keyboardInsetPx,
   sessionDraft,
@@ -129,6 +130,7 @@ TerminalQuickBar: ({
   onEditorDomFocusChange?: (active: boolean) => void;
   onToggleKeyboard?: () => void;
   onToggleCopyMode?: () => void;
+  onMeasuredHeightChange?: (height: number) => void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
   sessionDraft?: string;
@@ -146,6 +148,9 @@ TerminalQuickBar: ({
       </button>
       <button onClick={() => onEditorDomFocusChange?.(false)}>
         blur-quick-editor
+      </button>
+      <button onClick={() => onMeasuredHeightChange?.(184)}>
+        measure-quickbar
       </button>
       <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
       <button onClick={() => onToggleCopyMode?.()}>toggle-copy-mode</button>
@@ -746,7 +751,7 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("does not pass upstream terminal resize on Android, even when keyboard visibility changes", async () => {
+  it("lifts the Android terminal container without passing upstream terminal resize", async () => {
     const session = makeSession("s1");
     const onResize = vi.fn();
 
@@ -776,7 +781,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     const terminalView = screen.getByTestId("terminal-view-s1");
     const stage = screen.getByTestId("terminal-stage-shell");
-    expect(stage.getAttribute("style") || "").toContain("bottom: 30px;");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 60px;");
     expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
     expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
       "false",
@@ -785,7 +790,7 @@ describe("TerminalPage Android IME bridge", () => {
     keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 30px;");
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 380px;");
       expect(
         screen
           .getByTestId("terminal-view-s1")
@@ -798,6 +803,100 @@ describe("TerminalPage Android IME bridge", () => {
       ).toBe("false");
     });
     expect(onResize).not.toHaveBeenCalled();
+  });
+
+  it("lifts the terminal stage container above the IME together with the quickbar", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        width: 393,
+        height: 600,
+        offsetTop: 0,
+        offsetLeft: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    const session = makeSession("s1");
+
+    try {
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onLoadSavedTabList={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(imeListeners.has("keyboardState")).toBe(true);
+      });
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("300");
+      });
+
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("514px");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
   });
 
   it("keeps Android adaptive-phone upstream geometry on the width-mode channel instead of the resize channel", async () => {
@@ -927,7 +1026,7 @@ describe("TerminalPage Android IME bridge", () => {
     });
   });
 
-  it("keeps terminal content geometry stable while quick bar editor owns focus and Android keyboard is visible", async () => {
+  it("lifts the shell while quick bar editor owns focus without translating terminal content", async () => {
     const session = makeSession("s1");
 
     render(
@@ -951,7 +1050,7 @@ describe("TerminalPage Android IME bridge", () => {
     );
 
     const stage = screen.getByTestId("terminal-stage-shell");
-    expect(stage.getAttribute("style") || "").toContain("bottom: 30px;");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 60px;");
 
     fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
 
@@ -969,8 +1068,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const stable = stage.getAttribute("style") || "";
-      expect(stable).toContain("bottom: 30px;");
-      expect(stable).not.toContain("bottom: 310px;");
+      expect(stable).toContain("bottom: 340px;");
       expect(stable).not.toContain("transform: translateY");
     });
   });
@@ -1407,7 +1505,7 @@ describe("TerminalPage Android IME bridge", () => {
     const terminalStage = screen.getByTestId("terminal-stage-shell");
     const quickBarShell = screen.getByTestId("terminal-quickbar-shell");
     expect(terminalStage.getAttribute("style") || "").toContain(
-      "bottom: 30px;",
+      "bottom: 60px;",
     );
     expect(terminalStage.getAttribute("style") || "").not.toContain(
       "transform: translateY",
@@ -1423,8 +1521,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute("style") || "";
-      expect(style).toContain("bottom: 30px;");
-      expect(style).not.toContain("bottom: 350px;");
+      expect(style).toContain("bottom: 380px;");
       expect(style).not.toContain("transform: translateY");
       expect(quickBarShell.getAttribute("style") || "").toContain(
         "bottom: 320px;",

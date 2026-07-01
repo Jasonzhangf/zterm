@@ -1281,12 +1281,16 @@ function TerminalPageComponent({
     return [...hosts.values()];
   }, [drawerServerIdentityAliases, relayDevices, sessions]);
   const drawerRemoteSessions = useMemo(() => {
-    const localReuseKeys = new Set(sessions.map((session) => buildSessionSemanticReuseKey({
-      daemonHostId: session.daemonHostId,
-      bridgeHost: session.bridgeHost,
-      bridgePort: session.bridgePort,
-      sessionName: session.sessionName,
-    })));
+    const liveSessionByReuseKey = new Map(sessions.map((session) => [
+      buildSessionSemanticReuseKey({
+        daemonHostId: session.daemonHostId,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+        sessionName: session.sessionName,
+      }),
+      session,
+    ]));
+    const catalogLiveSessionIds = new Set<string>();
     const targets = new Map<string, {
       target: {
         name: string;
@@ -1313,26 +1317,28 @@ function TerminalPageComponent({
           bridgePort: group.bridgePort,
           sessionName,
         });
-        if (localReuseKeys.has(reuseKey)) {
-          continue;
+        const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
+        const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
+        if (liveSession) {
+          catalogLiveSessionIds.add(liveSession.id);
+        } else {
+          targets.set(id, {
+            target: {
+              name: group.name,
+              bridgeHost: group.bridgeHost,
+              bridgePort: group.bridgePort,
+              daemonHostId: group.daemonHostId,
+              authToken: group.authToken,
+              sessionNames: group.sessionNames,
+            },
+            sessionName,
+          });
         }
-        const id = `remote:${ownerKey}::session:${sessionName}`;
-        targets.set(id, {
-          target: {
-            name: group.name,
-            bridgeHost: group.bridgeHost,
-            bridgePort: group.bridgePort,
-            daemonHostId: group.daemonHostId,
-            authToken: group.authToken,
-            sessionNames: group.sessionNames,
-          },
-          sessionName,
-        });
         items.push({
           id,
-          title: sessionName,
+          title: liveSession?.customName || liveSession?.title || sessionName,
           subtitle: `${serverIdentity.label} · ${sessionName}`,
-          status: 'idle',
+          status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
           paneLabel: undefined,
           sessionGroupSlot: null,
           active: false,
@@ -1341,38 +1347,34 @@ function TerminalPageComponent({
         });
       }
     }
-    return { items, targets };
+    return { items, targets, catalogLiveSessionIds };
   }, [drawerServerIdentityAliases, sessionGroups, sessions]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
     const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, drawerServerIdentityAliases);
 
-    // 已打开的 session（按 pane 顺序）
-    const opened: TerminalSessionDrawerItem[] = workspacePanes.flatMap((pane, paneIndex) =>
-      pane.tabs
-        .map((tab) => sessions.find((candidate) => candidate.id === tab.sessionId) || null)
-        .filter((session): session is Session => Boolean(session))
-        .map((session) => {
-          const serverIdentity = resolveDrawerServerIdentity(session);
-          return {
-            id: session.id,
-            title: session.customName || session.title || session.sessionName,
-            subtitle: `${serverIdentity.label} · ${session.title || session.sessionName}`,
-            status: normalizeDrawerStatus(session.state),
-            remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
-            paneLabel: `P${paneIndex + 1}`,
-            sessionGroupSlot: resolveSessionGroupSlot(session.id),
-            active: activeSessionIds.has(session.id),
-            hostKey: serverIdentity.key,
-            hostLabel: serverIdentity.label,
-          };
-        }),
-    );
+    const catalogItems = drawerRemoteSessions.items.map((item) => {
+      const liveSession = sessions.find((session) => session.id === item.id) || null;
+      if (!liveSession) {
+        return item;
+      }
+      const serverIdentity = resolveDrawerServerIdentity(liveSession);
+      return {
+        ...item,
+        title: liveSession.customName || liveSession.title || liveSession.sessionName,
+        subtitle: `${serverIdentity.label} · ${liveSession.sessionName}`,
+        status: normalizeDrawerStatus(liveSession.state),
+        remoteMissing: resolveSessionRemoteMissing(liveSession, sessionGroups),
+        paneLabel: undefined,
+        sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
+        active: activeSessionIds.has(liveSession.id),
+        hostKey: serverIdentity.key,
+        hostLabel: serverIdentity.label,
+      };
+    });
 
-    // 未打开的 session（按名字排序），排除已打开的
-    const openedIds = new Set(opened.map((s) => s.id));
-    const unopened: TerminalSessionDrawerItem[] = sessions
-      .filter((s) => !openedIds.has(s.id))
+    const runtimeOnly: TerminalSessionDrawerItem[] = sessions
+      .filter((s) => !drawerRemoteSessions.catalogLiveSessionIds.has(s.id))
       .sort((a, b) => (a.customName || a.sessionName).localeCompare(b.customName || b.sessionName))
       .map((session) => {
         const serverIdentity = resolveDrawerServerIdentity(session);
@@ -1384,14 +1386,14 @@ function TerminalPageComponent({
           remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
           paneLabel: undefined,
           sessionGroupSlot: resolveSessionGroupSlot(session.id),
-          active: false,
+          active: activeSessionIds.has(session.id),
           hostKey: serverIdentity.key,
           hostLabel: serverIdentity.label,
         };
       });
 
-    return [...opened, ...unopened, ...drawerRemoteSessions.items];
-  }, [drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions, workspacePanes]);
+    return [...catalogItems, ...runtimeOnly];
+  }, [drawerRemoteSessions.catalogLiveSessionIds, drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -2250,11 +2252,17 @@ function TerminalPageComponent({
     topInsetPx: headerTopInsetPx,
     landscape,
   }), [headerTopInsetPx, landscape, splitVisible]);
-  const terminalChromeBottomPx = Math.max(0, quickBarHeight + layoutProfile.quickBar.touchSafeOffsetPx);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset, shellHeight);
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const terminalChromeBottomPx = Math.max(
+    0,
+    quickBarHeight
+      + layoutProfile.quickBar.touchSafeOffsetPx
+      + TERMINAL_QUICK_BAR_RENDER_LIFT_PX,
+  );
+  const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   // Use a ref to hold the live snapshot lambda so the registration useEffect
   // never needs to re-run. The producer reads ref.current, which is kept fresh
   // every render. This decouples the snapshot source from all reactive deps,
@@ -2278,6 +2286,7 @@ function TerminalPageComponent({
     terminalImeActive,
     terminalImeLiftPx,
     quickBarShellKeyboardLiftPx,
+    terminalStageBottomPx,
     networkOnline,
     connectionIssueVisible,
     isAndroid,
@@ -2726,7 +2735,7 @@ function TerminalPageComponent({
       visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
-          terminalChromeBottomPx={terminalChromeBottomPx}
+          terminalChromeBottomPx={terminalStageBottomPx}
           inputResetEpochBySession={inputResetEpochBySession}
           followResetEpoch={followResetEpoch}
           terminalKeyboardRequested={terminalKeyboardRequested}
@@ -2779,7 +2788,7 @@ function TerminalPageComponent({
           viewportRows={undefined}
           effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
           quickBarHeight={quickBarHeight}
-          terminalChromeBottomPx={terminalChromeBottomPx}
+          terminalChromeBottomPx={terminalStageBottomPx}
           layoutMode={layoutProfile.mode}
           landscape={landscape}
           splitVisible={splitVisible}
