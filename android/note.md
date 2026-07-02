@@ -1,3 +1,10 @@
+# 2026-07-02 feature-gates coverage lock
+
+- 架构映射：本 slice 是 cross-block verification-map prevention，不改业务 runtime；owner 是 `docs/feature-gates.md` 与 `src/lib/feature-registry-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。
+- 发现：`feature-gates.md` 漏了 13 个 registry feature 的验证说明，包括 `terminal.transport_lifecycle`、`daemon.runtime_entry`、`mainline_source.*`、`terminal.session_drawer` 等。
+- 修复：补齐缺失 feature 的验证风险说明，并新增 gate：registry 内每个 `feature_id` 必须出现在 `feature-gates.md`。
+- 证明范围：L0 验证映射覆盖 gate；未改 runtime 业务，不宣称 L1-L5 行为变化。
+
 # 2026-07-02 registry/function-map lockstep gate
 
 - 架构映射：本 slice 是 cross-block documentation/source-map prevention，不改业务 runtime；owner 是 `src/lib/feature-registry-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。

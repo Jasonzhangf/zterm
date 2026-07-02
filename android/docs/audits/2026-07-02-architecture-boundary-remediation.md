@@ -177,7 +177,7 @@ Boundary rule:
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
 3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
-5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, and registry/function-map feature id lockstep.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, and registry/feature-gates verification-map coverage.
 
 ## Repair Log
 
@@ -225,3 +225,12 @@ Boundary rule:
 - Added to `feature-registry-truth.test.ts`: every machine registry `feature_id` must appear in `docs/function-map.md`, and every function-map feature row must point back to a registry `feature_id`.
 - Positive tests: `test:feature-registry` proves all 27 registry features remain reviewable from the human function map.
 - Negative tests: scanner fails if a new feature is added only to the JSON registry, or if a function-map row invents an unregistered feature id.
+
+### 2026-07-02 seventh slice: feature-gates coverage lock
+
+- Block: Cross-block verification-map prevention gate.
+- Decision: Separate into static gate.
+- Added to `feature-registry-truth.test.ts`: every registry `feature_id` must appear in `docs/feature-gates.md`.
+- Filled missing `feature-gates.md` entries for quickbar, remote screenshot, transport lifecycle, connections projection, file transfer, daemon runtime/CLI/support/mainline, and session drawer.
+- Positive tests: `test:feature-registry` proves each registered feature has a human-readable verification risk statement.
+- Negative tests: scanner fails when future registry features are added without updating the verification guide.

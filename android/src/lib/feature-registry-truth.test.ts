@@ -68,6 +68,10 @@ function readFunctionMap() {
   return readFileSync(functionMapPath, 'utf8');
 }
 
+function readFeatureGates() {
+  return readFileSync(featureGatesPath, 'utf8');
+}
+
 function resolveExistingPath(relativePath: string) {
   const androidPath = join(androidRoot, relativePath);
   if (existsSync(androidPath)) return androidPath;
@@ -151,6 +155,15 @@ describe('feature registry truth gate', () => {
       .filter((featureId) => featureId.includes('.'));
     for (const featureId of functionMapFeatureIds) {
       expect(registryFeatureIds.has(featureId), featureId).toBe(true);
+    }
+  });
+
+  it('keeps the feature-gates verification guide covering every registry feature id', () => {
+    const registry = readRegistry();
+    const featureGates = readFeatureGates();
+
+    for (const feature of registry.features) {
+      expect(featureGates, feature.feature_id).toContain(`\`${feature.feature_id}\``);
     }
   });
 
