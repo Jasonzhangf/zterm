@@ -64,6 +64,10 @@ function readRegistry(): FeatureRegistry {
   return JSON.parse(readFileSync(registryPath, 'utf8')) as FeatureRegistry;
 }
 
+function readFunctionMap() {
+  return readFileSync(functionMapPath, 'utf8');
+}
+
 function resolveExistingPath(relativePath: string) {
   const androidPath = join(androidRoot, relativePath);
   if (existsSync(androidPath)) return androidPath;
@@ -130,6 +134,23 @@ describe('feature registry truth gate', () => {
 
     for (const relativePath of requiredCoveragePaths) {
       expect(coveredPaths.has(relativePath)).toBe(true);
+    }
+  });
+
+  it('keeps the human function map in lockstep with the machine registry feature ids', () => {
+    const registry = readRegistry();
+    const functionMap = readFunctionMap();
+    const registryFeatureIds = new Set(registry.features.map((feature) => feature.feature_id));
+
+    for (const featureId of registryFeatureIds) {
+      expect(functionMap, featureId).toContain(`\`${featureId}\``);
+    }
+
+    const functionMapFeatureIds = Array.from(functionMap.matchAll(/\| `([a-z0-9_.]+)` \|/g))
+      .map((match) => match[1])
+      .filter((featureId) => featureId.includes('.'));
+    for (const featureId of functionMapFeatureIds) {
+      expect(registryFeatureIds.has(featureId), featureId).toBe(true);
     }
   });
 

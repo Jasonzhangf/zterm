@@ -1,3 +1,10 @@
+# 2026-07-02 registry/function-map lockstep gate
+
+- 架构映射：本 slice 是 cross-block documentation/source-map prevention，不改业务 runtime；owner 是 `src/lib/feature-registry-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。
+- 修复：新增 registry/function-map 双向 feature id lockstep gate；`docs/feature-registry.json` 的每个 `feature_id` 必须出现在 `docs/function-map.md`，function map 的 feature 行也必须指回 registry 内已注册 id。
+- 验证目标：防止新功能只补机器 registry 或只补人工 function map，导致 owner/gate/review 面漂移成两套真源。
+- 证明范围：L0 架构与文档真源 gate；未改 runtime 业务，不宣称 L1-L5 行为变化。
+
 # 2026-07-02 architecture gate hardening
 
 - 架构映射：本 slice 是 cross-block prevention gate，不改业务 runtime；owner 是 `src/lib/architecture-boundary-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。

@@ -177,7 +177,7 @@ Boundary rule:
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
 3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
-5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, and attach correlation ownership.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, and registry/function-map feature id lockstep.
 
 ## Repair Log
 
@@ -217,3 +217,11 @@ Boundary rule:
 - Compatibility boundary: wire payload fields such as `TerminalAttachPayload.widthMode` remain allowed, but `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, tmux resize ownership, daemon-owned `clientSessionId`, and attach token ownership by `openRequestId` are forbidden.
 - Positive tests: `test:feature-registry` proves the architecture gate itself is part of the standard registry gate.
 - Negative tests: scanner fails if page/UI layers grow direct `createSession/closeSession/switchSession`, drawer host fallback returns, daemon stores client width policy, or attach correlation fields become token owner state.
+
+### 2026-07-02 sixth slice: registry/function-map lockstep gate
+
+- Block: Cross-block documentation and owner-map prevention gate.
+- Decision: Separate into static gate.
+- Added to `feature-registry-truth.test.ts`: every machine registry `feature_id` must appear in `docs/function-map.md`, and every function-map feature row must point back to a registry `feature_id`.
+- Positive tests: `test:feature-registry` proves all 27 registry features remain reviewable from the human function map.
+- Negative tests: scanner fails if a new feature is added only to the JSON registry, or if a function-map row invents an unregistered feature id.
