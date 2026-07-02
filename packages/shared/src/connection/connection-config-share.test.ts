@@ -42,7 +42,19 @@ describe('connection config share link', () => {
         kind: 'zterm.connection-config',
         schemaVersion: 1,
         exportedAt: 1000,
+        hosts: [
+          expect.objectContaining({
+            name: 'Mac Studio',
+            bridgeHost: '100.127.23.27',
+          }),
+        ],
       }),
+      hosts: [
+        expect.objectContaining({
+          name: 'Mac Studio',
+          bridgeHost: '100.127.23.27',
+        }),
+      ],
       host: expect.objectContaining({
         name: 'Mac Studio',
         bridgeHost: '100.127.23.27',
@@ -109,5 +121,48 @@ describe('connection config share link', () => {
       ok: false,
       error: 'connection share payload host is invalid',
     });
+  });
+
+  it('builds and parses all local connection configs in one share link', () => {
+    const link = buildConnectionConfigShareLink({
+      hosts: [
+        host,
+        {
+          ...host,
+          name: 'Linux Box',
+          bridgeHost: '100.64.0.20',
+          bridgePort: 3333,
+          sessionName: 'work',
+          authToken: 'token-b',
+        },
+      ],
+      exportedAt: 2000,
+    });
+
+    const parsed = parseConnectionConfigShareLink(link);
+
+    expect(parsed).toEqual(expect.objectContaining({
+      ok: true,
+      hosts: [
+        expect.objectContaining({
+          name: 'Mac Studio',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 40807,
+          password: undefined,
+          privateKey: undefined,
+          lastConnected: undefined,
+        }),
+        expect.objectContaining({
+          name: 'Linux Box',
+          bridgeHost: '100.64.0.20',
+          bridgePort: 3333,
+          sessionName: 'work',
+          authToken: 'token-b',
+        }),
+      ],
+    }));
+    if (parsed.ok) {
+      expect(parsed.payload.hosts).toHaveLength(2);
+    }
   });
 });

@@ -24,6 +24,10 @@ import { fetchTmuxSessions } from '../lib/tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
 
+type ShareScope = 'all' | 'single';
+
+const EMPTY_SHAREABLE_HOSTS: Host[] = [];
+
 interface ConnectionPropertiesPageProps {
   host?: Host;
   draft?: Partial<Omit<Host, 'id' | 'createdAt'>>;
@@ -64,7 +68,7 @@ function buildInitialState(
 export function ConnectionPropertiesPage({
   host,
   draft,
-  shareableHosts = [],
+  shareableHosts = EMPTY_SHAREABLE_HOSTS,
   bridgeSettings,
   onImportConnectionLink,
   onSave,
@@ -77,6 +81,7 @@ export function ConnectionPropertiesPage({
   const [sessionDiscoveryError, setSessionDiscoveryError] = useState('');
   const [connectionImportInput, setConnectionImportInput] = useState('');
   const [connectionImportStatus, setConnectionImportStatus] = useState('');
+  const [shareScope, setShareScope] = useState<ShareScope>('all');
   const [selectedShareHostId, setSelectedShareHostId] = useState('');
   const [shareQrSvg, setShareQrSvg] = useState('');
   const [shareState, setShareState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -106,16 +111,33 @@ export function ConnectionPropertiesPage({
     () => shareableHosts.find((candidate) => candidate.id === selectedShareHostId),
     [selectedShareHostId, shareableHosts],
   );
-  const shareSourceHost = host || selectedShareHost;
+  const shareSourceHosts = useMemo(() => {
+    if (host) {
+      return [host];
+    }
+    if (shareScope === 'single' && selectedShareHost) {
+      return [selectedShareHost];
+    }
+    return shareableHosts;
+  }, [host, selectedShareHost, shareScope, shareableHosts]);
+  const shareExportedAt = useMemo(
+    () => Math.max(...shareSourceHosts.map((candidate) => candidate.lastConnected || candidate.createdAt || 0), 0),
+    [shareSourceHosts],
+  );
   const shareLink = useMemo(
-    () => shareSourceHost
+    () => shareSourceHosts.length > 0
       ? buildConnectionConfigShareLink({
-          host: shareSourceHost,
-          exportedAt: shareSourceHost.lastConnected || shareSourceHost.createdAt,
+          hosts: shareSourceHosts,
+          exportedAt: shareExportedAt,
         })
       : '',
-    [shareSourceHost],
+    [shareExportedAt, shareSourceHosts],
   );
+  const shareTitle = host
+    ? 'Share Current Connection'
+    : shareScope === 'single' && selectedShareHost
+      ? `Share Single Connection: ${selectedShareHost.name}`
+      : `Share All Connections: ${shareableHosts.length}`;
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
   const rememberedServerViews = useMemo(() => buildBridgeServerPresetViews(bridgeSettings.servers), [bridgeSettings.servers]);
   const selectedDaemonHostId = (form.daemonHostId || form.relayHostId).trim();
@@ -126,13 +148,14 @@ export function ConnectionPropertiesPage({
   const daemonNeedsManualBinding = daemonFirst && Boolean(selectedDaemonHostId) && !daemonBoundServer;
 
   useEffect(() => {
-    if (host || !selectedShareHostId) {
+    if (host || shareScope !== 'single' || !selectedShareHostId) {
       return;
     }
     if (!shareableHosts.some((candidate) => candidate.id === selectedShareHostId)) {
       setSelectedShareHostId('');
+      setShareScope('all');
     }
-  }, [host, selectedShareHostId, shareableHosts]);
+  }, [host, selectedShareHostId, shareScope, shareableHosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -515,9 +538,9 @@ export function ConnectionPropertiesPage({
 
               <div style={{ display: 'grid', gap: '10px' }}>
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 900 }}>Share Existing Connection</div>
+                  <div style={{ fontSize: '15px', fontWeight: 900 }}>Share Existing Connections</div>
                   <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
-                    Select a saved connection to show its QR code and canonical link.
+                    By default this shares all saved connections. Select one only when you need a narrowed single-connection link.
                   </div>
                 </div>
                 {shareableHosts.length > 0 ? (
@@ -528,7 +551,10 @@ export function ConnectionPropertiesPage({
                         <button
                           key={candidate.id}
                           type="button"
-                          onClick={() => setSelectedShareHostId(candidate.id)}
+                          onClick={() => {
+                            setShareScope('single');
+                            setSelectedShareHostId(candidate.id);
+                          }}
                           style={{
                             border: 'none',
                             borderRadius: '16px',
@@ -774,9 +800,14 @@ export function ConnectionPropertiesPage({
         {shareLink && (
           <ConnectionSection
             title="Share Connection"
-            description="生成同一份连接分享链接；二维码只是这条链接的投影，不包含密码或私钥。"
+            description={host
+              ? '生成当前连接的分享链接；二维码只是这条链接的投影，不包含密码或私钥。'
+              : '默认生成全部已保存连接的分享链接；二维码只是这条链接的投影，不包含密码或私钥。'}
           >
             <div style={{ display: 'grid', gap: '14px' }}>
+              <div style={{ fontSize: '15px', fontWeight: 900, color: mobileTheme.colors.lightText }}>
+                {shareTitle}
+              </div>
               {shareQrSvg ? (
                 <div
                   data-testid="connection-share-qr"
@@ -836,6 +867,24 @@ export function ConnectionPropertiesPage({
                 }}
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                {!host && shareScope === 'single' && shareableHosts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setShareScope('all')}
+                    style={{
+                      minHeight: '42px',
+                      borderRadius: '14px',
+                      border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                      backgroundColor: '#ffffff',
+                      color: mobileTheme.colors.lightText,
+                      fontWeight: 800,
+                      padding: '0 16px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Share All Connections
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void handleCopyShareLink()}

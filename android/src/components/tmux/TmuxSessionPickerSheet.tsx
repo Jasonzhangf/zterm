@@ -53,8 +53,10 @@ interface TmuxSessionPickerSheetProps {
 }
 
 type DiscoveryState = 'idle' | 'loading' | 'done' | 'error';
+type ShareScope = 'all' | 'single';
 
 const EMPTY_SELECTED_SESSIONS: string[] = [];
+const EMPTY_SHAREABLE_HOSTS: Host[] = [];
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -140,7 +142,7 @@ export function TmuxSessionPickerSheet({
   activeTabId = null,
   initialTarget,
   initialSelectedSessions = EMPTY_SELECTED_SESSIONS,
-  shareableHosts = [],
+  shareableHosts = EMPTY_SHAREABLE_HOSTS,
   onClose,
   onSwitchOpenTab,
   onRenameOpenTab,
@@ -163,6 +165,7 @@ export function TmuxSessionPickerSheet({
   const [clockTick, setClockTick] = useState(0);
   const [connectionImportInput, setConnectionImportInput] = useState('');
   const [connectionImportStatus, setConnectionImportStatus] = useState('');
+  const [shareScope, setShareScope] = useState<ShareScope>('all');
   const [selectedShareHostId, setSelectedShareHostId] = useState('');
   const [shareQrSvg, setShareQrSvg] = useState('');
   const [shareCopyStatus, setShareCopyStatus] = useState('');
@@ -188,6 +191,7 @@ export function TmuxSessionPickerSheet({
     setLastRefreshedAt(null);
     setConnectionImportInput('');
     setConnectionImportStatus('');
+    setShareScope('all');
     setSelectedShareHostId(shareableHosts[0]?.id || '');
     setShareQrSvg('');
     setShareCopyStatus('');
@@ -244,15 +248,36 @@ export function TmuxSessionPickerSheet({
     () => shareableHosts.find((host) => host.id === selectedShareHostId),
     [selectedShareHostId, shareableHosts],
   );
-  const selectedShareLink = useMemo(
-    () => selectedShareHost
-      ? buildConnectionConfigShareLink({
-          host: selectedShareHost,
-          exportedAt: selectedShareHost.lastConnected || selectedShareHost.createdAt,
-        })
-      : '',
-    [selectedShareHost],
+  const shareExportedAt = useMemo(
+    () => Math.max(...shareableHosts.map((host) => host.lastConnected || host.createdAt || 0), 0),
+    [shareableHosts],
   );
+  const selectedShareLink = useMemo(
+    () => {
+      if (shareableHosts.length === 0) {
+        return '';
+      }
+      if (shareScope === 'single') {
+        return selectedShareHost
+          ? buildConnectionConfigShareLink({
+              host: selectedShareHost,
+              exportedAt: selectedShareHost.lastConnected || selectedShareHost.createdAt || shareExportedAt,
+            })
+          : '';
+      }
+      return buildConnectionConfigShareLink({
+        hosts: shareableHosts,
+        exportedAt: shareExportedAt,
+      });
+    },
+    [selectedShareHost, shareExportedAt, shareScope, shareableHosts],
+  );
+  const shareTitle = shareScope === 'single' && selectedShareHost
+    ? `分享单个连接：${selectedShareHost.name}`
+    : `分享全部连接：${shareableHosts.length} 个`;
+  const shareSubtitle = shareScope === 'single'
+    ? '另一台机器导入后只会新增或更新这个连接。'
+    : '另一台机器导入后会同步本机全部已保存连接。';
 
   useEffect(() => {
     if (mode !== 'new-connection') {
@@ -722,10 +747,10 @@ export function TmuxSessionPickerSheet({
               <div style={{ display: 'grid', gap: '10px' }}>
                 <div>
                   <div style={{ fontSize: '15px', fontWeight: 900, color: mobileTheme.colors.lightText }}>
-                    分享：{selectedShareHost?.name || '当前连接'}
+                    {shareTitle}
                   </div>
                   <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
-                    另一台机器可以扫下面二维码，或复制链接后导入。
+                    {shareSubtitle} 可以扫下面二维码，或复制链接后导入。
                   </div>
                 </div>
                 <div
@@ -764,6 +789,23 @@ export function TmuxSessionPickerSheet({
                   }}
                 />
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {shareScope === 'single' && shareableHosts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setShareScope('all')}
+                      style={{
+                        minHeight: '40px',
+                        padding: '0 14px',
+                        borderRadius: '14px',
+                        border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                        backgroundColor: '#ffffff',
+                        color: mobileTheme.colors.lightText,
+                        fontWeight: 800,
+                      }}
+                    >
+                      改为分享全部连接
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleCopyShareLink()}
@@ -790,17 +832,20 @@ export function TmuxSessionPickerSheet({
 
             <div style={{ display: 'grid', gap: '8px' }}>
               <div style={{ fontSize: '13px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
-                选择要分享的连接
+                可选：只分享某一个连接
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 {shareableHosts.length > 0 ? shareableHosts.map((host) => {
-                  const active = host.id === selectedShareHostId;
+                  const active = shareScope === 'single' && host.id === selectedShareHostId;
                   return (
                     <button
                       key={host.id}
                       type="button"
                       aria-pressed={active}
-                      onClick={() => setSelectedShareHostId(host.id)}
+                      onClick={() => {
+                        setShareScope('single');
+                        setSelectedShareHostId(host.id);
+                      }}
                       style={{
                         border: active ? `2px solid ${mobileTheme.colors.shell}` : 'none',
                         borderRadius: '16px',

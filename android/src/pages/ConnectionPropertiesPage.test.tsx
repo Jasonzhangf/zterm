@@ -700,30 +700,48 @@ describe('ConnectionPropertiesPage', () => {
     expect((screen.getByLabelText('Connection share link') as HTMLTextAreaElement).value).toBe('bad-link');
   });
 
-  it('shares an existing saved connection from the add connection flow', async () => {
+  it('shares all existing saved connections by default from the add connection flow', async () => {
     const savedHost = makeHost({
       id: 'share-existing',
       name: 'Existing Mac',
       password: 'must-not-export',
       privateKey: 'must-not-export',
     });
+    const linuxHost = makeHost({
+      id: 'share-linux',
+      name: 'Linux Box',
+      bridgeHost: '100.64.0.20',
+      bridgePort: 3334,
+      sessionName: 'work',
+      authToken: 'token-b',
+    });
 
     render(
       <ConnectionPropertiesPage
-        shareableHosts={[savedHost]}
+        shareableHosts={[savedHost, linuxHost]}
         bridgeSettings={bridgeSettings}
         onSave={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByText('Existing Mac'));
-
     const link = screen.getByTestId('connection-share-link') as HTMLTextAreaElement;
     const parsed = parseConnectionConfigShareLink(link.value);
+    expect(screen.getByText('Share All Connections: 2')).toBeTruthy();
     expect(parsed).toEqual(
       expect.objectContaining({
         ok: true,
+        hosts: [
+          expect.objectContaining({
+            name: 'Existing Mac',
+            password: undefined,
+            privateKey: undefined,
+          }),
+          expect.objectContaining({
+            name: 'Linux Box',
+            bridgeHost: '100.64.0.20',
+          }),
+        ],
         host: expect.objectContaining({
           name: 'Existing Mac',
           password: undefined,
@@ -734,5 +752,18 @@ describe('ConnectionPropertiesPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('connection-share-qr').innerHTML).toContain('<svg');
     });
+
+    fireEvent.click(screen.getByText('Linux Box'));
+    expect(screen.getByText('Share Single Connection: Linux Box')).toBeTruthy();
+    const narrowed = parseConnectionConfigShareLink(link.value);
+    expect(narrowed).toEqual(expect.objectContaining({
+      ok: true,
+      hosts: [
+        expect.objectContaining({
+          name: 'Linux Box',
+          bridgeHost: '100.64.0.20',
+        }),
+      ],
+    }));
   });
 });

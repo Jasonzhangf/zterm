@@ -216,18 +216,21 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     if (!parsed.ok) {
       return parsed;
     }
-    const importedHost = upsertHost(parsed.host);
-    setBridgeSettings((current) => upsertBridgeServer(current, {
-      name: importedHost.name,
-      targetHost: importedHost.bridgeHost,
-      targetPort: importedHost.bridgePort,
-      authToken: importedHost.authToken,
-      relayHostId: importedHost.daemonHostId || importedHost.relayHostId,
-      relayDeviceId: importedHost.relayDeviceId,
-      relayDeviceName: importedHost.name,
-    }));
+    const importedHosts = parsed.hosts.map((host) => upsertHost(host));
+    setBridgeSettings((current) => importedHosts.reduce((settings, importedHost) => upsertBridgeServer(settings, {
+        name: importedHost.name,
+        targetHost: importedHost.bridgeHost,
+        targetPort: importedHost.bridgePort,
+        authToken: importedHost.authToken,
+        relayHostId: importedHost.daemonHostId || importedHost.relayHostId,
+        relayDeviceId: importedHost.relayDeviceId,
+        relayDeviceName: importedHost.name,
+      }), current));
     setPageState(openConnectionsPage());
-    return { ok: true as const, name: importedHost.name };
+    return {
+      ok: true as const,
+      name: importedHosts.length === 1 ? importedHosts[0]!.name : `${importedHosts.length} 个连接`,
+    };
   }, [setBridgeSettings, setPageState, upsertHost]);
 
   useEffect(() => {

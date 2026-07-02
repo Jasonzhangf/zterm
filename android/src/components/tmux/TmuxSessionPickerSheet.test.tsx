@@ -238,7 +238,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     expect(screen.getByText('已导入：Imported Mac')).toBeTruthy();
   });
 
-  it('renders share QR, link, and scan image entry in the real new-connection sheet', async () => {
+  it('renders all saved connections QR/link by default in the real new-connection sheet', async () => {
     render(
       <TmuxSessionPickerSheet
         mode="new-connection"
@@ -258,6 +258,18 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
             tags: [],
             pinned: false,
           },
+          {
+            id: 'host-share-2',
+            createdAt: 2,
+            name: 'Linux Box',
+            bridgeHost: '100.64.0.20',
+            bridgePort: 3334,
+            sessionName: 'work',
+            authType: 'password',
+            authToken: 'token-b',
+            tags: [],
+            pinned: false,
+          },
         ]}
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
@@ -271,13 +283,35 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
 
     const link = screen.getByTestId('tmux-session-picker-share-link') as HTMLTextAreaElement;
     const parsed = parseConnectionConfigShareLink(link.value);
-    expect(screen.getByText('分享：Existing Mac')).toBeTruthy();
+    expect(screen.getByText('分享全部连接：2 个')).toBeTruthy();
     expect(parsed).toEqual(expect.objectContaining({
       ok: true,
+      hosts: [
+        expect.objectContaining({
+          name: 'Existing Mac',
+          bridgeHost: '100.64.0.10',
+        }),
+        expect.objectContaining({
+          name: 'Linux Box',
+          bridgeHost: '100.64.0.20',
+        }),
+      ],
       host: expect.objectContaining({
         name: 'Existing Mac',
         bridgeHost: '100.64.0.10',
       }),
+    }));
+    fireEvent.click(screen.getByText('Linux Box'));
+    const singleParsed = parseConnectionConfigShareLink(link.value);
+    expect(screen.getByText('分享单个连接：Linux Box')).toBeTruthy();
+    expect(singleParsed).toEqual(expect.objectContaining({
+      ok: true,
+      hosts: [
+        expect.objectContaining({
+          name: 'Linux Box',
+          bridgeHost: '100.64.0.20',
+        }),
+      ],
     }));
     await waitFor(() => {
       expect(screen.getByTestId('tmux-session-picker-share-qr').innerHTML).toContain('<svg');

@@ -20,6 +20,7 @@ describe('connection config share Android entry truth', () => {
     expect(appSource).toContain("CapacitorApp.addListener('appUrlOpen'");
     expect(appSource).toContain('zterm://connection/import');
     expect(appSource).toContain('parseConnectionConfigShareLink');
-    expect(appSource).toContain('upsertHost(parsed.host)');
+    expect(appSource).toContain('parsed.hosts.map((host) => upsertHost(host))');
+    expect(appSource).not.toContain('upsertHost(parsed.host)');
   });
 });

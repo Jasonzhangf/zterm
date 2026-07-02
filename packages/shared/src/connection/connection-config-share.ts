@@ -11,11 +11,12 @@ export interface ConnectionConfigSharePayload {
   kind: typeof CONNECTION_SHARE_KIND;
   schemaVersion: typeof CONNECTION_SHARE_SCHEMA_VERSION;
   exportedAt: number;
-  host: EditableHost;
+  hosts: EditableHost[];
+  host?: EditableHost;
 }
 
 export type ConnectionConfigShareParseResult =
-  | { ok: true; payload: ConnectionConfigSharePayload; host: EditableHost }
+  | { ok: true; payload: ConnectionConfigSharePayload; hosts: EditableHost[]; host: EditableHost }
   | { ok: false; error: string };
 
 function asString(value: unknown) {
@@ -113,18 +114,22 @@ export function normalizeConnectionConfigShareHost(input: unknown): EditableHost
 }
 
 export function buildConnectionConfigSharePayload(options: {
-  host: EditableHost;
+  host?: EditableHost;
+  hosts?: EditableHost[];
   exportedAt: number;
 }): ConnectionConfigSharePayload {
-  const host = normalizeConnectionConfigShareHost(options.host);
-  if (!host) {
-    throw new Error('invalid connection config share host');
+  const sourceHosts = options.host ? [options.host] : (options.hosts || []);
+  const hosts = sourceHosts
+    .map((host) => normalizeConnectionConfigShareHost(host))
+    .filter((host): host is EditableHost => host !== null);
+  if (hosts.length === 0 || hosts.length !== sourceHosts.length) {
+    throw new Error('invalid connection config share hosts');
   }
   return {
     kind: CONNECTION_SHARE_KIND,
     schemaVersion: CONNECTION_SHARE_SCHEMA_VERSION,
     exportedAt: options.exportedAt,
-    host,
+    hosts,
   };
 }
 
@@ -133,12 +138,14 @@ export function encodeConnectionConfigSharePayload(payload: ConnectionConfigShar
 }
 
 export function buildConnectionConfigShareLink(options: {
-  host: EditableHost;
+  host?: EditableHost;
+  hosts?: EditableHost[];
   exportedAt: number;
   linkKind?: 'app' | 'web';
 }) {
   const payload = buildConnectionConfigSharePayload({
     host: options.host,
+    hosts: options.hosts,
     exportedAt: options.exportedAt,
   });
   const encoded = encodeConnectionConfigSharePayload(payload);
@@ -200,8 +207,14 @@ export function parseConnectionConfigShareLink(input: string): ConnectionConfigS
   if (typeof candidate.exportedAt !== 'number' || !Number.isFinite(candidate.exportedAt)) {
     return { ok: false, error: 'connection share payload exportedAt is invalid' };
   }
-  const host = normalizeConnectionConfigShareHost(candidate.host);
-  if (!host) {
+  const rawHosts = Array.isArray(candidate.hosts) ? candidate.hosts : (candidate.host ? [candidate.host] : []);
+  if (rawHosts.length === 0) {
+    return { ok: false, error: 'connection share payload hosts are missing' };
+  }
+  const hosts = rawHosts
+    .map((host) => normalizeConnectionConfigShareHost(host))
+    .filter((host): host is EditableHost => host !== null);
+  if (hosts.length !== rawHosts.length) {
     return { ok: false, error: 'connection share payload host is invalid' };
   }
 
@@ -211,8 +224,9 @@ export function parseConnectionConfigShareLink(input: string): ConnectionConfigS
       kind: CONNECTION_SHARE_KIND,
       schemaVersion: CONNECTION_SHARE_SCHEMA_VERSION,
       exportedAt: candidate.exportedAt,
-      host,
+      hosts,
     },
-    host,
+    hosts,
+    host: hosts[0]!,
   };
 }
