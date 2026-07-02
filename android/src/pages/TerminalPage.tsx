@@ -1373,27 +1373,8 @@ function TerminalPageComponent({
       };
     });
 
-    const runtimeOnly: TerminalSessionDrawerItem[] = sessions
-      .filter((s) => !drawerRemoteSessions.catalogLiveSessionIds.has(s.id))
-      .sort((a, b) => (a.customName || a.sessionName).localeCompare(b.customName || b.sessionName))
-      .map((session) => {
-        const serverIdentity = resolveDrawerServerIdentity(session);
-        return {
-          id: session.id,
-          title: session.customName || session.title || session.sessionName,
-          subtitle: `${serverIdentity.label} · ${session.title || session.sessionName}`,
-          status: normalizeDrawerStatus(session.state),
-          remoteMissing: resolveSessionRemoteMissing(session, sessionGroups),
-          paneLabel: undefined,
-          sessionGroupSlot: resolveSessionGroupSlot(session.id),
-          active: activeSessionIds.has(session.id),
-          hostKey: serverIdentity.key,
-          hostLabel: serverIdentity.label,
-        };
-      });
-
-    return [...catalogItems, ...runtimeOnly];
-  }, [drawerRemoteSessions.catalogLiveSessionIds, drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
+    return catalogItems;
+  }, [drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;

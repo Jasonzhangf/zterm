@@ -8,6 +8,7 @@
 
 ## Key Decisions
 
+- [2026-07-02] Terminal drawer 的 session 列表必须是 `sessionGroups` catalog-first 投影：remote live session 只允许合并状态/active，不允许把未被 daemon catalog 枚举到的 runtime-only / stale opened tab 追加回抽屉。只要 daemon 没报告，就不能在 drawer 里假装“活着”。
 - [2026-07-02] Android IME 只能抬外层 terminal stage / quickbar 容器，不能进入 `TerminalView` 内容 viewport 计算链或触发 upstream resize；同一轮修复里，terminal drawer 的 session 列表必须以 server/session catalog 为真源，再把 live runtime sessions 按复用 key 合并进去，不能再按“已打开 tab 顺序”自己拼一份列表。
 - [2026-06-29] 多 daemon / 多服务器 UI 的用户可见身份不能再用 `bridgeHost:bridgePort` 或 telnet/bridge 端口表示；端口只是 transport 配置，不是服务器名。统一真源是 `src/lib/server-identity.ts`：drawer 分组、session group side peek、服务器色调用同一套 server key / display name / tone；UI 层只能消费 projection，禁止各自拼端口当 label。
 - [2026-07-01] Terminal drawer 的远端 session 列表真源必须是 `sessionGroups` catalog，而不是 drawer 自己维护第二份列表。打开 drawer 只按稳定 hostKey 触发远端枚举，refresh 结果通过 `handleRemoteSessionsRefreshed()` 写回 catalog；drawer 再投影 remote-only rows，并点击后复用 group session open 主链。

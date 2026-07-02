@@ -1270,3 +1270,7 @@ Need runtime debug to confirm:
 # 2026-07-01 IME container lift regression
 - 现场截图显示键盘弹起后 quickbar 上台但 terminal stage 容器仍按未抬起区域占位，底部被 quickbar/IME 盖住。已锁定唯一 owner：`TerminalPage` 只在 UI shell 层计算 `terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx`；`TerminalStageShell` 只消费 bottom 裁切；`TerminalView` 不拿 IME token、不触发 `onResize`。
 - 回归验证：`TerminalPage.android-ime.test.tsx` 锁住 stage 跟随 IME 上台且 `onResize` 不触发；`TerminalPageStageShell.pane-stage.test.tsx`、`TerminalView.dynamic-refresh.test.tsx`、`TerminalView.bottom-stale.test.tsx` 同跑，防止 shell 修复越界到 renderer 内容链。
+
+# 2026-07-02 Drawer catalog-only session projection
+- 现场问题：Terminal drawer 仍显示已经打开过但 daemon 不再枚举到的旧 tab。根因在 `TerminalPage.drawerSessions`：catalog 投影后又追加 `runtimeOnly` 本地 sessions，导致 stale opened tabs 绕过 daemon live session 真源。
+- 修复方向：drawer rows 只消费 `sessionGroups` daemon catalog，再把命中的 live runtime session 合并 status/active；不在 catalog 内的 runtime session 不显示在抽屉。回归：`TerminalPage.session-drawer.test.tsx` 锁住 catalog live/remote-only 显示，stale opened tab 隐藏。
