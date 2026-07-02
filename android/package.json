@@ -49,7 +49,7 @@
     "release:github": "bash ./scripts/publish-github-release.sh",
     "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
     "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs",
-    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts"
+    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

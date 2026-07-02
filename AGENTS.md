@@ -7,6 +7,7 @@
 ## Truth Sources
 - `android/docs/spec.md`：产品范围与验收
 - `android/docs/architecture.md`：模块边界、数据流、ownership
+- `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`：架构边界整改表；定义功能块 owner、允许/禁止职责、移除/分离/保留决策、防复发 gate
 - `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal server / buffer manager / renderer / UI shell 唯一真源
 - `android/docs/dev-workflow.md`：执行顺序、验证门禁、证据要求
 - `android/docs/ui-slices.md`：页面级切片与文件 ownership
@@ -27,6 +28,18 @@
 - 不在本仓库复制或内嵌 runtime 源码
 - runtime 问题改 `../wterm`，app 问题改 `zterm`
 - 先验证，后结论；无证据不宣称完成
+- 每次开发 / 修复 / 重构必须先读架构真源，再读代码：
+  - 先读 `android/docs/architecture.md`
+  - 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
+  - 再按任务域读对应 decision / feature registry / function map / skill
+  - 然后才读代码定位实现点
+- 改代码前必须写清楚“本次方法如何对应架构”：
+  - 属于哪个功能块
+  - 唯一 owner 是谁
+  - 当前越界项是 **物理移除 / 分离下沉 / 显式兼容保留** 哪一类
+  - allowed paths / forbidden paths 是否匹配
+  - 必跑 gate 是什么
+- 未完成上述架构映射前，不得直接改实现代码；禁止靠 grep 命中点直接补 patch。
 - terminal 链路必须先更新 docs / AGENTS / skill，再补测试，再改代码
 - terminal 链路必须保持 `server / buffer manager / renderer / UI shell` 独立，禁止越层漂移
 - daemon / buffer manager / renderer 都必须遵守 **读写解耦**：写侧只维护本层真相，读侧只读取当前真相；**请求不得触发上游同步策略**

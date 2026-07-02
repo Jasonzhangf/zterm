@@ -10,6 +10,32 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 - 出现“初次连接慢、输入不刷新、reading 拉不动、回到底部不 follow、带宽异常”
 - 任何想在 server / buffer manager / renderer 之间加补丁、fallback、第二语义的时候
 
+## 开发前置门禁：先架构，后代码
+
+任何 terminal / session / daemon / buffer / renderer 相关开发、修复、重构，必须先完成架构映射，再读代码和修改代码。
+
+固定顺序：
+1. 先读 `android/docs/architecture.md`
+2. 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
+3. 再读本 skill 与相关 decision / feature registry / function map
+4. 再读代码定位 owner 与实现点
+5. 写出本次方法如何对应架构后，才允许修改代码
+
+修改前必须明确：
+- 本次问题属于哪个功能块：session lifecycle / daemon truth / client buffer-render / UI projection / persistence truth
+- 唯一 owner 文件或模块是谁
+- 当前越界处理方式是 **物理移除 / 分离下沉 / 显式兼容保留** 哪一种
+- 哪些路径允许修改，哪些路径禁止修改
+- 正向测试和反向测试分别锁住什么风险
+- 若涉及 daemon / tmux / mirror / transport 主链，且本机可启动真实 daemon 与 tmux，必须跑真实闭环验证；只跑单测、typecheck、静态 gate 不得宣称完成。默认命令：`pnpm --dir android run daemon:mirror:close-loop`。
+- 若仓库内 Mac client 可用，还必须跑 Mac 客户端核心连接 gate，证明本地 client transport/runtime 能连；daemon-only probe 不能替代。默认最小命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`，其中必须覆盖 `bridge-transport`、`local-tmux-transport`、`terminal-runtime`、workbench active target。
+
+禁止事项：
+- 禁止先 grep 到命中点就直接 patch
+- 禁止在非 owner 层补偿 owner 层问题
+- 禁止用 fallback / 默认值 / catch 后继续成功 来掩盖真源缺失
+- 禁止 UI / App / daemon 任一层替其它层维护第二份状态机
+
 ## 冻结角色边界
 
 ```text
@@ -21,6 +47,50 @@ tmux truth
 ```
 
 四层只允许单向依赖，禁止越层漂移。
+
+## 测试闭环阶梯：证明范围必须逐层匹配
+
+terminal / daemon / client / renderer 相关任务完成前，先写清本轮影响到哪一层，再跑到对应层级。低层验证不能冒充高层完成。
+
+### L0 静态与架构 gate
+- 证明：类型、文档 map、owner/gate、禁止路径扫描没有明显破坏。
+- 不证明：真实 daemon、真实 tmux、真实 client、真实 UI 能连。
+- 常用 gate：`pnpm --dir android run test:feature-registry -- --reporter dot`、`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`、平台对应 type-check。
+
+### L1 owner 单元/红测
+- 证明：修改点 owner 的正向/反向语义被锁住。
+- 不证明：跨层真实连接成立。
+- 要求：状态机、stream 收口、timeout、retry、错误投影、资源清理必须同时有正向与反向测试。
+
+### L2 daemon/tmux 真回环
+- 证明：当前 daemon 代码能真实启动，tmux oracle 与 daemon mirror/client replay 一致，server 读写链路可通。
+- 不证明：App/Mac/Web/Android client 入口一定连得上。
+- 默认命令：`pnpm --dir android run daemon:mirror:close-loop`。
+- 证据最少包含：case summary、tmux oracle、daemon websocket events、replay/strict audit 结果。
+
+### L3 本地客户端 transport/runtime gate
+- 证明：仓库内本地 client 的 transport/runtime 能发起连接、完成握手、处理 head/body/input。
+- 不证明：packaged app、真机 UI、IME、窗口生命周期一定正确。
+- Mac 默认命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`。
+- Mac 必须覆盖：`bridge-transport`、`local-tmux-transport`、`terminal-runtime`、workbench active target。
+- Android/Web 默认至少覆盖：open-tab restore/resume、SessionContext transport、buffer apply、TerminalPage/TerminalView 渲染入口的目标测试。
+
+### L4 app shell / UI 行为 gate
+- 证明：页面入口、tab/split/drawer/IME/layout 等 UI shell 行为在测试环境中按语义工作。
+- 不证明：安装包、真实 WebView、真实 Electron packaged app 一定一致。
+- 要求：若问题发生在容器、IME、drawer、pane、renderer 可见窗口，不允许只跑 daemon 或 transport gate。
+
+### L5 packaged / device / real app smoke
+- 证明：真实 app 入口、打包产物、设备/桌面运行态按用户路径工作。
+- Android：APK 构建/安装态/真实 daemon debug 或真机 evidence。
+- Mac：packaged `.app` 或唯一 dev Electron 实例，截图/DOM/进程证据，必要时资源采样。
+- 不证明：未覆盖的其它平台或远端网络路径。
+
+### 汇报规则
+- 汇报时必须按层级列出已跑 gate，并说明每个 gate 证明什么。
+- 若只跑到 L2，只能说 daemon/tmux 闭环通过，不能说本地客户端连接正常。
+- 若只跑到 L3，只能说 client 核心连接逻辑通过，不能说 packaged app / 真机 UI 已闭环。
+- 若任务本身影响 L4/L5，但无法在线或真实运行验证，必须明确剩余风险和缺口。
 
 ## 0. transport / session 语义冻结
 
@@ -43,6 +113,9 @@ tmux truth
 - open-tab 物理关闭只能由用户显式 close 触发；远端 tmux session-name audit 只能记录缺失/更新历史 session group，不得删除 open tab、切走 active tab、写 closed tombstone、调用 runtime `closeSession`
 - terminal tab chrome 必须以 `OPEN_TABS` 为唯一真源 materialize；runtime sessions 只补 transport/state。若 persisted open tab 的 runtime shell 缺失，UI 必须保留 closed placeholder；只有用户显式 resume/open 才允许按 persisted tab 重建 runtime shell 和 transport，禁止用 `open tabs ∩ runtime sessions` 过滤导致“看起来自动关闭 tab”。
 - `OPEN_TABS` 的物理身份只能是 `sessionId`；`sessionName + daemon/bridge owner` 语义 key 不得用于 normalize/upsert/runtime-merge/close 时合并、替换、删除已打开 tab。semantic key 只允许用于 saved-list import 去重与用户显式 close 后的 tombstone。
+- `open-tab-intent` 这类 core truth 模块不得出现 `fallbackActiveSessionId` / `fallbackSessionIds` 式命名；需要保留 active 或选择关闭后的下一个 active 时，必须写成显式 policy（如 `preserveActiveSessionId` / `nextActiveCandidateSessionIds`）并由架构 gate 锁住。
+- `open-tab-persistence` 读写失败不得变成空 truth：存储损坏、读取异常、写入异常必须返回显式 `failed/invalid` 或 `{ ok:false, error }`，调用方至少记录结构化 runtime debug。
+- force relay / use auto / reconnect-with-mode 这类同一 open tab 的 transport-mode rebuild 只能放在 `useSessionOpenActions` 这类 session-open owner；`App.tsx`、`TerminalPage`、header、drawer 只能传 intent，不能自己构造 Host 或执行 `closeSession -> createSession -> switchSession` 生命周期序列。
 - 现场若出现：
   - app 说 connected
   - 但 daemon 看不到 subscriber / session-open / head-sync 进展
@@ -102,6 +175,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - subscriber transport count
   - daemon failure/backoff fact
   - 禁止消费 `active tab / foreground / follow / reading / visible range / viewport / pane layout`
+- daemon 不得长期保存 client width policy：`widthMode`、`adaptiveCols`、`terminalWidthMode`、`requestedAdaptiveCols` 只能作为兼容 wire 入参被读取，不能写入 `TerminalSession` / `SessionMirror`，也不能反向触发 tmux `resize-window` / `window-size latest` ownership。
 - 好网 fast lane 与弱网 slow lane 必须由红测锁定；性能 trace 只记录 timestamp/duration/bytes/line count/id/kind 这类 metadata，禁止记录真实 terminal payload 内容。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**

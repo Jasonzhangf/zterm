@@ -206,7 +206,10 @@
         "src/lib/session-transport-runtime.ts",
         "src/server/terminal-bridge-runtime.ts",
         "src/server/terminal-transport-runtime.ts",
-        "src/server/terminal-message-runtime.ts"
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-runtime-types.ts"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx",
@@ -214,6 +217,9 @@
       ],
       "required_gates": [
         "src/server/server.transport-lifecycle-truth.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
         "src/server/terminal-transport-runtime.test.ts",
         "src/lib/session-transport-runtime.test.ts",
         "src/contexts/session-context-transport-runtime.test.ts"
