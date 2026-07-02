@@ -4,6 +4,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { STORAGE_KEYS } from '../lib/types';
+import { APP_UPDATE_STORAGE_KEY } from '../lib/app-update';
 import { useConfigExport } from './useConfigExport';
 
 vi.mock('@capacitor/filesystem', () => ({
@@ -56,6 +57,41 @@ describe('useConfigExport', () => {
       directory: Directory.ExternalStorage,
       data: expect.stringContaining(STORAGE_KEYS.HOSTS),
     }));
+  });
+
+  it('exports local configuration keys without session/runtime state', async () => {
+    vi.mocked(Filesystem.mkdir).mockResolvedValue(undefined as never);
+    vi.mocked(Filesystem.writeFile).mockResolvedValue({ uri: 'file:///storage/zterm-config-export/zterm-config.json' } as never);
+    window.localStorage.setItem(STORAGE_KEYS.HOSTS, '[{"id":"host-1"}]');
+    window.localStorage.setItem(STORAGE_KEYS.BRIDGE_SETTINGS, '{"servers":[{"id":"server-1"}]}');
+    window.localStorage.setItem(STORAGE_KEYS.QUICK_ACTIONS, '[{"label":"ls"}]');
+    window.localStorage.setItem(STORAGE_KEYS.SHORTCUT_ACTIONS, '[{"label":"copy"}]');
+    window.localStorage.setItem(STORAGE_KEYS.WEBDAV_CONFIG, '{"enabled":false}');
+    window.localStorage.setItem(APP_UPDATE_STORAGE_KEY, '{"manifestUrl":"http://daemon/updates/latest.json"}');
+    window.localStorage.setItem(STORAGE_KEYS.SESSION_GROUPS, '[{"sessionNames":["server"]}]');
+    window.localStorage.setItem(STORAGE_KEYS.OPEN_TABS, '[{"sessionId":"runtime-tab"}]');
+    window.localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'runtime-tab');
+    window.localStorage.setItem(STORAGE_KEYS.SESSION_DRAFTS, '{"runtime-tab":"draft"}');
+    const { result } = renderHook(() => useConfigExport());
+
+    await act(async () => {
+      await result.current.exportConfig();
+    });
+
+    const writeArg = vi.mocked(Filesystem.writeFile).mock.calls[0]?.[0] as { data: string };
+    const payload = JSON.parse(writeArg.data) as { storage: Record<string, string> };
+    expect(Object.keys(payload.storage).sort()).toEqual([
+      APP_UPDATE_STORAGE_KEY,
+      STORAGE_KEYS.BRIDGE_SETTINGS,
+      STORAGE_KEYS.HOSTS,
+      STORAGE_KEYS.QUICK_ACTIONS,
+      STORAGE_KEYS.SHORTCUT_ACTIONS,
+      STORAGE_KEYS.WEBDAV_CONFIG,
+    ].sort());
+    expect(payload.storage[STORAGE_KEYS.SESSION_GROUPS]).toBeUndefined();
+    expect(payload.storage[STORAGE_KEYS.OPEN_TABS]).toBeUndefined();
+    expect(payload.storage[STORAGE_KEYS.ACTIVE_SESSION]).toBeUndefined();
+    expect(payload.storage[STORAGE_KEYS.SESSION_DRAFTS]).toBeUndefined();
   });
 
   it('returns an explicit import error instead of silently failing', async () => {

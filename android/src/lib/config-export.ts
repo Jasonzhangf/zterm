@@ -3,7 +3,11 @@ import { STORAGE_KEYS } from './types';
 import { APP_UPDATE_STORAGE_KEY } from './app-update';
 
 export const CONFIG_EXPORT_STORAGE_KEYS = Array.from(new Set<string>([
-  ...Object.values(STORAGE_KEYS),
+  STORAGE_KEYS.HOSTS,
+  STORAGE_KEYS.BRIDGE_SETTINGS,
+  STORAGE_KEYS.QUICK_ACTIONS,
+  STORAGE_KEYS.SHORTCUT_ACTIONS,
+  STORAGE_KEYS.WEBDAV_CONFIG,
   APP_UPDATE_STORAGE_KEY,
 ]));
 

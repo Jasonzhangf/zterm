@@ -4,6 +4,7 @@
 - 架构映射：本 slice 仍属于 `connections.config_share`；payload/parser owner 仍是 `packages/shared/src/connection/connection-config-share.ts`，storage import owner 仍由 App 调 `useHostStorage.upsertHost`；本轮只移动 UI projection。`ConnectionsPage` 只保留 FAB add intent，`ConnectionPropertiesPage` 的新增态承载导入/分享入口。
 - 防复发：测试需要同时锁住主列表不常驻 import 面板，以及新增连接页能 paste import、显示 malformed error、选择已有连接生成同一 canonical link/QR。
 - 现场 1988 再证伪：`+` 真实打开的是 `TmuxSessionPickerSheet`，不是 `ConnectionPropertiesPage`；因此导入/分享/扫码入口必须在 sheet 内出现，表单页入口只能作为二级兼容，不是主入口。Settings 的导出配置按钮不能只写 console，必须给用户可见成功/失败反馈。
+- Jason 进一步澄清：全局配置导出应导出本地服务器和设置，不按 session 分，也不导出 open tabs / session history / active session / drafts；导入服务器后再通过 daemon/tmux truth 发现所有 session 选项。
 
 # 2026-07-02 offline generated wiki HTML
 
