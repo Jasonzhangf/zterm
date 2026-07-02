@@ -20,7 +20,7 @@ export interface TerminalSessionDrawerItem {
    */
   hostKey?: string;
   /**
-   * host 展示名（machineName / alias / "default"），由 TerminalPage 注入。
+   * host 展示名（machineName / alias），由 TerminalPage 注入。
    * 未传入时回退到 hostKey；不允许 drawer 内部自行拼装。
    */
   hostLabel?: string;
@@ -51,6 +51,8 @@ export interface TerminalSessionDrawerProps {
 const DRAWER_WIDTH = 'min(280px, 72vw)';
 const SWIPE_CLOSE_THRESHOLD_PX = 48;
 const SWIPE_CLOSE_VERTICAL_TOLERANCE_PX = 44;
+const UNSCOPED_HOST_GROUP_KEY = '__unscoped__';
+const UNSCOPED_HOST_GROUP_LABEL = '未绑定主机';
 
 function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
   switch (status) {
@@ -174,13 +176,17 @@ function TerminalSessionDrawerComponent({
   };
 
   const hostGroups = useMemo(() => {
-    const groups = new Map<string, { hostKey: string; hostLabel: string; connected?: boolean; sessions: TerminalSessionDrawerItem[] }>();
+    const groups = new Map<
+      string,
+      { groupKey: string; hostKey?: string; hostLabel: string; connected?: boolean; sessions: TerminalSessionDrawerItem[] }
+    >();
     for (const host of hosts) {
       const hostKey = host.hostKey.trim();
       if (!hostKey) {
         continue;
       }
       groups.set(hostKey, {
+        groupKey: hostKey,
         hostKey,
         hostLabel: host.hostLabel.trim() || hostKey,
         connected: host.connected,
@@ -190,12 +196,14 @@ function TerminalSessionDrawerComponent({
     for (const session of sessions) {
       const hostKey = session.hostKey;
       if (!hostKey) {
-        // 单机场景：未显式提供 hostKey，则归入一个 sentinel "default" 分组。
-        const fallbackKey = 'default';
-        let group = groups.get(fallbackKey);
+        let group = groups.get(UNSCOPED_HOST_GROUP_KEY);
         if (!group) {
-          group = { hostKey: fallbackKey, hostLabel: session.hostLabel || '本机', sessions: [] };
-          groups.set(fallbackKey, group);
+          group = {
+            groupKey: UNSCOPED_HOST_GROUP_KEY,
+            hostLabel: session.hostLabel?.trim() || UNSCOPED_HOST_GROUP_LABEL,
+            sessions: [],
+          };
+          groups.set(UNSCOPED_HOST_GROUP_KEY, group);
         }
         group.sessions.push(session);
         continue;
@@ -203,7 +211,7 @@ function TerminalSessionDrawerComponent({
       const hostLabel = session.hostLabel || hostKey;
       let group = groups.get(hostKey);
       if (!group) {
-        group = { hostKey, hostLabel, sessions: [] };
+        group = { groupKey: hostKey, hostKey, hostLabel, sessions: [] };
         groups.set(hostKey, group);
       }
       group.sessions.push(session);
@@ -218,21 +226,27 @@ function TerminalSessionDrawerComponent({
     if (!multiHost) {
       return null;
     }
-    if (selectedHostKey && hostGroups.some((g) => g.hostKey === selectedHostKey)) {
+    if (selectedHostKey && hostGroups.some((g) => g.groupKey === selectedHostKey)) {
       return selectedHostKey;
     }
     const activeGroup = hostGroups.find((g) => g.sessions.some((s) => s.active));
-    return activeGroup?.hostKey || hostGroups[0]?.hostKey || null;
+    return activeGroup?.groupKey || hostGroups[0]?.groupKey || null;
   }, [hostGroups, multiHost, selectedHostKey]);
 
   const visibleSessions = useMemo(() => {
     if (!multiHost || !effectiveHostKey) {
       return sessions;
     }
-    const group = hostGroups.find((g) => g.hostKey === effectiveHostKey);
+    const group = hostGroups.find((g) => g.groupKey === effectiveHostKey);
     return group?.sessions || [];
   }, [effectiveHostKey, hostGroups, multiHost, sessions]);
-  const refreshHostKey = effectiveHostKey || hostGroups[0]?.hostKey;
+  const currentHostGroup = useMemo(() => {
+    if (!multiHost) {
+      return hostGroups[0] || null;
+    }
+    return hostGroups.find((g) => g.groupKey === effectiveHostKey) || hostGroups[0] || null;
+  }, [effectiveHostKey, hostGroups, multiHost]);
+  const refreshHostKey = currentHostGroup?.hostKey;
 
   useEffect(() => {
     if (!open || !onRefreshHostSessions || !refreshHostKey) {
@@ -245,7 +259,7 @@ function TerminalSessionDrawerComponent({
 
   const openNewSessionDialog = () => {
     setNewSessionDraft({
-      hostKey: effectiveHostKey || hostGroups[0]?.hostKey,
+      hostKey: currentHostGroup?.hostKey,
       sessionName: buildDefaultSessionName(),
       cwd: '~/',
     });
@@ -388,15 +402,23 @@ function TerminalSessionDrawerComponent({
             }}
           >
             {hostGroups.map((group) => {
-              const isActive = group.hostKey === effectiveHostKey;
-              const tone = getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel });
+              const isActive = group.groupKey === effectiveHostKey;
+              const tone = group.hostKey
+                ? getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel })
+                : {
+                    accent: 'rgba(220, 232, 255, 0.26)',
+                    accentSoft: 'rgba(220, 232, 255, 0.08)',
+                    lightCardBorder: 'rgba(255,255,255,0.08)',
+                    tabActiveBackground: 'rgba(255,255,255,0.06)',
+                    previewText: '#dce8ff',
+                  };
               const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'rgba(220,232,255,0.45)';
               return (
                 <button
-                  key={group.hostKey}
+                  key={group.groupKey}
                   type="button"
-                  data-testid={`terminal-session-drawer-host-${group.hostKey}`}
-                  onClick={() => setSelectedHostKey(group.hostKey)}
+                  data-testid={`terminal-session-drawer-host-${group.groupKey}`}
+                  onClick={() => setSelectedHostKey(group.groupKey)}
                   style={{
                     width: '100%',
                     flexShrink: 0,

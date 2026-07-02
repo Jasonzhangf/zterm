@@ -110,10 +110,36 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
 
     confirmNewSession();
-    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('default', {
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
       sessionName: 'work-api',
       cwd: '~/code/api',
     });
+  });
+
+  it('does not invent a host identity when caller omits hostKey', () => {
+    const onOpenQuickTabPicker = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+    confirmNewSession('unscoped-work', '~/code/unscoped');
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
+      sessionName: 'unscoped-work',
+      cwd: '~/code/unscoped',
+    });
+    expect(onOpenQuickTabPicker).not.toHaveBeenCalledWith('default', expect.anything());
   });
 
   it('keeps the add button above the IME inset', () => {

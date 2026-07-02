@@ -1,0 +1,208 @@
+# Architecture Boundary Remediation Plan
+
+Date: 2026-07-02
+Scope: Android app architecture, terminal/session ownership, daemon truth, UI projection, persistence/error handling
+
+## Decision Table
+
+| Block | Current problem | Action | Reason |
+| --- | --- | --- | --- |
+| Terminal session lifecycle | `App.tsx` directly closed/created/switched sessions for force relay / auto mode | Separated in second repair slice | Session open/close/restore is a unique owner concern, not page orchestration |
+| Daemon mirror truth | daemon stored client `widthMode/adaptiveCols` in session/mirror truth | Removed from daemon state in third repair slice | daemon must not own client viewport policy or width identity |
+| Open-tab persistence | storage read/write failures are normalized into empty/default state | Separated error path in first repair slice | explicit truth failure must not become silent empty truth |
+| Session drawer grouping | UI used `default` / `本机` sentinel for missing hostKey | Removed in fourth repair slice | UI component must consume resolved host identity, not invent it |
+| Open-tab intent fallback | `fallbackActiveSessionId` / `fallbackSessionIds` were used inside core intent logic | Renamed to explicit policy in first repair slice | fallback semantics in core truth should not be implicit |
+
+## Functional Blocks And Boundaries
+
+### 1. Session Orchestration Block
+
+Owner:
+- `src/hooks/useSessionOpenActions.ts`
+- `src/hooks/useOpenTabRuntime.ts`
+- `src/hooks/useOpenTabRestoreRuntimeSync.ts`
+
+Allowed:
+- create/open/close/switch/resume session intent
+- explicit restore of persisted open tabs
+- explicit tab materialization
+
+Forbidden:
+- page component direct session lifecycle control
+- hidden reopen inside UI event handlers
+- semantic merge of open tabs by anything other than `sessionId`
+
+Boundary rule:
+- `App.tsx` may dispatch UI intent only.
+- Any code that decides to create, close, switch, or resume a session belongs here.
+
+### 2. Daemon Truth Block
+
+Owner:
+- `src/server/terminal-runtime.ts`
+- `src/server/terminal-bridge-runtime.ts`
+- `src/server/terminal-message-runtime.ts`
+- `src/server/terminal-mirror-runtime.ts`
+
+Allowed:
+- tmux canonical buffer truth
+- transport/session facts owned by daemon
+- input receive/write queue
+- mirror snapshot and live sync
+
+Forbidden:
+- client viewport policy
+- client foreground/background or active tab truth
+- renderer follow/reading/renderBottomIndex truth
+- persistent client width policy in daemon state
+
+Boundary rule:
+- daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth.
+
+### 3. Client Rendering And Buffer Block
+
+Owner:
+- `src/contexts/session-context-buffer-runtime.ts`
+- `src/components/TerminalView.tsx`
+- `src/lib/session-render-gate.ts`
+
+Allowed:
+- visible range repair
+- local sparse buffer merge
+- renderer follow/reading state
+
+Forbidden:
+- transport pull from renderer directly
+- daemon truth mutation
+- fallback sync that hides missing buffer truth
+
+Boundary rule:
+- only buffer-sync apply may repaint body.
+
+### 4. UI Projection Block
+
+Owner:
+- `src/lib/connections-server-groups.ts`
+- `src/components/terminal/TerminalSessionDrawer.tsx`
+- `src/pages/ConnectionsPage.tsx`
+
+Allowed:
+- projection of resolved server/session labels
+- grouping and ordering
+- presentation-only sentinel for legacy data only if explicitly marked
+
+Forbidden:
+- inventing identity when upstream projection is missing
+- creating storage truth
+- session lifecycle control
+
+Boundary rule:
+- component layer consumes resolved identity; projection layer decides how legacy gaps are shown.
+
+### 5. Persistence Truth Block
+
+Owner:
+- `src/lib/open-tab-persistence.ts`
+- `src/lib/open-tab-intent.ts`
+- `src/lib/open-tab-restore.ts`
+
+Allowed:
+- normalize and persist explicit tab truth
+- restore persisted truth
+- compare and derive close/open intent
+
+Forbidden:
+- swallowing parse/write failures into empty truth for current tabs
+- implicit replacement of bad storage with default state
+- fallback naming that hides owner loss
+
+Boundary rule:
+- if persistence fails, caller receives explicit error state or explicit failure result, not a fake empty truth.
+
+## Remove / Separate / Keep
+
+### Remove
+
+- Remove daemon long-lived client width state.
+- Remove page-layer direct session lifecycle control.
+- Remove UI-layer identity invention when projection owner can resolve it.
+- Remove drawer-internal `default` / `本机` host sentinel; missing host identity may only be local unscoped UI grouping and must not be sent to callbacks.
+
+### Separate
+
+- Separate open-tab lifecycle from page navigation.
+- Separate daemon mirror truth from client viewport policy.
+- Separate persistence failure from “no data”.
+
+### Keep
+
+- Keep current-tab explicit truth.
+- Keep projection fallback only as a clearly labeled presentation compatibility path for legacy data.
+- Intent fallback was renamed into explicit owner policy: `preserveActiveSessionId` and `nextActiveCandidateSessionIds`, with `architecture-boundary-truth` gate preventing old fallback names from returning to `open-tab-intent.ts`.
+
+## How To Prevent Recurrence
+
+1. Add hard boundary gates.
+- Scan `src/server/**` for forbidden client-state symbols such as `widthMode`, `viewport`, `foreground`, `active tab`, `follow`, `reading`.
+- Scan page and UI layers for direct `createSession/closeSession/switchSession` calls outside the session-open owner hooks.
+- Scan core truth modules for `fallback*` names in non-presentation code.
+- Scan `TerminalSessionDrawer` for `default` / `本机` host identity fallback.
+
+2. Add owner-call maps.
+- Each feature must list one owner module, one allowed surface, one forbidden surface, and one test gate set.
+- Any new path must be registered before code is added.
+
+3. Add red tests for the failure modes.
+- daemon must not keep client policy as long-lived state
+- UI must not create identity when projection is missing
+- persistence failure must not become empty truth
+- tab restore must not auto-reopen by fallback
+
+4. Add explicit error propagation for truth stores.
+- persistence read/write failures should return explicit failure results
+- caller decides whether to show a recoverable error, but must not silently pretend success
+
+5. Add review checklist before merge.
+- Which block owns this?
+- Is the change removing, separating, or keeping?
+- Did it introduce fallback in core truth?
+- Did it add a second owner?
+- Did it add a silent failure path?
+
+## Immediate Next Move
+
+1. Update feature registry / function map if a boundary changes.
+2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
+3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
+4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers open-tab fallback names, App lifecycle ownership, remediation doc presence, and drawer host identity fallback.
+
+## Repair Log
+
+### 2026-07-02 second slice: session transport-mode rebuild
+
+- Block: Session Orchestration Block.
+- Decision: Separate.
+- Removed from `App.tsx`: direct force relay / use auto lifecycle sequence `closeSession -> createSession -> switchSession`.
+- Owner now: `src/hooks/useSessionOpenActions.ts`.
+- Positive tests: `useSessionOpenActions.test.tsx` proves force relay and auto mode rebuild the same `sessionId` in the owner hook.
+- Negative tests: missing relay token produces explicit alert and no runtime lifecycle call; `architecture-boundary-truth.test.ts` prevents force relay / use auto lifecycle code from returning to `App.tsx`.
+
+### 2026-07-02 third slice: daemon client width policy removal
+
+- Block: Daemon Truth Block.
+- Decision: Remove.
+- Removed from daemon truth: `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, adaptive-width reconcile state, and tmux `resize-window` / `window-size latest` ownership driven by client width policy.
+- Kept only as wire compatibility: attach / resize payload may still contain `widthMode`, but daemon treats it as non-persistent request metadata and does not store it as session or mirror truth.
+- Positive tests: `terminal-mirror-runtime.test.ts` proves attach payload remains accepted and resize still schedules mirror sync.
+- Negative tests: `server.transport-lifecycle-truth.test.ts` scans true owner files so `widthMode/adaptiveCols` state and tmux resize ownership cannot return; detach tests prove subscriber removal does not mutate tmux width policy.
+
+### 2026-07-02 fourth slice: drawer host identity sentinel removal
+
+- Block: UI Projection Block.
+- Decision: Remove.
+- Removed from `TerminalSessionDrawer`: drawer-internal `default` host key, `本机` host label fallback, and new-session callback propagation of fake host identity.
+- Kept only as local UI grouping: unscoped sessions may share a private internal group key for rendering, but that key is not a host identity and is not passed to refresh/create callbacks.
+- Owner remains: `TerminalPage` and `server-identity.ts` inject `hostKey/hostLabel`; drawer only consumes the projection.
+- Positive tests: `TerminalSessionDrawer.test.tsx` proves real host groups still pass the selected host key into new-session creation.
+- Negative tests: `TerminalSessionDrawer.test.tsx` proves missing hostKey calls `onOpenQuickTabPicker(undefined, ...)`, and `architecture-boundary-truth.test.ts` prevents `default` / `本机` host fallback from returning to the drawer.

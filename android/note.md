@@ -1,3 +1,20 @@
+# 2026-07-02 UI projection drawer host identity sentinel removal
+
+- 架构映射：本 slice 属于 `terminal.session_drawer` / UI Projection Block；唯一 identity owner 是 `TerminalPage` projection + `src/lib/server-identity.ts`，`TerminalSessionDrawer` 只消费 `hostKey/hostLabel`。
+- 修复：物理移除 drawer 内部 `default` hostKey 与 `本机` hostLabel fallback；未注入 hostKey 的 session 只进入 private unscoped UI group，不再把 fake host identity 传给 refresh/create callback。
+- 防复发：`src/lib/architecture-boundary-truth.test.ts` 增加 drawer host identity fallback 扫描；`TerminalSessionDrawer.test.tsx` 增加缺失 hostKey 时 `onOpenQuickTabPicker(undefined, ...)` 的反向测试。
+- 验证：`pnpm --dir android exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/lib/architecture-boundary-truth.test.ts --reporter dot` PASS（2 files / 19 tests）；`pnpm --dir android run test:feature-registry -- --reporter dot` PASS（3 files / 13 tests）；`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS。
+- 证明范围：这是 L0 + L1/L4 drawer projection gate；未触碰 daemon/tmux/client transport，因此本轮不宣称 L2/L3 连接闭环。
+
+# 2026-07-02 daemon truth live validation close-loop
+
+- Jason 指出 daemon/tmux 真实验证肯定可做也必须做；本次 daemon truth 架构切片不能只用单测、静态 gate、typecheck 收口。
+- 已检查 `scripts/daemon-mirror-close-loop.ts` / `scripts/daemon-mirror-lab.ts` / `scripts/run-daemon-mirror-lab.sh`：live lab 使用当前代码启动 managed daemon、创建固定 tmux session `zterm_mirror_lab`、通过 WebSocket control/session 链路连接，并用 tmux capture 作为 oracle；清理只针对明确 daemon PID 和明确 tmux session，不使用 broad kill。
+- 本机前置：`/opt/homebrew/bin/tmux`，`tmux 3.6a`，`pnpm` 可用，`tsx v4.21.0`。
+- 真实闭环验证已跑：`pnpm --dir android run daemon:mirror:close-loop` PASS。
+- 覆盖 case：`codex-live`、`top-live`、`vim-live`、`initial-sync`、`local-input-echo`、`external-input-echo`、`daemon-restart-recover`、`schedule-fire` 全部 PASS；每个 case replay + strict audit 通过，summary 写入 `android/evidence/daemon-mirror/2026-07-02/summary.json`。
+- 这次证据证明：当前代码 daemon 可真实启动，WebSocket session-open/connect/input/head/sync 主链可通，tmux oracle 与 daemon/client replay 一致，daemon restart 后可恢复，schedule fire 可进入 tmux 并被 buffer-sync 捕获。
+
 # 2026-07-01 Android bottom chrome / drawer close audit
 
 - 现场“不同手机/IME 抬起后底部输入框看不见”不是 buffer/renderer 真源问题；本轮定位到 UI shell chrome 计算漏算 `TerminalQuickBarShell` 自身的 `TERMINAL_QUICK_BAR_RENDER_LIFT_PX=30`。`TerminalPage` 以前只把 `quickBarHeight` 交给 `TerminalStageShell.bottom`，quickbar shell 又额外 bottom 30px，导致终端底部可能被 quickbar shell 覆盖。
@@ -1274,3 +1291,35 @@ Need runtime debug to confirm:
 # 2026-07-02 Drawer catalog-only session projection
 - 现场问题：Terminal drawer 仍显示已经打开过但 daemon 不再枚举到的旧 tab。根因在 `TerminalPage.drawerSessions`：catalog 投影后又追加 `runtimeOnly` 本地 sessions，导致 stale opened tabs 绕过 daemon live session 真源。
 - 修复方向：drawer rows 只消费 `sessionGroups` daemon catalog，再把命中的 live runtime session 合并 status/active；不在 catalog 内的 runtime session 不显示在抽屉。回归：`TerminalPage.session-drawer.test.tsx` 锁住 catalog live/remote-only 显示，stale opened tab 隐藏。
+# 2026-07-02 architecture audit findings
+
+- 只读审计范围：模块化/边界清晰、数据与控制分离、无 fallback、无静默失败。已验证 `feature-registry-truth` 与 `function-wiki-truth` 当前 PASS，但 gate 只检查文档/路径存在与字符串对齐，不检查 forbidden path 真实调用、daemon 是否持有 client 状态、fallback/silent failure 静态违规。
+- 高风险发现：`src/server/terminal-runtime-types.ts` 与 `src/server/terminal-mirror-runtime.ts` 仍在 daemon session/mirror 内保存 `widthMode/adaptiveCols`，并由 subscriber width mode 反向影响 tmux resize；这与“daemon 不持有客户端 width mode / viewport truth”规则冲突。
+- 高风险发现：`src/App.tsx` 的 force relay / use auto handler 直接 `closeSession -> setTimeout -> createSession -> switchSession`，绕过 `useSessionOpenActions` / open-tab owner，属于页面层承载 session lifecycle 控制。
+- 静默失败发现：`open-tab-persistence` 读/写 `OPEN_TABS` / `ACTIVE_SESSION` 失败时只 `console.error` 并返回空/继续，容易把存储损坏/不可写投影成“没有打开 tabs”，缺显式错误链或 UI 事实。
+- fallback/默认值发现：`TerminalSessionDrawer` 对缺 hostKey session 使用 `default/本机` sentinel；`open-tab-intent` 仍暴露 `fallbackActiveSessionId/fallbackSessionIds` 激活替代路径。需要区分 UI presentation fallback 与业务真源 fallback，并加 gate 禁止关键真源使用 fallback 命名/语义。
+
+# 2026-07-02 IME lift inconsistent across phones
+
+- 架构映射：问题属于 UI Projection / Layout Shell 的 `terminal.keyboard_ime`，owner 是 `terminal-keyboard-lift.ts`、`TerminalPage.tsx`、`TerminalPageStageShell.tsx`；禁止改 `TerminalView`、daemon、buffer manager。
+- 现场两台手机键盘弹起时 quickbar/terminal shell 有的上抬、有的没上抬。高风险根因：WebView/visualViewport 指标在某些设备上看起来像“已 resize”，但真实 root/container 并未被 Android 推到键盘上方；当前 `isKeyboardViewportAlreadyResized()` 只看 stable height > current layout + visualViewportBottom≈current layout，可能把 adjustPan/overlay 设备误判成已 resize，返回 lift=0。
+- 已验证更精确根因：`TerminalStageShell.bottom` 已包含 `quickBarHeight + touchSafeOffset + TERMINAL_QUICK_BAR_RENDER_LIFT_PX + IME lift`，但 `TerminalQuickBarShell.bottom` 只包含 `touchSafeOffset + IME lift`，少了 quickbar 自身 `TERMINAL_QUICK_BAR_RENDER_LIFT_PX=30` 基线。修复为 QuickBar shell 同样纳入 render lift；红测先红后绿。验证：IME owner gate 59 tests PASS，`tsc --noEmit` PASS。
+
+# 2026-07-02 architecture remediation slice: open-tab truth
+
+- 架构映射：本轮属于 Persistence Truth Block / `terminal.open_tabs`，owner 是 `src/lib/open-tab-intent.ts` 与 `src/lib/open-tab-persistence.ts`；允许路径限 open-tab hooks/tests/package gate，禁止改 daemon / renderer / Connections projection。
+- 修复：`fallbackActiveSessionId` 改为显式 `preserveActiveSessionId` policy，`fallbackSessionIds` 改为 `nextActiveCandidateSessionIds` policy；`architecture-boundary-truth.test.ts` 接入 `test:feature-registry`，防止旧 fallback 命名回到 core intent。
+- 修复：`readPersistedOpenTabsState()` / `readPersistedActiveSessionIdState()` 现在返回 `status: failed/invalid` 与 `error`，`persistOpenTabsState()` / `persistActiveSessionId()` 返回 `{ ok:false, error }`；调用方至少记录 `open-tabs.persistence.write-failed`，不再只有 void/空 truth。
+- 验证：open-tabs required gates PASS（52 tests），open-tab runtime/session action slice PASS（59 tests），`test:feature-registry` PASS（11 tests），`tsc --noEmit` PASS。
+
+# 2026-07-02 architecture remediation slice: session orchestration owner
+
+- 架构映射：本轮属于 Session Orchestration Block / `terminal.open_tabs` action surface，owner 是 `src/hooks/useSessionOpenActions.ts`；处理方式是分离下沉，禁止 `App.tsx` 直接决定 force relay / use auto 的 close/create/switch 生命周期。
+- 修复：`App.tsx` 删除 force relay / use auto 里的 Host 构造与 `closeSession -> setTimeout -> createSession -> switchSession` 序列，只把 `TerminalPage` intent 交给 owner action；`useSessionOpenActions` 负责同 `sessionId` 下按 `transportMode: webrtc/auto` 重建 runtime，并显式 alert 缺 relay token / daemonHostId。
+- 回归：`useSessionOpenActions.test.tsx` 正向锁 force relay / auto mode rebuild；反向锁缺 relay token 不触发 runtime lifecycle；`architecture-boundary-truth.test.ts` 锁 `App.tsx` 不再包含 force relay / use auto 生命周期实现。
+
+# 2026-07-02 architecture remediation slice: daemon client width policy removal
+
+- 架构映射：本轮属于 Daemon Truth Block / `terminal.transport_lifecycle`，owner 是 `src/server/terminal-runtime-types.ts`、`src/server/terminal-mirror-runtime.ts`、`src/server/terminal-runtime.ts`；处理方式是物理移除，禁止 daemon 持有 client `widthMode/adaptiveCols` 或按 client resize 改写 tmux 宽度。
+- 修复：删除 `TerminalSession.widthMode`、`SessionMirror.adaptiveCols`、adaptive width reconcile、detach/close 时释放 manual width 的逻辑；attach/resize wire 仍接受 `widthMode` 字段作为兼容输入，但只触发 mirror sync，不进入 daemon session/mirror truth。
+- 回归：`server.transport-lifecycle-truth.test.ts` 扫 owner 文件防止 `widthMode/adaptiveCols` state 和 tmux resize ownership 复活；`terminal-mirror-runtime.test.ts` 锁 attach payload 可兼容但不存 policy；`terminal-runtime.detached-session.test.ts` 锁 detach 不再 mutate tmux width policy；daemon/transport/tsc gates 已通过。
