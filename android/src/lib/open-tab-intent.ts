@@ -282,7 +282,7 @@ export function upsertOpenTabIntentSession(
   tab: PersistedOpenTab,
   options?: {
     activate?: boolean;
-    fallbackActiveSessionId?: string | null;
+    preserveActiveSessionId?: string | null;
   },
 ): OpenTabIntentState {
   const existingTab = currentState.tabs.find((item) => item.sessionId === tab.sessionId) || null;
@@ -299,7 +299,7 @@ export function upsertOpenTabIntentSession(
     : (
       shouldRewriteActiveSessionId
         ? nextTab.sessionId
-        : (currentState.activeSessionId || options?.fallbackActiveSessionId || null)
+        : (currentState.activeSessionId || options?.preserveActiveSessionId || null)
     );
   let inserted = false;
   return normalizeOpenTabIntentState(
@@ -365,7 +365,7 @@ export function closeOpenTabIntentSession(
   sessionId: string,
   options?: {
     runtimeActiveSessionId?: string | null;
-    fallbackSessionIds?: string[];
+    nextActiveCandidateSessionIds?: string[];
     runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
   },
 ): OpenTabIntentState {
@@ -374,7 +374,7 @@ export function closeOpenTabIntentSession(
     currentState.activeSessionId === sessionId
       ? (
         nextTabs[0]?.sessionId
-        || options?.fallbackSessionIds?.find((id) => id !== sessionId)
+        || options?.nextActiveCandidateSessionIds?.find((id) => id !== sessionId)
         || null
       )
       : (
@@ -391,7 +391,7 @@ export function deriveCloseOpenTabIntent(
   sessionId: string,
   options?: {
     runtimeActiveSessionId?: string | null;
-    fallbackSessionIds?: string[];
+    nextActiveCandidateSessionIds?: string[];
     runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
   },
 ): CloseOpenTabIntentResult {

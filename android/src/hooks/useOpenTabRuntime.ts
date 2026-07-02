@@ -108,7 +108,7 @@ export interface OpenTabRuntimeResult {
   runtimeRefs: OpenTabRuntimeRefs;
   applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
+    options?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   handleSwitchSession: (sessionId: string) => void;
   handleMoveSession: (sessionId: string, toIndex: number) => void;
@@ -217,7 +217,12 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     if (persistOptions?.markExplicitTruth !== false) {
       hasPersistedOpenTabsTruthRef.current = true;
     }
-    persistOpenTabsState(nextState.tabs, nextState.activeSessionId);
+    const persistResult = persistOpenTabsState(nextState.tabs, nextState.activeSessionId);
+    if (!persistResult.ok) {
+      runtimeDebug('open-tabs.persistence.write-failed', {
+        error: persistResult.error instanceof Error ? persistResult.error.message : String(persistResult.error),
+      });
+    }
     return nextState;
   }, []);
 
@@ -278,11 +283,11 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;
   }, persistOptions?: {
-    fallbackActiveSessionId?: string | null;
+    preserveActiveSessionId?: string | null;
     switchRuntime?: OpenTabRuntimeSwitchReason;
     markExplicitTruth?: boolean;
   }) => {
-    const normalizedActiveSessionId = nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null;
+    const normalizedActiveSessionId = nextState.activeSessionId ?? persistOptions?.preserveActiveSessionId ?? null;
     if (persistOptions?.switchRuntime) {
       return persistAndSwitchExplicitOpenTabs(nextState.tabs, normalizedActiveSessionId, persistOptions.switchRuntime);
     }
@@ -293,7 +298,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
   const applyClosedOpenTabIntent = useCallback((sessionId: string, closeOptions?: {
     runtimeActiveSessionId?: string | null;
-    fallbackSessionIds?: string[];
+    nextActiveCandidateSessionIds?: string[];
     runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken'>>;
     closeRuntimeSession?: boolean;
     clearDraft?: boolean;
@@ -307,7 +312,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     const runtimeSessions = closeOptions?.runtimeSessions || sessionsRef.current;
     const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, normalizedSessionId, {
       runtimeActiveSessionId: closeOptions?.runtimeActiveSessionId ?? runtimeActiveSessionIdRef.current,
-      fallbackSessionIds: closeOptions?.fallbackSessionIds ?? runtimeSessions.map((session) => session.id),
+      nextActiveCandidateSessionIds: closeOptions?.nextActiveCandidateSessionIds ?? runtimeSessions.map((session) => session.id),
       runtimeSessions,
     });
     if (closeResult.closedReuseKeyVariants.length > 0) {

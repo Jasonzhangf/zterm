@@ -49,7 +49,6 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: 'demo',
-    widthMode: 'mirror-fixed',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -208,13 +207,11 @@ describe('terminal message runtime explicit error truth', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const { runtime, sessions, sendMessage } = createRuntime({ mirror });
@@ -257,12 +254,10 @@ describe('terminal message runtime explicit error truth', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const { runtime, sessions, refreshMirrorHeadForSession, sendBufferHeadToSession } = createRuntime({ mirror });
@@ -297,12 +292,10 @@ describe('terminal message runtime explicit error truth', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const { runtime, sessions, sendBufferHeadToSession } = createRuntime({ mirror });
@@ -359,7 +352,7 @@ describe('terminal message runtime explicit error truth', () => {
     );
   });
 
-  it('routes adaptive-phone resize frames to daemon width owner without terminal input fallback', async () => {
+  it('routes resize frames as compatibility no-op without terminal input fallback', async () => {
     const { runtime, sessions, sendTransportMessage, handleInput, closeSession, handleAdaptiveResize } = createRuntime();
     const session = createSession();
     sessions.set(session.id, session);

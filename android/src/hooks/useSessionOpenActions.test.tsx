@@ -37,11 +37,13 @@ function createOptions(overrides: Partial<any> = {}) {
   const deleteSessionGroup = vi.fn();
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
+  const closeSession = vi.fn();
+  const switchSession = vi.fn();
   const setPageState = vi.fn();
-  const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
+  const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
-      nextState.activeSessionId ?? persistOptions?.fallbackActiveSessionId ?? null,
+      nextState.activeSessionId ?? persistOptions?.preserveActiveSessionId ?? null,
     );
     openTabStateRef.current = normalized;
     return normalized;
@@ -87,6 +89,8 @@ function createOptions(overrides: Partial<any> = {}) {
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
     createSession,
+    closeSession,
+    switchSession,
     runtimeActiveSessionId: overrides.runtimeActiveSessionId ?? null,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -109,6 +113,8 @@ function createOptions(overrides: Partial<any> = {}) {
       deleteSessionGroup,
       pruneSessionGroupSelectionToRemoteTruth,
       ensureTerminalPageVisible,
+      closeSession,
+      switchSession,
       applyOpenTabState,
       setPageState,
     },
@@ -761,6 +767,148 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.createSession).toHaveBeenCalledTimes(1);
     expect(harness.refs.openTabStateRef.current.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a']);
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('saved-a');
+  });
+
+  it('rebuilds a force-relay tab inside the session-open owner', () => {
+    const harness = createOptions({
+      bridgeSettings: {
+        servers: [{
+          id: 'preset-1',
+          name: 'Preset A',
+          targetHost: '100.127.23.27',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'daemon-a',
+          relayDeviceId: 'device-a',
+        }],
+        targetHost: '100.127.23.27',
+        targetPort: 3333,
+        targetAuthToken: 'token-a',
+        defaultServerId: 'preset-1',
+        traversalRelay: { accessToken: 'relay-token' },
+      },
+      sessions: [{
+        id: 'session-live',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        state: 'connected',
+      }],
+    });
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-live',
+      hostId: 'host-a',
+      connectionName: 'Conn A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'shared',
+      authToken: 'token-a',
+      createdAt: 1000,
+      customName: 'Custom Shared',
+    }], 'session-live');
+
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleForceRelaySession('session-live');
+    });
+
+    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-live');
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        sessionName: 'shared',
+        transportMode: 'webrtc',
+      }),
+      expect.objectContaining({
+        sessionId: 'session-live',
+        createdAt: 1000,
+        customName: 'Custom Shared',
+      }),
+    );
+    expect(harness.spies.switchSession).toHaveBeenCalledWith('session-live');
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not rebuild force-relay when explicit relay prerequisites are missing', () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const harness = createOptions();
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-live',
+      hostId: 'host-a',
+      connectionName: 'Conn A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'shared',
+      authToken: 'token-a',
+      createdAt: 1000,
+    }], 'session-live');
+
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleForceRelaySession('session-live');
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('请先在 Settings 登录 Relay 控制面。');
+    expect(harness.spies.closeSession).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).not.toHaveBeenCalled();
+    expect(harness.spies.switchSession).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds a session back to auto mode inside the session-open owner', () => {
+    const harness = createOptions({
+      sessions: [{
+        id: 'session-live',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'shared',
+        authToken: 'token-a',
+        state: 'connected',
+      }],
+    });
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-live',
+      hostId: 'host-a',
+      connectionName: 'Conn A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'shared',
+      authToken: 'token-a',
+      createdAt: 1000,
+    }], 'session-live');
+
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleUseAutoSession('session-live');
+    });
+
+    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-live');
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        sessionName: 'shared',
+        transportMode: 'auto',
+      }),
+      expect.objectContaining({
+        sessionId: 'session-live',
+        createdAt: 1000,
+      }),
+    );
+    expect(harness.spies.switchSession).toHaveBeenCalledWith('session-live');
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 
   it('skips closed tabs and preserves their reuse tombstones when loading saved tab list', async () => {

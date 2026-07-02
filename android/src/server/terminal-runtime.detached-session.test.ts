@@ -120,13 +120,11 @@ describe('terminal runtime detached transport cleanup', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set([session.id]),
     };
 
@@ -145,7 +143,7 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(mirror.subscribers.has(session.id)).toBe(false);
   });
 
-  it('releases tmux manual window-size and refreshes geometry after the last adaptive subscriber detaches', () => {
+  it('detaches subscribers without mutating tmux width policy', () => {
     const { runtime, mirrors, runTmux, setPaneMetrics } = createDeps();
     const connection = createTransportConnection('transport-1');
     const session = runtime.createTransportBoundSession(connection);
@@ -172,27 +170,24 @@ describe('terminal runtime detached transport cleanup', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map([[session.id, { cols: 56, widthMode: 'adaptive-phone' }]]),
       subscribers: new Set([session.id]),
     };
 
     mirrors.set(mirror.key, mirror);
     session.sessionName = mirror.sessionName;
     session.mirrorKey = mirror.key;
-    session.widthMode = 'adaptive-phone';
 
     runtime.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-t', 'demo', 'window-size', 'latest']);
-    expect(mirror.cols).toBe(99);
-    expect(mirror.rows).toBe(56);
-    expect(mirror.baselineCols).toBe(99);
-    expect(mirror.baselineRows).toBe(56);
-    expect(mirror.adaptiveCols.has(session.id)).toBe(false);
+    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-t', 'demo', 'window-size', 'latest']);
+    expect(mirror.cols).toBe(56);
+    expect(mirror.rows).toBe(24);
+    expect(mirror.baselineCols).toBe(56);
+    expect(mirror.baselineRows).toBe(24);
+    expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 });

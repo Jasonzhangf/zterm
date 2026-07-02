@@ -14,7 +14,7 @@ interface ApplyOpenTabStateFn {
       tabs: PersistedOpenTab[];
       activeSessionId: string | null;
     },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
+    options?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
   ): {
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;
@@ -34,7 +34,7 @@ interface UseOpenTabSessionActionsOptions {
   renameSession: (sessionId: string, name: string) => void;
   applyClosedOpenTabIntent: (sessionId: string, closeOptions?: {
     runtimeActiveSessionId?: string | null;
-    fallbackSessionIds?: string[];
+    nextActiveCandidateSessionIds?: string[];
     runtimeSessions?: Array<Pick<Session, 'id' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'authToken'>>;
     closeRuntimeSession?: boolean;
     clearDraft?: boolean;
@@ -71,7 +71,7 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   const handleMoveSession = useCallback((sessionId: string, toIndex: number) => {
     const nextOpenTabState = moveOpenTabIntentSession(openTabStateRef.current, sessionId, toIndex);
     applyOpenTabState(nextOpenTabState, {
-      fallbackActiveSessionId: openTabStateRef.current.activeSessionId,
+      preserveActiveSessionId: openTabStateRef.current.activeSessionId,
     });
     moveSession(sessionId, toIndex);
   }, [
@@ -83,7 +83,7 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
   const handleRenameSession = useCallback((sessionId: string, name: string) => {
     const nextOpenTabState = renameOpenTabIntentSession(openTabStateRef.current, sessionId, name);
     applyOpenTabState(nextOpenTabState, {
-      fallbackActiveSessionId: openTabStateRef.current.activeSessionId,
+      preserveActiveSessionId: openTabStateRef.current.activeSessionId,
     });
     renameSession(sessionId, name);
   }, [
@@ -111,7 +111,7 @@ export function useOpenTabSessionActions(options: UseOpenTabSessionActionsOption
     applyClosedOpenTabIntent(sessionId, {
       runtimeSessions,
       runtimeActiveSessionId: currentRuntimeActiveSessionId,
-      fallbackSessionIds: runtimeSessions.filter((session) => session.id !== sessionId).map((session) => session.id),
+      nextActiveCandidateSessionIds: runtimeSessions.filter((session) => session.id !== sessionId).map((session) => session.id),
       closeRuntimeSession: true,
       clearDraft: true,
       source,

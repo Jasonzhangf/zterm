@@ -22,7 +22,7 @@ interface ApplyOpenTabStateFn {
       tabs: PersistedOpenTab[];
       activeSessionId: string | null;
     },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
+    options?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason; markExplicitTruth?: boolean },
   ): {
     tabs: PersistedOpenTab[];
     activeSessionId: string | null;

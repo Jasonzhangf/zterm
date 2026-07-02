@@ -68,12 +68,14 @@ interface UseSessionOpenActionsOptions {
       sessionId?: string;
     },
   ) => string;
+  closeSession: (sessionId: string) => void;
+  switchSession: (sessionId: string) => void;
   runtimeActiveSessionId: string | null;
   runtimeRefs: OpenTabRuntimeRefs;
   ensureTerminalPageVisible: () => void;
   applyOpenTabState: (
     nextState: { tabs: PersistedOpenTab[]; activeSessionId: string | null },
-    options?: { fallbackActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
+    options?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   onSessionsOpenedInPane?: (sessionIds: string[], paneId: string) => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
@@ -121,6 +123,8 @@ export interface SessionOpenActionsResult {
   handleSelectCleanSession: (target: BridgeTarget) => void;
   handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[]) => void;
   handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<void>;
+  handleForceRelaySession: (sessionId: string) => void;
+  handleUseAutoSession: (sessionId: string) => void;
   closePicker: () => void;
 }
 
@@ -134,6 +138,8 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
     createSession,
+    closeSession,
+    switchSession,
     runtimeActiveSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -232,7 +238,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       openedTab,
       {
         activate: shouldActivate,
-        fallbackActiveSessionId: runtimeActiveSessionId,
+        preserveActiveSessionId: runtimeActiveSessionId,
       },
     );
     applyOpenTabState(nextOpenTabState, shouldActivate ? {
@@ -619,6 +625,123 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleRemoteSessionsRefreshed(target, sessionNames);
   }, [bridgeSettings, handleRemoteSessionsRefreshed, resolveTargetByHostKey]);
 
+  const resolveCanonicalRelayHostId = useCallback((tab: PersistedOpenTab) => {
+    const currentBridgeSettings = bridgeSettingsRef.current;
+    return (
+      currentBridgeSettings.servers.find((server) => (
+        server.id === currentBridgeSettings.defaultServerId
+        && server.targetHost === tab.bridgeHost
+        && server.targetPort === tab.bridgePort
+        && server.relayHostId?.trim()
+      ))?.relayHostId?.trim()
+      || currentBridgeSettings.servers.find((server) => (
+        server.targetHost === tab.bridgeHost
+        && server.targetPort === tab.bridgePort
+        && server.relayHostId?.trim()
+        && server.relayDeviceId?.trim()
+      ))?.relayHostId?.trim()
+      || ''
+    );
+  }, [bridgeSettingsRef]);
+
+  const reconnectOpenTabWithHost = useCallback((sessionId: string, host: Host, tab: PersistedOpenTab, eventName: string, payload: Record<string, unknown>) => {
+    runtimeDebug(eventName, payload);
+    closeSession(sessionId);
+    createSession(host, {
+      sessionId,
+      createdAt: tab.createdAt,
+      customName: tab.customName,
+    });
+    switchSession(sessionId);
+    ensureTerminalPageVisible();
+  }, [closeSession, createSession, ensureTerminalPageVisible, switchSession]);
+
+  const handleForceRelaySession = useCallback((sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === normalizedSessionId);
+    const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
+    const relayAccessToken = bridgeSettingsRef.current.traversalRelay?.accessToken?.trim();
+    if (!relayAccessToken) {
+      window.alert?.('请先在 Settings 登录 Relay 控制面。');
+      return;
+    }
+    if (!tab) {
+      window.alert?.('当前 tab 缺少连接信息，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
+      return;
+    }
+    const relayHostId = resolveCanonicalRelayHostId(tab) || tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
+    if (!relayHostId) {
+      window.alert?.('当前 tab 缺少 daemonHostId，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
+      return;
+    }
+
+    const relayHost: Host = {
+      id: tab.hostId || `force-relay:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
+      createdAt: tab.createdAt || Date.now(),
+      name: tab.connectionName || tab.sessionName,
+      bridgeHost: tab.bridgeHost,
+      bridgePort: tab.bridgePort,
+      daemonHostId: relayHostId,
+      relayHostId,
+      sessionName: tab.sessionName,
+      authToken: tab.authToken,
+      autoCommand: tab.autoCommand,
+      transportMode: 'webrtc',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      lastConnected: Date.now(),
+    };
+    reconnectOpenTabWithHost(normalizedSessionId, relayHost, tab, 'app.session.force-relay', {
+      sessionId: normalizedSessionId,
+      relayHostId,
+      sessionName: relayHost.sessionName,
+      bridgeHost: relayHost.bridgeHost,
+      bridgePort: relayHost.bridgePort,
+    });
+  }, [
+    bridgeSettingsRef,
+    openTabStateRef,
+    reconnectOpenTabWithHost,
+    resolveCanonicalRelayHostId,
+    sessionsRef,
+  ]);
+
+  const handleUseAutoSession = useCallback((sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === normalizedSessionId);
+    const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
+    if (!tab) {
+      window.alert?.('当前 tab 缺少连接信息，无法切回 Auto。请从连接列表重新打开。');
+      return;
+    }
+    const relayHostId = tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
+    const autoHost: Host = {
+      id: tab.hostId || `auto:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
+      createdAt: tab.createdAt || Date.now(),
+      name: tab.connectionName || tab.sessionName,
+      bridgeHost: tab.bridgeHost,
+      bridgePort: tab.bridgePort,
+      daemonHostId: relayHostId || undefined,
+      relayHostId: relayHostId || undefined,
+      sessionName: tab.sessionName,
+      authToken: tab.authToken,
+      autoCommand: tab.autoCommand,
+      transportMode: 'auto',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      lastConnected: Date.now(),
+    };
+    reconnectOpenTabWithHost(normalizedSessionId, autoHost, tab, 'app.session.use-auto', {
+      sessionId: normalizedSessionId,
+      relayHostId: relayHostId || null,
+      sessionName: autoHost.sessionName,
+      bridgeHost: autoHost.bridgeHost,
+      bridgePort: autoHost.bridgePort,
+    });
+  }, [openTabStateRef, reconnectOpenTabWithHost, sessionsRef]);
+
   const closePicker = useCallback(() => {
     setPickerMode(null);
     setPickerScopePaneId(null);
@@ -642,6 +765,8 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
     handleRefreshDrawerHostSessions,
+    handleForceRelaySession,
+    handleUseAutoSession,
     closePicker,
   };
 }

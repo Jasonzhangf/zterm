@@ -6,34 +6,56 @@ import {
 } from './session-semantic-identity';
 import { STORAGE_KEYS, type Host, type PersistedOpenTab, type Session } from './types';
 
+export type PersistedActiveSessionIdState =
+  | { status: 'unavailable' | 'empty' | 'available'; activeSessionId: string | null }
+  | { status: 'failed'; activeSessionId: null; error: unknown };
+
+export type PersistedOpenTabsState =
+  | { status: 'unavailable' | 'empty'; tabs: PersistedOpenTab[]; hasStoredValue: false }
+  | { status: 'available'; tabs: PersistedOpenTab[]; hasStoredValue: true }
+  | { status: 'invalid' | 'failed'; tabs: PersistedOpenTab[]; hasStoredValue: true; error: unknown };
+
+export type PersistOpenTabsStateResult =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
 export function readPersistedActiveSessionId() {
+  return readPersistedActiveSessionIdState().activeSessionId;
+}
+
+export function readPersistedActiveSessionIdState(): PersistedActiveSessionIdState {
   if (typeof window === 'undefined') {
-    return null;
+    return { status: 'unavailable', activeSessionId: null };
   }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION);
-    return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+    const activeSessionId = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+    return activeSessionId
+      ? { status: 'available', activeSessionId }
+      : { status: 'empty', activeSessionId: null };
   } catch (error) {
     console.error('[open-tab-persistence] Failed to restore active session:', error);
-    return null;
+    return { status: 'failed', activeSessionId: null, error };
   }
 }
 
-export function persistActiveSessionId(activeSessionId: string | null) {
+export function persistActiveSessionId(activeSessionId: string | null): PersistOpenTabsStateResult {
   if (typeof window === 'undefined') {
-    return;
+    return { ok: true };
   }
 
   try {
     const normalized = typeof activeSessionId === 'string' ? activeSessionId.trim() : '';
     if (normalized) {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, normalized);
-      return;
+      return { ok: true };
     }
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+    return { ok: true };
   } catch (error) {
     console.error('[open-tab-persistence] Failed to persist active session:', error);
+    return { ok: false, error };
   }
 }
 
@@ -137,9 +159,10 @@ export function readPersistedOpenTabs() {
   return readPersistedOpenTabsState().tabs;
 }
 
-export function readPersistedOpenTabsState() {
+export function readPersistedOpenTabsState(): PersistedOpenTabsState {
   if (typeof window === 'undefined') {
     return {
+      status: 'unavailable',
       tabs: [] as PersistedOpenTab[],
       hasStoredValue: false,
     };
@@ -149,6 +172,7 @@ export function readPersistedOpenTabsState() {
     const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
     if (!raw) {
       return {
+        status: 'empty',
         tabs: [] as PersistedOpenTab[],
         hasStoredValue: false,
       };
@@ -156,11 +180,14 @@ export function readPersistedOpenTabsState() {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       return {
+        status: 'invalid',
         tabs: [] as PersistedOpenTab[],
-        hasStoredValue: false,
+        hasStoredValue: true,
+        error: new Error('Persisted OPEN_TABS value is not an array'),
       };
     }
     return {
+      status: 'available',
       tabs: parsed
         .map(normalizePersistedOpenTab)
         .filter((item): item is PersistedOpenTab => item !== null),
@@ -169,8 +196,10 @@ export function readPersistedOpenTabsState() {
   } catch (error) {
     console.error('[open-tab-persistence] Failed to restore open tabs:', error);
     return {
+      status: 'failed',
       tabs: [] as PersistedOpenTab[],
-      hasStoredValue: false,
+      hasStoredValue: true,
+      error,
     };
   }
 }
@@ -215,16 +244,21 @@ export function buildPersistedOpenTabFromHostSession(options: {
   };
 }
 
-export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null) {
+export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null): PersistOpenTabsStateResult {
   if (typeof window === 'undefined') {
-    return;
+    return { ok: true };
   }
 
   try {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
-    persistActiveSessionId(activeSessionId);
+    const activeSessionResult = persistActiveSessionId(activeSessionId);
+    if (!activeSessionResult.ok) {
+      return activeSessionResult;
+    }
+    return { ok: true };
   } catch (error) {
     console.error('[open-tab-persistence] Failed to persist open tabs:', error);
+    return { ok: false, error };
   }
 }
 

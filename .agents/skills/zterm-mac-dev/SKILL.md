@@ -84,19 +84,37 @@ pnpm --filter @zterm/mac type-check
 pnpm --filter @zterm/mac build
 ```
 
-#### B. packaged 门槛（按需）
+#### B. 核心连接门槛
+Mac terminal / transport / runtime 改动必须先跑本地客户端核心连接 gate，不能用 daemon-only probe 替代。
+
+```bash
+pnpm --dir mac test -- --reporter dot
+pnpm --dir mac run type-check
+```
+
+最低覆盖面：
+- `bridge-transport`：remote daemon WebSocket 两阶段握手、connected state、head/body/input 发到 live socket、stale socket 不污染当前连接。
+- `local-tmux-transport`：Electron local tmux API connect、connected event、head/body request、input/resize/activity/disconnect 同一 clientId。
+- `terminal-runtime`：head 变化触发 body sync，same-end revision 变化不能被去重吞掉。
+- workbench active target：tab/pane 切换不重复 reconnect，不把 local/remote target 混成第二状态机。
+
+证明范围：
+- 证明 Mac client transport/runtime 核心连接逻辑可用。
+- 不证明 packaged `.app`、真实窗口、DOM 输入、资源/退出态已闭环。
+
+#### C. packaged 门槛（按需）
 ```bash
 pnpm --filter @zterm/mac package
 ```
 
-#### C. 运行态 smoke 门槛
+#### D. 运行态 smoke 门槛
 至少覆盖本轮改动直接影响的主路径：
 - terminal 能打开
 - input / resize / scroll / split / tab 中与本轮相关的关键路径
 - local tmux 或 remote bridge 至少一条真实链路
 - 若改的是资源/生命周期：补 `ps/top` 资源采样 + 退出态进程检查
 
-#### D. 证据门槛
+#### E. 证据门槛
 证据至少二选二：
 - 命令输出
 - app 截图
@@ -131,6 +149,8 @@ top -pid <renderer_pid> -stats pid,cpu,mem,threads,state,time -l 2
 
 ## 五、反模式
 - 编译过了就让 Jason 手测
+- daemon/tmux probe 绿了就宣称 Mac client 连接正常
+- Mac client core tests 绿了就宣称 packaged `.app` 正常
 - 只在浏览器里验证，却汇报 packaged app 可用
 - 没退出旧 app 就直接打开新 app
 - 没有运行态证据就下“无泄漏 / 无 orphan / 性能已优化”结论

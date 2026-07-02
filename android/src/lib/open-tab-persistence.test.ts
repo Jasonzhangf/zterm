@@ -10,6 +10,7 @@ import {
   persistOpenTabsState,
   persistClosedTabReuseKeys,
   readPersistedActiveSessionId,
+  readPersistedActiveSessionIdState,
   readPersistedClosedTabReuseKeys,
   readPersistedOpenTabsState,
   resolveHostForPersistedOpenTab,
@@ -94,11 +95,13 @@ describe('open-tab persistence truth', () => {
       },
     ]));
 
-    expect(readPersistedOpenTabsState().tabs.map((tab) => tab.sessionId)).toEqual(['old', 'new']);
+    const state = readPersistedOpenTabsState();
+    expect(state.status).toBe('available');
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['old', 'new']);
   });
 
   it('persists exactly the provided tabs and active id without second normalization', () => {
-    persistOpenTabsState([
+    const result = persistOpenTabsState([
       {
         sessionId: 's1',
         hostId: 'host-1',
@@ -111,11 +114,84 @@ describe('open-tab persistence truth', () => {
       },
     ], 'missing-active');
 
+    expect(result).toEqual({ ok: true });
     expect(readPersistedOpenTabsState().tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
     expect(readPersistedActiveSessionId()).toBe('missing-active');
   });
 
-  it('deduplicates persisted tabs by bridge target + tmux session while keeping preferred metadata', () => {
+  it('reports invalid persisted open-tab storage without pretending empty truth', () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify({ tabs: [] }));
+
+    const state = readPersistedOpenTabsState();
+
+    expect(state.status).toBe('invalid');
+    expect(state.hasStoredValue).toBe(true);
+    expect(state.tabs).toEqual([]);
+    expect('error' in state && state.error).toBeTruthy();
+  });
+
+  it('reports open-tab read failures as explicit failed state', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: () => {
+          throw new Error('storage read blocked');
+        },
+      },
+    });
+
+    const state = readPersistedOpenTabsState();
+
+    expect(state.status).toBe('failed');
+    expect(state.hasStoredValue).toBe(true);
+    expect(state.tabs).toEqual([]);
+    expect('error' in state && state.error).toBeInstanceOf(Error);
+  });
+
+  it('reports active-session read failures as explicit failed state', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: () => {
+          throw new Error('active read blocked');
+        },
+      },
+    });
+
+    const state = readPersistedActiveSessionIdState();
+
+    expect(state.status).toBe('failed');
+    expect(state.activeSessionId).toBeNull();
+    expect('error' in state && state.error).toBeInstanceOf(Error);
+  });
+
+  it('reports open-tab write failures as explicit failure result', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        setItem: () => {
+          throw new Error('storage write blocked');
+        },
+      },
+    });
+
+    const result = persistOpenTabsState([
+      {
+        sessionId: 's1',
+        hostId: 'host-1',
+        connectionName: 'Conn 1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        createdAt: 1,
+      },
+    ], 's1');
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBeInstanceOf(Error);
+  });
+
+  it('deduplicates persisted tabs only by physical sessionId, not by bridge target + tmux session', () => {
     expect(dedupePersistedOpenTabs([
       {
         sessionId: 'old',
@@ -139,6 +215,9 @@ describe('open-tab persistence truth', () => {
         createdAt: 2,
       },
     ])).toEqual([
+      expect.objectContaining({
+        sessionId: 'old',
+      }),
       expect.objectContaining({
         sessionId: 'new',
         customName: 'Keep Me',

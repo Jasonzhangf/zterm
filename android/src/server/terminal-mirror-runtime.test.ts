@@ -19,7 +19,6 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: null,
-    widthMode: 'mirror-fixed',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -428,7 +427,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('uses min adaptive cols across concurrent adaptive-phone subscribers', async () => {
+  it('does not keep per-subscriber adaptive width policy across subscribers', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const firstSession = createSession('session-1');
     const secondSession = createSession('session-2');
@@ -450,13 +449,12 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     const mirror = mirrors.get('demo');
-    expect(mirror?.adaptiveCols.get('session-1')?.cols).toBe(120);
-    expect(mirror?.adaptiveCols.get('session-2')?.cols).toBe(80);
-    expect(mirror?.cols).toBe(80);
-    expect(runTmux).toHaveBeenLastCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
+    expect(mirror?.subscribers).toEqual(new Set(['session-1', 'session-2']));
+    expect(mirror?.cols).toBe(120);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
   });
 
-  it('accepts adaptive-phone attach payload with cols only and keeps baseline rows', async () => {
+  it('accepts width-mode attach payload as wire compatibility without storing client policy', async () => {
     const { runtime, sessions, mirrors } = createRuntime();
     const session = createSession('session-1');
     sessions.set(session.id, session);
@@ -468,12 +466,13 @@ describe('terminal mirror runtime lifecycle truth', () => {
     } as any);
 
     const mirror = mirrors.get('demo');
-    expect(mirror?.adaptiveCols.get('session-1')?.cols).toBe(88);
     expect(mirror?.cols).toBe(88);
     expect(mirror?.rows).toBe(40);
+    expect(session).not.toHaveProperty('widthMode');
+    expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
-  it('keeps upstream width untouched for mirror-fixed subscriber attach', async () => {
+  it('keeps existing mirror geometry when a later subscriber sends different client cols', async () => {
     const { runtime, sessions, mirrors } = createRuntime();
     const adaptiveSession = createSession('session-1');
     const fixedSession = createSession('session-2');
@@ -498,7 +497,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(mirror?.cols).toBe(90);
-    expect(mirror?.adaptiveCols.has('session-2')).toBe(false);
+    expect(fixedSession).not.toHaveProperty('widthMode');
+    expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
   it('stops recurring live sync once the last subscriber detaches, then resumes on reattach', async () => {
@@ -754,14 +754,12 @@ describe('terminal mirror runtime lifecycle truth', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set([session.id]),
     };
     session.mirrorKey = mirror.key;

@@ -205,13 +205,11 @@ describe('terminal mirror capture runtime', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       
       flushInFlight: false,
       flushPromise: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     const readSnapshot = vi.fn().mockResolvedValue(stableSnapshot);
@@ -265,13 +263,11 @@ describe('terminal mirror capture runtime', () => {
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
 

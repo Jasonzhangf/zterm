@@ -30,6 +30,14 @@ function readBridgeRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-bridge-runtime.ts'), 'utf8');
 }
 
+function readTerminalRuntimeTypesSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-runtime-types.ts'), 'utf8');
+}
+
+function readTerminalMirrorRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-mirror-runtime.ts'), 'utf8');
+}
+
 function extractBlock(source: string, anchor: string, length = 600) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -128,11 +136,19 @@ describe('server transport/session lifecycle truth gates', () => {
 
   it('does not keep client-style state machine fields in daemon terminal core', () => {
     const source = readServerSource();
+    const runtimeTypesSource = readTerminalRuntimeTypesSource();
+    const mirrorRuntimeSource = readTerminalMirrorRuntimeSource();
     expect(source).not.toContain("state: 'idle' | 'connecting' | 'connected' | 'error' | 'closed'");
     expect(source).not.toContain('session.state =');
     expect(source).not.toContain('mirror.state =');
     expect(source).not.toContain('terminalWidthMode:');
     expect(source).not.toContain('requestedAdaptiveCols:');
+    expect(runtimeTypesSource).not.toContain('widthMode: TerminalWidthMode;');
+    expect(runtimeTypesSource).not.toContain('adaptiveCols:');
+    expect(mirrorRuntimeSource).not.toContain('session.widthMode');
+    expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
+    expect(mirrorRuntimeSource).not.toContain("runTmux(['resize-window'");
+    expect(mirrorRuntimeSource).not.toContain("runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']");
   });
 
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {

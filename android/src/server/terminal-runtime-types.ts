@@ -44,7 +44,6 @@ export interface TerminalSession {
   closeTransport?: (reason: string) => void;
   sessionName: string;
   mirrorKey: string | null;
-  widthMode: TerminalWidthMode;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
 }
@@ -59,7 +58,6 @@ export interface SessionMirror {
   baselineCols?: number;
   baselineRows?: number;
   consecutiveFailures: number;
-  adaptiveCols: Map<string, { cols: number; widthMode: TerminalWidthMode }>;
   cursorKeysApp: boolean;
   revision: number;
   lastScrollbackCount: number;
@@ -71,9 +69,6 @@ export interface SessionMirror {
   lastLiveActivityAt: number;
   // R14: last time a head payload was broadcast to any subscriber of this mirror.
   lastHeadBroadcastAt: number;
-  // R6: last time reconcileMirrorAdaptiveWidth actually issued a tmux
-  // resize-window call. Used to throttle rapid client resize events.
-  lastResizeAt: number;
   lastCaptureDurationMs?: number;
   lastCanonicalizeDurationMs?: number;
   flushInFlight: boolean;

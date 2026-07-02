@@ -333,7 +333,7 @@ describe('open-tab intent truth', () => {
         authToken: 'shared-token',
         createdAt: 3,
       }),
-      { activate: false, fallbackActiveSessionId: 's2' },
+      { activate: false, preserveActiveSessionId: 's2' },
     );
 
     expect(state.tabs).toEqual([
@@ -389,7 +389,7 @@ describe('open-tab intent truth', () => {
       's1',
       {
         runtimeActiveSessionId: 's1',
-        fallbackSessionIds: ['s2', 's3'],
+        nextActiveCandidateSessionIds: ['s2', 's3'],
       },
     );
 
@@ -412,7 +412,7 @@ describe('open-tab intent truth', () => {
       'runtime-new',
       {
         runtimeActiveSessionId: 'runtime-new',
-        fallbackSessionIds: ['s2'],
+        nextActiveCandidateSessionIds: ['s2'],
         runtimeSessions: [
           makeSession('runtime-new', {
             bridgeHost: '100.127.23.27',
@@ -443,7 +443,7 @@ describe('open-tab intent truth', () => {
       'runtime-new',
       {
         runtimeActiveSessionId: 'runtime-new',
-        fallbackSessionIds: ['s2'],
+        nextActiveCandidateSessionIds: ['s2'],
         runtimeSessions: [
           makeSession('runtime-new', {
             bridgeHost: '100.127.23.27',
@@ -475,7 +475,7 @@ describe('open-tab intent truth', () => {
       'daemon-live',
       {
         runtimeActiveSessionId: 'daemon-live',
-        fallbackSessionIds: [],
+        nextActiveCandidateSessionIds: [],
         runtimeSessions: [
           makeSession('daemon-live', {
             daemonHostId: 'daemon-a',
@@ -506,7 +506,7 @@ describe('open-tab intent truth', () => {
       'runtime-daemon',
       {
         runtimeActiveSessionId: 'runtime-daemon',
-        fallbackSessionIds: [],
+        nextActiveCandidateSessionIds: [],
         runtimeSessions: [
           makeSession('runtime-daemon', {
             daemonHostId: 'daemon-a',

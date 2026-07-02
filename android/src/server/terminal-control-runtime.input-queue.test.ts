@@ -43,7 +43,6 @@ function createReadyMirror(): SessionMirror {
     lastFlushCompletedAt: 0,
     lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
     lastCaptureDurationMs: 0,
     lastCanonicalizeDurationMs: 0,
     flushInFlight: false,
@@ -51,7 +50,6 @@ function createReadyMirror(): SessionMirror {
     pendingStableCaptureSnapshot: null,
     liveSyncTimer: null,
     consecutiveFailures: 0,
-    adaptiveCols: new Map(),
     subscribers: new Set(),
     scratchBridge: null,
   };

@@ -37,7 +37,7 @@ import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
-import type { Host, TraversalRelayDeviceSnapshot } from './lib/types';
+import type { TraversalRelayDeviceSnapshot } from './lib/types';
 
 const RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS = 300;
 const RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS = 5000;
@@ -450,6 +450,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
     handleRefreshDrawerHostSessions,
+    handleForceRelaySession,
+    handleUseAutoSession,
     closePicker,
   } = useSessionOpenActions({
     bridgeSettings,
@@ -460,6 +462,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
     createSession,
+    closeSession,
+    switchSession,
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -484,117 +488,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     auditOpenTabsAgainstRemoteSessions,
   });
 
-  const handleForceRelaySession = useCallback((sessionId: string) => {
-    const tab = openTabState.tabs.find((item) => item.sessionId === sessionId);
-    const liveSession = sessions.find((item) => item.id === sessionId) || null;
-    const canonicalRelayHostId = tab
-      ? (
-        bridgeSettings.servers.find((server) => (
-          server.id === bridgeSettings.defaultServerId
-          && server.targetHost === tab.bridgeHost
-          && server.targetPort === tab.bridgePort
-          && server.relayHostId?.trim()
-        ))?.relayHostId?.trim()
-        || bridgeSettings.servers.find((server) => (
-          server.targetHost === tab.bridgeHost
-          && server.targetPort === tab.bridgePort
-          && server.relayHostId?.trim()
-          && server.relayDeviceId?.trim()
-        ))?.relayHostId?.trim()
-        || ''
-      )
-      : '';
-    const relayHostId = canonicalRelayHostId || tab?.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
-    if (!bridgeSettings.traversalRelay?.accessToken) {
-      window.alert?.('请先在 Settings 登录 Relay 控制面。');
-      return;
-    }
-    if (!tab || !relayHostId) {
-      window.alert?.('当前 tab 缺少 daemonHostId，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
-      return;
-    }
-
-    const relayHost: Host = {
-      id: tab.hostId || `force-relay:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
-      createdAt: tab.createdAt || Date.now(),
-      name: tab.connectionName || tab.sessionName,
-      bridgeHost: tab.bridgeHost,
-      bridgePort: tab.bridgePort,
-      daemonHostId: relayHostId,
-      relayHostId,
-      sessionName: tab.sessionName,
-      authToken: tab.authToken,
-      autoCommand: tab.autoCommand,
-      transportMode: 'webrtc',
-      authType: 'password',
-      tags: [],
-      pinned: false,
-      lastConnected: Date.now(),
-    };
-    runtimeDebug('app.session.force-relay', {
-      sessionId,
-      relayHostId,
-      sessionName: relayHost.sessionName,
-      bridgeHost: relayHost.bridgeHost,
-      bridgePort: relayHost.bridgePort,
-    });
-    closeSession(sessionId);
-    window.setTimeout(() => {
-      createSession(relayHost, {
-        sessionId,
-        createdAt: tab.createdAt,
-        customName: tab.customName,
-      });
-      switchSession(sessionId);
-      ensureTerminalPageVisible();
-    }, 0);
-  }, [bridgeSettings.traversalRelay?.accessToken, closeSession, createSession, ensureTerminalPageVisible, openTabState.tabs, sessions, switchSession]);
-
-  const handleUseAutoSession = useCallback((sessionId: string) => {
-    const tab = openTabState.tabs.find((item) => item.sessionId === sessionId);
-    const liveSession = sessions.find((item) => item.id === sessionId) || null;
-    if (!tab) {
-      window.alert?.('当前 tab 缺少连接信息，无法切回 Auto。请从连接列表重新打开。');
-      return;
-    }
-    const relayHostId = tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
-    const autoHost: Host = {
-      id: tab.hostId || `auto:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
-      createdAt: tab.createdAt || Date.now(),
-      name: tab.connectionName || tab.sessionName,
-      bridgeHost: tab.bridgeHost,
-      bridgePort: tab.bridgePort,
-      daemonHostId: relayHostId || undefined,
-      relayHostId: relayHostId || undefined,
-      sessionName: tab.sessionName,
-      authToken: tab.authToken,
-      autoCommand: tab.autoCommand,
-      transportMode: 'auto',
-      authType: 'password',
-      tags: [],
-      pinned: false,
-      lastConnected: Date.now(),
-    };
-    runtimeDebug('app.session.use-auto', {
-      sessionId,
-      relayHostId: relayHostId || null,
-      sessionName: autoHost.sessionName,
-      bridgeHost: autoHost.bridgeHost,
-      bridgePort: autoHost.bridgePort,
-    });
-    closeSession(sessionId);
-    window.setTimeout(() => {
-      createSession(autoHost, {
-        sessionId,
-        createdAt: tab.createdAt,
-        customName: tab.customName,
-      });
-      switchSession(sessionId);
-      ensureTerminalPageVisible();
-    }, 0);
-  }, [closeSession, createSession, ensureTerminalPageVisible, openTabState.tabs, sessions, switchSession]);
-
-
+  
   return (
     <div
       style={{

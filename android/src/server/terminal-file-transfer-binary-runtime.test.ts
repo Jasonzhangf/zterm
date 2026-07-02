@@ -13,7 +13,6 @@ function makeSession(): TerminalSession {
     transport: null,
     sessionName: 'client-session-name',
     mirrorKey: 'mirror-1',
-    widthMode: 'adaptive-phone',
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -28,7 +27,6 @@ function makeReadyMirror(): SessionMirror {
     cols: 120,
     rows: 40,
     consecutiveFailures: 0,
-    adaptiveCols: new Map(),
     cursorKeysApp: false,
     revision: 1,
     lastScrollbackCount: 0,
@@ -39,7 +37,6 @@ function makeReadyMirror(): SessionMirror {
     lastFlushCompletedAt: 0,
     lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
     flushInFlight: false,
     flushPromise: null,
     liveSyncTimer: null,

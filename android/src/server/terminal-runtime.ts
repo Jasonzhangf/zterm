@@ -123,7 +123,6 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       closeTransport: connection.closeTransport,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
-      widthMode: 'mirror-fixed',
       pendingPasteImage: null,
       pendingAttachFile: null,
     };
@@ -189,13 +188,11 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
-      mirror.adaptiveCols.delete(session.id);
       // R3: this transport is going away, so any pending input items for its
       // mirror must NOT survive into a future attach. We deliberately drop
       // the in-queue items here; in-flight tmux spawn (if any) resolves
       // naturally because shouldWrite() will return false on the next check.
       deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`);
-      mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
       // R10: do not force a 0-delay capture after detach. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       // Forcing immediate capture here caused tmux to thrash on every
@@ -217,10 +214,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     if (mirror) {
       const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
       mirror.subscribers = detachResult.nextSubscribers;
-      mirror.adaptiveCols.delete(session.id);
       // R3: drop the input queue for this mirror before the session is gone.
       deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`);
-      mirrorRuntime.reconcileMirrorAdaptiveWidth(mirror);
       // R10: do not force a 0-delay capture after close. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       if (mirror.subscribers.size > 0) {

@@ -2,6 +2,8 @@
 
 ## Key Decisions
 
+- [2026-07-02] daemon/tmux 闭环不能替代本地客户端连接证明。凡 terminal/transport/runtime 主链变更，若 Mac client 在仓库内可用，至少要跑 Mac 核心连接 gate：`bridge-transport` 远端 daemon WebSocket 两阶段握手、`local-tmux-transport` Electron local tmux API、`terminal-runtime` head/body refresh、workbench active target 入口；当前命令为 `pnpm --dir mac test -- --reporter dot` 和 `pnpm --dir mac run type-check`。2026-07-02 已补 `mac/src/lib/bridge-transport.test.ts` 与 `mac/src/lib/local-tmux-transport.test.ts`，全量 Mac tests 59/59 PASS。
+- [2026-07-02] Mac 验证汇报必须按层级说清楚：core tests 只能证明 client transport/runtime 连接逻辑，不等于 packaged `.app`、DOM 输入、窗口生命周期或资源退出态已验证；涉及 Electron main/preload/local tmux/packaged 行为时，仍要跑 packaged smoke 并采截图/进程/日志证据。
 - [2026-04-24] Mac runtime 若只靠 renderer `onViewportChange` 驱动 `buffer-sync-request`，follow 会因为 renderer 的 follow 去重 key 不含动态 `viewportEndIndex` 而停在旧尾部；server `buffer-head.latestEndIndex` 必须进入 runtime follow planner，成为请求最新尾屏的主触发。
 
 - [2026-04-24] Jason 已明确授权 Mac 完全重写；当前第一刀先冻结与 Android 相同的 contract model（Server truth -> Client Buffer Worker -> Renderer Container -> UI Shell），再切 app shell 入口和 ownership，禁止继续在旧 `ShellWorkspace` / workspace 编排上叠 patch。

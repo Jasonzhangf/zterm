@@ -82,7 +82,6 @@ describe('terminal transport performance truth', () => {
       transport,
       sessionName: 'demo',
       mirrorKey: 'demo',
-      widthMode: 'mirror-fixed',
       pendingPasteImage: null,
       pendingAttachFile: null,
     };

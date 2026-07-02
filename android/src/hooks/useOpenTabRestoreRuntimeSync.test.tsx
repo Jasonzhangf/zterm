@@ -35,7 +35,7 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
   it('explicitly resumes the restored active tab when the persisted page is terminal', async () => {
     const applyOpenTabState = vi.fn((nextState, options) => ({
       tabs: nextState.tabs,
-      activeSessionId: nextState.activeSessionId ?? options?.fallbackActiveSessionId ?? null,
+      activeSessionId: nextState.activeSessionId ?? options?.preserveActiveSessionId ?? null,
     }));
     const createSession = vi.fn((host, options) => {
       expect(host).toEqual(expect.objectContaining({
@@ -96,7 +96,7 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
   it('keeps restore-sync when the persisted page is not terminal', async () => {
     const applyOpenTabState = vi.fn((nextState, options) => ({
       tabs: nextState.tabs,
-      activeSessionId: nextState.activeSessionId ?? options?.fallbackActiveSessionId ?? null,
+      activeSessionId: nextState.activeSessionId ?? options?.preserveActiveSessionId ?? null,
     }));
 
     renderHook(() => useOpenTabRestoreRuntimeSync({

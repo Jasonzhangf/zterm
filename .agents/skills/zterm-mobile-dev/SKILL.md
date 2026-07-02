@@ -229,6 +229,44 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 
 ## 三、开发闭环流程
 
+### 3.0 测试闭环分层规则
+
+Android / daemon / shared / Mac 任一 terminal 主链改动，都必须按影响面选择验证层级，不能用低层 gate 冒充高层完成。
+
+#### L0 架构与静态 gate
+- 证明：feature owner、function map、类型、禁止路径扫描没有明显破坏。
+- 不证明：真实 daemon/tmux/client/UI 可用。
+- 常用命令：`pnpm --dir android run test:feature-registry -- --reporter dot`、`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`。
+
+#### L1 Android client 单元/集成 gate
+- 证明：open-tab restore/resume、SessionContext transport、buffer worker、TerminalPage/TerminalView 局部语义正确。
+- 不证明：真实 daemon/tmux 或真机 WebView 已闭环。
+- 要求：涉及状态机、retry、timeout、错误投影、IME、renderer 可见窗口时，必须有正向和反向测试。
+
+#### L2 daemon/tmux 真回环
+- 证明：当前 daemon 能真实启动，tmux oracle 与 daemon mirror/client replay 一致。
+- 默认命令：`pnpm --dir android run daemon:mirror:close-loop`。
+- 不证明：本地客户端入口一定连得上。
+
+#### L3 本地客户端核心连接 gate
+- 证明：仓库内本地 client transport/runtime 能连。若 Mac client 可用，必须跑 Mac gate，不能只用 daemon probe。
+- 默认命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`。
+- 覆盖面：remote daemon `bridge-transport`、local tmux `local-tmux-transport`、`terminal-runtime`、workbench active target。
+- 不证明：Android 真机或 Mac packaged app 运行态已经正常。
+
+#### L4 Android UI / WebView gate
+- 证明：TerminalPage、IME、drawer、pane、renderer shell 在 Android/WebView 语义下成立。
+- 若问题是键盘、容器上抬、输入法特殊键、touch、drawer、可视窗口，不能只跑 L2/L3。
+
+#### L5 APK / 真机 / 发布态 gate
+- 证明：真实安装态和用户路径可用。
+- 需要 APK smoke、真实设备、daemon debug、截图/logcat/evidence 中至少与本轮问题相关的证据。
+
+汇报要求：
+- 必须列出已跑到哪一层，以及没跑到的层级为什么不在本轮范围。
+- 不能把“daemon/tmux 真回环通过”写成本地客户端正常。
+- 不能把“Mac client 核心测试通过”写成 Android 真机正常。
+
 ### 3.1 流程图
 
 ```

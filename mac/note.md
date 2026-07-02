@@ -1,4 +1,15 @@
 
+## 2026-07-02 Mac client core connection gate
+- Jason 纠正：daemon/tmux 闭环不能替代本地客户端连接证明；zterm 已有 Mac 客户端，至少要跑 Mac client 核心连接测试套件。
+- 现状缺口：Mac 之前没有直接覆盖 `bridge-transport` / `local-tmux-transport` owner 的测试文件；`terminal-runtime.same-end-refresh` 只证明 runtime 消费 local tmux 消息后的 buffer sync 策略，不证明 transport 连接层。
+- 已补 owner 测试：
+  - `mac/src/lib/bridge-transport.test.ts`：锁远端 daemon WebSocket 两阶段握手 `session-open -> session-ticket -> connect -> connected`，以及 `buffer-head-request` / `buffer-sync-request` / `input` 发到 live socket；反向锁 reconnect 后 stale socket message 不得污染当前 state。
+  - `mac/src/lib/local-tmux-transport.test.ts`：锁 Mac Electron local tmux API `connect`、`connected` event materialize、head/body request 转发、input/resize/activity/disconnect 使用同一 clientId。
+- 验证：
+  - `pnpm --dir mac exec vitest run src/lib/bridge-transport.test.ts src/lib/local-tmux-transport.test.ts src/lib/terminal-runtime.same-end-refresh.test.ts src/lib/terminal-runtime-lifecycle.test.ts src/app/MacPaneWorkbench.test.tsx --reporter dot` PASS（5 files / 19 tests）。
+  - `pnpm --dir mac run type-check` PASS。
+  - `pnpm --dir mac test -- --reporter dot` PASS（14 files / 59 tests）。
+
 ## 2026-06-02 mac terminal display investigation
 - Goal: fix Mac terminal bottom visibility, input echo, ANSI colors; require screenshot evidence.
 - Current lead: MacTerminalView DOM renderer maps rows/cells; inspect row view model and layout before patch.
@@ -30,3 +41,26 @@
 - 旧 `ShellWorkspace` 暂时只通过 `MacWorkspaceTransitionalShell` 被生产入口消费，命名明确为 transitional；本轮不改 runtime、不接多窗口、不接 server rail。
 - `MacAppShell/MacPaneWorkbench` 未接入 production entrypoint，避免把单 runtime 多 pane 争用路径作为新主线。
 - targeted 验证：`pnpm --filter @zterm/mac test -- MacDesktopApp App.test` PASS（2 files / 2 tests）。
+
+## 2026-07-01 Mac packaged smoke bottom display follow-up
+- Packaged app CDP target: `file:///Volumes/extension/code/zterm/mac/out/mac-arm64/ZTerm.app/Contents/Resources/app.asar/dist/index.html` on port `9341`.
+- 现场视觉混乱的直接证据：`localStorage["zterm:mac:shell-workspace:v1"]` 恢复了 5 pane split tree，其中包含空 pane 与 `rcc-routecodex2` error pane；这会把主 terminal 区域压小。
+- 修正 DOM selector 后的行级证据：terminal row selector 是 `[data-terminal-row="true"]`；有内容的 pane `viewportAtBottomDelta=0`，最后一行距离 viewport 底部约 `0.2-0.4px`，暂未证明 buffer follow 未到底。
+- 截图证据：`mac/evidence/2026-07-01-mac-entrypoint-smoke/zterm-front-current.png`；CDP `Page.captureScreenshot` 在 packaged app 中 timeout，系统截图可用。
+
+## 2026-07-01 Mac bottom residual fix
+- 根因确认：Mac renderer 用 `Math.floor(viewportHeight / rowHeight)` 计算整行 viewportRows；当 viewport 高度不是 17px 整数倍且 buffer 短于 viewport 时，grid 只对齐到整行槽，真实底部会留下 `height % rowHeight` 的空白（现场 zterm pane residual `15.40625px`）。
+- 修复：`MacTerminalView` 记录真实 viewport clientHeight，对 short-buffer follow frame 把 residual 加到 grid top padding；不改变 buffer truth、scrollback 或 tmux capture 语义。
+- Packaged smoke 新证据：`mac/evidence/2026-07-01-mac-bottom-render-smoke/visible-bottom-metrics.json` 中 zterm pane bottom visible row delta `0.40625px`；其它有内容 pane visual bottom delta `0.203125px`。`pane-bottom-metrics.json` 里长 buffer last DOM row 可在 viewport 下方是 overscan，不再用 last DOM row 判定底部。
+
+## 2026-07-01 Mac content truth correction
+- Jason 纠正：底部几何对齐不是 terminal 正确性证据；本问题必须比较 `tmux capture-pane` 原始尾部、Mac local tmux/runtime buffer、DOM 可见尾部。
+- 已发现 packaged app DOM visible tail 与 `tmux capture-pane -p -t zterm -S -20 -E -1` 不一致：tmux 已有最新内容，但 DOM 仍停在旧内容，说明 Mac local tmux client 刷新链路 stale，不是单纯窗口底部 padding 问题。
+- 当前首要假设：`terminal-runtime` 的 `lastBufferSyncKey` 只按 request payload 去重，未把 `buffer-head.revision` 变化纳入；当 `latestEndIndex` 不变但同一可见窗口内容更新时，会吞掉应有的 `buffer-sync-request`。
+- 已修：`buffer-head` revision 变化时清掉去重键，并把 `targetHeadRevision` 写入 `buffer-sync-request`，保证 same-end 新 revision 会重新拉正文。
+- 新增回归：`terminal-runtime.same-end-refresh.test.ts` 锁住两个方向，`revision` 变必须重拉，`revision` 不变不能重复刷。
+- 二次根因：Mac local tmux 的 `buffer-head` 曾用 visible-only capture，把尾窗编号成 `0..rows`；`buffer-sync` 用 full-history capture，编号是 `0..N`，导致 sync request 按 full-history 开头切片，active pane 显示旧内容。修复为 head/sync 都使用同一 full-history capture index 真源。
+- 三次根因：内容到 DOM 后，follow scroll 用整行 viewportRows 公式，真实 viewport 高度非 17px 整数倍时会落后真实 DOM max scroll，导致最后两三行在视口下方。修复为 follow 模式在 DOM 提供有效 scrollHeight 时贴真实 DOM bottom。
+
+## 2026-07-01 shared session group layout truth
+- Jason 指出 Mac 不能继续复制 Android UI 逻辑；session group / boundary viewport projection 已上移到 @zterm/shared，Android 只保留 re-export 薄壳。后续 Mac/Android 必须消费 shared core，不允许在 ShellWorkspace 或 TerminalPage 内补第二套边界投影语义。

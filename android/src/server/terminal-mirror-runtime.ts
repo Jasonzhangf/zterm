@@ -3,7 +3,6 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '../lib/types';
-import type { TerminalWidthMode } from './terminal-runtime-types';
 import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
 import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
@@ -102,22 +101,12 @@ export interface TerminalMirrorRuntime {
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => void;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
-  reconcileMirrorAdaptiveWidth: (mirror: SessionMirror) => void;
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   supportsWindowSizeManagement?: boolean;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
-// R6: at most one tmux resize per mirror per this many ms. Keyboard / rotation
-// / pinch on the client can fire 50+ resize frames per second; we collapse
-// them into a single tmux resize here.
-const MIRROR_RESIZE_THROTTLE_MS = 250;
-// R7: multi-sub safety. When 2+ subscribers of the same mirror have
-// different widthMode values, we DO NOT resize tmux globally. Truncating the
-// mirror to a sub's narrow cols would corrupt another sub's view. Each sub
-// will instead receive a per-sub narrow mirror via buffer-sync truncation.
-const MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK = 2;
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -182,17 +171,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.baselineRows = deps.normalizeTerminalRows(geometry.rows);
   }
 
-  function refreshMirrorGeometryFromTmux(mirror: SessionMirror) {
-    const metrics = deps.readTmuxPaneMetrics(mirror.sessionName);
-    const geometry = {
-      cols: metrics.paneCols,
-      rows: metrics.paneRows,
-    };
-    writeMirrorBaselineGeometry(mirror, geometry);
-    mirror.cols = deps.normalizeTerminalCols(geometry.cols);
-    mirror.rows = deps.normalizeTerminalRows(geometry.rows);
-  }
-
   function stopMirrorLiveSync(mirror: SessionMirror) {
     if (mirror.liveSyncTimer) {
       clearTimeout(mirror.liveSyncTimer);
@@ -240,7 +218,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastFlushCompletedAt: 0,
       lastLiveActivityAt: 0,
       lastHeadBroadcastAt: 0,
-      lastResizeAt: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
@@ -248,7 +225,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       pendingStableCaptureSnapshot: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
-      adaptiveCols: new Map(),
       subscribers: new Set(),
     };
     mirrors.set(sessionName, mirror);
@@ -313,7 +289,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lastFlushCompletedAt = 0;
     mirror.lastLiveActivityAt = 0;
     mirror.lastHeadBroadcastAt = 0;
-    mirror.lastResizeAt = 0;
     mirror.lastCaptureDurationMs = 0;
     mirror.lastCanonicalizeDurationMs = 0;
     mirror.lastScrollbackCount = -1;
@@ -337,70 +312,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     deps.sendScheduleStateToSession(session, mirror.sessionName);
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
   }
-  function reconcileMirrorAdaptiveWidth(mirror: SessionMirror) {
-    if (deps.supportsWindowSizeManagement === false) {
-      return;
-    }
-    const baselineCols = resolveMirrorBaselineCols(mirror);
-    const baselineRows = resolveMirrorBaselineRows(mirror);
-    // R7: enumerate widthMode across all subscribers. If 2+ different
-    // widthMode values are present, refuse to mutate tmux; each sub gets its
-    // own narrow mirror at consume time (renderer / buffer-sync truncation).
-    const widthModes = new Set<TerminalWidthMode>();
-    for (const sessionId of mirror.subscribers) {
-      const sub = sessions.get(sessionId);
-      if (sub) {
-        widthModes.add(sub.widthMode);
-      }
-    }
-    if (widthModes.size >= MIRROR_RESIZE_MULTISUB_DIVERGENCE_BLOCK) {
-      return;
-    }
-    let minCols = 0;
-    for (const entry of mirror.adaptiveCols.values()) {
-      if (entry.widthMode === 'adaptive-phone' && entry.cols > 0) {
-        if (minCols === 0 || entry.cols < minCols) {
-          minCols = entry.cols;
-        }
-      }
-    }
-    if (minCols === 0) {
-      try {
-        deps.runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']);
-        refreshMirrorGeometryFromTmux(mirror);
-      } catch (error) {
-        console.warn(
-          `[${deps.logTimePrefix()}] failed to release tmux window-size ownership for ${mirror.sessionName}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      return;
-    }
-    const targetCols = minCols > 0
-      ? Math.min(deps.normalizeTerminalCols(minCols), baselineCols)
-      : baselineCols;
-    const targetRows = baselineRows;
-    if (targetCols === mirror.cols && targetRows === mirror.rows) {
-      return;
-    }
-    // R6: throttle tmux resize. Capture the last-requested timestamp and
-    // bail if another resize landed within MIRROR_RESIZE_THROTTLE_MS.
-    const now = Date.now();
-    if (
-      mirror.lastResizeAt > 0
-      && now - mirror.lastResizeAt < MIRROR_RESIZE_THROTTLE_MS
-    ) {
-      return;
-    }
-    mirror.lastResizeAt = now;
-    try {
-      deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(targetCols)]);
-      mirror.cols = targetCols;
-      mirror.rows = targetRows;
-    } catch (error) {
-      console.warn(`[${deps.logTimePrefix()}] failed to resize tmux window for ${mirror.sessionName}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   function announceMirrorSubscribersReady(mirror: SessionMirror) {
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
@@ -516,12 +427,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (!captured) {
           throw new Error('tmux capture returned no canonical buffer');
         }
-        if (mirror.adaptiveCols.size === 0) {
-          writeMirrorBaselineGeometry(mirror, {
-            cols: mirror.cols,
-            rows: mirror.rows,
-          });
-        }
+        writeMirrorBaselineGeometry(mirror, {
+          cols: mirror.cols,
+          rows: mirror.rows,
+        });
         mirror.consecutiveFailures = 0;
         const changedRanges = deps.mirrorBufferChanged(mirror, previousStartIndex, previousLines);
         const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
@@ -778,9 +687,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (previousMirror) {
       const detachResult = detachMirrorSubscriber(previousMirror.subscribers, session.id);
       previousMirror.subscribers = detachResult.nextSubscribers;
-      previousMirror.adaptiveCols.delete(session.id);
       if (movingBetweenMirrors) {
-        reconcileMirrorAdaptiveWidth(previousMirror);
         scheduleMirrorLiveSync(previousMirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
       }
     }
@@ -799,14 +706,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       mirror.rows = resolveMirrorBaselineRows(mirror);
     }
     mirror.subscribers.add(session.id);
-    const clientWidthMode = payload.widthMode || 'mirror-fixed';
-    session.widthMode = clientWidthMode;
-    if (clientWidthMode === 'adaptive-phone' && requestedCols > 0) {
-      mirror.adaptiveCols.set(session.id, { cols: requestedCols, widthMode: clientWidthMode });
-    } else {
-      mirror.adaptiveCols.delete(session.id);
-    }
-    reconcileMirrorAdaptiveWidth(mirror);
     if (mirror.lifecycle !== 'ready') {
       mirror.cols = requestedCols;
       mirror.rows = resolveMirrorBaselineRows(mirror);
@@ -827,24 +726,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!mirror) {
       return;
     }
-    const nextWidthMode = payload.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
-    session.widthMode = nextWidthMode;
-    if (deps.supportsWindowSizeManagement === false) {
-      if (nextWidthMode === 'adaptive-phone' && Number.isFinite(payload.cols) && (payload.cols || 0) > 0) {
-        throw new Error('wezterm backend does not support adaptive window resizing');
-      }
-      scheduleMirrorLiveSync(mirror, 0);
-      return;
-    }
-    if (nextWidthMode === 'adaptive-phone' && Number.isFinite(payload.cols) && (payload.cols || 0) > 0) {
-      mirror.adaptiveCols.set(session.id, {
-        cols: deps.normalizeTerminalCols(payload.cols),
-        widthMode: nextWidthMode,
-      });
-    } else {
-      mirror.adaptiveCols.delete(session.id);
-    }
-    reconcileMirrorAdaptiveWidth(mirror);
+    void payload;
     scheduleMirrorLiveSync(mirror, 0);
   }
 
@@ -887,7 +769,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     attachTmux,
     handleAdaptiveResize,
     handleInput,
-    reconcileMirrorAdaptiveWidth,
     disposeLiveMirrorInputBatch: (sessionName, reason) =>
       deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`),
   };
