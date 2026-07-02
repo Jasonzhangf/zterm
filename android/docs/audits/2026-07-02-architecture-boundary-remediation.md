@@ -147,6 +147,8 @@ Boundary rule:
 - Scan page and UI layers for direct `createSession/closeSession/switchSession` calls outside the session-open owner hooks.
 - Scan core truth modules for `fallback*` names in non-presentation code.
 - Scan `TerminalSessionDrawer` for `default` / `本机` host identity fallback.
+- Current gate owner: `src/lib/architecture-boundary-truth.test.ts`, wired into `pnpm --dir android run test:feature-registry`.
+- Width policy scan is compatibility-aware: `widthMode` may exist in attach/resize wire payload types, but must not become `TerminalSession` / `SessionMirror` owned state or tmux resize ownership.
 
 2. Add owner-call maps.
 - Each feature must list one owner module, one allowed surface, one forbidden surface, and one test gate set.
@@ -175,7 +177,7 @@ Boundary rule:
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
 3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
-5. Add boundary red tests and a scanner gate. In progress; current gate covers open-tab fallback names, App lifecycle ownership, remediation doc presence, and drawer host identity fallback.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, and attach correlation ownership.
 
 ## Repair Log
 
@@ -206,3 +208,12 @@ Boundary rule:
 - Owner remains: `TerminalPage` and `server-identity.ts` inject `hostKey/hostLabel`; drawer only consumes the projection.
 - Positive tests: `TerminalSessionDrawer.test.tsx` proves real host groups still pass the selected host key into new-session creation.
 - Negative tests: `TerminalSessionDrawer.test.tsx` proves missing hostKey calls `onOpenQuickTabPicker(undefined, ...)`, and `architecture-boundary-truth.test.ts` prevents `default` / `本机` host fallback from returning to the drawer.
+
+### 2026-07-02 fifth slice: architecture gate hardening
+
+- Block: Cross-block prevention gate.
+- Decision: Separate into static gate.
+- Added to `architecture-boundary-truth.test.ts`: package gate wiring check, page/UI direct session lifecycle primitive scan, daemon client width policy owner scan, and daemon attach correlation owner scan.
+- Compatibility boundary: wire payload fields such as `TerminalAttachPayload.widthMode` remain allowed, but `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, tmux resize ownership, daemon-owned `clientSessionId`, and attach token ownership by `openRequestId` are forbidden.
+- Positive tests: `test:feature-registry` proves the architecture gate itself is part of the standard registry gate.
+- Negative tests: scanner fails if page/UI layers grow direct `createSession/closeSession/switchSession`, drawer host fallback returns, daemon stores client width policy, or attach correlation fields become token owner state.

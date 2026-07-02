@@ -8,7 +8,19 @@ function read(relativePath: string) {
   return readFileSync(join(root, relativePath), 'utf8');
 }
 
+function stripComments(source: string) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
 describe('architecture boundary truth gate', () => {
+  it('keeps this architecture gate wired into the feature-registry command', () => {
+    const packageJson = read('package.json');
+
+    expect(packageJson).toContain('src/lib/architecture-boundary-truth.test.ts');
+  });
+
   it('keeps open-tab core intent policies explicit instead of fallback-named truth', () => {
     const source = read('src/lib/open-tab-intent.ts');
 
@@ -39,6 +51,22 @@ describe('architecture boundary truth gate', () => {
     expect(source).not.toMatch(/closeSession\(sessionId\)[\s\S]*createSession\([\s\S]*switchSession\(sessionId\)/);
   });
 
+  it('keeps page and terminal UI components from owning session lifecycle primitives', () => {
+    const surfaces = [
+      'src/App.tsx',
+      'src/pages/TerminalPage.tsx',
+      'src/components/terminal/TerminalHeader.tsx',
+      'src/components/terminal/TerminalSessionDrawer.tsx',
+    ];
+
+    for (const relativePath of surfaces) {
+      const source = read(relativePath);
+      expect(source, relativePath).not.toMatch(/\bcreateSession\s*\(/);
+      expect(source, relativePath).not.toMatch(/\bswitchSession\s*\(/);
+      expect(source, relativePath).not.toMatch(/\bcloseSession\s*\(/);
+    }
+  });
+
   it('keeps TerminalSessionDrawer from inventing host identity fallbacks', () => {
     const source = read('src/components/terminal/TerminalSessionDrawer.tsx');
 
@@ -47,5 +75,32 @@ describe('architecture boundary truth gate', () => {
     expect(source).not.toContain("hostLabel: session.hostLabel || '本机'");
     expect(source).not.toContain('hostLabel: session.hostLabel || "本机"');
     expect(source).toContain('UNSCOPED_HOST_GROUP_KEY');
+  });
+
+  it('keeps daemon client width policy as wire compatibility only, not daemon-owned state', () => {
+    const runtimeTypesSource = stripComments(read('src/server/terminal-runtime-types.ts'));
+    const mirrorRuntimeSource = stripComments(read('src/server/terminal-mirror-runtime.ts'));
+
+    expect(runtimeTypesSource).not.toMatch(/interface\s+TerminalSession[\s\S]*\bwidthMode\s*:/);
+    expect(runtimeTypesSource).not.toMatch(/interface\s+SessionMirror[\s\S]*\badaptiveCols\s*:/);
+    expect(mirrorRuntimeSource).not.toContain('session.widthMode');
+    expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
+    expect(mirrorRuntimeSource).not.toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
+    expect(mirrorRuntimeSource).not.toMatch(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"][\s\S]*['"]latest['"]/);
+
+    expect(runtimeTypesSource).toContain('widthMode?: TerminalWidthMode');
+    expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(session: TerminalSession, payload: \{ cols\?: number; widthMode\?:/);
+  });
+
+  it('keeps daemon attach correlation fields out of daemon-owned token state', () => {
+    const messageControlSource = stripComments(read('src/server/terminal-message-control-runtime.ts'));
+    const attachTokenSource = stripComments(read('src/server/terminal-attach-token-runtime.ts'));
+
+    expect(messageControlSource).not.toContain('clientSessionId');
+    expect(attachTokenSource).not.toContain('clientSessionId');
+    expect(attachTokenSource).not.toContain('openRequestId');
+    expect(attachTokenSource).toContain('const sessionTransportAttachTokens = new Set<string>()');
+    expect(messageControlSource).toContain('openRequestId: payload.openRequestId');
+    expect(messageControlSource).toContain('sessionTransportToken');
   });
 });

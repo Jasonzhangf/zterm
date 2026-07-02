@@ -1,3 +1,11 @@
+# 2026-07-02 architecture gate hardening
+
+- 架构映射：本 slice 是 cross-block prevention gate，不改业务 runtime；owner 是 `src/lib/architecture-boundary-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。
+- 修复：新增 gate wiring 检查、page/UI direct session lifecycle primitive 扫描、daemon client width policy owner 扫描、attach correlation owner 扫描。
+- 兼容边界：允许 `TerminalAttachPayload.widthMode` 与 resize wire payload 保留；禁止 `TerminalSession.widthMode`、`SessionMirror.adaptiveCols`、tmux resize/window-size ownership、daemon-owned `clientSessionId`、attach token 用 `openRequestId` 做 owner。
+- 验证：`pnpm --dir android run test:feature-registry -- --reporter dot` PASS（3 files / 17 tests）。
+- 证明范围：L0 架构防复发 gate；未改 runtime 业务，不宣称 L1-L5 行为变化。
+
 # 2026-07-02 UI projection drawer host identity sentinel removal
 
 - 架构映射：本 slice 属于 `terminal.session_drawer` / UI Projection Block；唯一 identity owner 是 `TerminalPage` projection + `src/lib/server-identity.ts`，`TerminalSessionDrawer` 只消费 `hostKey/hostLabel`。
