@@ -574,7 +574,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onDeleteServerGroup={handleDeleteServerGroup}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onImportConnectionLink={handleImportConnectionShareLink}
             onAddNew={handleAddNew}
             onOpenSettings={handleOpenSettingsPage}
             onOpenVaults={handleOpenSettingsPage}
@@ -585,7 +584,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
           <ConnectionPropertiesPage
             host={editingHost}
             draft={editingDraft}
+            shareableHosts={hosts}
             bridgeSettings={bridgeSettings}
+            onImportConnectionLink={handleImportConnectionShareLink}
             onSave={handleSaveHost}
             onCancel={handleCancelHostForm}
           />

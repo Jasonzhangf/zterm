@@ -656,4 +656,83 @@ describe('ConnectionPropertiesPage', () => {
       expect(screen.getByText('Copied')).toBeTruthy();
     });
   });
+
+  it('imports a pasted connection share link from the add connection flow', () => {
+    const onImportConnectionLink = vi.fn(() => ({ ok: true as const, name: 'Imported Mac' }));
+
+    render(
+      <ConnectionPropertiesPage
+        bridgeSettings={bridgeSettings}
+        onImportConnectionLink={onImportConnectionLink}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Connection share link'), {
+      target: { value: 'zterm://connection/import?payload=abc' },
+    });
+    fireEvent.click(screen.getByText('Import'));
+
+    expect(onImportConnectionLink).toHaveBeenCalledWith('zterm://connection/import?payload=abc');
+    expect(screen.getByText('Imported Imported Mac')).toBeTruthy();
+    expect((screen.getByLabelText('Connection share link') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('surfaces malformed import links in the add connection flow without clearing input', () => {
+    const onImportConnectionLink = vi.fn(() => ({ ok: false as const, error: 'connection share link is missing payload' }));
+
+    render(
+      <ConnectionPropertiesPage
+        bridgeSettings={bridgeSettings}
+        onImportConnectionLink={onImportConnectionLink}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Connection share link'), {
+      target: { value: 'bad-link' },
+    });
+    fireEvent.click(screen.getByText('Import'));
+
+    expect(screen.getByText('Import failed: connection share link is missing payload')).toBeTruthy();
+    expect((screen.getByLabelText('Connection share link') as HTMLTextAreaElement).value).toBe('bad-link');
+  });
+
+  it('shares an existing saved connection from the add connection flow', async () => {
+    const savedHost = makeHost({
+      id: 'share-existing',
+      name: 'Existing Mac',
+      password: 'must-not-export',
+      privateKey: 'must-not-export',
+    });
+
+    render(
+      <ConnectionPropertiesPage
+        shareableHosts={[savedHost]}
+        bridgeSettings={bridgeSettings}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Existing Mac'));
+
+    const link = screen.getByTestId('connection-share-link') as HTMLTextAreaElement;
+    const parsed = parseConnectionConfigShareLink(link.value);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        ok: true,
+        host: expect.objectContaining({
+          name: 'Existing Mac',
+          password: undefined,
+          privateKey: undefined,
+        }),
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('connection-share-qr').innerHTML).toContain('<svg');
+    });
+  });
 });

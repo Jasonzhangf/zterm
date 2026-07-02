@@ -27,7 +27,9 @@ import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
 interface ConnectionPropertiesPageProps {
   host?: Host;
   draft?: Partial<Omit<Host, 'id' | 'createdAt'>>;
+  shareableHosts?: Host[];
   bridgeSettings: BridgeSettings;
+  onImportConnectionLink?: (input: string) => { ok: true; name: string } | { ok: false; error: string };
   onSave: (hostData: Omit<Host, 'id' | 'createdAt'>) => void;
   onCancel: () => void;
 }
@@ -59,12 +61,23 @@ function buildInitialState(
   };
 }
 
-export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, onCancel }: ConnectionPropertiesPageProps) {
+export function ConnectionPropertiesPage({
+  host,
+  draft,
+  shareableHosts = [],
+  bridgeSettings,
+  onImportConnectionLink,
+  onSave,
+  onCancel,
+}: ConnectionPropertiesPageProps) {
   const [form, setForm] = useState(() => buildInitialState(host, draft, bridgeSettings));
   const [tagInput, setTagInput] = useState('');
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [sessionDiscoveryState, setSessionDiscoveryState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [sessionDiscoveryError, setSessionDiscoveryError] = useState('');
+  const [connectionImportInput, setConnectionImportInput] = useState('');
+  const [connectionImportStatus, setConnectionImportStatus] = useState('');
+  const [selectedShareHostId, setSelectedShareHostId] = useState('');
   const [shareQrSvg, setShareQrSvg] = useState('');
   const [shareState, setShareState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareError, setShareError] = useState('');
@@ -89,14 +102,19 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   }, [form.bridgeHost, form.bridgePort, form.authToken, form.daemonHostId, form.relayHostId, form.relayDeviceId]);
 
   const pageTitle = useMemo(() => (host ? 'Edit Connection' : 'New Connection'), [host]);
+  const selectedShareHost = useMemo(
+    () => shareableHosts.find((candidate) => candidate.id === selectedShareHostId),
+    [selectedShareHostId, shareableHosts],
+  );
+  const shareSourceHost = host || selectedShareHost;
   const shareLink = useMemo(
-    () => host
+    () => shareSourceHost
       ? buildConnectionConfigShareLink({
-          host,
-          exportedAt: host.lastConnected || host.createdAt,
+          host: shareSourceHost,
+          exportedAt: shareSourceHost.lastConnected || shareSourceHost.createdAt,
         })
       : '',
-    [host],
+    [shareSourceHost],
   );
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
   const rememberedServerViews = useMemo(() => buildBridgeServerPresetViews(bridgeSettings.servers), [bridgeSettings.servers]);
@@ -106,6 +124,15 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     [bridgeSettings.servers, selectedDaemonHostId],
   );
   const daemonNeedsManualBinding = daemonFirst && Boolean(selectedDaemonHostId) && !daemonBoundServer;
+
+  useEffect(() => {
+    if (host || !selectedShareHostId) {
+      return;
+    }
+    if (!shareableHosts.some((candidate) => candidate.id === selectedShareHostId)) {
+      setSelectedShareHostId('');
+    }
+  }, [host, selectedShareHostId, shareableHosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -264,6 +291,20 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     }
   };
 
+  const handleImportConnectionLink = () => {
+    if (!onImportConnectionLink) {
+      setConnectionImportStatus('当前版本未启用连接导入入口。');
+      return;
+    }
+    const result = onImportConnectionLink(connectionImportInput);
+    if (!result.ok) {
+      setConnectionImportStatus(`Import failed: ${result.error}`);
+      return;
+    }
+    setConnectionImportInput('');
+    setConnectionImportStatus(`Imported ${result.name}`);
+  };
+
   const handleDiscoverSessions = async () => {
     if (daemonFirst && !selectedDaemonHostId) {
       setAvailableSessions([]);
@@ -406,6 +447,117 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
+        {!host && (
+          <ConnectionSection
+            title="Import / Share Existing"
+            description="从另一台设备粘贴分享链接导入，或选择当前已有连接生成同一份二维码/链接。"
+          >
+            <div style={{ display: 'grid', gap: '14px' }}>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '15px', fontWeight: 900 }}>Import Connection</div>
+                    <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                      Paste a zterm share link from another device.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleImportConnectionLink}
+                    style={{
+                      border: 'none',
+                      borderRadius: '16px',
+                      minHeight: '42px',
+                      padding: '0 14px',
+                      backgroundColor: mobileTheme.colors.shell,
+                      color: '#ffffff',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Import
+                  </button>
+                </div>
+                <textarea
+                  aria-label="Connection share link"
+                  value={connectionImportInput}
+                  onChange={(event) => {
+                    setConnectionImportInput(event.target.value);
+                    setConnectionImportStatus('');
+                  }}
+                  placeholder="zterm://connection/import?payload=..."
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    borderRadius: '18px',
+                    padding: '12px 14px',
+                    backgroundColor: '#f6f8fb',
+                    color: mobileTheme.colors.lightText,
+                    boxSizing: 'border-box',
+                    resize: 'vertical',
+                  }}
+                />
+                {connectionImportStatus && (
+                  <div
+                    role="status"
+                    style={{
+                      fontSize: '12px',
+                      color: connectionImportStatus.startsWith('Import failed')
+                        ? mobileTheme.colors.danger
+                        : mobileTheme.colors.lightMuted,
+                    }}
+                  >
+                    {connectionImportStatus}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 900 }}>Share Existing Connection</div>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                    Select a saved connection to show its QR code and canonical link.
+                  </div>
+                </div>
+                {shareableHosts.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {shareableHosts.map((candidate) => {
+                      const active = candidate.id === selectedShareHostId;
+                      return (
+                        <button
+                          key={candidate.id}
+                          type="button"
+                          onClick={() => setSelectedShareHostId(candidate.id)}
+                          style={{
+                            border: 'none',
+                            borderRadius: '16px',
+                            padding: '12px 14px',
+                            backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
+                            color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                            boxShadow: mobileTheme.shadow.soft,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <div style={{ fontWeight: 800 }}>{candidate.name}</div>
+                          <div style={{ fontSize: '12px', opacity: 0.8 }}>
+                            {candidate.bridgeHost}:{candidate.bridgePort}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
+                    No saved connection available to share yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </ConnectionSection>
+        )}
+
         <GeneralSection
           name={form.name}
           onNameChange={(name) => setForm((current) => ({ ...current, name }))}
@@ -619,7 +771,7 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           onPinnedChange={(pinned) => setForm((current) => ({ ...current, pinned }))}
         />
 
-        {host && (
+        {shareLink && (
           <ConnectionSection
             title="Share Connection"
             description="生成同一份连接分享链接；二维码只是这条链接的投影，不包含密码或私钥。"

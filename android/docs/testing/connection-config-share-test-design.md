@@ -15,17 +15,19 @@
 4. QR code, copy link, and paste/deep-link import must all consume the same canonical link payload.
 5. Import parses the link or raw encoded payload and returns an explicit success host or explicit error.
 6. UI import must call host storage `upsertHost`; pages must not write `localStorage` directly.
+7. Manual paste import and saved-connection sharing are exposed behind the FAB / add-connection flow; the main Connections list only owns the add intent and must not render a permanent import panel.
 
 ## White-Box Plan
 
 - `packages/shared/src/connection/connection-config-share.test.ts` covers canonical payload build, app link, web link, raw encoded payload import, endpoint normalization, secret stripping, malformed input, unsupported URL, and invalid host identity.
-- `src/pages/ConnectionPropertiesPage.test.tsx` proves the QR/link UI is rendered from `buildConnectionConfigShareLink(...)`; QR must not build a second payload format.
+- `src/pages/ConnectionPropertiesPage.test.tsx` proves the QR/link UI is rendered from `buildConnectionConfigShareLink(...)`; QR must not build a second payload format. It also proves paste import and saved-connection sharing live inside the add-connection flow.
+- `src/pages/ConnectionsPage.test.tsx` proves the main list does not render a permanent import box and only delegates to the FAB add intent.
 - `src/lib/connection-config-share-android-truth.test.ts` proves the native `zterm://connection/import` intent filter and `appUrlOpen` handler delegate to the same parser and `upsertHost` import action.
 
 ## Module Black-Box Plan
 
 - Connection form/page export tests prove a saved connection can show/copy a link and render a QR projection from the same link.
-- Import tests prove successful paste import delegates to the app import owner.
+- Add-flow import tests prove successful paste import delegates to the app import owner.
 - Error tests prove malformed links are shown as explicit import errors, not ignored and not converted into empty host state.
 
 ## Project Black-Box Impact
