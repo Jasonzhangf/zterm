@@ -480,6 +480,45 @@
       ]
     },
     {
+      "feature_id": "connections.config_share",
+      "title": "Connection configuration QR and link share contract",
+      "domain": "connections",
+      "owners": [
+        "packages/shared/src/connection/connection-config-share.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/connection/connection-config-share.ts",
+        "packages/shared/src/connection/connection-config-share.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/src/react/use-host-storage.ts",
+        "package.json",
+        "pnpm-lock.yaml",
+        "native/android/app/src/main/AndroidManifest.xml",
+        "src/App.tsx",
+        "src/lib/connection-config-share-android-truth.test.ts",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "docs/testing/connection-config-share-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "packages/shared/src/connection/connection-config-share.test.ts",
+        "src/lib/connection-config-share-android-truth.test.ts",
+        "docs/testing/connection-config-share-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/testing/connection-config-share-test-design.md"
+      ]
+    },
+    {
       "feature_id": "relay.account_directory",
       "title": "Relay account-scoped machine, endpoint, and session directory",
       "domain": "relay",

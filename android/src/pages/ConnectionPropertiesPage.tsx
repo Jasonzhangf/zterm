@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { resolveEffectiveBridgePort, resolveNormalizedBridgeHost } from '@zterm/shared';
+import QRCode from 'qrcode';
+import {
+  buildConnectionConfigShareLink,
+  resolveEffectiveBridgePort,
+  resolveNormalizedBridgeHost,
+} from '@zterm/shared';
 import { AppearanceSection } from '../components/connection-form/AppearanceSection';
 import { AuthSection } from '../components/connection-form/AuthSection';
 import { ConnectionSection } from '../components/connection-form/ConnectionSection';
@@ -60,6 +65,9 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [sessionDiscoveryState, setSessionDiscoveryState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [sessionDiscoveryError, setSessionDiscoveryError] = useState('');
+  const [shareQrSvg, setShareQrSvg] = useState('');
+  const [shareState, setShareState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [shareError, setShareError] = useState('');
   const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
     Boolean(bridgeSettings.traversalRelay?.accessToken),
   );
@@ -81,6 +89,15 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
   }, [form.bridgeHost, form.bridgePort, form.authToken, form.daemonHostId, form.relayHostId, form.relayDeviceId]);
 
   const pageTitle = useMemo(() => (host ? 'Edit Connection' : 'New Connection'), [host]);
+  const shareLink = useMemo(
+    () => host
+      ? buildConnectionConfigShareLink({
+          host,
+          exportedAt: host.lastConnected || host.createdAt,
+        })
+      : '',
+    [host],
+  );
   const defaultServer = useMemo(() => getDefaultBridgeServer(bridgeSettings), [bridgeSettings]);
   const rememberedServerViews = useMemo(() => buildBridgeServerPresetViews(bridgeSettings.servers), [bridgeSettings.servers]);
   const selectedDaemonHostId = (form.daemonHostId || form.relayHostId).trim();
@@ -89,6 +106,42 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
     [bridgeSettings.servers, selectedDaemonHostId],
   );
   const daemonNeedsManualBinding = daemonFirst && Boolean(selectedDaemonHostId) && !daemonBoundServer;
+
+  useEffect(() => {
+    let cancelled = false;
+    setShareQrSvg('');
+    setShareState('idle');
+    setShareError('');
+    if (!shareLink) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    QRCode.toString(shareLink, {
+      type: 'svg',
+      margin: 1,
+      width: 192,
+      errorCorrectionLevel: 'M',
+      color: {
+        dark: '#101218',
+        light: '#ffffff',
+      },
+    })
+      .then((svg) => {
+        if (!cancelled) {
+          setShareQrSvg(svg);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setShareState('error');
+          setShareError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shareLink]);
 
   const applyDaemonSelection = (device: TraversalRelayDeviceSnapshot) => {
     const mappedTarget = resolveRelayDeviceBridgeTarget(bridgeSettings.servers, device);
@@ -192,6 +245,23 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
       pinned: form.pinned,
       lastConnected: host?.lastConnected ?? draft?.lastConnected,
     });
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!shareLink) return;
+    if (!navigator.clipboard?.writeText) {
+      setShareState('error');
+      setShareError('系统剪贴板不可用，无法复制分享链接。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setShareState('copied');
+      setShareError('');
+    } catch (error) {
+      setShareState('error');
+      setShareError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const handleDiscoverSessions = async () => {
@@ -548,6 +618,101 @@ export function ConnectionPropertiesPage({ host, draft, bridgeSettings, onSave, 
           pinned={form.pinned}
           onPinnedChange={(pinned) => setForm((current) => ({ ...current, pinned }))}
         />
+
+        {host && (
+          <ConnectionSection
+            title="Share Connection"
+            description="生成同一份连接分享链接；二维码只是这条链接的投影，不包含密码或私钥。"
+          >
+            <div style={{ display: 'grid', gap: '14px' }}>
+              {shareQrSvg ? (
+                <div
+                  data-testid="connection-share-qr"
+                  aria-label="Connection share QR code"
+                  style={{
+                    width: '216px',
+                    minHeight: '216px',
+                    borderRadius: '24px',
+                    backgroundColor: '#ffffff',
+                    boxShadow: mobileTheme.shadow.soft,
+                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    display: 'grid',
+                    placeItems: 'center',
+                    padding: '12px',
+                    overflow: 'hidden',
+                  }}
+                  dangerouslySetInnerHTML={{ __html: shareQrSvg }}
+                />
+              ) : (
+                <div
+                  data-testid="connection-share-qr"
+                  aria-label="Connection share QR code"
+                  style={{
+                    width: '216px',
+                    minHeight: '216px',
+                    borderRadius: '24px',
+                    backgroundColor: '#ffffff',
+                    boxShadow: mobileTheme.shadow.soft,
+                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    display: 'grid',
+                    placeItems: 'center',
+                    padding: '12px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '12px' }}>
+                    QR building...
+                  </span>
+                </div>
+              )}
+              <textarea
+                data-testid="connection-share-link"
+                readOnly
+                value={shareLink}
+                rows={4}
+                style={{
+                  width: '100%',
+                  border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                  borderRadius: '18px',
+                  padding: '12px 14px',
+                  backgroundColor: '#ffffff',
+                  color: mobileTheme.colors.lightText,
+                  fontSize: '12px',
+                  lineHeight: 1.5,
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyShareLink()}
+                  style={{
+                    minHeight: '42px',
+                    borderRadius: '14px',
+                    border: 'none',
+                    backgroundColor: mobileTheme.colors.shell,
+                    color: '#ffffff',
+                    fontWeight: 800,
+                    padding: '0 16px',
+                    cursor: 'pointer',
+                    boxShadow: mobileTheme.shadow.soft,
+                  }}
+                >
+                  Copy Link
+                </button>
+                {shareState === 'copied' && (
+                  <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '13px' }}>Copied</span>
+                )}
+                {shareState === 'error' && (
+                  <span style={{ color: mobileTheme.colors.danger, fontSize: '13px' }}>
+                    {shareError || 'Share link failed'}
+                  </span>
+                )}
+              </div>
+            </div>
+          </ConnectionSection>
+        )}
       </div>
     </div>
   );

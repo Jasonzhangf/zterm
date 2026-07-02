@@ -4,6 +4,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
@@ -32,7 +34,7 @@ import {
 import { collectClientDebugSnapshot, registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { runtimeDebug } from './lib/runtime-debug';
 import { projectRelayDirectoryDeviceSnapshots } from './lib/relay-account-directory';
-import { openTerminalPage } from './lib/page-state';
+import { openConnectionsPage, openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -160,7 +162,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
-  const { hosts, isLoaded: hostsLoaded, addHost, updateHost, deleteHost } = useHostStorage();
+  const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
@@ -208,6 +210,60 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       }));
     },
   });
+
+  const handleImportConnectionShareLink = useCallback((input: string) => {
+    const parsed = parseConnectionConfigShareLink(input);
+    if (!parsed.ok) {
+      return parsed;
+    }
+    const importedHost = upsertHost(parsed.host);
+    setBridgeSettings((current) => upsertBridgeServer(current, {
+      name: importedHost.name,
+      targetHost: importedHost.bridgeHost,
+      targetPort: importedHost.bridgePort,
+      authToken: importedHost.authToken,
+      relayHostId: importedHost.daemonHostId || importedHost.relayHostId,
+      relayDeviceId: importedHost.relayDeviceId,
+      relayDeviceName: importedHost.name,
+    }));
+    setPageState(openConnectionsPage());
+    return { ok: true as const, name: importedHost.name };
+  }, [setBridgeSettings, setPageState, upsertHost]);
+
+  useEffect(() => {
+    let disposed = false;
+    let listenerHandle: { remove: () => Promise<void> | void } | null = null;
+    const listenerResult = CapacitorApp.addListener('appUrlOpen', (event) => {
+        const url = typeof event.url === 'string' ? event.url : '';
+        if (!url.startsWith('zterm://connection/import') && !url.startsWith('https://zterm.app/connection/import')) {
+          return;
+        }
+        const result = handleImportConnectionShareLink(url);
+        if (!result.ok) {
+          alert(`Connection import failed: ${result.error}`);
+          return;
+        }
+        alert(`Imported connection: ${result.name}`);
+      });
+    void Promise.resolve(listenerResult).then((handle) => {
+        if (!handle) {
+          return;
+        }
+        if (disposed) {
+          void handle.remove();
+          return;
+        }
+        listenerHandle = handle;
+      }).catch((error) => {
+      alert(`Connection deep link listener failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return () => {
+      disposed = true;
+      if (listenerHandle) {
+        void listenerHandle.remove();
+      }
+    };
+  }, [handleImportConnectionShareLink]);
 
   useEffect(() => {
     const generation = relayDeviceStreamGenerationRef.current + 1;
@@ -518,6 +574,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onDeleteServerGroup={handleDeleteServerGroup}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            onImportConnectionLink={handleImportConnectionShareLink}
             onAddNew={handleAddNew}
             onOpenSettings={handleOpenSettingsPage}
             onOpenVaults={handleOpenSettingsPage}

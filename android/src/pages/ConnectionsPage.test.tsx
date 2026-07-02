@@ -876,6 +876,71 @@ it('exits group management and restores the add-server entry', () => {
     );
   });
 
+  it('imports a pasted connection share link through the app import owner', () => {
+    const onImportConnectionLink = vi.fn(() => ({ ok: true as const, name: 'Imported Mac' }));
+
+    render(
+      <ConnectionsPage
+        hosts={[]}
+        sessions={[]}
+        sessionGroups={[]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onImportConnectionLink={onImportConnectionLink}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Connection share link'), {
+      target: { value: 'zterm://connection/import?payload=abc' },
+    });
+    fireEvent.click(screen.getByText('Import'));
+
+    expect(onImportConnectionLink).toHaveBeenCalledWith('zterm://connection/import?payload=abc');
+    expect(screen.getByText('Imported Imported Mac')).toBeTruthy();
+    expect((screen.getByLabelText('Connection share link') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('surfaces malformed connection share links without clearing the pasted input', () => {
+    const onImportConnectionLink = vi.fn(() => ({ ok: false as const, error: 'connection share link is missing payload' }));
+
+    render(
+      <ConnectionsPage
+        hosts={[]}
+        sessions={[]}
+        sessionGroups={[]}
+        onResumeSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenGroupSession={vi.fn()}
+        onEditServerGroup={vi.fn()}
+        onSaveServerGroupSelection={vi.fn()}
+        onDeleteServerGroup={vi.fn()}
+        onOpenServerGroups={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddNew={vi.fn()}
+        onImportConnectionLink={onImportConnectionLink}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Connection share link'), {
+      target: { value: 'bad-link' },
+    });
+    fireEvent.click(screen.getByText('Import'));
+
+    expect(screen.getByText('Import failed: connection share link is missing payload')).toBeTruthy();
+    expect((screen.getByLabelText('Connection share link') as HTMLTextAreaElement).value).toBe('bad-link');
+  });
+
   it('keeps daemonHostId when opening checked sessions from expanded group', () => {
     const onOpenServerGroups = vi.fn();
 

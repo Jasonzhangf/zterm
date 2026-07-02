@@ -299,27 +299,34 @@ const sessionHistoryHarness = vi.hoisted(() => {
 });
 
 const capacitorAppHarness = vi.hoisted(() => {
-  let listeners: Array<(state: { isActive: boolean }) => void> = [];
+  let listenersByEventName: Record<string, Array<(payload: any) => void>> = {};
 
   return {
-    addListener: vi.fn(async (_eventName: string, listener: (state: { isActive: boolean }) => void) => {
-      listeners.push(listener);
+    addListener: vi.fn(async (eventName: string, listener: (payload: any) => void) => {
+      listenersByEventName[eventName] = [...(listenersByEventName[eventName] || []), listener];
       return {
         remove: vi.fn(async () => {
-          listeners = listeners.filter((item) => item !== listener);
+          listenersByEventName[eventName] = (listenersByEventName[eventName] || []).filter((item) => item !== listener);
         }),
       };
     }),
     emit(state: { isActive: boolean }) {
+      const listeners = listenersByEventName.appStateChange || [];
       const activeListeners = listeners.length > 0
         ? listeners
-        : [this.addListener.mock.calls[this.addListener.mock.calls.length - 1]?.[1]].filter(
+        : this.addListener.mock.calls
+          .filter((call) => call[0] === 'appStateChange')
+          .map((call) => call[1])
+          .filter(
             (listener): listener is (state: { isActive: boolean }) => void => typeof listener === 'function',
           );
       activeListeners.forEach((listener) => listener(state));
     },
+    eventCallCount(eventName: string) {
+      return this.addListener.mock.calls.filter((call) => call[0] === eventName).length;
+    },
     reset() {
-      listeners = [];
+      listenersByEventName = {};
       this.addListener.mockReset();
     },
   };
@@ -1246,7 +1253,8 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    await waitFor(() => expect(capacitorAppHarness.addListener).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(capacitorAppHarness.eventCallCount('appStateChange')).toBe(1));
+    expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0);
 
     sessionHarness.update(
       {
@@ -1272,7 +1280,8 @@ describe('App dynamic refresh matrix', () => {
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
 
-    expect(capacitorAppHarness.addListener).toHaveBeenCalledTimes(1);
+    expect(capacitorAppHarness.eventCallCount('appStateChange')).toBe(1);
+    expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0);
   });
 
   it('restores persisted terminal tabs using the stored latest tab set and explicit-resumes the active tab', async () => {

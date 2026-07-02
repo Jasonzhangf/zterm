@@ -2,8 +2,10 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseConnectionConfigShareLink } from '@zterm/shared';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+import type { Host } from '../lib/types';
 import { ConnectionPropertiesPage } from './ConnectionPropertiesPage';
 
 const tmuxSessionMocks = vi.hoisted(() => ({
@@ -57,6 +59,33 @@ const bridgeSettings: BridgeSettings = {
     },
   ],
 };
+
+function makeHost(overrides: Partial<Host> = {}): Host {
+  return {
+    id: overrides.id || 'host-1',
+    createdAt: overrides.createdAt || 1000,
+    name: overrides.name || 'Share Mac',
+    bridgeHost: overrides.bridgeHost || '100.127.23.27:40807',
+    bridgePort: overrides.bridgePort || 3333,
+    daemonHostId: overrides.daemonHostId || 'daemon-a',
+    sessionName: overrides.sessionName || 'main',
+    authToken: overrides.authToken || 'token-a',
+    relayHostId: overrides.relayHostId || 'daemon-a',
+    relayDeviceId: overrides.relayDeviceId || 'device-a',
+    tailscaleHost: overrides.tailscaleHost,
+    ipv6Host: overrides.ipv6Host,
+    ipv4Host: overrides.ipv4Host,
+    signalUrl: overrides.signalUrl,
+    transportMode: overrides.transportMode || 'webrtc',
+    authType: overrides.authType || 'password',
+    password: overrides.password,
+    privateKey: overrides.privateKey,
+    tags: overrides.tags || ['work'],
+    pinned: overrides.pinned || false,
+    lastConnected: overrides.lastConnected,
+    autoCommand: overrides.autoCommand,
+  };
+}
 
 describe('ConnectionPropertiesPage', () => {
   beforeEach(() => {
@@ -578,5 +607,53 @@ describe('ConnectionPropertiesPage', () => {
 
     expect(window.alert).toHaveBeenCalledWith('RTC First 模式下请先选择一个在线的 Relay Daemon 设备');
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('renders a canonical share link and QR projection for an existing saved host', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const savedHost = makeHost({
+      password: 'must-not-export',
+      privateKey: 'must-not-export',
+      lastConnected: 2000,
+    });
+
+    render(
+      <ConnectionPropertiesPage
+        host={savedHost}
+        bridgeSettings={bridgeSettings}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const link = screen.getByTestId('connection-share-link') as HTMLTextAreaElement;
+    expect(link.value.startsWith('zterm://connection/import?payload=')).toBe(true);
+    const parsed = parseConnectionConfigShareLink(link.value);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        ok: true,
+        host: expect.objectContaining({
+          name: 'Share Mac',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 40807,
+          password: undefined,
+          privateKey: undefined,
+          lastConnected: undefined,
+        }),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connection-share-qr').innerHTML).toContain('<svg');
+    });
+    fireEvent.click(screen.getByText('Copy Link'));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(link.value);
+      expect(screen.getByText('Copied')).toBeTruthy();
+    });
   });
 });

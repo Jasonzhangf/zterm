@@ -1360,3 +1360,9 @@ Need runtime debug to confirm:
 - 架构映射：本轮属于 Daemon Truth Block / `terminal.transport_lifecycle`，owner 是 `src/server/terminal-runtime-types.ts`、`src/server/terminal-mirror-runtime.ts`、`src/server/terminal-runtime.ts`；处理方式是物理移除，禁止 daemon 持有 client `widthMode/adaptiveCols` 或按 client resize 改写 tmux 宽度。
 - 修复：删除 `TerminalSession.widthMode`、`SessionMirror.adaptiveCols`、adaptive width reconcile、detach/close 时释放 manual width 的逻辑；attach/resize wire 仍接受 `widthMode` 字段作为兼容输入，但只触发 mirror sync，不进入 daemon session/mirror truth。
 - 回归：`server.transport-lifecycle-truth.test.ts` 扫 owner 文件防止 `widthMode/adaptiveCols` state 和 tmux resize ownership 复活；`terminal-mirror-runtime.test.ts` 锁 attach payload 可兼容但不存 policy；`terminal-runtime.detached-session.test.ts` 锁 detach 不再 mutate tmux width policy；daemon/transport/tsc gates 已通过。
+
+# 2026-07-02 connection config share contract slice
+
+- 架构映射：新功能属于 Connections / Storage 的 `connections.config_share`，唯一 payload owner 是 `packages/shared/src/connection/connection-config-share.ts`；页面只能投影 shared link/QR，导入只能走 `useHostStorage.upsertHost`，禁止在 UI/daemon/terminal transport 中复制 payload 或补第二套同步逻辑。
+- 当前切片：先下沉 shared payload builder/parser，二维码和链接共用同一 canonical link；payload 显式剥离 `password/privateKey/lastConnected`，解析失败返回 `{ ok:false, error }`，不静默吞错、不产生空 host truth。
+- UI 切片：Connection Properties 展示 canonical link + QR SVG + copy；Connections 提供 paste import；App 层统一 `parseConnectionConfigShareLink -> upsertHost`，Android Manifest 注册 `zterm://connection/import`。仍需 packaged-device smoke 才能宣称真机扫码/外部链接端到端完成。

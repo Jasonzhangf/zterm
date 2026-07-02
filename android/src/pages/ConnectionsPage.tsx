@@ -49,6 +49,7 @@ interface ConnectionsPageProps {
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
   onAddNew?: () => void;
+  onImportConnectionLink?: (input: string) => { ok: true; name: string } | { ok: false; error: string };
   onOpenVaults?: () => void;
   onOpenSettings: () => void;
 }
@@ -120,12 +121,15 @@ export function ConnectionsPage({
   onEdit,
   onDelete,
   onAddNew,
+  onImportConnectionLink,
   onOpenVaults,
   onOpenSettings,
 }: ConnectionsPageProps) {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [selectedSessionsByGroup, setSelectedSessionsByGroup] = useState<Record<string, string[]>>({});
   const [vaultNoticeVisible, setVaultNoticeVisible] = useState(false);
+  const [connectionImportInput, setConnectionImportInput] = useState('');
+  const [connectionImportStatus, setConnectionImportStatus] = useState('');
   const relayAccount = readTraversalRelayAccountState();
   const serverGroups = useMemo(() => buildConnectionsServerGroups({
     hosts,
@@ -271,6 +275,20 @@ export function ConnectionsPage({
   const handleOpenVaults = () => {
     onOpenVaults?.();
     setVaultNoticeVisible(true);
+  };
+
+  const handleImportConnectionLink = () => {
+    if (!onImportConnectionLink) {
+      setConnectionImportStatus('当前版本未启用连接导入入口。');
+      return;
+    }
+    const result = onImportConnectionLink(connectionImportInput);
+    if (!result.ok) {
+      setConnectionImportStatus(`Import failed: ${result.error}`);
+      return;
+    }
+    setConnectionImportInput('');
+    setConnectionImportStatus(`Imported ${result.name}`);
   };
 
   const openSelectedServerGroups = () => {
@@ -419,6 +437,76 @@ export function ConnectionsPage({
         }}
       >
         <ConnectionsHeader subtitle="Grouped by daemon first. Tap to open, long-press to choose sessions." />
+
+        <div
+          style={{
+            borderRadius: '24px',
+            backgroundColor: '#ffffff',
+            boxShadow: mobileTheme.shadow.soft,
+            border: `1px solid ${mobileTheme.colors.lightBorder}`,
+            padding: '14px',
+            display: 'grid',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 900 }}>Import Connection</div>
+              <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                Paste a zterm share link from another device.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleImportConnectionLink}
+              style={{
+                border: 'none',
+                borderRadius: '16px',
+                minHeight: '42px',
+                padding: '0 14px',
+                backgroundColor: mobileTheme.colors.shell,
+                color: '#ffffff',
+                fontWeight: 900,
+                cursor: 'pointer',
+              }}
+            >
+              Import
+            </button>
+          </div>
+          <textarea
+            aria-label="Connection share link"
+            value={connectionImportInput}
+            onChange={(event) => {
+              setConnectionImportInput(event.target.value);
+              setConnectionImportStatus('');
+            }}
+            placeholder="zterm://connection/import?payload=..."
+            rows={3}
+            style={{
+              width: '100%',
+              border: `1px solid ${mobileTheme.colors.lightBorder}`,
+              borderRadius: '18px',
+              padding: '12px 14px',
+              backgroundColor: '#f6f8fb',
+              color: mobileTheme.colors.lightText,
+              boxSizing: 'border-box',
+              resize: 'vertical',
+            }}
+          />
+          {connectionImportStatus && (
+            <div
+              role="status"
+              style={{
+                fontSize: '12px',
+                color: connectionImportStatus.startsWith('Import failed')
+                  ? mobileTheme.colors.danger
+                  : mobileTheme.colors.lightMuted,
+              }}
+            >
+              {connectionImportStatus}
+            </div>
+          )}
+        </div>
 
         {serverGroups.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
