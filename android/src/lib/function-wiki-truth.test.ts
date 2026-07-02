@@ -145,13 +145,17 @@ describe('function wiki truth gate', () => {
     }
   });
 
-  it('keeps generated html sourced from mermaid diagrams', () => {
+  it('keeps generated html offline and sourced from mermaid diagrams', () => {
     for (const file of ['daemon', 'cli', 'mainline-source']) {
       const md = read(`docs/wiki/${file}.md`);
       const html = read(`docs/wiki/generated/${file}.html`);
       expect(md).toContain('```mermaid');
-      expect(html).toContain('<div class="mermaid">');
+      expect(html).toContain('<svg class="wiki-graph"');
+      expect(html).toContain('<pre class="source">');
       expect(html).toContain('flowchart TD');
+      expect(html).not.toContain('cdn.jsdelivr.net');
+      expect(html).not.toContain('<script');
+      expect(html).not.toContain('https://');
     }
   });
 });

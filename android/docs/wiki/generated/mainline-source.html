@@ -1,22 +1,107 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Mainline Source Wiki</title><script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs"; mermaid.initialize({ startOnLoad: true });</script></head><body>
+<html><head><meta charset="utf-8"><title>Mainline Source Wiki</title><style>
+body { margin: 24px; background: #f7f3ea; color: #1d2525; font-family: ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size: 24px; margin-bottom: 18px; }
+.wiki-graph { width: 100%; max-width: 1400px; min-height: 220px; background: #fffaf0; border: 1px solid #d9cdb9; border-radius: 18px; box-shadow: 0 12px 36px rgba(50, 40, 25, 0.12); }
+.node rect { fill: #fbf7ed; stroke: #365b54; stroke-width: 1.5; }
+.node text { fill: #1d2525; font-size: 13px; font-weight: 650; }
+.edge { fill: none; stroke: #b46a3c; stroke-width: 2; }
+.arrow { fill: #b46a3c; }
+.source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
+</style></head><body>
 <h1>Mainline Source Wiki</h1>
-<div class="mermaid">
-flowchart TD
-  Native["native/android/app/src/main"] --> Capacitor["capacitor.config.ts"]
-  Capacitor --> Vite["vite.config.ts"]
-  Vite --> Main["src/main.tsx"]
-  Main --> App["src/App.tsx"]
-  App --> Connections["src/pages/ConnectionsPage.tsx"]
-  App --> TerminalPage["src/pages/TerminalPage.tsx"]
-  TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
-  TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
-  TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
-  TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
-  LayoutProfile --> StageShell
-  TerminalPage --> SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx"]
-  SessionDrawer --> TerminalPage
-  TerminalView --> Renderer["src/lib/session-render-buffer-store.ts"]
-  Renderer --> RenderGate["src/lib/session-render-gate.ts"]
-</div>
+<svg class="wiki-graph" viewBox="0 0 2050 754" role="img" aria-label="Mainline graph">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
+    </marker>
+  </defs>
+  <path d="M 330 62 C 365 62, 365 62, 400 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 660 62 C 695 62, 695 62, 730 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 62, 1060 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 62 C 1355 62, 1355 62, 1390 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 62 C 1685 62, 1685 62, 1720 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 62 C 1685 62, 1685 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 152, 70 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 242, 70 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 332, 70 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 422, 70 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 422 C 354 422, 354 332, 70 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 512, 70 512" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 512 C 1025 512, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 152 C 354 152, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 602 C 354 602, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
+  <g class="node" data-node-id="Native">
+  <rect x="70" y="34" width="260" height="56" rx="12" />
+  <text x="86" y="68">native/android/app/src/main</text>
+</g>
+<g class="node" data-node-id="Capacitor">
+  <rect x="400" y="34" width="260" height="56" rx="12" />
+  <text x="416" y="68">capacitor.config.ts</text>
+</g>
+<g class="node" data-node-id="Vite">
+  <rect x="730" y="34" width="260" height="56" rx="12" />
+  <text x="746" y="68">vite.config.ts</text>
+</g>
+<g class="node" data-node-id="Main">
+  <rect x="1060" y="34" width="260" height="56" rx="12" />
+  <text x="1076" y="68">src/main.tsx</text>
+</g>
+<g class="node" data-node-id="App">
+  <rect x="1390" y="34" width="260" height="56" rx="12" />
+  <text x="1406" y="68">src/App.tsx</text>
+</g>
+<g class="node" data-node-id="Connections">
+  <rect x="1720" y="34" width="260" height="56" rx="12" />
+  <text x="1736" y="68">src/pages/ConnectionsPage.tsx</text>
+</g>
+<g class="node" data-node-id="TerminalPage">
+  <rect x="1720" y="124" width="260" height="56" rx="12" />
+  <text x="1736" y="158">src/pages/TerminalPage.tsx</text>
+</g>
+<g class="node" data-node-id="TerminalView">
+  <rect x="70" y="124" width="260" height="56" rx="12" />
+  <text x="86" y="158">src/components/TerminalView.tsx</text>
+</g>
+<g class="node" data-node-id="QuickBar">
+  <rect x="70" y="214" width="260" height="56" rx="12" />
+  <text x="86" y="248">src/components/terminal/TerminalQuickBar.tsx</text>
+</g>
+<g class="node" data-node-id="StageShell">
+  <rect x="70" y="304" width="260" height="56" rx="12" />
+  <text x="86" y="338">src/pages/TerminalPageStageShell.tsx</text>
+</g>
+<g class="node" data-node-id="LayoutProfile">
+  <rect x="70" y="394" width="260" height="56" rx="12" />
+  <text x="86" y="428">src/lib/terminal-layout-profile.ts</text>
+</g>
+<g class="node" data-node-id="SessionDrawer">
+  <rect x="70" y="484" width="260" height="56" rx="12" />
+  <text x="86" y="518">src/components/terminal/TerminalSessionDrawer.tsx</text>
+</g>
+<g class="node" data-node-id="Renderer">
+  <rect x="70" y="574" width="260" height="56" rx="12" />
+  <text x="86" y="608">src/lib/session-render-buffer-store.ts</text>
+</g>
+<g class="node" data-node-id="RenderGate">
+  <rect x="70" y="664" width="260" height="56" rx="12" />
+  <text x="86" y="698">src/lib/session-render-gate.ts</text>
+</g>
+</svg>
+<pre class="source">flowchart TD
+  Native[&quot;native/android/app/src/main&quot;] --&gt; Capacitor[&quot;capacitor.config.ts&quot;]
+  Capacitor --&gt; Vite[&quot;vite.config.ts&quot;]
+  Vite --&gt; Main[&quot;src/main.tsx&quot;]
+  Main --&gt; App[&quot;src/App.tsx&quot;]
+  App --&gt; Connections[&quot;src/pages/ConnectionsPage.tsx&quot;]
+  App --&gt; TerminalPage[&quot;src/pages/TerminalPage.tsx&quot;]
+  TerminalPage --&gt; TerminalView[&quot;src/components/TerminalView.tsx&quot;]
+  TerminalPage --&gt; QuickBar[&quot;src/components/terminal/TerminalQuickBar.tsx&quot;]
+  TerminalPage --&gt; StageShell[&quot;src/pages/TerminalPageStageShell.tsx&quot;]
+  TerminalPage --&gt; LayoutProfile[&quot;src/lib/terminal-layout-profile.ts&quot;]
+  LayoutProfile --&gt; StageShell
+  TerminalPage --&gt; SessionDrawer[&quot;src/components/terminal/TerminalSessionDrawer.tsx&quot;]
+  SessionDrawer --&gt; TerminalPage
+  TerminalView --&gt; Renderer[&quot;src/lib/session-render-buffer-store.ts&quot;]
+  Renderer --&gt; RenderGate[&quot;src/lib/session-render-gate.ts&quot;]</pre>
 </body></html>

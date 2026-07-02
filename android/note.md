@@ -1,3 +1,11 @@
+# 2026-07-02 offline generated wiki HTML
+
+- 架构映射：本 slice 是 Wiki Review Surface block，不改业务 runtime；owner 是 `scripts/build-function-wiki.mjs`、`docs/wiki/generated/*.html`、`src/lib/function-wiki-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。
+- 发现：旧审计 `arch-quality-audit-2026-06-19.md` 已记录 A1：generated wiki HTML 依赖 `cdn.jsdelivr.net` Mermaid，不满足离线 review 面。
+- 修复：生成器物理移除 CDN/script 依赖，改为解析当前 flowchart 子集并生成内联 SVG；HTML 同时保留原始 Mermaid source 便于 review。
+- 防复发：`function-wiki-truth.test.ts` 禁止 generated HTML 包含 `<script`、`https://`、`cdn.jsdelivr.net`，并要求 `<svg class="wiki-graph">` 与 `<pre class="source">`。
+- 证明范围：L0 wiki HTML 生成与静态 gate；未做浏览器截图验证，不宣称 L4/L5 visual smoke。
+
 # 2026-07-02 wiki mainline-call-map manifest
 
 - 架构映射：本 slice 是 Wiki Review Surface / Mainline Call Map block，不改业务 runtime；owner 是 `docs/wiki/mainline-call-map.json` 与 `src/lib/function-wiki-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。

@@ -177,7 +177,7 @@ Boundary rule:
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
 3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
-5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, registry/feature-gates verification-map coverage, and wiki/mainline-call-map machine manifest alignment.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, registry/feature-gates verification-map coverage, wiki/mainline-call-map machine manifest alignment, and offline generated wiki HTML.
 
 ## Repair Log
 
@@ -243,3 +243,13 @@ Boundary rule:
 - Added to `function-wiki-truth.test.ts`: manifest existence, parseability, lifecycle ids, canonical docs, verification gates, node/edge endpoint validity, and owner `feature_id` lookup against the registry.
 - Positive tests: `test:feature-registry` proves wiki review surfaces now have a machine-readable call-map companion.
 - Negative tests: scanner fails if a lifecycle references a missing node, missing owner feature, missing canonical doc, or missing verification gate.
+
+### 2026-07-02 ninth slice: offline generated wiki HTML
+
+- Block: Wiki Review Surface.
+- Decision: Remove external runtime dependency.
+- Removed generated wiki HTML dependency on `https://cdn.jsdelivr.net/npm/mermaid...`.
+- Updated `scripts/build-function-wiki.mjs` to parse the supported Mermaid flowchart subset and emit deterministic inline SVG plus the original source text.
+- Added to `function-wiki-truth.test.ts`: generated HTML must contain local SVG/source and must not contain `<script`, `https://`, or `cdn.jsdelivr.net`.
+- Positive tests: `test:feature-registry` proves generated wiki HTML remains present and locally viewable.
+- Negative tests: scanner fails if future generated wiki HTML reintroduces CDN/script dependency.
