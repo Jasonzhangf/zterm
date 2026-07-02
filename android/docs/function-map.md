@@ -56,7 +56,7 @@ Rules:
 
 ## Mainline Source Index
 
-`docs/wiki/mainline-source.md` is the canonical source for "where does this user-visible surface live". It must stay in lockstep with this map. The `src/lib/function-wiki-truth.test.ts` gate fails when the wiki, the registry, and the mainline index disagree.
+`docs/wiki/mainline-source.md` is the canonical source for "where does this user-visible surface live". `docs/wiki/mainline-call-map.json` is the machine-readable call-map manifest whose node ids must align with that wiki. Both must stay in lockstep with this map. The `src/lib/function-wiki-truth.test.ts` gate fails when the wiki, the registry, the call-map manifest, and the mainline index disagree.
 
 Rules:
 

@@ -441,6 +441,7 @@ android/
 - `docs/wiki/daemon.md` — daemon runtime entry, tmux/mirror/bridge/schedule/control/ftransfer/screenshot paths
 - `docs/wiki/cli.md` — bash CLI surface (`zterm-daemon.sh`), npm global install, launchd lifecycle
 - `docs/wiki/mainline-source.md` — Android / daemon / CLI mainline source ownership
+- `docs/wiki/mainline-call-map.json` — machine-readable mainline call map; node ids must align with wiki Mermaid ids
 - `scripts/build-function-wiki.mjs` — generates `docs/wiki/generated/*.html` from mermaid blocks
 
 任何功能改动在进入代码前，必须先按 `feature_id` 定位：

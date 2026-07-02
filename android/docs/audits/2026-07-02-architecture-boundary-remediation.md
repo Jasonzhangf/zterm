@@ -177,7 +177,7 @@ Boundary rule:
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
 3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
-5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, and registry/feature-gates verification-map coverage.
+5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, registry/feature-gates verification-map coverage, and wiki/mainline-call-map machine manifest alignment.
 
 ## Repair Log
 
@@ -234,3 +234,12 @@ Boundary rule:
 - Filled missing `feature-gates.md` entries for quickbar, remote screenshot, transport lifecycle, connections projection, file transfer, daemon runtime/CLI/support/mainline, and session drawer.
 - Positive tests: `test:feature-registry` proves each registered feature has a human-readable verification risk statement.
 - Negative tests: scanner fails when future registry features are added without updating the verification guide.
+
+### 2026-07-02 eighth slice: wiki mainline-call-map manifest
+
+- Block: Wiki Review Surface / Mainline Call Map.
+- Decision: Separate into machine-readable manifest and static gate.
+- Added `docs/wiki/mainline-call-map.json` with `android_mainline`, `daemon_mainline`, and `cli_mainline` lifecycles. Node ids match `docs/wiki/mainline-source.md` Mermaid ids.
+- Added to `function-wiki-truth.test.ts`: manifest existence, parseability, lifecycle ids, canonical docs, verification gates, node/edge endpoint validity, and owner `feature_id` lookup against the registry.
+- Positive tests: `test:feature-registry` proves wiki review surfaces now have a machine-readable call-map companion.
+- Negative tests: scanner fails if a lifecycle references a missing node, missing owner feature, missing canonical doc, or missing verification gate.

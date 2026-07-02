@@ -8,6 +8,7 @@ const requiredDocs = [
   'docs/wiki/daemon.md',
   'docs/wiki/cli.md',
   'docs/wiki/mainline-source.md',
+  'docs/wiki/mainline-call-map.json',
   'docs/wiki/generated/daemon.html',
   'docs/wiki/generated/cli.html',
   'docs/wiki/generated/mainline-source.html',
@@ -25,6 +26,16 @@ const requiredFunctionMapIds = [
 
 function read(relativePath: string) {
   return readFileSync(join(root, relativePath), 'utf8');
+}
+
+function resolvePath(relativePath: string) {
+  const androidPath = join(root, relativePath);
+  if (existsSync(androidPath)) return androidPath;
+
+  const repoPath = join(root, '..', relativePath);
+  if (existsSync(repoPath)) return repoPath;
+
+  return null;
 }
 
 describe('function wiki truth gate', () => {
@@ -77,6 +88,61 @@ describe('function wiki truth gate', () => {
     expect(mainline).toContain('Android Mainline');
     expect(mainline).toContain('Daemon Mainline');
     expect(mainline).toContain('CLI Mainline');
+  });
+
+  it('keeps the machine-readable mainline call map aligned with wiki nodes and registry owners', () => {
+    const manifest = JSON.parse(read('docs/wiki/mainline-call-map.json')) as {
+      schema_version: number;
+      lifecycles: Array<{
+        lifecycle_id: string;
+        title: string;
+        entrypoint: string;
+        owner_feature: string;
+        canonical_docs: string[];
+        verification_gates: string[];
+        nodes: Array<{ id: string; label: string }>;
+        edges: Array<{ from: string; to: string; owner_feature: string; status: string }>;
+      }>;
+    };
+    const mainline = read('docs/wiki/mainline-source.md');
+    const registry = JSON.parse(read('docs/feature-registry.json')) as {
+      features: Array<{ feature_id: string }>;
+    };
+    const featureIds = new Set(registry.features.map((feature) => feature.feature_id));
+
+    expect(manifest.schema_version).toBe(1);
+    expect(manifest.lifecycles.map((lifecycle) => lifecycle.lifecycle_id)).toEqual([
+      'android_mainline',
+      'daemon_mainline',
+      'cli_mainline',
+    ]);
+
+    for (const lifecycle of manifest.lifecycles) {
+      expect(mainline).toContain(lifecycle.title);
+      expect(featureIds.has(lifecycle.owner_feature), lifecycle.owner_feature).toBe(true);
+
+      const nodeIds = new Set(lifecycle.nodes.map((node) => node.id));
+      expect(nodeIds.has(lifecycle.entrypoint), lifecycle.entrypoint).toBe(true);
+
+      for (const docPath of lifecycle.canonical_docs) {
+        expect(resolvePath(docPath), docPath).not.toBeNull();
+      }
+
+      for (const gatePath of lifecycle.verification_gates) {
+        expect(resolvePath(gatePath), gatePath).not.toBeNull();
+      }
+
+      for (const node of lifecycle.nodes) {
+        expect(mainline, node.id).toContain(node.id);
+      }
+
+      for (const edge of lifecycle.edges) {
+        expect(nodeIds.has(edge.from), `${lifecycle.lifecycle_id}:${edge.from}`).toBe(true);
+        expect(nodeIds.has(edge.to), `${lifecycle.lifecycle_id}:${edge.to}`).toBe(true);
+        expect(featureIds.has(edge.owner_feature), edge.owner_feature).toBe(true);
+        expect(['anchored', 'partial', 'binding pending']).toContain(edge.status);
+      }
+    }
   });
 
   it('keeps generated html sourced from mermaid diagrams', () => {

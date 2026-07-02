@@ -1,3 +1,10 @@
+# 2026-07-02 wiki mainline-call-map manifest
+
+- 架构映射：本 slice 是 Wiki Review Surface / Mainline Call Map block，不改业务 runtime；owner 是 `docs/wiki/mainline-call-map.json` 与 `src/lib/function-wiki-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。
+- 发现：旧审计 `arch-quality-audit-2026-06-19.md` 已记录 F1：mainline call map 未机器可读，当前 wiki 只有 md/html，没有 JSON manifest。
+- 修复：新增 `android_mainline`、`daemon_mainline`、`cli_mainline` 三个 lifecycle 的 machine-readable call map；节点 ID 对齐 `docs/wiki/mainline-source.md` Mermaid ID；gate 校验 owner feature、节点/边、canonical docs、verification gates。
+- 证明范围：L0 wiki/mainline-call-map manifest gate；未改 runtime 业务，不宣称 L1-L5 行为变化。
+
 # 2026-07-02 feature-gates coverage lock
 
 - 架构映射：本 slice 是 cross-block verification-map prevention，不改业务 runtime；owner 是 `docs/feature-gates.md` 与 `src/lib/feature-registry-truth.test.ts`，接入点是 `android/package.json -> test:feature-registry`。

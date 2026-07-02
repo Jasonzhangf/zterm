@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "description": "Machine-readable mainline call map for zterm Android, daemon, and CLI review surfaces. Node ids match docs/wiki/mainline-source.md Mermaid ids.",
+  "lifecycles": [
+    {
+      "lifecycle_id": "android_mainline",
+      "title": "Android Mainline",
+      "entrypoint": "Native",
+      "return_path": "TerminalView -> RenderGate -> TerminalView",
+      "owner_feature": "mainline_source.android",
+      "canonical_docs": [
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md",
+        "docs/function-map.md"
+      ],
+      "verification_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "nodes": [
+        { "id": "Native", "label": "native/android/app/src/main" },
+        { "id": "Capacitor", "label": "capacitor.config.ts" },
+        { "id": "Vite", "label": "vite.config.ts" },
+        { "id": "Main", "label": "src/main.tsx" },
+        { "id": "App", "label": "src/App.tsx" },
+        { "id": "Connections", "label": "src/pages/ConnectionsPage.tsx" },
+        { "id": "TerminalPage", "label": "src/pages/TerminalPage.tsx" },
+        { "id": "TerminalView", "label": "src/components/TerminalView.tsx" },
+        { "id": "QuickBar", "label": "src/components/terminal/TerminalQuickBar.tsx" },
+        { "id": "StageShell", "label": "src/pages/TerminalPageStageShell.tsx" },
+        { "id": "LayoutProfile", "label": "src/lib/terminal-layout-profile.ts" },
+        { "id": "SessionDrawer", "label": "src/components/terminal/TerminalSessionDrawer.tsx" },
+        { "id": "Renderer", "label": "src/lib/session-render-buffer-store.ts" },
+        { "id": "RenderGate", "label": "src/lib/session-render-gate.ts" }
+      ],
+      "edges": [
+        { "from": "Native", "to": "Capacitor", "owner_feature": "mainline_source.android", "semantic_input": "native Android entry", "semantic_output": "Capacitor app config", "status": "anchored" },
+        { "from": "Capacitor", "to": "Vite", "owner_feature": "mainline_source.android", "semantic_input": "Capacitor shell config", "semantic_output": "web app build entry", "status": "anchored" },
+        { "from": "Vite", "to": "Main", "owner_feature": "mainline_source.android", "semantic_input": "Vite runtime entry", "semantic_output": "React root entry", "status": "anchored" },
+        { "from": "Main", "to": "App", "owner_feature": "mainline_source.android", "semantic_input": "React root", "semantic_output": "app shell", "status": "anchored" },
+        { "from": "App", "to": "Connections", "owner_feature": "connections.history_projection", "semantic_input": "connections route", "semantic_output": "connections projection", "status": "anchored" },
+        { "from": "App", "to": "TerminalPage", "owner_feature": "mainline_source.android", "semantic_input": "terminal route", "semantic_output": "terminal page shell", "status": "anchored" },
+        { "from": "TerminalPage", "to": "TerminalView", "owner_feature": "terminal.buffer_render", "semantic_input": "active terminal session projection", "semantic_output": "terminal renderer props", "status": "anchored" },
+        { "from": "TerminalPage", "to": "QuickBar", "owner_feature": "terminal.quickbar", "semantic_input": "terminal shell actions", "semantic_output": "quickbar controls", "status": "anchored" },
+        { "from": "TerminalPage", "to": "StageShell", "owner_feature": "terminal.workspace_panes", "semantic_input": "pane layout state", "semantic_output": "stage slots", "status": "anchored" },
+        { "from": "TerminalPage", "to": "LayoutProfile", "owner_feature": "terminal.session_group_layout", "semantic_input": "viewport/layout facts", "semantic_output": "layout profile", "status": "anchored" },
+        { "from": "LayoutProfile", "to": "StageShell", "owner_feature": "terminal.session_group_layout", "semantic_input": "layout profile", "semantic_output": "stage slot policy", "status": "anchored" },
+        { "from": "TerminalPage", "to": "SessionDrawer", "owner_feature": "terminal.session_drawer", "semantic_input": "resolved host/session projection", "semantic_output": "drawer rows and host rail", "status": "anchored" },
+        { "from": "SessionDrawer", "to": "TerminalPage", "owner_feature": "terminal.session_drawer", "semantic_input": "drawer UI intent", "semantic_output": "page-level intent callback", "status": "anchored" },
+        { "from": "TerminalView", "to": "Renderer", "owner_feature": "terminal.buffer_render", "semantic_input": "visible terminal body demand", "semantic_output": "buffer store read", "status": "anchored" },
+        { "from": "Renderer", "to": "RenderGate", "owner_feature": "terminal.buffer_render", "semantic_input": "buffer store state", "semantic_output": "render commit eligibility", "status": "anchored" }
+      ]
+    },
+    {
+      "lifecycle_id": "daemon_mainline",
+      "title": "Daemon Mainline",
+      "entrypoint": "CLI",
+      "return_path": "Mirror -> Message -> Server -> Transport",
+      "owner_feature": "mainline_source.daemon",
+      "canonical_docs": [
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/daemon.md",
+        "docs/architecture.md",
+        "docs/function-map.md"
+      ],
+      "verification_gates": [
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "nodes": [
+        { "id": "CLI", "label": "scripts/zterm-daemon.sh" },
+        { "id": "Server", "label": "src/server/server.ts" },
+        { "id": "DaemonRuntime", "label": "src/server/terminal-daemon-runtime.ts" },
+        { "id": "Runtime", "label": "src/server/terminal-runtime.ts" },
+        { "id": "Bridge", "label": "src/server/terminal-bridge-runtime.ts" },
+        { "id": "Message", "label": "src/server/terminal-message-runtime.ts" },
+        { "id": "Mirror", "label": "src/server/terminal-mirror-runtime.ts" },
+        { "id": "Capture", "label": "src/server/terminal-mirror-capture.ts" },
+        { "id": "Control", "label": "src/server/terminal-message-control-runtime.ts" },
+        { "id": "Tmux", "label": "src/server/terminal-control-runtime.ts" },
+        { "id": "Schedule", "label": "src/server/terminal-schedule-runtime.ts" },
+        { "id": "Transfer", "label": "src/server/terminal-file-transfer-runtime.ts" },
+        { "id": "Screenshot", "label": "src/server/remote-screenshot-daemon.ts" },
+        { "id": "Http", "label": "src/server/terminal-http-runtime.ts" },
+        { "id": "Debug", "label": "src/server/terminal-debug-runtime.ts" },
+        { "id": "Transport", "label": "src/server/terminal-transport-runtime.ts" },
+        { "id": "Relay", "label": "src/server/relay-client.ts" }
+      ],
+      "edges": [
+        { "from": "CLI", "to": "Server", "owner_feature": "daemon.cli_shell", "semantic_input": "daemon run command", "semantic_output": "server process entry", "status": "anchored" },
+        { "from": "Server", "to": "DaemonRuntime", "owner_feature": "daemon.runtime_entry", "semantic_input": "server lifecycle wiring", "semantic_output": "daemon lifecycle orchestration", "status": "anchored" },
+        { "from": "Server", "to": "Runtime", "owner_feature": "daemon.runtime_entry", "semantic_input": "server session runtime wiring", "semantic_output": "terminal runtime", "status": "anchored" },
+        { "from": "Runtime", "to": "Bridge", "owner_feature": "terminal.transport_lifecycle", "semantic_input": "terminal runtime connection need", "semantic_output": "bridge runtime", "status": "anchored" },
+        { "from": "Runtime", "to": "Message", "owner_feature": "terminal.daemon_input", "semantic_input": "client message frame", "semantic_output": "message dispatch", "status": "anchored" },
+        { "from": "Message", "to": "Mirror", "owner_feature": "terminal.buffer_render", "semantic_input": "head/range/live sync request", "semantic_output": "mirror truth read/write", "status": "anchored" },
+        { "from": "Mirror", "to": "Capture", "owner_feature": "terminal.buffer_render", "semantic_input": "tmux capture request", "semantic_output": "canonical mirror snapshot", "status": "anchored" },
+        { "from": "Message", "to": "Control", "owner_feature": "terminal.daemon_input", "semantic_input": "control/input message", "semantic_output": "control dispatch", "status": "anchored" },
+        { "from": "Control", "to": "Tmux", "owner_feature": "terminal.daemon_input", "semantic_input": "tmux control/write operation", "semantic_output": "tmux side effect", "status": "anchored" },
+        { "from": "Control", "to": "Schedule", "owner_feature": "terminal.schedule", "semantic_input": "schedule control operation", "semantic_output": "schedule state transition", "status": "anchored" },
+        { "from": "Control", "to": "Transfer", "owner_feature": "daemon.file_transfer", "semantic_input": "file transfer control operation", "semantic_output": "file transfer event", "status": "anchored" },
+        { "from": "Control", "to": "Screenshot", "owner_feature": "terminal.remote_screenshot", "semantic_input": "remote screenshot request", "semantic_output": "native screenshot handoff", "status": "anchored" },
+        { "from": "Server", "to": "Http", "owner_feature": "daemon.runtime_entry", "semantic_input": "HTTP request", "semantic_output": "HTTP debug/update response", "status": "anchored" },
+        { "from": "Server", "to": "Debug", "owner_feature": "daemon.runtime_entry", "semantic_input": "debug event", "semantic_output": "debug projection", "status": "anchored" },
+        { "from": "Server", "to": "Transport", "owner_feature": "terminal.transport_lifecycle", "semantic_input": "wire transport", "semantic_output": "transport send/broadcast", "status": "anchored" },
+        { "from": "Server", "to": "Relay", "owner_feature": "relay.account_directory", "semantic_input": "relay registration/signaling", "semantic_output": "relay client facts", "status": "anchored" }
+      ]
+    },
+    {
+      "lifecycle_id": "cli_mainline",
+      "title": "CLI Mainline",
+      "entrypoint": "DevCLI",
+      "return_path": "GlobalBin -> Shell -> Runtime",
+      "owner_feature": "mainline_source.cli",
+      "canonical_docs": [
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/cli.md",
+        "docs/function-map.md"
+      ],
+      "verification_gates": [
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "nodes": [
+        { "id": "DevCLI", "label": "pnpm run daemon:*" },
+        { "id": "Shell", "label": "scripts/zterm-daemon.sh" },
+        { "id": "Launchd", "label": "~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist" },
+        { "id": "Direct", "label": "~/.wterm/run/zterm-daemon.pid" },
+        { "id": "Runtime", "label": "~/.wterm/daemon-runtime/server.cjs" },
+        { "id": "Native", "label": "scripts/native/zterm-daemon.swift" },
+        { "id": "WinShell", "label": "scripts/windows/zterm-daemon.ps1" },
+        { "id": "WinTask", "label": "Windows Scheduled Task: ZTermDaemon" },
+        { "id": "Release", "label": "scripts/prepare-global-daemon-release.sh" },
+        { "id": "Install", "label": "scripts/install-global-daemon-cli.sh" },
+        { "id": "GlobalBin", "label": "~/.local/bin/zterm-daemon" },
+        { "id": "Npm", "label": "scripts/prepare-daemon-npm-package.mjs" },
+        { "id": "PackageBin", "label": "package/bin/zterm-daemon" }
+      ],
+      "edges": [
+        { "from": "DevCLI", "to": "Shell", "owner_feature": "daemon.cli_shell", "semantic_input": "developer daemon command", "semantic_output": "shell CLI dispatch", "status": "anchored" },
+        { "from": "Shell", "to": "Launchd", "owner_feature": "daemon.cli_shell", "semantic_input": "macOS service command", "semantic_output": "launchd service state", "status": "anchored" },
+        { "from": "Shell", "to": "Direct", "owner_feature": "daemon.cli_shell", "semantic_input": "direct daemon command", "semantic_output": "pid-file process state", "status": "anchored" },
+        { "from": "Shell", "to": "Runtime", "owner_feature": "daemon.cli_shell", "semantic_input": "run command", "semantic_output": "staged runtime execution", "status": "anchored" },
+        { "from": "Shell", "to": "Native", "owner_feature": "daemon.cli_shell", "semantic_input": "native helper need", "semantic_output": "native helper handoff", "status": "anchored" },
+        { "from": "WinShell", "to": "WinTask", "owner_feature": "daemon.cli_shell", "semantic_input": "Windows service command", "semantic_output": "scheduled task state", "status": "anchored" },
+        { "from": "WinTask", "to": "Runtime", "owner_feature": "daemon.cli_shell", "semantic_input": "scheduled task launch", "semantic_output": "runtime process", "status": "anchored" },
+        { "from": "Release", "to": "Runtime", "owner_feature": "daemon.cli_shell", "semantic_input": "release staging", "semantic_output": "runtime bundle", "status": "anchored" },
+        { "from": "Release", "to": "Install", "owner_feature": "daemon.cli_shell", "semantic_input": "release install request", "semantic_output": "global installer", "status": "anchored" },
+        { "from": "Install", "to": "GlobalBin", "owner_feature": "daemon.cli_shell", "semantic_input": "install script", "semantic_output": "global daemon bin", "status": "anchored" },
+        { "from": "Npm", "to": "PackageBin", "owner_feature": "daemon.cli_shell", "semantic_input": "npm package staging", "semantic_output": "package bin", "status": "anchored" },
+        { "from": "Npm", "to": "WinShell", "owner_feature": "daemon.cli_shell", "semantic_input": "npm package staging", "semantic_output": "Windows support runner", "status": "anchored" }
+      ]
+    }
+  ]
+}
