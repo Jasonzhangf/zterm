@@ -269,10 +269,9 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     expect(screen.getByText('扫描二维码图片')).toBeTruthy();
     expect(screen.getByLabelText('Scan connection QR image')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('Existing Mac'));
-
     const link = screen.getByTestId('tmux-session-picker-share-link') as HTMLTextAreaElement;
     const parsed = parseConnectionConfigShareLink(link.value);
+    expect(screen.getByText('分享：Existing Mac')).toBeTruthy();
     expect(parsed).toEqual(expect.objectContaining({
       ok: true,
       host: expect.objectContaining({

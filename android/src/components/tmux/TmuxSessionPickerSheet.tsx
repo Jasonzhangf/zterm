@@ -170,6 +170,10 @@ export function TmuxSessionPickerSheet({
   const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
     Boolean(bridgeSettings.traversalRelay?.accessToken) && open,
   );
+  const shareableHostIds = useMemo(
+    () => shareableHosts.map((host) => host.id).join('\u0000'),
+    [shareableHosts],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -184,11 +188,11 @@ export function TmuxSessionPickerSheet({
     setLastRefreshedAt(null);
     setConnectionImportInput('');
     setConnectionImportStatus('');
-    setSelectedShareHostId('');
+    setSelectedShareHostId(shareableHosts[0]?.id || '');
     setShareQrSvg('');
     setShareCopyStatus('');
     refreshRelayDevices();
-  }, [initialSelectedSessions, initialTarget, open, refreshRelayDevices]);
+  }, [initialSelectedSessions, initialTarget, open, refreshRelayDevices, shareableHostIds]);
 
   useEffect(() => {
     if (!open) {
@@ -249,6 +253,21 @@ export function TmuxSessionPickerSheet({
       : '',
     [selectedShareHost],
   );
+
+  useEffect(() => {
+    if (mode !== 'new-connection') {
+      return;
+    }
+    if (shareableHosts.length === 0) {
+      if (selectedShareHostId) {
+        setSelectedShareHostId('');
+      }
+      return;
+    }
+    if (!selectedShareHostId || !shareableHosts.some((host) => host.id === selectedShareHostId)) {
+      setSelectedShareHostId(shareableHosts[0]!.id);
+    }
+  }, [mode, selectedShareHostId, shareableHostIds, shareableHosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -699,37 +718,16 @@ export function TmuxSessionPickerSheet({
               </div>
             )}
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              {shareableHosts.length > 0 ? shareableHosts.map((host) => {
-                const active = host.id === selectedShareHostId;
-                return (
-                  <button
-                    key={host.id}
-                    type="button"
-                    onClick={() => setSelectedShareHostId(host.id)}
-                    style={{
-                      border: 'none',
-                      borderRadius: '16px',
-                      padding: '10px 12px',
-                      backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
-                      color: active ? '#ffffff' : mobileTheme.colors.lightText,
-                      boxShadow: mobileTheme.shadow.soft,
-                      textAlign: 'left',
-                    }}
-                  >
-                    <div style={{ fontWeight: 800 }}>{host.name}</div>
-                    <div style={{ fontSize: '11px', opacity: 0.78 }}>{host.bridgeHost}:{host.bridgePort}</div>
-                  </button>
-                );
-              }) : (
-                <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
-                  还没有可分享的已保存连接。
-                </div>
-              )}
-            </div>
-
             {selectedShareLink && (
               <div style={{ display: 'grid', gap: '10px' }}>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 900, color: mobileTheme.colors.lightText }}>
+                    分享：{selectedShareHost?.name || '当前连接'}
+                  </div>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                    另一台机器可以扫下面二维码，或复制链接后导入。
+                  </div>
+                </div>
                 <div
                   data-testid="tmux-session-picker-share-qr"
                   aria-label="Connection share QR code"
@@ -789,6 +787,41 @@ export function TmuxSessionPickerSheet({
                 </div>
               </div>
             )}
+
+            <div style={{ display: 'grid', gap: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
+                选择要分享的连接
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                {shareableHosts.length > 0 ? shareableHosts.map((host) => {
+                  const active = host.id === selectedShareHostId;
+                  return (
+                    <button
+                      key={host.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setSelectedShareHostId(host.id)}
+                      style={{
+                        border: active ? `2px solid ${mobileTheme.colors.shell}` : 'none',
+                        borderRadius: '16px',
+                        padding: active ? '8px 10px' : '10px 12px',
+                        backgroundColor: active ? 'rgba(16,18,24,0.06)' : '#ffffff',
+                        color: mobileTheme.colors.lightText,
+                        boxShadow: mobileTheme.shadow.soft,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800 }}>{host.name}</div>
+                      <div style={{ fontSize: '11px', opacity: 0.78 }}>{host.bridgeHost}:{host.bridgePort}</div>
+                    </button>
+                  );
+                }) : (
+                  <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
+                    还没有可分享的已保存连接。
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

@@ -1374,3 +1374,4 @@ Need runtime debug to confirm:
 - 架构映射：新功能属于 Connections / Storage 的 `connections.config_share`，唯一 payload owner 是 `packages/shared/src/connection/connection-config-share.ts`；页面只能投影 shared link/QR，导入只能走 `useHostStorage.upsertHost`，禁止在 UI/daemon/terminal transport 中复制 payload 或补第二套同步逻辑。
 - 当前切片：先下沉 shared payload builder/parser，二维码和链接共用同一 canonical link；payload 显式剥离 `password/privateKey/lastConnected`，解析失败返回 `{ ok:false, error }`，不静默吞错、不产生空 host truth。
 - UI 切片：Connection Properties 展示 canonical link + QR SVG + copy；Connections 提供 paste import；App 层统一 `parseConnectionConfigShareLink -> upsertHost`，Android Manifest 注册 `zterm://connection/import`。仍需 packaged-device smoke 才能宣称真机扫码/外部链接端到端完成。
+- 现场纠正：真实 `+` 入口是 `TmuxSessionPickerSheet`；分享二维码/链接不能藏在“点击已有连接卡片后才出现”的隐式交互里。打开 `New Connection` sheet 时必须默认选中第一个可分享 host 并直接展示二维码与链接，连接卡片只作为切换分享对象。
