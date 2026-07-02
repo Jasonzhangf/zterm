@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
+import jsQR from 'jsqr';
+import { buildConnectionConfigShareLink } from '@zterm/shared';
 import {
   type BridgeServerPreset,
   type BridgeSettings,
@@ -12,6 +15,7 @@ import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-targ
 import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
 import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
+import type { Host } from '../../lib/types';
 import {
   buildTmuxSessionPickerRows,
   findOpenTabsMissingFromRemote,
@@ -35,6 +39,7 @@ interface TmuxSessionPickerSheetProps {
   activeTabId?: string | null;
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
+  shareableHosts?: Host[];
   onClose: () => void;
   onSwitchOpenTab?: (sessionId: string) => void;
   onRenameOpenTab?: (sessionId: string, nextName: string) => void;
@@ -42,6 +47,7 @@ interface TmuxSessionPickerSheetProps {
   onOpenTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   onOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   onSelectCleanSession: (target: BridgeTarget) => void;
+  onImportConnectionLink?: (input: string) => { ok: true; name: string } | { ok: false; error: string };
   onSaveGroupSelection?: (target: BridgeTarget, sessionNames: string[]) => void;
   onRemoteSessionsRefreshed?: (target: BridgeTarget, sessionNames: string[]) => void;
 }
@@ -83,6 +89,48 @@ function getDirectorySessionNames(target: BridgeTarget) {
   );
 }
 
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error || new Error('读取二维码图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('二维码图片无法解码'));
+    image.src = src;
+  });
+}
+
+async function decodeQrImageFile(file: File) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement('canvas');
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) {
+    throw new Error('二维码图片尺寸无效');
+  }
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('当前 WebView 不支持二维码图片解析');
+  }
+  context.drawImage(image, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+  const qr = jsQR(imageData.data, imageData.width, imageData.height);
+  if (!qr?.data) {
+    throw new Error('没有在图片中识别到 zterm 配置二维码');
+  }
+  return qr.data;
+}
+
 export function TmuxSessionPickerSheet({
   mode,
   open,
@@ -92,6 +140,7 @@ export function TmuxSessionPickerSheet({
   activeTabId = null,
   initialTarget,
   initialSelectedSessions = EMPTY_SELECTED_SESSIONS,
+  shareableHosts = [],
   onClose,
   onSwitchOpenTab,
   onRenameOpenTab,
@@ -99,6 +148,7 @@ export function TmuxSessionPickerSheet({
   onOpenTmuxSession,
   onOpenMultipleTmuxSessions,
   onSelectCleanSession,
+  onImportConnectionLink,
   onSaveGroupSelection,
   onRemoteSessionsRefreshed,
 }: TmuxSessionPickerSheetProps) {
@@ -111,6 +161,12 @@ export function TmuxSessionPickerSheet({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
+  const [connectionImportInput, setConnectionImportInput] = useState('');
+  const [connectionImportStatus, setConnectionImportStatus] = useState('');
+  const [selectedShareHostId, setSelectedShareHostId] = useState('');
+  const [shareQrSvg, setShareQrSvg] = useState('');
+  const [shareCopyStatus, setShareCopyStatus] = useState('');
+  const qrScanInputRef = useRef<HTMLInputElement | null>(null);
   const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
     Boolean(bridgeSettings.traversalRelay?.accessToken) && open,
   );
@@ -126,6 +182,11 @@ export function TmuxSessionPickerSheet({
     setDiscoveryState('idle');
     setErrorMessage('');
     setLastRefreshedAt(null);
+    setConnectionImportInput('');
+    setConnectionImportStatus('');
+    setSelectedShareHostId('');
+    setShareQrSvg('');
+    setShareCopyStatus('');
     refreshRelayDevices();
   }, [initialSelectedSessions, initialTarget, open, refreshRelayDevices]);
 
@@ -175,6 +236,101 @@ export function TmuxSessionPickerSheet({
     filterActionableTmuxSelections(selectedSessions, unifiedSessionRows, showOpenTabState)
   ), [selectedSessions, showOpenTabState, unifiedSessionRows]);
   const selectedCount = actionableSelectedSessions.length;
+  const selectedShareHost = useMemo(
+    () => shareableHosts.find((host) => host.id === selectedShareHostId),
+    [selectedShareHostId, shareableHosts],
+  );
+  const selectedShareLink = useMemo(
+    () => selectedShareHost
+      ? buildConnectionConfigShareLink({
+          host: selectedShareHost,
+          exportedAt: selectedShareHost.lastConnected || selectedShareHost.createdAt,
+        })
+      : '',
+    [selectedShareHost],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setShareQrSvg('');
+    setShareCopyStatus('');
+    if (!selectedShareLink) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    QRCode.toString(selectedShareLink, {
+      type: 'svg',
+      margin: 1,
+      width: 192,
+      errorCorrectionLevel: 'M',
+      color: {
+        dark: '#101218',
+        light: '#ffffff',
+      },
+    })
+      .then((svg) => {
+        if (!cancelled) {
+          setShareQrSvg(svg);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setShareCopyStatus(`二维码生成失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedShareLink]);
+
+  const handleImportConnectionLink = (input: string) => {
+    if (!onImportConnectionLink) {
+      setConnectionImportStatus('当前版本未启用连接导入入口。');
+      return;
+    }
+    const result = onImportConnectionLink(input);
+    if (!result.ok) {
+      setConnectionImportStatus(`导入失败：${result.error}`);
+      return;
+    }
+    setConnectionImportInput('');
+    setConnectionImportStatus(`已导入：${result.name}`);
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!selectedShareLink) {
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setShareCopyStatus('系统剪贴板不可用，无法复制分享链接。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selectedShareLink);
+      setShareCopyStatus('分享链接已复制');
+    } catch (error) {
+      setShareCopyStatus(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleScanQrFile = async (file?: File | null) => {
+    if (!file) {
+      return;
+    }
+    try {
+      setConnectionImportStatus('正在识别二维码...');
+      const decoded = await decodeQrImageFile(file);
+      setConnectionImportInput(decoded);
+      handleImportConnectionLink(decoded);
+    } catch (error) {
+      setConnectionImportStatus(`扫码失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (qrScanInputRef.current) {
+        qrScanInputRef.current.value = '';
+      }
+    }
+  };
 
   const handleRefreshNow = async () => {
     const bridgeHost = selectedTarget.bridgeHost.trim();
@@ -449,6 +605,190 @@ export function TmuxSessionPickerSheet({
             >
               新增服务器
             </button>
+          </div>
+        )}
+
+        {mode === 'new-connection' && (
+          <div
+            style={{
+              borderRadius: '22px',
+              padding: '16px',
+              backgroundColor: '#ffffff',
+              boxShadow: mobileTheme.shadow.soft,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <SectionTitle
+              title="导入 / 分享连接"
+              subtitle="粘贴分享链接、扫描二维码图片，或选择已有连接生成二维码给另一台机器同步。"
+            />
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleImportConnectionLink(connectionImportInput)}
+                style={{
+                  minHeight: '40px',
+                  padding: '0 14px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: mobileTheme.colors.shell,
+                  color: '#ffffff',
+                  fontWeight: 800,
+                }}
+              >
+                导入链接
+              </button>
+              <button
+                type="button"
+                onClick={() => qrScanInputRef.current?.click()}
+                style={{
+                  minHeight: '40px',
+                  padding: '0 14px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: 'rgba(14,165,233,0.16)',
+                  color: '#0369a1',
+                  fontWeight: 800,
+                }}
+              >
+                扫描二维码图片
+              </button>
+              <input
+                ref={qrScanInputRef}
+                aria-label="Scan connection QR image"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: 'none' }}
+                onChange={(event) => void handleScanQrFile(event.target.files?.[0])}
+              />
+            </div>
+            <textarea
+              aria-label="Connection share link"
+              value={connectionImportInput}
+              onChange={(event) => {
+                setConnectionImportInput(event.target.value);
+                setConnectionImportStatus('');
+              }}
+              placeholder="zterm://connection/import?payload=..."
+              rows={3}
+              style={{
+                width: '100%',
+                border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                borderRadius: '18px',
+                padding: '12px 14px',
+                backgroundColor: '#f6f8fb',
+                color: mobileTheme.colors.lightText,
+                boxSizing: 'border-box',
+                resize: 'vertical',
+              }}
+            />
+            {connectionImportStatus && (
+              <div
+                role="status"
+                style={{
+                  fontSize: '12px',
+                  color: connectionImportStatus.includes('失败') || connectionImportStatus.includes('未启用')
+                    ? mobileTheme.colors.danger
+                    : mobileTheme.colors.lightMuted,
+                }}
+              >
+                {connectionImportStatus}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {shareableHosts.length > 0 ? shareableHosts.map((host) => {
+                const active = host.id === selectedShareHostId;
+                return (
+                  <button
+                    key={host.id}
+                    type="button"
+                    onClick={() => setSelectedShareHostId(host.id)}
+                    style={{
+                      border: 'none',
+                      borderRadius: '16px',
+                      padding: '10px 12px',
+                      backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
+                      color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                      boxShadow: mobileTheme.shadow.soft,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{host.name}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.78 }}>{host.bridgeHost}:{host.bridgePort}</div>
+                  </button>
+                );
+              }) : (
+                <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
+                  还没有可分享的已保存连接。
+                </div>
+              )}
+            </div>
+
+            {selectedShareLink && (
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <div
+                  data-testid="tmux-session-picker-share-qr"
+                  aria-label="Connection share QR code"
+                  style={{
+                    width: '216px',
+                    minHeight: '216px',
+                    borderRadius: '24px',
+                    backgroundColor: '#ffffff',
+                    boxShadow: mobileTheme.shadow.soft,
+                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    display: 'grid',
+                    placeItems: 'center',
+                    padding: '12px',
+                    overflow: 'hidden',
+                  }}
+                  dangerouslySetInnerHTML={{ __html: shareQrSvg || '<span>QR building...</span>' }}
+                />
+                <textarea
+                  data-testid="tmux-session-picker-share-link"
+                  readOnly
+                  value={selectedShareLink}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    borderRadius: '18px',
+                    padding: '12px 14px',
+                    backgroundColor: '#ffffff',
+                    color: mobileTheme.colors.lightText,
+                    fontSize: '12px',
+                    lineHeight: 1.5,
+                    resize: 'vertical',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyShareLink()}
+                    style={{
+                      minHeight: '40px',
+                      padding: '0 14px',
+                      borderRadius: '14px',
+                      border: 'none',
+                      backgroundColor: mobileTheme.colors.shell,
+                      color: '#ffffff',
+                      fontWeight: 800,
+                    }}
+                  >
+                    复制分享链接
+                  </button>
+                  {shareCopyStatus && (
+                    <span style={{ fontSize: '12px', color: shareCopyStatus.includes('失败') ? mobileTheme.colors.danger : mobileTheme.colors.lightMuted }}>
+                      {shareCopyStatus}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

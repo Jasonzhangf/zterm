@@ -495,6 +495,8 @@
         "pnpm-lock.yaml",
         "native/android/app/src/main/AndroidManifest.xml",
         "src/App.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/lib/connection-config-share-android-truth.test.ts",
         "src/pages/ConnectionPropertiesPage.tsx",
         "src/pages/ConnectionPropertiesPage.test.tsx",
@@ -516,6 +518,37 @@
         "docs/architecture.md",
         "docs/feature-gates.md",
         "docs/testing/connection-config-share-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "settings.config_transfer",
+      "title": "Settings config export and import feedback",
+      "domain": "settings",
+      "owners": [
+        "src/hooks/useConfigExport.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useConfigExport.ts",
+        "src/hooks/useConfigExport.test.tsx",
+        "src/App.tsx",
+        "src/components/settings/AppUpdateSection.tsx",
+        "src/components/settings/AppUpdateSection.test.tsx",
+        "docs/testing/config-transfer-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/hooks/useConfigExport.test.tsx",
+        "src/components/settings/AppUpdateSection.test.tsx",
+        "docs/testing/config-transfer-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/testing/config-transfer-test-design.md"
       ]
     },
     {

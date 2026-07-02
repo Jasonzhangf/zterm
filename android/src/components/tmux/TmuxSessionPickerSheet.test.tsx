@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './TmuxSessionPickerSheet';
 
 const tmuxSessionsMock = vi.hoisted(() => ({
@@ -9,6 +10,12 @@ const tmuxSessionsMock = vi.hoisted(() => ({
   createTmuxSession: vi.fn(),
   killTmuxSession: vi.fn(),
   renameTmuxSession: vi.fn(),
+}));
+
+vi.mock('qrcode', () => ({
+  default: {
+    toString: vi.fn().mockResolvedValue('<svg data-qr="ok"></svg>'),
+  },
 }));
 
 const refreshRelayDevices = vi.fn();
@@ -203,5 +210,78 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
       bridgeHost: '',
       bridgePort: 3333,
     }));
+  });
+
+  it('imports a pasted connection share link in the real new-connection sheet', () => {
+    const onImportConnectionLink = vi.fn(() => ({ ok: true as const, name: 'Imported Mac' }));
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="new-connection"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+        onImportConnectionLink={onImportConnectionLink}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Connection share link'), {
+      target: { value: 'zterm://connection/import?payload=abc' },
+    });
+    fireEvent.click(screen.getByText('导入链接'));
+
+    expect(onImportConnectionLink).toHaveBeenCalledWith('zterm://connection/import?payload=abc');
+    expect(screen.getByText('已导入：Imported Mac')).toBeTruthy();
+  });
+
+  it('renders share QR, link, and scan image entry in the real new-connection sheet', async () => {
+    render(
+      <TmuxSessionPickerSheet
+        mode="new-connection"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        shareableHosts={[
+          {
+            id: 'host-share',
+            createdAt: 1,
+            name: 'Existing Mac',
+            bridgeHost: '100.64.0.10',
+            bridgePort: 3333,
+            sessionName: 'main',
+            authType: 'password',
+            authToken: 'token-a',
+            tags: [],
+            pinned: false,
+          },
+        ]}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('扫描二维码图片')).toBeTruthy();
+    expect(screen.getByLabelText('Scan connection QR image')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Existing Mac'));
+
+    const link = screen.getByTestId('tmux-session-picker-share-link') as HTMLTextAreaElement;
+    const parsed = parseConnectionConfigShareLink(link.value);
+    expect(parsed).toEqual(expect.objectContaining({
+      ok: true,
+      host: expect.objectContaining({
+        name: 'Existing Mac',
+        bridgeHost: '100.64.0.10',
+      }),
+    }));
+    await waitFor(() => {
+      expect(screen.getByTestId('tmux-session-picker-share-qr').innerHTML).toContain('<svg');
+    });
   });
 });

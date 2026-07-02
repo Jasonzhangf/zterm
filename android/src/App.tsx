@@ -624,8 +624,25 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
               void startUpdate();
             }}
             onResetUpdateIgnorePolicy={resetIgnorePolicy}
-            onExportConfig={() => { void exportConfig(); }}
-            onImportConfig={() => { void importConfig(); }}
+            onExportConfig={() => {
+              void exportConfig().then((result) => {
+                if (result.ok) {
+                  alert(`配置已导出：${result.uri || result.path}`);
+                  return;
+                }
+                alert(`配置导出失败：${result.error}`);
+              });
+            }}
+            onImportConfig={() => {
+              void importConfig().then((result) => {
+                if (result.ok) {
+                  alert(`配置已导入：${result.path}`);
+                  globalThis.location?.reload();
+                  return;
+                }
+                alert(`配置导入失败：${result.error}`);
+              });
+            }}
             configExporting={configExporting}
             configImporting={configImporting}
             rollbackBackup={rollbackBackup}
@@ -733,11 +750,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         onRenameOpenTab={handleRenameSession}
         onCloseOpenTab={handleCloseSession}
         onOpenTmuxSession={handleOpenSingleTmuxSession}
-        onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
-        onSelectCleanSession={handleSelectCleanSession}
-        onSaveGroupSelection={(target, sessionNames) => {
-          handleSaveServerGroupSelection(target, sessionNames);
-          closePicker();
+            onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
+            onSelectCleanSession={handleSelectCleanSession}
+            shareableHosts={hosts}
+            onImportConnectionLink={handleImportConnectionShareLink}
+            onSaveGroupSelection={(target, sessionNames) => {
+              handleSaveServerGroupSelection(target, sessionNames);
+              closePicker();
         }}
         onRemoteSessionsRefreshed={(target, sessionNames) => {
           handleRemoteSessionsRefreshed(target, sessionNames);

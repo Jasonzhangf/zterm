@@ -3,6 +3,7 @@
 - Jason 现场指出 87 版本 Connections 主界面看不到分享/导入，期望点击右下角 `+` 后，在新增连接流程里看到“导入”和“分享已有连接”。
 - 架构映射：本 slice 仍属于 `connections.config_share`；payload/parser owner 仍是 `packages/shared/src/connection/connection-config-share.ts`，storage import owner 仍由 App 调 `useHostStorage.upsertHost`；本轮只移动 UI projection。`ConnectionsPage` 只保留 FAB add intent，`ConnectionPropertiesPage` 的新增态承载导入/分享入口。
 - 防复发：测试需要同时锁住主列表不常驻 import 面板，以及新增连接页能 paste import、显示 malformed error、选择已有连接生成同一 canonical link/QR。
+- 现场 1988 再证伪：`+` 真实打开的是 `TmuxSessionPickerSheet`，不是 `ConnectionPropertiesPage`；因此导入/分享/扫码入口必须在 sheet 内出现，表单页入口只能作为二级兼容，不是主入口。Settings 的导出配置按钮不能只写 console，必须给用户可见成功/失败反馈。
 
 # 2026-07-02 offline generated wiki HTML
 

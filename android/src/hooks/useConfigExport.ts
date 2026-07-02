@@ -10,6 +10,11 @@ import {
 
 const CONFIG_EXPORT_DIR = 'zterm-config-export';
 const CONFIG_EXPORT_FILE = 'zterm-config.json';
+const CONFIG_EXPORT_PATH = `${CONFIG_EXPORT_DIR}/${CONFIG_EXPORT_FILE}`;
+
+type ConfigTransferResult =
+  | { ok: true; path: string; uri?: string }
+  | { ok: false; error: string };
 
 export function useConfigExport() {
   const [exporting, setExporting] = useState(false);
@@ -36,16 +41,15 @@ export function useConfigExport() {
         recursive: true,
       });
       const result = await Filesystem.writeFile({
-        path: `${CONFIG_EXPORT_DIR}/${CONFIG_EXPORT_FILE}`,
+        path: CONFIG_EXPORT_PATH,
         data: json,
         directory: Directory.ExternalStorage,
       });
-      console.log('[ConfigExport] Config exported to:', result.uri);
-      return true;
+      return { ok: true, path: CONFIG_EXPORT_PATH, uri: result.uri } satisfies ConfigTransferResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Export failed';
       setLastError(message);
-      return false;
+      return { ok: false, error: message } satisfies ConfigTransferResult;
     } finally {
       setExporting(false);
     }
@@ -60,7 +64,7 @@ export function useConfigExport() {
         throw new Error('Storage not available');
       }
       const result = await Filesystem.readFile({
-        path: `${CONFIG_EXPORT_DIR}/${CONFIG_EXPORT_FILE}`,
+        path: CONFIG_EXPORT_PATH,
         directory: Directory.ExternalStorage,
       });
       const json = typeof result.data === 'string' ? result.data : '';
@@ -70,12 +74,11 @@ export function useConfigExport() {
         throw new Error('Invalid config file format');
       }
       applyConfigImportPayload(storage, validated);
-      globalThis.location?.reload();
-      return true;
+      return { ok: true, path: CONFIG_EXPORT_PATH } satisfies ConfigTransferResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Import failed';
       setLastError(message);
-      return false;
+      return { ok: false, error: message } satisfies ConfigTransferResult;
     } finally {
       setImporting(false);
     }
