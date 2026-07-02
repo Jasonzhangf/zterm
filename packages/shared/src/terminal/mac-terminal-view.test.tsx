@@ -111,4 +111,30 @@ describe('MacTerminalView render projection bridge', () => {
     const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
     expect(terminalRows.at(-1)?.textContent).toContain('line 80');
   });
+
+  it('bottom-aligns short buffers against the real viewport bottom when height is not row-aligned', async () => {
+    const lines = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`);
+    const { container } = render(<MacTerminalView projection={projection(lines, 6)} allowDomFocus />);
+    const viewport = container.querySelector('[data-mac-terminal-scroll="true"]') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 1885 });
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => {
+      const grid = container.querySelector('.term-grid') as HTMLElement;
+      expect(grid.style.paddingTop).toBe('865px');
+    });
+    const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
+    expect(terminalRows.at(-1)?.textContent).toContain('line 60');
+  });
+
+  it('pins follow mode to the real DOM bottom when the viewport height is not row-aligned', async () => {
+    const lines = Array.from({ length: 160 }, (_, index) => `line ${index + 1}`);
+    const { container } = render(<MacTerminalView projection={projection(lines, 7)} allowDomFocus />);
+    const viewport = container.querySelector('[data-mac-terminal-scroll="true"]') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 859 });
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 2720 });
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => expect(viewport.scrollTop).toBe(2720 - 859));
+    const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
+    expect(terminalRows.at(-1)?.textContent).toContain('line 160');
+  });
 });

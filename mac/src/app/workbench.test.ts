@@ -13,6 +13,7 @@ import {
   closeTab,
   createInitialWorkbenchState,
   openConnectionInWorkbench,
+  openLocalTmuxInWorkbench,
   setLauncherOpen,
   splitActivePaneRight,
   resolveActiveTab,
@@ -54,6 +55,22 @@ describe('Mac workbench pane state', () => {
     state = openConnectionInWorkbench(state, makeTarget('a'));
     state = openConnectionInWorkbench(state, makeTarget('b'), { append: true });
     expect(state.workspace.panes[0].tabs.length).toBe(2);
+  });
+
+  it('openLocalTmuxInWorkbench replaces an empty active tab', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openLocalTmuxInWorkbench(state, 'rcc');
+    expect(state.workspace.panes.length).toBe(1);
+    expect(state.workspace.panes[0].tabs[0].kind).toBe('local-tmux');
+    expect(state.workspace.panes[0].tabs[0].localSessionName).toBe('rcc');
+  });
+
+  it('openLocalTmuxInWorkbench appends when active pane has a live tab', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = openLocalTmuxInWorkbench(state, 'zterm', { append: true });
+    expect(state.workspace.panes[0].tabs.length).toBe(2);
+    expect(state.workspace.panes[0].tabs[1].kind).toBe('local-tmux');
   });
 
   it('splitActivePaneRight adds an empty pane', () => {

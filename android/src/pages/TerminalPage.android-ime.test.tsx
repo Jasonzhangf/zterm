@@ -1510,7 +1510,7 @@ describe("TerminalPage Android IME bridge", () => {
     expect(terminalStage.getAttribute("style") || "").not.toContain(
       "transform: translateY",
     );
-    expect(quickBarShell.getAttribute("style") || "").toContain("bottom: 0px;");
+    expect(quickBarShell.getAttribute("style") || "").toContain("bottom: 30px;");
 
     await waitFor(() => {
       expect(imeListeners.has("keyboardState")).toBe(true);
@@ -1524,7 +1524,7 @@ describe("TerminalPage Android IME bridge", () => {
       expect(style).toContain("bottom: 380px;");
       expect(style).not.toContain("transform: translateY");
       expect(quickBarShell.getAttribute("style") || "").toContain(
-        "bottom: 320px;",
+        "bottom: 350px;",
       );
     });
   });

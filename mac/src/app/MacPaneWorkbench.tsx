@@ -67,13 +67,28 @@ function resolveTabTarget(tab: MacWorkbenchTab | null | undefined, hosts: Host[]
   return tab.draftTarget ? { ...tab.draftTarget } : null;
 }
 
-function buildActiveTargetSignature(target: EditableHost | null) {
+function resolveLocalTmuxSessionName(tab: MacWorkbenchTab | null | undefined) {
+  return tab?.kind === 'local-tmux' ? tab.localSessionName?.trim() || '' : '';
+}
+
+function buildActiveTabRuntimeSignature(tab: MacWorkbenchTab | null, hosts: Host[]) {
+  if (!tab) return '';
+  if (tab.kind === 'local-tmux') {
+    return JSON.stringify({ kind: 'local-tmux', sessionName: resolveLocalTmuxSessionName(tab) });
+  }
+  const target = resolveTabTarget(tab, hosts);
   if (!target) return '';
   return JSON.stringify({
+    kind: 'connection',
     name: target.name,
     bridgeHost: target.bridgeHost,
     bridgePort: target.bridgePort,
     sessionName: target.sessionName,
+    authToken: target.authToken || '',
+    authType: target.authType,
+    password: target.password || '',
+    privateKey: target.privateKey || '',
+    autoCommand: target.autoCommand || '',
   });
 }
 
@@ -108,27 +123,46 @@ function MacTerminalPane({
 }) {
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeTarget = resolveTabTarget(activeTab, hosts);
+  const localTmuxSessionName = resolveLocalTmuxSessionName(activeTab);
   const lastSignatureRef = useRef('');
-  const activeTargetSignature = buildActiveTargetSignature(activeTarget);
+  const activeTabRuntimeSignature = buildActiveTabRuntimeSignature(activeTab, hosts);
 
   useEffect(() => {
+    if (activeTab?.kind === 'local-tmux') {
+      if (!localTmuxSessionName) {
+        lastSignatureRef.current = '';
+        return;
+      }
+      if (activeTabRuntimeSignature === lastSignatureRef.current) {
+        return;
+      }
+      lastSignatureRef.current = activeTabRuntimeSignature;
+      runtime.connectLocalTmux({ sessionName: localTmuxSessionName, title: activeTab.title });
+      return;
+    }
     if (!activeTarget) {
       lastSignatureRef.current = '';
       return;
     }
-    if (activeTargetSignature === lastSignatureRef.current) {
+    if (activeTabRuntimeSignature === lastSignatureRef.current) {
       return;
     }
-    lastSignatureRef.current = activeTargetSignature;
+    lastSignatureRef.current = activeTabRuntimeSignature;
     runtime.connectRemote(activeTarget);
-  }, [activeTarget, activeTargetSignature, runtime]);
+  }, [activeTab, activeTarget, activeTabRuntimeSignature, localTmuxSessionName, runtime]);
 
   const tabDescriptors: PaneTabDescriptor[] = pane.tabs.map((tab) => ({
     id: tab.id,
     title: tab.title,
     isActive: tab.id === pane.activeTabId,
-    badge: tab.kind === 'connection' ? '·' : undefined,
+    badge: tab.kind === 'connection' ? '·' : tab.kind === 'local-tmux' ? 'tmux' : undefined,
   }));
+  const terminalLabel = activeTab?.kind === 'local-tmux'
+    ? `Local tmux · ${localTmuxSessionName}`
+    : activeTarget
+      ? activeTarget.name || activeTarget.sessionName
+      : '';
+  const hasTerminal = Boolean(activeTarget || localTmuxSessionName);
 
   return (
     <div
@@ -150,15 +184,17 @@ function MacTerminalPane({
         onRenameTab={(tabId) => onRenameTab(pane.id, tabId)}
       />
       <div className="mac-terminal-surface">
-        {activeTarget ? (
+        {hasTerminal ? (
           <>
             <div className="mac-terminal-meta">
               <span className={`mac-runtime-pill ${runtimeState.connection.status}`}>{runtimeState.connection.status}</span>
-              <span>{activeTarget.name || activeTarget.sessionName}</span>
+              <span>{terminalLabel}</span>
             </div>
             <div className="mac-terminal-canvas">
               <MacTerminalView
                 projection={runtimeState.render}
+                active={isActivePane}
+                allowDomFocus
                 onInput={(data: string) => runtime.sendInput(data)}
               />
             </div>

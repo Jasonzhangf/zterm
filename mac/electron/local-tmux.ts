@@ -670,7 +670,7 @@ export class LocalTmuxManager {
 
     client.refreshInFlight = true;
     try {
-      const { title, snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: true });
+      const { title, snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: false });
       if (client.disposed) {
         return;
       }
@@ -816,7 +816,7 @@ export class LocalTmuxManager {
       return null;
     }
 
-    const { snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: true });
+    const { snapshot } = await readSessionCapture(client.sessionName, client.cols, client.rows, { visibleOnly: false });
     const captureFingerprint = fingerprintCapture(snapshot);
     if (captureFingerprint !== client.lastCaptureFingerprint) {
       client.lastCaptureFingerprint = captureFingerprint;

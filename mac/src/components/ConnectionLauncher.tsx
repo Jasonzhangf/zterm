@@ -12,6 +12,7 @@ interface ConnectionLauncherProps {
   bridgeSettings: BridgeSettings;
   onClose: () => void;
   onOpenHost: (host: Host, append: boolean) => void;
+  onOpenLocalTmuxSession: (sessionName: string, append: boolean) => void;
   onSaveDraft: (draft: EditableHost, editingHostId?: string, connectAfterSave?: boolean) => void;
 }
 
@@ -30,10 +31,13 @@ export function ConnectionLauncher({
   bridgeSettings,
   onClose,
   onOpenHost,
+  onOpenLocalTmuxSession,
   onSaveDraft,
 }: ConnectionLauncherProps) {
   const [editingHostId, setEditingHostId] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<EditableHost>(() => buildDraftFromSettings(bridgeSettings));
+  const [localTmuxSessions, setLocalTmuxSessions] = useState<string[]>([]);
+  const [localTmuxError, setLocalTmuxError] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -41,6 +45,13 @@ export function ConnectionLauncher({
     }
     setEditingHostId(undefined);
     setDraft(buildDraftFromSettings(bridgeSettings));
+    setLocalTmuxError('');
+    void window.ztermMac.localTmux.listSessions()
+      .then((sessions) => setLocalTmuxSessions([...sessions].sort((left, right) => left.localeCompare(right))))
+      .catch((error) => {
+        setLocalTmuxSessions([]);
+        setLocalTmuxError(error instanceof Error ? error.message : String(error));
+      });
   }, [open, bridgeSettings]);
 
   const sortedHosts = useMemo(
@@ -104,6 +115,27 @@ export function ConnectionLauncher({
                       }}
                     >
                       Edit
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="mac-section-title">Local tmux</div>
+            <div className="mac-saved-list">
+              {localTmuxError ? <div className="mac-empty-copy">{localTmuxError}</div> : null}
+              {!localTmuxError && localTmuxSessions.length === 0 ? (
+                <div className="mac-empty-copy">没有可枚举的本地 tmux session。</div>
+              ) : null}
+              {localTmuxSessions.map((sessionName) => (
+                <article className="mac-saved-card" key={sessionName}>
+                  <button className="mac-saved-open" type="button" onClick={() => onOpenLocalTmuxSession(sessionName, false)}>
+                    <strong>{sessionName}</strong>
+                    <span>Local tmux session</span>
+                  </button>
+                  <div className="mac-saved-actions">
+                    <button className="mac-chip-button" type="button" onClick={() => onOpenLocalTmuxSession(sessionName, true)}>
+                      New tab
                     </button>
                   </div>
                 </article>

@@ -21,6 +21,7 @@ import {
   appendEmptyTab,
   createInitialWorkbenchState,
   openConnectionInWorkbench,
+  openLocalTmuxInWorkbench,
   resolveActiveTab,
   resolveTabTarget,
   setLauncherOpen,
@@ -150,6 +151,10 @@ export function MacAppShell(props: MacAppShellProps) {
     setWorkbench((current) => openConnectionInWorkbench(current, target, { persistedHostId: host.id, append }));
   };
 
+  const handleOpenLocalTmuxSession = (sessionName: string, append: boolean) => {
+    setWorkbench((current) => openLocalTmuxInWorkbench(current, sessionName, { append }));
+  };
+
   const handleSaveDraft = (draft: EditableHost, editingHostId?: string, connectAfterSave?: boolean) => {
     const normalized: EditableHost = {
       ...draft,
@@ -247,6 +252,7 @@ export function MacAppShell(props: MacAppShellProps) {
         bridgeSettings={bridgeSettings}
         onClose={() => setWorkbench((current) => setLauncherOpen(current, false))}
         onOpenHost={handleOpenHost}
+        onOpenLocalTmuxSession={handleOpenLocalTmuxSession}
         onSaveDraft={handleSaveDraft}
       />
     </div>

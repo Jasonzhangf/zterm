@@ -258,6 +258,7 @@ function buildBufferSyncRequestPayload(
     localEndIndex: Math.max(0, Math.floor(buffer.endIndex || 0)),
     requestStartIndex: requestedWindow.requestStartIndex,
     requestEndIndex: requestedWindow.requestEndIndex,
+    targetHeadRevision: head?.revision,
     missingRanges: normalizeMissingRanges(viewState.missingRanges),
   };
 }
@@ -393,7 +394,11 @@ export function createTerminalRuntime(): TerminalRuntimeController {
     }
 
     if (message.type === 'buffer-head') {
+      const previousHead = head;
       head = normalizeHead(message.payload);
+      if (previousHead && previousHead.revision !== head.revision) {
+        lastBufferSyncKey = '';
+      }
       syncState();
       if (lastViewState.mode === 'follow') {
         applyViewportDemand();

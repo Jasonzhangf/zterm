@@ -6,7 +6,7 @@ import { MacDesktopApp } from './MacDesktopApp';
 const addHost = vi.fn();
 const updateHost = vi.fn();
 const setSettings = vi.fn();
-const transitionalShell = vi.fn();
+const macAppShell = vi.fn();
 
 vi.mock('@zterm/shared', async () => {
   const actual = await vi.importActual<typeof import('@zterm/shared')>('@zterm/shared');
@@ -33,10 +33,10 @@ vi.mock('@zterm/shared', async () => {
   };
 });
 
-vi.mock('./MacWorkspaceTransitionalShell', () => ({
-  MacWorkspaceTransitionalShell: (props: Record<string, unknown>) => {
-    transitionalShell(props);
-    return <div data-testid="mac-workspace-transitional-shell" />;
+vi.mock('./MacAppShell', () => ({
+  MacAppShell: (props: Record<string, unknown>) => {
+    macAppShell(props);
+    return <div data-testid="mac-app-shell" />;
   },
 }));
 
@@ -46,12 +46,12 @@ afterEach(() => {
 });
 
 describe('MacDesktopApp production entrypoint', () => {
-  it('boots the explicit transitional workspace shell through one owner boundary', () => {
+  it('boots MacAppShell through the shared workspace owner boundary', () => {
     const { container } = render(<MacDesktopApp />);
 
-    expect(container.querySelector('[data-testid="mac-workspace-transitional-shell"]')).toBeTruthy();
-    expect(transitionalShell).toHaveBeenCalledTimes(1);
-    expect(transitionalShell.mock.calls[0][0]).toMatchObject({
+    expect(container.querySelector('[data-testid="mac-app-shell"]')).toBeTruthy();
+    expect(macAppShell).toHaveBeenCalledTimes(1);
+    expect(macAppShell.mock.calls[0][0]).toMatchObject({
       hosts: [{ id: 'host-1', name: 'mac-studio' }],
       isLoaded: true,
       bridgeSettings: {

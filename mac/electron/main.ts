@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { LocalTmuxManager } from './local-tmux.js';
+import { createMainWindowOptions } from './window-options.js';
 import {
   DEFAULT_REMOTE_SCREENSHOT_HELPER_SOCKET_PATH,
   cleanupScreenshotHelperRuntimeState,
@@ -36,15 +37,15 @@ function getDevServerUrl() {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 900,
-    minHeight: 620,
-    backgroundColor: '#10131b',
-    title: 'ZTerm',
+    ...createMainWindowOptions(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.show();
   });
 
   win.webContents.on('console-message', (_event, level, message, line, sourceId) => {

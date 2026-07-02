@@ -2783,7 +2783,13 @@ function TerminalPageComponent({
             pickerMode: sessionPickerDebugMode,
           }}
         />
-        <TerminalQuickBarShell bottomPx={terminalImeLiftPx + layoutProfile.quickBar.touchSafeOffsetPx}>
+        <TerminalQuickBarShell
+          bottomPx={
+            terminalImeLiftPx
+            + layoutProfile.quickBar.touchSafeOffsetPx
+            + TERMINAL_QUICK_BAR_RENDER_LIFT_PX
+          }
+        >
           {quickBarNode}
         </TerminalQuickBarShell>
       </div>

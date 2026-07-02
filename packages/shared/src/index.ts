@@ -26,6 +26,16 @@ export * from './schedule/next-fire';
 export * from './shortcuts/terminal-shortcut-composer';
 export * from './workspace/workspace-model';
 export * from './workspace/split-tree-workspace';
+export * from './workspace/session-group-viewport';
+export {
+  TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS,
+  TERMINAL_SESSION_GROUP_WIDE_ASPECT_RATIO,
+  normalizeTerminalSessionGroupLayoutMode,
+  resolveTerminalLayoutProfile,
+  resolveTerminalSessionGroupLayoutAxis,
+  type TerminalLayoutProfile,
+  type TerminalSessionGroupLayoutAxis,
+} from './workspace/terminal-layout-profile';
 
 export * from './terminal/renderer/index';
 export * from './interaction/operation';

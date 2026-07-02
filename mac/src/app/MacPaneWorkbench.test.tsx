@@ -20,6 +20,7 @@ import { MacPaneWorkbench } from './MacPaneWorkbench';
 import {
   createInitialWorkbenchState,
   openConnectionInWorkbench,
+  openLocalTmuxInWorkbench,
   splitActivePaneRight,
   type MacWorkbenchState,
 } from './workbench';
@@ -196,6 +197,28 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
       />,
     );
     expect(runtime.connectRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it('connects a local tmux tab through the same pane workbench surface', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openLocalTmuxInWorkbench(workbench, 'rcc');
+    const runtime = makeRuntimeStub();
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtime={runtime}
+        runtimeState={makeRuntimeState()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    expect(runtime.connectLocalTmux).toHaveBeenCalledWith({ sessionName: 'rcc', title: 'rcc' });
+    expect(runtime.connectRemote).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Local tmux · rcc');
   });
 
   it('forwards onSelectTab via shared PaneTabs callback (click a non-active tab)', () => {

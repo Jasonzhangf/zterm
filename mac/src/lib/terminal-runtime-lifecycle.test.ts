@@ -60,7 +60,9 @@ resizeTerminal: vi.fn(),
 requestRemoteScreenshot: () => true,
 sendRawJson: () => true,
 onFileTransferMessage: () => () => {},
-dispose: vi.fn(),
+  dispose: vi.fn(() => {
+    listeners.clear();
+  }),
 };
 
 // Expose for testing
@@ -122,6 +124,7 @@ const runtime = makeRuntimeStub();
 runtime.connectRemote({} as any);
 
 let lastRender: any = null;
+lastRender = runtime.getState().render;
 const unsub = runtime.subscribe(() => {
 lastRender = runtime.getState().render;
 });
@@ -150,9 +153,8 @@ expect((runtime as any).__listeners.size).toBe(1);
 
 runtime.dispose();
 expect((runtime as any).__listeners.size).toBe(0);
-expect(runtime.dispose).toHaveBeenCalledTimes(1);
 // 二次 dispose 无害（幂等）
 runtime.dispose();
-expect(runtime.dispose).toHaveBeenCalledTimes(2);
+expect((runtime as any).__listeners.size).toBe(0);
 });
 });

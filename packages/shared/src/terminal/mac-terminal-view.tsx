@@ -90,6 +90,7 @@ export function MacTerminalView(props: MacTerminalViewProps) {
   const [readingMode, setReadingMode] = useState(false);
   const [renderBottomIndex, setRenderBottomIndex] = useState(projection?.endIndex ?? 0);
   const [viewportRows, setViewportRows] = useState(DEFAULT_ROWS);
+  const [viewportHeightPx, setViewportHeightPx] = useState(0);
   void active;
 
   const refreshMeasuredViewport = () => {
@@ -97,6 +98,8 @@ export function MacTerminalView(props: MacTerminalViewProps) {
     if (!viewport) return;
     const measured = measureTerminalViewport(viewport, 14, rowHeight);
     setViewportRows((current) => (current === measured.rows ? current : measured.rows));
+    const nextHeightPx = Math.max(0, viewport.clientHeight || 0);
+    setViewportHeightPx((current) => (current === nextHeightPx ? current : nextHeightPx));
   };
 
   const renderGeometry = useMemo(() => {
@@ -128,13 +131,16 @@ export function MacTerminalView(props: MacTerminalViewProps) {
       rowHeightPx,
       totalRows: frame.totalRows,
     });
-    return { frame, rowsToRender, padding };
-  }, [projection, readingMode, renderBottomIndex, viewportRows]);
+    const shortBufferBottomResidualPx = frame.totalRows <= viewportRows
+      ? Math.max(0, viewportHeightPx - viewportRows * rowHeightPx)
+      : 0;
+    return { frame, rowsToRender, padding, shortBufferBottomResidualPx };
+  }, [projection, readingMode, renderBottomIndex, viewportHeightPx, viewportRows]);
 
   const syncScrollHostToRenderBottom = (nextRenderBottomIndex: number) => {
     const viewport = viewportRef.current;
     if (!viewport || !projection) return;
-    viewport.scrollTop = resolveScrollTopForRenderBottomIndex({
+    const resolvedScrollTop = resolveScrollTopForRenderBottomIndex({
       nextRenderBottomIndex,
       totalRows: renderGeometry.frame.totalRows,
       viewportRows,
@@ -142,6 +148,10 @@ export function MacTerminalView(props: MacTerminalViewProps) {
       rowHeightPx,
       maxScrollTop: renderGeometry.frame.maxScrollTop,
     });
+    const domMaxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    viewport.scrollTop = domMaxScrollTop > 0 && !readingMode && nextRenderBottomIndex >= renderGeometry.frame.followVisualBottomIndex
+      ? domMaxScrollTop
+      : resolvedScrollTop;
   };
 
   useLayoutEffect(() => {
@@ -189,7 +199,9 @@ export function MacTerminalView(props: MacTerminalViewProps) {
   const handleScroll = () => {
     const viewport = viewportRef.current;
     if (!viewport || !projection) return;
-    const isAtBottom = viewport.scrollTop >= renderGeometry.frame.maxScrollTop - 1;
+    const domMaxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const bottomThreshold = domMaxScrollTop > 0 ? domMaxScrollTop : renderGeometry.frame.maxScrollTop;
+    const isAtBottom = viewport.scrollTop >= bottomThreshold - 1;
     const nextMode = isAtBottom ? 'follow' : 'reading';
     const nextRenderBottomIndex = isAtBottom
       ? renderGeometry.frame.followVisualBottomIndex
@@ -273,7 +285,7 @@ export function MacTerminalView(props: MacTerminalViewProps) {
           data-cursor-source="projection"
           style={{
             minHeight: '100%',
-            paddingTop: `${renderGeometry.padding.termGridPaddingTopPx}px`,
+            paddingTop: `${renderGeometry.padding.termGridPaddingTopPx + renderGeometry.shortBufferBottomResidualPx}px`,
             paddingBottom: `${renderGeometry.padding.termGridPaddingBottomPx}px`,
           }}
         >

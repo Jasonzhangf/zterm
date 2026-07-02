@@ -191,6 +191,39 @@ export function openConnectionInWorkbench(
   return { ...state, workspace: next, launcherOpen: false };
 }
 
+export function openLocalTmuxInWorkbench(
+  state: MacWorkbenchState,
+  sessionName: string,
+  options?: { append?: boolean },
+): MacWorkbenchState {
+  const normalizedSessionName = sessionName.trim();
+  if (!normalizedSessionName) {
+    return state;
+  }
+  const newTab = createLocalTmuxTab(normalizedSessionName);
+  const activePane = state.workspace.panes.find((p) => p.id === state.workspace.activePaneId)
+    ?? state.workspace.panes[0];
+  if (!activePane) {
+    return state;
+  }
+
+  if (!options?.append && activePane.tabs.length === 1 && activePane.tabs[0].kind === 'empty') {
+    const next = updateWorkspacePane(state.workspace, activePane.id, (p) => ({
+      ...p,
+      tabs: [newTab],
+      activeTabId: newTab.id,
+    }));
+    return { ...state, workspace: next, launcherOpen: false };
+  }
+
+  const next = updateWorkspacePane(state.workspace, activePane.id, (p) => ({
+    ...p,
+    tabs: [...p.tabs, newTab],
+    activeTabId: newTab.id,
+  }));
+  return { ...state, workspace: next, launcherOpen: false };
+}
+
 export function splitActivePaneRight(state: MacWorkbenchState): MacWorkbenchState {
   const activePaneId = state.workspace.activePaneId;
   const activePane = state.workspace.panes.find((p) => p.id === activePaneId);
