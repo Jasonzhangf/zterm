@@ -3,6 +3,7 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildConnectionConfigShareLink } from '@zterm/shared';
 import App from './App';
 import { STORAGE_KEYS } from './lib/types';
 
@@ -321,6 +322,17 @@ const capacitorAppHarness = vi.hoisted(() => {
             (listener): listener is (state: { isActive: boolean }) => void => typeof listener === 'function',
           );
       activeListeners.forEach((listener) => listener(state));
+    },
+    emitUrlOpen(url: string) {
+      const listeners = (listenersByEventName.appUrlOpen || []).length > 0
+        ? listenersByEventName.appUrlOpen
+        : this.addListener.mock.calls
+          .filter((call) => call[0] === 'appUrlOpen')
+          .map((call) => call[1])
+          .filter(
+            (listener): listener is (payload: { url: string }) => void => typeof listener === 'function',
+          );
+      listeners.forEach((listener) => listener({ url }));
     },
     eventCallCount(eventName: string) {
       return this.addListener.mock.calls.filter((call) => call[0] === eventName).length;
@@ -1282,6 +1294,49 @@ describe('App dynamic refresh matrix', () => {
 
     expect(capacitorAppHarness.eventCallCount('appStateChange')).toBe(1);
     expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0);
+  });
+
+  it('imports shared quick actions and shortcut actions from connection config deep links', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0));
+
+    const link = buildConnectionConfigShareLink({
+      hosts: [
+        {
+          name: 'Imported Mac',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          sessionName: 'main',
+          authToken: 'token-a',
+          authType: 'password',
+          tags: [],
+          pinned: false,
+        },
+      ],
+      quickActions: [
+        { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+      ],
+      shortcutActions: [
+        { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+      ],
+      exportedAt: 3000,
+    });
+
+    act(() => {
+      capacitorAppHarness.emitUrlOpen(link);
+    });
+
+    expect(quickActionHarness.setQuickActions).toHaveBeenCalledWith([
+      { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+    ]);
+    expect(shortcutActionHarness.setShortcutActions).toHaveBeenCalledWith([
+      { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+    ]);
+    expect(alertSpy).toHaveBeenCalledWith('Imported connection: Imported Mac，1 个文本快捷指令，1 个终端快捷键');
   });
 
   it('restores persisted terminal tabs using the stored latest tab set and explicit-resumes the active tab', async () => {

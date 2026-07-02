@@ -1376,3 +1376,4 @@ Need runtime debug to confirm:
 - UI 切片：Connection Properties 展示 canonical link + QR SVG + copy；Connections 提供 paste import；App 层统一 `parseConnectionConfigShareLink -> upsertHost`，Android Manifest 注册 `zterm://connection/import`。仍需 packaged-device smoke 才能宣称真机扫码/外部链接端到端完成。
 - 现场纠正：真实 `+` 入口是 `TmuxSessionPickerSheet`；分享二维码/链接不能藏在“点击已有连接卡片后才出现”的隐式交互里。打开 `New Connection` sheet 时必须默认选中第一个可分享 host 并直接展示二维码与链接，连接卡片只作为切换分享对象。
 - 现场纠正 2：配置分享的默认语义应是“一次分享本机全部已保存连接”，不是默认分享某一个连接。shared payload 真源改为 `hosts[]`；旧单 host 输入只归一成单元素 `hosts[]`；App import 必须遍历 `parsed.hosts` 批量 `upsertHost`。
+- 现场纠正 3：全量配置分享还必须包含快捷指令配置。shared payload 增加 `quickActions[]` 和 `shortcutActions[]`；默认全量二维码包含它们，导入时通过 `setQuickActions` / `setShortcutActions` 写回 storage owner。单连接 narrowed share 不附带快捷配置。

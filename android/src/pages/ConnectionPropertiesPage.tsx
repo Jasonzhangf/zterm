@@ -22,16 +22,20 @@ import { mobileTheme } from '../lib/mobile-ui';
 import { findBridgePresetForDaemonHostId, resolveRelayDeviceBridgeTarget } from '../lib/session-picker';
 import { fetchTmuxSessions } from '../lib/tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
-import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { ConfigShareQuickAction, ConfigShareShortcutAction, Host, TraversalRelayDeviceSnapshot } from '../lib/types';
 
 type ShareScope = 'all' | 'single';
 
 const EMPTY_SHAREABLE_HOSTS: Host[] = [];
+const EMPTY_QUICK_ACTIONS: ConfigShareQuickAction[] = [];
+const EMPTY_SHORTCUT_ACTIONS: ConfigShareShortcutAction[] = [];
 
 interface ConnectionPropertiesPageProps {
   host?: Host;
   draft?: Partial<Omit<Host, 'id' | 'createdAt'>>;
   shareableHosts?: Host[];
+  quickActions?: ConfigShareQuickAction[];
+  shortcutActions?: ConfigShareShortcutAction[];
   bridgeSettings: BridgeSettings;
   onImportConnectionLink?: (input: string) => { ok: true; name: string } | { ok: false; error: string };
   onSave: (hostData: Omit<Host, 'id' | 'createdAt'>) => void;
@@ -69,6 +73,8 @@ export function ConnectionPropertiesPage({
   host,
   draft,
   shareableHosts = EMPTY_SHAREABLE_HOSTS,
+  quickActions = EMPTY_QUICK_ACTIONS,
+  shortcutActions = EMPTY_SHORTCUT_ACTIONS,
   bridgeSettings,
   onImportConnectionLink,
   onSave,
@@ -128,10 +134,12 @@ export function ConnectionPropertiesPage({
     () => shareSourceHosts.length > 0
       ? buildConnectionConfigShareLink({
           hosts: shareSourceHosts,
+          quickActions: host || shareScope === 'single' ? [] : quickActions,
+          shortcutActions: host || shareScope === 'single' ? [] : shortcutActions,
           exportedAt: shareExportedAt,
         })
       : '',
-    [shareExportedAt, shareSourceHosts],
+    [host, quickActions, shareExportedAt, shareScope, shareSourceHosts, shortcutActions],
   );
   const shareTitle = host
     ? 'Share Current Connection'
@@ -802,7 +810,7 @@ export function ConnectionPropertiesPage({
             title="Share Connection"
             description={host
               ? '生成当前连接的分享链接；二维码只是这条链接的投影，不包含密码或私钥。'
-              : '默认生成全部已保存连接的分享链接；二维码只是这条链接的投影，不包含密码或私钥。'}
+              : '默认生成全部已保存连接和快捷指令配置的分享链接；二维码只是这条链接的投影，不包含密码或私钥。'}
           >
             <div style={{ display: 'grid', gap: '14px' }}>
               <div style={{ fontSize: '15px', fontWeight: 900, color: mobileTheme.colors.lightText }}>

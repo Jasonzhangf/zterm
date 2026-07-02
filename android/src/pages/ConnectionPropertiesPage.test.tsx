@@ -719,6 +719,12 @@ describe('ConnectionPropertiesPage', () => {
     render(
       <ConnectionPropertiesPage
         shareableHosts={[savedHost, linuxHost]}
+        quickActions={[
+          { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+        ]}
+        shortcutActions={[
+          { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+        ]}
         bridgeSettings={bridgeSettings}
         onSave={vi.fn()}
         onCancel={vi.fn()}
@@ -747,6 +753,12 @@ describe('ConnectionPropertiesPage', () => {
           password: undefined,
           privateKey: undefined,
         }),
+        quickActions: [
+          { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+        ],
+        shortcutActions: [
+          { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+        ],
       }),
     );
     await waitFor(() => {

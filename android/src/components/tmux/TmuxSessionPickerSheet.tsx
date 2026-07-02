@@ -15,7 +15,7 @@ import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-targ
 import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
 import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
-import type { Host } from '../../lib/types';
+import type { ConfigShareQuickAction, ConfigShareShortcutAction, Host } from '../../lib/types';
 import {
   buildTmuxSessionPickerRows,
   findOpenTabsMissingFromRemote,
@@ -40,6 +40,8 @@ interface TmuxSessionPickerSheetProps {
   initialTarget?: Partial<BridgeTarget> | null;
   initialSelectedSessions?: string[];
   shareableHosts?: Host[];
+  quickActions?: ConfigShareQuickAction[];
+  shortcutActions?: ConfigShareShortcutAction[];
   onClose: () => void;
   onSwitchOpenTab?: (sessionId: string) => void;
   onRenameOpenTab?: (sessionId: string, nextName: string) => void;
@@ -57,6 +59,8 @@ type ShareScope = 'all' | 'single';
 
 const EMPTY_SELECTED_SESSIONS: string[] = [];
 const EMPTY_SHAREABLE_HOSTS: Host[] = [];
+const EMPTY_QUICK_ACTIONS: ConfigShareQuickAction[] = [];
+const EMPTY_SHORTCUT_ACTIONS: ConfigShareShortcutAction[] = [];
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -143,6 +147,8 @@ export function TmuxSessionPickerSheet({
   initialTarget,
   initialSelectedSessions = EMPTY_SELECTED_SESSIONS,
   shareableHosts = EMPTY_SHAREABLE_HOSTS,
+  quickActions = EMPTY_QUICK_ACTIONS,
+  shortcutActions = EMPTY_SHORTCUT_ACTIONS,
   onClose,
   onSwitchOpenTab,
   onRenameOpenTab,
@@ -267,17 +273,19 @@ export function TmuxSessionPickerSheet({
       }
       return buildConnectionConfigShareLink({
         hosts: shareableHosts,
+        quickActions,
+        shortcutActions,
         exportedAt: shareExportedAt,
       });
     },
-    [selectedShareHost, shareExportedAt, shareScope, shareableHosts],
+    [quickActions, selectedShareHost, shareExportedAt, shareScope, shareableHosts, shortcutActions],
   );
   const shareTitle = shareScope === 'single' && selectedShareHost
     ? `分享单个连接：${selectedShareHost.name}`
     : `分享全部连接：${shareableHosts.length} 个`;
   const shareSubtitle = shareScope === 'single'
     ? '另一台机器导入后只会新增或更新这个连接。'
-    : '另一台机器导入后会同步本机全部已保存连接。';
+    : '另一台机器导入后会同步本机全部已保存连接和快捷指令配置。';
 
   useEffect(() => {
     if (mode !== 'new-connection') {

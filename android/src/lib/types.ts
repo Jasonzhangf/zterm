@@ -18,6 +18,8 @@ import type {
   TerminalGapRange,
 } from '@zterm/shared/types';
 import type {
+  ConnectionConfigShareQuickAction,
+  ConnectionConfigShareShortcutAction,
   WorkspacePane,
   WorkspaceState,
   WorkspaceTab,
@@ -429,6 +431,9 @@ export interface TerminalShortcutAction {
   order: number;
   row: 'top-scroll' | 'bottom-scroll';
 }
+
+export type ConfigShareQuickAction = ConnectionConfigShareQuickAction;
+export type ConfigShareShortcutAction = ConnectionConfigShareShortcutAction;
 
 export type SessionDraftMap = Record<string, string>;
 

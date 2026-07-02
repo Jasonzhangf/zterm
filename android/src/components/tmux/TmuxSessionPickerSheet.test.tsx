@@ -271,6 +271,12 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
             pinned: false,
           },
         ]}
+        quickActions={[
+          { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+        ]}
+        shortcutActions={[
+          { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+        ]}
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
@@ -300,6 +306,12 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         name: 'Existing Mac',
         bridgeHost: '100.64.0.10',
       }),
+      quickActions: [
+        { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+      ],
+      shortcutActions: [
+        { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+      ],
     }));
     fireEvent.click(screen.getByText('Linux Box'));
     const singleParsed = parseConnectionConfigShareLink(link.value);

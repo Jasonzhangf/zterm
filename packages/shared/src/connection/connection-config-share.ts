@@ -12,11 +12,35 @@ export interface ConnectionConfigSharePayload {
   schemaVersion: typeof CONNECTION_SHARE_SCHEMA_VERSION;
   exportedAt: number;
   hosts: EditableHost[];
+  quickActions: ConnectionConfigShareQuickAction[];
+  shortcutActions: ConnectionConfigShareShortcutAction[];
   host?: EditableHost;
 }
 
+export interface ConnectionConfigShareQuickAction {
+  id: string;
+  label: string;
+  sequence: string;
+  order: number;
+}
+
+export interface ConnectionConfigShareShortcutAction {
+  id: string;
+  label: string;
+  sequence: string;
+  order: number;
+  row: 'top-scroll' | 'bottom-scroll';
+}
+
 export type ConnectionConfigShareParseResult =
-  | { ok: true; payload: ConnectionConfigSharePayload; hosts: EditableHost[]; host: EditableHost }
+  | {
+      ok: true;
+      payload: ConnectionConfigSharePayload;
+      hosts: EditableHost[];
+      host: EditableHost;
+      quickActions: ConnectionConfigShareQuickAction[];
+      shortcutActions: ConnectionConfigShareShortcutAction[];
+    }
   | { ok: false; error: string };
 
 function asString(value: unknown) {
@@ -31,6 +55,55 @@ function asTags(value: unknown) {
   return Array.isArray(value)
     ? value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
+}
+
+function normalizeQuickActions(input: unknown): ConnectionConfigShareQuickAction[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const candidate = item as Partial<ConnectionConfigShareQuickAction>;
+      const id = asString(candidate.id);
+      const label = asString(candidate.label);
+      const sequence = typeof candidate.sequence === 'string' ? candidate.sequence : '';
+      const order = asNumber(candidate.order, Number.NaN);
+      if (!id || !label || !Number.isFinite(order)) {
+        return null;
+      }
+      return { id, label, sequence, order };
+    })
+    .filter((item): item is ConnectionConfigShareQuickAction => item !== null)
+    .sort((left, right) => left.order - right.order);
+}
+
+function normalizeShortcutActions(input: unknown): ConnectionConfigShareShortcutAction[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const candidate = item as Partial<ConnectionConfigShareShortcutAction>;
+      const id = asString(candidate.id);
+      const label = asString(candidate.label);
+      const sequence = typeof candidate.sequence === 'string' ? candidate.sequence : '';
+      const order = asNumber(candidate.order, Number.NaN);
+      const row = candidate.row === 'top-scroll' || candidate.row === 'bottom-scroll'
+        ? candidate.row
+        : null;
+      if (!id || !label || !Number.isFinite(order) || !row) {
+        return null;
+      }
+      return { id, label, sequence, order, row };
+    })
+    .filter((item): item is ConnectionConfigShareShortcutAction => item !== null)
+    .sort((left, right) => left.order - right.order);
 }
 
 function toBase64Url(value: string) {
@@ -116,6 +189,8 @@ export function normalizeConnectionConfigShareHost(input: unknown): EditableHost
 export function buildConnectionConfigSharePayload(options: {
   host?: EditableHost;
   hosts?: EditableHost[];
+  quickActions?: ConnectionConfigShareQuickAction[];
+  shortcutActions?: ConnectionConfigShareShortcutAction[];
   exportedAt: number;
 }): ConnectionConfigSharePayload {
   const sourceHosts = options.host ? [options.host] : (options.hosts || []);
@@ -130,6 +205,8 @@ export function buildConnectionConfigSharePayload(options: {
     schemaVersion: CONNECTION_SHARE_SCHEMA_VERSION,
     exportedAt: options.exportedAt,
     hosts,
+    quickActions: normalizeQuickActions(options.quickActions),
+    shortcutActions: normalizeShortcutActions(options.shortcutActions),
   };
 }
 
@@ -140,12 +217,16 @@ export function encodeConnectionConfigSharePayload(payload: ConnectionConfigShar
 export function buildConnectionConfigShareLink(options: {
   host?: EditableHost;
   hosts?: EditableHost[];
+  quickActions?: ConnectionConfigShareQuickAction[];
+  shortcutActions?: ConnectionConfigShareShortcutAction[];
   exportedAt: number;
   linkKind?: 'app' | 'web';
 }) {
   const payload = buildConnectionConfigSharePayload({
     host: options.host,
     hosts: options.hosts,
+    quickActions: options.quickActions,
+    shortcutActions: options.shortcutActions,
     exportedAt: options.exportedAt,
   });
   const encoded = encodeConnectionConfigSharePayload(payload);
@@ -217,6 +298,8 @@ export function parseConnectionConfigShareLink(input: string): ConnectionConfigS
   if (hosts.length !== rawHosts.length) {
     return { ok: false, error: 'connection share payload host is invalid' };
   }
+  const quickActions = normalizeQuickActions(candidate.quickActions);
+  const shortcutActions = normalizeShortcutActions(candidate.shortcutActions);
 
   return {
     ok: true,
@@ -225,8 +308,12 @@ export function parseConnectionConfigShareLink(input: string): ConnectionConfigS
       schemaVersion: CONNECTION_SHARE_SCHEMA_VERSION,
       exportedAt: candidate.exportedAt,
       hosts,
+      quickActions,
+      shortcutActions,
     },
     hosts,
     host: hosts[0]!,
+    quickActions,
+    shortcutActions,
   };
 }

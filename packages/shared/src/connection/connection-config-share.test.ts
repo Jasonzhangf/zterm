@@ -36,8 +36,10 @@ describe('connection config share link', () => {
     const parsed = parseConnectionConfigShareLink(link);
 
     expect(link.startsWith('zterm://connection/import?payload=')).toBe(true);
-    expect(parsed).toEqual({
+    expect(parsed).toEqual(expect.objectContaining({
       ok: true,
+      quickActions: [],
+      shortcutActions: [],
       payload: expect.objectContaining({
         kind: 'zterm.connection-config',
         schemaVersion: 1,
@@ -71,7 +73,7 @@ describe('connection config share link', () => {
         privateKey: undefined,
         lastConnected: undefined,
       }),
-    });
+    }));
   });
 
   it('builds a web link and accepts raw encoded payload for paste/import flows', () => {
@@ -136,6 +138,14 @@ describe('connection config share link', () => {
           authToken: 'token-b',
         },
       ],
+      quickActions: [
+        { id: 'qa-2', label: 'pwd', sequence: 'pwd\r', order: 1 },
+        { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+      ],
+      shortcutActions: [
+        { id: 'sc-2', label: 'Enter', sequence: '\r', order: 1, row: 'top-scroll' },
+        { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+      ],
       exportedAt: 2000,
     });
 
@@ -160,9 +170,19 @@ describe('connection config share link', () => {
           authToken: 'token-b',
         }),
       ],
+      quickActions: [
+        { id: 'qa-1', label: 'ls', sequence: 'ls -la\r', order: 0 },
+        { id: 'qa-2', label: 'pwd', sequence: 'pwd\r', order: 1 },
+      ],
+      shortcutActions: [
+        { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
+        { id: 'sc-2', label: 'Enter', sequence: '\r', order: 1, row: 'top-scroll' },
+      ],
     }));
     if (parsed.ok) {
       expect(parsed.payload.hosts).toHaveLength(2);
+      expect(parsed.payload.quickActions).toHaveLength(2);
+      expect(parsed.payload.shortcutActions).toHaveLength(2);
     }
   });
 });

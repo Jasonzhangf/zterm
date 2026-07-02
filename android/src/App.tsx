@@ -217,6 +217,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       return parsed;
     }
     const importedHosts = parsed.hosts.map((host) => upsertHost(host));
+    if (parsed.quickActions.length > 0) {
+      setQuickActions(parsed.quickActions);
+    }
+    if (parsed.shortcutActions.length > 0) {
+      setShortcutActions(parsed.shortcutActions);
+    }
     setBridgeSettings((current) => importedHosts.reduce((settings, importedHost) => upsertBridgeServer(settings, {
         name: importedHost.name,
         targetHost: importedHost.bridgeHost,
@@ -229,9 +235,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     setPageState(openConnectionsPage());
     return {
       ok: true as const,
-      name: importedHosts.length === 1 ? importedHosts[0]!.name : `${importedHosts.length} 个连接`,
+      name: [
+        importedHosts.length === 1 ? importedHosts[0]!.name : `${importedHosts.length} 个连接`,
+        parsed.quickActions.length > 0 ? `${parsed.quickActions.length} 个文本快捷指令` : '',
+        parsed.shortcutActions.length > 0 ? `${parsed.shortcutActions.length} 个终端快捷键` : '',
+      ].filter(Boolean).join('，'),
     };
-  }, [setBridgeSettings, setPageState, upsertHost]);
+  }, [setBridgeSettings, setPageState, setQuickActions, setShortcutActions, upsertHost]);
 
   useEffect(() => {
     let disposed = false;
@@ -588,6 +598,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             host={editingHost}
             draft={editingDraft}
             shareableHosts={hosts}
+            quickActions={quickActions}
+            shortcutActions={shortcutActions}
             bridgeSettings={bridgeSettings}
             onImportConnectionLink={handleImportConnectionShareLink}
             onSave={handleSaveHost}
@@ -756,6 +768,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
             onSelectCleanSession={handleSelectCleanSession}
             shareableHosts={hosts}
+            quickActions={quickActions}
+            shortcutActions={shortcutActions}
             onImportConnectionLink={handleImportConnectionShareLink}
             onSaveGroupSelection={(target, sessionNames) => {
               handleSaveServerGroupSelection(target, sessionNames);
