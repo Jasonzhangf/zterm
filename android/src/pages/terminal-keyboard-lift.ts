@@ -81,6 +81,31 @@ export function resolveWindowWidth() {
   return resolveTerminalViewportMetrics().layoutWidth;
 }
 
+function normalizeReportedKeyboardInsetCssPx(
+  reportedKeyboardInset: number,
+  layoutViewportHeight: number,
+) {
+  const safeReportedInset = Math.max(0, Math.round(reportedKeyboardInset || 0));
+  if (safeReportedInset <= 0 || typeof window === "undefined") {
+    return safeReportedInset;
+  }
+
+  const devicePixelRatio = Math.max(1, Number(window.devicePixelRatio || 1));
+  if (devicePixelRatio <= 1 || layoutViewportHeight <= 0) {
+    return safeReportedInset;
+  }
+
+  const cssInset = Math.max(0, Math.round(safeReportedInset / devicePixelRatio));
+  if (cssInset <= 0) {
+    return safeReportedInset;
+  }
+
+  const reportedRatio = safeReportedInset / layoutViewportHeight;
+  const cssRatio = cssInset / layoutViewportHeight;
+  const looksLikePhysicalPixels = reportedRatio > 0.55 && cssRatio >= 0.18 && cssRatio <= 0.55;
+  return looksLikePhysicalPixels ? cssInset : safeReportedInset;
+}
+
 export function resolveKeyboardLiftPx(
   reportedKeyboardInset: number,
   layoutViewportHeightOverride?: number,
@@ -101,6 +126,10 @@ export function resolveKeyboardLiftPx(
           Math.max(0, Math.round(window.innerHeight || 0)),
         )
       : resolvedLayoutViewportHeight;
+  const normalizedReportedInset = normalizeReportedKeyboardInsetCssPx(
+    safeReportedInset,
+    layoutViewportHeight,
+  );
 
   const layoutViewportWidth = Math.max(
     0,
@@ -108,11 +137,11 @@ export function resolveKeyboardLiftPx(
       Math.max(window.innerWidth || 0, window.document?.documentElement?.clientWidth || 0),
     ),
   );
-  const keyboardLiftCapRatio = layoutViewportWidth > layoutViewportHeight ? 0.5 : 0.6;
+  const keyboardLiftCapRatio = layoutViewportWidth > layoutViewportHeight ? 0.38 : 0.45;
   const keyboardLiftCapPx = Math.max(0, Math.round(layoutViewportHeight * keyboardLiftCapRatio));
   const safeCappedInset = keyboardLiftCapPx > 0
-    ? Math.min(safeReportedInset, keyboardLiftCapPx)
-    : safeReportedInset;
+    ? Math.min(normalizedReportedInset, keyboardLiftCapPx)
+    : normalizedReportedInset;
 
   const visualViewport = window.visualViewport;
   if (!visualViewport) {

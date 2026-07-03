@@ -41,8 +41,8 @@ describe("terminal-keyboard-lift", () => {
         offsetTop: 0,
       },
     });
-    // 2000 * 0.6 = 1200
-    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(1200);
+    // 2000 * 0.45 = 900
+    expect(resolveKeyboardLiftPx(1600, 2000)).toBe(900);
   });
 
   it("keeps landscape lift when a reported keyboard inset is present", () => {
@@ -59,8 +59,28 @@ describe("terminal-keyboard-lift", () => {
         offsetTop: 0,
       },
     });
-    // 1000 * 0.5 = 500
-    expect(resolveKeyboardLiftPx(900, 1000)).toBe(500);
+    // 1000 * 0.38 = 380
+    expect(resolveKeyboardLiftPx(900, 1000)).toBe(380);
+  });
+
+  it("normalizes Android physical-pixel keyboard heights before applying lift", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 393,
+      innerHeight: 900,
+      devicePixelRatio: 2,
+      document: {
+        documentElement: {
+          clientWidth: 393,
+          clientHeight: 900,
+        },
+      },
+      visualViewport: {
+        height: 900,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(760, 900)).toBe(380);
   });
 
   it("does not add lift when WebView has already resized to the keyboard top", () => {

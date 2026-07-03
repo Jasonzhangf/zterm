@@ -1945,7 +1945,7 @@ describe("resolveKeyboardLiftPx", () => {
     });
   });
 
-  it("keeps reported keyboard inset when layout and visual viewport bottoms are already aligned", () => {
+  it("caps reported keyboard inset when layout and visual viewport bottoms are already aligned", () => {
     const originalInnerHeight = window.innerHeight;
     const originalDocumentClientHeight = document.documentElement.clientHeight;
     const originalVisualViewport = window.visualViewport;
@@ -1966,7 +1966,7 @@ describe("resolveKeyboardLiftPx", () => {
       },
     });
 
-    expect(resolveKeyboardLiftPx(320, 600)).toBe(300);
+    expect(resolveKeyboardLiftPx(320, 600)).toBe(228);
 
     Object.defineProperty(window, "innerHeight", {
       configurable: true,

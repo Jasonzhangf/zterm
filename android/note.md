@@ -13,6 +13,7 @@
   - `TerminalPage.android-ime.test.tsx`：已 resize viewport 时，quickbar keyboard inset = 0，stage bottom 只保留 chrome 高度，不再出现第二次 lift。
   - `TerminalSessionDrawer.test.tsx` / `TerminalPage.session-drawer.test.tsx`：一次点击只 dispatch 一次 session select，页面集成用例改为命中唯一 select owner。
   - `use-bridge-settings-storage.test.tsx`：首启无配置时窄 viewport 默认 `adaptive-phone`。
+- 现场纠正 4：1994 后双抬改善但仍抬太高。根因继续收敛在同一 `terminal-keyboard-lift.ts` helper：部分 Android 输入法上报的 `keyboardHeight` 可能接近物理像素或明显偏大，旧上限 portrait 60% / landscape 50% 过高。修复为先按 `devicePixelRatio` 识别并归一疑似物理像素高度，再把最大 lift 收紧到 portrait 45% / landscape 38%；回归锁住高 DPR 手机上 `760px` 报告值在 393x900 viewport 下归一为 `380px`，避免 quickbar 被顶到半屏。
 
 # 2026-07-02 connection config share add-flow correction
 
