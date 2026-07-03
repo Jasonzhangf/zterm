@@ -592,3 +592,8 @@ silently returns 0 when viewport metrics are stable.
 - daemon 必须把 WezTerm cursor 作为独立 metadata 写入 `WezTermMirrorSnapshot.cursor` / `buffer-head.cursor`，禁止把 cursor 样式写进 `TerminalCell`。
 - 已验证真实 Windows daemon `100.75.122.121:3333` 在 `session-open -> connect -> buffer-head` 返回 `cursor={"rowIndex":0,"col":16,"visible":true}`；若手机仍无光标，下一步查 Android 是否消费了该 `buffer-head.cursor`。
 - daemon npm 包不能再只声明 `os/cpu=darwin/arm64`；Windows fresh install 需要允许 `win32/x64`，否则 `npm install -g` 会在平台检查阶段失败。
+
+## 2026-07-03 Android IME quickbar reserve truth
+
+- Terminal IME/layout 修复不能靠固定 `30px` render lift 或“保留/撤回旧公式”凑位置。`TerminalPage` 的 stage bottom reserve 唯一公式应是 `measured quickBarHeight + safeOffset + terminalImeLiftPx`，QuickBar shell bottom 唯一公式应是 `safeOffset + terminalImeLiftPx`。
+- `quickBarHeight` 必须来自 `TerminalQuickBar.onMeasuredHeightChange` 的真实测量；未测量前不要用固定高度抬高 terminal stage。IME active 时也必须保留 measured quickbar reserve，不能只裁到 `terminalImeLiftPx`，否则快捷栏会遮挡 terminal 内容。

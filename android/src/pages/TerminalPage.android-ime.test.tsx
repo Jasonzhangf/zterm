@@ -781,7 +781,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     const terminalView = screen.getByTestId("terminal-view-s1");
     const stage = screen.getByTestId("terminal-stage-shell");
-    expect(stage.getAttribute("style") || "").toContain("bottom: 60px;");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 0px;");
     expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
     expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
       "false",
@@ -874,7 +874,7 @@ describe("TerminalPage Android IME bridge", () => {
         expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("300");
       });
 
-      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("300px");
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("484px");
     } finally {
       Object.defineProperty(window, "innerHeight", {
         configurable: true,
@@ -984,7 +984,7 @@ describe("TerminalPage Android IME bridge", () => {
         expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("0");
       });
 
-      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("214px");
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("184px");
     } finally {
       Object.defineProperty(window, "innerHeight", {
         configurable: true,
@@ -1160,7 +1160,7 @@ describe("TerminalPage Android IME bridge", () => {
     );
 
     const stage = screen.getByTestId("terminal-stage-shell");
-    expect(stage.getAttribute("style") || "").toContain("bottom: 60px;");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 0px;");
 
     fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
 
@@ -1615,12 +1615,12 @@ describe("TerminalPage Android IME bridge", () => {
     const terminalStage = screen.getByTestId("terminal-stage-shell");
     const quickBarShell = screen.getByTestId("terminal-quickbar-shell");
     expect(terminalStage.getAttribute("style") || "").toContain(
-      "bottom: 60px;",
+      "bottom: 0px;",
     );
     expect(terminalStage.getAttribute("style") || "").not.toContain(
       "transform: translateY",
     );
-    expect(quickBarShell.getAttribute("style") || "").toContain("bottom: 30px;");
+    expect(quickBarShell.getAttribute("style") || "").toContain("bottom: 0px;");
 
     await waitFor(() => {
       expect(imeListeners.has("keyboardState")).toBe(true);

@@ -90,7 +90,6 @@ type VirtualKeyboardApi = {
 };
 
 const NETWORK_BANNER_GRACE_MS = 3000;
-const TERMINAL_QUICK_BAR_RENDER_LIFT_PX = 30;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
@@ -1004,7 +1003,7 @@ function TerminalPageComponent({
   );
   const [connectionIssueVisible, setConnectionIssueVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const [quickBarHeight, setQuickBarHeight] = useState(TERMINAL_QUICK_BAR_RENDER_LIFT_PX);
+  const [quickBarHeight, setQuickBarHeight] = useState(0);
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
@@ -2301,15 +2300,12 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
-  const quickBarRenderLiftPx = terminalImeLiftPx > 0 ? 0 : TERMINAL_QUICK_BAR_RENDER_LIFT_PX;
   const terminalChromeBottomPx = Math.max(
     0,
     quickBarHeight
-      + layoutProfile.quickBar.touchSafeOffsetPx
-      + quickBarRenderLiftPx,
+      + layoutProfile.quickBar.touchSafeOffsetPx,
   );
-  const terminalStageChromeBottomPx = terminalImeLiftPx > 0 ? 0 : terminalChromeBottomPx;
-  const terminalStageBottomPx = terminalStageChromeBottomPx + terminalImeLiftPx;
+  const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   const visualViewportDebugWidth = typeof window !== 'undefined'
     ? Math.round(window.visualViewport?.width || 0)
     : 0;
@@ -2344,7 +2340,6 @@ function TerminalPageComponent({
     terminalImeActive,
     terminalImeLiftPx,
     quickBarShellKeyboardLiftPx,
-    terminalStageChromeBottomPx,
     terminalStageBottomPx,
     networkOnline,
     connectionIssueVisible,
@@ -2877,7 +2872,6 @@ function TerminalPageComponent({
           bottomPx={
             terminalImeLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
-            + quickBarRenderLiftPx
           }
         >
           {quickBarNode}
