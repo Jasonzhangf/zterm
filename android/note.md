@@ -1394,3 +1394,8 @@ Need runtime debug to confirm:
 - 现场纠正：真实 `+` 入口是 `TmuxSessionPickerSheet`；分享二维码/链接不能藏在“点击已有连接卡片后才出现”的隐式交互里。打开 `New Connection` sheet 时必须默认选中第一个可分享 host 并直接展示二维码与链接，连接卡片只作为切换分享对象。
 - 现场纠正 2：配置分享的默认语义应是“一次分享本机全部已保存连接”，不是默认分享某一个连接。shared payload 真源改为 `hosts[]`；旧单 host 输入只归一成单元素 `hosts[]`；App import 必须遍历 `parsed.hosts` 批量 `upsertHost`。
 - 现场纠正 3：全量配置分享还必须包含快捷指令配置。shared payload 增加 `quickActions[]` 和 `shortcutActions[]`；默认全量二维码包含它们，导入时通过 `setQuickActions` / `setShortcutActions` 写回 storage owner。单连接 narrowed share 不附带快捷配置。
+
+# 2026-07-03 IME precise quickbar lift
+
+- 现场诊断值显示 `RESZ=N`、`VV/SH/RAW` 未 resize，`KB/LIFT=294` 合理；剩余“抬高太多”来自 IME lift 上又叠加固定 `TERMINAL_QUICK_BAR_RENDER_LIFT_PX=30`。修复只在 `TerminalPage` UI shell owner 内处理：IME 活跃时 `quickBarRenderLiftPx=0`，键盘隐藏时保留 30px 基线；不传入 `TerminalView`，不触发 resize，不进入 daemon/tmux/buffer truth。
+- 回归锁定：IME 活跃的 stage/quickbar bottom 期望整体减少 30px；already-resized 路径保持不二次上抬。验证：IME owner 110 tests PASS，`tsc --noEmit` PASS，`git diff --check` PASS，debug build/APK `0.1.3.1997` PASS。

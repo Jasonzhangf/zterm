@@ -2301,11 +2301,12 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const quickBarRenderLiftPx = terminalImeLiftPx > 0 ? 0 : TERMINAL_QUICK_BAR_RENDER_LIFT_PX;
   const terminalChromeBottomPx = Math.max(
     0,
     quickBarHeight
       + layoutProfile.quickBar.touchSafeOffsetPx
-      + TERMINAL_QUICK_BAR_RENDER_LIFT_PX,
+      + quickBarRenderLiftPx,
   );
   const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   const visualViewportDebugWidth = typeof window !== 'undefined'
@@ -2874,7 +2875,7 @@ function TerminalPageComponent({
           bottomPx={
             terminalImeLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
-            + TERMINAL_QUICK_BAR_RENDER_LIFT_PX
+            + quickBarRenderLiftPx
           }
         >
           {quickBarNode}

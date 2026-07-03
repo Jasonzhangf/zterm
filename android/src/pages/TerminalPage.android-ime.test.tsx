@@ -790,7 +790,7 @@ describe("TerminalPage Android IME bridge", () => {
     keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 380px;");
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 350px;");
       expect(
         screen
           .getByTestId("terminal-view-s1")
@@ -874,7 +874,7 @@ describe("TerminalPage Android IME bridge", () => {
         expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("300");
       });
 
-      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("514px");
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("484px");
     } finally {
       Object.defineProperty(window, "innerHeight", {
         configurable: true,
@@ -1178,7 +1178,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const stable = stage.getAttribute("style") || "";
-      expect(stable).toContain("bottom: 340px;");
+      expect(stable).toContain("bottom: 310px;");
       expect(stable).not.toContain("transform: translateY");
     });
   });
@@ -1631,10 +1631,10 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       const style = terminalStage.getAttribute("style") || "";
-      expect(style).toContain("bottom: 380px;");
+      expect(style).toContain("bottom: 350px;");
       expect(style).not.toContain("transform: translateY");
       expect(quickBarShell.getAttribute("style") || "").toContain(
-        "bottom: 350px;",
+        "bottom: 320px;",
       );
     });
   });
