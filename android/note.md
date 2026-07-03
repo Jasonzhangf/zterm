@@ -1,3 +1,10 @@
+# 2026-07-03 File Sync sorting / no-filter enumeration
+
+- Jason 现场确认本地目录已能枚举，但文件同步列表缺少按时间排序选项，并且图片文件不应因扩展名/类型/隐藏规则被过滤。
+- 架构映射：本 slice 属于 file sync UI projection + native storage owner；`FileTransferSheet` 只做列表投影、排序和选择，`StoragePermissionPlugin` 只返回 native 目录事实。排序不进入 native/daemon 真源，过滤语义从本地枚举链路物理移除。
+- 修复方向：本地 native `readdir` 不再跳过 dot files；TS native API 删除 `showHidden` 参数；远端 file-list 请求固定 `showHidden: true` 以请求完整列表；UI 增加名称/修改时间和正序/倒序切换，目录仍排在文件前。
+- 回归锁定：`FileTransferSheet.test.tsx` 覆盖远端请求完整列表、本地图片与 dot file 不过滤、本地按 modified 倒序排序、权限拒绝不伪装空目录。
+
 # 2026-07-03 Android IME double-lift / drawer double-select / startup width-mode default
 
 - Jason 现场复现两个真机问题：1）IME 弹出后出现“内容上抬 + 容器再上抬”的双重上抬；2）session drawer 里点一次 session 不能稳定切过去，首击会出现双框/错误过渡。

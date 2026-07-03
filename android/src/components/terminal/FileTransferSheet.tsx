@@ -36,6 +36,13 @@ interface LocalFileEntry {
   uri?: string;
 }
 
+type FileSortField = "name" | "modified";
+type FileSortDirection = "asc" | "desc";
+type SortableFileEntry = Pick<
+  LocalFileEntry,
+  "name" | "type" | "modified"
+>;
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -130,6 +137,22 @@ function getParentLocalDisplayPath(path: string) {
   return parent.length >= EXTERNAL_STORAGE_ROOT.length
     ? parent
     : EXTERNAL_STORAGE_ROOT;
+}
+
+function compareFileEntries(
+  a: SortableFileEntry,
+  b: SortableFileEntry,
+  sortField: FileSortField,
+  sortDirection: FileSortDirection,
+) {
+  if (a.type !== b.type) {
+    return a.type === "directory" ? -1 : 1;
+  }
+  const value =
+    sortField === "modified"
+      ? a.modified - b.modified || a.name.localeCompare(b.name)
+      : a.name.localeCompare(b.name);
+  return sortDirection === "asc" ? value : -value;
 }
 
 function resolvePrimaryTransferLabel(
@@ -228,6 +251,13 @@ const progressRowStyle = {
   color: mobileTheme.colors.textSecondary,
 };
 
+const sortControlStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+  flexShrink: 0,
+};
+
 export function FileTransferSheet({
   open,
   remoteCwd,
@@ -241,7 +271,6 @@ export function FileTransferSheet({
     sendJsonRef.current = sendJson;
   }, [sendJson]);
   const localPathRef = useRef(DEFAULT_LOCAL_DOWNLOAD_DIR);
-  const showHiddenLocalRef = useRef(false);
 
   // Remote state
   const fileTransferRuntimeRef = useRef(
@@ -268,7 +297,7 @@ export function FileTransferSheet({
             path: joinLocalDisplayPath(downloadDir, payload.fileName),
             data: combined,
           });
-          loadLocalDir(downloadDir, showHiddenLocalRef.current, {
+          loadLocalDir(downloadDir, {
             requestPermission: false,
           });
         } catch (error) {
@@ -287,8 +316,11 @@ export function FileTransferSheet({
   const remoteEntries = runtimeState.remoteEntries as RemoteFileEntry[];
   const remoteParentPath = runtimeState.remoteParentPath;
   const remoteLoading = runtimeState.remoteLoading;
-  const [showHiddenRemote, setShowHiddenRemote] = useState(false);
   const [selectedRemote, setSelectedRemote] = useState<Set<string>>(new Set());
+  const [remoteSortField, setRemoteSortField] =
+    useState<FileSortField>("name");
+  const [remoteSortDirection, setRemoteSortDirection] =
+    useState<FileSortDirection>("asc");
 
   // Local state
   const [localPath, setLocalPath] = useState(DEFAULT_LOCAL_DOWNLOAD_DIR);
@@ -301,16 +333,14 @@ export function FileTransferSheet({
     string | null
   >(null);
   const [localListError, setLocalListError] = useState<string | null>(null);
-  const [showHiddenLocal, setShowHiddenLocal] = useState(false);
   const [selectedLocal, setSelectedLocal] = useState<Set<string>>(new Set());
+  const [localSortField, setLocalSortField] = useState<FileSortField>("name");
+  const [localSortDirection, setLocalSortDirection] =
+    useState<FileSortDirection>("asc");
 
   useEffect(() => {
     localPathRef.current = localPath;
   }, [localPath]);
-
-  useEffect(() => {
-    showHiddenLocalRef.current = showHiddenLocal;
-  }, [showHiddenLocal]);
 
   // Direction
   const [direction, setDirection] = useState<"upload" | "download">("download");
@@ -318,13 +348,56 @@ export function FileTransferSheet({
   // Transfers
   const transfers = runtimeState.transfers as TransferProgress[];
   const preview = runtimeState.preview;
-  const visibleLocalEntries = localEntries;
+  const visibleRemoteEntries = [...remoteEntries].sort((a, b) =>
+    compareFileEntries(a, b, remoteSortField, remoteSortDirection),
+  );
+  const visibleLocalEntries = [...localEntries].sort((a, b) =>
+    compareFileEntries(a, b, localSortField, localSortDirection),
+  );
+
+  const renderSortControls = (
+    sortField: FileSortField,
+    setSortField: (field: FileSortField) => void,
+    sortDirection: FileSortDirection,
+    setSortDirection: (direction: FileSortDirection) => void,
+  ) => (
+    <div style={sortControlStyle}>
+      <button
+        type="button"
+        onClick={() =>
+          setSortField(sortField === "name" ? "modified" : "name")
+        }
+        style={{
+          ...actionButtonStyle("transparent", mobileTheme.colors.textSecondary),
+          minHeight: "24px",
+          padding: "0 8px",
+          fontSize: "11px",
+        }}
+      >
+        {sortField === "name" ? "按名称" : "按时间"}
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+        }
+        style={{
+          ...actionButtonStyle("transparent", mobileTheme.colors.textSecondary),
+          minHeight: "24px",
+          padding: "0 8px",
+          fontSize: "11px",
+        }}
+      >
+        {sortDirection === "asc" ? "正序" : "倒序"}
+      </button>
+    </div>
+  );
 
   // Request remote file list
-  const requestRemoteList = useCallback((path: string, showHidden: boolean) => {
+  const requestRemoteList = useCallback((path: string) => {
     const request = fileTransferRuntimeRef.current.requestRemoteList(
       path,
-      showHidden,
+      true,
     );
     const payload: FileListRequestPayload = request.message.payload;
     sendJsonRef.current?.({ type: "file-list-request", payload });
@@ -342,8 +415,8 @@ export function FileTransferSheet({
     setSelectedLocal(new Set());
     setDirection("download");
     forceRuntimeTick((value) => value + 1);
-    requestRemoteList(initialRemotePath, showHiddenRemote);
-  }, [open, remoteCwd, requestRemoteList, showHiddenRemote]);
+    requestRemoteList(initialRemotePath);
+  }, [open, remoteCwd, requestRemoteList]);
 
   const checkLocalStoragePermission = useCallback(async () => {
     try {
@@ -392,11 +465,7 @@ export function FileTransferSheet({
 
   // Load local directory
   const loadLocalDir = useCallback(
-    async (
-      path: string,
-      showHidden: boolean,
-      options?: { requestPermission?: boolean },
-    ) => {
+    async (path: string, options?: { requestPermission?: boolean }) => {
       const normalizedPath = normalizeLocalDisplayPath(path);
       setLocalLoading(true);
       setLocalListError(null);
@@ -410,7 +479,6 @@ export function FileTransferSheet({
         }
         const result = await StoragePermissionPlugin.readdir({
           path: normalizedPath,
-          showHidden,
         });
         const entries: LocalFileEntry[] = [];
         for (const entry of result.files) {
@@ -444,16 +512,16 @@ export function FileTransferSheet({
 
   useEffect(() => {
     if (open && localPath) {
-      loadLocalDir(localPath, showHiddenLocal, { requestPermission: true });
+      loadLocalDir(localPath, { requestPermission: true });
     }
-  }, [open, localPath, showHiddenLocal, loadLocalDir]);
+  }, [open, localPath, loadLocalDir]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     const refreshLocalAccess = () => {
-      void loadLocalDir(localPath, showHiddenLocal, { requestPermission: false });
+      void loadLocalDir(localPath, { requestPermission: false });
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -466,7 +534,7 @@ export function FileTransferSheet({
       window.removeEventListener("focus", refreshLocalAccess);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [open, localPath, showHiddenLocal, loadLocalDir]);
+  }, [open, localPath, loadLocalDir]);
 
   // Listen for daemon file-transfer messages
   useEffect(() => {
@@ -502,9 +570,9 @@ export function FileTransferSheet({
   const navigateRemotePath = useCallback(
     (path: string) => {
       setSelectedRemote(new Set());
-      requestRemoteList(path, showHiddenRemote);
+      requestRemoteList(path);
     },
-    [requestRemoteList, showHiddenRemote],
+    [requestRemoteList],
   );
 
   const previewRemoteMarkdown = useCallback(
@@ -625,7 +693,7 @@ export function FileTransferSheet({
       }
       setSelectedLocal(new Set());
       // Refresh remote list
-      requestRemoteList(remotePath, showHiddenRemote);
+      requestRemoteList(remotePath);
     }
   }, [
     checkLocalStoragePermission,
@@ -638,7 +706,6 @@ export function FileTransferSheet({
     localPath,
     sendJson,
     requestRemoteList,
-    showHiddenRemote,
   ]);
 
   if (!open) return null;
@@ -698,21 +765,12 @@ export function FileTransferSheet({
         <>
           <div style={sectionLabelStyle}>
             <span>🖥 远程: {truncateName(remotePath, 40)}</span>
-            <button
-              type="button"
-              onClick={() => setShowHiddenRemote((v) => !v)}
-              style={{
-                ...actionButtonStyle(
-                  "transparent",
-                  mobileTheme.colors.textSecondary,
-                ),
-                minHeight: "24px",
-                padding: "0 8px",
-                fontSize: "11px",
-              }}
-            >
-              {showHiddenRemote ? "隐藏" : "显示"} .文件
-            </button>
+            {renderSortControls(
+              remoteSortField,
+              setRemoteSortField,
+              remoteSortDirection,
+              setRemoteSortDirection,
+            )}
           </div>
           <div style={pathBreadcrumbStyle}>
             <button
@@ -750,7 +808,7 @@ export function FileTransferSheet({
               >
                 加载中…
               </div>
-            ) : remoteEntries.length === 0 ? (
+            ) : visibleRemoteEntries.length === 0 ? (
               <div
                 style={{
                   padding: "20px",
@@ -761,7 +819,7 @@ export function FileTransferSheet({
                 空目录
               </div>
             ) : (
-              remoteEntries.map((entry) => (
+              visibleRemoteEntries.map((entry) => (
                 <div
                   key={entry.name}
                   style={fileRowStyle}
@@ -942,21 +1000,12 @@ export function FileTransferSheet({
         {/* Local panel */}
         <div style={sectionLabelStyle}>
           <span>📱 本地: {truncateName(localPath, 40)}</span>
-          <button
-            type="button"
-            onClick={() => setShowHiddenLocal((v) => !v)}
-            style={{
-              ...actionButtonStyle(
-                "transparent",
-                mobileTheme.colors.textSecondary,
-              ),
-              minHeight: "24px",
-              padding: "0 8px",
-              fontSize: "11px",
-            }}
-          >
-            {showHiddenLocal ? "隐藏" : "显示"} .文件
-          </button>
+          {renderSortControls(
+            localSortField,
+            setLocalSortField,
+            localSortDirection,
+            setLocalSortDirection,
+          )}
         </div>
         <div style={pathBreadcrumbStyle}>
           <button

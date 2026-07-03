@@ -82,7 +82,7 @@ describe("FileTransferSheet", () => {
         type: "file-list-request",
         payload: expect.objectContaining({
           path: "",
-          showHidden: false,
+          showHidden: true,
         }),
       });
     });
@@ -108,7 +108,7 @@ describe("FileTransferSheet", () => {
         type: "file-list-request",
         payload: expect.objectContaining({
           path: "/remote/home",
-          showHidden: false,
+          showHidden: true,
         }),
       });
     });
@@ -166,7 +166,6 @@ describe("FileTransferSheet", () => {
       expect(StoragePermissionPlugin.request).toHaveBeenCalled();
       expect(StoragePermissionPlugin.readdir).toHaveBeenCalledWith({
         path: "/storage/emulated/0/Download/zterm",
-        showHidden: false,
       });
       expect(screen.getByText("hello.txt")).toBeTruthy();
     });
@@ -244,9 +243,89 @@ describe("FileTransferSheet", () => {
     await waitFor(() => {
       expect(StoragePermissionPlugin.readdir).toHaveBeenCalledWith({
         path: "/storage/emulated/0/Download/zterm",
-        showHidden: false,
       });
       expect(screen.getByText("granted-later.txt")).toBeTruthy();
+    });
+  });
+
+  it("does not filter local image or dot files returned by the native storage owner", async () => {
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: ".nomedia",
+          type: "file",
+          size: 0,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/.nomedia",
+        },
+        {
+          name: "photo.jpg",
+          type: "file",
+          size: 2048,
+          modified: 2,
+          uri: "file:///storage/emulated/0/Download/photo.jpg",
+        },
+      ],
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(".nomedia")).toBeTruthy();
+      expect(screen.getByText("photo.jpg")).toBeTruthy();
+      expect(screen.queryByText("显示 .文件")).toBeNull();
+      expect(screen.queryByText("隐藏 .文件")).toBeNull();
+    });
+  });
+
+  it("sorts local files by modified time in descending order when requested", async () => {
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "old.txt",
+          type: "file",
+          size: 1,
+          modified: 10,
+          uri: "file:///storage/emulated/0/Download/old.txt",
+        },
+        {
+          name: "new.txt",
+          type: "file",
+          size: 1,
+          modified: 20,
+          uri: "file:///storage/emulated/0/Download/new.txt",
+        },
+      ],
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("old.txt")).toBeTruthy());
+
+    const sortFieldButtons = screen.getAllByText("按名称");
+    fireEvent.click(sortFieldButtons[1]);
+    const directionButtons = screen.getAllByText("正序");
+    fireEvent.click(directionButtons[1]);
+
+    await waitFor(() => {
+      const text = document.body.textContent || "";
+      expect(text.indexOf("new.txt")).toBeLessThan(text.indexOf("old.txt"));
     });
   });
 

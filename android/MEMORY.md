@@ -598,3 +598,9 @@ silently returns 0 when viewport metrics are stable.
 
 - Terminal IME/layout 修复不能靠固定 `30px` render lift 或“保留/撤回旧公式”凑位置。`TerminalPage` 的 stage bottom reserve 唯一公式应是 `measured quickBarHeight + safeOffset + terminalImeLiftPx`，QuickBar shell bottom 唯一公式应是 `safeOffset + terminalImeLiftPx`。
 - `quickBarHeight` 必须来自 `TerminalQuickBar.onMeasuredHeightChange` 的真实测量；未测量前不要用固定高度抬高 terminal stage。IME active 时也必须保留 measured quickbar reserve，不能只裁到 `terminalImeLiftPx`，否则快捷栏会遮挡 terminal 内容。
+
+## 2026-07-03 File Sync no-filter enumeration truth
+
+- Android file sync 本地枚举真源是 `StoragePermissionPlugin` native owner；它必须返回目录事实本身，不按图片扩展名、隐藏文件名或文件类型过滤。UI 只做 projection、选择、排序。
+- `FileTransferSheet` 的排序只属于列表投影：按名称/修改时间、正序/倒序在 UI 层切换；排序/过滤状态不得进入 native storage owner 或 daemon 文件真源。
+- 回归门禁：`pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot` 必须覆盖 remote `showHidden:true`、本地图片与 dot file 不过滤、mtime 倒序排序、权限失败显式报错。

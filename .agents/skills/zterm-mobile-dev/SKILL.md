@@ -228,6 +228,11 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 多服务器身份色必须走 `src/lib/server-color.ts` 的固定红/黄/蓝/绿/青/橙 palette；禁止连续 hue hash 漂到紫/粉区，常见服务器 key 需要测试锁住不同色。
 - traversal route health cache 是进程级全局状态；会创建 `TraversalSocket` 或断言 WebSocket 实例/线路选择的测试必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache`，否则前一用例记录的坏线路会让后续用例不创建 socket，表现为 `MockWebSocket.instances` 为 0。
 
+### 2.16 File Sync 枚举与排序边界
+- Android 11+ 本地文件同步必须走 native storage owner；`FileTransferSheet` 只消费 `StoragePermissionPlugin` 返回的目录事实，不得在 UI 或 native 枚举层按扩展名、图片类型、隐藏文件名做过滤。
+- 文件排序只属于 UI projection：按名称/修改时间、正序/倒序可以在列表投影层切换；不得把排序/过滤状态写回本地 storage owner 或 daemon 文件真源。
+- 远端文件列表若协议仍带 `showHidden`，客户端必须请求完整列表；禁止用默认隐藏文件过滤制造“目录成功但文件消失”的假状态。
+
 ## 三、开发闭环流程
 
 ### 3.0 测试闭环分层规则

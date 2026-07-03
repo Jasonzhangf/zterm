@@ -119,7 +119,6 @@ public class StoragePermissionPlugin extends Plugin {
             return;
         }
         String path = call.getString("path", "");
-        boolean showHidden = Boolean.TRUE.equals(call.getBoolean("showHidden", false));
         try {
             File dir = resolveExternalStoragePath(path);
             if (!dir.exists()) {
@@ -140,9 +139,6 @@ public class StoragePermissionPlugin extends Plugin {
                 .thenComparing(file -> file.getName().toLowerCase()));
             JSArray filesArray = new JSArray();
             for (File file : files) {
-                if (!showHidden && file.getName().startsWith(".")) {
-                    continue;
-                }
                 filesArray.put(buildFileEntry(file));
             }
             JSObject result = new JSObject();
