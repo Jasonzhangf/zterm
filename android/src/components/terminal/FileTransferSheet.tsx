@@ -15,6 +15,8 @@ import type {
 
 const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk (must match daemon)
 const BASE64_CHUNK_SIZE = Math.floor(FILE_CHUNK_SIZE / 3) * 4;
+const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
+const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
 
 interface FileTransferSheetProps {
   open: boolean;
@@ -90,6 +92,53 @@ function decodeBase64Utf8(data: string) {
     bytes[index] = binary.charCodeAt(index);
   }
   return new TextDecoder().decode(bytes);
+}
+
+function normalizeLocalDisplayPath(path: string) {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === "/") {
+    return EXTERNAL_STORAGE_ROOT;
+  }
+  if (trimmed === EXTERNAL_STORAGE_ROOT) {
+    return EXTERNAL_STORAGE_ROOT;
+  }
+  if (trimmed.startsWith(`${EXTERNAL_STORAGE_ROOT}/`)) {
+    return trimmed.replace(/\/+$/, "");
+  }
+  if (trimmed.startsWith("/")) {
+    return `${EXTERNAL_STORAGE_ROOT}/${trimmed.replace(/^\/+/, "")}`.replace(
+      /\/+$/,
+      "",
+    );
+  }
+  return `${EXTERNAL_STORAGE_ROOT}/${trimmed}`.replace(/\/+$/, "");
+}
+
+function toExternalStorageRelativePath(path: string) {
+  const normalized = normalizeLocalDisplayPath(path);
+  if (normalized === EXTERNAL_STORAGE_ROOT) {
+    return "";
+  }
+  return normalized.slice(EXTERNAL_STORAGE_ROOT.length + 1);
+}
+
+function joinLocalDisplayPath(parentPath: string, childName: string) {
+  const normalizedParent = normalizeLocalDisplayPath(parentPath);
+  if (normalizedParent === EXTERNAL_STORAGE_ROOT) {
+    return `${EXTERNAL_STORAGE_ROOT}/${childName}`;
+  }
+  return `${normalizedParent}/${childName}`;
+}
+
+function getParentLocalDisplayPath(path: string) {
+  const normalized = normalizeLocalDisplayPath(path);
+  if (normalized === EXTERNAL_STORAGE_ROOT) {
+    return EXTERNAL_STORAGE_ROOT;
+  }
+  const parent = normalized.slice(0, normalized.lastIndexOf("/"));
+  return parent.length >= EXTERNAL_STORAGE_ROOT.length
+    ? parent
+    : EXTERNAL_STORAGE_ROOT;
 }
 
 function resolvePrimaryTransferLabel(
@@ -200,6 +249,8 @@ export function FileTransferSheet({
   useEffect(() => {
     sendJsonRef.current = sendJson;
   }, [sendJson]);
+  const localPathRef = useRef(DEFAULT_LOCAL_DOWNLOAD_DIR);
+  const showHiddenLocalRef = useRef(false);
 
   // Remote state
   const fileTransferRuntimeRef = useRef(
@@ -207,10 +258,14 @@ export function FileTransferSheet({
       onDownloadComplete: async (payload, orderedChunksBase64) => {
         try {
           const combined = orderedChunksBase64.join("");
-          const downloadDir = localPath || "/storage/emulated/0/Download/zterm";
+          const downloadDir = normalizeLocalDisplayPath(
+            localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+          );
+          const downloadDirRelative =
+            toExternalStorageRelativePath(downloadDir);
           try {
             await Filesystem.mkdir({
-              path: downloadDir,
+              path: downloadDirRelative,
               directory: Directory.ExternalStorage,
               recursive: true,
             });
@@ -222,11 +277,15 @@ export function FileTransferSheet({
           }
 
           await Filesystem.writeFile({
-            path: `${downloadDir}/${payload.fileName}`,
+            path: downloadDirRelative
+              ? `${downloadDirRelative}/${payload.fileName}`
+              : payload.fileName,
             data: combined,
             directory: Directory.ExternalStorage,
           });
-          loadLocalDir(downloadDir, showHiddenLocal);
+          loadLocalDir(downloadDir, showHiddenLocalRef.current, {
+            requestPermission: false,
+          });
         } catch (error) {
           fileTransferRuntimeRef.current.markDownloadWriteError(
             payload.requestId,
@@ -247,9 +306,7 @@ export function FileTransferSheet({
   const [selectedRemote, setSelectedRemote] = useState<Set<string>>(new Set());
 
   // Local state
-  const [localPath, setLocalPath] = useState(
-    "/storage/emulated/0/Download/zterm",
-  );
+  const [localPath, setLocalPath] = useState(DEFAULT_LOCAL_DOWNLOAD_DIR);
   const [localEntries, setLocalEntries] = useState<LocalFileEntry[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
   const [localPermissionGranted, setLocalPermissionGranted] = useState<
@@ -258,8 +315,17 @@ export function FileTransferSheet({
   const [localPermissionError, setLocalPermissionError] = useState<
     string | null
   >(null);
+  const [localListError, setLocalListError] = useState<string | null>(null);
   const [showHiddenLocal, setShowHiddenLocal] = useState(false);
   const [selectedLocal, setSelectedLocal] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    localPathRef.current = localPath;
+  }, [localPath]);
+
+  useEffect(() => {
+    showHiddenLocalRef.current = showHiddenLocal;
+  }, [showHiddenLocal]);
 
   // Direction
   const [direction, setDirection] = useState<"upload" | "download">("download");
@@ -301,7 +367,7 @@ export function FileTransferSheet({
       setLocalPermissionError(
         status.granted
           ? null
-          : "本地文件同步需要存储权限；请在 daemon/应用安装设置中一次性授权。",
+          : "本地文件同步需要存储权限；已尝试拉起授权页，请完成授权后返回此页面。",
       );
       return status.granted;
     } catch (error) {
@@ -313,18 +379,53 @@ export function FileTransferSheet({
     }
   }, []);
 
+  const ensureLocalStoragePermission = useCallback(
+    async (requestIfMissing: boolean) => {
+      const granted = await checkLocalStoragePermission();
+      if (granted || !requestIfMissing) {
+        return granted;
+      }
+      try {
+        const requestedStatus = await StoragePermissionPlugin.request();
+        setLocalPermissionGranted(requestedStatus.granted);
+        setLocalPermissionError(
+          requestedStatus.granted
+            ? null
+            : "本地文件同步需要存储权限；已尝试拉起授权页，请完成授权后返回此页面。",
+        );
+        return requestedStatus.granted;
+      } catch (error) {
+        setLocalPermissionGranted(false);
+        setLocalPermissionError(
+          error instanceof Error ? error.message : String(error),
+        );
+        return false;
+      }
+    },
+    [checkLocalStoragePermission],
+  );
+
   // Load local directory
   const loadLocalDir = useCallback(
-    async (path: string, showHidden: boolean) => {
+    async (
+      path: string,
+      showHidden: boolean,
+      options?: { requestPermission?: boolean },
+    ) => {
+      const normalizedPath = normalizeLocalDisplayPath(path);
+      const relativePath = toExternalStorageRelativePath(normalizedPath);
       setLocalLoading(true);
+      setLocalListError(null);
       try {
-        const permissionGranted = await checkLocalStoragePermission();
+        const permissionGranted = await ensureLocalStoragePermission(
+          options?.requestPermission ?? false,
+        );
         if (!permissionGranted) {
           setLocalEntries([]);
           return;
         }
         const result = await Filesystem.readdir({
-          path,
+          path: relativePath,
           directory: Directory.ExternalStorage,
         });
         const entries: LocalFileEntry[] = [];
@@ -335,7 +436,9 @@ export function FileTransferSheet({
           if (type === "file") {
             try {
               const stat = await Filesystem.stat({
-                path: `${path}/${entry.name}`,
+                path: relativePath
+                  ? `${relativePath}/${entry.name}`
+                  : entry.name,
                 directory: Directory.ExternalStorage,
               });
               size = stat.size;
@@ -361,20 +464,44 @@ export function FileTransferSheet({
           return a.name.localeCompare(b.name);
         });
         setLocalEntries(entries);
+        setLocalPath(normalizedPath);
       } catch (err) {
         console.warn("[FileTransferSheet] local readdir failed:", err);
         setLocalEntries([]);
+        setLocalListError(
+          `本地目录读取失败：${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setLocalLoading(false);
       }
     },
-    [checkLocalStoragePermission],
+    [ensureLocalStoragePermission],
   );
 
   useEffect(() => {
     if (open && localPath) {
-      loadLocalDir(localPath, showHiddenLocal);
+      loadLocalDir(localPath, showHiddenLocal, { requestPermission: true });
     }
+  }, [open, localPath, showHiddenLocal, loadLocalDir]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const refreshLocalAccess = () => {
+      void loadLocalDir(localPath, showHiddenLocal, { requestPermission: false });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshLocalAccess();
+      }
+    };
+    window.addEventListener("focus", refreshLocalAccess);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refreshLocalAccess);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [open, localPath, showHiddenLocal, loadLocalDir]);
 
   // Listen for daemon file-transfer messages
@@ -443,7 +570,10 @@ export function FileTransferSheet({
           return true;
         }
         const readResult = await Filesystem.readFile({
-          path: `${localPath}/${entry.name}`,
+          path: (() => {
+            const relativePath = toExternalStorageRelativePath(localPath);
+            return relativePath ? `${relativePath}/${entry.name}` : entry.name;
+          })(),
           directory: Directory.ExternalStorage,
         });
         const data = typeof readResult.data === "string" ? readResult.data : "";
@@ -491,7 +621,10 @@ export function FileTransferSheet({
         if (!entry || entry.type !== "file") continue;
         try {
           const readResult = await Filesystem.readFile({
-            path: `${localPath}/${name}`,
+            path: (() => {
+              const relativePath = toExternalStorageRelativePath(localPath);
+              return relativePath ? `${relativePath}/${name}` : name;
+            })(),
             directory: Directory.ExternalStorage,
           });
           const base64 =
@@ -873,9 +1006,7 @@ export function FileTransferSheet({
           <button
             type="button"
             onClick={() => {
-              const parts = localPath.split("/");
-              parts.pop();
-              setLocalPath(parts.join("/") || "/");
+              setLocalPath(getParentLocalDisplayPath(localPath));
               setSelectedLocal(new Set());
             }}
             style={{
@@ -915,6 +1046,17 @@ export function FileTransferSheet({
             >
               {localPermissionError || "本地文件同步需要先授权存储权限。"}
             </div>
+          ) : localListError ? (
+            <div
+              style={{
+                padding: "20px",
+                textAlign: "center",
+                color: mobileTheme.colors.textMuted,
+                lineHeight: 1.5,
+              }}
+            >
+              {localListError}
+            </div>
           ) : visibleLocalEntries.length === 0 ? (
             <div
               style={{
@@ -932,11 +1074,7 @@ export function FileTransferSheet({
                 style={fileRowStyle}
                 onClick={() => {
                   if (entry.type === "directory") {
-                    setLocalPath(
-                      localPath === "/"
-                        ? `/${entry.name}`
-                        : `${localPath}/${entry.name}`,
-                    );
+                    setLocalPath(joinLocalDisplayPath(localPath, entry.name));
                     setSelectedLocal(new Set());
                   } else if (isMarkdownFileName(entry.name)) {
                     void previewLocalMarkdown(entry);

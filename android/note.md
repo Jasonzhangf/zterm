@@ -218,6 +218,24 @@
 # 2026-06-29 contracts parallelism blocker
 
 - `android/package.json` 里的 `test:terminal:contracts` 在 vitest 默认多文件并发下会互相覆盖全局 `WebSocket` mock，`SessionContext.ws-refresh.test.tsx` 单跑绿，但合并跑会红。
+
+# 2026-07-03 file transfer local storage permission / external path audit
+
+- Jason 现场新反馈：文件/图片相关本地目录在未授权时没有主动申请权限；即便用户手动授权，`/storage/emulated/0/Download` 仍可能列不出来，UI 看起来像“空目录”。
+- 架构映射：
+  - 功能块：`daemon.file_transfer` 中的 client sheet projection / local file access。
+  - UI owner：`src/components/terminal/FileTransferSheet.tsx`，负责触发权限请求、授权后刷新、目录错误显式投影。
+  - Native owner：`android/native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java`，只负责权限真相与 request 入口。
+  - forbidden：不能把目录读取失败伪装成空目录；不能把 Android 外部存储路径解释散落到多个调用点。
+- 现状确认：
+  - `checkLocalStoragePermission()` 只调用 `StoragePermissionPlugin.check()`，不会 `request()`。
+  - `Filesystem.readdir/stat/readFile/writeFile/mkdir` 统一用了 `Directory.ExternalStorage`，但 path 传的是绝对 `/storage/emulated/0/...`；Capacitor 这条链更合理的 owner 语义是 ExternalStorage 根下相对路径。
+  - `readdir` 异常后当前直接 `setLocalEntries([])`，导致权限/path 失败被投影成“空目录”。
+- 本轮目标：
+  - 缺权限时自动请求。
+  - 从设置页返回后自动 refresh permission + relist。
+  - ExternalStorage 调用统一走相对路径 helper。
+  - local list/read/write 失败显式显示错误，不再假装空目录。
 - 修复方向：把 contracts gate 改成串行文件执行，再重新跑全量构建，避免把测试隔离问题误判成 runtime 回归。
 
 # 2026-06-29 macbookair fresh install daemon verification

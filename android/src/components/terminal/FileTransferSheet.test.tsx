@@ -42,12 +42,20 @@ afterEach(() => {
     granted: true,
     mode: "manage-external-storage",
   });
+  vi.mocked(StoragePermissionPlugin.check).mockClear();
   vi.mocked(StoragePermissionPlugin.request).mockClear();
+  vi.mocked(Filesystem.readdir).mockClear();
   vi.mocked(Filesystem.readdir).mockResolvedValue({ files: [] } as any);
+  vi.mocked(Filesystem.stat).mockClear();
   vi.mocked(Filesystem.stat).mockResolvedValue({ size: 0 } as any);
+  vi.mocked(Filesystem.readFile).mockClear();
   vi.mocked(Filesystem.readFile).mockResolvedValue({
     data: "IyBMb2NhbA==",
   } as any);
+  vi.mocked(Filesystem.mkdir).mockClear();
+  vi.mocked(Filesystem.mkdir).mockResolvedValue(undefined as any);
+  vi.mocked(Filesystem.writeFile).mockClear();
+  vi.mocked(Filesystem.writeFile).mockResolvedValue(undefined as any);
 });
 
 describe("FileTransferSheet", () => {
@@ -117,8 +125,46 @@ describe("FileTransferSheet", () => {
     expect(sendJsonB).not.toHaveBeenCalled();
   });
 
-  it("does not request storage permission when local sync lacks install-time authorization", async () => {
+  it("requests storage permission and lists the external storage path with a relative Filesystem path", async () => {
     vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({
+      granted: false,
+      mode: "manage-external-storage",
+    });
+    vi.mocked(StoragePermissionPlugin.request).mockResolvedValue({
+      granted: true,
+      mode: "manage-external-storage",
+    });
+    vi.mocked(Filesystem.readdir).mockResolvedValue({
+      files: [{ name: "hello.txt", type: "file" }],
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.check).toHaveBeenCalled();
+      expect(StoragePermissionPlugin.request).toHaveBeenCalled();
+      expect(Filesystem.readdir).toHaveBeenCalledWith({
+        path: "Download/zterm",
+        directory: "ExternalStorage",
+      });
+      expect(screen.getByText("hello.txt")).toBeTruthy();
+    });
+  });
+
+  it("shows an explicit permission error and does not fake an empty directory when storage permission is still denied", async () => {
+    vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({
+      granted: false,
+      mode: "manage-external-storage",
+    });
+    vi.mocked(StoragePermissionPlugin.request).mockResolvedValue({
       granted: false,
       mode: "manage-external-storage",
     });
@@ -134,9 +180,70 @@ describe("FileTransferSheet", () => {
     );
 
     await waitFor(() => {
-      expect(StoragePermissionPlugin.check).toHaveBeenCalled();
-      expect(StoragePermissionPlugin.request).not.toHaveBeenCalled();
+      expect(StoragePermissionPlugin.request).toHaveBeenCalled();
+      expect(Filesystem.readdir).not.toHaveBeenCalled();
       expect(document.body.textContent).toContain("本地文件同步需要存储权限");
+    });
+  });
+
+  it("refreshes permission and re-lists the local directory after app focus returns from Android settings", async () => {
+    vi.mocked(StoragePermissionPlugin.check)
+      .mockResolvedValueOnce({
+        granted: false,
+        mode: "manage-external-storage",
+      })
+      .mockResolvedValueOnce({
+        granted: true,
+        mode: "manage-external-storage",
+      });
+    vi.mocked(StoragePermissionPlugin.request).mockResolvedValue({
+      granted: false,
+      mode: "manage-external-storage",
+    });
+    vi.mocked(Filesystem.readdir).mockResolvedValue({
+      files: [{ name: "granted-later.txt", type: "file" }],
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("本地文件同步需要存储权限");
+    });
+
+    fireEvent(window, new Event("focus"));
+
+    await waitFor(() => {
+      expect(Filesystem.readdir).toHaveBeenCalledWith({
+        path: "Download/zterm",
+        directory: "ExternalStorage",
+      });
+      expect(screen.getByText("granted-later.txt")).toBeTruthy();
+    });
+  });
+
+  it("shows an explicit local directory read error instead of pretending the directory is empty", async () => {
+    vi.mocked(Filesystem.readdir).mockRejectedValue(new Error("EACCES"));
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("本地目录读取失败：EACCES");
     });
   });
 
