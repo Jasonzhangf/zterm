@@ -192,7 +192,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('false');
 
-    fireEvent.click(await screen.findByTestId(`terminal-session-drawer-row-${targetSessionId}`));
+    fireEvent.click(await screen.findByTestId(`terminal-session-drawer-select-${targetSessionId}`));
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
   });
 
@@ -288,7 +288,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(onRefreshDrawerHostSessions).toHaveBeenCalledWith('daemon-a'));
     expect(await screen.findByText('remote-beta')).toBeTruthy();
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:remote-beta'));
 
     expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
       {

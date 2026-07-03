@@ -40,4 +40,30 @@ describe('useBridgeSettingsStorage', () => {
     expect(screen.getByTestId('width-mode').textContent).toBe('adaptive-phone');
     expect(renderModes[0]).toBe('adaptive-phone');
   });
+
+  it('detects adaptive-phone as the first-launch default on narrow viewports', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 393,
+      },
+    });
+
+    function Harness() {
+      const { settings } = useBridgeSettingsStorage();
+      return <div data-testid="width-mode">{settings.terminalWidthMode}</div>;
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByTestId('width-mode').textContent).toBe('adaptive-phone');
+  });
 });

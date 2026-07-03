@@ -2,21 +2,43 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_BRIDGE_SETTINGS, normalizeBridgeSettings, type BridgeSettings } from '../connection/bridge-settings';
 import { STORAGE_KEYS } from '../connection/types';
 
+function resolveInitialTerminalWidthMode() {
+  if (typeof window === 'undefined') {
+    return DEFAULT_BRIDGE_SETTINGS.terminalWidthMode;
+  }
+  const visualViewportWidth = Math.round(window.visualViewport?.width || 0);
+  const layoutWidth = Math.round(
+    Math.max(
+      window.innerWidth || 0,
+      window.document?.documentElement?.clientWidth || 0,
+      visualViewportWidth,
+    ),
+  );
+  return layoutWidth > 0 && layoutWidth <= 700 ? 'adaptive-phone' : 'mirror-fixed';
+}
+
+function buildDetectedDefaultBridgeSettings(): BridgeSettings {
+  return {
+    ...DEFAULT_BRIDGE_SETTINGS,
+    terminalWidthMode: resolveInitialTerminalWidthMode(),
+  };
+}
+
 function readStoredBridgeSettings(): BridgeSettings {
   if (typeof window === 'undefined') {
-    return DEFAULT_BRIDGE_SETTINGS;
+    return buildDetectedDefaultBridgeSettings();
   }
 
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS);
     if (!stored) {
-      return DEFAULT_BRIDGE_SETTINGS;
+      return buildDetectedDefaultBridgeSettings();
     }
 
     return normalizeBridgeSettings(JSON.parse(stored));
   } catch (error) {
     console.error('[useBridgeSettingsStorage] Failed to load bridge settings:', error);
-    return DEFAULT_BRIDGE_SETTINGS;
+    return buildDetectedDefaultBridgeSettings();
   }
 }
 

@@ -1,3 +1,19 @@
+# 2026-07-03 Android IME double-lift / drawer double-select / startup width-mode default
+
+- Jason 现场复现两个真机问题：1）IME 弹出后出现“内容上抬 + 容器再上抬”的双重上抬；2）session drawer 里点一次 session 不能稳定切过去，首击会出现双框/错误过渡。
+- 架构映射：
+  - IME 问题属于 `TerminalPage` 的 layout shell owner；renderer / daemon / buffer 都不应背锅。
+  - session 切换问题属于 `terminal.session_drawer` 的 UI projection / intent owner；不能让同一 row 在两个 DOM owner 上重复 dispatch `onSelectSession`。
+  - 启动宽度模式默认值属于 `useBridgeSettingsStorage` 的客户端配置真源；无本地显式设置时应按当前 viewport 定初始模式，而不是永远写死 `mirror-fixed`。
+- 修复：
+  - `TerminalPage` 新增 `keyboardViewportAlreadyResized` 判定；Android 已 `adjustResize` 时不再冻结 `shellHeight` 到 stable height，也不再额外吃第二次 IME lift。
+  - `TerminalSessionDrawer` 物理移除 row 外层 `div` 的重复 `onClick`，只保留内层 select button 作为 session 选择唯一 owner。
+  - `useBridgeSettingsStorage` 在没有持久化配置时按当前 viewport 宽度初始化默认 `terminalWidthMode`：窄屏默认 `adaptive-phone`，宽屏保留 `mirror-fixed`。
+- 回归：
+  - `TerminalPage.android-ime.test.tsx`：已 resize viewport 时，quickbar keyboard inset = 0，stage bottom 只保留 chrome 高度，不再出现第二次 lift。
+  - `TerminalSessionDrawer.test.tsx` / `TerminalPage.session-drawer.test.tsx`：一次点击只 dispatch 一次 session select，页面集成用例改为命中唯一 select owner。
+  - `use-bridge-settings-storage.test.tsx`：首启无配置时窄 viewport 默认 `adaptive-phone`。
+
 # 2026-07-02 connection config share add-flow correction
 
 - Jason 现场指出 87 版本 Connections 主界面看不到分享/导入，期望点击右下角 `+` 后，在新增连接流程里看到“导入”和“分享已有连接”。

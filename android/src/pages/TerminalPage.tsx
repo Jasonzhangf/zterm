@@ -37,6 +37,8 @@ import {
 } from '../lib/terminal-layout-profile';
 import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import {
+  isKeyboardViewportAlreadyResized,
+  resolveCurrentLayoutViewportHeight,
   resolveKeyboardLiftPx,
   resolveLayoutViewportHeight,
   resolveTerminalHeaderTopInsetPx,
@@ -1025,10 +1027,18 @@ function TerminalPageComponent({
   }, [quickBarEditorFocused]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
-  const keyboardViewportFreezeActive = isAndroid && (terminalKeyboardRequested || keyboardInset > 0);
+  const keyboardViewportAlreadyResized = isAndroid
+    && keyboardInset > 0
+    && isKeyboardViewportAlreadyResized(
+      keyboardInset,
+      stableLayoutViewportHeightRef.current,
+    );
+  const keyboardViewportFreezeActive = isAndroid
+    && (terminalKeyboardRequested || keyboardInset > 0)
+    && !keyboardViewportAlreadyResized;
   const shellHeight = keyboardViewportFreezeActive
     ? Math.max(rawShellHeight, stableLayoutViewportHeightRef.current)
-    : rawShellHeight;
+    : Math.max(rawShellHeight, resolveCurrentLayoutViewportHeight());
   const sessionGroupLayoutAxis = resolveTerminalSessionGroupLayoutAxis({
     viewportWidth,
     viewportHeight: shellHeight,
@@ -2261,6 +2271,7 @@ function TerminalPageComponent({
     shellHeight,
     layoutViewportHeight: shellHeight,
     keyboardInset,
+    keyboardViewportAlreadyResized,
     effectiveKeyboardLiftPx,
     terminalKeyboardRequested,
     quickBarEditorFocused,

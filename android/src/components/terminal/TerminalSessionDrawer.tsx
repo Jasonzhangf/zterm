@@ -496,9 +496,6 @@ function TerminalSessionDrawerComponent({
               onTouchMove={clearLongPressTimer}
               onTouchEnd={clearLongPressTimer}
               onTouchCancel={clearLongPressTimer}
-              onClick={() => {
-                if (!unavailable) onSelectSession(session.id);
-              }}
               style={{
                 minHeight: '72px',
                 width: '100%',

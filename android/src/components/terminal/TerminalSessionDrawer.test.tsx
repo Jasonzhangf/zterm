@@ -54,8 +54,9 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-row-s2'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'));
     expect(onSelectSession).toHaveBeenCalledWith('s2');
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
 
     fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
       changedTouches: [{ clientX: 180, clientY: 560 }],
@@ -429,7 +430,7 @@ describe('TerminalSessionDrawer', () => {
 
     const row = screen.getByTestId('terminal-session-drawer-row-ghost');
     expect(row.textContent).toContain('unavailable');
-    fireEvent.click(row);
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-ghost'));
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 

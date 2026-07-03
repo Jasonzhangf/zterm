@@ -899,6 +899,116 @@ describe("TerminalPage Android IME bridge", () => {
     }
   });
 
+  it("does not freeze the terminal shell height or add a second lift when Android already resized the viewport", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 900,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onLoadSavedTabList={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 600,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 600,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 600,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("0");
+      });
+
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("214px");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
   it("keeps Android adaptive-phone upstream geometry on the width-mode channel instead of the resize channel", async () => {
     const session = makeSession("s1");
 
