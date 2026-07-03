@@ -54,7 +54,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
     }
   });
 
-  it('writes uploaded file to remote target dir and sends the final path to the tmux mirror', () => {
+  it('writes uploaded file to remote target dir without injecting the final path into tmux input', () => {
     uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-'));
     const session = makeSession();
     const mirror = makeReadyMirror();
@@ -93,8 +93,8 @@ describe('terminal-file-transfer-binary-runtime', () => {
 
     const filePath = join(uploadDir, 'photo.png');
     expect(readFileSync(filePath, 'utf8')).toBe('image');
-    expect(writeToTmuxSession).toHaveBeenCalledWith('tmux-main', filePath, true);
-    expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 33);
+    expect(writeToTmuxSession).not.toHaveBeenCalled();
+    expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
     expect(sentMessages).toContainEqual({
       type: 'file-upload-complete',
       payload: { requestId: 'upload-1', filePath, bytes: 5 },

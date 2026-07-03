@@ -1,3 +1,10 @@
+# 2026-07-03 File Sync upload path injection removal
+
+- Jason 现场指出同步功能实现越界：图片/文件已经传到远端，但额外把远端文件位置写进对话框/输入框，这是错误副作用。
+- 架构映射：本 slice 属于 File Sync 上传主链；owner 是 `terminal-file-transfer-binary-runtime.ts` 的 `file-upload-*` 处理。同步只产生远端文件事实和 `file-upload-complete` 事件，不属于 terminal input / quick input / composer。
+- 根因：`handleFileUploadEnd()` 写完文件后调用 `writeToTmuxSession(mirror.sessionName, filePath, true)` 并触发 mirror sync，导致上传后的路径被注入 tmux 输入。
+- 修复：物理删除 `file-upload-end` 完成后的 tmux 写入和 mirror sync；回归改为证明文件已写入、`file-upload-complete` 仍返回，但 `writeToTmuxSession` / `scheduleMirrorLiveSync` 均不调用。
+
 # 2026-07-03 File Sync sorting / no-filter enumeration
 
 - Jason 现场确认本地目录已能枚举，但文件同步列表缺少按时间排序选项，并且图片文件不应因扩展名/类型/隐藏规则被过滤。

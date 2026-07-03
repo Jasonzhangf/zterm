@@ -604,3 +604,9 @@ silently returns 0 when viewport metrics are stable.
 - Android file sync 本地枚举真源是 `StoragePermissionPlugin` native owner；它必须返回目录事实本身，不按图片扩展名、隐藏文件名或文件类型过滤。UI 只做 projection、选择、排序。
 - `FileTransferSheet` 的排序只属于列表投影：按名称/修改时间、正序/倒序在 UI 层切换；排序/过滤状态不得进入 native storage owner 或 daemon 文件真源。
 - 回归门禁：`pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot` 必须覆盖 remote `showHidden:true`、本地图片与 dot file 不过滤、mtime 倒序排序、权限失败显式报错。
+
+## 2026-07-03 File Sync upload no input injection truth
+
+- File Sync 上传完成只允许写入远端目标目录并发送 `file-upload-complete`；禁止把上传后的远端路径写入 tmux、quick input、composer 或任何对话输入框。
+- `terminal-file-transfer-binary-runtime.ts -> handleFileUploadEnd()` 是同步上传的 server owner；这里不得调用 `writeToTmuxSession()` 或 `writeToLiveMirror()`。路径注入属于旧 paste/attach 语义，不属于 sync。
+- 回归门禁：`pnpm --dir android exec vitest run src/server/terminal-file-transfer-binary-runtime.test.ts --reporter dot` 必须证明文件写入成功、complete 事件存在、tmux 写入和 mirror sync 不发生。

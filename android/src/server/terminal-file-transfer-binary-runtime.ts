@@ -229,11 +229,6 @@ export function createTerminalFileTransferBinaryRuntime(
       const filePath = join(upload.targetDir, upload.fileName);
       const fileBuffer = Buffer.concat(sortedChunks);
       writeFileSync(filePath, fileBuffer);
-      const mirror = deps.getSessionMirror(session);
-      if (mirror?.lifecycle === 'ready') {
-        deps.writeToTmuxSession(mirror.sessionName, filePath, true);
-        deps.scheduleMirrorLiveSync(mirror, 33);
-      }
 
       deps.sendMessage(session, {
         type: 'file-upload-complete',
