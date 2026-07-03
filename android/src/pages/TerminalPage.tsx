@@ -384,13 +384,20 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   onMove,
   keyboardInset,
   shellHeight,
+  rawShellHeight,
   visualViewportHeight,
+  visualViewportWidth,
+  visualViewportOffsetTop,
+  currentLayoutViewportHeight,
   terminalKeyboardRequested,
+  keyboardViewportAlreadyResized,
   containerHeightPx,
   viewportRows,
   copyModeActive,
   copyStartRowIndex,
   effectiveKeyboardLiftPx,
+  terminalImeLiftPx,
+  quickBarShellKeyboardLiftPx,
   quickBarHeight,
   terminalChromeBottomPx,
   layoutMode,
@@ -417,13 +424,20 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   onMove: (next: { x: number; y: number }) => void;
   keyboardInset?: number;
   shellHeight?: number;
+  rawShellHeight?: number;
   visualViewportHeight?: number;
+  visualViewportWidth?: number;
+  visualViewportOffsetTop?: number;
+  currentLayoutViewportHeight?: number;
   terminalKeyboardRequested?: boolean;
+  keyboardViewportAlreadyResized?: boolean;
   containerHeightPx?: number;
   viewportRows?: number;
   copyModeActive?: boolean;
   copyStartRowIndex?: number | null;
   effectiveKeyboardLiftPx?: number;
+  terminalImeLiftPx?: number;
+  quickBarShellKeyboardLiftPx?: number;
   quickBarHeight?: number;
   terminalChromeBottomPx?: number;
   layoutMode?: string;
@@ -470,14 +484,21 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     index,
     metrics: getSessionDebugMetrics ? (getSessionDebugMetrics(paneSession.id) || undefined) : undefined,
   }));
+  const screenWidth = typeof window !== 'undefined' ? Math.round(window.screen?.width || 0) : 0;
+  const screenHeight = typeof window !== 'undefined' ? Math.round(window.screen?.height || 0) : 0;
+  const innerWidth = typeof window !== 'undefined' ? Math.round(window.innerWidth || 0) : 0;
+  const innerHeight = typeof window !== 'undefined' ? Math.round(window.innerHeight || 0) : 0;
+  const documentClientWidth = typeof document !== 'undefined' ? Math.round(document.documentElement?.clientWidth || 0) : 0;
+  const documentClientHeight = typeof document !== 'undefined' ? Math.round(document.documentElement?.clientHeight || 0) : 0;
+  const devicePixelRatio = typeof window !== 'undefined' ? Number(window.devicePixelRatio || 1) : 1;
   const overlayStyle: React.CSSProperties = {
     position: 'absolute',
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : '10px',
     left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
     right: debugOverlayPos.x >= 0 ? undefined : '10px',
     zIndex: 12,
-    minWidth: paneMetrics.length > 1 ? '156px' : '88px',
-    maxWidth: paneMetrics.length > 1 ? '176px' : '96px',
+    minWidth: '188px',
+    maxWidth: '226px',
     padding: '5px 6px',
     borderRadius: '10px',
     border: `1.5px solid ${metrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(83, 139, 255, 0.6)'}`,
@@ -527,7 +548,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
-        <span>状态</span>
+        <span>IME 诊断</span>
         <button
           type="button"
           aria-label="关闭调试浮窗"
@@ -547,6 +568,39 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         >
           ×
         </button>
+      </div>
+      <div
+        data-testid="terminal-debug-ime-metrics"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '44px 1fr',
+          columnGap: '6px',
+          rowGap: '2px',
+          marginTop: '2px',
+          padding: '4px 0',
+          borderTop: '1px solid rgba(255,255,255,0.10)',
+          borderBottom: '1px solid rgba(255,255,255,0.10)',
+          color: 'rgba(231, 238, 252, 0.86)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        <span>SCR</span><span>{screenWidth}x{screenHeight}</span>
+        <span>DPR</span><span>{devicePixelRatio.toFixed(2)}</span>
+        <span>IN</span><span>{innerWidth}x{innerHeight}</span>
+        <span>DOC</span><span>{documentClientWidth}x{documentClientHeight}</span>
+        <span>VV</span><span>{visualViewportWidth ?? '?'}x{visualViewportHeight ?? '?'}</span>
+        <span>VVO</span><span>{visualViewportOffsetTop ?? '?'}</span>
+        <span>CUR</span><span>{currentLayoutViewportHeight ?? '?'}</span>
+        <span>RAW</span><span>{rawShellHeight ?? '?'}</span>
+        <span>SH</span><span>{shellHeight ?? '?'}</span>
+        <span>KB</span><span>{keyboardInset ?? 0}</span>
+        <span>LIFT</span><span>{effectiveKeyboardLiftPx ?? 0}</span>
+        <span>IME-L</span><span>{terminalImeLiftPx ?? 0}</span>
+        <span>QB-L</span><span>{quickBarShellKeyboardLiftPx ?? 0}</span>
+        <span>QB</span><span>{quickBarHeight ?? '?'}</span>
+        <span>STAGE</span><span>{terminalChromeBottomPx ?? '?'}</span>
+        <span>RESZ</span><span style={{ color: keyboardViewportAlreadyResized ? '#86efac' : '#fca5a5' }}>{keyboardViewportAlreadyResized ? 'Y' : 'N'}</span>
+        <span>IME</span><span style={{ color: terminalKeyboardRequested ? '#86efac' : '#fca5a5' }}>{terminalKeyboardRequested ? 'Y' : 'N'}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
         <span>渲染</span>
@@ -2254,6 +2308,16 @@ function TerminalPageComponent({
       + TERMINAL_QUICK_BAR_RENDER_LIFT_PX,
   );
   const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
+  const visualViewportDebugWidth = typeof window !== 'undefined'
+    ? Math.round(window.visualViewport?.width || 0)
+    : 0;
+  const visualViewportDebugHeight = typeof window !== 'undefined'
+    ? Math.round(window.visualViewport?.height || 0)
+    : 0;
+  const visualViewportDebugOffsetTop = typeof window !== 'undefined'
+    ? Math.round(window.visualViewport?.offsetTop || 0)
+    : 0;
+  const currentLayoutViewportDebugHeight = resolveCurrentLayoutViewportHeight();
   // Use a ref to hold the live snapshot lambda so the registration useEffect
   // never needs to re-run. The producer reads ref.current, which is kept fresh
   // every render. This decouples the snapshot source from all reactive deps,
@@ -2567,7 +2631,7 @@ function TerminalPageComponent({
       onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
       copyModeActive={copySelection.active}
       onToggleCopyMode={handleQuickBarToggleCopyMode}
-      copyDebugLabel={`COPY:SYSTEM KB:${keyboardInset} IME:${terminalKeyboardRequested ? 'Y' : 'N'}`}
+      copyDebugLabel={`IME KB:${keyboardInset} L:${effectiveKeyboardLiftPx} ST:${terminalStageBottomPx} VV:${visualViewportDebugWidth}x${visualViewportDebugHeight} SH:${shellHeight} R:${keyboardViewportAlreadyResized ? 'Y' : 'N'}`}
       onToggleAbsoluteLineNumbers={handleQuickBarToggleAbsoluteLineNumbers}
       onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
       debugOverlayVisible={debugOverlayVisible}
@@ -2597,6 +2661,7 @@ function TerminalPageComponent({
     landscape,
     handleQuickBarEditorDomFocusChange,
     keyboardInset,
+    keyboardViewportAlreadyResized,
     onFileAttach,
     onImagePaste,
     onQuickActionsChange,
@@ -2616,8 +2681,12 @@ function TerminalPageComponent({
     terminalImeActive,
     keyboardInset,
     terminalKeyboardRequested,
+    terminalStageBottomPx,
     toggleSplitLayout,
+    visualViewportDebugHeight,
+    visualViewportDebugWidth,
     workspacePanes.length,
+    shellHeight,
     layoutProfile.stage.containerRadius,
     layoutProfile.stage.outerMargin,
     layoutProfile.stage.paneGap,
@@ -2774,11 +2843,18 @@ function TerminalPageComponent({
           onMove={setDebugOverlayPos}
           keyboardInset={keyboardInset}
           shellHeight={shellHeight}
-          visualViewportHeight={typeof window !== 'undefined' ? Math.round(window.visualViewport?.height || 0) : 0}
+          rawShellHeight={rawShellHeight}
+          visualViewportHeight={visualViewportDebugHeight}
+          visualViewportWidth={visualViewportDebugWidth}
+          visualViewportOffsetTop={visualViewportDebugOffsetTop}
+          currentLayoutViewportHeight={currentLayoutViewportDebugHeight}
           terminalKeyboardRequested={terminalKeyboardRequested}
+          keyboardViewportAlreadyResized={keyboardViewportAlreadyResized}
           containerHeightPx={undefined}
           viewportRows={undefined}
           effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
+          terminalImeLiftPx={terminalImeLiftPx}
+          quickBarShellKeyboardLiftPx={quickBarShellKeyboardLiftPx}
           quickBarHeight={quickBarHeight}
           terminalChromeBottomPx={terminalStageBottomPx}
           layoutMode={layoutProfile.mode}
