@@ -217,6 +217,32 @@ public class StoragePermissionPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void writeFileChunk(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File parent = target.getParentFile();
+            if (parent == null || (!parent.exists() && !parent.mkdirs())) {
+                call.reject("Unable to create parent directory: " + target.getPath());
+                return;
+            }
+            String data = call.getString("data", "");
+            byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+            boolean append = Boolean.TRUE.equals(call.getBoolean("append", false));
+            try (FileOutputStream output = new FileOutputStream(target, append)) {
+                output.write(bytes);
+            }
+            JSObject result = new JSObject();
+            result.put("bytesWritten", bytes.length);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void mkdir(PluginCall call) {
         if (!ensureStoragePermission(call)) {
             return;

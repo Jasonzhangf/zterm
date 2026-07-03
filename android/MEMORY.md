@@ -610,3 +610,9 @@ silently returns 0 when viewport metrics are stable.
 - File Sync 上传完成只允许写入远端目标目录并发送 `file-upload-complete`；禁止把上传后的远端路径写入 tmux、quick input、composer 或任何对话输入框。
 - `terminal-file-transfer-binary-runtime.ts -> handleFileUploadEnd()` 是同步上传的 server owner；这里不得调用 `writeToTmuxSession()` 或 `writeToLiveMirror()`。路径注入属于旧 paste/attach 语义，不属于 sync。
 - 回归门禁：`pnpm --dir android exec vitest run src/server/terminal-file-transfer-binary-runtime.test.ts --reporter dot` 必须证明文件写入成功、complete 事件存在、tmux 写入和 mirror sync 不发生。
+
+## 2026-07-03 File Sync download chunked write truth
+
+- File Sync 下载保存不能把整文件 base64 合并后一次性传给 Android native；图片/大文件必须按 `file-download-chunk` 分块调用 native storage 写入，避免 bridge 大 payload 变空后生成 0 字节文件。
+- 下载完成后必须 `stat` 本地目标文件并校验 `size === totalBytes`；大小不一致是显式 transfer error，不能显示 done。
+- 回归门禁：`pnpm --dir android exec vitest run src/lib/file-transfer-session-runtime.test.ts src/components/terminal/FileTransferSheet.test.tsx --reporter dot` 必须覆盖 chunked write、size mismatch error、不覆盖为 done，以及本地/远程排序。

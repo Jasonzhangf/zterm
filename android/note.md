@@ -1,3 +1,10 @@
+# 2026-07-03 File Sync download zero-byte fix
+
+- Jason 现场指出同步图片下载到本地最后写盘失败，文件大小为 0；同时强调远程和本地排序都需要按名称/时间、正序/倒序。
+- 架构映射：本 slice 属于 File Sync 下载保存主链；`FileTransferSheet` 负责下载 chunks 到 native storage 的投影/保存动作，`StoragePermissionPlugin` 是 Android 本地写盘 owner，`file-transfer-session-runtime` 负责 transfer 状态。
+- 根因：旧实现把所有 download chunks 合并成一个大 base64 字符串后一次性传给 native `writeFile`，Android bridge 上大 payload 可能变空；native 又允许空字符串成功写盘，导致 0 字节。另一个隐藏问题是本地写盘失败后 runtime 会把 transfer 覆盖回 `done`。
+- 修复：新增 native `writeFileChunk(path,data,append)`，下载完成按 chunk 分块写盘；写完 `stat` 校验本地 size 等于 `totalBytes`；写盘/大小校验失败由 runtime 保持 `error`，不再覆盖为 `done`。回归同时锁住远程/本地按时间倒序排序。
+
 # 2026-07-03 File Sync upload path injection removal
 
 - Jason 现场指出同步功能实现越界：图片/文件已经传到远端，但额外把远端文件位置写进对话框/输入框，这是错误副作用。

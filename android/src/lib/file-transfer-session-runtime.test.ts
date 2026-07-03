@@ -70,6 +70,43 @@ describe('file-transfer-session-runtime', () => {
     expect(runtime.getState().transfers[0]?.transferredBytes).toBe(4096);
   });
 
+  it('keeps download transfer in error state when local write callback fails', async () => {
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 250,
+      randomId: () => 'fail',
+      onDownloadComplete: () => {
+        throw new Error('download size mismatch: wrote 0 bytes, expected 5');
+      },
+    });
+
+    runtime.open('/remote/home');
+    const download = runtime.startDownload({ name: 'photo.png', size: 5 }, '/remote/home');
+
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'photo.png',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'aW1hZ2U=',
+      },
+    });
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'photo.png',
+        totalBytes: 5,
+      },
+    });
+
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'error',
+      error: 'download size mismatch: wrote 0 bytes, expected 5',
+    });
+  });
+
   it('owns upload runtime truth independently from component state', async () => {
     const runtime = createFileTransferSessionRuntime({
       now: () => 300,

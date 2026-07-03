@@ -233,6 +233,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 文件排序只属于 UI projection：按名称/修改时间、正序/倒序可以在列表投影层切换；不得把排序/过滤状态写回本地 storage owner 或 daemon 文件真源。
 - 远端文件列表若协议仍带 `showHidden`，客户端必须请求完整列表；禁止用默认隐藏文件过滤制造“目录成功但文件消失”的假状态。
 - File Sync 的上传语义只负责把本地文件写入远端目标目录并回报 `file-upload-complete`；禁止把上传后的远端路径写入 tmux、quick input、composer 或任何对话输入框。
+- File Sync 下载保存不得把整文件 base64 合并后一次性跨 JS/native bridge 写盘；必须按 `file-download-chunk` 分块写入 native storage，并在完成后用 `stat` 校验本地字节数等于远端 `totalBytes`，失败必须显式进入 transfer error。
 
 ## 三、开发闭环流程
 

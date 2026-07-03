@@ -28,6 +28,7 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
     }),
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined),
+    writeFileChunk: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
     readFile: vi.fn().mockResolvedValue({ data: "IyBMb2NhbA==" }),
   },
 }));
@@ -61,6 +62,10 @@ afterEach(() => {
   vi.mocked(StoragePermissionPlugin.writeFile).mockResolvedValue(
     undefined as any,
   );
+  vi.mocked(StoragePermissionPlugin.writeFileChunk).mockClear();
+  vi.mocked(StoragePermissionPlugin.writeFileChunk).mockResolvedValue({
+    bytesWritten: 0,
+  } as any);
 });
 
 describe("FileTransferSheet", () => {
@@ -326,6 +331,144 @@ describe("FileTransferSheet", () => {
     await waitFor(() => {
       const text = document.body.textContent || "";
       expect(text.indexOf("new.txt")).toBeLessThan(text.indexOf("old.txt"));
+    });
+  });
+
+  it("sorts remote files by modified time in descending order when requested", async () => {
+    const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = {
+      current: null,
+    };
+    const onFileTransferMessage = vi.fn((nextHandler: (msg: any) => void) => {
+      handlerRef.current = nextHandler;
+      return () => {};
+    });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={onFileTransferMessage}
+      />,
+    );
+
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
+    handlerRef.current?.({
+      type: "file-list-response",
+      payload: {
+        requestId: sendJson.mock.calls[0][0].payload.requestId,
+        path: "/remote/home",
+        parentPath: "/remote",
+        entries: [
+          { name: "old.png", type: "file", size: 1, modified: 10 },
+          { name: "new.png", type: "file", size: 1, modified: 20 },
+        ],
+      },
+    });
+
+    await waitFor(() => expect(screen.getByText("old.png")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("按名称")[0]);
+    fireEvent.click(screen.getAllByText("正序")[0]);
+
+    await waitFor(() => {
+      const text = document.body.textContent || "";
+      expect(text.indexOf("new.png")).toBeLessThan(text.indexOf("old.png"));
+    });
+  });
+
+  it("downloads remote image chunks to local storage without collapsing the write into an empty file", async () => {
+    const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = {
+      current: null,
+    };
+    const onFileTransferMessage = vi.fn((nextHandler: (msg: any) => void) => {
+      handlerRef.current = nextHandler;
+      return () => {};
+    });
+    vi.mocked(StoragePermissionPlugin.stat).mockResolvedValue({
+      size: 5,
+      modified: 0,
+      uri: "file:///storage/emulated/0/Download/zterm/photo.png",
+      type: "file",
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={onFileTransferMessage}
+      />,
+    );
+
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
+    handlerRef.current?.({
+      type: "file-list-response",
+      payload: {
+        requestId: sendJson.mock.calls[0][0].payload.requestId,
+        path: "/remote/home",
+        parentPath: "/remote",
+        entries: [{ name: "photo.png", type: "file", size: 5, modified: 1 }],
+      },
+    });
+
+    await waitFor(() => expect(screen.getByText("photo.png")).toBeTruthy());
+    fireEvent.click(screen.getByText("photo.png"));
+    fireEvent.click(screen.getByText("下载 1 项"));
+
+    const downloadRequest = sendJson.mock.calls.find(
+      (call) => call[0]?.type === "file-download-request",
+    )?.[0];
+    expect(downloadRequest).toBeTruthy();
+
+    handlerRef.current?.({
+      type: "file-download-chunk",
+      payload: {
+        requestId: downloadRequest.payload.requestId,
+        fileName: "photo.png",
+        chunkIndex: 0,
+        totalChunks: 2,
+        dataBase64: "aW1h",
+      },
+    });
+    handlerRef.current?.({
+      type: "file-download-chunk",
+      payload: {
+        requestId: downloadRequest.payload.requestId,
+        fileName: "photo.png",
+        chunkIndex: 1,
+        totalChunks: 2,
+        dataBase64: "Z2U=",
+      },
+    });
+    handlerRef.current?.({
+      type: "file-download-complete",
+      payload: {
+        requestId: downloadRequest.payload.requestId,
+        fileName: "photo.png",
+        totalBytes: 5,
+      },
+    });
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.writeFileChunk).toHaveBeenNthCalledWith(1, {
+        path: "/storage/emulated/0/Download/zterm/photo.png",
+        data: "aW1h",
+        append: false,
+      });
+      expect(StoragePermissionPlugin.writeFileChunk).toHaveBeenNthCalledWith(2, {
+        path: "/storage/emulated/0/Download/zterm/photo.png",
+        data: "Z2U=",
+        append: true,
+      });
+      expect(StoragePermissionPlugin.writeFile).not.toHaveBeenCalled();
+      expect(StoragePermissionPlugin.stat).toHaveBeenCalledWith({
+        path: "/storage/emulated/0/Download/zterm/photo.png",
+      });
     });
   });
 

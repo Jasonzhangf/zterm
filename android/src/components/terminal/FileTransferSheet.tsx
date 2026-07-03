@@ -277,10 +277,10 @@ export function FileTransferSheet({
     createFileTransferSessionRuntime({
       onDownloadComplete: async (payload, orderedChunksBase64) => {
         try {
-          const combined = orderedChunksBase64.join("");
           const downloadDir = normalizeLocalDisplayPath(
             localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
           );
+          const targetPath = joinLocalDisplayPath(downloadDir, payload.fileName);
           try {
             await StoragePermissionPlugin.mkdir({
               path: downloadDir,
@@ -293,19 +293,38 @@ export function FileTransferSheet({
             );
           }
 
-          await StoragePermissionPlugin.writeFile({
-            path: joinLocalDisplayPath(downloadDir, payload.fileName),
-            data: combined,
-          });
+          if (payload.totalBytes > 0 && orderedChunksBase64.length === 0) {
+            throw new Error("download completed without file chunks");
+          }
+
+          if (orderedChunksBase64.length === 0) {
+            await StoragePermissionPlugin.writeFile({
+              path: targetPath,
+              data: "",
+            });
+          } else {
+            for (let index = 0; index < orderedChunksBase64.length; index += 1) {
+              await StoragePermissionPlugin.writeFileChunk({
+                path: targetPath,
+                data: orderedChunksBase64[index] || "",
+                append: index > 0,
+              });
+            }
+          }
+
+          const written = await StoragePermissionPlugin.stat({ path: targetPath });
+          if (written.size !== payload.totalBytes) {
+            throw new Error(
+              `download size mismatch: wrote ${written.size} bytes, expected ${payload.totalBytes}`,
+            );
+          }
+
           loadLocalDir(downloadDir, {
             requestPermission: false,
           });
         } catch (error) {
-          fileTransferRuntimeRef.current.markDownloadWriteError(
-            payload.requestId,
-            error instanceof Error ? error.message : String(error),
-          );
           forceRuntimeTick((value) => value + 1);
+          throw error;
         }
       },
     }),

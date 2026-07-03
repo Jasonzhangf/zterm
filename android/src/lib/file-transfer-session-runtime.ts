@@ -308,11 +308,25 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             return false;
           }
           activeDownloadRequestId = null;
+          try {
+            await deps?.onDownloadComplete?.(
+              msg.payload,
+              Array.from({ length: downloadChunks.size }, (_, index) => downloadChunks.get(index) || '').filter(Boolean),
+            );
+          } catch (error) {
+            downloadChunks = new Map();
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
+                ...current,
+                status: 'error',
+                error: error instanceof Error ? error.message : String(error),
+              })),
+            };
+            settleWaiter(msg.payload.requestId);
+            return true;
+          }
           settleWaiter(msg.payload.requestId);
-          await deps?.onDownloadComplete?.(
-            msg.payload,
-            Array.from({ length: downloadChunks.size }, (_, index) => downloadChunks.get(index) || '').filter(Boolean),
-          );
           downloadChunks = new Map();
           state = {
             ...state,
