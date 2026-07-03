@@ -2308,7 +2308,8 @@ function TerminalPageComponent({
       + layoutProfile.quickBar.touchSafeOffsetPx
       + quickBarRenderLiftPx,
   );
-  const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
+  const terminalStageChromeBottomPx = terminalImeLiftPx > 0 ? 0 : terminalChromeBottomPx;
+  const terminalStageBottomPx = terminalStageChromeBottomPx + terminalImeLiftPx;
   const visualViewportDebugWidth = typeof window !== 'undefined'
     ? Math.round(window.visualViewport?.width || 0)
     : 0;
@@ -2343,6 +2344,7 @@ function TerminalPageComponent({
     terminalImeActive,
     terminalImeLiftPx,
     quickBarShellKeyboardLiftPx,
+    terminalStageChromeBottomPx,
     terminalStageBottomPx,
     networkOnline,
     connectionIssueVisible,

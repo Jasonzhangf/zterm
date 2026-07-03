@@ -164,5 +164,10 @@ export function resolveKeyboardLiftPx(
     return safeCappedInset;
   }
 
+  const tinyViewportRemainderThreshold = Math.max(24, Math.round(safeCappedInset * 0.2));
+  if (occludedBottom <= tinyViewportRemainderThreshold) {
+    return safeCappedInset;
+  }
+
   return Math.min(safeCappedInset, occludedBottom);
 }

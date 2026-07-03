@@ -125,6 +125,28 @@ describe("terminal-keyboard-lift", () => {
     expect(resolveKeyboardLiftPx(320, 900)).toBe(280);
   });
 
+  it("ignores tiny visual viewport remainder when the keyboard inset is much larger", () => {
+    vi.stubGlobal("window", {
+      innerWidth: 712,
+      innerHeight: 770,
+      devicePixelRatio: 3.25,
+      document: {
+        documentElement: {
+          clientWidth: 711,
+          clientHeight: 770,
+        },
+      },
+      visualViewport: {
+        height: 770,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveCurrentLayoutViewportHeight()).toBe(770);
+    expect(isKeyboardViewportAlreadyResized(293, 778)).toBe(false);
+    expect(resolveKeyboardLiftPx(293, 778)).toBe(293);
+  });
+
   it("uses reported inset when visualViewport is absent", () => {
     vi.stubGlobal("window", {
       innerHeight: 1000,
