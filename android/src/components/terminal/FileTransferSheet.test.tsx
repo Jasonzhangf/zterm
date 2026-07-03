@@ -10,20 +10,6 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileTransferSheet } from "./FileTransferSheet";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
-import { Filesystem } from "@capacitor/filesystem";
-
-vi.mock("@capacitor/filesystem", () => ({
-  Directory: {
-    ExternalStorage: "ExternalStorage",
-  },
-  Filesystem: {
-    readdir: vi.fn().mockResolvedValue({ files: [] }),
-    stat: vi.fn().mockResolvedValue({ size: 0 }),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue({ data: "IyBMb2NhbA==" }),
-  },
-}));
 
 vi.mock("../../plugins/StoragePermissionPlugin", () => ({
   StoragePermissionPlugin: {
@@ -33,6 +19,16 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
     request: vi
       .fn()
       .mockResolvedValue({ granted: true, mode: "manage-external-storage" }),
+    readdir: vi.fn().mockResolvedValue({ files: [] }),
+    stat: vi.fn().mockResolvedValue({
+      size: 0,
+      modified: 0,
+      uri: "file:///storage/emulated/0/Download/zterm",
+      type: "directory",
+    }),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue({ data: "IyBMb2NhbA==" }),
   },
 }));
 
@@ -44,18 +40,27 @@ afterEach(() => {
   });
   vi.mocked(StoragePermissionPlugin.check).mockClear();
   vi.mocked(StoragePermissionPlugin.request).mockClear();
-  vi.mocked(Filesystem.readdir).mockClear();
-  vi.mocked(Filesystem.readdir).mockResolvedValue({ files: [] } as any);
-  vi.mocked(Filesystem.stat).mockClear();
-  vi.mocked(Filesystem.stat).mockResolvedValue({ size: 0 } as any);
-  vi.mocked(Filesystem.readFile).mockClear();
-  vi.mocked(Filesystem.readFile).mockResolvedValue({
+  vi.mocked(StoragePermissionPlugin.readdir).mockClear();
+  vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+    files: [],
+  } as any);
+  vi.mocked(StoragePermissionPlugin.stat).mockClear();
+  vi.mocked(StoragePermissionPlugin.stat).mockResolvedValue({
+    size: 0,
+    modified: 0,
+    uri: "file:///storage/emulated/0/Download/zterm",
+    type: "directory",
+  } as any);
+  vi.mocked(StoragePermissionPlugin.readFile).mockClear();
+  vi.mocked(StoragePermissionPlugin.readFile).mockResolvedValue({
     data: "IyBMb2NhbA==",
   } as any);
-  vi.mocked(Filesystem.mkdir).mockClear();
-  vi.mocked(Filesystem.mkdir).mockResolvedValue(undefined as any);
-  vi.mocked(Filesystem.writeFile).mockClear();
-  vi.mocked(Filesystem.writeFile).mockResolvedValue(undefined as any);
+  vi.mocked(StoragePermissionPlugin.mkdir).mockClear();
+  vi.mocked(StoragePermissionPlugin.mkdir).mockResolvedValue(undefined as any);
+  vi.mocked(StoragePermissionPlugin.writeFile).mockClear();
+  vi.mocked(StoragePermissionPlugin.writeFile).mockResolvedValue(
+    undefined as any,
+  );
 });
 
 describe("FileTransferSheet", () => {
@@ -125,7 +130,7 @@ describe("FileTransferSheet", () => {
     expect(sendJsonB).not.toHaveBeenCalled();
   });
 
-  it("requests storage permission and lists the external storage path with a relative Filesystem path", async () => {
+  it("requests storage permission and lists the external storage path through the native storage owner", async () => {
     vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({
       granted: false,
       mode: "manage-external-storage",
@@ -134,8 +139,16 @@ describe("FileTransferSheet", () => {
       granted: true,
       mode: "manage-external-storage",
     });
-    vi.mocked(Filesystem.readdir).mockResolvedValue({
-      files: [{ name: "hello.txt", type: "file" }],
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "hello.txt",
+          type: "file",
+          size: 5,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/zterm/hello.txt",
+        },
+      ],
     } as any);
 
     render(
@@ -151,9 +164,9 @@ describe("FileTransferSheet", () => {
     await waitFor(() => {
       expect(StoragePermissionPlugin.check).toHaveBeenCalled();
       expect(StoragePermissionPlugin.request).toHaveBeenCalled();
-      expect(Filesystem.readdir).toHaveBeenCalledWith({
-        path: "Download/zterm",
-        directory: "ExternalStorage",
+      expect(StoragePermissionPlugin.readdir).toHaveBeenCalledWith({
+        path: "/storage/emulated/0/Download/zterm",
+        showHidden: false,
       });
       expect(screen.getByText("hello.txt")).toBeTruthy();
     });
@@ -181,7 +194,7 @@ describe("FileTransferSheet", () => {
 
     await waitFor(() => {
       expect(StoragePermissionPlugin.request).toHaveBeenCalled();
-      expect(Filesystem.readdir).not.toHaveBeenCalled();
+      expect(StoragePermissionPlugin.readdir).not.toHaveBeenCalled();
       expect(document.body.textContent).toContain("本地文件同步需要存储权限");
     });
   });
@@ -200,8 +213,16 @@ describe("FileTransferSheet", () => {
       granted: false,
       mode: "manage-external-storage",
     });
-    vi.mocked(Filesystem.readdir).mockResolvedValue({
-      files: [{ name: "granted-later.txt", type: "file" }],
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "granted-later.txt",
+          type: "file",
+          size: 13,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/zterm/granted-later.txt",
+        },
+      ],
     } as any);
 
     render(
@@ -221,16 +242,18 @@ describe("FileTransferSheet", () => {
     fireEvent(window, new Event("focus"));
 
     await waitFor(() => {
-      expect(Filesystem.readdir).toHaveBeenCalledWith({
-        path: "Download/zterm",
-        directory: "ExternalStorage",
+      expect(StoragePermissionPlugin.readdir).toHaveBeenCalledWith({
+        path: "/storage/emulated/0/Download/zterm",
+        showHidden: false,
       });
       expect(screen.getByText("granted-later.txt")).toBeTruthy();
     });
   });
 
   it("shows an explicit local directory read error instead of pretending the directory is empty", async () => {
-    vi.mocked(Filesystem.readdir).mockRejectedValue(new Error("EACCES"));
+    vi.mocked(StoragePermissionPlugin.readdir).mockRejectedValue(
+      new Error("EACCES"),
+    );
 
     render(
       <FileTransferSheet

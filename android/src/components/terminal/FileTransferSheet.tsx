@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Filesystem, Directory } from "@capacitor/filesystem";
 import { mobileTheme } from "../../lib/mobile-ui";
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
@@ -112,14 +111,6 @@ function normalizeLocalDisplayPath(path: string) {
     );
   }
   return `${EXTERNAL_STORAGE_ROOT}/${trimmed}`.replace(/\/+$/, "");
-}
-
-function toExternalStorageRelativePath(path: string) {
-  const normalized = normalizeLocalDisplayPath(path);
-  if (normalized === EXTERNAL_STORAGE_ROOT) {
-    return "";
-  }
-  return normalized.slice(EXTERNAL_STORAGE_ROOT.length + 1);
 }
 
 function joinLocalDisplayPath(parentPath: string, childName: string) {
@@ -261,12 +252,9 @@ export function FileTransferSheet({
           const downloadDir = normalizeLocalDisplayPath(
             localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
           );
-          const downloadDirRelative =
-            toExternalStorageRelativePath(downloadDir);
           try {
-            await Filesystem.mkdir({
-              path: downloadDirRelative,
-              directory: Directory.ExternalStorage,
+            await StoragePermissionPlugin.mkdir({
+              path: downloadDir,
               recursive: true,
             });
           } catch (mkdirError) {
@@ -276,12 +264,9 @@ export function FileTransferSheet({
             );
           }
 
-          await Filesystem.writeFile({
-            path: downloadDirRelative
-              ? `${downloadDirRelative}/${payload.fileName}`
-              : payload.fileName,
+          await StoragePermissionPlugin.writeFile({
+            path: joinLocalDisplayPath(downloadDir, payload.fileName),
             data: combined,
-            directory: Directory.ExternalStorage,
           });
           loadLocalDir(downloadDir, showHiddenLocalRef.current, {
             requestPermission: false,
@@ -413,7 +398,6 @@ export function FileTransferSheet({
       options?: { requestPermission?: boolean },
     ) => {
       const normalizedPath = normalizeLocalDisplayPath(path);
-      const relativePath = toExternalStorageRelativePath(normalizedPath);
       setLocalLoading(true);
       setLocalListError(null);
       try {
@@ -424,38 +408,18 @@ export function FileTransferSheet({
           setLocalEntries([]);
           return;
         }
-        const result = await Filesystem.readdir({
-          path: relativePath,
-          directory: Directory.ExternalStorage,
+        const result = await StoragePermissionPlugin.readdir({
+          path: normalizedPath,
+          showHidden,
         });
         const entries: LocalFileEntry[] = [];
         for (const entry of result.files) {
-          if (!showHidden && entry.name.startsWith(".")) continue;
           const type = entry.type === "directory" ? "directory" : "file";
-          let size = 0;
-          if (type === "file") {
-            try {
-              const stat = await Filesystem.stat({
-                path: relativePath
-                  ? `${relativePath}/${entry.name}`
-                  : entry.name,
-                directory: Directory.ExternalStorage,
-              });
-              size = stat.size;
-            } catch (statError) {
-              console.warn(
-                "[FileTransferSheet] stat failed for",
-                entry.name,
-                statError,
-              );
-            }
-          }
           entries.push({
             name: entry.name,
             type,
-            size,
-            modified: 0,
-            mimeType: (entry as any).mimeType,
+            size: entry.size,
+            modified: entry.modified,
             uri: entry.uri,
           });
         }
@@ -569,12 +533,8 @@ export function FileTransferSheet({
         if (!permissionGranted) {
           return true;
         }
-        const readResult = await Filesystem.readFile({
-          path: (() => {
-            const relativePath = toExternalStorageRelativePath(localPath);
-            return relativePath ? `${relativePath}/${entry.name}` : entry.name;
-          })(),
-          directory: Directory.ExternalStorage,
+        const readResult = await StoragePermissionPlugin.readFile({
+          path: joinLocalDisplayPath(localPath, entry.name),
         });
         const data = typeof readResult.data === "string" ? readResult.data : "";
         const text = decodeBase64Utf8(data);
@@ -620,12 +580,8 @@ export function FileTransferSheet({
         const entry = localEntries.find((e) => e.name === name);
         if (!entry || entry.type !== "file") continue;
         try {
-          const readResult = await Filesystem.readFile({
-            path: (() => {
-              const relativePath = toExternalStorageRelativePath(localPath);
-              return relativePath ? `${relativePath}/${name}` : name;
-            })(),
-            directory: Directory.ExternalStorage,
+          const readResult = await StoragePermissionPlugin.readFile({
+            path: joinLocalDisplayPath(localPath, name),
           });
           const base64 =
             typeof readResult.data === "string" ? readResult.data : "";

@@ -229,12 +229,12 @@
   - forbidden：不能把目录读取失败伪装成空目录；不能把 Android 外部存储路径解释散落到多个调用点。
 - 现状确认：
   - `checkLocalStoragePermission()` 只调用 `StoragePermissionPlugin.check()`，不会 `request()`。
-  - `Filesystem.readdir/stat/readFile/writeFile/mkdir` 统一用了 `Directory.ExternalStorage`，但 path 传的是绝对 `/storage/emulated/0/...`；Capacitor 这条链更合理的 owner 语义是 ExternalStorage 根下相对路径。
+- `Filesystem.readdir/stat/readFile/writeFile/mkdir` 统一用了 `Directory.ExternalStorage`。后续被现场证伪：Android 11+ 即便授权 MANAGE_EXTERNAL_STORAGE，也不能把 Capacitor `Directory.ExternalStorage` 当全盘文件 owner；Capacitor README 明确 ExternalStorage 只适用于 Android 9 或更老版本。
   - `readdir` 异常后当前直接 `setLocalEntries([])`，导致权限/path 失败被投影成“空目录”。
 - 本轮目标：
   - 缺权限时自动请求。
   - 从设置页返回后自动 refresh permission + relist。
-  - ExternalStorage 调用统一走相对路径 helper。
+- 本地文件访问下沉到 `StoragePermissionPlugin` native owner，用 Android `File` API 读写真实 `/storage/emulated/0/...`，并用 canonical path guard 防越界。
   - local list/read/write 失败显式显示错误，不再假装空目录。
 - 修复方向：把 contracts gate 改成串行文件执行，再重新跑全量构建，避免把测试隔离问题误判成 runtime 回归。
 
