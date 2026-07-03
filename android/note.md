@@ -1,3 +1,10 @@
+# 2026-07-03 Session resume first-tap active truth fix
+
+- Jason 现场指出切 session 时第一次切换目标未连接可用，界面不变且后续也不变，需要第二次切换才过去。
+- 架构映射：本 slice 属于 `terminal.open_tabs` + `terminal.transport_lifecycle` 交界；`useOpenTabSessionActions` 是用户 resume/switch intent owner，`useOpenTabRuntime` 负责 open-tab active truth 与 runtime switch，`SessionContext` 负责 transport refresh。
+- 根因：`handleResumeSession()` 调 `resumeActiveSessionTransport()` 成功后提前 return，导致 open-tab `ACTIVE_SESSION` 未提交，第一次点击只启动/刷新 transport，不切 UI active truth。
+- 修复：物理移除 `openExplicitSessionById` 短路；resume 入口统一走 `handleSwitchSession()`，先提交 active tab truth，再通过 `switchRuntime:'explicit-resume'` 推进 runtime switch/transport refresh。回归锁住 connecting 目标第一次 resume 后 `ACTIVE_SESSION=s2`、`switchSession(s2)`、`resumeActiveSessionTransport(s2)` 均发生，并在目标 connected 后渲染目标 revision。
+
 # 2026-07-03 File Sync download zero-byte fix
 
 - Jason 现场指出同步图片下载到本地最后写盘失败，文件大小为 0；同时强调远程和本地排序都需要按名称/时间、正序/倒序。

@@ -457,10 +457,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     setFollowResetEpoch((current) => current + 1);
   }, []);
 
-  const openExplicitSessionById = useCallback((sessionId: string) => {
-    return resumeActiveSessionTransport(sessionId);
-  }, [resumeActiveSessionTransport]);
-
   useOpenTabLifecycleEffects({
     sessionsRef,
     openTabStateRef,
@@ -486,7 +482,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     moveSession,
     renameSession,
     applyClosedOpenTabIntent,
-    openExplicitSessionById,
   });
 
   const runtimeRefs = useMemo<OpenTabRuntimeRefs>(() => ({

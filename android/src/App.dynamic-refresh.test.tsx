@@ -982,6 +982,70 @@ describe('App dynamic refresh matrix', () => {
     expect(openTerminalPageSpy).not.toHaveBeenCalled();
   });
 
+  it('commits the requested active tab on the first resume tap before relying on transport readiness', async () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 's1',
+        hostId: 'host-s1',
+        connectionName: 'conn-s1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s1',
+        createdAt: 1,
+      },
+      {
+        sessionId: 's2',
+        hostId: 'host-s2',
+        connectionName: 'conn-s2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s2',
+        createdAt: 2,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), { ...makeSession('s2', 9), state: 'connecting' }],
+        activeSessionId: 's1',
+        connectedCount: 1,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    sessionHarness.switchSession.mockClear();
+    sessionHarness.resumeActiveSessionTransport.mockClear();
+    openTerminalPageSpy.mockClear();
+
+    act(() => {
+      connectionsPageHarness.readProps().onResumeSession('s2');
+    });
+
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 1), makeSession('s2', 9)],
+          activeSessionId: 's2',
+          connectedCount: 2,
+        } as any,
+        makeSession('s2', 9),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('9'));
+  });
+
   // NOTE: d505c65 changed inputResetEpoch from React state to a ref to eliminate
   // keystroke-triggered React state cascades. Keystrokes no longer bump the epoch.
   // The epoch only increments on real session switches (applySessionSwitchRenderReset

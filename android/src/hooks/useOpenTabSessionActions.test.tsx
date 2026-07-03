@@ -28,7 +28,6 @@ describe('useOpenTabSessionActions transport semantics', () => {
       moveSession: vi.fn(),
       renameSession: vi.fn(),
       applyClosedOpenTabIntent: vi.fn(),
-      openExplicitSessionById: vi.fn(() => false),
     }));
 
     act(() => {
@@ -43,9 +42,8 @@ describe('useOpenTabSessionActions transport semantics', () => {
     expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 
-  it('does not downgrade an explicit resume into a generic tab switch when transport reopen already succeeded', () => {
+  it('commits active tab truth when resume opens transport so the first tap changes the target', () => {
     const applyOpenTabState = vi.fn();
-    const openExplicitSessionById = vi.fn(() => true);
     const ensureTerminalPageVisible = vi.fn();
 
     const { result } = renderHook(() => useOpenTabSessionActions({
@@ -63,15 +61,17 @@ describe('useOpenTabSessionActions transport semantics', () => {
       moveSession: vi.fn(),
       renameSession: vi.fn(),
       applyClosedOpenTabIntent: vi.fn(),
-      openExplicitSessionById,
     }));
 
     act(() => {
       result.current.handleResumeSession('s2');
     });
 
-    expect(openExplicitSessionById).toHaveBeenCalledWith('s2');
-    expect(applyOpenTabState).not.toHaveBeenCalled();
+    expect(applyOpenTabState).toHaveBeenCalledTimes(1);
+    expect(applyOpenTabState).toHaveBeenCalledWith(
+      expect.objectContaining({ activeSessionId: 's2' }),
+      expect.objectContaining({ switchRuntime: 'explicit-resume' }),
+    );
     expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 });

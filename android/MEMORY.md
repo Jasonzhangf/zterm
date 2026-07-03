@@ -616,3 +616,9 @@ silently returns 0 when viewport metrics are stable.
 - File Sync 下载保存不能把整文件 base64 合并后一次性传给 Android native；图片/大文件必须按 `file-download-chunk` 分块调用 native storage 写入，避免 bridge 大 payload 变空后生成 0 字节文件。
 - 下载完成后必须 `stat` 本地目标文件并校验 `size === totalBytes`；大小不一致是显式 transfer error，不能显示 done。
 - 回归门禁：`pnpm --dir android exec vitest run src/lib/file-transfer-session-runtime.test.ts src/components/terminal/FileTransferSheet.test.tsx --reporter dot` 必须覆盖 chunked write、size mismatch error、不覆盖为 done，以及本地/远程排序。
+
+## 2026-07-03 Session resume active truth
+
+- Session resume/switch 入口不能只调用 transport resume 后提前返回；必须先提交 open-tab active truth，再由 `switchRuntime:'explicit-resume'` 统一推进 runtime switch 和 transport refresh。
+- 错误反模式：`resumeActiveSessionTransport()` 返回 true 就跳过 `handleSwitchSession()`，会造成第一次点击只开连接不切 UI，目标 connected 后也不会自动变成 active，需要第二次点击。
+- 回归门禁：`pnpm --dir android exec vitest run src/hooks/useOpenTabSessionActions.test.tsx src/App.dynamic-refresh.test.tsx --reporter dot` 必须覆盖 connecting 目标首次 resume 即写入 `ACTIVE_SESSION`、调用 `switchSession/resumeActiveSessionTransport`，并在目标 connected 后渲染目标 session。
