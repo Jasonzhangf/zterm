@@ -233,9 +233,12 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     if (!nextActiveSessionId) {
       return;
     }
+    const targetRuntimeSession = sessionsRef.current.find(
+      (session) => session.id === nextActiveSessionId,
+    ) || null;
     if (
       switchReason === 'explicit-resume'
-      && !sessionsRef.current.some((session) => session.id === nextActiveSessionId)
+      && !targetRuntimeSession
       && !pendingMaterializedOpenTabSessionIdsRef.current.has(nextActiveSessionId)
     ) {
       const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === nextActiveSessionId) || null;
@@ -264,7 +267,17 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
       switchSession(nextActiveSessionId);
     }
-    if (switchReason === 'explicit-resume') {
+    const shouldResumeUnavailableRuntime = (
+      switchReason === 'explicit-resume'
+      && (
+        !targetRuntimeSession
+        || targetRuntimeSession.state === 'idle'
+        || targetRuntimeSession.state === 'closed'
+        || targetRuntimeSession.state === 'disconnected'
+        || targetRuntimeSession.state === 'error'
+      )
+    );
+    if (shouldResumeUnavailableRuntime) {
       resumeActiveSessionTransport(nextActiveSessionId);
     }
   }, [createSession, resumeActiveSessionTransport, switchSession]);

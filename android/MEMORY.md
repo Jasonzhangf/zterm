@@ -622,3 +622,9 @@ silently returns 0 when viewport metrics are stable.
 - Session resume/switch 入口不能只调用 transport resume 后提前返回；必须先提交 open-tab active truth，再由 `switchRuntime:'explicit-resume'` 统一推进 runtime switch 和 transport refresh。
 - 错误反模式：`resumeActiveSessionTransport()` 返回 true 就跳过 `handleSwitchSession()`，会造成第一次点击只开连接不切 UI，目标 connected 后也不会自动变成 active，需要第二次点击。
 - 回归门禁：`pnpm --dir android exec vitest run src/hooks/useOpenTabSessionActions.test.tsx src/App.dynamic-refresh.test.tsx --reporter dot` 必须覆盖 connecting 目标首次 resume 即写入 `ACTIVE_SESSION`、调用 `switchSession/resumeActiveSessionTransport`，并在目标 connected 后渲染目标 session。
+
+## 2026-07-04 Session switch transport de-dup
+
+- 切换到已有 runtime shell 的 session 时，`SessionContext.switchSession()` 已经通过 `active-reentry` 拥有唯一 refresh owner；`useOpenTabRuntime` 不得再对 `connecting/reconnecting/connected` 目标无差别补一发 `resumeActiveSessionTransport()`。
+- `explicit-resume` 只保留给 unavailable runtime：目标缺失或状态是 `idle/closed/disconnected/error` 时才允许显式 reopen。否则重复推进 traversal/control open 更容易出现 `ws connect timeout`。
+- 回归门禁：`pnpm --dir android exec vitest run src/hooks/useOpenTabRuntime.test.tsx src/hooks/useOpenTabSessionActions.test.tsx src/App.dynamic-refresh.test.tsx src/lib/open-tab-history-truth.test.ts --reporter dot` 必须同时证明 connecting 目标不二次 resume，而 disconnected 目标仍保留显式 reopen。

@@ -977,8 +977,7 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(openTerminalPageSpy).not.toHaveBeenCalled();
   });
 
@@ -1030,8 +1029,7 @@ describe('App dynamic refresh matrix', () => {
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2');
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
     act(() => {
       sessionHarness.update(
         {

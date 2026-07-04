@@ -5,6 +5,13 @@
 - 根因：`handleResumeSession()` 调 `resumeActiveSessionTransport()` 成功后提前 return，导致 open-tab `ACTIVE_SESSION` 未提交，第一次点击只启动/刷新 transport，不切 UI active truth。
 - 修复：物理移除 `openExplicitSessionById` 短路；resume 入口统一走 `handleSwitchSession()`，先提交 active tab truth，再通过 `switchRuntime:'explicit-resume'` 推进 runtime switch/transport refresh。回归锁住 connecting 目标第一次 resume 后 `ACTIVE_SESSION=s2`、`switchSession(s2)`、`resumeActiveSessionTransport(s2)` 均发生，并在目标 connected 后渲染目标 revision。
 
+# 2026-07-04 Session switch ws connect timeout de-dup
+
+- Jason 现场截图显示切 session 后非常容易出现 `ws connect timeout` banner。
+- 架构映射：仍是 `terminal.open_tabs` + `terminal.transport_lifecycle` 交界；`useOpenTabRuntime.requestRuntimeActiveSessionSwitch()` 不应对已有 runtime shell 的目标重复推进 transport，`SessionContext.switchSession()` 已经拥有 active-reentry refresh。
+- 根因：前一轮修复后，切换到已有 runtime shell 且正在 `connecting/reconnecting/connected` 的 session 时，外层仍无差别补一发 `resumeActiveSessionTransport()`；这会让同一次切换同时走 `active-reentry` 和 `explicit-resume` 两条 refresh path，更容易把 traversal/control open 推到 `ws connect timeout`。
+- 修复：`explicit-resume` 收窄为只给 unavailable runtime 使用：目标 runtime 缺失或状态是 `idle/closed/disconnected/error` 时才补 `resumeActiveSessionTransport()`；对已有且正在 `connecting/reconnecting/connected` 的目标只做 `switchSession()`，让 `active-reentry` 成为唯一 refresh owner。回归锁住 connecting 目标切换时不再额外调用 `resumeActiveSessionTransport()`，但 disconnected 目标仍保留显式 reopen。
+
 # 2026-07-03 File Sync download zero-byte fix
 
 - Jason 现场指出同步图片下载到本地最后写盘失败，文件大小为 0；同时强调远程和本地排序都需要按名称/时间、正序/倒序。
