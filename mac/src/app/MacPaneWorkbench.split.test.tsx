@@ -20,32 +20,26 @@ import {
   splitActivePaneRight,
   type MacWorkbenchState,
 } from './workbench';
-import { resolvePaneProfile, type EditableHost, Host, BridgeSettings, PaneProfile } from '@zterm/shared';
-import type { TerminalRuntimeController } from '../lib/terminal-runtime';
+import { resolvePaneProfile, type EditableHost, BridgeSettings, PaneProfile } from '@zterm/shared';
 import type { TerminalRuntimeState } from '../lib/terminal-runtime';
+import type { MacRuntimeRegistry } from './runtime/MacRuntimeRegistry';
 
-function makeRuntimeStub(): TerminalRuntimeController {
+function makeRuntimeRegistryStub(runtimeState = makeRuntimeState()): MacRuntimeRegistry {
   return {
-    getState: () => ({}) as any,
-    subscribe: () => () => {},
-    connectRemote: vi.fn(),
-    connectLocalTmux: vi.fn(),
-    disconnect: vi.fn(),
-    setActivityMode: vi.fn(),
-    updateViewport: vi.fn(),
-    requestScheduleList: vi.fn(),
-    upsertScheduleJob: vi.fn(),
-    deleteScheduleJob: vi.fn(),
-    toggleScheduleJob: vi.fn(),
-    runScheduleJobNow: vi.fn(),
-    sendInput: vi.fn(),
-    pasteImage: () => true,
-    resizeTerminal: vi.fn(),
-    requestRemoteScreenshot: () => true,
-    sendRawJson: () => true,
-    onFileTransferMessage: () => () => {},
+    ensureRuntime: vi.fn(() => ({}) as any),
+    getRuntime: vi.fn(() => ({}) as any),
+    getRuntimeState: vi.fn(() => runtimeState),
+    subscribeRuntime: vi.fn(() => () => {}),
+    getActiveRuntimeKey: vi.fn(() => null),
+    subscribeActiveRuntimeKey: vi.fn(() => () => {}),
+    setActiveRuntimeKey: vi.fn(),
+    sendInput: vi.fn(() => true),
+    updateViewport: vi.fn(() => true),
+    resizeTerminal: vi.fn(() => true),
+    disposeRuntime: vi.fn(),
+    releaseRuntime: vi.fn(),
     dispose: vi.fn(),
-  } as any;
+  };
 }
 
 function makeRuntimeState(): TerminalRuntimeState {
@@ -98,8 +92,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -117,8 +110,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -136,8 +128,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -169,8 +160,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );

@@ -30,31 +30,40 @@ This mirrors the useful iTerm2 model: OS windows contain tabs and split panes, a
 
 Current code evidence:
 
-- `mac/src/App.tsx` still renders `ShellWorkspace`.
-- `ShellWorkspace` has a useful split tree and per-resource runtime registry.
-- `MacAppShell/MacPaneWorkbench` is a newer but non-production path.
-- `MacAppShell/MacPaneWorkbench` currently passes one runtime into all panes, so it cannot be the multi-live-pane target without refactoring.
-- Electron main creates one business `BrowserWindow`; there is no multi-window owner.
-- Server management is in `QuickConnectSheet`, not in a persistent server directory.
+- `mac/src/App.tsx` renders `MacDesktopApp`.
+- `MacDesktopApp` renders `MacAppShell`; this is the current production renderer path.
+- `MacAppShell` now creates `MacRuntimeRegistry`, ensures runtimes for live tabs, sets the active runtime key, and releases closed runtime keys.
+- `MacPaneWorkbench` now consumes registry projections by `runtimeKey`; pane UI no longer calls `connectRemote` / `connectLocalTmux`.
+- `MacWorkspaceStore` / `MacPaneTree` pure model now exists under `mac/src/app/workspace/*`; production renderer bootstraps and saves workspace identity by renderer `windowId` through `MacAppShell`.
+- The old all-in-one `ShellWorkspace` source has been physically removed after replacement coverage passed. Schedule, screenshot, file-transfer, QuickConnect, Details, and Terminal primitives remain only as standalone future owner inputs.
+- Electron main now creates `MacWindowManager`, which owns BrowserWindow creation, New Window menu/IPC actions, persisted open window records, activate focus/restore, and renderer `windowId` query injection. Packaged multi-window restore smoke has passed.
+- Server management now has a persistent `MacServerDirectory` rail in the production shell for saved server/session projection, read-only remote daemon live refresh, refresh status/errors, and explicit open actions. `ConnectionLauncher` / `QuickConnectSheet` remain add/edit/manual connect surfaces. Packaged read-only refresh smoke passed against the local Mac Studio daemon.
+- Local file browser / preview now has three owners: shared `FileBrowserCore`, `MacFileBrowserPanel`, and the Mac Electron local filesystem adapter. Unit/component tests and packaged local browse/preview smoke pass.
+- Runtime registry is statically, unit-test, and packaged-smoke verified. Packaged tmux A/B smoke proves two panes connected, input/echo isolation, resize, switch, close, and B input after A close.
 
 Design decision:
 
-- Keep the split-tree and per-resource runtime lessons from `ShellWorkspace`.
-- Do not keep `ShellWorkspace` as an all-in-one UI/runtime owner.
+- Keep the verified split-tree and per-resource runtime lessons in the new owner modules.
+- Do not restore `ShellWorkspace` as an all-in-one UI/runtime owner.
 - Build a new production mainline with explicit owners.
 - Remove or migrate obsolete entrypoint code after the new mainline is verified.
+- Use `mac/docs/function-map.md` and `mac/docs/mainline-call-map.json` as the owner/mainline truth before implementation slices.
+- Slice 1 entrypoint correction, Slice 2 workspace store, Slice 3 runtime registry, Slice 4 server directory including read-only remote live refresh, Slice 5 `MacWindowManager`, the local file browser branch, and Slice 7 legacy cleanup are implemented and verified through their required gates.
 
 ## Owner Map
 
 | Feature | Owner | Allowed paths | Forbidden paths | Required gates |
 | --- | --- | --- | --- | --- |
-| Mac app entrypoint | `MacDesktopApp` | `mac/src/App.tsx`, `mac/src/app/*` | `mac/src/pages/ShellWorkspace.tsx` as new feature sink | `pnpm --filter @zterm/mac type-check`, `pnpm --filter @zterm/mac build` |
+| Mac app entrypoint | `MacDesktopApp` | `mac/src/App.tsx`, `mac/src/app/*` | any restored `mac/src/pages/ShellWorkspace.tsx` feature sink | `pnpm --filter @zterm/mac type-check`, `pnpm --filter @zterm/mac build` |
 | Window lifecycle | `MacWindowManager` | `mac/electron/main.ts`, preload window IPC bridge | terminal runtime files | type-check, build, package when changed |
 | Workspace state | `MacWorkspaceStore` | `mac/src/app/workspace/*` | transport, buffer, renderer | unit tests, type-check |
 | Pane tree layout | `MacPaneTree` | shared pane tree helpers or `mac/src/app/workspace/*` | terminal transport/runtime | unit tests for split/resize/move |
 | Runtime session registry | `MacRuntimeRegistry` | `mac/src/app/runtime/*`, thin wrappers around `mac/src/lib/terminal-runtime.ts` | pane/tab UI components | runtime registry unit tests, terminal smoke when behavior changes |
-| Server directory | `MacServerDirectory` | shared server identity helpers, `mac/src/app/server-directory/*` | runtime transport | projection tests, type-check |
+| Server directory | `MacServerDirectory` | shared server identity helpers, `mac/src/app/server-directory/*`, thin `MacAppShell` refresh orchestration | runtime transport, workspace open/close/prune during refresh | projection tests, refresh success/error tests, type-check, packaged read-only refresh smoke when route is available |
 | Connection launcher | `MacConnectionLauncher` | `mac/src/app/launcher/*` | server directory truth | UI tests, projection tests |
+| File browser core | `FileBrowserCore` | `packages/shared/src/files/*` | React, Electron IPC, terminal runtime | shared core tests, architecture import gate |
+| File browser UI | `MacFileBrowserPanel` | `mac/src/app/file-browser/*` | terminal runtime, Electron fs policy | component tests, packaged fs smoke |
+| Local filesystem adapter | `createMacLocalFileSystemService`, `registerMacFileSystemIpcHandlers` | `mac/electron/file-system.ts`, preload bridge | preview policy, UI state | IPC tests, package, packaged fs smoke |
 | Terminal rendering | shared terminal renderer | `packages/shared/src/terminal/*`, thin Mac consumer | app shell layout | renderer tests, terminal smoke |
 
 ## Mainline Call Map
@@ -104,7 +113,8 @@ User activates pane/tab
 
 ```text
 User refreshes server or server directory auto-refresh tick fires
--> MacServerDirectory.fetchSessions(serverId)
+-> MacServerDirectoryRail explicit refresh button
+-> MacAppShell calls fetchMacServerDirectoryLiveSessionSnapshot(server)
 -> Projection updates live sessions for that server
 -> Workspace open tabs are not created/closed by projection
 -> Unavailable sessions are displayed as unavailable transport facts
@@ -228,6 +238,10 @@ Changes:
 - Add this plan as the design truth.
 - Update `mac/docs/spec.md`.
 - Update `mac/docs/architecture.md`.
+- Add `mac/docs/function-map.md`.
+- Add `mac/docs/mainline-call-map.json`.
+- Add `mac/docs/testing/mac-desktop-workspace-test-design.md`.
+- Add a low-false-positive architecture truth gate for current entrypoint truth, map parseability, and required owner IDs.
 - Update `mac/docs/dev-workflow.md` only if gates change.
 - Update `mac/task.md`.
 
@@ -247,7 +261,7 @@ Goal: introduce one production entrypoint and stop the document/code mismatch.
 Changes:
 
 - Create `MacDesktopApp` as the only renderer entrypoint.
-- Move current usable `ShellWorkspace` behavior behind explicit child owners or keep it as a temporary adapter named accordingly.
+- Keep replacement behavior behind explicit child owners. Do not recreate `ShellWorkspace` as a temporary adapter.
 - Add a test that `App` renders the new entrypoint.
 
 Verification:
@@ -266,7 +280,7 @@ Changes:
 
 - Add `MacWorkspaceStore` pure model.
 - Add split right/down, close pane, move tab, activate tab tests.
-- Persist by `workspaceId`, not one global `shell-workspace`.
+- Persist by `workspaceId`, not one legacy global shell workspace key.
 
 Verification:
 
@@ -282,9 +296,10 @@ Goal: guarantee independent live panes without recreating transports on tab swit
 
 Changes:
 
-- Add `MacRuntimeRegistry`.
+- Add `MacRuntimeRegistry`. Implemented in `mac/src/app/runtime/MacRuntimeRegistry.ts`.
 - Registry owns `runtimeKey -> TerminalRuntimeController`.
-- Pane UI only requests a runtime and consumes projection.
+- `MacAppShell` ensures runtimes for live tabs and sets active runtime key.
+- `MacPaneWorkbench` consumes projection and routes input/viewport/resize through registry by runtime key.
 - Hidden runtime goes idle, not dispose.
 
 Positive tests:
@@ -302,9 +317,10 @@ Negative tests:
 Verification:
 
 ```bash
-pnpm --filter @zterm/mac test -- runtime
-pnpm --filter @zterm/mac type-check
-pnpm --filter @zterm/mac build
+pnpm --dir mac exec vitest run src/app/runtime/MacRuntimeRegistry.test.ts src/app/MacPaneWorkbench.test.tsx src/app/MacAppShell.layout.test.tsx --reporter dot
+pnpm --dir mac test -- --reporter dot
+pnpm --dir mac run type-check
+pnpm --dir mac run build
 ```
 
 Runtime smoke required before declaring the slice complete.
@@ -315,9 +331,9 @@ Goal: make multi-server management a first-class desktop surface.
 
 Changes:
 
-- Add left server rail.
+- Add left server rail. Implemented in `mac/src/app/server-directory/MacServerDirectoryRail.tsx`.
 - Reuse shared server identity projection when possible.
-- Show server groups, live sessions, refresh status, and errors.
+- Show server groups, saved sessions, daemon live session snapshots, refresh status/errors, and open-session state.
 - Move `QuickConnectSheet` to add/edit server flow.
 
 Positive tests:
@@ -334,9 +350,15 @@ Negative tests:
 Verification:
 
 ```bash
-pnpm --filter @zterm/mac test -- server
-pnpm --filter @zterm/mac type-check
-pnpm --filter @zterm/mac build
+pnpm --dir mac exec vitest run src/app/server-directory/MacServerDirectory.test.ts src/app/MacAppShell.layout.test.tsx --reporter dot
+pnpm --dir mac run type-check
+pnpm --dir mac run build
+```
+
+Packaged read-only daemon refresh smoke evidence:
+
+```text
+mac/evidence/2026-07-04-server-refresh-smoke/
 ```
 
 ### Slice 5: Electron multi-window
@@ -345,17 +367,20 @@ Goal: support OS-level windows without mixing window state into terminal truth.
 
 Changes:
 
-- Add `MacWindowManager` in Electron main.
-- Add menu/shortcut for New Window.
-- Pass `windowId` to renderer.
-- Persist each window's workspace separately.
+- Add `MacWindowManager` in Electron main. Implemented in `mac/electron/window-manager.ts`.
+- Add menu/shortcut for New Window. Implemented through `createMacWindowMenuTemplate` and the preload `windowManager.createWindow()` IPC bridge.
+- Pass `windowId` to renderer. Implemented through dev URL/file query injection and `resolveMacRendererWindowId`.
+- Persist each window's workspace separately. Implemented through `MacAppShell` + `MacWorkspaceStore` localStorage key `zterm:mac:workspace:v1:<windowId>`.
+- Preserve open window records on app quit and restore them on next launch. Implemented through `createFileMacWindowRecordStore` and `MacWindowManager.restoreWindows()`.
 
 Verification:
 
 ```bash
-pnpm --filter @zterm/mac type-check
-pnpm --filter @zterm/mac build
-pnpm --filter @zterm/mac package
+pnpm --dir mac exec vitest run src/electron/window-manager.test.ts src/app/window/window-id.test.ts src/app/MacDesktopApp.test.tsx src/app/MacAppShell.layout.test.tsx --reporter dot
+pnpm --dir mac test -- --reporter dot
+pnpm --dir mac run type-check
+pnpm --dir mac run build
+pnpm --dir mac run package
 ```
 
 Packaged smoke required:
@@ -411,10 +436,11 @@ pnpm --filter @zterm/mac build
 
 Code cannot keep duplicate production meanings.
 
-After Slice 1 and Slice 3 pass:
+After Slice 1, Slice 3, and replacement package/live gates pass:
 
-- Rename any retained `ShellWorkspace` adapter to make transitional status explicit.
-- Remove unused `MacAppShell/MacPaneWorkbench` path or migrate it into the new owners.
-- Delete obsolete tests that assert the old entrypoint, after equivalent tests exist for the new mainline.
+- Do not retain a `ShellWorkspace` adapter.
+- Remove unused duplicate production paths or migrate them into the new owners.
+- Delete obsolete tests that assert the old entrypoint after equivalent tests exist for the new mainline.
+- Slice 7 result: `mac/src/pages/ShellWorkspace.tsx`, `mac/src/pages/ShellWorkspace.split-tree.test.tsx`, and `mac/src/lib/shell-workspace.ts` are physically removed and guarded by `mac/src/lib/mac-architecture-truth.test.ts`.
 
 Deletion must be in a verified commit with tests proving the replacement path.

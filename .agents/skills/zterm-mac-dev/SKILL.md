@@ -50,6 +50,15 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 - 旧 app 必须先退出，再打开新包；不要叠多个实例污染结论。
 - 禁止 broad kill；退出旧 app 用应用级 quit 或明确 PID 级关闭。
 
+### 2.4 Desktop workspace owner gate
+- Mac desktop workspace / multi-window / pane-tab-runtime / file browser 重构必须先查并同步：
+  - `mac/docs/function-map.md`
+  - `mac/docs/mainline-call-map.json`
+  - `mac/docs/testing/mac-desktop-workspace-test-design.md`
+- 未落地 owner 只标 `binding pending`，禁止伪造 symbol / caller / callee。
+- 初始架构 gate 只锁当前已成立事实与 map parseability；不要把后续切片才会修的 transitional debt 提前做成误报红测。
+- 当实现进入对应切片后，必须把 pending 规则升级为 hard gate，例如 runtime 创建只能在 `MacRuntimeRegistry`，pane UI 不得直接 `connectRemote/connectLocalTmux`。
+
 ---
 
 ## 三、强制闭环流程（Jason 新冻结）
@@ -181,6 +190,13 @@ Jason，已完成本轮自闭环：
 - 截图/DOM probe/输入验证必须指向同一个 CDP target、同一个 tmux session、同一个 evidence JSON；不得在多个 Electron 窗口之间交叉取证。
 - 临时 CDP probe 不要往页面注入会持久影响事件链的监听器/异常代码；若注入失败导致 renderer error，必须 reload 或重启唯一实例后再验证。
 - local tmux 颜色真源是 `tmux capture-pane -e` 的 SGR 输出；纯 `capture-pane -p` 只保留文本，会把 `fg/bg` 全部退成默认色。
+- Packaged multi-window smoke 不依赖 `System Events` 注入快捷键作为真源；优先通过正式 preload IPC / menu owner 触发 `MacWindowManager.createWindow()`，再用 CDP 验证 page target、renderer `windowId`、workspace key、quit/reopen restore。若 `System Events` 卡住，只中断该明确 osascript 会话，不能用它证明失败或成功。
+- Packaged app 实际使用 `preload.cts -> preload.cjs`。凡修改 `window.ztermMac` bridge 或 IPC surface，必须同步更新 `preload.ts` 与 `preload.cts`，并用 packaged smoke 证明真实 preload bridge 可用；不能只看 renderer type 或 `preload.ts`。
+- Packaged React 表单/controlled input smoke 不把直接 `input.value = ...` 当真源；自动化应先 focus/select 目标 input，再用 CDP `Input.insertText` 或等价真实输入路径触发 React state，最后点击正式 UI command。直接 setter 只可作诊断，不能作为 browse/connect/save 成功证据。
+- Packaged runtime A/B input isolation smoke 优先用本轮专用 tmux session + `tmux pipe-pane -o <log>` 作为输入 oracle；`capture-pane` 对 detached `cat` fixture 可能不稳定，不能单独证明 app input 到达或串线。完成后用 `tmux pipe-pane -t <session>` 关闭观测管道，避免后台持续写日志。
+- Runtime split/tab smoke 中，resize 必须同时看 DOM pane width 和 workspace record pane size；只看拖拽动作或 divider 存在不算 resize 闭环。关闭 active pane 后必须证明 renderer root 仍 mounted、workspace `activePaneId` 指向现存 pane、剩余 runtime 还能输入。
+- Server rail remote refresh smoke 是 read-only daemon observation：只能发 `list-sessions`/Refresh，允许用现有用户 sessions 做列表观测，但禁止写 input、create、kill、rename。证据必须同时证明 refresh 后 live sessions 进入 rail、workspace pane/tab 数不变、terminal stage 未自动打开 session、错误时显示 error 且 saved/open sessions 保留。
+- Legacy workspace cleanup closeout 不能只扫入口 import。必须同时证明旧 all-in-one source 文件物理不存在、生产源码无 `ShellWorkspace` 引用、architecture truth gate 锁 `MAC-16-LegacyRemoval`、packaged DOM 无 `.shell-workspace-root` / forbidden root。历史 `zterm:mac:shell-workspace:v1` localStorage 残留只说明用户数据未清理，不可当作 fallback 存在或已读取的证据。
 
 ## 七、单 session 操作铁律（2026-06-02 新增）
 

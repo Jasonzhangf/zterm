@@ -12,10 +12,6 @@ vi.mock('./app/MacDesktopApp', () => ({
   },
 }));
 
-vi.mock('./pages/ShellWorkspace', () => ({
-  ShellWorkspace: () => <div data-testid="forbidden-shell-workspace-root" />,
-}));
-
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -27,6 +23,5 @@ describe('App renderer root', () => {
 
     expect(macDesktopApp).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="mac-desktop-app"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="forbidden-shell-workspace-root"]')).toBeNull();
   });
 });

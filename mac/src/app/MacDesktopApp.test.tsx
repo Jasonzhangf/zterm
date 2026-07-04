@@ -47,11 +47,13 @@ afterEach(() => {
 
 describe('MacDesktopApp production entrypoint', () => {
   it('boots MacAppShell through the shared workspace owner boundary', () => {
+    window.history.replaceState(null, '', '/?windowId=window-from-query');
     const { container } = render(<MacDesktopApp />);
 
     expect(container.querySelector('[data-testid="mac-app-shell"]')).toBeTruthy();
     expect(macAppShell).toHaveBeenCalledTimes(1);
     expect(macAppShell.mock.calls[0][0]).toMatchObject({
+      windowId: 'window-from-query',
       hosts: [{ id: 'host-1', name: 'mac-studio' }],
       isLoaded: true,
       bridgeSettings: {

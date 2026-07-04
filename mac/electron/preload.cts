@@ -6,6 +6,18 @@ type LocalTmuxRequestPayload = { knownRevision: number; localStartIndex: number;
 
 contextBridge.exposeInMainWorld('ztermMac', {
   platform: 'mac',
+  windowManager: {
+    createWindow: () => ipcRenderer.invoke('zterm:window:create'),
+  },
+  fileSystem: {
+    readdir: (dirPath: string) => ipcRenderer.invoke('zterm:fs:readdir', { dirPath }),
+    saveFile: (dirPath: string, fileName: string, dataBase64: string) =>
+      ipcRenderer.invoke('zterm:fs:save-file', { dirPath, fileName, dataBase64 }),
+    readFile: (filePath: string) => ipcRenderer.invoke('zterm:fs:read-file', { filePath }),
+    mkdir: (dirPath: string) => ipcRenderer.invoke('zterm:fs:mkdir', { dirPath }),
+    getDownloadDir: () => ipcRenderer.invoke('zterm:fs:get-download-dir'),
+    selectDirectory: () => ipcRenderer.invoke('zterm:fs:select-directory'),
+  },
   localTmux: {
     listSessions: () => ipcRenderer.invoke('zterm:local-tmux:list-sessions'),
     connect: (payload: LocalTmuxConnectPayload) => ipcRenderer.invoke('zterm:local-tmux:connect', payload),

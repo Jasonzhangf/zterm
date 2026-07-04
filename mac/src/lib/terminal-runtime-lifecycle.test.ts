@@ -76,7 +76,7 @@ listeners.forEach((l) => l());
 return runtime;
 }
 
-describe('tab 切换 runtime 保活 (red baseline — ShellWorkspace 当前会 dispose)', () => {
+describe('tab 切换 runtime 保活', () => {
 it('setActivityMode("idle") 不清除 runtime listeners', () => {
 const runtime = makeRuntimeStub();
 const unsub = runtime.subscribe(() => {});

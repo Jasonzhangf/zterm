@@ -108,6 +108,17 @@ describe('Mac workbench pane state', () => {
     expect(state.workspace.panes.length).toBe(1);
   });
 
+  it('closeTab redirects activePaneId when removing the active pane', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = splitActivePaneRight(state);
+    const activePane = state.workspace.panes.find((pane) => pane.id === state.workspace.activePaneId)!;
+    state = closeTab(state, activePane.tabs[0].id);
+    expect(state.workspace.panes.length).toBe(1);
+    expect(state.workspace.panes.some((pane) => pane.id === state.workspace.activePaneId)).toBe(true);
+    expect(state.workspace.activePaneId).not.toBe(activePane.id);
+  });
+
   it('moveTabToPane moves connection tab between panes', () => {
     let state: MacWorkbenchState = createInitialWorkbenchState();
     state = openConnectionInWorkbench(state, makeTarget('a'));

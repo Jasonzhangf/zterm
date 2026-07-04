@@ -178,7 +178,7 @@ function PaneDivider<TTabId extends string>({
         const startX = event.clientX;
         const startRatio = sourceSlot.size;
         const targetRatio = targetSlot.size;
-        const stage = (event.currentTarget.parentElement as HTMLElement | null);
+        const stage = event.currentTarget.closest('[data-testid="pane-stage-split"]') as HTMLElement | null;
         const stageWidth = stage?.getBoundingClientRect().width ?? 0;
         const move = (e: PointerEvent) => {
           if (!stageWidth) {

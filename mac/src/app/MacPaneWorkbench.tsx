@@ -15,10 +15,8 @@
  */
 
 import { MacTerminalView, PaneStage, PaneTabs, resolvePaneProfile, resizePaneRatio } from '@zterm/shared';
-import { useEffect, useRef } from 'react';
 import type {
   BridgeSettings,
-  EditableHost,
   Host,
   PanePlatform,
   PaneProfile,
@@ -26,9 +24,15 @@ import type {
   PaneTabDescriptor,
   WorkspacePane,
 } from '@zterm/shared';
-import type { MacWorkbenchTab, MacWorkbenchState } from './workbench';
-import type { TerminalRuntimeController } from '../lib/terminal-runtime';
-import type { TerminalRuntimeState } from '../lib/terminal-runtime';
+import {
+  resolveLocalTmuxSessionName,
+  resolveTabRuntimeKey,
+  resolveTabTarget,
+  closeTab,
+  type MacWorkbenchTab,
+  type MacWorkbenchState,
+} from './workbench';
+import { useMacRuntimeState, type MacRuntimeRegistry } from './runtime/MacRuntimeRegistry';
 
 interface MacPaneWorkbenchProps {
   workbench: MacWorkbenchState;
@@ -36,60 +40,8 @@ interface MacPaneWorkbenchProps {
   hosts: Host[];
   platform: PanePlatform;
   splitVisible: boolean;
-  runtime: TerminalRuntimeController;
-  runtimeState: TerminalRuntimeState;
+  runtimeRegistry: MacRuntimeRegistry;
   bridgeSettings: BridgeSettings;
-}
-
-function resolveTabTarget(tab: MacWorkbenchTab | null | undefined, hosts: Host[]): EditableHost | null {
-  if (!tab || tab.kind !== 'connection') {
-    return null;
-  }
-  if (tab.persistedHostId) {
-    const persisted = hosts.find((h) => h.id === tab.persistedHostId);
-    if (persisted) {
-      return {
-        name: persisted.name,
-        bridgeHost: persisted.bridgeHost,
-        bridgePort: persisted.bridgePort,
-        sessionName: persisted.sessionName,
-        authToken: persisted.authToken,
-        authType: persisted.authType,
-        password: persisted.password,
-        privateKey: persisted.privateKey,
-        tags: persisted.tags,
-        pinned: persisted.pinned,
-        lastConnected: persisted.lastConnected,
-        autoCommand: persisted.autoCommand,
-      };
-    }
-  }
-  return tab.draftTarget ? { ...tab.draftTarget } : null;
-}
-
-function resolveLocalTmuxSessionName(tab: MacWorkbenchTab | null | undefined) {
-  return tab?.kind === 'local-tmux' ? tab.localSessionName?.trim() || '' : '';
-}
-
-function buildActiveTabRuntimeSignature(tab: MacWorkbenchTab | null, hosts: Host[]) {
-  if (!tab) return '';
-  if (tab.kind === 'local-tmux') {
-    return JSON.stringify({ kind: 'local-tmux', sessionName: resolveLocalTmuxSessionName(tab) });
-  }
-  const target = resolveTabTarget(tab, hosts);
-  if (!target) return '';
-  return JSON.stringify({
-    kind: 'connection',
-    name: target.name,
-    bridgeHost: target.bridgeHost,
-    bridgePort: target.bridgePort,
-    sessionName: target.sessionName,
-    authToken: target.authToken || '',
-    authType: target.authType,
-    password: target.password || '',
-    privateKey: target.privateKey || '',
-    autoCommand: target.autoCommand || '',
-  });
 }
 
 function MacTerminalPane({
@@ -99,8 +51,7 @@ function MacTerminalPane({
   hosts,
   platform,
   profile,
-  runtime,
-  runtimeState,
+  runtimeRegistry,
   onSelectTab,
   onCloseTab,
   onActivatePane,
@@ -113,8 +64,7 @@ function MacTerminalPane({
   hosts: Host[];
   platform: PanePlatform;
   profile: PaneProfile;
-  runtime: TerminalRuntimeController;
-  runtimeState: TerminalRuntimeState;
+  runtimeRegistry: MacRuntimeRegistry;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
   onActivatePane: (paneId: string) => void;
@@ -124,32 +74,8 @@ function MacTerminalPane({
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeTarget = resolveTabTarget(activeTab, hosts);
   const localTmuxSessionName = resolveLocalTmuxSessionName(activeTab);
-  const lastSignatureRef = useRef('');
-  const activeTabRuntimeSignature = buildActiveTabRuntimeSignature(activeTab, hosts);
-
-  useEffect(() => {
-    if (activeTab?.kind === 'local-tmux') {
-      if (!localTmuxSessionName) {
-        lastSignatureRef.current = '';
-        return;
-      }
-      if (activeTabRuntimeSignature === lastSignatureRef.current) {
-        return;
-      }
-      lastSignatureRef.current = activeTabRuntimeSignature;
-      runtime.connectLocalTmux({ sessionName: localTmuxSessionName, title: activeTab.title });
-      return;
-    }
-    if (!activeTarget) {
-      lastSignatureRef.current = '';
-      return;
-    }
-    if (activeTabRuntimeSignature === lastSignatureRef.current) {
-      return;
-    }
-    lastSignatureRef.current = activeTabRuntimeSignature;
-    runtime.connectRemote(activeTarget);
-  }, [activeTab, activeTarget, activeTabRuntimeSignature, localTmuxSessionName, runtime]);
+  const runtimeKey = resolveTabRuntimeKey(activeTab, hosts);
+  const runtimeState = useMacRuntimeState(runtimeRegistry, runtimeKey);
 
   const tabDescriptors: PaneTabDescriptor[] = pane.tabs.map((tab) => ({
     id: tab.id,
@@ -195,7 +121,9 @@ function MacTerminalPane({
                 projection={runtimeState.render}
                 active={isActivePane}
                 allowDomFocus
-                onInput={(data: string) => runtime.sendInput(data)}
+                onInput={(data: string) => runtimeRegistry.sendInput(runtimeKey, data)}
+                onResize={(cols: number, rows: number) => runtimeRegistry.resizeTerminal(runtimeKey, cols, rows)}
+                onViewportChange={(viewState) => runtimeRegistry.updateViewport(runtimeKey, viewState as any)}
               />
             </div>
           </>
@@ -215,8 +143,7 @@ export function MacPaneWorkbench({
   hosts,
   platform,
   splitVisible,
-  runtime,
-  runtimeState,
+  runtimeRegistry,
 }: MacPaneWorkbenchProps) {
   const profile = resolvePaneProfile({ platform, splitVisible });
 
@@ -240,33 +167,10 @@ export function MacPaneWorkbench({
 
   const handleCloseTab = (paneId: string, tabId: string) => {
     setWorkbench((prev) => {
-      const pane = prev.workspace.panes.find((p) => p.id === paneId);
-      if (!pane) return prev;
-      const remaining = pane.tabs.filter((t) => t.id !== tabId);
-      if (remaining.length === 0) {
-        if (prev.workspace.panes.length === 1) {
-          return prev;
-        }
-        return {
-          ...prev,
-          workspace: {
-            ...prev.workspace,
-            panes: prev.workspace.panes.filter((p) => p.id !== paneId),
-          },
-        };
+      if (!prev.workspace.panes.some((pane) => pane.id === paneId && pane.tabs.some((tab) => tab.id === tabId))) {
+        return prev;
       }
-      const nextActiveTab = pane.activeTabId === tabId
-        ? remaining[remaining.length - 1]?.id ?? remaining[0].id
-        : pane.activeTabId;
-      return {
-        ...prev,
-        workspace: {
-          ...prev.workspace,
-          panes: prev.workspace.panes.map((p) =>
-            p.id === paneId ? { ...p, tabs: remaining, activeTabId: nextActiveTab } : p,
-          ),
-        },
-      };
+      return closeTab(prev, tabId);
     });
   };
 
@@ -305,8 +209,7 @@ export function MacPaneWorkbench({
         hosts={hosts}
         platform={platform}
         profile={profile}
-        runtime={runtime}
-        runtimeState={runtimeState}
+        runtimeRegistry={runtimeRegistry}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onActivatePane={handleActivatePane}

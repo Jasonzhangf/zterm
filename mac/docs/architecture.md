@@ -74,22 +74,28 @@ Module responsibilities:
 | MacRuntimeRegistry | runtimeKey to TerminalRuntimeController lifecycle | pane tree layout |
 | MacServerDirectory | server identity, live session projection | open tabs, runtime state |
 | MacConnectionLauncher | add/edit/connect server flow | server projection truth |
+| MacFileBrowserPanel | local file browser UI state and preview projection | terminal runtime, Electron fs policy |
+| FileBrowserCore | path/sort/preview policy | React UI, Electron IPC, terminal runtime |
+| Mac local filesystem adapter | local fs list/read/dialog IPC | preview policy, UI state, terminal runtime |
 | Shared Terminal Renderer | terminal projection display/input surface | workspace mutation |
 
 ## Current Transitional State
 
 The repository currently contains conflicting paths:
 
-- Production renderer entrypoint: `App -> ShellWorkspace`.
-- Newer but non-production path: `MacAppShell/MacPaneWorkbench`.
-- `ShellWorkspace` has useful per-resource runtime behavior but mixes UI, profile, runtime registry, screenshot, file transfer, and split logic in one component.
-- `MacAppShell/MacPaneWorkbench` has cleaner app-shell direction but one runtime is passed to all panes.
+- Production renderer entrypoint: `App -> MacDesktopApp -> MacAppShell`.
+- `MacAppShell/MacPaneWorkbench` is current production. Runtime creation/connect/activity is now owned by `MacRuntimeRegistry`; pane UI consumes assigned runtime projection and routes input/viewport/resize by `runtimeKey`.
+- The old all-in-one `ShellWorkspace` path has been physically removed. It must not return as fallback workspace semantics; retained schedule, screenshot, file-transfer, QuickConnect, Details, and Terminal primitives need explicit future owners before reuse.
+- Implemented owner modules: `MacWorkspaceStore`, `MacRuntimeRegistry`, `MacServerDirectory`, `MacWindowManager`, `FileBrowserCore`, `MacFileBrowserPanel`, and the Mac local filesystem adapter.
+- Verified packaged behavior: `MacWindowManager` multi-window restore smoke has evidence under `mac/evidence/2026-07-04-window-manager-smoke/`; local file browser browse/preview smoke has evidence under `mac/evidence/2026-07-04-file-browser-smoke/`; runtime A/B input/resize/switch/close isolation smoke has evidence under `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`; server rail read-only daemon refresh smoke has evidence under `mac/evidence/2026-07-04-server-refresh-smoke/`.
+- Incomplete target behavior: profiles/arrangements, schedule UI re-entry, screenshot UI re-entry, file-transfer UI re-entry, settings, and terminal renderer closeout still need dedicated owner slices.
 
 Design decision:
 
 - Build the new owner modules from `desktop-workspace-plan.md`.
 - Reuse only verified useful behavior from transitional code.
 - Do not keep duplicate production entrypoints after replacement tests pass.
+- Record every owner, mainline edge, and pending binding in `mac/docs/function-map.md` and `mac/docs/mainline-call-map.json` before deeper refactors.
 
 ## Multi-Server Boundary
 

@@ -14,7 +14,7 @@
 - [x] T2 建立新的 `MacDesktopApp` production entrypoint
 - [x] T3 建立 minimal launcher / editor / active tab 闭环
 - [x] T4 接回真实 runtime 并验证 terminal surface
-- [ ] T5 物理删除或迁移 `MacAppShell/MacPaneWorkbench` 与 `ShellWorkspace` 的重复生产语义
+- [x] T5 物理删除旧 `ShellWorkspace` all-in-one 生产语义；`MacAppShell/MacPaneWorkbench` 只保留当前 verified owner path
 
 ## Epic-003 Runtime contract cutover
 
@@ -24,19 +24,27 @@
 - [ ] T2 切出 Mac session head / buffer worker adapter（进行中：已接入 head-driven follow sync）
 - [ ] T3 让 renderer 只消费新的 projection contract
 - [ ] T4 删除旧 workspace/runtime 编排残留
-- [ ] T5 新增 `MacRuntimeRegistry`，按 `runtimeKey -> TerminalRuntimeController` 管理独立 live pane runtime
+- [x] T5 新增 `MacRuntimeRegistry`，按 `runtimeKey -> TerminalRuntimeController` 管理独立 live pane runtime（白盒 + packaged A/B input/resize/switch/close smoke 已完成）
 
 ## Epic-004 Desktop workspace after contract
 
 对应 `mac/docs/desktop-workspace-plan.md`，先做 owner 和 CI gate，再做桌面能力。
 设计原则：**复用 shared 公共层，平台壳只补桌面特有能力，禁止复制第二套真相**。
 
+- [x] T-0A `mac/docs/spec.md` / `mac/docs/architecture.md` / `mac/docs/desktop-workspace-plan.md` current baseline 对齐 `App -> MacDesktopApp -> MacAppShell`
+- [x] T-0B 建立 `mac/docs/function-map.md` owner/function 查询入口
+- [x] T-0C 建立 `mac/docs/mainline-call-map.json` lifecycle/call edge 机器真源
+- [x] T-0D 建立 `mac/docs/testing/mac-desktop-workspace-test-design.md` 白盒/黑盒/运行态测试设计
+- [x] T-0E 建立 Slice 0 architecture truth gate skeleton
 - [x] T0 shared compact wire 类型 + normalizeWireLines + replayBufferSyncHistory（packages/shared）
 - [x] T1 mac/scripts/daemon-loopback.ts 回环测试（initial-sync + local-input-echo 2/2 PASS）
 - [x] T2 mac/scripts/run-daemon-loopback.sh runner
-- [ ] T3 `MacWorkspaceStore`：window/workspace/pane/tab 纯状态模型 + split/resize/move/activate 单测
-- [ ] T4 `MacServerDirectory`：左侧多服务器 rail + live session projection + refresh 不改 open tabs 的反向测试
-- [ ] T5 `MacWindowManager`：Electron New Window + windowId + window-scoped workspace persistence + packaged smoke
+- [x] T3 `MacWorkspaceStore`：window/workspace/pane/tab 纯状态模型 + split/resize/move/activate 单测
+- [x] T3R `MacRuntimeRegistry`：runtimeKey -> controller、connect once、active/idle、release、projection/input 路由白盒 gate（packaged A/B input/resize/switch/close live isolation 已闭环）
+- [x] T4 `MacServerDirectory`：左侧多服务器 rail + saved/live projection 输入 + read-only remote daemon refresh + refresh/projection 不改 open tabs 的正反测试（packaged smoke 已闭环）
+- [x] T5 `MacWindowManager`：Electron New Window + windowId + window-scoped workspace persistence + packaged quit/reopen restore smoke
+- [x] T5F `MacFileBrowser`：shared FileBrowserCore + Electron fs adapter + MacFileBrowserPanel，覆盖本地 fixture 浏览、文本预览、二进制禁用、大文件确认（packaged fs smoke 已闭环）
+- [x] T5L Legacy cleanup：物理删除 `ShellWorkspace.tsx` / `ShellWorkspace.split-tree.test.tsx` / `shell-workspace.ts`，architecture truth gate 锁不复活
 - [ ] T6 Profiles / arrangements：profile 不含 live runtime，arrangement 不含 buffer truth
 
 ### P0 终端体验基础（Epic-004.A 核心连接 + 终端）
@@ -95,14 +103,14 @@
 
 ### P3 高级功能（Epic-004.D 桌面特有能力）
 
-- [ ] T-D1 vertical split
-  - ShellWorkspace 已有 splitActivePane（MAX_PANES=3），需验证真实 terminal surface 在 split pane 中���作
+- [x] T-D1 vertical split
+  - 新 production owner 已通过 packaged A/B runtime smoke 验证 split pane 独立连接、输入、resize、switch、close
   - 验证：点击 split → 两个 terminal 各自独立连接 → 各自独立输入/输出
-- [ ] T-D2 local tmux
-  - ShellWorkspace 已有 local-tmux tab kind + localTransport，需验证完整闭环
+- [x] T-D2 local tmux
+  - 新 production owner 已用专用 `zterm_mac_goal_a/b` packaged smoke 验证 local tmux 完整闭环
   - 验证：选择本地 tmux session → 连接 → 输入/输出/resize 正常
 - [ ] T-D3 schedule modal re-entry
-  - ShellWorkspace 已有 scheduleModalOpen，需验证定时任务 CRUD 完整闭环
+  - 旧 all-in-one ShellWorkspace 已删除；schedule UI 需以独立 owner 重新接入并验证定时任务 CRUD 完整闭环
   - 验证：打开 schedule → 新增 → 列表显示 → 立即执行 → 删除
 - [ ] T-D4 packaged smoke closeout
   - electron-builder 构建 → .app 安装 → 打开 → 连接 daemon → 终端渲染

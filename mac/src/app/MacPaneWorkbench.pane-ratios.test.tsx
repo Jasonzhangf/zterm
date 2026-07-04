@@ -20,32 +20,26 @@ import {
   splitActivePaneRight,
   type MacWorkbenchState,
 } from './workbench';
-import type { EditableHost, Host, BridgeSettings } from '@zterm/shared';
-import type { TerminalRuntimeController } from '../lib/terminal-runtime';
+import type { EditableHost, BridgeSettings } from '@zterm/shared';
 import type { TerminalRuntimeState } from '../lib/terminal-runtime';
+import type { MacRuntimeRegistry } from './runtime/MacRuntimeRegistry';
 
-function makeRuntimeStub(): TerminalRuntimeController {
+function makeRuntimeRegistryStub(runtimeState = makeRuntimeState()): MacRuntimeRegistry {
   return {
-    getState: () => ({}) as any,
-    subscribe: () => () => {},
-    connectRemote: vi.fn(),
-    connectLocalTmux: vi.fn(),
-    disconnect: vi.fn(),
-    setActivityMode: vi.fn(),
-    updateViewport: vi.fn(),
-    requestScheduleList: vi.fn(),
-    upsertScheduleJob: vi.fn(),
-    deleteScheduleJob: vi.fn(),
-    toggleScheduleJob: vi.fn(),
-    runScheduleJobNow: vi.fn(),
-    sendInput: vi.fn(),
-    pasteImage: () => true,
-    resizeTerminal: vi.fn(),
-    requestRemoteScreenshot: () => true,
-    sendRawJson: () => true,
-    onFileTransferMessage: () => () => {},
+    ensureRuntime: vi.fn(() => ({}) as any),
+    getRuntime: vi.fn(() => ({}) as any),
+    getRuntimeState: vi.fn(() => runtimeState),
+    subscribeRuntime: vi.fn(() => () => {}),
+    getActiveRuntimeKey: vi.fn(() => null),
+    subscribeActiveRuntimeKey: vi.fn(() => () => {}),
+    setActiveRuntimeKey: vi.fn(),
+    sendInput: vi.fn(() => true),
+    updateViewport: vi.fn(() => true),
+    resizeTerminal: vi.fn(() => true),
+    disposeRuntime: vi.fn(),
+    releaseRuntime: vi.fn(),
     dispose: vi.fn(),
-  } as any;
+  };
 }
 
 function makeRuntimeState(): TerminalRuntimeState {
@@ -98,8 +92,7 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -121,22 +114,70 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    // jsdom 缺真实 layout — mock 所有 div 的 getBoundingClientRect
-    // PaneStage 结构: main[stage-split] > div[display:contents] > divider
+    // jsdom 缺真实 layout，真实计算应取 stage 宽度而不是 divider wrapper。
     const bcr = { width: 1000, height: 600, left: 0, top: 0, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) };
-    container.querySelectorAll('div').forEach((el) => {
-      (el as HTMLElement).getBoundingClientRect = () => bcr as DOMRect;
-    });
+    const stage = container.querySelector('[data-testid="pane-stage-split"]') as HTMLElement | null;
+    (stage as HTMLElement).getBoundingClientRect = () => bcr as DOMRect;
     const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
     expect(divider).toBeTruthy();
     fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 200, bubbles: true } as any));
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 350, clientY: 200, bubbles: true } as any));
+    expect(setWorkbench).toHaveBeenCalled();
+  });
+
+  it('生产 DOM wrapper 下 divider 仍用 stage 宽度计算 ratio', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('a'));
+    workbench = splitActivePaneRight(workbench);
+    const setWorkbench = vi.fn();
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={setWorkbench}
+        hosts={[]}
+        platform="desktop"
+        splitVisible
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+    const stage = container.querySelector('[data-testid="pane-stage-split"]') as HTMLElement | null;
+    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
+    expect(stage).toBeTruthy();
+    expect(divider).toBeTruthy();
+    (stage as HTMLElement).getBoundingClientRect = () => ({
+      width: 1000,
+      height: 600,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const wrapper = divider!.parentElement as HTMLElement;
+    wrapper.getBoundingClientRect = () => ({
+      width: 0,
+      height: 0,
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 200, bubbles: true } as any));
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 350, clientY: 200, bubbles: true } as any));
+
     expect(setWorkbench).toHaveBeenCalled();
   });
 
@@ -159,8 +200,7 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );

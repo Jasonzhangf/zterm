@@ -64,3 +64,90 @@
 
 ## 2026-07-01 shared session group layout truth
 - Jason 指出 Mac 不能继续复制 Android UI 逻辑；session group / boundary viewport projection 已上移到 @zterm/shared，Android 只保留 re-export 薄壳。后续 Mac/Android 必须消费 shared core，不允许在 ShellWorkspace 或 TerminalPage 内补第二套边界投影语义。
+
+## 2026-07-04 Mac architecture review
+- 证据：`pnpm --dir mac test -- --reporter dot` PASS（14 files / 59 tests），`pnpm --dir mac run type-check` PASS，`pnpm --dir mac run build` PASS；未跑 packaged/live smoke，不能宣称真实窗口/终端体验闭环。
+- 入口真相：源码是 `App -> MacDesktopApp -> MacAppShell`，不是文档里的 `App -> ShellWorkspace`；`mac/docs/spec.md` / `mac/docs/architecture.md` / `mac/docs/desktop-workspace-plan.md` 的 current baseline 已滞后。
+- 架构风险：`MacAppShell` 仍只创建一个 `TerminalRuntimeController` 并传给所有 panes；`MacPaneWorkbench` 每个 pane 又会用同一个 runtime 发 connect，本质还是 single runtime multi-pane，不满足 `MacRuntimeRegistry runtimeKey -> controller` 目标。
+- 能力分叉：旧 `ShellWorkspace` 才有 per-resource runtime registry、nested split、schedule/screenshot/file-transfer；新 production entry 没迁完这些 owner。继续补 UI 前，应先收口 `MacWorkspaceStore` / `MacRuntimeRegistry` / `MacServerDirectory`，再迁移文件浏览/预览。
+
+## 2026-07-04 Mac desktop workspace Slice 0
+- 已修正 `mac/docs/spec.md` / `mac/docs/architecture.md` / `mac/docs/desktop-workspace-plan.md` 的 current baseline：当前生产入口是 `App -> MacDesktopApp -> MacAppShell`，不是 `App -> ShellWorkspace`。
+- 已新增 `mac/docs/function-map.md`、`mac/docs/mainline-call-map.json`、`mac/docs/testing/mac-desktop-workspace-test-design.md`，未实现 owner 均显式标 `binding pending`。
+- 已新增 `mac/src/lib/mac-architecture-truth.test.ts`：锁 App 不回旧入口、docs 不含 stale entrypoint、function map feature IDs、mainline map parseability/node/edge/queryability、goal plan 存在。
+- 验证：`pnpm --dir mac exec vitest run src/lib/mac-architecture-truth.test.ts --reporter dot` PASS（1 file / 6 tests）；`pnpm --dir mac test -- --reporter dot` PASS（15 files / 65 tests）；`pnpm --dir mac run type-check` PASS；`pnpm --dir mac run build` PASS。
+- 未跑 packaged/live smoke；本轮无 Electron main/preload/fs/window/runtime 行为改动，不能宣称 packaged app 或 live terminal 体验闭环。
+
+## 2026-07-04 Mac desktop workspace Slice 1 workspace store
+- 已新增 `mac/src/app/workspace/workspace-store.ts`：`MacWorkspaceStore` / `MacPaneTree` 纯 owner，负责 window/workspace/pane/tab identity、split、resize、move、activate、close、windowId scoped storage；记录只允许 `runtimeKey` identity，不允许 runtime/buffer/transport/render state。
+- 已新增 `mac/src/app/workspace/workbench-model.ts`，并把 `mac/src/app/workbench.ts` 降为薄 re-export，生产 UI 兼容旧 import，但纯语义已下沉到 workspace owner 路径。
+- 已新增 `mac/src/app/workspace/workspace-store.test.ts`：覆盖 load/save by windowId、split right/down、resize、move tab、activate pane/tab、close tab/pane、invalid persisted record 显式失败、runtime-owned state 反向拒绝。
+- 已同步 `mac/docs/function-map.md`、`mac/docs/mainline-call-map.json`、`mac/docs/testing/mac-desktop-workspace-test-design.md`、`mac/docs/desktop-workspace-plan.md`、`mac/task.md`，并把 architecture truth gate 升级到锁 `MacWorkspaceStore` anchored binding。
+- 验证：`pnpm --dir mac exec vitest run src/lib/mac-architecture-truth.test.ts src/app/workspace/workspace-store.test.ts src/app/workbench.test.ts --reporter dot` PASS（3 files / 31 tests）；`pnpm --dir mac test -- --reporter dot` PASS（16 files / 76 tests）；`pnpm --dir mac run type-check` PASS；`pnpm --dir mac run build` PASS。
+- 未跑 packaged/live smoke；本轮无 Electron main/preload/window/fs/runtime 行为改动。剩余：`MacDesktopApp` 尚未按 real `windowId` bootstrap `MacWorkspaceStore`，`MacAppShell` 仍是单 runtime，下一步进入 `MacRuntimeRegistry` 或先做 workspace store renderer integration。
+
+## 2026-07-04 Mac desktop workspace Slice 3 runtime registry
+- 已新增 `mac/src/app/runtime/MacRuntimeRegistry.ts`：`MacRuntimeRegistry` 是当前生产路径唯一 runtime owner，负责 `runtimeKey -> TerminalRuntimeController`、connect signature 去重、active/idle、release/dispose、runtime projection subscription、input/viewport/resize 按 key 路由。
+- 已改 `MacAppShell`：不再 `createTerminalRuntime` / `useTerminalRuntimeState`，改为创建 `createMacRuntimeRegistry()`；根据 workbench live tabs ensure runtime，根据 active tab 设置 active runtime key，关闭 tab 后 release 不再存在的 runtime key。
+- 已改 `MacPaneWorkbench`：pane UI 不再调用 `connectRemote` / `connectLocalTmux`；`MacTerminalPane` 只用 `useMacRuntimeState(registry, runtimeKey)` 消费投影，并把 input/viewport/resize 交给 registry。
+- 已改 `workbench-model`：connection/local tmux tab 带 client-side `runtimeKey` identity；不保存 controller/buffer/render state。
+- 已新增/同步测试：`MacRuntimeRegistry.test.ts` 覆盖 distinct/reuse/connect once/local tmux/active idle/same active no reconnect/hidden no dispose/release only target/stale event isolation/input viewport resize routing；Pane/Shell 测试改为验证 registry owner 边界。
+- 已同步 `function-map`、`mainline-call-map`、test design、desktop plan、task，并升级 architecture truth gate：`MacAppShell` 禁 `createTerminalRuntime`，`MacPaneWorkbench` 禁 `.connectRemote` / `.connectLocalTmux`。
+- 已通过 targeted：`pnpm --dir mac exec vitest run src/app/runtime/MacRuntimeRegistry.test.ts src/app/MacPaneWorkbench.test.tsx src/app/MacPaneWorkbench.split.test.tsx src/app/MacPaneWorkbench.pane-ratios.test.tsx src/app/MacAppShell.layout.test.tsx src/app/workbench.test.ts --reporter dot` PASS（6 files / 47 tests）。
+- 后续验证：targeted architecture/runtime/workspace gate PASS（6 files / 56 tests）；Mac core connection gate PASS（4 files / 12 tests）；Mac full tests PASS（17 files / 89 tests）；`pnpm --dir mac run type-check` PASS；`pnpm --dir mac run build` PASS；`git diff --check` PASS。
+- Live smoke：创建专用 `zterm_mac_goal_a` / `zterm_mac_goal_b`，单 dev Electron + CDP 9342 打开；UI 成功 split 出两个 pane，分别显示 `Local tmux · zterm_mac_goal_a` / `Local tmux · zterm_mac_goal_b` 且两个 runtime pill 均为 `connected`。证据：`mac/evidence/2026-07-04-runtime-registry-smoke/two-pane-connected.png` 和 `two-pane-connected-dom.json`。
+- Live smoke 缺口：dev Electron 下 DOM synthetic KeyboardEvent 与 CDP `page.keyboard` 均未让 React terminal input 写入 tmux（tmux capture 仍为空），符合 2026-06-02 记录的 dev automation 限制。OS-level `System Events` 前台应用查询卡住，已 Ctrl-C 停止，未发送按键。不能声明 input/echo A-B isolation 已 live 闭环；只能声明 two-pane connect/render surface 已 live 观察。
+
+## 2026-07-04 Mac desktop workspace Slice 4 server directory
+- 已新增 `mac/src/app/server-directory/MacServerDirectory.ts`：`MacServerDirectory` 是 projection-only owner，负责 saved server/session projection、optional live session snapshot projection、open session 标记、explicit open intent builder；不导入 workspace mutator、runtime registry 或 terminal runtime。
+- 已新增 `MacServerDirectoryRail` 并接入 `MacAppShell` 左 rail：rail refresh/projection 不创建 tab，只有 explicit session click 才经 `resolveMacServerDirectoryOpenIntent` -> `openConnectionInWorkbench` 打开 workspace tab。
+- 已同步 `function-map`、`mainline-call-map`、test design、spec/architecture/desktop plan/task；`MAC-05-ServerDirectory`、`MAC-06-OpenTabIntent`、`MAC-EDGE-0006`、`MAC-EDGE-0007` 均 anchored。
+- 已新增/同步测试：`MacServerDirectory.test.ts` 覆盖 server identity grouping、optional live snapshots、projection-only refresh、open unavailable saved session 不被关闭、duplicate endpoint dedupe、explicit open intent 不变异 projection、unknown server 显式错误；`MacAppShell.layout.test.tsx` 覆盖 rail 渲染和 explicit click open。
+- 验证：targeted `src/lib/mac-architecture-truth.test.ts src/app/server-directory/MacServerDirectory.test.ts src/app/MacAppShell.layout.test.tsx` PASS（3 files / 25 tests）；Mac full tests PASS（18 files / 99 tests）；`pnpm --dir mac run type-check` PASS；`pnpm --dir mac run build` PASS；`git diff --check` PASS。
+- 未跑 packaged smoke；本轮未改 Electron main/preload/window/local fs。剩余：remote daemon live refresh wiring 未接生产路径，file browser/multi-window/legacy cleanup 仍 pending。
+
+## 2026-07-04 Mac desktop workspace Slice 5 window manager
+- 已新增 `mac/electron/window-manager.ts`：`MacWindowManager` 是 BrowserWindow/windowId owner，负责 create/focus/restore、New Window menu 模板、renderer URL/file query 注入 `windowId`、open window record store、quit 前保留 open records、重启 `restoreWindows()`。
+- 已改 `mac/electron/main.ts`：正常 app 创建 `MacWindowManager`，`app ready` 走 `restoreWindows()`，`activate` 走 `restoreOrCreateWindow()`，`before-quit` 走 `prepareForQuit()`；新增 `zterm:window:create` IPC，preload 暴露 `window.ztermMac.windowManager.createWindow()`。
+- 已改 renderer bootstrap：`MacDesktopApp` 从 URL query 读取 `windowId`；`MacAppShell` 用 `MacWorkspaceStore` 按 `zterm:mac:workspace:v1:<windowId>` load/save workspace identity，不写旧 `zterm:mac:shell-workspace:v1`，不保存 runtime/buffer/transport state。
+- 已新增/同步测试：`window-manager.test.ts` 覆盖 dev/file windowId 注入、create/focus/closed、New Window menu、quit 保留 records 并按同 windowId restore；`window-id.test.ts` 覆盖 renderer query；`MacDesktopApp` / `MacAppShell` 测试覆盖 windowId 透传、window-scoped workspace save、New Window IPC；architecture truth gate 锁 `MacWindowManager` anchored。
+- 验证：targeted window/architecture/layout PASS（5 files / 30 tests，后续 record restore targeted 3 files / 28 tests）；Mac full tests PASS（20 files / 111 tests）；`pnpm --dir mac run type-check` PASS；`pnpm --dir mac run build` PASS；`pnpm --dir mac run package` PASS；`git diff --check` PASS。
+- Packaged smoke：`mac/evidence/2026-07-04-window-manager-smoke/restore-before-quit.json` 证明 IPC 创建第二窗口，两个窗口 `windowId` 为 `mac-window-33350880-a8eb-4afe-922d-c419aebd0520` / `mac-window-ea3e0530-0c47-4e5c-9a80-7c3e8949905a`；`restore-after-reopen.json` 证明 quit/reopen 后恢复同两个 `windowId`；`restore-after-reopen.png` 是截图；资源证据 `restore-top-86062.txt` 显示 PID 86062 两次 top CPU 0.0、约 42MB；退出后 `restore-cdp-after-quit.txt` / `restore-main-process-after-quit.txt` / `restore-process-after-quit.txt` 证明 9343 端口和明确 PID 消失。
+- 自动化缺口：`System Events` Cmd+N 注入卡住，已 Ctrl-C 中断明确 osascript 会话；本轮改用正式 preload IPC 走同一个 `MacWindowManager.createWindow()` owner 做 packaged smoke，不用辅助功能权限作为验证真源。
+
+## 2026-07-04 14:17 Mac desktop workspace Slice file browser plan
+- 本轮 owner：`mac.file_browser_core` -> `packages/shared/src/files/file-browser-core.ts`；`mac.platform_fs` -> `mac/electron/file-system.ts` + preload `window.ztermMac.fileSystem`；`mac.file_browser_ui` -> `mac/src/app/file-browser/MacFileBrowserPanel.tsx`。
+- 架构边界：FileBrowserCore 只做路径/排序/预览 policy，不导入 React/Electron/terminal/runtime/platform fs；Electron adapter 只做 local fs IO/dialog IPC，不做文本/二进制/大文件预览策略；React UI 只持有打开面板、目录、选中文件、confirm/error/loading projection。
+- 主线：`MAC-04-WorkspaceShell -> MAC-12-FileBrowserOpen -> MAC-13-FileProviderRead -> MAC-14-FilePreview`。显式 toolbar/command 打开，不能由 terminal runtime connect/disconnect 触发。
+- 测试先行：shared core unit 覆盖 normalize/join/sort/text/binary/large-confirm/provider-error；Electron adapter test 覆盖 readdir/read/select-dir/mkdir/save-file raw result；UI component test 覆盖 browse fixture、text preview、binary disabled、large confirm、no runtime connect；architecture gate 锁 core import 与 adapter policy 边界。
+- 必跑验证：targeted shared/core + mac fs/UI/architecture；full Mac test/type-check/build/diff-check；因 main/preload/local fs 改动，必须 package + packaged fs smoke。Live runtime A/B input/resize/switch/close 仍是后续缺口，不用本地 file browser smoke 替代。
+
+## 2026-07-04 Mac desktop workspace file browser closeout
+- 已新增 `packages/shared/src/files/file-browser-core.ts`：唯一拥有 local path normalize/join/parent、directory-first sort、provider error projection、text/binary/large-text preview policy；不导入 React/Electron/terminal/runtime。
+- 已新增 `mac/electron/file-system.ts`：唯一 local fs IPC adapter owner，注册 `zterm:fs:*` 与 `select-directory`，只返回 raw fs facts/错误；`mac/electron/main.ts` 不再散落 fs handlers；`preload.ts` 与 packaged 真入口 `preload.cts` 均暴露 `window.ztermMac.fileSystem`。
+- 已新增 `mac/src/app/file-browser/MacFileBrowserPanel.tsx` 并接入 `MacAppShell` 的显式 `Files` 按钮；UI 只消费 shared policy + platform provider，不调用 runtime connect/disconnect。
+- 已同步 `function-map`、`mainline-call-map`、test design、spec/architecture/desktop plan/task；`MAC-12/13/14` 与 `MAC-EDGE-0013/0014/0015` 均 anchored。
+- 验证：shared full tests PASS（33 files / 276 tests）；Mac full tests PASS（22 files / 123 tests）；targeted file/architecture PASS（4 files / 33 tests）；type-check PASS；build PASS；package PASS；`git diff --check` PASS。
+- Packaged fs smoke：新包以 CDP 9344 启动，真实 `window.ztermMac.fileSystem` readdir/readFile/selectDirectory 可用；fixture 列表包含 `src/image.png/large.log/README.md`；README 文本预览显示 `text preview ok`；PNG 预览 disabled；`large.log` 先出现 confirm，再显示文本。证据：`mac/evidence/2026-07-04-file-browser-smoke/file-browser-dom.json`、`file-browser.png`、`ipc-race.json`。
+- 资源/退出：PID `5248` 资源采样写入 `top-before-quit.txt`；通过 CDP `Browser.close` 退出；`cdp-after-quit.txt` 为空，`process-after-quit.txt` 只有 header，证明 9344 端口和明确 PID 消失。
+- 自动化经验：packaged React controlled input 不能靠直接 `input.value = ...` 作为 smoke 真源，需先 focus/select 再用 CDP `Input.insertText`，否则 React state 可能不更新；Electron packaged 实际 preload 是 `preload.cts -> preload.cjs`，改 bridge 必须同时更新 `.ts` 与 `.cts`。
+
+## 2026-07-04 Mac runtime live isolation closeout
+- Packaged app + CDP 自动化下，`tmux capture-pane` 不能稳定作为 detached `cat` fixture 的输入 oracle；本轮改用专用 session 的 `tmux pipe-pane -o` 日志，且只操作 `zterm_mac_goal_a` / `zterm_mac_goal_b`，不写用户已有 session。
+- 发现并修复 shared `PaneStage` 生产 resize bug：divider 实际包在 `display: contents` wrapper 下，旧代码用 `event.currentTarget.parentElement` 取到 wrapper，`stageWidth=0` 导致 drag resize 无效；改为 `closest('[data-testid="pane-stage-split"]')`，并补 `MacPaneWorkbench.pane-ratios.test.tsx` 生产结构回归。
+- 发现并修复 close active pane root 清空 bug：`MacPaneWorkbench` UI 层手写 close pane 时绕过 `workbench-model.closeTab`，删除 active pane 后留下 dangling `activePaneId`，随后 `MacWorkspaceStore.parse` 抛错导致 React root 空白；改为 UI close 调 `closeTab` owner，并补 `workbench.test.ts` 与 `MacPaneWorkbench.test.tsx` 回归。
+- Packaged live4 smoke 已闭环：正式 launcher 打开 `zterm_mac_goal_a/b`，A/B 均 connected；B marker 只进 B pipe，A marker 只进 A pipe；divider drag 后 pane 宽度 `1752/1752 -> 2249.164/1254.836`，workspace size `0.5/0.5 -> 0.641884/0.358116`，marker 仍隔离；切 B/A active 状态正确；关闭 A 后只剩 B pane，root 仍 mounted，B after-close marker 只进 B。证据：`mac/evidence/2026-07-04-runtime-live-isolation-smoke/live4-full-runtime-isolation-result.json`、`live4-after-close-b-input.png`、`live4-pipe-a.log`、`live4-pipe-b.log`。
+- 资源/退出：live4 packaged app 端口 owner PID `75136`，`live4-top-before-quit-75136.txt` 采样完成；CDP `Browser.close` 后 `live4-cdp-after-quit.txt` / `live4-lsof-after-quit.txt` 为空，`live4-ps-after-quit-75136.txt` 只有 header。
+
+## 2026-07-04 Mac server directory remote refresh slice
+- 本片 owner：`mac.server_directory`；主线追加 `MAC-17-ServerLiveRefresh`。唯一允许链路是 `MacServerDirectoryRail refresh click -> MacAppShell thin async orchestration -> fetchMacServerDirectoryLiveSessionSnapshot -> projectMacServerDirectory`。
+- 架构边界：refresh 只能更新 `liveSessions` 和每 server refresh status/error 投影；不得调用 `openConnectionInWorkbench`、`addHost`、`setBridgeSettings`、`MacRuntimeRegistry.ensureRuntime`，不得 close/prune 已打开或 saved sessions。
+- 测试设计：正向锁 refresh 成功后 live sessions 出现在 rail；反向锁缺 token/daemon error 显式显示错误且保留 saved/open sessions，不包装成 empty success。
+- Live smoke 只做 read-only daemon `list-sessions` 观测；Jason 已允许用 Mac Studio daemon 和现有 sessions 做观测，但不能向现有用户 sessions 写 input。
+
+## 2026-07-04 Mac legacy cleanup closeout
+- 本片 owner：`mac.legacy_cleanup`；主线 `MAC-16-LegacyRemoval -> MAC-04-WorkspaceShell` 已从 pending 升级为 anchored，验证入口是 `mac/src/lib/mac-architecture-truth.test.ts`。
+- 已物理删除旧 all-in-one `ShellWorkspace` 页面/lib/旧 split-tree 测试：`mac/src/pages/ShellWorkspace.tsx`、`mac/src/pages/ShellWorkspace.split-tree.test.tsx`、`mac/src/lib/shell-workspace.ts`；同时删除孤立 `.shell-workspace-root` CSS。
+- 保留范围：`QuickConnectSheet`、`DetailsSlot`、`TerminalSlot`、`SessionScheduleModal`、`RemoteScreenshotSheet`、`FileTransferSheet`、`bridge-transport` 等独立组件/协议 helper 未删除；它们不是 workspace fallback，后续需按各自 owner 重新接入。
+- 旧 `localStorage["zterm:mac:shell-workspace:v1"]` 在用户数据里可能仍残留，但新 production 路径不读写。当前 hard gate 锁文件不存在、生产源码无 `ShellWorkspace` 引用、packaged DOM 无 `.shell-workspace-root`。
+- 验证：targeted cleanup/workspace/runtime/server/file 11 files / 99 tests PASS；Mac full 21 files / 124 tests PASS；shared full 33 files / 276 tests PASS；type-check/build/package/diff-check PASS；final packaged smoke 9348 证明新包渲染新 shell 且旧 root 不存在，资源/退出证据在 `mac/evidence/2026-07-04-legacy-cleanup-smoke/`。

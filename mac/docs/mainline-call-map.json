@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "lifecycles": [
+    {
+      "lifecycle_id": "mac_desktop_mainline",
+      "title": "Mac desktop workspace mainline",
+      "entrypoint": "MAC-00-AppEntry",
+      "return_path": "MAC-11-Renderer",
+      "canonical_docs": [
+        "mac/docs/spec.md",
+        "mac/docs/architecture.md",
+        "mac/docs/desktop-workspace-plan.md",
+        "mac/docs/function-map.md",
+        "mac/docs/testing/mac-desktop-workspace-test-design.md"
+      ],
+      "nodes": [
+        {
+          "id": "MAC-00-AppEntry",
+          "label": "App entry",
+          "owner_feature": "mac.entrypoint",
+          "entrypoint": "mac/src/App.tsx",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-01-DesktopBootstrap",
+          "label": "Desktop bootstrap",
+          "owner_feature": "mac.entrypoint",
+          "entrypoint": "MacDesktopApp",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-02-WindowRecord",
+          "label": "Window record",
+          "owner_feature": "mac.window_lifecycle",
+          "entrypoint": "createMacWindowManager(...) in mac/electron/window-manager.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-03-WorkspaceLoad",
+          "label": "Workspace load",
+          "owner_feature": "mac.workspace_store",
+          "entrypoint": "createMacWorkspaceStore(...).load(windowId) in mac/src/app/workspace/workspace-store.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-04-WorkspaceShell",
+          "label": "Workspace shell render",
+          "owner_feature": "mac.workspace_store",
+          "entrypoint": "current MacAppShell transitional shell",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-05-ServerDirectory",
+          "label": "Server directory projection",
+          "owner_feature": "mac.server_directory",
+          "entrypoint": "projectMacServerDirectory(input) in mac/src/app/server-directory/MacServerDirectory.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-17-ServerLiveRefresh",
+          "label": "Server live refresh",
+          "owner_feature": "mac.server_directory",
+          "entrypoint": "fetchMacServerDirectoryLiveSessionSnapshot(...) in mac/src/app/server-directory/MacServerDirectory.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-06-OpenTabIntent",
+          "label": "Open tab intent",
+          "owner_feature": "mac.server_directory",
+          "entrypoint": "resolveMacServerDirectoryOpenIntent(...) in mac/src/app/server-directory/MacServerDirectory.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-07-PaneTreeUpdate",
+          "label": "Pane tree update",
+          "owner_feature": "mac.workspace_store",
+          "entrypoint": "splitMacWorkspacePane / moveMacWorkspaceTab / resizeMacWorkspacePanes",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-08-RuntimeEnsure",
+          "label": "Runtime ensure",
+          "owner_feature": "mac.runtime_registry",
+          "entrypoint": "MacRuntimeRegistry.ensureRuntime(target) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-09-RuntimeActivity",
+          "label": "Runtime activity",
+          "owner_feature": "mac.runtime_registry",
+          "entrypoint": "MacRuntimeRegistry setActiveRuntimeKey/releaseRuntime in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-10-TerminalProjection",
+          "label": "Terminal projection consumption",
+          "owner_feature": "mac.terminal_pane",
+          "entrypoint": "MacTerminalPane nested in mac/src/app/MacPaneWorkbench.tsx",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-11-Renderer",
+          "label": "Shared terminal renderer",
+          "owner_feature": "mac.terminal_pane",
+          "entrypoint": "MacTerminalView from @zterm/shared",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-12-FileBrowserOpen",
+          "label": "File browser open",
+          "owner_feature": "mac.file_browser_ui",
+          "entrypoint": "MacFileBrowserPanel in mac/src/app/file-browser/MacFileBrowserPanel.tsx",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-13-FileProviderRead",
+          "label": "File provider read",
+          "owner_feature": "mac.platform_fs",
+          "entrypoint": "registerMacFileSystemIpcHandlers(...) in mac/electron/file-system.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-14-FilePreview",
+          "label": "File preview projection",
+          "owner_feature": "mac.file_browser_core",
+          "entrypoint": "FileBrowserCore policy functions in packages/shared/src/files/file-browser-core.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-15-WindowRestore",
+          "label": "Window restore",
+          "owner_feature": "mac.window_lifecycle",
+          "entrypoint": "MacWindowManager.restoreWindows() / restoreOrCreateWindow() in mac/electron/window-manager.ts",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-16-LegacyRemoval",
+          "label": "Legacy removal gate",
+          "owner_feature": "mac.legacy_cleanup",
+          "entrypoint": "mac/src/lib/mac-architecture-truth.test.ts",
+          "status": "anchored"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "MAC-EDGE-0001",
+          "from": "MAC-00-AppEntry",
+          "to": "MAC-01-DesktopBootstrap",
+          "owner_feature": "mac.entrypoint",
+          "caller": "App in mac/src/App.tsx",
+          "callee": "MacDesktopApp in mac/src/app/MacDesktopApp.tsx",
+          "semantic_input": "renderer root render",
+          "semantic_output": "desktop bootstrap component",
+          "status": "anchored",
+          "verification_gates": ["mac/src/App.test.tsx", "pnpm --dir mac test -- --reporter dot"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0002",
+          "from": "MAC-01-DesktopBootstrap",
+          "to": "MAC-02-WindowRecord",
+          "owner_feature": "mac.window_lifecycle",
+          "caller": "Electron app/menu/IPC lifecycle in mac/electron/main.ts",
+          "callee": "createMacWindowManager(...).createWindow() / restoreWindows() in mac/electron/window-manager.ts",
+          "semantic_input": "renderer bootstrap needs current windowId",
+          "semantic_output": "stable BrowserWindow record and renderer URL query windowId",
+          "status": "anchored",
+          "verification_gates": ["mac/src/electron/window-manager.test.ts", "packaged multi-window restore smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0003",
+          "from": "MAC-02-WindowRecord",
+          "to": "MAC-03-WorkspaceLoad",
+          "owner_feature": "mac.workspace_store",
+          "caller": "MacDesktopApp resolves renderer windowId and MacAppShell bootstrap",
+          "callee": "createMacWorkspaceStore(localStorage).load(windowId)",
+          "semantic_input": "renderer windowId query",
+          "semantic_output": "window-scoped workspace record in zterm:mac:workspace:v1:<windowId>",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/window/window-id.test.ts", "mac/src/app/MacDesktopApp.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0004",
+          "from": "MAC-03-WorkspaceLoad",
+          "to": "MAC-04-WorkspaceShell",
+          "owner_feature": "mac.workspace_store",
+          "caller": "MacWorkspaceStore",
+          "callee": "MacWorkspaceShell render",
+          "semantic_input": "workspace record",
+          "semantic_output": "workspace shell view model",
+          "status": "binding pending",
+          "verification_gates": ["future workspace shell tests"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0005",
+          "from": "MAC-01-DesktopBootstrap",
+          "to": "MAC-04-WorkspaceShell",
+          "owner_feature": "mac.entrypoint",
+          "caller": "MacDesktopApp in mac/src/app/MacDesktopApp.tsx",
+          "callee": "MacAppShell in mac/src/app/MacAppShell.tsx",
+          "semantic_input": "shared host and bridge settings storage",
+          "semantic_output": "current transitional workspace shell props",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacDesktopApp.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0006",
+          "from": "MAC-05-ServerDirectory",
+          "to": "MAC-06-OpenTabIntent",
+          "owner_feature": "mac.server_directory",
+          "caller": "MacAppShell serverDirectoryProjection render in mac/src/app/MacAppShell.tsx",
+          "callee": "MacServerDirectoryRail explicit session click -> resolveMacServerDirectoryOpenIntent",
+          "semantic_input": "selected server/session from server rail projection",
+          "semantic_output": "explicit open-tab intent only after user click",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0018",
+          "from": "MAC-05-ServerDirectory",
+          "to": "MAC-17-ServerLiveRefresh",
+          "owner_feature": "mac.server_directory",
+          "caller": "MacServerDirectoryRail refresh button -> MacAppShell.handleRefreshServerDirectoryServer in mac/src/app/MacAppShell.tsx",
+          "callee": "fetchMacServerDirectoryLiveSessionSnapshot(...) in mac/src/app/server-directory/MacServerDirectory.ts",
+          "semantic_input": "explicit refresh intent for one server with bridge host, port, and token",
+          "semantic_output": "live tmux session snapshot or explicit refresh error for that server",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "read-only remote daemon refresh smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0019",
+          "from": "MAC-17-ServerLiveRefresh",
+          "to": "MAC-05-ServerDirectory",
+          "owner_feature": "mac.server_directory",
+          "caller": "MacAppShell live snapshot/status state in mac/src/app/MacAppShell.tsx",
+          "callee": "projectMacServerDirectory(input) in mac/src/app/server-directory/MacServerDirectory.ts",
+          "semantic_input": "saved servers, open session keys, live session snapshots, and refresh state records",
+          "semantic_output": "server rail projection with live sessions and refresh status/error labels only",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0007",
+          "from": "MAC-06-OpenTabIntent",
+          "to": "MAC-03-WorkspaceLoad",
+          "owner_feature": "mac.workspace_store",
+          "caller": "MacAppShell handleOpenServerDirectorySession",
+          "callee": "openConnectionInWorkbench(...) in mac/src/app/workspace/workbench-model.ts",
+          "semantic_input": "explicit server directory open intent",
+          "semantic_output": "workspace connection tab identity persisted in current transitional workbench state",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "mac/src/app/workbench.test.ts"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0008",
+          "from": "MAC-03-WorkspaceLoad",
+          "to": "MAC-07-PaneTreeUpdate",
+          "owner_feature": "mac.workspace_store",
+          "caller": "splitMacWorkspacePane / moveMacWorkspaceTab / resizeMacWorkspacePanes in mac/src/app/workspace/workspace-store.ts",
+          "callee": "shared workspace-model addPaneToWorkspace / moveTabBetweenPanes / resizePaneRatio",
+          "semantic_input": "workspace pane operation over a MacWorkspaceRecord",
+          "semantic_output": "updated pane tree/workspace identity record without runtime state",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/workspace/workspace-store.test.ts"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0009",
+          "from": "MAC-03-WorkspaceLoad",
+          "to": "MAC-08-RuntimeEnsure",
+          "owner_feature": "mac.runtime_registry",
+          "caller": "MacAppShell runtimeEnsureTargets effect in mac/src/app/MacAppShell.tsx",
+          "callee": "MacRuntimeRegistry.ensureRuntime(target) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "semantic_input": "live workbench tab target with runtimeKey",
+          "semantic_output": "runtime controller connected once per key/signature",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0010",
+          "from": "MAC-08-RuntimeEnsure",
+          "to": "MAC-09-RuntimeActivity",
+          "owner_feature": "mac.runtime_registry",
+          "caller": "MacAppShell activeRuntimeKey effect in mac/src/app/MacAppShell.tsx",
+          "callee": "MacRuntimeRegistry.setActiveRuntimeKey(runtimeKey) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "semantic_input": "active tab runtimeKey or null",
+          "semantic_output": "previous runtime idle, next runtime active, hidden runtimes retained",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0011",
+          "from": "MAC-09-RuntimeActivity",
+          "to": "MAC-10-TerminalProjection",
+          "owner_feature": "mac.terminal_pane",
+          "caller": "useMacRuntimeState(registry, runtimeKey) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "callee": "MacTerminalPane in mac/src/app/MacPaneWorkbench.tsx",
+          "semantic_input": "assigned runtime render state",
+          "semantic_output": "terminal pane projection props and runtime-scoped input/viewport/resize callbacks",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0012",
+          "from": "MAC-10-TerminalProjection",
+          "to": "MAC-11-Renderer",
+          "owner_feature": "mac.terminal_pane",
+          "caller": "MacTerminalPane",
+          "callee": "MacTerminalView from @zterm/shared",
+          "semantic_input": "render projection and input callback",
+          "semantic_output": "visible terminal and user input events",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "live terminal smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0013",
+          "from": "MAC-04-WorkspaceShell",
+          "to": "MAC-12-FileBrowserOpen",
+          "owner_feature": "mac.file_browser_ui",
+          "caller": "MacAppShell Files button in mac/src/app/MacAppShell.tsx",
+          "callee": "MacFileBrowserPanel in mac/src/app/file-browser/MacFileBrowserPanel.tsx",
+          "semantic_input": "explicit local file browser command",
+          "semantic_output": "file browser panel opened without terminal runtime mutation",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "packaged fs smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0014",
+          "from": "MAC-12-FileBrowserOpen",
+          "to": "MAC-13-FileProviderRead",
+          "owner_feature": "mac.platform_fs",
+          "caller": "MacFileBrowserPanel",
+          "callee": "window.ztermMac.fileSystem preload bridge backed by registerMacFileSystemIpcHandlers",
+          "semantic_input": "directory select/list or file read request",
+          "semantic_output": "raw file provider result or explicit error",
+          "status": "anchored",
+          "verification_gates": ["mac/src/electron/file-system.test.ts", "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx", "packaged fs smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0015",
+          "from": "MAC-13-FileProviderRead",
+          "to": "MAC-14-FilePreview",
+          "owner_feature": "mac.file_browser_core",
+          "caller": "MacFileBrowserPanel",
+          "callee": "FileBrowserCore policy functions from packages/shared/src/files/file-browser-core.ts",
+          "semantic_input": "file facts and preview bytes",
+          "semantic_output": "text preview, large-file confirm, or binary-disabled projection",
+          "status": "anchored",
+          "verification_gates": ["packages/shared/src/files/file-browser-core.test.ts", "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0016",
+          "from": "MAC-02-WindowRecord",
+          "to": "MAC-15-WindowRestore",
+          "owner_feature": "mac.window_lifecycle",
+          "caller": "app ready/activate/menu New Window in mac/electron/main.ts",
+          "callee": "MacWindowManager.restoreWindows() / restoreOrCreateWindow()",
+          "semantic_input": "app launch restore records, macOS activate, or explicit New Window intent",
+          "semantic_output": "restore persisted open windows by stable windowId, focus last managed window, or create a fresh BrowserWindow",
+          "status": "anchored",
+          "verification_gates": ["mac/src/electron/window-manager.test.ts", "packaged multi-window restore smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0017",
+          "from": "MAC-16-LegacyRemoval",
+          "to": "MAC-04-WorkspaceShell",
+          "owner_feature": "mac.legacy_cleanup",
+          "caller": "architecture truth gate",
+          "callee": "new workspace shell replacement nodes",
+          "semantic_input": "legacy production path scan",
+          "semantic_output": "ShellWorkspace source files absent and no production imports remain after cleanup slice",
+          "status": "anchored",
+          "verification_gates": ["mac/src/lib/mac-architecture-truth.test.ts", "full Mac tests"]
+        }
+      ]
+    }
+  ]
+}

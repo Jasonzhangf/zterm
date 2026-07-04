@@ -6,9 +6,13 @@ type LocalTerminalBufferPayload = { revision: number; startIndex: number; endInd
 
 contextBridge.exposeInMainWorld('ztermMac', {
   platform: 'mac',
+  windowManager: {
+    createWindow: () =>
+      ipcRenderer.invoke('zterm:window:create') as Promise<{ ok: boolean; windowId?: string; error?: string }>,
+  },
   fileSystem: {
     readdir: (dirPath: string) =>
-      ipcRenderer.invoke('zterm:fs:readdir', { dirPath }) as Promise<{ ok: boolean; entries: Array<{ name: string; type: string; size: number; modified: number }>; error?: string }>,
+      ipcRenderer.invoke('zterm:fs:readdir', { dirPath }) as Promise<{ ok: boolean; path: string; entries: Array<{ name: string; type: string; size: number; modified: number; modifiedMs?: number; path?: string }>; error?: string }>,
     saveFile: (dirPath: string, fileName: string, dataBase64: string) =>
       ipcRenderer.invoke('zterm:fs:save-file', { dirPath, fileName, dataBase64 }) as Promise<{ ok: boolean; path?: string; error?: string }>,
     readFile: (filePath: string) =>
@@ -17,6 +21,8 @@ contextBridge.exposeInMainWorld('ztermMac', {
       ipcRenderer.invoke('zterm:fs:mkdir', { dirPath }) as Promise<{ ok: boolean; error?: string }>,
     getDownloadDir: () =>
       ipcRenderer.invoke('zterm:fs:get-download-dir') as Promise<string>,
+    selectDirectory: () =>
+      ipcRenderer.invoke('zterm:fs:select-directory') as Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>,
   },
   localTmux: {
     listSessions: () => ipcRenderer.invoke('zterm:local-tmux:list-sessions') as Promise<string[]>,

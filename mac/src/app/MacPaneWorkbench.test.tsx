@@ -14,8 +14,8 @@
  * 用 inline `mac-pane-header` + `mac-tab-pill` 而非 shared PaneTabs。
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MacPaneWorkbench } from './MacPaneWorkbench';
 import {
   createInitialWorkbenchState,
@@ -24,22 +24,9 @@ import {
   splitActivePaneRight,
   type MacWorkbenchState,
 } from './workbench';
-import type { EditableHost, Host, BridgeSettings } from '@zterm/shared';
-import type { TerminalRuntimeController } from '../lib/terminal-runtime';
+import type { EditableHost, BridgeSettings } from '@zterm/shared';
 import type { TerminalRuntimeState } from '../lib/terminal-runtime';
-
-function makeHost(id: string, name: string): Host {
-  return {
-    id,
-    name,
-    bridgeHost: '127.0.0.1',
-    bridgePort: 3333,
-    sessionName: name,
-    authType: 'password',
-    tags: [],
-    pinned: false,
-  };
-}
+import type { MacRuntimeRegistry } from './runtime/MacRuntimeRegistry';
 
 function makeBridgeSettings(): BridgeSettings {
   return {
@@ -53,28 +40,22 @@ function makeBridgeSettings(): BridgeSettings {
   } as any;
 }
 
-function makeRuntimeStub(): TerminalRuntimeController {
+function makeRuntimeRegistryStub(runtimeState = makeRuntimeState()): MacRuntimeRegistry {
   return {
-    getState: () => ({}) as any,
-    subscribe: () => () => {},
-    connectRemote: vi.fn(),
-    connectLocalTmux: vi.fn(),
-    disconnect: vi.fn(),
-    setActivityMode: vi.fn(),
-    updateViewport: vi.fn(),
-    requestScheduleList: vi.fn(),
-    upsertScheduleJob: vi.fn(),
-    deleteScheduleJob: vi.fn(),
-    toggleScheduleJob: vi.fn(),
-    runScheduleJobNow: vi.fn(),
-    sendInput: vi.fn(),
-    pasteImage: () => true,
-    resizeTerminal: vi.fn(),
-    requestRemoteScreenshot: () => true,
-    sendRawJson: () => true,
-    onFileTransferMessage: () => () => {},
+    ensureRuntime: vi.fn(() => ({}) as any),
+    getRuntime: vi.fn(() => ({}) as any),
+    getRuntimeState: vi.fn(() => runtimeState),
+    subscribeRuntime: vi.fn(() => () => {}),
+    getActiveRuntimeKey: vi.fn(() => null),
+    subscribeActiveRuntimeKey: vi.fn(() => () => {}),
+    setActiveRuntimeKey: vi.fn(),
+    sendInput: vi.fn(() => true),
+    updateViewport: vi.fn(() => true),
+    resizeTerminal: vi.fn(() => true),
+    disposeRuntime: vi.fn(),
+    releaseRuntime: vi.fn(),
     dispose: vi.fn(),
-  } as any;
+  };
 }
 
 function makeRuntimeState(): TerminalRuntimeState {
@@ -119,8 +100,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -139,8 +119,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -158,8 +137,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -167,10 +145,10 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
     expect(container.querySelector(`[data-testid="pane-tabs-${paneId}"]`)).toBeTruthy();
   });
 
-  it('does not reconnect the same active target on rerender', () => {
+  it('does not connect targets from pane rendering on rerender', () => {
     let workbench: MacWorkbenchState = createInitialWorkbenchState();
     workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));
-    const runtime = makeRuntimeStub();
+    const registry = makeRuntimeRegistryStub();
     const { rerender } = render(
       <MacPaneWorkbench
         workbench={workbench}
@@ -178,12 +156,11 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={runtime}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={registry}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    expect(runtime.connectRemote).toHaveBeenCalledTimes(1);
+    expect(registry.ensureRuntime).not.toHaveBeenCalled();
     rerender(
       <MacPaneWorkbench
         workbench={workbench}
@@ -191,18 +168,17 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={runtime}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={registry}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    expect(runtime.connectRemote).toHaveBeenCalledTimes(1);
+    expect(registry.ensureRuntime).not.toHaveBeenCalled();
   });
 
-  it('connects a local tmux tab through the same pane workbench surface', () => {
+  it('renders a local tmux tab from the assigned runtime projection', () => {
     let workbench: MacWorkbenchState = createInitialWorkbenchState();
     workbench = openLocalTmuxInWorkbench(workbench, 'rcc');
-    const runtime = makeRuntimeStub();
+    const registry = makeRuntimeRegistryStub();
     const { container } = render(
       <MacPaneWorkbench
         workbench={workbench}
@@ -210,15 +186,36 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={runtime}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={registry}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
 
-    expect(runtime.connectLocalTmux).toHaveBeenCalledWith({ sessionName: 'rcc', title: 'rcc' });
-    expect(runtime.connectRemote).not.toHaveBeenCalled();
+    expect(registry.getRuntimeState).toHaveBeenCalledWith('local-tmux:rcc');
+    expect(registry.ensureRuntime).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Local tmux · rcc');
+  });
+
+  it('routes visible terminal input to the active tab runtime key only', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));
+    const registry = makeRuntimeRegistryStub();
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={registry}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    const terminal = container.querySelector('[data-mac-terminal-input="visible-dom"]') as HTMLElement | null;
+    expect(terminal).toBeTruthy();
+    fireEvent.keyDown(terminal!, { key: 'x' });
+    expect(registry.sendInput).toHaveBeenCalledWith('remote:127.0.0.1:3333:dev', 'x');
   });
 
   it('forwards onSelectTab via shared PaneTabs callback (click a non-active tab)', () => {
@@ -232,8 +229,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
@@ -243,6 +239,35 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
     fireEvent.click(tabB!);
     // MacPaneWorkbench onSelectTab 触发 setWorkbench
     // 红测只验证 setWorkbench 被调用（具体 transition 留给 workbench 测）
+  });
+
+  it('closing the active pane routes through workbench owner and keeps activePaneId valid', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openLocalTmuxInWorkbench(workbench, 'zterm_mac_goal_a');
+    workbench = splitActivePaneRight(workbench);
+    workbench = openLocalTmuxInWorkbench(workbench, 'zterm_mac_goal_b');
+    const activePane = workbench.workspace.panes.find((pane) => pane.id === workbench.workspace.activePaneId)!;
+    let nextWorkbench = workbench;
+    const setWorkbench = (updater: any) => {
+      nextWorkbench = typeof updater === 'function' ? updater(nextWorkbench) : updater;
+    };
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={setWorkbench as any}
+        hosts={[]}
+        platform="desktop"
+        splitVisible
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    fireEvent.click(container.querySelector(`[data-testid="pane-tab-close-${activePane.activeTabId}"]`)!);
+
+    expect(nextWorkbench.workspace.panes.length).toBe(1);
+    expect(nextWorkbench.workspace.panes.some((pane) => pane.id === nextWorkbench.workspace.activePaneId)).toBe(true);
+    expect(nextWorkbench.workspace.activePaneId).not.toBe(activePane.id);
   });
 
   it('renders right-click context menu trigger on desktop (PaneTabs data-testid)', () => {
@@ -255,8 +280,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         hosts={[]}
         platform="desktop"
         splitVisible={false}
-        runtime={makeRuntimeStub()}
-        runtimeState={makeRuntimeState()}
+        runtimeRegistry={makeRuntimeRegistryStub()}
         bridgeSettings={makeBridgeSettings()}
       />,
     );
