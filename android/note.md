@@ -1,3 +1,11 @@
+# 2026-07-04 Foldable / landscape bottom quickbar lift
+
+- Jason 截图反馈折叠屏和横屏底部需要整体再往上抬一点，可能会和底边快捷栏目重合。
+- 架构映射：`feature_id=terminal.keyboard_ime`，唯一 owner 是 `src/pages/terminal-keyboard-lift.ts`、`src/pages/TerminalPage.tsx`、`src/pages/TerminalPageStageShell.tsx`；本轮只改 UI shell bottom inset/lift，不碰 `TerminalView`、buffer manager、daemon、transport。
+- Function map / feature gates / MemoryPalace 均指向同一 owner：QuickBar shell bottom 和 TerminalStageShell bottom 必须消费同一 shell 几何真相；TerminalView 不接收 IME/layout token，不触发 upstream resize。
+- 初步实现方向：新增 shell-only bottom lift policy，foldable-like wide portrait 与 landscape 加小额额外 bottom lift；`terminalChromeBottomPx = quickBarHeight + touchSafeOffset + extraLift`，QuickBar shell bottom = `terminalImeLiftPx + touchSafeOffset + extraLift`。这样快捷栏本体上抬，stage 同步预留，不会互相覆盖。
+- 测试设计：白盒测 policy 的 phone/foldable/landscape 正反；模块黑盒在 `TerminalPage.android-ime.test.tsx` 测 foldable/landscape bottom 值，且 `TerminalView` 仍无 `onResize/onWidthModeChange`；缺口是真机截图/L5 需后续设备验证。
+
 # 2026-07-03 Session resume first-tap active truth fix
 
 - Jason 现场指出切 session 时第一次切换目标未连接可用，界面不变且后续也不变，需要第二次切换才过去。

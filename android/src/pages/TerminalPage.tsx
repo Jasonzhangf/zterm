@@ -39,6 +39,7 @@ import { resolveTerminalOrientation } from '../lib/terminal-viewport-metrics';
 import {
   isKeyboardViewportAlreadyResized,
   resolveCurrentLayoutViewportHeight,
+  resolveTerminalBottomChromeLiftPx,
   resolveKeyboardLiftPx,
   resolveLayoutViewportHeight,
   resolveTerminalHeaderTopInsetPx,
@@ -185,6 +186,7 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
 });
 
 export {
+  resolveTerminalBottomChromeLiftPx,
   resolveKeyboardLiftPx,
   resolveLayoutViewportHeight,
   resolveTerminalHeaderTopInsetPx,
@@ -2300,10 +2302,16 @@ function TerminalPageComponent({
   const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
   const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const terminalBottomChromeLiftPx = resolveTerminalBottomChromeLiftPx({
+    viewportWidth,
+    viewportHeight: shellHeight,
+    landscape,
+  });
   const terminalChromeBottomPx = Math.max(
     0,
     quickBarHeight
-      + layoutProfile.quickBar.touchSafeOffsetPx,
+      + layoutProfile.quickBar.touchSafeOffsetPx
+      + terminalBottomChromeLiftPx,
   );
   const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   const visualViewportDebugWidth = typeof window !== 'undefined'
@@ -2340,6 +2348,7 @@ function TerminalPageComponent({
     terminalImeActive,
     terminalImeLiftPx,
     quickBarShellKeyboardLiftPx,
+    terminalBottomChromeLiftPx,
     terminalStageBottomPx,
     networkOnline,
     connectionIssueVisible,
@@ -2872,6 +2881,7 @@ function TerminalPageComponent({
           bottomPx={
             terminalImeLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
+            + terminalBottomChromeLiftPx
           }
         >
           {quickBarNode}

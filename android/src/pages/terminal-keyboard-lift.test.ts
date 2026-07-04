@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isKeyboardViewportAlreadyResized,
   resolveCurrentLayoutViewportHeight,
+  resolveTerminalBottomChromeLiftPx,
   resolveKeyboardLiftPx,
   resolveTerminalHeaderTopInsetPx,
 } from "./terminal-keyboard-lift";
@@ -161,5 +162,45 @@ describe("terminal-keyboard-lift", () => {
     });
     expect(resolveTerminalHeaderTopInsetPx(false)).toBe(23);
     expect(resolveTerminalHeaderTopInsetPx(true)).toBe(16);
+  });
+
+  it("does not add bottom chrome lift for normal portrait phone width", () => {
+    expect(resolveTerminalBottomChromeLiftPx({
+      viewportWidth: 393,
+      viewportHeight: 852,
+      landscape: false,
+    })).toBe(0);
+  });
+
+  it("raises foldable portrait bottom chrome above the bottom quick controls", () => {
+    expect(resolveTerminalBottomChromeLiftPx({
+      viewportWidth: 712,
+      viewportHeight: 770,
+      landscape: false,
+    })).toBe(14);
+  });
+
+  it("raises landscape bottom chrome with a compact shell lift", () => {
+    expect(resolveTerminalBottomChromeLiftPx({
+      viewportWidth: 900,
+      viewportHeight: 393,
+      landscape: true,
+    })).toBe(10);
+  });
+
+  it("does not add bottom chrome lift for desktop-like landscape height", () => {
+    expect(resolveTerminalBottomChromeLiftPx({
+      viewportWidth: 1024,
+      viewportHeight: 768,
+      landscape: true,
+    })).toBe(0);
+  });
+
+  it("does not treat a wide short viewport as foldable portrait when orientation input is stale", () => {
+    expect(resolveTerminalBottomChromeLiftPx({
+      viewportWidth: 1024,
+      viewportHeight: 768,
+      landscape: false,
+    })).toBe(0);
   });
 });

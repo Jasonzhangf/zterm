@@ -899,6 +899,184 @@ describe("TerminalPage Android IME bridge", () => {
     }
   });
 
+  it("adds foldable portrait bottom chrome lift to both stage and quickbar shell", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 712,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 712,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 770,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 770,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 712,
+          height: 770,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onLoadSavedTabList={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("198px");
+        expect(screen.getByTestId("terminal-quickbar-shell").style.bottom).toBe("14px");
+      });
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onresize")).toBe("false");
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onwidthmodechange")).toBe("false");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
+  it("adds compact landscape bottom chrome lift without entering the renderer resize path", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 900,
+          height: 393,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+          onLoadSavedTabList={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("194px");
+        expect(screen.getByTestId("terminal-quickbar-shell").style.bottom).toBe("10px");
+      });
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onresize")).toBe("false");
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onwidthmodechange")).toBe("false");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
   it("does not freeze the terminal shell height or add a second lift when Android already resized the viewport", async () => {
     const originalInnerHeight = window.innerHeight;
     const originalInnerWidth = window.innerWidth;

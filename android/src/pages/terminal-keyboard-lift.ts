@@ -1,7 +1,29 @@
 import { resolveTerminalViewportMetrics } from "../lib/terminal-viewport-metrics";
 
+const FOLDABLE_PORTRAIT_MIN_WIDTH_PX = 600;
+const FOLDABLE_PORTRAIT_BOTTOM_CHROME_LIFT_PX = 14;
+const COMPACT_LANDSCAPE_MAX_HEIGHT_PX = 480;
+const LANDSCAPE_BOTTOM_CHROME_LIFT_PX = 10;
+
 export function resolveLayoutViewportHeight() {
-  return resolveTerminalViewportMetrics().layoutHeight;
+  const metrics = resolveTerminalViewportMetrics();
+  if (typeof window === "undefined") {
+    return metrics.layoutHeight;
+  }
+
+  const currentClientHeight = Math.max(
+    0,
+    Math.round(window.document?.documentElement?.clientHeight || 0),
+  );
+  const currentVisualBottom = Math.max(
+    0,
+    Math.round((window.visualViewport?.height || 0) + (window.visualViewport?.offsetTop || 0)),
+  );
+  if (currentClientHeight <= 0 && currentVisualBottom <= 0) {
+    return 0;
+  }
+
+  return metrics.layoutHeight;
 }
 
 export function resolveCurrentLayoutViewportHeight() {
@@ -79,6 +101,35 @@ export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
 
 export function resolveWindowWidth() {
   return resolveTerminalViewportMetrics().layoutWidth;
+}
+
+export function resolveTerminalBottomChromeLiftPx({
+  viewportWidth,
+  viewportHeight,
+  landscape,
+}: {
+  viewportWidth: number;
+  viewportHeight: number;
+  landscape?: boolean;
+}) {
+  const safeViewportWidth = Math.max(0, Math.round(viewportWidth || 0));
+  const safeViewportHeight = Math.max(0, Math.round(viewportHeight || 0));
+  const resolvedLandscape =
+    landscape ?? (safeViewportHeight > 0 && safeViewportWidth > safeViewportHeight);
+
+  if (resolvedLandscape && safeViewportHeight > 0 && safeViewportHeight <= COMPACT_LANDSCAPE_MAX_HEIGHT_PX) {
+    return LANDSCAPE_BOTTOM_CHROME_LIFT_PX;
+  }
+
+  if (
+    !resolvedLandscape
+    && safeViewportWidth >= FOLDABLE_PORTRAIT_MIN_WIDTH_PX
+    && safeViewportHeight >= safeViewportWidth
+  ) {
+    return FOLDABLE_PORTRAIT_BOTTOM_CHROME_LIFT_PX;
+  }
+
+  return 0;
 }
 
 function normalizeReportedKeyboardInsetCssPx(
