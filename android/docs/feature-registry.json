@@ -854,6 +854,55 @@
       ]
     },
     {
+      "feature_id": "project.loop_governance",
+      "title": "Project loop governance and report-only triage loop",
+      "domain": "project-governance",
+      "owners": [
+        "docs/loops/LOOP.md",
+        "docs/loops/loop-manifest.json",
+        "src/lib/loop-governance-truth.test.ts"
+      ],
+      "allowed_paths": [
+        "docs/loops/LOOP.md",
+        "docs/loops/STATE.md",
+        "docs/loops/loop-constraints.md",
+        "docs/loops/loop-budget.md",
+        "docs/loops/loop-run-log.md",
+        "docs/loops/loop-manifest.json",
+        "docs/testing/loop-governance-test-design.md",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-call-map.json",
+        "src/lib/loop-governance-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "package.json",
+        "../AGENTS.md",
+        "../.agents/skills/zterm-mobile-dev/SKILL.md",
+        "note.md",
+        "MEMORY.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/pages/",
+        "src/components/",
+        "native/android/",
+        "../mac/evidence/"
+      ],
+      "required_gates": [
+        "src/lib/loop-governance-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/loops/LOOP.md",
+        "docs/loops/loop-manifest.json",
+        "docs/testing/loop-governance-test-design.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
       "feature_id": "mainline_source.android",
       "owners": [
         "native/android/app/src/main/AndroidManifest.xml"

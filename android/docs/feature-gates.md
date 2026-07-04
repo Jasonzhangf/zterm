@@ -50,6 +50,7 @@ Do not use another feature owner to compensate for a broken owner. If a feature 
 - `daemon.cli_shell`: prove `zterm-daemon.sh` command contracts, launchd/bootstrap, config writes, global install, and native helper handoff stay in CLI owners and report explicit failure instead of silently continuing.
 - `daemon.cli_node`: prove node CLI helpers stay diagnostic/harness-only, share parser behavior where required, and never become daemon runtime owners.
 - `daemon.support`: prove setup/verify/release helper scripts only validate or prepare prerequisites and cannot become hidden runtime truth.
+- `project.loop_governance`: prove the initialized loop stays in L1 report-only mode, has required loop docs/state/constraints/budget/run-log/manifest, denies product-code/runtime/daemon/git write actions, binds every report item to feature map and `mainline_call_id`, and keeps `test:feature-registry` wired to the loop truth gate.
 - `mainline_source.android`: prove Android native entry, Capacitor config, Vite entry, app shell, terminal view, and terminal page remain documented user-facing source surfaces and stay cross-linked to feature registry/function wiki gates.
 - `mainline_source.daemon`: prove daemon request paths remain anchored at `src/server/server.ts` and the documented terminal runtime modules, with function wiki gates catching owner drift.
 - `mainline_source.cli`: prove CLI release/install mainline remains anchored in shell/package scripts and generated wiki docs, with no undocumented public command surface.

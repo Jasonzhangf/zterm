@@ -1,3 +1,11 @@
+# 2026-07-04 Loop governance L1 initialization
+
+- 架构映射：新增 `feature_id=project.loop_governance`，属于 cross-block governance / prevention gate，不改 terminal runtime、daemon、UI 业务主链；唯一 owner 是 `android/docs/loops/**`、`android/docs/testing/loop-governance-test-design.md`、`android/src/lib/loop-governance-truth.test.ts` 和 registry/function map/gate 绑定。
+- 初始化结果：`zterm.daily-triage` 只启用 `L1 report-only`，允许 read/report/append run log，显式禁止 product code edits、daemon start/stop、stage/commit、push/merge。L2/L3 未启用，升级需 Jason 明确批准、maker/checker、run history、唯一 owner 和 required gates。
+- Mainline call ID：`docs/wiki/mainline-call-map.json` 每条 edge 增加 deterministic `edge_id=<lifecycle_id>:<from>-><to>`；loop manifest 的 `mainline_call_ids` 必须反查真实 edge，禁止编造调用边。
+- 防复发：`src/lib/loop-governance-truth.test.ts` 接入 `test:feature-registry`，覆盖 loop files/manifest parse、kill switch 初始 inactive、L1 禁动作、report required fields、mainline_call_id 绑定、L2/L3 disabled、测试设计存在。
+- 验证：`pnpm --dir android run test:feature-registry -- --reporter dot` PASS（4 files / 30 tests）；`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS；`git diff --check` PASS。
+
 # 2026-07-04 Foldable / landscape bottom quickbar lift
 
 - Jason 截图反馈折叠屏和横屏底部需要整体再往上抬一点，可能会和底边快捷栏目重合。

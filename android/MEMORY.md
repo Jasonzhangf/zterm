@@ -8,6 +8,8 @@
 
 ## Key Decisions
 
+- [2026-07-04] zterm recurring loop 初始化已收口为 `project.loop_governance`，当前唯一启用模式是 `zterm.daily-triage` 的 `L1 report-only`：只读项目真源、报告、追加 run log；禁止 product code edits、daemon start/stop、stage/commit、push/merge。真源文件是 `android/docs/loops/LOOP.md`、`STATE.md`、`loop-constraints.md`、`loop-budget.md`、`loop-run-log.md`、`loop-manifest.json` 和 `docs/testing/loop-governance-test-design.md`。L2/L3 未启用，必须等 L1 run history、唯一 owner/gates、maker/checker 和 Jason 明确批准。
+- [2026-07-04] `docs/wiki/mainline-call-map.json` 的每条 edge 必须有 deterministic `edge_id=<lifecycle_id>:<from>-><to>`；loop manifest 的 `mainline_call_ids` 只能引用真实 edge。`src/lib/loop-governance-truth.test.ts` 已接入 `test:feature-registry`，锁住 loop manifest、L1 禁动作、kill switch、report required fields、mainline call ID、测试设计和 L2/L3 disabled。
 - [2026-07-02] 每次开发 / 修复 / 重构必须先读 `android/docs/architecture.md` 与 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`，把方法映射到功能块、唯一 owner、allowed/forbidden paths、移除/分离/兼容保留决策和必跑 gate 后，才允许读代码并修改实现。禁止靠 grep 命中点直接 patch。
 - [2026-07-02] daemon / tmux 主链只要本机可启动真实 daemon 与 tmux，就必须跑真实闭环，不能只用单测、typecheck、静态 gate 宣称完成。当前标准命令是 `pnpm --dir android run daemon:mirror:close-loop`，会用 managed daemon + tmux oracle 跑 `codex-live/top-live/vim-live/initial-sync/local-input-echo/external-input-echo/daemon-restart-recover/schedule-fire`，再做 replay 与 strict audit。本轮已在 tmux 3.6a 上 PASS，证据在 `android/evidence/daemon-mirror/2026-07-02/summary.json`。
 - [2026-07-02] terminal 验证必须按 L0-L5 层级汇报证明范围：L2 daemon/tmux 真回环不能证明本地客户端连接；L3 Mac/Web/client core gate 不能证明 Android 真机或 packaged app；IME/drawer/renderer shell 问题必须跑 UI/WebView/设备层 gate，不能用 daemon 或 transport 低层 gate 代替。

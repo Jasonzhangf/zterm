@@ -237,6 +237,13 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - File Sync 下载保存不得把整文件 base64 合并后一次性跨 JS/native bridge 写盘；必须按 `file-download-chunk` 分块写入 native storage，并在完成后用 `stat` 校验本地字节数等于远端 `totalBytes`，失败必须显式进入 transfer error。
 - Session resume/switch 入口必须先提交 open-tab active truth，再由同一 `switchRuntime: 'explicit-resume'` 推进 transport；禁止 `resumeActiveSessionTransport()` 成功后提前 return，否则首次点击只开连接不切 UI，必须二次点击才可见。
 
+### 2.17 Loop Governance 初始化规则
+- 项目 recurring loop 的唯一入口是 `android/docs/loops/LOOP.md`，机器真源是 `android/docs/loops/loop-manifest.json`。
+- 当前只允许 `zterm.daily-triage` 以 `L1 report-only` 运行：只读项目真源、报告、追加 run log；禁止 product code edits、daemon start/stop、stage/commit、push/merge。
+- loop 发现项必须绑定 `feature_id`、owner、required gate 和 `mainline_call_id`；`mainline_call_id` 必须反查到 `docs/wiki/mainline-call-map.json` 的真实 `edge_id`。
+- 升级到 L2 前必须先有多次 L1 低误报 run history、唯一 owner、required gates、maker/checker 分离和 Jason 明确批准；L3 unattended 默认关闭。
+- 任何 loop governance 变更必须跑 `pnpm --dir android run test:feature-registry -- --reporter dot`，其中 `src/lib/loop-governance-truth.test.ts` 会锁住 L1 禁动作、kill switch、manifest 和 mainline call ID。
+
 ## 三、开发闭环流程
 
 ### 3.0 测试闭环分层规则

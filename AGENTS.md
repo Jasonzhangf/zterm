@@ -10,6 +10,7 @@
 - `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`：架构边界整改表；定义功能块 owner、允许/禁止职责、移除/分离/保留决策、防复发 gate
 - `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal server / buffer manager / renderer / UI shell 唯一真源
 - `android/docs/dev-workflow.md`：执行顺序、验证门禁、证据要求
+- `android/docs/loops/LOOP.md`：项目 recurring loop 治理入口；当前只启用 L1 report-only 初始化，不启用自动修复
 - `android/docs/ui-slices.md`：页面级切片与文件 ownership
 - `android/docs/daemon-mirror-test-plan.md`：daemon/tmux mirror 本地验证顺序（当前先 TUI `top` / `vim`，再手机）
 - `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer/render/daemon mirror 门禁

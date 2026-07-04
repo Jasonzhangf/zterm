@@ -101,7 +101,7 @@ describe('function wiki truth gate', () => {
         canonical_docs: string[];
         verification_gates: string[];
         nodes: Array<{ id: string; label: string }>;
-        edges: Array<{ from: string; to: string; owner_feature: string; status: string }>;
+        edges: Array<{ from: string; to: string; owner_feature: string; status: string; edge_id?: string }>;
       }>;
     };
     const mainline = read('docs/wiki/mainline-source.md');
@@ -137,10 +137,12 @@ describe('function wiki truth gate', () => {
       }
 
       for (const edge of lifecycle.edges) {
+        const expectedEdgeId = `${lifecycle.lifecycle_id}:${edge.from}->${edge.to}`;
         expect(nodeIds.has(edge.from), `${lifecycle.lifecycle_id}:${edge.from}`).toBe(true);
         expect(nodeIds.has(edge.to), `${lifecycle.lifecycle_id}:${edge.to}`).toBe(true);
         expect(featureIds.has(edge.owner_feature), edge.owner_feature).toBe(true);
         expect(['anchored', 'partial', 'binding pending']).toContain(edge.status);
+        expect(edge.edge_id).toBe(expectedEdgeId);
       }
     }
   });
