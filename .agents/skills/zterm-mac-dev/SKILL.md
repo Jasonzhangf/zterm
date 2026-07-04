@@ -185,6 +185,21 @@ Jason，已完成本轮自闭环：
 - 禁止让 `electron-builder` 自动发现 distribution identity；否则每次 package 都可能触发 Keychain 授权弹窗。
 - 只有正式发布/分发签名任务才允许显式启用签名 identity，并必须单独说明签名和 notarization 验证。
 
+### 3.5 状态 / Alpha 汇报对账门禁
+- 触发：Jason 问“今天完成了什么”“Mac 版本状态”“离 alpha 多远”“能不能手测/alpha 测试”，或上下文压缩/恢复后需要汇报 Mac 进度。
+- 汇报前必须对账：
+  - `git log --oneline -- mac packages/shared .agents/skills/zterm-mac-dev`
+  - `git status --short`
+  - `mac/MEMORY.md`
+  - `mac/task.md`
+  - `mac/docs/function-map.md`
+  - `mac/docs/testing/mac-desktop-workspace-test-design.md`
+  - `mac/docs/alpha-readiness.md`（若不存在或过期，先补齐）
+  - `mac/evidence/<date>-*` 证据目录索引
+- 汇报必须按证据层级拆开：已提交代码、白盒测试、packaged smoke、真实 daemon/local tmux/live UI、未验证缺口。
+- 不得只根据最近 handoff、loop run、Android note 或当前聊天上下文汇报 Mac 状态；Mac 进度以 Mac docs/MEMORY/task/evidence/git 提交共同对账为准。
+- 如果发现 evidence 仍是 untracked，只能报告 retention/cleanup 待决策；未经授权不得删除、移动、stage 或提交。
+
 ## 六、Mac dev runtime 单实例验证规则（2026-06-02）
 - 调试 Electron dev app 时，同一轮只能保留一个 `--remote-debugging-port` 实例；新开前先用明确 PID/app-level quit 收掉旧实例，禁止多端口并发导致证据串线。
 - 截图/DOM probe/输入验证必须指向同一个 CDP target、同一个 tmux session、同一个 evidence JSON；不得在多个 Electron 窗口之间交叉取证。

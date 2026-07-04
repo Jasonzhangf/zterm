@@ -10,9 +10,10 @@
 6. `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md` — terminal head / sparse buffer / render container truth.
 7. `.agents/skills/terminal-buffer-truth/SKILL.md` — buffer/render/scroll hard gate.
 8. `mac/task.md` — current task board.
-9. `mac/CACHE.md` — short-term context.
-10. `mac/MEMORY.md` — long-term lessons.
-11. `mac/evidence/` — verification evidence.
+9. `mac/docs/alpha-readiness.md` — Mac alpha readiness, blockers, and required packaged smoke truth.
+10. `mac/CACHE.md` — short-term context.
+11. `mac/MEMORY.md` — long-term lessons.
+12. `mac/evidence/` — verification evidence.
 
 ## Core Terminal Model
 

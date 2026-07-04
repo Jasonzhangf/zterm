@@ -206,6 +206,22 @@ describe('Mac architecture truth', () => {
     expect(goalPlan).toContain('MacFileBrowser');
   });
 
+  it('keeps alpha readiness tracked as an explicit non-alpha truth source', () => {
+    const architecture = readMac(path.join('docs', 'architecture.md'));
+    const taskBoard = readMac('task.md');
+    const skill = readRepo(path.join('.agents', 'skills', 'zterm-mac-dev', 'SKILL.md'));
+    const readiness = readMac(path.join('docs', 'alpha-readiness.md'));
+
+    expect(architecture).toContain('mac/docs/alpha-readiness.md');
+    expect(taskBoard).toContain('Alpha readiness');
+    expect(skill).toContain('状态 / Alpha 汇报对账门禁');
+    expect(readiness).toContain('Current verdict: not alpha-ready yet.');
+    expect(readiness).toContain('P0 blockers before Jason alpha');
+    expect(readiness).toContain('Remote terminal path');
+    expect(readiness).toContain('Evidence retention');
+    expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
+  });
+
   it('anchors MacWorkspaceStore before workspace integration slices', () => {
     const functionMap = readMac(path.join('docs', 'function-map.md'));
     const workspaceStoreSource = readMac(path.join('src', 'app', 'workspace', 'workspace-store.ts'));

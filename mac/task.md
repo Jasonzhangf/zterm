@@ -1,5 +1,11 @@
 # zterm Mac Task Board
 
+## Alpha readiness
+
+- [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
+- [ ] 关闭 P0 alpha blockers：`T-A1` / `T-A2` / `T-A3` / `T-A4` / `T-A5` / remote open / alpha package handoff / evidence retention
+- [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
+
 ## Epic-001 Rewrite truth freeze
 
 - [x] T1 以 Android contract model 重写 Mac spec / architecture / dev-workflow
