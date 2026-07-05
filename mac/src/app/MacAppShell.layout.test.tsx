@@ -46,6 +46,8 @@ vi.mock('./runtime/MacRuntimeRegistry', () => ({
     getActiveRuntimeKey: vi.fn(() => null),
     subscribeActiveRuntimeKey: vi.fn(() => () => {}),
     setActiveRuntimeKey: setActiveRuntimeKeyMock,
+    reconnectRuntime: vi.fn(() => true),
+    disconnectRuntime: vi.fn(() => true),
     sendInput: vi.fn(() => true),
     updateViewport: vi.fn(() => true),
     resizeTerminal: vi.fn(() => true),
@@ -237,7 +239,7 @@ describe('MacAppShell layout (red baseline)', () => {
     expect(active.length).toBe(1);
   });
 
-  it('ensures runtime registry targets for live tabs and marks the active runtime', () => {
+  it('prepares restored hidden runtime targets but only eager-connects the active tab', () => {
     let state = createInitialWorkbenchState();
     state = openConnectionInWorkbench(state, makeTarget('a'));
     state = openConnectionInWorkbench(state, makeTarget('b'), { append: true });
@@ -246,11 +248,11 @@ describe('MacAppShell layout (red baseline)', () => {
     expect(ensureRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'remote',
       runtimeKey: 'remote:127.0.0.1:3333:a',
-    }));
+    }), { connect: false });
     expect(ensureRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'remote',
       runtimeKey: 'remote:127.0.0.1:3333:b',
-    }));
+    }), { connect: true });
     expect(setActiveRuntimeKeyMock).toHaveBeenCalledWith('remote:127.0.0.1:3333:b');
   });
 
@@ -297,7 +299,7 @@ describe('MacAppShell layout (red baseline)', () => {
     expect(ensureRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'remote',
       runtimeKey: 'remote:h1:host-a',
-    }));
+    }), { connect: true });
   });
 
   it('persists workbench identity by renderer windowId without writing legacy shell storage', () => {

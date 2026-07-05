@@ -120,6 +120,27 @@ describe('MacRuntimeRegistry', () => {
     expect(runtimes[0].connectLocalTmux).not.toHaveBeenCalled();
   });
 
+  it('can prepare a hidden runtime shell without opening transport', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+
+    registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: false });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(runtimes[0].connectLocalTmux).not.toHaveBeenCalled();
+    expect(registry.getRuntime('local-tmux:zterm_mac_goal_a')).toBe(runtimes[0]);
+  });
+
+  it('connects a prepared runtime when it becomes active target', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+
+    registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: false });
+    registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: true });
+
+    expect(runtimes[0].connectLocalTmux).toHaveBeenCalledTimes(1);
+  });
+
   it('connects a local tmux runtime once for the same key and session signature', () => {
     const { runtimes, factory } = createRuntimeFactory();
     const registry = createMacRuntimeRegistry(factory);
@@ -221,5 +242,40 @@ describe('MacRuntimeRegistry', () => {
     expect(runtimes[1].updateViewport).toHaveBeenCalledWith({ mode: 'follow', viewportEndIndex: 10, viewportRows: 24 });
     expect(runtimes[1].resizeTerminal).toHaveBeenCalledWith(120, 40);
   });
-});
 
+  it('disconnects only the requested runtime and leaves siblings untouched', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+
+    registry.ensureRuntime(localTarget('zterm_mac_goal_a'));
+    registry.ensureRuntime(localTarget('zterm_mac_goal_b'));
+
+    expect(registry.disconnectRuntime('local-tmux:zterm_mac_goal_b')).toBe(true);
+    expect(runtimes[0].disconnect).not.toHaveBeenCalled();
+    expect(runtimes[1].disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconnects only the requested runtime using the stored target', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+
+    registry.ensureRuntime(localTarget('zterm_mac_goal_a'));
+    registry.ensureRuntime(localTarget('zterm_mac_goal_b'));
+    registry.disconnectRuntime('local-tmux:zterm_mac_goal_b');
+
+    expect(registry.reconnectRuntime('local-tmux:zterm_mac_goal_b')).toBe(true);
+    expect(runtimes[0].connectLocalTmux).toHaveBeenCalledTimes(1);
+    expect(runtimes[1].connectLocalTmux).toHaveBeenCalledTimes(2);
+    expect(runtimes[1].connectLocalTmux).toHaveBeenLastCalledWith({
+      sessionName: 'zterm_mac_goal_b',
+      title: 'zterm_mac_goal_b',
+    });
+  });
+
+  it('does not reconnect when no prepared target exists for the runtime key', () => {
+    const { factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+
+    expect(registry.reconnectRuntime('local-tmux:missing')).toBe(false);
+  });
+});

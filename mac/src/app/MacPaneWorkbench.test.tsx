@@ -49,6 +49,8 @@ function makeRuntimeRegistryStub(runtimeState = makeRuntimeState()): MacRuntimeR
     getActiveRuntimeKey: vi.fn(() => null),
     subscribeActiveRuntimeKey: vi.fn(() => () => {}),
     setActiveRuntimeKey: vi.fn(),
+    reconnectRuntime: vi.fn(() => true),
+    disconnectRuntime: vi.fn(() => true),
     sendInput: vi.fn(() => true),
     updateViewport: vi.fn(() => true),
     resizeTerminal: vi.fn(() => true),
@@ -194,6 +196,32 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
     expect(registry.getRuntimeState).toHaveBeenCalledWith('local-tmux:rcc');
     expect(registry.ensureRuntime).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Local tmux · rcc');
+    expect(container.textContent).toContain('80x24');
+  });
+
+  it('terminal header reconnect and disconnect controls route through runtime registry owner', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openLocalTmuxInWorkbench(workbench, 'zterm_mac_goal_a');
+    const registry = makeRuntimeRegistryStub(makeRuntimeState());
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={registry}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    const paneId = workbench.workspace.panes[0].id;
+    fireEvent.click(container.querySelector(`[data-testid="mac-terminal-reconnect-${paneId}"]`)!);
+    fireEvent.click(container.querySelector(`[data-testid="mac-terminal-disconnect-${paneId}"]`)!);
+
+    expect(registry.reconnectRuntime).toHaveBeenCalledWith('local-tmux:zterm_mac_goal_a');
+    expect(registry.disconnectRuntime).toHaveBeenCalledWith('local-tmux:zterm_mac_goal_a');
+    expect(registry.getRuntime).not.toHaveBeenCalled();
   });
 
   it('routes visible terminal input to the active tab runtime key only', () => {

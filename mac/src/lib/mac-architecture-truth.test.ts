@@ -36,6 +36,7 @@ const REQUIRED_FEATURE_IDS = [
   'mac.window_lifecycle',
   'mac.workspace_store',
   'mac.runtime_registry',
+  'mac.local_tmux_provider',
   'mac.server_directory',
   'mac.terminal_pane',
   'mac.file_browser_core',
@@ -55,6 +56,7 @@ const REQUIRED_NODE_IDS = [
   'MAC-06-OpenTabIntent',
   'MAC-07-PaneTreeUpdate',
   'MAC-08-RuntimeEnsure',
+  'MAC-18-LocalTmuxProvider',
   'MAC-09-RuntimeActivity',
   'MAC-10-TerminalProjection',
   'MAC-11-Renderer',
@@ -76,6 +78,8 @@ const REQUIRED_EDGES: Array<[string, string]> = [
   ['MAC-06-OpenTabIntent', 'MAC-03-WorkspaceLoad'],
   ['MAC-03-WorkspaceLoad', 'MAC-07-PaneTreeUpdate'],
   ['MAC-03-WorkspaceLoad', 'MAC-08-RuntimeEnsure'],
+  ['MAC-08-RuntimeEnsure', 'MAC-18-LocalTmuxProvider'],
+  ['MAC-18-LocalTmuxProvider', 'MAC-09-RuntimeActivity'],
   ['MAC-08-RuntimeEnsure', 'MAC-09-RuntimeActivity'],
   ['MAC-09-RuntimeActivity', 'MAC-10-TerminalProjection'],
   ['MAC-10-TerminalProjection', 'MAC-11-Renderer'],
@@ -211,6 +215,9 @@ describe('Mac architecture truth', () => {
     const taskBoard = readMac('task.md');
     const skill = readRepo(path.join('.agents', 'skills', 'zterm-mac-dev', 'SKILL.md'));
     const readiness = readMac(path.join('docs', 'alpha-readiness.md'));
+    const functionMap = readMac(path.join('docs', 'function-map.md'));
+    const testDesign = readMac(path.join('docs', 'testing', 'mac-desktop-workspace-test-design.md'));
+    const packageJson = JSON.parse(readMac('package.json')) as { scripts?: Record<string, string> };
 
     expect(architecture).toContain('mac/docs/alpha-readiness.md');
     expect(taskBoard).toContain('Alpha readiness');
@@ -220,6 +227,13 @@ describe('Mac architecture truth', () => {
     expect(readiness).toContain('Remote terminal path');
     expect(readiness).toContain('Evidence retention');
     expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
+    expect(packageJson.scripts?.['blackbox:terminal-buffer']).toBe('node scripts/terminal-buffer-blackbox-gate.mjs');
+    expect(fs.existsSync(path.join(macRoot, 'scripts', 'terminal-buffer-blackbox-gate.mjs'))).toBe(true);
+    expect(taskBoard).toContain('blackbox:terminal-buffer');
+    expect(skill).toContain('session truth');
+    expect(readiness).toContain('terminal buffer black-box gate');
+    expect(functionMap).toContain('blackbox:terminal-buffer');
+    expect(testDesign).toContain('Terminal buffer black-box');
   });
 
   it('anchors MacWorkspaceStore before workspace integration slices', () => {
@@ -304,6 +318,34 @@ describe('Mac architecture truth', () => {
     expect(runtimeActivityEdge?.status).toBe('anchored');
     expect(terminalProjectionEdge?.status).toBe('anchored');
     expect(runtimeEnsureEdge?.verification_gates).toContain('mac/src/app/runtime/MacRuntimeRegistry.test.ts');
+  });
+
+  it('keeps local tmux provider capture aligned with session truth', () => {
+    const functionMap = readMac(path.join('docs', 'function-map.md'));
+    const testDesign = readMac(path.join('docs', 'testing', 'mac-desktop-workspace-test-design.md'));
+    const localTmuxSource = readMac(path.join('electron', 'local-tmux.ts'));
+    const callMap = parseMainlineCallMap();
+    const lifecycle = callMap.lifecycles.find((item) => item.lifecycle_id === 'mac_desktop_mainline');
+    expect(lifecycle).toBeTruthy();
+    if (!lifecycle) return;
+
+    const localTmuxNode = lifecycle.nodes.find((node) => node.id === 'MAC-18-LocalTmuxProvider');
+    const localTmuxRequestEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0020');
+    const localTmuxReturnEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0021');
+
+    expect(functionMap).toContain('`mac.local_tmux_provider` | `LocalTmuxManager`, `readSessionCapture`, `captureToBufferPayload`');
+    expect(localTmuxSource).toContain('#{alternate_on}');
+    expect(localTmuxSource).toContain("options?.visibleOnly || alternateOn ? `-${paneRows}` : `-${historySize}`");
+    expect(localTmuxSource).toContain("['capture-pane', '-e', '-p', '-t', target, '-S', captureStart]");
+    expect(localTmuxSource).not.toContain("'-E', '-1'");
+    expect(localTmuxSource).not.toContain('"-E", "-1"');
+    expect(testDesign).toContain('Canonical tmux capture must include visible pane bottom');
+    expect(testDesign).toContain('alternate screen capture uses bounded visible current screen truth');
+    expect(localTmuxNode?.status).toBe('anchored');
+    expect(localTmuxRequestEdge?.status).toBe('anchored');
+    expect(localTmuxReturnEdge?.status).toBe('anchored');
+    expect(localTmuxRequestEdge?.verification_gates).toContain('mac/src/lib/local-tmux-transport.test.ts');
+    expect(localTmuxReturnEdge?.verification_gates).toContain('pnpm --dir mac run blackbox:terminal-buffer -- --case=all');
   });
 
   it('anchors MacServerDirectory as projection-only server rail owner', () => {

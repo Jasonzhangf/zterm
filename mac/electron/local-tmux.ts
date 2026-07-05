@@ -407,7 +407,7 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
     '-p',
     '-t',
     target,
-    '#{pane_width}\t#{pane_height}\t#{cursor_x}\t#{cursor_y}\t#{?cursor_flag,1,0}\t#{session_name}\t#{window_name}\t#{pane_title}\t#{history_size}',
+    '#{pane_width}\t#{pane_height}\t#{cursor_x}\t#{cursor_y}\t#{?cursor_flag,1,0}\t#{session_name}\t#{window_name}\t#{pane_title}\t#{history_size}\t#{alternate_on}',
   ]);
   const [
     paneWidthText,
@@ -419,6 +419,7 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
     windowName,
     paneTitle,
     historySizeText,
+    alternateOnText,
   ] = metricsRaw.trimEnd().split('\t');
 
   const paneCols = Math.max(1, Number.parseInt(paneWidthText || '', 10) || requestedCols || DEFAULT_COLS);
@@ -429,10 +430,11 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
   const cursorRow = Math.max(0, Number.parseInt(cursorYText || '', 10) || 0);
   const cursorVisible = (cursorVisibleText || '0') === '1';
   const historySize = Math.max(0, Number.parseInt(historySizeText || '', 10) || 0);
+  const alternateOn = (alternateOnText || '0') === '1';
   const title = [resolvedSessionName, windowName, paneTitle].filter(Boolean).join(' · ') || sessionName;
 
-  const captureStart = options?.visibleOnly ? `-${paneRows}` : `-${historySize}`;
-  const captureRaw = await runTmux(['capture-pane', '-e', '-p', '-t', target, '-S', captureStart, '-E', '-1']);
+  const captureStart = options?.visibleOnly || alternateOn ? `-${paneRows}` : `-${historySize}`;
+  const captureRaw = await runTmux(['capture-pane', '-e', '-p', '-t', target, '-S', captureStart]);
   const normalized = captureRaw.replace(/\r\n/g, '\n');
   const capturedLines = normalized.length === 0 ? [] : normalized.split('\n');
   const wrappedLines: LocalTerminalCell[][] = [];
@@ -481,7 +483,7 @@ async function readSessionCapture(sessionName: string, requestedCols: number, re
       },
       cursorKeysApp: false,
       scrollbackLines,
-      scrollbackStartIndex: totalLines > rows ? 0 : undefined,
+      scrollbackStartIndex: totalLines > rows && !alternateOn ? 0 : undefined,
     },
   };
 }

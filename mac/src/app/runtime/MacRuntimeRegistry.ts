@@ -26,14 +26,20 @@ export type MacRuntimeEnsureTarget =
 
 export type MacRuntimeFactory = () => TerminalRuntimeController;
 
+export interface MacRuntimeEnsureOptions {
+  connect?: boolean;
+}
+
 export interface MacRuntimeRegistry {
-  ensureRuntime(target: MacRuntimeEnsureTarget): TerminalRuntimeController;
+  ensureRuntime(target: MacRuntimeEnsureTarget, options?: MacRuntimeEnsureOptions): TerminalRuntimeController;
   getRuntime(runtimeKey: MacRuntimeKey | string | null | undefined): TerminalRuntimeController | null;
   getRuntimeState(runtimeKey: MacRuntimeKey | string | null | undefined): TerminalRuntimeState;
   subscribeRuntime(runtimeKey: MacRuntimeKey | string | null | undefined, listener: () => void): () => void;
   getActiveRuntimeKey(): MacRuntimeKey | null;
   subscribeActiveRuntimeKey(listener: () => void): () => void;
   setActiveRuntimeKey(runtimeKey: MacRuntimeKey | string | null | undefined): void;
+  reconnectRuntime(runtimeKey: MacRuntimeKey | string | null | undefined): boolean;
+  disconnectRuntime(runtimeKey: MacRuntimeKey | string | null | undefined): boolean;
   sendInput(runtimeKey: MacRuntimeKey | string | null | undefined, data: string): boolean;
   updateViewport(runtimeKey: MacRuntimeKey | string | null | undefined, viewState: TerminalRuntimeViewState): boolean;
   resizeTerminal(runtimeKey: MacRuntimeKey | string | null | undefined, cols: number, rows: number): boolean;
@@ -51,7 +57,9 @@ class MacRuntimeRegistryError extends Error {
 
 type RuntimeEntry = {
   runtime: TerminalRuntimeController;
-  connectSignature: string;
+  target: MacRuntimeEnsureTarget | null;
+  targetSignature: string;
+  connectedSignature: string;
   unsubscribe: () => void;
 };
 
@@ -135,7 +143,9 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
     const runtime = factory();
     const entry: RuntimeEntry = {
       runtime,
-      connectSignature: '',
+      target: null,
+      targetSignature: '',
+      connectedSignature: '',
       unsubscribe: runtime.subscribe(() => emitRuntime(runtimeKey)),
     };
     entries.set(runtimeKey, entry);
@@ -163,23 +173,35 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
     emitRuntime(runtimeKey);
   };
 
+  const connectEntry = (entry: RuntimeEntry, target: MacRuntimeEnsureTarget) => {
+    const nextSignature = buildEnsureTargetSignature(target);
+    if (entry.connectedSignature === nextSignature) {
+      return;
+    }
+    if (target.kind === 'local-tmux') {
+      entry.runtime.connectLocalTmux({
+        sessionName: target.sessionName.trim(),
+        title: target.title,
+      });
+    } else {
+      entry.runtime.connectRemote(target.target);
+    }
+    entry.connectedSignature = nextSignature;
+  };
+
   return {
-    ensureRuntime(target) {
+    ensureRuntime(target, options) {
       const runtimeKey = requireRuntimeKey(target.runtimeKey);
       const entry = getOrCreateEntry(runtimeKey);
       const nextSignature = buildEnsureTargetSignature(target);
-      if (entry.connectSignature === nextSignature) {
+      entry.target = target;
+      entry.targetSignature = nextSignature;
+      if (options?.connect === false) {
+        entry.runtime.setActivityMode(runtimeKey === activeRuntimeKey ? 'active' : 'idle');
+        emitRuntime(runtimeKey);
         return entry.runtime;
       }
-      if (target.kind === 'local-tmux') {
-        entry.runtime.connectLocalTmux({
-          sessionName: target.sessionName.trim(),
-          title: target.title,
-        });
-      } else {
-        entry.runtime.connectRemote(target.target);
-      }
-      entry.connectSignature = nextSignature;
+      connectEntry(entry, target);
       entry.runtime.setActivityMode(runtimeKey === activeRuntimeKey ? 'active' : 'idle');
       emitRuntime(runtimeKey);
       return entry.runtime;
@@ -237,6 +259,35 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
       }
       emitActive();
     },
+    reconnectRuntime(runtimeKeyInput) {
+      const runtimeKey = normalizeRuntimeKey(runtimeKeyInput);
+      if (!runtimeKey) {
+        return false;
+      }
+      const entry = entries.get(runtimeKey);
+      if (!entry?.target) {
+        return false;
+      }
+      entry.connectedSignature = '';
+      connectEntry(entry, entry.target);
+      entry.runtime.setActivityMode(runtimeKey === activeRuntimeKey ? 'active' : 'idle');
+      emitRuntime(runtimeKey);
+      return true;
+    },
+    disconnectRuntime(runtimeKeyInput) {
+      const runtimeKey = normalizeRuntimeKey(runtimeKeyInput);
+      if (!runtimeKey) {
+        return false;
+      }
+      const entry = entries.get(runtimeKey);
+      if (!entry) {
+        return false;
+      }
+      entry.runtime.disconnect();
+      entry.connectedSignature = '';
+      emitRuntime(runtimeKey);
+      return true;
+    },
     sendInput(runtimeKeyInput, data) {
       const runtime = this.getRuntime(runtimeKeyInput);
       if (!runtime) {
@@ -283,4 +334,3 @@ export function useMacRuntimeState(
     () => EMPTY_MAC_RUNTIME_STATE,
   );
 }
-

@@ -89,6 +89,8 @@ function MacTerminalPane({
       ? activeTarget.name || activeTarget.sessionName
       : '';
   const hasTerminal = Boolean(activeTarget || localTmuxSessionName);
+  const terminalSizeLabel = `${runtimeState.render.cols || 0}x${runtimeState.render.rows || 0}`;
+  const connectionError = 'error' in runtimeState.connection ? runtimeState.connection.error : '';
 
   return (
     <div
@@ -115,6 +117,26 @@ function MacTerminalPane({
             <div className="mac-terminal-meta">
               <span className={`mac-runtime-pill ${runtimeState.connection.status}`}>{runtimeState.connection.status}</span>
               <span>{terminalLabel}</span>
+              <span className="mac-terminal-size">{terminalSizeLabel}</span>
+              {connectionError ? <span className="mac-terminal-error">{connectionError}</span> : null}
+              <button
+                className="mac-terminal-control"
+                type="button"
+                data-testid={`mac-terminal-reconnect-${pane.id}`}
+                disabled={!runtimeKey}
+                onClick={() => runtimeRegistry.reconnectRuntime(runtimeKey)}
+              >
+                Reconnect
+              </button>
+              <button
+                className="mac-terminal-control"
+                type="button"
+                data-testid={`mac-terminal-disconnect-${pane.id}`}
+                disabled={!runtimeKey}
+                onClick={() => runtimeRegistry.disconnectRuntime(runtimeKey)}
+              >
+                Disconnect
+              </button>
             </div>
             <div className="mac-terminal-canvas">
               <MacTerminalView

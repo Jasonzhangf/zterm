@@ -44,11 +44,15 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 - remote 连接与 local tmux 都必须走真实 runtime，不允许静态占位冒充 live terminal。
 - “能列 session” 不等于 “已 attach”；需要真实 connect / attach / resize / input 路径验证。
 - 修改 local tmux / remote bridge / renderer 任一层后，必须至少做一次实际 smoke，不只看编译通过。
+- Electron local tmux head/sync 的 canonical capture 必须包含 scrollback + visible pane bottom；`capture-pane -E -1` 会停在历史尾部，不能用于 app buffer truth，否则 packaged DOM 会落后真实 `tmux capture-pane` 尾部。
 
 ### 2.3 资源与生命周期
 - 不允许只凭代码阅读宣称“没有内存泄漏/没有孤儿进程”；必须有运行态证据。
 - 旧 app 必须先退出，再打开新包；不要叠多个实例污染结论。
 - 禁止 broad kill；退出旧 app 用应用级 quit 或明确 PID 级关闭。
+- tmux / daemon / CDP smoke 必须先盘点现有资源，再复用本轮已有专用 session / port / app 实例；禁止每次验证都新建 timestamp session。
+- 只有两类 session 允许写入或重置：本轮明确创建的专用 session，或带项目 gate marker 且 owner/case 匹配的固定 gate session。已有用户 session 只允许只读观测。
+- 每个 live / blackbox smoke 结束前必须复核生命周期：列出本轮新增 session / pipe-pane / app PID / debug port，关闭临时资源；若固定 gate session 需要保留供复用，必须说明 marker 与名称。
 
 ### 2.4 Desktop workspace owner gate
 - Mac desktop workspace / multi-window / pane-tab-runtime / file browser 重构必须先查并同步：
@@ -121,6 +125,15 @@ pnpm --filter @zterm/mac package
 - terminal 能打开
 - input / resize / scroll / split / tab 中与本轮相关的关键路径
 - local tmux 或 remote bridge 至少一条真实链路
+- terminal buffer/render 正确性必须比较 session truth 和 app render output：
+  - session truth：`tmux capture-pane`
+  - input oracle：专用 session 的 `tmux pipe-pane`
+  - app output：packaged app DOM rendered rows / 截图
+  - 必跑 gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all`
+  - 必须包含持续刷新底部 TUI case；只看到 `connected`、底部几何对齐或静态截图不算 terminal 数据闭环
+  - blackbox gate 必须复用固定专用 tmux session：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui`，并用 tmux option marker 验证 owner/case 后才允许 respawn / clear-history / cleanup；禁止 timestamp 新建一串 session，禁止碰无 marker 的用户 session
+  - blackbox gate 默认保留这两个固定 session 作为复用池；只有显式 `--cleanup-sessions` 才能在 marker 验证通过后精确关闭它们。运行结束必须复核 `tmux list-sessions`，确认没有遗留新的 `zterm_mac_*` 临时 session
+  - TUI fixture 每次 run 前必须重置内容和清 history；持续刷新只比较当前可见 screen 与 app rendered rows，历史/overscan 只能作为 raw evidence，不能进入 lag 判定
 - 若改的是资源/生命周期：补 `ps/top` 资源采样 + 退出态进程检查
 
 #### E. 证据门槛
@@ -205,9 +218,12 @@ Jason，已完成本轮自闭环：
 - 截图/DOM probe/输入验证必须指向同一个 CDP target、同一个 tmux session、同一个 evidence JSON；不得在多个 Electron 窗口之间交叉取证。
 - 临时 CDP probe 不要往页面注入会持久影响事件链的监听器/异常代码；若注入失败导致 renderer error，必须 reload 或重启唯一实例后再验证。
 - local tmux 颜色真源是 `tmux capture-pane -e` 的 SGR 输出；纯 `capture-pane -p` 只保留文本，会把 `fg/bg` 全部退成默认色。
+- local tmux 数据真源还必须覆盖 visible pane bottom：`LocalTmuxManager` 的 head/sync capture 保留 `-e -p`，但禁止加 `-E -1`；若黑盒出现 tmux/pipe 有完整尾部而 app DOM 缺尾部，先查该 capture 参数，不要在 renderer 补偿。
+- local tmux TUI/alternate-screen 类刷新不得走 full-history live payload；`readSessionCapture` 检测 `alternate_on` 后只用 bounded visible capture（`-S -<paneRows>`）作为当前 screen truth，避免历史帧累计成刷新延迟或旧行上移。
 - Packaged multi-window smoke 不依赖 `System Events` 注入快捷键作为真源；优先通过正式 preload IPC / menu owner 触发 `MacWindowManager.createWindow()`，再用 CDP 验证 page target、renderer `windowId`、workspace key、quit/reopen restore。若 `System Events` 卡住，只中断该明确 osascript 会话，不能用它证明失败或成功。
 - Packaged app 实际使用 `preload.cts -> preload.cjs`。凡修改 `window.ztermMac` bridge 或 IPC surface，必须同步更新 `preload.ts` 与 `preload.cts`，并用 packaged smoke 证明真实 preload bridge 可用；不能只看 renderer type 或 `preload.ts`。
 - Packaged React 表单/controlled input smoke 不把直接 `input.value = ...` 当真源；自动化应先 focus/select 目标 input，再用 CDP `Input.insertText` 或等价真实输入路径触发 React state，最后点击正式 UI command。直接 setter 只可作诊断，不能作为 browse/connect/save 成功证据。
+- Packaged CDP smoke helper 必须在 websocket `close/error` 时 reject pending command，尤其是 `Browser.close`；否则数据对比已绿也会因为未 settle 的 top-level await 退出 13，并且缺少 `process-after-close` evidence。
 - Packaged runtime A/B input isolation smoke 优先用本轮专用 tmux session + `tmux pipe-pane -o <log>` 作为输入 oracle；`capture-pane` 对 detached `cat` fixture 可能不稳定，不能单独证明 app input 到达或串线。完成后用 `tmux pipe-pane -t <session>` 关闭观测管道，避免后台持续写日志。
 - Runtime split/tab smoke 中，resize 必须同时看 DOM pane width 和 workspace record pane size；只看拖拽动作或 divider 存在不算 resize 闭环。关闭 active pane 后必须证明 renderer root 仍 mounted、workspace `activePaneId` 指向现存 pane、剩余 runtime 还能输入。
 - Server rail remote refresh smoke 是 read-only daemon observation：只能发 `list-sessions`/Refresh，允许用现有用户 sessions 做列表观测，但禁止写 input、create、kill、rename。证据必须同时证明 refresh 后 live sessions 进入 rail、workspace pane/tab 数不变、terminal stage 未自动打开 session、错误时显示 error 且 saved/open sessions 保留。

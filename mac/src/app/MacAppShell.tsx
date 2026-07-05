@@ -90,9 +90,12 @@ function toEditableHost(host: Host): EditableHost {
 }
 
 function resolveTabRuntimeEnsureTarget(
-  tab: MacWorkbenchTab,
+  tab: MacWorkbenchTab | null,
   hosts: Host[],
 ): MacRuntimeEnsureTarget | null {
+  if (!tab) {
+    return null;
+  }
   const runtimeKey = resolveTabRuntimeKey(tab, hosts);
   if (!runtimeKey) {
     return null;
@@ -221,6 +224,7 @@ export function MacAppShell(props: MacAppShellProps) {
   const platform: PanePlatform = 'desktop';
   const activeTarget = useMemo(() => resolveTabTarget(activeTab, hosts), [activeTab, hosts]);
   const activeRuntimeKey = useMemo(() => resolveTabRuntimeKey(activeTab, hosts), [activeTab, hosts]);
+  const activeRuntimeEnsureTarget = useMemo(() => resolveTabRuntimeEnsureTarget(activeTab, hosts), [activeTab, hosts]);
   const runtimeEnsureTargets = useMemo(() => resolveWorkbenchRuntimeEnsureTargets(workbench, hosts), [workbench, hosts]);
   const liveRuntimeKeys = useMemo(() => new Set(listWorkbenchRuntimeKeys(workbench, hosts)), [workbench, hosts]);
   const openSessionKeys = useMemo(() => resolveWorkbenchOpenSessionKeys(workbench, hosts), [workbench, hosts]);
@@ -251,14 +255,16 @@ export function MacAppShell(props: MacAppShellProps) {
   useEffect(() => () => runtimeRegistry.dispose(), [runtimeRegistry]);
 
   useEffect(() => {
-    runtimeEnsureTargets.forEach((target) => runtimeRegistry.ensureRuntime(target));
+    runtimeEnsureTargets.forEach((target) => runtimeRegistry.ensureRuntime(target, {
+      connect: Boolean(activeRuntimeEnsureTarget && target.runtimeKey === activeRuntimeEnsureTarget.runtimeKey),
+    }));
     previousRuntimeKeysRef.current.forEach((runtimeKey) => {
       if (!liveRuntimeKeys.has(runtimeKey)) {
         runtimeRegistry.releaseRuntime(runtimeKey);
       }
     });
     previousRuntimeKeysRef.current = liveRuntimeKeys;
-  }, [liveRuntimeKeys, runtimeEnsureTargets, runtimeRegistry]);
+  }, [activeRuntimeEnsureTarget, liveRuntimeKeys, runtimeEnsureTargets, runtimeRegistry]);
 
   useEffect(() => {
     if (activeRuntimeKey && !liveRuntimeKeys.has(activeRuntimeKey)) {

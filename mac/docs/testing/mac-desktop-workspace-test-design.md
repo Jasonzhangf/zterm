@@ -59,6 +59,16 @@ MAC-16-LegacyRemoval
 -> replacement owner nodes
 ```
 
+Local tmux provider branch:
+
+```text
+MAC-08-RuntimeEnsure
+-> MAC-18-LocalTmuxProvider
+-> MAC-09-RuntimeActivity
+-> MAC-10-TerminalProjection
+-> MAC-11-Renderer
+```
+
 ## Current Slice Status
 
 | Slice | Scope | Test status |
@@ -99,6 +109,12 @@ Slice file browser hard checks now active:
 - Electron fs adapter contains no preview policy.
 - `MacFileBrowserPanel` opens through explicit app UI and does not call runtime connect/disconnect.
 
+Local tmux provider hard checks now active:
+
+- `LocalTmuxManager` remains the Electron-side local tmux capture/input/head/sync owner.
+- Canonical tmux capture for head/sync keeps SGR with `capture-pane -e -p`.
+- Canonical tmux capture must include visible pane bottom; `capture-pane -E -1` is forbidden for local tmux head/sync payloads because it can omit the live visible tail and make app rows stale relative to `tmux capture-pane` truth.
+
 Slice 7 hard checks now active:
 
 - `mac/src/pages/ShellWorkspace.tsx`, `mac/src/pages/ShellWorkspace.split-tree.test.tsx`, and `mac/src/lib/shell-workspace.ts` do not exist.
@@ -137,6 +153,15 @@ Slice 5 hard checks now active:
 - closing last tab for a runtime disposes only that runtime. Implemented as `releaseRuntime`.
 - stale event from runtime A cannot update runtime B projection. Implemented.
 - input, viewport, and resize route only to the assigned runtime key. Implemented.
+
+`mac.local_tmux_provider`:
+
+- local tmux head/sync requests are routed through the preload IPC bridge to `LocalTmuxManager`.
+- `readSessionCapture(...)` uses one canonical history-plus-visible capture for both head and sync.
+- head/sync capture preserves ANSI SGR with `-e` and does not end at `-E -1`.
+- alternate screen capture uses bounded visible current screen truth with `capture-pane -e -p -S -<paneRows>`, so full-history scrollback cannot become the live TUI refresh payload.
+- packaged sequence gate proves app-rendered tail contains the same controlled numbered output as tmux truth.
+- packaged TUI gate proves continuously refreshing bottom content advances in app rendered rows within bounded lag.
 
 `mac.window_lifecycle`:
 
@@ -212,6 +237,14 @@ Runtime black-box:
 - Switching A idle / B active keeps A buffer.
 - Closing A disposes A runtime only.
 
+Terminal buffer black-box:
+
+- Gate command: `pnpm --dir mac run blackbox:terminal-buffer -- --case=all`.
+- Session source truth is `tmux capture-pane`; input oracle is `tmux pipe-pane`; app output target is packaged app DOM rendered rows (`data-terminal-row-text`).
+- `sequence` case proves app input reaches the dedicated session and the rendered tail contains the same controlled numbered output as tmux truth.
+- `tui` case proves a continuously refreshing bottom TUI screen advances in the app render output and stays within bounded lag of tmux truth.
+- This gate is required before closing `T-A4`; connected status, screenshots, bottom geometry, or local renderer unit tests do not replace it.
+
 Remote daemon black-box, only when a real daemon route is available:
 
 - Remote session open uses bridge two-stage handshake.
@@ -236,8 +269,10 @@ Minimum steps:
 5. Open local file browser fixture and preview a text file.
 6. Open two dedicated local tmux sessions in separate panes.
 7. Verify input, resize, switch, and close behavior.
-8. Capture `ps/top` resource snapshot.
-9. Quit app and verify no orphan ZTerm/Electron helper process.
+8. Run terminal buffer black-box gate against packaged app:
+   `pnpm --dir mac run blackbox:terminal-buffer -- --case=all --evidence=mac/evidence/<date>-mac-alpha-p0-closeout/buffer-gate`
+9. Capture `ps/top` resource snapshot.
+10. Quit app and verify no orphan ZTerm/Electron helper process.
 
 Evidence path:
 
@@ -251,15 +286,18 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 | --- | --- | --- | --- |
 | Docs/maps/gate | architecture truth gate | not required | type-check/build only |
 | Workspace pure model | workspace unit tests | renderer split shell test | type-check/build |
-| Runtime registry | registry positive/negative tests | local tmux A/B isolation | type-check/build plus runtime smoke |
+| Runtime registry | registry positive/negative tests | local tmux A/B isolation | type-check/build plus runtime smoke plus `blackbox:terminal-buffer` when terminal buffer/render behavior is claimed |
+| Local tmux provider | architecture truth gate forbids visible-tail-omitting capture; local transport tests | session truth vs app rows through dedicated tmux sessions | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
 | Server directory | projection tests, refresh success/error negative tests | explicit open-only app test; read-only remote daemon refresh smoke when route is available | type-check/build |
 | File browser shared core | core unit tests, import gate | fixture directory browse/preview | package smoke if Electron fs changes |
 | Electron window manager | window manager tests | multi-window renderer smoke | package + packaged smoke |
 | Legacy cleanup | architecture scan | replacement path black-box tests | full Mac tests/type-check/build; package if runtime/window changed |
+| Terminal buffer/render | runtime + pane owner tests | session truth vs rendered rows, sequence and TUI refresh | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
 
 ## Known Gaps
 
 - Runtime registry now has packaged A/B tmux evidence for input/echo isolation, resize, switch, close, and B after-close input under `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`.
+- Terminal buffer correctness now has an explicit packaged black-box gate design, but alpha readiness still requires the latest run evidence to show `sequence` and `tui` passing under the alpha closeout evidence directory.
 - Legacy `ShellWorkspace` all-in-one source is removed. Schedule modal, remote screenshot, file transfer, QuickConnect, Details, and Terminal primitives are retained only as standalone future owner inputs, not as fallback workspace semantics.
 - `MacWorkspaceStore` pure model exists and `MacDesktopApp` / `MacAppShell` now bootstrap renderer state from `windowId`; packaged multi-window restore smoke passed.
 - `MacServerDirectory` projects saved servers/sessions, explicit refresh status/errors, and live daemon snapshots; read-only real-daemon refresh smoke must still be run for each routed endpoint before claiming remote live coverage.

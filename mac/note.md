@@ -151,3 +151,27 @@
 - 保留范围：`QuickConnectSheet`、`DetailsSlot`、`TerminalSlot`、`SessionScheduleModal`、`RemoteScreenshotSheet`、`FileTransferSheet`、`bridge-transport` 等独立组件/协议 helper 未删除；它们不是 workspace fallback，后续需按各自 owner 重新接入。
 - 旧 `localStorage["zterm:mac:shell-workspace:v1"]` 在用户数据里可能仍残留，但新 production 路径不读写。当前 hard gate 锁文件不存在、生产源码无 `ShellWorkspace` 引用、packaged DOM 无 `.shell-workspace-root`。
 - 验证：targeted cleanup/workspace/runtime/server/file 11 files / 99 tests PASS；Mac full 21 files / 124 tests PASS；shared full 33 files / 276 tests PASS；type-check/build/package/diff-check PASS；final packaged smoke 9348 证明新包渲染新 shell 且旧 root 不存在，资源/退出证据在 `mac/evidence/2026-07-04-legacy-cleanup-smoke/`。
+
+## 2026-07-04 Mac terminal buffer black-box gate
+- Jason 纠正：Mac terminal packaged smoke 不能只看 connected/status/截图，必须比较 session truth 和 app render output。
+- 新 gate owner 映射：`mac.runtime_registry` / `mac.terminal_pane` 的 L5 packaged gate 增加 `pnpm --dir mac run blackbox:terminal-buffer -- --case=all`。
+- gate 设计：专用 tmux session；`tmux capture-pane` 是 session output truth；`tmux pipe-pane` 是 input oracle；packaged app DOM `data-terminal-row-text` 是 output target；覆盖 controlled sequence 和持续刷新底部 TUI。
+- 当前状态：脚本和 docs/gate 映射已补，尚需跑 packaged gate；未通过前不能关闭 T-A4，也不能宣称 alpha-ready。
+
+## 2026-07-04 Mac terminal buffer black-box red follow-up
+- 复验红点：`buffer-gate-sequence-5/sequence-comparison.json` 显示 packaged app 已 connected，`pipe-pane` saw input token，pipe 与 `tmux capture-pane` 均有 `_001.._080`，但 app DOM rows 只到 `_057`，因此是有效 session truth -> output target 不一致。
+- 架构映射：问题属于 `mac.local_tmux_provider`，唯一 owner 是 `mac/electron/local-tmux.ts` 的 `LocalTmuxManager/readSessionCapture/captureToBufferPayload`；不是 `MacTerminalPane` / renderer 补偿点。
+- 处理方式：物理移除 head/sync canonical capture 的 `capture-pane -E -1` 可见尾部裁断语义；allowed path 是 Electron local tmux provider + map/gate/test 设计，forbidden path 是 renderer/UI 二次拉取或本地补 tail。
+- 必跑 gate：先 architecture/local tmux/terminal runtime 白盒，再 full Mac/type/build/package，最后 packaged `blackbox:terminal-buffer -- --case=all`，sequence 与 TUI 均绿前不能关闭 T-A4。
+
+## 2026-07-04 Mac terminal buffer black-box closeout
+- 固定 session 生命周期：gate 改为复用 `zterm_mac_gate_sequence` / `zterm_mac_gate_tui`，用 tmux option marker 标识 owner/case；已存在但无 marker 的同名 session 直接拒绝；每轮 respawn + `clear-history`，默认保留固定 session，不再 timestamp 新建一堆 session。
+- TUI 黑盒根因：fixture 刷新和 provider full-history capture 会把历史帧累进到 DOM，造成 lag 假红/真实刷新风险；`LocalTmuxManager` 检测 `alternate_on` 后用 bounded visible capture（`-S -<paneRows>`）作为 current screen truth，避免 full-history live payload。
+- 验证：targeted architecture/local tmux 18/18 PASS；Mac full tests 132/132 PASS；type-check/build/package/diff-check PASS；packaged `blackbox:terminal-buffer -- --case=all --port=9362 --evidence=mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1` PASS。sequence/tui 都自动对比 session truth 与 app DOM，无人工确认。
+- 剩余：T-A4 只关闭黑盒 gate 子项；large-output reading mode、gap repair、return-to-follow packaged proof 仍未完成。
+
+## 2026-07-04 Mac tmux lifecycle correction
+- 用户纠正：测试不能每轮新开一串 tmux session 后不管生命周期；必须复用已打开的固定 session，并在结束时精确收口。
+- 已复核并精确关闭旧临时测试 session：`zterm_mac_alpha_a`、`zterm_mac_alpha_b`、`zterm_mac_alpha_large`、`zterm_mac_buffer_222327`、`zterm_mac_goal_a`、`zterm_mac_goal_b`。
+- 保留且只保留固定 gate 复用池：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui`，二者 tmux option marker 均为 `@zterm_mac_gate_owner=terminal-buffer-blackbox`。
+- 规则已同步到 `.agents/skills/zterm-mac-dev/SKILL.md` 与 `mac/MEMORY.md`：后续 smoke/blackbox 必须先盘点、优先复用、结束复核；关闭只能逐个明确 session 名，禁止 broad kill。

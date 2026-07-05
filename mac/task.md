@@ -69,6 +69,11 @@
 - [ ] T-A4 Buffer follow/reading 状态机验证
   - terminal-runtime 已有 follow/reading + missingRanges，需验证 renderer 端完整消费
   - 用户上滑进 reading、滚回底恢复 follow
+  - 新增必跑黑盒 gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all`
+  - gate 必须比较 `tmux capture-pane` / `tmux pipe-pane` session truth 与 packaged app DOM rendered rows
+  - gate 必须覆盖持续刷新底部 TUI，防止底部更新时 DOM 旧行上移或漏刷
+  - 当前 blackbox gate：`sequence` + `tui` 已在 packaged app 自动对比通过；证据 `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`
+  - 剩余红点：large output reading mode、gap repair、return-to-follow 仍需 packaged proof，未完成前 T-A4 不关闭
   - 验证：输入命令产生大量输出 → 上滑进 reading → 新输出不抢滚 → 滚回底恢复 follow
 - [ ] T-A5 断线自动重连
   - 断线后进入 error 状态 → 用户点击重连 或 自动退回到 idle → 可手动重新连接

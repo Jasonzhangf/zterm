@@ -85,6 +85,13 @@
           "status": "anchored"
         },
         {
+          "id": "MAC-18-LocalTmuxProvider",
+          "label": "Local tmux provider",
+          "owner_feature": "mac.local_tmux_provider",
+          "entrypoint": "LocalTmuxManager in mac/electron/local-tmux.ts",
+          "status": "anchored"
+        },
+        {
           "id": "MAC-09-RuntimeActivity",
           "label": "Runtime activity",
           "owner_feature": "mac.runtime_registry",
@@ -287,6 +294,30 @@
           "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
         },
         {
+          "edge_id": "MAC-EDGE-0020",
+          "from": "MAC-08-RuntimeEnsure",
+          "to": "MAC-18-LocalTmuxProvider",
+          "owner_feature": "mac.local_tmux_provider",
+          "caller": "createLocalTmuxTransportController in mac/src/lib/local-tmux-transport.ts",
+          "callee": "window.ztermMac.localTmux preload bridge backed by LocalTmuxManager in mac/electron/local-tmux.ts",
+          "semantic_input": "local tmux connect/head/sync/input/resize intent for one clientId",
+          "semantic_output": "Electron local tmux provider request with explicit clientId and target session",
+          "status": "anchored",
+          "verification_gates": ["mac/src/lib/local-tmux-transport.test.ts", "mac/src/lib/mac-architecture-truth.test.ts"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0021",
+          "from": "MAC-18-LocalTmuxProvider",
+          "to": "MAC-09-RuntimeActivity",
+          "owner_feature": "mac.local_tmux_provider",
+          "caller": "LocalTmuxManager.refreshClient/requestBufferHead/requestBufferSync in mac/electron/local-tmux.ts",
+          "callee": "TerminalRuntimeController local transport server-message handler in mac/src/lib/terminal-runtime.ts",
+          "semantic_input": "tmux session capture and provider response payload",
+          "semantic_output": "buffer-head or buffer-sync event for the active local tmux runtime",
+          "status": "anchored",
+          "verification_gates": ["mac/src/lib/mac-architecture-truth.test.ts", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
+        },
+        {
           "edge_id": "MAC-EDGE-0011",
           "from": "MAC-09-RuntimeActivity",
           "to": "MAC-10-TerminalProjection",
@@ -308,7 +339,7 @@
           "semantic_input": "render projection and input callback",
           "semantic_output": "visible terminal and user input events",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "live terminal smoke"]
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
         },
         {
           "edge_id": "MAC-EDGE-0013",

@@ -14,6 +14,7 @@ Evidence-backed completed areas:
 - Workspace: `MacWorkspaceStore` owns window/workspace/pane/tab identity and persists by renderer `windowId`.
 - Runtime: `MacRuntimeRegistry` owns `runtimeKey -> TerminalRuntimeController`; pane UI routes input/viewport/resize by runtime key.
 - Local tmux: packaged A/B smoke proved two dedicated sessions connected, input isolation, resize, switch, close, and B input after A close.
+- Terminal buffer black-box: packaged `blackbox:terminal-buffer -- --case=all` passed for controlled sequence and continuously refreshing TUI screen, comparing `tmux capture-pane` / `pipe-pane` truth with packaged DOM rendered rows.
 - Window lifecycle: `MacWindowManager` owns BrowserWindow create/focus/restore, New Window IPC/menu, stable `windowId`, and restore after app quit/reopen.
 - Server rail: `MacServerDirectory` owns saved/live session projection; read-only refresh against Mac Studio daemon updates rail without opening/pruning workspace tabs.
 - Local file browser: shared `FileBrowserCore`, Electron filesystem adapter, and `MacFileBrowserPanel` browse/preview local fixtures in packaged app.
@@ -22,6 +23,7 @@ Evidence-backed completed areas:
 Recorded evidence:
 
 - `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`
+- `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`
 - `mac/evidence/2026-07-04-window-manager-smoke/`
 - `mac/evidence/2026-07-04-server-refresh-smoke/`
 - `mac/evidence/2026-07-04-file-browser-smoke/`
@@ -39,7 +41,8 @@ P0 blockers before Jason alpha:
 - `T-A1` QuickConnect/session discovery flow: connect should discover sessions, preselect a useful session, and open terminal with one explicit action.
 - `T-A2` Tab restore: cold restart must restore open tabs and active tab; only active tab should eager-connect.
 - `T-A3` Terminal header: show session/status/resolution and provide clear reconnect/disconnect actions.
-- `T-A4` Buffer follow/reading verification: large output, scrollback reading mode, gap repair, and return-to-follow need packaged live proof.
+- `T-A4` Buffer follow/reading verification: large output, scrollback reading mode, gap repair, return-to-follow, and session-truth-vs-render-output comparison need packaged live proof.
+  - Current black-box gate status: `sequence` and `tui` passed in packaged app under `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`. Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof.
 - `T-A5` Disconnect/reconnect: daemon restart and network/session close must surface explicit error and recover through reconnect.
 - Remote terminal path: server rail refresh is read-only verified, but opening a remote daemon session from rail through the full bridge path still needs packaged live smoke.
 - Alpha package handoff: no signed/notarized distributable, install/update path, release notes, or clean user-data migration plan is verified.
@@ -75,6 +78,7 @@ Plus packaged smoke evidence for:
 
 - cold launch and open tab restore
 - local tmux terminal input/output
+- terminal buffer black-box gate: `tmux capture-pane` / `pipe-pane` truth compared with packaged app rendered DOM rows, including a continuously refreshing bottom TUI case
 - remote daemon session open
 - split pane runtime isolation
 - large-output follow/reading
