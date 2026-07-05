@@ -224,6 +224,36 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
     expect(registry.getRuntime).not.toHaveBeenCalled();
   });
 
+  it('terminal header surfaces runtime error state without wrapping it as connected', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openLocalTmuxInWorkbench(workbench, 'zterm_mac_goal_a');
+    const registry = makeRuntimeRegistryStub({
+      ...makeRuntimeState(),
+      connection: {
+        status: 'error',
+        error: 'daemon refused session',
+        connectedSessionId: '',
+        title: 'zterm_mac_goal_a',
+        activeTarget: { sessionName: 'zterm_mac_goal_a' },
+      } as any,
+    });
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={registry}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    expect(container.querySelector('.mac-runtime-pill')?.textContent).toBe('error');
+    expect(container.querySelector('.mac-terminal-error')?.textContent).toContain('daemon refused session');
+    expect(container.textContent).not.toContain('connected\nLocal tmux · zterm_mac_goal_a');
+  });
+
   it('routes visible terminal input to the active tab runtime key only', () => {
     let workbench: MacWorkbenchState = createInitialWorkbenchState();
     workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));

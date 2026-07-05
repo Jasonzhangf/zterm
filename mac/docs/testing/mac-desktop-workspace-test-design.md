@@ -77,6 +77,8 @@ MAC-08-RuntimeEnsure
 | Slice 1 entrypoint | `App -> MacDesktopApp` | implemented; covered by `src/App.test.tsx` and `src/app/MacDesktopApp.test.tsx` |
 | Slice 2 workspace store | `MacWorkspaceStore` / `MacPaneTree` pure model | implemented; production renderer bootstraps by `windowId` and packaged window restore smoke passed |
 | Slice 3 runtime registry | `MacRuntimeRegistry` | implemented in code and white-box tests; packaged A/B tmux input/resize/switch/close isolation smoke passed |
+| Alpha P0 T-A2 cold restore | `MacWorkspaceStore` + `MacRuntimeRegistry` active-only eager connect | packaged `smoke:alpha-p0 -- --case=header-restore` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/` |
+| Alpha P0 T-A3 terminal header | `MacTerminalPane` + `MacRuntimeRegistry` controls | packaged `smoke:alpha-p0 -- --case=header-restore` passed; white-box locks error state is not wrapped as connected |
 | Slice 4 server directory | persistent rail projection | saved/open projection and explicit open-only UI implemented; remote live refresh wiring now targets projection-only status/live session state |
 | Slice 5 file browser | shared core + Mac UI + Electron fs adapter | implemented in unit/component tests; packaged fs browse/preview smoke passed |
 | Slice 6 Electron window manager | multi-window + windowId | implemented in `MacWindowManager`; packaged multi-window create + quit/reopen restore smoke passed |
@@ -204,6 +206,8 @@ Slice 5 hard checks now active:
 - `MacTerminalPane` consumes the projection for its assigned `runtimeKey`.
 - Input from pane A calls runtime A only.
 - Pane B render is unchanged when runtime A emits.
+- Terminal header shows runtime status, session label, terminal size, reconnect, disconnect, and error text without wrapping errors as connected.
+- Terminal reconnect/disconnect controls call `MacRuntimeRegistry` only, not direct transport primitives.
 - File browser open intent does not call terminal runtime connect/disconnect. Implemented in `mac/src/app/file-browser/MacFileBrowserPanel.test.tsx` and `mac/src/app/MacAppShell.layout.test.tsx`.
 - Server rail projection does not call workspace open/close actions; `MacAppShell` opens a tab only from explicit rail click. Implemented in `MacAppShell.layout.test.tsx`.
 - Server rail refresh click calls only the live refresh helper, projects returned sessions, and does not call `addHost`, `setBridgeSettings`, `ensureRuntime`, or workspace open. Implemented in `MacAppShell.layout.test.tsx`.
@@ -236,6 +240,7 @@ Runtime black-box:
 - Resize A does not reset B.
 - Switching A idle / B active keeps A buffer.
 - Closing A disposes A runtime only.
+- `header-restore` packaged smoke seeds a window-scoped workspace with one active local tmux tab and one hidden local tmux tab, closes/reopens the packaged app, and proves the same `windowId`, active tab, hidden tab, header projection, active-only `ensureRuntime(connect:true)`, hidden `ensureRuntime(connect:false)`, active-only actual runtime connect, active-only disconnect, and reconnect-to-connected.
 
 Terminal buffer black-box:
 
@@ -286,7 +291,8 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 | --- | --- | --- | --- |
 | Docs/maps/gate | architecture truth gate | not required | type-check/build only |
 | Workspace pure model | workspace unit tests | renderer split shell test | type-check/build |
-| Runtime registry | registry positive/negative tests | local tmux A/B isolation | type-check/build plus runtime smoke plus `blackbox:terminal-buffer` when terminal buffer/render behavior is claimed |
+| Runtime registry | registry positive/negative tests | local tmux A/B isolation; alpha `header-restore` active-only smoke | type-check/build plus runtime smoke plus `blackbox:terminal-buffer` when terminal buffer/render behavior is claimed |
+| Terminal header/status | pane header tests, runtime registry reconnect/disconnect tests | header status and control transitions | package plus `pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore` |
 | Local tmux provider | architecture truth gate forbids visible-tail-omitting capture; local transport tests | session truth vs app rows through dedicated tmux sessions | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
 | Server directory | projection tests, refresh success/error negative tests | explicit open-only app test; read-only remote daemon refresh smoke when route is available | type-check/build |
 | File browser shared core | core unit tests, import gate | fixture directory browse/preview | package smoke if Electron fs changes |

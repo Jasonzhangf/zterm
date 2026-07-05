@@ -156,6 +156,7 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   delete (window as any).ztermMac;
+  delete (window as any).__ztermAlphaSmoke;
   ensureRuntimeMock.mockClear();
   setActiveRuntimeKeyMock.mockClear();
   releaseRuntimeMock.mockClear();
@@ -254,6 +255,27 @@ describe('MacAppShell layout (red baseline)', () => {
       runtimeKey: 'remote:127.0.0.1:3333:b',
     }), { connect: true });
     expect(setActiveRuntimeKeyMock).toHaveBeenCalledWith('remote:127.0.0.1:3333:b');
+  });
+
+  it('records alpha smoke active-only runtime decisions only when diagnostics are enabled', () => {
+    (window as any).__ztermAlphaSmoke = { runtimeEnsureCalls: [] };
+    let state = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = openConnectionInWorkbench(state, makeTarget('b'), { append: true });
+    renderShell(state);
+
+    expect((window as any).__ztermAlphaSmoke.runtimeEnsureCalls).toEqual([
+      expect.objectContaining({
+        runtimeKey: 'remote:127.0.0.1:3333:a',
+        sessionName: 'a',
+        connect: false,
+      }),
+      expect.objectContaining({
+        runtimeKey: 'remote:127.0.0.1:3333:b',
+        sessionName: 'b',
+        connect: true,
+      }),
+    ]);
   });
 
   it('renders server directory saved sessions without opening tabs during projection', () => {

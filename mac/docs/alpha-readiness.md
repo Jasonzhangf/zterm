@@ -12,7 +12,9 @@ Evidence-backed completed areas:
 
 - Entrypoint: `App -> MacDesktopApp -> MacAppShell`; old `ShellWorkspace` production source removed.
 - Workspace: `MacWorkspaceStore` owns window/workspace/pane/tab identity and persists by renderer `windowId`.
+- Tab restore: packaged `smoke:alpha-p0 -- --case=header-restore` proved cold reopen restores the same `windowId`, active tab, and hidden tab; active runtime is eager-connected while hidden runtime is prepare-only.
 - Runtime: `MacRuntimeRegistry` owns `runtimeKey -> TerminalRuntimeController`; pane UI routes input/viewport/resize by runtime key.
+- Terminal header: packaged `smoke:alpha-p0 -- --case=header-restore` proved header status/session/size/reconnect/disconnect controls for a local tmux terminal. The same smoke proved disconnect changes `connected -> idle` and reconnect returns to `connected` on the active runtime without touching the hidden runtime.
 - Local tmux: packaged A/B smoke proved two dedicated sessions connected, input isolation, resize, switch, close, and B input after A close.
 - Terminal buffer black-box: packaged `blackbox:terminal-buffer -- --case=all` passed for controlled sequence and continuously refreshing TUI screen, comparing `tmux capture-pane` / `pipe-pane` truth with packaged DOM rendered rows.
 - Window lifecycle: `MacWindowManager` owns BrowserWindow create/focus/restore, New Window IPC/menu, stable `windowId`, and restore after app quit/reopen.
@@ -28,6 +30,7 @@ Recorded evidence:
 - `mac/evidence/2026-07-04-server-refresh-smoke/`
 - `mac/evidence/2026-07-04-file-browser-smoke/`
 - `mac/evidence/2026-07-04-legacy-cleanup-smoke/`
+- `mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/`
 
 Committed refactor baseline:
 
@@ -39,14 +42,17 @@ Committed refactor baseline:
 P0 blockers before Jason alpha:
 
 - `T-A1` QuickConnect/session discovery flow: connect should discover sessions, preselect a useful session, and open terminal with one explicit action.
-- `T-A2` Tab restore: cold restart must restore open tabs and active tab; only active tab should eager-connect.
-- `T-A3` Terminal header: show session/status/resolution and provide clear reconnect/disconnect actions.
 - `T-A4` Buffer follow/reading verification: large output, scrollback reading mode, gap repair, return-to-follow, and session-truth-vs-render-output comparison need packaged live proof.
   - Current black-box gate status: `sequence` and `tui` passed in packaged app under `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`. Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof.
 - `T-A5` Disconnect/reconnect: daemon restart and network/session close must surface explicit error and recover through reconnect.
 - Remote terminal path: server rail refresh is read-only verified, but opening a remote daemon session from rail through the full bridge path still needs packaged live smoke.
 - Alpha package handoff: no signed/notarized distributable, install/update path, release notes, or clean user-data migration plan is verified.
-- Evidence retention: current `mac/evidence/2026-07-04-*` directories are untracked; retention/cleanup policy is not decided.
+
+Closed P0 items:
+
+- `T-A2` Tab restore: packaged `header-restore-final2` smoke restored hidden + active tabs after app close/reopen under the same `windowId`, with hidden `ensureRuntime(connect:false)` and zero hidden `runtimeConnectCalls`.
+- `T-A3` Terminal header: packaged `header-restore-final2` smoke showed `connected`, `Local tmux · zterm_mac_alpha_active`, `80x24`, reconnect and disconnect controls; disconnect/reconnect changed active runtime state and did not connect the hidden runtime.
+- Evidence retention: generated `mac/evidence/**` artifacts are ignored by git; only `mac/evidence/README.md` is committed. Evidence paths may be referenced in docs, but artifacts are local verification output and must not be staged.
 
 P1 blockers for a useful alpha:
 
@@ -88,8 +94,8 @@ Plus packaged smoke evidence for:
 
 ## Next Slice Order
 
-1. P0 terminal header + reconnect controls.
+1. P0 QuickConnect/session discovery.
 2. P0 remote daemon open from server rail.
-3. P0 cold-start tab restore with active-only eager connect.
-4. P0 follow/reading/gap repair packaged smoke.
-5. P0 alpha package handoff and evidence retention policy.
+3. P0 follow/reading/gap repair packaged smoke.
+4. P0 daemon/transport disconnect/reconnect recovery.
+5. P0 alpha package handoff.

@@ -145,6 +145,30 @@ function resolveWorkbenchRuntimeEnsureTargets(
   return targets;
 }
 
+function recordAlphaP0RuntimeEnsureDecision(target: MacRuntimeEnsureTarget, connect: boolean) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const smoke = (window as any).__ztermAlphaSmoke;
+  if (!smoke || typeof smoke !== 'object') {
+    return;
+  }
+  const sessionName = target.kind === 'local-tmux'
+    ? target.sessionName
+    : target.target.sessionName;
+  const calls = Array.isArray(smoke.runtimeEnsureCalls)
+    ? smoke.runtimeEnsureCalls
+    : [];
+  calls.push({
+    at: Date.now(),
+    runtimeKey: target.runtimeKey,
+    kind: target.kind,
+    sessionName,
+    connect,
+  });
+  smoke.runtimeEnsureCalls = calls;
+}
+
 function resolveWorkbenchOpenSessionKeys(workbench: MacWorkbenchState, hosts: Host[]) {
   const sessionKeys = new Set<string>();
   workbench.workspace.panes.forEach((pane) => {
@@ -255,9 +279,11 @@ export function MacAppShell(props: MacAppShellProps) {
   useEffect(() => () => runtimeRegistry.dispose(), [runtimeRegistry]);
 
   useEffect(() => {
-    runtimeEnsureTargets.forEach((target) => runtimeRegistry.ensureRuntime(target, {
-      connect: Boolean(activeRuntimeEnsureTarget && target.runtimeKey === activeRuntimeEnsureTarget.runtimeKey),
-    }));
+    runtimeEnsureTargets.forEach((target) => {
+      const connect = Boolean(activeRuntimeEnsureTarget && target.runtimeKey === activeRuntimeEnsureTarget.runtimeKey);
+      recordAlphaP0RuntimeEnsureDecision(target, connect);
+      runtimeRegistry.ensureRuntime(target, { connect });
+    });
     previousRuntimeKeysRef.current.forEach((runtimeKey) => {
       if (!liveRuntimeKeys.has(runtimeKey)) {
         runtimeRegistry.releaseRuntime(runtimeKey);

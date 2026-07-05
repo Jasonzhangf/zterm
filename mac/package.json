@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "blackbox:terminal-buffer": "node scripts/terminal-buffer-blackbox-gate.mjs",
+    "smoke:alpha-p0": "node scripts/alpha-p0-packaged-smoke.mjs",
     "package": "pnpm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir"
   },
   "dependencies": {

@@ -181,9 +181,9 @@
           "caller": "MacDesktopApp resolves renderer windowId and MacAppShell bootstrap",
           "callee": "createMacWorkspaceStore(localStorage).load(windowId)",
           "semantic_input": "renderer windowId query",
-          "semantic_output": "window-scoped workspace record in zterm:mac:workspace:v1:<windowId>",
+          "semantic_output": "window-scoped workspace record in zterm:mac:workspace:v1:<windowId>, including cold-restored active and hidden tab identity",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/window/window-id.test.ts", "mac/src/app/MacDesktopApp.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx"]
+          "verification_gates": ["mac/src/app/window/window-id.test.ts", "mac/src/app/MacDesktopApp.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
         },
         {
           "edge_id": "MAC-EDGE-0004",
@@ -276,10 +276,10 @@
           "owner_feature": "mac.runtime_registry",
           "caller": "MacAppShell runtimeEnsureTargets effect in mac/src/app/MacAppShell.tsx",
           "callee": "MacRuntimeRegistry.ensureRuntime(target) in mac/src/app/runtime/MacRuntimeRegistry.ts",
-          "semantic_input": "live workbench tab target with runtimeKey",
-          "semantic_output": "runtime controller connected once per key/signature",
+          "semantic_input": "live workbench tab target with runtimeKey and active/hidden restore intent",
+          "semantic_output": "runtime controller connected once per key/signature; hidden restored tabs prepared with connect:false",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
         },
         {
           "edge_id": "MAC-EDGE-0010",
@@ -291,7 +291,7 @@
           "semantic_input": "active tab runtimeKey or null",
           "semantic_output": "previous runtime idle, next runtime active, hidden runtimes retained",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
         },
         {
           "edge_id": "MAC-EDGE-0020",
@@ -325,9 +325,9 @@
           "caller": "useMacRuntimeState(registry, runtimeKey) in mac/src/app/runtime/MacRuntimeRegistry.ts",
           "callee": "MacTerminalPane in mac/src/app/MacPaneWorkbench.tsx",
           "semantic_input": "assigned runtime render state",
-          "semantic_output": "terminal pane projection props and runtime-scoped input/viewport/resize callbacks",
+          "semantic_output": "terminal pane projection props, header status/session/size controls, and runtime-scoped input/viewport/resize/reconnect/disconnect callbacks",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts"]
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
         },
         {
           "edge_id": "MAC-EDGE-0012",
@@ -339,7 +339,7 @@
           "semantic_input": "render projection and input callback",
           "semantic_output": "visible terminal and user input events",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
         },
         {
           "edge_id": "MAC-EDGE-0013",

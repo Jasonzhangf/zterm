@@ -121,6 +121,33 @@ function subscribeNoop() {
   return () => {};
 }
 
+function recordAlphaP0RuntimeRegistryEvent(
+  eventName: 'runtimeConnectCalls' | 'runtimeDisconnectCalls',
+  details: {
+    runtimeKey: MacRuntimeKey;
+    target?: MacRuntimeEnsureTarget | null;
+  },
+) {
+  const smoke = (globalThis as any).__ztermAlphaSmoke;
+  if (!smoke || typeof smoke !== 'object') {
+    return;
+  }
+  const calls = Array.isArray(smoke[eventName]) ? smoke[eventName] : [];
+  const target = details.target;
+  const sessionName = target?.kind === 'local-tmux'
+    ? target.sessionName
+    : target?.kind === 'remote'
+      ? target.target.sessionName
+      : '';
+  calls.push({
+    at: Date.now(),
+    runtimeKey: details.runtimeKey,
+    kind: target?.kind || 'unknown',
+    sessionName,
+  });
+  smoke[eventName] = calls;
+}
+
 export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerminalRuntime): MacRuntimeRegistry {
   const entries = new Map<MacRuntimeKey, RuntimeEntry>();
   const runtimeListeners = new Map<MacRuntimeKey, Set<() => void>>();
@@ -173,7 +200,7 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
     emitRuntime(runtimeKey);
   };
 
-  const connectEntry = (entry: RuntimeEntry, target: MacRuntimeEnsureTarget) => {
+  const connectEntry = (runtimeKey: MacRuntimeKey, entry: RuntimeEntry, target: MacRuntimeEnsureTarget) => {
     const nextSignature = buildEnsureTargetSignature(target);
     if (entry.connectedSignature === nextSignature) {
       return;
@@ -186,6 +213,7 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
     } else {
       entry.runtime.connectRemote(target.target);
     }
+    recordAlphaP0RuntimeRegistryEvent('runtimeConnectCalls', { runtimeKey, target });
     entry.connectedSignature = nextSignature;
   };
 
@@ -201,7 +229,7 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
         emitRuntime(runtimeKey);
         return entry.runtime;
       }
-      connectEntry(entry, target);
+      connectEntry(runtimeKey, entry, target);
       entry.runtime.setActivityMode(runtimeKey === activeRuntimeKey ? 'active' : 'idle');
       emitRuntime(runtimeKey);
       return entry.runtime;
@@ -269,7 +297,7 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
         return false;
       }
       entry.connectedSignature = '';
-      connectEntry(entry, entry.target);
+      connectEntry(runtimeKey, entry, entry.target);
       entry.runtime.setActivityMode(runtimeKey === activeRuntimeKey ? 'active' : 'idle');
       emitRuntime(runtimeKey);
       return true;
@@ -284,6 +312,7 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
         return false;
       }
       entry.runtime.disconnect();
+      recordAlphaP0RuntimeRegistryEvent('runtimeDisconnectCalls', { runtimeKey, target: entry.target });
       entry.connectedSignature = '';
       emitRuntime(runtimeKey);
       return true;

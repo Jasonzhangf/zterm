@@ -228,12 +228,18 @@ describe('Mac architecture truth', () => {
     expect(readiness).toContain('Evidence retention');
     expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
     expect(packageJson.scripts?.['blackbox:terminal-buffer']).toBe('node scripts/terminal-buffer-blackbox-gate.mjs');
+    expect(packageJson.scripts?.['smoke:alpha-p0']).toBe('node scripts/alpha-p0-packaged-smoke.mjs');
     expect(fs.existsSync(path.join(macRoot, 'scripts', 'terminal-buffer-blackbox-gate.mjs'))).toBe(true);
+    expect(fs.existsSync(path.join(macRoot, 'scripts', 'alpha-p0-packaged-smoke.mjs'))).toBe(true);
     expect(taskBoard).toContain('blackbox:terminal-buffer');
+    expect(taskBoard).toContain('smoke:alpha-p0');
     expect(skill).toContain('session truth');
     expect(readiness).toContain('terminal buffer black-box gate');
+    expect(readiness).toContain('header-restore-final2');
     expect(functionMap).toContain('blackbox:terminal-buffer');
+    expect(functionMap).toContain('smoke:alpha-p0');
     expect(testDesign).toContain('Terminal buffer black-box');
+    expect(testDesign).toContain('header-restore');
   });
 
   it('anchors MacWorkspaceStore before workspace integration slices', () => {
@@ -318,6 +324,15 @@ describe('Mac architecture truth', () => {
     expect(runtimeActivityEdge?.status).toBe('anchored');
     expect(terminalProjectionEdge?.status).toBe('anchored');
     expect(runtimeEnsureEdge?.verification_gates).toContain('mac/src/app/runtime/MacRuntimeRegistry.test.ts');
+    expect(runtimeEnsureEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
+    );
+    expect(runtimeActivityEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
+    );
+    expect(terminalProjectionEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
+    );
   });
 
   it('keeps local tmux provider capture aligned with session truth', () => {
@@ -429,6 +444,9 @@ describe('Mac architecture truth', () => {
     expect(workspaceLoadEdge?.status).toBe('anchored');
     expect(windowRestoreEdge?.status).toBe('anchored');
     expect(windowEdge?.verification_gates).toContain('mac/src/electron/window-manager.test.ts');
+    expect(workspaceLoadEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
+    );
   });
 
   it('anchors the file browser branch with shared policy, platform IO, and UI projection owners', () => {

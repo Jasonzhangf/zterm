@@ -3,7 +3,8 @@
 ## Alpha readiness
 
 - [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
-- [ ] 关闭 P0 alpha blockers：`T-A1` / `T-A2` / `T-A3` / `T-A4` / `T-A5` / remote open / alpha package handoff / evidence retention
+- [ ] 关闭 P0 alpha blockers：`T-A1` / `T-A4` / `T-A5` / remote open / alpha package handoff
+- [x] Evidence retention：`mac/evidence/**` 已加入 git ignore；只保留 `mac/evidence/README.md` 入仓，generated evidence 只作本地验证输出
 - [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
 
 ## Epic-001 Rewrite truth freeze
@@ -58,13 +59,17 @@
 - [ ] T-A1 QuickConnectSheet session 自动发现补全
   - 连接成功后自动 fetchTmuxSessions → 预选最近连接的 session → 一键 open
   - 验证：QuickConnectSheet 输入 host/token → 发现 → 选中 → 连接 → 终端渲染
-- [ ] T-A2 Tab 恢复持久化（OPEN_TABS / ACTIVE_SESSION localStorage 冷启动恢复）
+- [x] T-A2 Tab 恢复持久化（MacWorkspaceStore window-scoped localStorage 冷启动恢复）
   - 从 shared STORAGE_KEYS 读写，冷启动时恢复上次打开的 tab + 最后活跃 tab
   - 只允许 active tab eager connect，hidden tabs 仅恢复 shell 不建连
+  - packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore --port=9363 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2`
+  - 证据：同一 `windowId` 关闭/重开后恢复 hidden + active tabs；hidden `ensureRuntime(connect:false)`，hidden `runtimeConnectCalls=0`，active `runtimeConnectCalls=2`
   - 验证：打开多个 tab → 关闭 app → 重启 → tab 恢复 → active tab 自动连接
-- [ ] T-A3 TerminalHeader 状态显示补齐
+- [x] T-A3 TerminalHeader 状态显示补齐
   - 显示连接状态胶囊（idle/connecting/connected/error）+ session 名 + 分辨率
   - 断开/重连按钮
+  - packaged smoke：`header-restore-final2` 证明 header 显示 `connected` / `Local tmux · zterm_mac_alpha_active` / `80x24` / Reconnect / Disconnect；点击 Disconnect 后 active runtime `connected -> idle`，点击 Reconnect 后恢复 `connected`
+  - 白盒：`MacPaneWorkbench.test.tsx` 覆盖 controls 只调用 `MacRuntimeRegistry`，并锁 error 状态不包装成 connected
   - 验证：连接前后 header 状态切换��确
 - [ ] T-A4 Buffer follow/reading 状态机验证
   - terminal-runtime 已有 follow/reading + missingRanges，需验证 renderer 端完整消费

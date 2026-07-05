@@ -175,3 +175,10 @@
 - 已复核并精确关闭旧临时测试 session：`zterm_mac_alpha_a`、`zterm_mac_alpha_b`、`zterm_mac_alpha_large`、`zterm_mac_buffer_222327`、`zterm_mac_goal_a`、`zterm_mac_goal_b`。
 - 保留且只保留固定 gate 复用池：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui`，二者 tmux option marker 均为 `@zterm_mac_gate_owner=terminal-buffer-blackbox`。
 - 规则已同步到 `.agents/skills/zterm-mac-dev/SKILL.md` 与 `mac/MEMORY.md`：后续 smoke/blackbox 必须先盘点、优先复用、结束复核；关闭只能逐个明确 session 名，禁止 broad kill。
+
+## 2026-07-05 Mac alpha P0 header/restore packaged closeout
+- 新增 packaged smoke gate：`mac/scripts/alpha-p0-packaged-smoke.mjs`，npm 入口 `pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore`。
+- 架构映射：`mac.workspace_store` / `MAC-EDGE-0003` 证明 window-scoped workspace 冷恢复；`mac.runtime_registry` / `MAC-EDGE-0009/0010` 证明 active-only eager connect；`mac.terminal_pane` / `MAC-EDGE-0011/0012` 证明 header/status/control projection。
+- 白盒新增：`MacAppShell.layout.test.tsx` 锁 smoke diagnostics 只记录 active-only ensure；`MacRuntimeRegistry.test.ts` 锁 smoke diagnostics 的实际 connect/disconnect；`MacPaneWorkbench.test.tsx` 锁 error header 不包装成 connected。
+- Packaged smoke fresh evidence：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/summary.json`。结果：同一 `windowId` 冷重启恢复 hidden + active tabs；hidden ensure connect=0、hidden actual runtime connect=0；active actual runtime connect=2；Disconnect 后 header idle，Reconnect 后 connected。
+- 生命周期复核：9363 CDP/ZTerm/Electron helper 为空；`zterm_mac_alpha_active` / `zterm_mac_alpha_hidden` 临时 tmux session 已按 marker 精确清理；现有用户 tmux session 只读未写入。

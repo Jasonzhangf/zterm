@@ -278,4 +278,38 @@ describe('MacRuntimeRegistry', () => {
 
     expect(registry.reconnectRuntime('local-tmux:missing')).toBe(false);
   });
+
+  it('records alpha smoke actual connect and disconnect events only when diagnostics are enabled', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+    (globalThis as any).__ztermAlphaSmoke = {
+      runtimeConnectCalls: [],
+      runtimeDisconnectCalls: [],
+    };
+
+    try {
+      registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: false });
+      registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: true });
+      registry.ensureRuntime(localTarget('zterm_mac_goal_a'), { connect: true });
+      registry.disconnectRuntime('local-tmux:zterm_mac_goal_a');
+
+      expect(runtimes[0].connectLocalTmux).toHaveBeenCalledTimes(1);
+      expect((globalThis as any).__ztermAlphaSmoke.runtimeConnectCalls).toEqual([
+        expect.objectContaining({
+          runtimeKey: 'local-tmux:zterm_mac_goal_a',
+          kind: 'local-tmux',
+          sessionName: 'zterm_mac_goal_a',
+        }),
+      ]);
+      expect((globalThis as any).__ztermAlphaSmoke.runtimeDisconnectCalls).toEqual([
+        expect.objectContaining({
+          runtimeKey: 'local-tmux:zterm_mac_goal_a',
+          kind: 'local-tmux',
+          sessionName: 'zterm_mac_goal_a',
+        }),
+      ]);
+    } finally {
+      delete (globalThis as any).__ztermAlphaSmoke;
+    }
+  });
 });
