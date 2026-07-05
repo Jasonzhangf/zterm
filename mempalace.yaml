@@ -1,0 +1,13 @@
+wing: zterm
+rooms:
+  - name: general
+    description: zterm source, architecture docs, tests, and project memory
+    keywords:
+      - zterm
+      - android
+      - mac
+      - terminal
+      - renderer
+      - daemon
+      - buffer
+      - memory
