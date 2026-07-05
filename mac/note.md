@@ -212,3 +212,10 @@
 - 白盒：`mac-architecture-truth` + bridge/local transport + runtime registry targeted 41/41 PASS。覆盖 unexpected close -> error、manual disconnect -> idle、target-only reconnect、missing target reconnect false。
 - Packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect --port=9367 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/disconnect-reconnect-final2` PASS。证据证明 active local tmux transport close 后 header/runtime error，点击官方 Reconnect 后 connected；active runtime connect count `2`，hidden runtime connect count `0`，`windowIdStable=true`。
 - 生命周期：9367 packaged app close 后 ZTerm/CDP process 文件为空；`zterm_mac_alpha_reconnect*` 临时 tmux session 已按 marker 清理；固定 gate session 只保留 `zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`。
+
+## 2026-07-05 Mac alpha package handoff closeout
+- 本片 owner：package handoff/docs truth。目标不是 public release，而是 Jason internal alpha unsigned local package。
+- Artifact：`mac/out/mac-arm64/ZTerm.app`。`rtk pnpm --dir mac run package` 已用 `CSC_IDENTITY_AUTO_DISCOVERY=false` 与 `build.mac.identity=null` 跳过签名，输出 local `.app` directory。
+- 新增 `mac/docs/alpha-handoff.md`：写清 artifact path、build/open 边界、verified gates、evidence paths、user-data boundary、known limitations、internal alpha scope。
+- Readiness/task：P0 blocker `alpha package handoff` 已关闭；`alpha-readiness` 改为 ready for Jason internal alpha as unsigned local package，同时保留 public release not ready。
+- 验证：handoff 前一轮已跑 Mac full tests 22/22 files 146/146 tests、type-check、build、package、`node --check` 两个 smoke scripts、`git diff --check`。package 后 artifact 存在于 `mac/out/mac-arm64/ZTerm.app`。

@@ -229,8 +229,9 @@ describe('Mac architecture truth', () => {
     expect(architecture).toContain('mac/docs/alpha-readiness.md');
     expect(taskBoard).toContain('Alpha readiness');
     expect(skill).toContain('状态 / Alpha 汇报对账门禁');
-    expect(readiness).toContain('Current verdict: not alpha-ready yet.');
+    expect(readiness).toContain('Current verdict: ready for Jason internal alpha as an unsigned local package.');
     expect(readiness).toContain('P0 blockers before Jason alpha');
+    expect(readiness).toContain('None for Jason internal alpha using the current unsigned local package.');
     expect(readiness).toContain('Remote server rail open');
     expect(readiness).toContain('server-rail-remote-open-final2');
     expect(readiness).toContain('T-A4');
@@ -240,8 +241,9 @@ describe('Mac architecture truth', () => {
     expect(readiness).toContain('disconnect-reconnect-final2');
     expect(readiness).toContain('transport-owner close surfaces explicit `error`');
     expect(readiness).toContain('Alpha package handoff');
+    expect(readiness).toContain('mac/docs/alpha-handoff.md');
     expect(readiness).toContain('Evidence retention');
-    expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
+    expect(readiness).toContain('Internal alpha handoff requires');
     expect(packageJson.scripts?.['blackbox:terminal-buffer']).toBe('node scripts/terminal-buffer-blackbox-gate.mjs');
     expect(packageJson.scripts?.['smoke:alpha-p0']).toBe('node scripts/alpha-p0-packaged-smoke.mjs');
     expect(fs.existsSync(path.join(macRoot, 'scripts', 'terminal-buffer-blackbox-gate.mjs'))).toBe(true);

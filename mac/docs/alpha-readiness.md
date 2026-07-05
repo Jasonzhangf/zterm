@@ -2,9 +2,11 @@
 
 ## Status
 
-Current verdict: not alpha-ready yet.
+Current verdict: ready for Jason internal alpha as an unsigned local package.
 
 The Mac client has crossed the architecture-refactor baseline: the production path now has explicit owners for entrypoint, workspace identity, runtime registry, server directory, Electron window lifecycle, local file browser, local filesystem bridge, and legacy workspace removal. It is suitable for focused internal engineering smoke, but not yet suitable for Jason alpha testing as a daily terminal client.
+
+It is not a public release: the current artifact is unsigned, not notarized, has no installer/update channel, and does not perform user-data migration.
 
 ## Verified Baseline
 
@@ -48,7 +50,7 @@ Committed refactor baseline:
 
 P0 blockers before Jason alpha:
 
-- Alpha package handoff: no signed/notarized distributable, install/update path, release notes, or clean user-data migration plan is verified.
+- None for Jason internal alpha using the current unsigned local package.
 
 Closed P0 items:
 
@@ -59,6 +61,7 @@ Closed P0 items:
 - Evidence retention: generated `mac/evidence/**` artifacts are ignored by git; only `mac/evidence/README.md` is committed. Evidence paths may be referenced in docs, but artifacts are local verification output and must not be staged.
 - `T-A4` Buffer follow/reading: packaged `buffer-gate-all-t-a4-final` smoke passed `sequence`, `tui`, and `large-reading`. `large-reading` proved scrollback reading mode, no scroll steal while new output arrives, return-to-follow, app/tmux append tail equality, and runtime viewport reading diagnostics.
 - `T-A5` Disconnect/reconnect: packaged `disconnect-reconnect-final2` smoke used a smoke-only local transport owner close to project explicit `error`, then clicked the official Reconnect control and recovered to `connected`. It proved active runtime reconnect count `2`, hidden runtime reconnect count `0`, stable `windowId`, no 9367/ZTerm process after close, and marker-cleaned dedicated tmux sessions. White-box tests cover bridge/local unexpected close -> error and manual disconnect -> idle.
+- Alpha package handoff: local unsigned package `mac/out/mac-arm64/ZTerm.app` exists after `rtk pnpm --dir mac run package`; `mac/docs/alpha-handoff.md` defines artifact path, install/open boundary, user-data boundary, verified gates, evidence paths, and public-release limitations. Latest package handoff gates passed: Mac tests 22 files / 146 tests, type-check, build, package, smoke script syntax checks, terminal buffer script syntax check, and diff check.
 
 P1 blockers for a useful alpha:
 
@@ -70,14 +73,15 @@ P1 blockers for a useful alpha:
 
 ## Distance Estimate
 
-Alpha distance: low-to-medium.
+Alpha distance: internal alpha-ready; public release not ready.
 
 Engineering estimate from current state:
 
-- Minimal internal alpha: 1 focused slice if scope accepts the current unsigned local package.
-- Practical Jason alpha: about 1-4 focused slices because package handoff still needs explicit install/release notes/user-data boundary, while settings basics remain P1.
+- Minimal internal alpha: ready if scope accepts the current unsigned local package.
+- Practical daily-use alpha: P1 gaps remain, mainly settings basics and re-entry surfaces.
+- Public release: still requires signing, notarization, installer/DMG, updater, and public release notes.
 
-Do not call the Mac client alpha-ready until all P0 blockers above are closed with:
+Internal alpha handoff requires:
 
 ```bash
 pnpm --dir mac test -- --reporter dot
@@ -98,6 +102,10 @@ Plus packaged smoke evidence for:
 - file browser local preview
 - app quit with no orphan process
 
+Internal alpha handoff document:
+
+- `mac/docs/alpha-handoff.md`
+
 ## Next Slice Order
 
-1. P0 alpha package handoff.
+1. P1 settings basics or another Jason-prioritized alpha usability gap.
