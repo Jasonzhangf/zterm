@@ -24,7 +24,7 @@ import {
   buildTerminalRenderFrame,
   buildTerminalGridPadding,
   buildTerminalRenderGeometryRevision,
-  buildTerminalViewportDemand,
+  buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
   queueTerminalFollowScrollSync,
   cancelTerminalFollowScrollSync,
@@ -683,11 +683,13 @@ function TerminalViewComponent({
         return;
       }
 
-      const demand = buildTerminalViewportDemand({
+      const demand = buildTerminalViewportDemandWithRepair({
         nextMode,
         nextRenderBottomIndex,
         viewportRows,
         bufferStartIndex: renderBuffer.startIndex,
+        bufferEndIndex: renderBuffer.endIndex,
+        gapRanges: renderBuffer.gapRanges,
         followDemandAnchorEndIndex,
         viewportEndIndexOverride: options?.viewportEndIndex,
       });
@@ -702,6 +704,8 @@ function TerminalViewComponent({
       followDemandAnchorEndIndex,
       onViewportChange,
       refreshActive,
+      renderBuffer.endIndex,
+      renderBuffer.gapRanges,
       renderBuffer.startIndex,
       sessionId,
       viewportRows,

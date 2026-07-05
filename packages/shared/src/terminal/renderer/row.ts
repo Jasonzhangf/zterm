@@ -43,7 +43,7 @@ export interface TerminalViewportDemand {
 }
 
 export interface TerminalViewportDemandWithRepair extends TerminalViewportDemand {
-  missingRanges: TerminalGapRange[];
+  missingRanges?: TerminalGapRange[];
 }
 
 export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
@@ -296,20 +296,25 @@ export function buildTerminalViewportDemandWithRepair(options: {
     visibleEndIndex - Math.max(1, Math.floor(options.viewportRows || 1)),
   );
 
-  return {
-    ...demand,
-    missingRanges: computeVisibleRangeRepairRanges({
-      visibleStartIndex,
-      visibleEndIndex,
-      localStartIndex: options.bufferStartIndex,
-      localEndIndex: options.bufferEndIndex,
-      localGapRanges: Array.isArray(options.gapRanges) ? options.gapRanges : [],
-    }),
-  };
+  const missingRanges = computeVisibleRangeRepairRanges({
+    visibleStartIndex,
+    visibleEndIndex,
+    localStartIndex: options.bufferStartIndex,
+    localEndIndex: options.bufferEndIndex,
+    localGapRanges: Array.isArray(options.gapRanges) ? options.gapRanges : [],
+  });
+
+  return missingRanges.length > 0
+    ? { ...demand, missingRanges }
+    : demand;
 }
 
 export function buildTerminalViewportDemandKey(demand: TerminalViewportDemand) {
-  return `${demand.mode}:${demand.viewportEndIndex}:${demand.viewportRows}`;
+  const missingRanges = (demand as TerminalViewportDemandWithRepair).missingRanges;
+  const repairKey = Array.isArray(missingRanges) && missingRanges.length > 0
+    ? `:${missingRanges.map((range) => `${range.startIndex}-${range.endIndex}`).join(',')}`
+    : '';
+  return `${demand.mode}:${demand.viewportEndIndex}:${demand.viewportRows}${repairKey}`;
 }
 
 export function renderGapMarker(options: {

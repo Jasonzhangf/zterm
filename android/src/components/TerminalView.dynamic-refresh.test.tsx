@@ -814,7 +814,54 @@ describe('TerminalView minimal mirror render', () => {
     await waitFor(() => {
       expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(true);
     });
+    expect(
+      onViewportChange.mock.calls.some(([, payload]) =>
+        payload?.mode === 'reading'
+        && JSON.stringify(payload?.missingRanges) === JSON.stringify([{ startIndex: 5, endIndex: 6 }]),
+      ),
+    ).toBe(true);
     expect(view.container.querySelector('[data-terminal-gap=\"true\"]')).toBeTruthy();
+  });
+
+  it('automatically reports visible follow gaps as missingRanges from the shared renderer core', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(120),
+      bufferTailEndIndex: 120,
+    });
+    session.buffer.lines[110] = [];
+    session.buffer.gapRanges = [{ startIndex: 110, endIndex: 111 }];
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('row-120'));
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 110, endIndex: 111 }],
+      });
+    });
+    expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
   });
 
   it('does not freeze the active follow viewport on the previous frame when latest rows contain gaps', async () => {

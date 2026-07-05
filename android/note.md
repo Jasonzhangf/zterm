@@ -1468,3 +1468,9 @@ Need runtime debug to confirm:
 
 - 现场诊断值显示 `RESZ=N`、`VV/SH/RAW` 未 resize，`KB/LIFT=294` 合理；剩余“抬高太多”来自 IME lift 上又叠加固定 `TERMINAL_QUICK_BAR_RENDER_LIFT_PX=30`。修复只在 `TerminalPage` UI shell owner 内处理：IME 活跃时 `quickBarRenderLiftPx=0`，键盘隐藏时保留 30px 基线；不传入 `TerminalView`，不触发 resize，不进入 daemon/tmux/buffer truth。
 - 回归锁定：IME 活跃的 stage/quickbar bottom 期望整体减少 30px；already-resized 路径保持不二次上抬。验证：IME owner 110 tests PASS，`tsc --noEmit` PASS，`git diff --check` PASS，debug build/APK `0.1.3.1997` PASS。
+# 2026-07-05 Android renderer shared visible-gap repair
+
+- 架构映射：本轮属于 `terminal.buffer_render` / renderer visible-range demand；唯一修改点是 Android `TerminalView` 的 viewport emit 改为消费 shared `buildTerminalViewportDemandWithRepair`，不在 Android 复制 missingRanges/gap repair 逻辑。
+- 修复：Android follow/reading viewport demand 现在携带 shared core 计算出的 visible `missingRanges`；shared demand key 纳入 missingRanges 拓扑，避免同 viewport 下可见 gap 改变被去重吞掉。无 gap 时仍保持旧 payload 形状，不发送空 `missingRanges: []`。
+- 回归：`TerminalView.dynamic-refresh.test.tsx` 增加自动黑盒断言，证明 visible reading/follow gap 会通过 `onViewportChange` 上报 `missingRanges`，并同步渲染 gap marker。
+- 验证：shared renderer/Mac tests 25 PASS；Android targeted renderer/buffer tests 86 PASS；Android prebuild terminal regression core 576+96 PASS；relay local smoke PASS；web build PASS；Gradle debug build PASS，APK `0.1.3.2011` 已发布到 update channel。

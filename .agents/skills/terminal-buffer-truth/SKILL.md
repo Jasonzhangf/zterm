@@ -604,6 +604,7 @@ tmux truth
 - 若现场出现 **`buffer-sync` 明明持续收到，但 `localRevision/localEndIndex` 长时间不前进、client 反复请求同一 3 屏窗口**，优先查 **client 侧 incoming `buffer-sync` apply 阶段**；收到即更新本地 buffer truth，不要再叠微任务批处理/延迟 flush 第二语义。
 - 若现场是“有内容但要等补齐才整屏一起跳出来”，优先判 **renderer / buffer manager 边界错**；正确语义是 gap 先空白，补齐后局部重刷
 - `reading-repair` / visible-gap repair 的 client 判重与 in-flight cover **必须纳入当前 `missingRanges` / gap 拓扑语义**；同一 `knownRevision/localWindow/requestWindow` 下，只要可见区 gap 变了，就必须允许再次发 repair。否则现场会出现：页面局部空白，手动上下划一下（viewport 改变）后才补刷。
+- Android / Mac renderer 的 visible-gap repair demand 必须共用 shared `buildTerminalViewportDemandWithRepair`；平台 view 只传入 local buffer window + gap ranges，不得复制 missingRanges 计算。demand key 必须纳入非空 `missingRanges`，无 gap 时不发送空数组以保持旧 payload 形状。
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。

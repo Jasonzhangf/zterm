@@ -631,3 +631,10 @@ silently returns 0 when viewport metrics are stable.
 - 切换到已有 runtime shell 的 session 时，`SessionContext.switchSession()` 已经通过 `active-reentry` 拥有唯一 refresh owner；`useOpenTabRuntime` 不得再对 `connecting/reconnecting/connected` 目标无差别补一发 `resumeActiveSessionTransport()`。
 - `explicit-resume` 只保留给 unavailable runtime：目标缺失或状态是 `idle/closed/disconnected/error` 时才允许显式 reopen。否则重复推进 traversal/control open 更容易出现 `ws connect timeout`。
 - 回归门禁：`pnpm --dir android exec vitest run src/hooks/useOpenTabRuntime.test.tsx src/hooks/useOpenTabSessionActions.test.tsx src/App.dynamic-refresh.test.tsx src/lib/open-tab-history-truth.test.ts --reporter dot` 必须同时证明 connecting 目标不二次 resume，而 disconnected 目标仍保留显式 reopen。
+
+## 2026-07-05 Android renderer visible gap repair shared core
+
+- Android `TerminalView` 的 viewport demand 必须消费 shared `buildTerminalViewportDemandWithRepair`，与 Mac renderer 共用 visible-gap repair 核心；禁止在 Android 独立复制 missingRanges/gap 计算。
+- `buildTerminalViewportDemandKey` 必须纳入非空 `missingRanges` 拓扑；同一 mode/end/rows 下可见 gap 改变仍必须重新上报，否则 buffer manager 会漏发 visible repair。
+- 无 visible gap 时 demand 不发送空 `missingRanges: []`，保持旧 payload 形状；有 visible gap 时才显式带 ranges。
+- 回归门禁：`pnpm --dir android exec vitest run src/components/TerminalView.dynamic-refresh.test.tsx src/contexts/session-context-buffer-runtime.test.ts --reporter dot` 与 `pnpm --dir packages/shared exec vitest run src/terminal/renderer.test.ts src/terminal/mac-terminal-view.test.tsx --reporter dot`。
