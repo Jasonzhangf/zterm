@@ -3,7 +3,7 @@
 ## Alpha readiness
 
 - [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
-- [ ] 关闭 P0 alpha blockers：`T-A4` / `T-A5` / alpha package handoff
+- [ ] 关闭 P0 alpha blockers：`T-A5` / alpha package handoff
 - [x] Evidence retention：`mac/evidence/**` 已加入 git ignore；只保留 `mac/evidence/README.md` 入仓，generated evidence 只作本地验证输出
 - [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
 
@@ -79,14 +79,16 @@
   - packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open --port=9365 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/server-rail-remote-open-final2`
   - 证据：真实 daemon `list-sessions` 返回 dedicated `zterm_mac_alpha_remote_open`；Refresh 后 rail live sessions 更新且 `runtimeEnsureCalls=0`；点击 rail session 后 remote runtime connected once；DOM rows 渲染 `ZTERM_ALPHA_REMOTE_OPEN_READY`；9365/ZTerm 进程为空；dedicated tmux session 已 marker 清理；storage/evidence token 已 redacted
   - 验证：server rail Refresh → live session 出现 → explicit click → 远端终端渲染
-- [ ] T-A4 Buffer follow/reading 状态机验证
+- [x] T-A4 Buffer follow/reading 状态机验证
   - terminal-runtime 已有 follow/reading + missingRanges，需验证 renderer 端完整消费
   - 用户上滑进 reading、滚回底恢复 follow
   - 新增必跑黑盒 gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all`
   - gate 必须比较 `tmux capture-pane` / `tmux pipe-pane` session truth 与 packaged app DOM rendered rows
   - gate 必须覆盖持续刷新底部 TUI，防止底部更新时 DOM 旧行上移或漏刷
-  - 当前 blackbox gate：`sequence` + `tui` 已在 packaged app 自动对比通过；证据 `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`
-  - 剩余红点：large output reading mode、gap repair、return-to-follow 仍需 packaged proof，未完成前 T-A4 不关闭
+  - packaged gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all --port=9366 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final`
+  - 证据：`sequence` 比较 pipe/tmux/app tail `_001.._080` 一致；`tui` 比较持续刷新底部 screen，max lag 1 且 final exact；`large-reading` 证明大量输出后进入 reading，新输出不抢滚，滚回底恢复 follow，app/tmux append tail 一致，runtime viewport 记录 reading demand
+  - 修复：shared renderer 从 projection gap truth 生成 visible `missingRanges` 并透传到 runtime；Mac terminal canvas 增加 flex 高度约束，packaged 下 scroll 容器不再随内容无限长
+  - 生命周期：固定 gate session `zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large` 使用 marker 复用；9366 packaged app 退出后无 CDP owner
   - 验证：输入命令产生大量输出 → 上滑进 reading → 新输出不抢滚 → 滚回底恢复 follow
 - [ ] T-A5 断线自动重连
   - 断线后进入 error 状态 → 用户点击重连 或 自动退回到 idle → 可手动重新连接

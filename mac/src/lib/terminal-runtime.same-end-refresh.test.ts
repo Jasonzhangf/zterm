@@ -183,4 +183,38 @@ describe('terminal runtime same-end refresh', () => {
     expect(localTmuxHarness.syncRequests).toHaveLength(0);
     runtime.dispose();
   });
+
+  it('passes renderer missing ranges through reading repair sync requests', () => {
+    const runtime = createTerminalRuntime();
+    runtime.connectLocalTmux({ sessionName: 'zterm' });
+
+    emit({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'zterm',
+        revision: 3,
+        latestEndIndex: 120,
+        availableStartIndex: 50,
+        availableEndIndex: 120,
+      },
+    });
+    emit({ type: 'buffer-sync', payload: makeBufferPayload(3, Array.from({ length: 20 }, (_, index) => `line ${index}`)) });
+    localTmuxHarness.syncRequests = [];
+
+    runtime.updateViewport({
+      mode: 'reading',
+      viewportEndIndex: 70,
+      viewportRows: 20,
+      missingRanges: [{ startIndex: 55, endIndex: 60 }],
+    });
+    vi.advanceTimersByTime(30);
+
+    expect(localTmuxHarness.syncRequests).toHaveLength(1);
+    expect(localTmuxHarness.syncRequests[0]).toMatchObject({
+      requestEndIndex: 70,
+      targetHeadRevision: 3,
+      missingRanges: [{ startIndex: 55, endIndex: 60 }],
+    });
+    runtime.dispose();
+  });
 });

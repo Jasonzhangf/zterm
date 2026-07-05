@@ -395,7 +395,7 @@
           "caller": "MacTerminalPane",
           "callee": "MacTerminalView from @zterm/shared",
           "semantic_input": "render projection and input callback",
-          "semantic_output": "visible terminal and user input events",
+          "semantic_output": "visible terminal, user input events, and renderer-owned viewport demand including visible missingRanges",
           "status": "anchored",
           "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
         },

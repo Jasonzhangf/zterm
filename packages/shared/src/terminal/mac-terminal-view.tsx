@@ -16,7 +16,7 @@ import {
   buildTerminalGridPadding,
   buildTerminalRenderFrame,
   buildTerminalRenderRows,
-  buildTerminalViewportDemand,
+  buildTerminalViewportDemandWithRepair,
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
   resolveScrollTopForRenderBottomIndex,
@@ -178,14 +178,15 @@ export function MacTerminalView(props: MacTerminalViewProps) {
     requestAnimationFrame(() => {
       syncScrollHostToRenderBottom(renderGeometry.frame.followVisualBottomIndex);
       onViewportChange?.({
-        ...buildTerminalViewportDemand({
+        ...buildTerminalViewportDemandWithRepair({
           nextMode: 'follow',
           nextRenderBottomIndex: renderGeometry.frame.followVisualBottomIndex,
           viewportRows,
           bufferStartIndex: projection.startIndex,
+          bufferEndIndex: projection.endIndex,
+          gapRanges: projection.gapRanges,
           followDemandAnchorEndIndex: projection.endIndex,
         }),
-        missingRanges: [],
       });
     });
   }, [onViewportChange, projection?.endIndex, projection?.revision, readingMode, renderGeometry.frame.followVisualBottomIndex, viewportRows]);
@@ -209,14 +210,15 @@ export function MacTerminalView(props: MacTerminalViewProps) {
     setReadingMode(nextMode === 'reading');
     setRenderBottomIndex(nextRenderBottomIndex);
     onViewportChange?.({
-      ...buildTerminalViewportDemand({
+      ...buildTerminalViewportDemandWithRepair({
         nextMode,
         nextRenderBottomIndex,
         viewportRows,
         bufferStartIndex: projection.startIndex,
+        bufferEndIndex: projection.endIndex,
+        gapRanges: projection.gapRanges,
         followDemandAnchorEndIndex: projection.endIndex,
       }),
-      missingRanges: [],
     });
   };
 

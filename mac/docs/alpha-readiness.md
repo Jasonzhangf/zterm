@@ -17,7 +17,7 @@ Evidence-backed completed areas:
 - Runtime: `MacRuntimeRegistry` owns `runtimeKey -> TerminalRuntimeController`; pane UI routes input/viewport/resize by runtime key.
 - Terminal header: packaged `smoke:alpha-p0 -- --case=header-restore` proved header status/session/size/reconnect/disconnect controls for a local tmux terminal. The same smoke proved disconnect changes `connected -> idle` and reconnect returns to `connected` on the active runtime without touching the hidden runtime.
 - Local tmux: packaged A/B smoke proved two dedicated sessions connected, input isolation, resize, switch, close, and B input after A close.
-- Terminal buffer black-box: packaged `blackbox:terminal-buffer -- --case=all` passed for controlled sequence and continuously refreshing TUI screen, comparing `tmux capture-pane` / `pipe-pane` truth with packaged DOM rendered rows.
+- Terminal buffer black-box: packaged `blackbox:terminal-buffer -- --case=all` passed for controlled sequence, continuously refreshing TUI screen, and large-output reading/return-to-follow, comparing `tmux capture-pane` / `pipe-pane` truth with packaged DOM rendered rows.
 - Window lifecycle: `MacWindowManager` owns BrowserWindow create/focus/restore, New Window IPC/menu, stable `windowId`, and restore after app quit/reopen.
 - Server rail: `MacServerDirectory` owns saved/live session projection; read-only refresh against Mac Studio daemon updates rail without opening/pruning workspace tabs.
 - Server rail remote open: packaged `smoke:alpha-p0 -- --case=server-rail-remote-open` proved refresh projects live sessions with zero runtime creation, then explicit rail session click creates a connected remote runtime and renders the dedicated tmux session output.
@@ -28,6 +28,7 @@ Recorded evidence:
 
 - `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`
 - `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`
+- `mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final/`
 - `mac/evidence/2026-07-04-window-manager-smoke/`
 - `mac/evidence/2026-07-04-server-refresh-smoke/`
 - `mac/evidence/2026-07-04-file-browser-smoke/`
@@ -45,8 +46,6 @@ Committed refactor baseline:
 
 P0 blockers before Jason alpha:
 
-- `T-A4` Buffer follow/reading verification: large output, scrollback reading mode, gap repair, return-to-follow, and session-truth-vs-render-output comparison need packaged live proof.
-  - Current black-box gate status: `sequence` and `tui` passed in packaged app under `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`. Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof.
 - `T-A5` Disconnect/reconnect: daemon restart and network/session close must surface explicit error and recover through reconnect.
 - Alpha package handoff: no signed/notarized distributable, install/update path, release notes, or clean user-data migration plan is verified.
 
@@ -57,6 +56,7 @@ Closed P0 items:
 - `T-A2` Tab restore: packaged `header-restore-final2` smoke restored hidden + active tabs after app close/reopen under the same `windowId`, with hidden `ensureRuntime(connect:false)` and zero hidden `runtimeConnectCalls`.
 - `T-A3` Terminal header: packaged `header-restore-final2` smoke showed `connected`, `Local tmux · zterm_mac_alpha_active`, `80x24`, reconnect and disconnect controls; disconnect/reconnect changed active runtime state and did not connect the hidden runtime.
 - Evidence retention: generated `mac/evidence/**` artifacts are ignored by git; only `mac/evidence/README.md` is committed. Evidence paths may be referenced in docs, but artifacts are local verification output and must not be staged.
+- `T-A4` Buffer follow/reading: packaged `buffer-gate-all-t-a4-final` smoke passed `sequence`, `tui`, and `large-reading`. `large-reading` proved scrollback reading mode, no scroll steal while new output arrives, return-to-follow, app/tmux append tail equality, and runtime viewport reading diagnostics.
 
 P1 blockers for a useful alpha:
 
@@ -72,8 +72,8 @@ Alpha distance: medium.
 
 Engineering estimate from current state:
 
-- Minimal internal alpha: about 3 focused slices if scope is local tmux + basic remote open + restart recovery.
-- Practical Jason alpha: about 3-6 focused slices because terminal follow/reading, reconnect, settings basics, and package handoff still need packaged smoke evidence.
+- Minimal internal alpha: about 2 focused slices if scope is local tmux + basic remote open + restart recovery.
+- Practical Jason alpha: about 2-5 focused slices because reconnect, settings basics, and package handoff still need packaged smoke evidence.
 
 Do not call the Mac client alpha-ready until all P0 blockers above are closed with:
 
@@ -92,13 +92,11 @@ Plus packaged smoke evidence for:
 - terminal buffer black-box gate: `tmux capture-pane` / `pipe-pane` truth compared with packaged app rendered DOM rows, including a continuously refreshing bottom TUI case
 - remote daemon session open
 - split pane runtime isolation
-- large-output follow/reading
 - daemon disconnect/reconnect
 - file browser local preview
 - app quit with no orphan process
 
 ## Next Slice Order
 
-1. P0 follow/reading/gap repair packaged smoke.
-2. P0 daemon/transport disconnect/reconnect recovery.
-3. P0 alpha package handoff.
+1. P0 daemon/transport disconnect/reconnect recovery.
+2. P0 alpha package handoff.

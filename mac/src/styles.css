@@ -1410,10 +1410,20 @@ button {
 .mac-terminal-surface {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid rgba(170, 188, 214, 0.08);
   background: #0a0e14;
+}
+
+.mac-terminal-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .mac-file-browser-panel {

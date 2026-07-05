@@ -276,6 +276,7 @@ Terminal buffer black-box:
 - Session source truth is `tmux capture-pane`; input oracle is `tmux pipe-pane`; app output target is packaged app DOM rendered rows (`data-terminal-row-text`).
 - `sequence` case proves app input reaches the dedicated session and the rendered tail contains the same controlled numbered output as tmux truth.
 - `tui` case proves a continuously refreshing bottom TUI screen advances in the app render output and stays within bounded lag of tmux truth.
+- `large-reading` case proves large output can enter scrollback reading mode, new output does not steal the reading position, scroll-to-bottom returns to follow, append tail matches tmux truth, and renderer viewport demand reaches runtime diagnostics.
 - This gate is required before closing `T-A4`; connected status, screenshots, bottom geometry, or local renderer unit tests do not replace it.
 
 Remote daemon black-box, only when a real daemon route is available:
@@ -326,12 +327,12 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 | File browser shared core | core unit tests, import gate | fixture directory browse/preview | package smoke if Electron fs changes |
 | Electron window manager | window manager tests | multi-window renderer smoke | package + packaged smoke |
 | Legacy cleanup | architecture scan | replacement path black-box tests | full Mac tests/type-check/build; package if runtime/window changed |
-| Terminal buffer/render | runtime + pane owner tests | session truth vs rendered rows, sequence and TUI refresh | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
+| Terminal buffer/render | runtime + pane owner tests | session truth vs rendered rows, sequence, TUI refresh, and large-output reading/return-follow | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
 
 ## Known Gaps
 
 - Runtime registry now has packaged A/B tmux evidence for input/echo isolation, resize, switch, close, and B after-close input under `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`.
-- Terminal buffer correctness now has an explicit packaged black-box gate design, but alpha readiness still requires the latest run evidence to show `sequence` and `tui` passing under the alpha closeout evidence directory.
+- Terminal buffer correctness now has packaged black-box evidence under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final/` showing `sequence`, `tui`, and `large-reading` passing under the alpha closeout evidence directory.
 - Legacy `ShellWorkspace` all-in-one source is removed. Schedule modal, remote screenshot, file transfer, QuickConnect, Details, and Terminal primitives are retained only as standalone future owner inputs, not as fallback workspace semantics.
 - `MacWorkspaceStore` pure model exists and `MacDesktopApp` / `MacAppShell` now bootstrap renderer state from `windowId`; packaged multi-window restore smoke passed.
 - `MacServerDirectory` projects saved servers/sessions, explicit refresh status/errors, and live daemon snapshots; read-only real-daemon refresh smoke must still be run for each routed endpoint before claiming remote live coverage.

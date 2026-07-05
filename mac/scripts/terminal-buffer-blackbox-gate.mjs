@@ -10,6 +10,7 @@
  * Cases:
  * - sequence: app input -> tmux output -> app rendered tail
  * - tui: continuously updating bottom line -> app refresh follows tmux truth
+ * - large-reading: large output scrollback stays in reading, then returns to follow
  */
 
 import { spawnSync } from 'node:child_process';
@@ -28,6 +29,7 @@ const GATE_SESSION_OPTION_CASE = '@zterm_mac_gate_case';
 const FIXED_GATE_SESSIONS = {
   sequence: 'zterm_mac_gate_sequence',
   tui: 'zterm_mac_gate_tui',
+  largeReading: 'zterm_mac_gate_large',
 };
 const ROOT = resolve(new URL('..', import.meta.url).pathname, '..');
 const MAC_ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -57,7 +59,7 @@ function parseArgs(argv) {
     else if (arg === '--cleanup-sessions') out.cleanupSessions = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
-  if (!['sequence', 'tui', 'all'].includes(out.caseName)) {
+  if (!['sequence', 'tui', 'large-reading', 'all'].includes(out.caseName)) {
     throw new Error(`Unsupported --case=${out.caseName}`);
   }
   if (!Number.isFinite(out.port) || out.port <= 0) {
@@ -201,6 +203,36 @@ function createTuiSession(sessionName, evidenceDir) {
   run('chmod', ['755', scriptPath]);
   ensureGateSession(sessionName, 'tui', `${shellQuote(scriptPath)} ${shellQuote(stopPath)}`);
   return { stopPath };
+}
+
+function createLargeReadingSession(sessionName, evidenceDir) {
+  const scriptPath = join(evidenceDir, `${sessionName}-large-reading.sh`);
+  writeFileSync(scriptPath, [
+    '#!/bin/sh',
+    "printf 'ZTERM_LARGE_READY\\n'",
+    'i=1',
+    'while [ "$i" -le 1500 ]; do',
+    "  printf 'ZTERM_LARGE_BASE_%04d\\n' \"$i\"",
+    '  i=$((i + 1))',
+    'done',
+    'while IFS= read -r token; do',
+    "  case \"$token\" in",
+    '    ZTERMLARGEAPPEND*)',
+    '      j=1',
+    '      while [ "$j" -le 60 ]; do',
+    "        printf '%s_%03d\\n' \"$token\" \"$j\"",
+    '        j=$((j + 1))',
+    '      done',
+    '      ;;',
+    '    *)',
+    "      printf 'ZTERM_LARGE_IGNORED %s\\n' \"$token\"",
+    '      ;;',
+    '  esac',
+    'done',
+    '',
+  ].join('\n'));
+  run('chmod', ['755', scriptPath]);
+  ensureGateSession(sessionName, 'large-reading', shellQuote(scriptPath));
 }
 
 function capturePlain(sessionName, lines = 160) {
@@ -502,6 +534,29 @@ function compactSequenceResult(result) {
   };
 }
 
+function compactLargeReadingResult(result) {
+  return {
+    caseName: result.caseName,
+    sessionName: result.sessionName,
+    appendPrefix: result.appendPrefix,
+    appConnectedToSession: result.appConnectedToSession,
+    enteredReading: result.enteredReading,
+    readingStableAfterAppend: result.readingStableAfterAppend,
+    tmuxHasAppendTail: result.tmuxHasAppendTail,
+    returnToFollow: result.returnToFollow,
+    appContainsAppendTailAfterFollow: result.appContainsAppendTailAfterFollow,
+    viewportRecordedReading: result.viewportRecordedReading,
+    beforeScroll: result.beforeScroll,
+    readingScroll: result.readingScroll,
+    afterAppendScroll: result.afterAppendScroll,
+    afterFollowScroll: result.afterFollowScroll,
+    readingSample: result.readingRowsAfterScroll.slice(0, 3).concat(result.readingRowsAfterScroll.slice(-3)),
+    afterAppendSample: result.readingRowsAfterAppend.slice(0, 3).concat(result.readingRowsAfterAppend.slice(-3)),
+    appTailSample: result.appLinesAfterFollow.slice(-8),
+    tmuxTailSample: result.tmuxLines.slice(-8),
+  };
+}
+
 async function readAppTerminal(call) {
   return evalPage(call, `(() => {
     const viewport = document.querySelector('[data-mac-terminal-scroll="true"]');
@@ -528,6 +583,126 @@ async function readAppTerminal(call) {
     const meta = [...document.querySelectorAll('.mac-terminal-meta')].map((node) => node.innerText);
     return { rows, renderedRowCount: renderedRows.length, visibleRowCount: rows.length, stageText, scroll, meta };
   })()`);
+}
+
+async function readAlphaSmoke(call) {
+  return evalPage(call, `(() => {
+    const smoke = window.__ztermAlphaSmoke || {};
+    return {
+      runtimeViewportCalls: Array.isArray(smoke.runtimeViewportCalls) ? smoke.runtimeViewportCalls : [],
+      runtimeConnectCalls: Array.isArray(smoke.runtimeConnectCalls) ? smoke.runtimeConnectCalls : [],
+    };
+  })()`);
+}
+
+async function scrollTerminal(call, scrollTop) {
+  return evalPage(call, `(() => {
+    const node = document.querySelector('[data-mac-terminal-scroll="true"]');
+    if (!node) return null;
+    node.scrollTop = ${JSON.stringify(scrollTop)};
+    node.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return {
+      top: node.scrollTop,
+      height: node.scrollHeight,
+      client: node.clientHeight,
+      atBottom: node.scrollTop >= node.scrollHeight - node.clientHeight - 2,
+    };
+  })()`);
+}
+
+async function runLargeReadingCase(call, sessionName) {
+  const pipePath = join(options.evidenceDir, `${sessionName}-pipe.log`);
+  startPipe(sessionName, pipePath);
+  try {
+    await evalPage(call, `(() => {
+      window.__ztermAlphaSmoke = {
+        runtimeEnsureCalls: [],
+        runtimeConnectCalls: [],
+        runtimeDisconnectCalls: [],
+        runtimeViewportCalls: [],
+      };
+      return true;
+    })()`);
+    await openLocalTmuxFromLauncher(call, sessionName);
+    let readyApp = null;
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      await sleep(500);
+      readyApp = await readAppTerminal(call);
+      const joined = [readyApp.stageText, ...readyApp.rows.map((row) => row.text)].join('\n');
+      if (joined.includes('ZTERM_LARGE_BASE_1500')) {
+        break;
+      }
+    }
+    if (!readyApp || ![readyApp.stageText, ...readyApp.rows.map((row) => row.text)].join('\n').includes('ZTERM_LARGE_BASE_1500')) {
+      throw new Error('Large reading fixture did not reach app tail before scroll');
+    }
+
+    const beforeScroll = readyApp.scroll;
+    const readingTop = Math.max(0, Math.floor((beforeScroll?.height || 0) * 0.45));
+    await scrollTerminal(call, readingTop);
+    await sleep(500);
+    const readingApp = await readAppTerminal(call);
+    const readingRowsAfterScroll = readingApp.rows.map((row) => row.text).filter(Boolean);
+
+    const appendPrefix = `ZTERMLARGEAPPEND${Date.now()}`;
+    runTmux(['send-keys', '-t', sessionName, '-l', appendPrefix]);
+    runTmux(['send-keys', '-t', sessionName, 'Enter']);
+    await sleep(1800);
+    const afterAppendApp = await readAppTerminal(call);
+    const readingRowsAfterAppend = afterAppendApp.rows.map((row) => row.text).filter(Boolean);
+    const afterAppendText = [afterAppendApp.stageText, ...readingRowsAfterAppend].join('\n');
+    const tmux = capturePlain(sessionName, 220);
+    const tmuxLines = normalizeLines(tmux);
+
+    await scrollTerminal(call, 10_000_000);
+    await sleep(1200);
+    const afterFollowApp = await readAppTerminal(call);
+    const appLinesAfterFollow = [
+      ...afterFollowApp.rows.map((row) => row.text),
+      ...normalizeLines(afterFollowApp.stageText),
+    ].map((line) => line.trim()).filter(Boolean);
+    const appTextAfterFollow = appLinesAfterFollow.join('\n');
+    const smoke = await readAlphaSmoke(call);
+    const appExpectedTail = Array.from({ length: 12 }, (_, index) => `${appendPrefix}_${String(index + 49).padStart(3, '0')}`);
+
+    const result = {
+      caseName: 'large-reading',
+      sessionName,
+      appendPrefix,
+      appConnectedToSession: afterFollowApp.meta.some((line) => line.includes(sessionName) && line.includes('connected')),
+      enteredReading: readingApp.scroll ? readingApp.scroll.atBottom === false : false,
+      readingStableAfterAppend: JSON.stringify(readingRowsAfterScroll) === JSON.stringify(readingRowsAfterAppend),
+      tmuxHasAppendTail: appExpectedTail.every((line) => tmuxLines.some((tmuxLine) => tmuxLine.trim() === line)),
+      returnToFollow: afterFollowApp.scroll ? afterFollowApp.scroll.atBottom === true : false,
+      appContainsAppendTailAfterFollow: appExpectedTail.every((line) => appTextAfterFollow.includes(line)),
+      viewportRecordedReading: smoke.runtimeViewportCalls.some((item) => item?.viewState?.mode === 'reading'),
+      beforeScroll,
+      readingScroll: readingApp.scroll,
+      afterAppendScroll: afterAppendApp.scroll,
+      afterFollowScroll: afterFollowApp.scroll,
+      readingRowsAfterScroll,
+      readingRowsAfterAppend,
+      appLinesAfterFollow,
+      tmuxLines,
+      smoke,
+    };
+    writeFileSync(join(options.evidenceDir, 'large-reading-comparison.json'), JSON.stringify(result, null, 2));
+    writeFileSync(join(options.evidenceDir, 'large-reading-tmux-capture.txt'), tmux);
+    writeFileSync(join(options.evidenceDir, 'large-reading-pipe.log'), readFileSync(pipePath, 'utf8'));
+    const ok = result.appConnectedToSession
+      && result.enteredReading
+      && result.readingStableAfterAppend
+      && result.tmuxHasAppendTail
+      && result.returnToFollow
+      && result.appContainsAppendTailAfterFollow
+      && result.viewportRecordedReading;
+    if (!ok) {
+      throw new Error(`Large reading black-box compare failed: ${JSON.stringify(compactLargeReadingResult(result), null, 2)}`);
+    }
+    return compactLargeReadingResult(result);
+  } finally {
+    stopPipe(sessionName);
+  }
 }
 
 async function runSequenceCase(call, sessionName) {
@@ -712,6 +887,7 @@ async function captureScreenshot(call, name) {
 async function main() {
   const sequenceSession = FIXED_GATE_SESSIONS.sequence;
   const tuiSession = FIXED_GATE_SESSIONS.tui;
+  const largeReadingSession = FIXED_GATE_SESSIONS.largeReading;
   const summary = {
     evidenceDir: options.evidenceDir,
     port: options.port,
@@ -723,6 +899,7 @@ async function main() {
     },
     sequenceSession,
     tuiSession,
+    largeReadingSession,
     results: [],
   };
   let tuiFixture = null;
@@ -732,6 +909,9 @@ async function main() {
     }
     if (options.caseName === 'tui' || options.caseName === 'all') {
       tuiFixture = createTuiSession(tuiSession, options.evidenceDir);
+    }
+    if (options.caseName === 'large-reading' || options.caseName === 'all') {
+      createLargeReadingSession(largeReadingSession, options.evidenceDir);
     }
     await startPackagedApp();
     const pageSocket = await connectPage();
@@ -745,6 +925,10 @@ async function main() {
     if (options.caseName === 'tui' || options.caseName === 'all') {
       summary.results.push(await runTuiCase(freshSocket.call, tuiSession, tuiFixture.stopPath));
       await captureScreenshot(freshSocket.call, 'tui.png');
+    }
+    if (options.caseName === 'large-reading' || options.caseName === 'all') {
+      summary.results.push(await runLargeReadingCase(freshSocket.call, largeReadingSession));
+      await captureScreenshot(freshSocket.call, 'large-reading.png');
     }
     captureResourceSample('resource-before-close');
     freshSocket.ws.close();
@@ -765,6 +949,9 @@ async function main() {
       }
       if (options.caseName === 'tui' || options.caseName === 'all') {
         killDedicatedSession(tuiSession, 'tui');
+      }
+      if (options.caseName === 'large-reading' || options.caseName === 'all') {
+        killDedicatedSession(largeReadingSession, 'large-reading');
       }
     }
   }

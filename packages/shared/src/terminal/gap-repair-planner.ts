@@ -30,8 +30,8 @@ export function computeVisibleRangeRepairRanges(
     visibleEndIndex,
     localStartIndex,
     localEndIndex,
-    localGapRanges,
   } = params;
+  const localGapRanges = Array.isArray(params.localGapRanges) ? params.localGapRanges : [];
 
   if (visibleEndIndex <= visibleStartIndex) {
     return [];

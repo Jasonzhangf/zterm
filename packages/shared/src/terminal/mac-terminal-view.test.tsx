@@ -21,7 +21,12 @@ function cell(char: string, extra: Partial<TerminalCell> = {}): TerminalCell {
   };
 }
 
-function projection(lines: string[], revision = 1, mutate?: (line: TerminalCell[], rowIndex: number) => TerminalCell[]): TerminalRenderBufferProjection {
+function projection(
+  lines: string[],
+  revision = 1,
+  mutate?: (line: TerminalCell[], rowIndex: number) => TerminalCell[],
+  overrides: Partial<TerminalRenderBufferProjection> = {},
+): TerminalRenderBufferProjection {
   return {
     lines: lines.map((line, rowIndex) => {
       const cells = Array.from(line).map((char) => cell(char));
@@ -35,6 +40,7 @@ function projection(lines: string[], revision = 1, mutate?: (line: TerminalCell[
     rows: 24,
     cursorKeysApp: false,
     revision,
+    ...overrides,
   };
 }
 
@@ -136,5 +142,35 @@ describe('MacTerminalView render projection bridge', () => {
     await waitFor(() => expect(viewport.scrollTop).toBe(2720 - 859));
     const terminalRows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'));
     expect(terminalRows.at(-1)?.textContent).toContain('line 160');
+  });
+
+  it('emits visible gap repair ranges when scrolling in reading mode', async () => {
+    const onViewportChange = vi.fn();
+    const lines = Array.from({ length: 80 }, (_, index) => `line ${index + 1}`);
+    const { container } = render(
+      <MacTerminalView
+        projection={projection(lines, 8, undefined, { gapRanges: [{ startIndex: 30, endIndex: 35 }] })}
+        onViewportChange={onViewportChange}
+        allowDomFocus
+      />,
+    );
+    const viewport = container.querySelector('[data-mac-terminal-scroll="true"]') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 408 });
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1360 });
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => expect(onViewportChange).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'follow',
+      viewportRows: 24,
+    })));
+    onViewportChange.mockClear();
+
+    fireEvent.scroll(viewport, { target: { scrollTop: 20 * 17 } });
+
+    expect(onViewportChange).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'reading',
+      viewportEndIndex: 44,
+      viewportRows: 24,
+      missingRanges: [{ startIndex: 30, endIndex: 35 }],
+    }));
   });
 });

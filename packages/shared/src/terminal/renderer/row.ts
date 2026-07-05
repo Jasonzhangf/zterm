@@ -3,6 +3,7 @@ import type { TerminalCell, TerminalGapRange } from '../../connection/types';
 import type { TerminalThemePreset } from '../theme';
 import { safeTerminalCodePointToString } from '../cell-render';
 import { terminalCellStyle } from '../renderer';
+import { computeVisibleRangeRepairRanges } from '../gap-repair-planner';
 
 export interface TerminalRenderRowModel {
   absoluteIndex: number;
@@ -41,6 +42,10 @@ export interface TerminalViewportDemand {
   viewportRows: number;
 }
 
+export interface TerminalViewportDemandWithRepair extends TerminalViewportDemand {
+  missingRanges: TerminalGapRange[];
+}
+
 export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
@@ -60,13 +65,14 @@ export function hasDiscontinuousNeighbor(
 
 export function buildTerminalRenderRows(options: {
   bufferLines: TerminalCell[][];
-  gapRanges: TerminalGapRange[];
+  gapRanges?: TerminalGapRange[];
   startIndex: number;
   leadingBlankRows: number;
   renderStartOffset: number;
   renderEndOffset: number;
 }) {
   const rows: TerminalRenderRowModel[] = [];
+  const gapRanges = Array.isArray(options.gapRanges) ? options.gapRanges : [];
   const visibleDataStartOffset = Math.max(0, options.renderStartOffset - options.leadingBlankRows);
   const visibleDataEndOffset = Math.max(
     visibleDataStartOffset,
@@ -79,7 +85,7 @@ export function buildTerminalRenderRows(options: {
     rows.push({
       absoluteIndex,
       row: options.bufferLines[dataOffset] || [],
-      isGap: isTerminalGapIndex(options.gapRanges, absoluteIndex),
+      isGap: isTerminalGapIndex(gapRanges, absoluteIndex),
       viewportOffset,
     });
   }
@@ -263,6 +269,42 @@ export function buildTerminalViewportDemand(options: {
     mode: options.nextMode,
     viewportEndIndex,
     viewportRows: options.viewportRows,
+  };
+}
+
+export function buildTerminalViewportDemandWithRepair(options: {
+  nextMode: 'follow' | 'reading';
+  nextRenderBottomIndex: number;
+  viewportRows: number;
+  bufferStartIndex: number;
+  bufferEndIndex: number;
+  gapRanges: TerminalGapRange[];
+  followDemandAnchorEndIndex: number;
+  viewportEndIndexOverride?: number;
+}): TerminalViewportDemandWithRepair {
+  const demand = buildTerminalViewportDemand({
+    nextMode: options.nextMode,
+    nextRenderBottomIndex: options.nextRenderBottomIndex,
+    viewportRows: options.viewportRows,
+    bufferStartIndex: options.bufferStartIndex,
+    followDemandAnchorEndIndex: options.followDemandAnchorEndIndex,
+    viewportEndIndexOverride: options.viewportEndIndexOverride,
+  });
+  const visibleEndIndex = Math.max(options.bufferStartIndex, demand.viewportEndIndex);
+  const visibleStartIndex = Math.max(
+    options.bufferStartIndex,
+    visibleEndIndex - Math.max(1, Math.floor(options.viewportRows || 1)),
+  );
+
+  return {
+    ...demand,
+    missingRanges: computeVisibleRangeRepairRanges({
+      visibleStartIndex,
+      visibleEndIndex,
+      localStartIndex: options.bufferStartIndex,
+      localEndIndex: options.bufferEndIndex,
+      localGapRanges: Array.isArray(options.gapRanges) ? options.gapRanges : [],
+    }),
   };
 }
 

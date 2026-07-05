@@ -233,7 +233,9 @@ describe('Mac architecture truth', () => {
     expect(readiness).toContain('P0 blockers before Jason alpha');
     expect(readiness).toContain('Remote server rail open');
     expect(readiness).toContain('server-rail-remote-open-final2');
-    expect(readiness).toContain('Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof');
+    expect(readiness).toContain('T-A4');
+    expect(readiness).toContain('buffer-gate-all-t-a4-final');
+    expect(readiness).toContain('large-reading');
     expect(readiness).toContain('T-A5');
     expect(readiness).toContain('Alpha package handoff');
     expect(readiness).toContain('Evidence retention');

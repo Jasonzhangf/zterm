@@ -131,9 +131,10 @@ pnpm --filter @zterm/mac package
   - app output：packaged app DOM rendered rows / 截图
   - 必跑 gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all`
   - 必须包含持续刷新底部 TUI case；只看到 `connected`、底部几何对齐或静态截图不算 terminal 数据闭环
-  - blackbox gate 必须复用固定专用 tmux session：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui`，并用 tmux option marker 验证 owner/case 后才允许 respawn / clear-history / cleanup；禁止 timestamp 新建一串 session，禁止碰无 marker 的用户 session
-  - blackbox gate 默认保留这两个固定 session 作为复用池；只有显式 `--cleanup-sessions` 才能在 marker 验证通过后精确关闭它们。运行结束必须复核 `tmux list-sessions`，确认没有遗留新的 `zterm_mac_*` 临时 session
+  - blackbox gate 必须复用固定专用 tmux session：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`，并用 tmux option marker 验证 owner/case 后才允许 respawn / clear-history / cleanup；禁止 timestamp 新建一串 session，禁止碰无 marker 的用户 session
+  - blackbox gate 默认保留这三个固定 session 作为复用池；只有显式 `--cleanup-sessions` 才能在 marker 验证通过后精确关闭它们。运行结束必须复核 `tmux list-sessions`，确认没有遗留新的 `zterm_mac_*` 临时 session
   - TUI fixture 每次 run 前必须重置内容和清 history；持续刷新只比较当前可见 screen 与 app rendered rows，历史/overscan 只能作为 raw evidence，不能进入 lag 判定
+  - large-reading fixture 必须证明真实 scroll 容器进入 reading：`scroll.atBottom=false`、append 后 reading rows 不变、scroll-to-bottom 后 app tail 与 tmux tail 一致；若 `clientHeight === scrollHeight`，先修父容器高度约束，不准把 DOM 全量内容当作 reading 通过
 - 若改的是资源/生命周期：补 `ps/top` 资源采样 + 退出态进程检查
 
 #### E. 证据门槛

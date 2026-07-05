@@ -312,4 +312,44 @@ describe('MacRuntimeRegistry', () => {
       delete (globalThis as any).__ztermAlphaSmoke;
     }
   });
+
+  it('records alpha smoke viewport events only when diagnostics are enabled', () => {
+    const { runtimes, factory } = createRuntimeFactory();
+    const registry = createMacRuntimeRegistry(factory);
+    (globalThis as any).__ztermAlphaSmoke = {
+      runtimeViewportCalls: [],
+    };
+
+    try {
+      registry.ensureRuntime(localTarget('zterm_mac_goal_a'));
+      registry.updateViewport('local-tmux:zterm_mac_goal_a', {
+        mode: 'reading',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 96, endIndex: 100 }],
+      });
+
+      expect(runtimes[0].updateViewport).toHaveBeenCalledWith({
+        mode: 'reading',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 96, endIndex: 100 }],
+      });
+      expect((globalThis as any).__ztermAlphaSmoke.runtimeViewportCalls).toEqual([
+        expect.objectContaining({
+          runtimeKey: 'local-tmux:zterm_mac_goal_a',
+          kind: 'local-tmux',
+          sessionName: 'zterm_mac_goal_a',
+          viewState: {
+            mode: 'reading',
+            viewportEndIndex: 120,
+            viewportRows: 24,
+            missingRanges: [{ startIndex: 96, endIndex: 100 }],
+          },
+        }),
+      ]);
+    } finally {
+      delete (globalThis as any).__ztermAlphaSmoke;
+    }
+  });
 });

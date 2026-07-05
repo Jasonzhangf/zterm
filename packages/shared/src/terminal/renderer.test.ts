@@ -6,6 +6,7 @@ import {
   buildTerminalMeasuredViewportState,
   buildTerminalRenderRows,
   buildTerminalViewportDemand,
+  buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
   clearTerminalRecentViewportLayoutChange,
   flushTerminalFollowScrollSync,
@@ -80,6 +81,25 @@ describe('shared terminal renderer pure helpers', () => {
       viewportRows: 12,
     });
     expect(buildTerminalViewportDemandKey(demand)).toBe('reading:132:12');
+  });
+
+  it('builds viewport demand with visible repair ranges from renderer-owned gap truth', () => {
+    const demand = buildTerminalViewportDemandWithRepair({
+      nextMode: 'reading',
+      nextRenderBottomIndex: 170,
+      viewportRows: 24,
+      bufferStartIndex: 100,
+      bufferEndIndex: 220,
+      gapRanges: [{ startIndex: 150, endIndex: 155 }],
+      followDemandAnchorEndIndex: 220,
+    });
+
+    expect(demand).toEqual({
+      mode: 'reading',
+      viewportEndIndex: 170,
+      viewportRows: 24,
+      missingRanges: [{ startIndex: 150, endIndex: 155 }],
+    });
   });
 
   it('queues follow scroll sync as pure pending timer state', () => {

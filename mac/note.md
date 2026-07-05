@@ -197,3 +197,10 @@
 - 白盒：`MacAppShell.layout.test.tsx` 新增 refresh 后 `ensureRuntime` 未调用、点击 live session 后 remote runtime `connect:true`；`mac-architecture-truth.test.ts` 锁 `server-rail-remote-open` smoke 和 mainline gate。
 - Packaged smoke：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/server-rail-remote-open-final2/summary.json`。真实 daemon `list-sessions` 返回 dedicated `zterm_mac_alpha_remote_open`；Refresh 后 rail project live 且 `runtimeEnsureCalls=0`；点击后 remote runtime connected once，DOM rows 渲染 `ZTERM_ALPHA_REMOTE_OPEN_READY`。
 - 生命周期/安全：final evidence 中 token 字段已 redacted；`rg "wterm-4123456|targetAuthToken|authToken" server-rail-remote-open-final2` 无输出；9365/ZTerm process after close 为空；`zterm_mac_alpha_remote_open` 已按 marker 精确清理；用户 tmux session 只读未写入。
+
+## 2026-07-05 Mac alpha P0 T-A4 buffer follow/reading closeout
+- 本片 owner：`mac.terminal_pane` + shared renderer demand path；runtime 只接收并透传 renderer `missingRanges`，不在 runtime 里猜 gap。
+- 修复：`buildTerminalViewportDemandWithRepair` 用 visible range + projection `gapRanges` 计算 repair ranges；`MacTerminalView` follow/reading demand 不再硬清 `missingRanges`；`MacRuntimeRegistry` 增加 smoke-only viewport diagnostics；`.mac-terminal-surface/.mac-terminal-canvas` 增加 flex height 约束，修 packaged 下 `clientHeight === scrollHeight` 导致无法进入 reading 的真实布局缺口。
+- 白盒：shared renderer/gap/MacTerminalView 33/33 PASS；Mac runtime/registry/pane/layout targeted 47/47 PASS；type-check/build/package PASS。
+- Packaged gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all --port=9366 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final` PASS。sequence pipe/tmux/app tail `_001.._080` 一致；TUI current screen max lag 1、final exact；large-reading 进入 reading、append 后 scroll/rows 稳定、scroll-to-bottom 回 follow、app/tmux append tail 一致、runtime viewport diagnostics 记录 reading demand。
+- 生命周期：9366 packaged app close 后 process 文件为空；固定 gate session 保留为复用池：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`，均需 marker 校验后复用或 cleanup。

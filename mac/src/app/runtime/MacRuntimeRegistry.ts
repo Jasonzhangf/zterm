@@ -122,10 +122,11 @@ function subscribeNoop() {
 }
 
 function recordAlphaP0RuntimeRegistryEvent(
-  eventName: 'runtimeConnectCalls' | 'runtimeDisconnectCalls',
+  eventName: 'runtimeConnectCalls' | 'runtimeDisconnectCalls' | 'runtimeViewportCalls',
   details: {
     runtimeKey: MacRuntimeKey;
     target?: MacRuntimeEnsureTarget | null;
+    viewState?: TerminalRuntimeViewState;
   },
 ) {
   const smoke = (globalThis as any).__ztermAlphaSmoke;
@@ -144,6 +145,7 @@ function recordAlphaP0RuntimeRegistryEvent(
     runtimeKey: details.runtimeKey,
     kind: target?.kind || 'unknown',
     sessionName,
+    viewState: details.viewState,
   });
   smoke[eventName] = calls;
 }
@@ -326,10 +328,16 @@ export function createMacRuntimeRegistry(factory: MacRuntimeFactory = createTerm
       return true;
     },
     updateViewport(runtimeKeyInput, viewState) {
+      const runtimeKey = normalizeRuntimeKey(runtimeKeyInput);
       const runtime = this.getRuntime(runtimeKeyInput);
       if (!runtime) {
         return false;
       }
+      recordAlphaP0RuntimeRegistryEvent('runtimeViewportCalls', {
+        runtimeKey: runtimeKey!,
+        target: entries.get(runtimeKey!)?.target,
+        viewState,
+      });
       runtime.updateViewport(viewState);
       return true;
     },
