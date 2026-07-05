@@ -1481,3 +1481,10 @@ Need runtime debug to confirm:
 - 根因：无 `zterm:bridge-settings.terminalWidthMode` 或旧配置缺字段时，默认 resolver 用 `Math.max(innerWidth, documentElement.clientWidth, visualViewport.width)`；Android WebView/折叠屏可能首帧 `visualViewport.width=393` 但 layout viewport 为 `980`，导致进入 terminal 前被错判为 `mirror-fixed`，打开 Settings 后再写入/刷新才变成 adaptive。
 - 修复：默认 resolver 改为优先使用 `visualViewport.width`，再依次使用 `innerWidth`、`documentElement.clientWidth`；持久化 `BRIDGE_SETTINGS.terminalWidthMode` 仍最高优先级。删除旧 `src/lib/device/TerminalWidthModeManager.ts` 和旧 `terminal-width-mode` localStorage 分叉真源。
 - 回归：shared storage 测试覆盖 persisted adaptive、窄 viewport、WebView visual narrow/layout wide、wide viewport；App first-paint 测试覆盖未打开 Settings 时首帧 DOM `data-width-mode=adaptive-phone` 且 connect payload `widthMode=adaptive-phone`；架构 gate 防旧分叉 owner 复活。
+
+# 2026-07-05 Terminal drawer close touch activation
+
+- 现场问题：抽屉 session row 右侧 `×` 在真机触摸路径下无效；已有测试只覆盖 click，没覆盖 Android WebView touch activation。
+- 根因：close button 只有 `onClick`；row/drawer 外层同时有 touch/长按手势 owner，真机触摸路径可能不产生可依赖 click 或被父层手势链吃掉。
+- 修复：close button 增加自身 `onTouchStart/onTouchEnd/onTouchCancel`，touchEnd 直接调用 `onCloseSession` 并用 ref 去重后续 synthetic click；同时阻止冒泡和清长按 timer，避免触发 select/slot menu。
+- 回归：`TerminalSessionDrawer.test.tsx` 新增 close touch activation 用例，锁住 touch 能关闭、不会 select、后续 click 不重复关闭。

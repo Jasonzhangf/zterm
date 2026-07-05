@@ -644,3 +644,8 @@ silently returns 0 when viewport metrics are stable.
 - `BridgeSettings.terminalWidthMode` 是启动排版和 connect payload 的唯一客户端真源；持久化值来自 `STORAGE_KEYS.BRIDGE_SETTINGS`，旧 `terminal-width-mode` localStorage key / `TerminalWidthModeManager` 分叉 owner 已物理删除并由 architecture gate 禁止复活。
 - 首装或旧配置缺 `terminalWidthMode` 时，默认 resolver 必须优先使用 `visualViewport.width` 判定手机首帧宽度；Android WebView / 折叠屏可能出现 `visualViewport.width` 窄但 `innerWidth/documentElement.clientWidth` 宽，不能用 `Math.max(...)` 把手机错判成 `mirror-fixed`。
 - 回归门禁：`pnpm --dir packages/shared exec vitest run src/react/use-bridge-settings-storage.test.tsx --reporter dot` 与 `pnpm --dir android exec vitest run src/App.first-paint.real-terminal.test.tsx src/lib/architecture-boundary-truth.test.ts --reporter dot` 必须覆盖未进入 Settings 前首帧 DOM 和 connect payload 都是 `adaptive-phone`。
+
+## 2026-07-05 Terminal drawer close touch activation
+
+- `TerminalSessionDrawer` 内部 action button 不能只依赖 `click`；Android WebView 抽屉行外层有 touch/long-press 手势 owner，右侧关闭 `×` 必须拥有自己的 `touchend` 激活路径，并阻止冒泡、清理长按 timer、去重 synthetic click。
+- 回归门禁：`pnpm --dir android exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter dot` 必须覆盖 close touch activation 不触发 select 且不重复 close。

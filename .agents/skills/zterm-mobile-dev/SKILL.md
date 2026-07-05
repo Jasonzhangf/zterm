@@ -187,6 +187,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
 - Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机不能依赖 `click` 或 `pointerup`；用按钮自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
+- Android WebView 的 `TerminalSessionDrawer` row 内关闭 `×` 也必须有自身 `touchend` 激活路径；父 row 有 touch/long-press 手势时，close button 要 `stopPropagation()`、清长按 timer、去重 synthetic click，测试必须覆盖 touch close 不触发 select。
 - 若状态浮窗只出现 `drawer:touchstart` 而没有 `add:*`，不要继续猜 `click/pointer/touch`，也不要直接下“遮挡”结论；先加 `cap:start/end:<target>` 确认真实命中节点。`TerminalSessionDrawer` 底部 `New Session` 的语义 owner 应放在整个 footer hit surface，而不是只放在内部可视 button 上。
 
 ### 2.12 Android IME 特殊键门禁

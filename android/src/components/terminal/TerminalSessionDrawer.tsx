@@ -120,6 +120,7 @@ function TerminalSessionDrawerComponent({
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
+  const closeTouchHandledRef = useRef<string | null>(null);
   const [slotMenu, setSlotMenu] = useState<{
     sessionId: string;
     title: string;
@@ -146,6 +147,11 @@ function TerminalSessionDrawerComponent({
       window.clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+  };
+
+  const activateCloseSession = (sessionId: string) => {
+    clearLongPressTimer();
+    onCloseSession(sessionId);
   };
 
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
@@ -640,10 +646,30 @@ function TerminalSessionDrawerComponent({
                   type="button"
                   aria-label={`关闭 ${session.title}`}
                   data-testid={`terminal-session-drawer-close-${session.id}`}
+                  onTouchStart={(event) => {
+                    event.stopPropagation();
+                    clearLongPressTimer();
+                  }}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeTouchHandledRef.current = session.id;
+                    activateCloseSession(session.id);
+                  }}
+                  onTouchCancel={(event) => {
+                    event.stopPropagation();
+                    if (closeTouchHandledRef.current === session.id) {
+                      closeTouchHandledRef.current = null;
+                    }
+                  }}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onCloseSession(session.id);
+                    if (closeTouchHandledRef.current === session.id) {
+                      closeTouchHandledRef.current = null;
+                      return;
+                    }
+                    activateCloseSession(session.id);
                   }}
                   style={{
                     width: '24px',
