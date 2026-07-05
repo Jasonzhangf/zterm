@@ -1,5 +1,0 @@
-case=local-input-echo
-ok=true
-reason=
-mismatchIndex=none
-generatedAt=2026-04-27T10:31:02.385Z

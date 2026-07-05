@@ -27,6 +27,10 @@ mac/dist/
 mac/dist-electron/
 mac/out/
 mac/*.tsbuildinfo
+mac/evidence/**
+!mac/evidence/
+!mac/evidence/README.md
+mac/mac/evidence/**
 # source-of-truth trees must never contain generated JS siblings
 android/src/**/*.js
 android/src/**/*.js.map
