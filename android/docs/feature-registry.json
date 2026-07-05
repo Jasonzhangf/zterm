@@ -281,7 +281,11 @@
         "src/contexts/session-context-lifecycle.ts",
         "src/lib/session-render-gate.ts",
         "src/lib/session-render-buffer-store.ts",
+        "src/lib/session-render-gate.tui-content.test.ts",
         "src/lib/terminal-buffer-replay.evidence.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/components/TerminalView.bottom-stale.test.tsx",
+        "docs/testing/terminal-refresh-buffer-truth-test-design.md",
         "src/server/terminal-mirror-runtime.ts",
         "src/server/terminal-mirror-capture.ts",
         "src/server/terminal-control-runtime.ts"
@@ -292,7 +296,10 @@
       ],
       "required_gates": [
         "src/lib/session-render-gate.test.ts",
+        "src/lib/session-render-gate.tui-content.test.ts",
         "src/lib/session-render-buffer-store.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/components/TerminalView.bottom-stale.test.tsx",
         "src/contexts/session-context-buffer-runtime.test.ts",
         "src/contexts/multi-pane-refresh.test.ts",
         "src/server/terminal-mirror-runtime.test.ts",

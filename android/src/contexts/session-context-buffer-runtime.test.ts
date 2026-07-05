@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionBufferState } from '../lib/terminal-buffer';
-import type { Session, TerminalBufferPayload } from '../lib/types';
+import type { Session, SessionBufferState, TerminalBufferPayload } from '../lib/types';
 import {
   applyIncomingBufferSyncRuntime,
   handleBufferHeadRuntime,
@@ -82,6 +82,13 @@ function makeLine(text: string) {
       width: 1,
     })),
   };
+}
+
+function cellsToText(cells: Array<{ char?: number; width?: number }>) {
+  return cells
+    .filter((cell) => cell.width !== 0)
+    .map((cell) => String.fromCodePoint(typeof cell.char === 'number' ? cell.char : 32))
+    .join('');
 }
 
 function makeHeadRuntimeRefs(options: {
@@ -381,6 +388,99 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
 
     expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-sync-revision-gap-sparse-payload',
+      }),
+    );
+  });
+
+  it('applies many consecutive same-window body row updates and schedules a render commit', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: Array.from({ length: 100 }, (_, offset) => `old-${String(100 + offset).padStart(3, '0')}`),
+      startIndex: 100,
+      endIndex: 200,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 200,
+      cols: 80,
+      rows: 24,
+      revision: 20,
+      cacheLines: 1000,
+    });
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 21,
+        startIndex: 100,
+        endIndex: 200,
+        availableStartIndex: 100,
+        availableEndIndex: 200,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: Array.from({ length: 96 }, (_, offset) => {
+          const absoluteIndex = 104 + offset;
+          return {
+            ...makeLine(`new-${String(absoluteIndex).padStart(3, '0')}`),
+            index: absoluteIndex,
+          };
+        }),
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: {
+          current: new Map([
+            [sessionId, {
+              revision: 21,
+              latestEndIndex: 200,
+              availableStartIndex: 100,
+              availableEndIndex: 200,
+              seenAt: 1,
+            }],
+          ]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set() },
+        lastSyncRequestAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    const nextBuffer = committedBuffers[0]!;
+    expect(nextBuffer.revision).toBe(21);
+    expect(nextBuffer.startIndex).toBe(100);
+    expect(nextBuffer.endIndex).toBe(200);
+    expect(cellsToText(nextBuffer.lines[0])).toBe('old-100');
+    expect(cellsToText(nextBuffer.lines[4])).toBe('new-104');
+    expect(cellsToText(nextBuffer.lines[99])).toBe('new-199');
     expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
     expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
       sessionId,

@@ -649,3 +649,11 @@ silently returns 0 when viewport metrics are stable.
 
 - `TerminalSessionDrawer` 内部 action button 不能只依赖 `click`；Android WebView 抽屉行外层有 touch/long-press 手势 owner，右侧关闭 `×` 必须拥有自己的 `touchend` 激活路径，并阻止冒泡、清理长按 timer、去重 synthetic click。
 - 回归门禁：`pnpm --dir android exec vitest run src/components/terminal/TerminalSessionDrawer.test.tsx src/pages/TerminalPage.session-drawer.test.tsx --reporter dot` 必须覆盖 close touch activation 不触发 select 且不重复 close。
+
+## 2026-07-05 MemPalace/search source-only corpus
+
+- `wing=zterm` 不得直接 mine 仓库根目录；唯一允许入口是 `scripts/mempalace-mine-zterm.sh` 生成 `/Volumes/extension/code/memory/zterm-mempalace-corpus-safe` 后再索引。
+- 搜索语料只允许代码、文档、项目记忆、local skill、少量源码配置；生成物、构建物、release/update 包、evidence、缓存目录、依赖目录、HTML 预览、日志、APK/tgz/lock 文件必须在 mine 前 corpus 扫描 0 命中，mine 后 Chroma `source_file` 禁止路径也必须 0 命中。
+- Android native / Mac Electron 属于真实源码，应进入安全语料；但 Capacitor generated web bundle `android/native/android/app/src/main/assets/public/`、`capacitor.config.json`、`capacitor.plugins.json` 和图片/媒体资源不属于代码/文档搜索语料。
+- 本地文本搜索默认尊重根目录 `.ignore`；若 MemPalace 结果出现 generated/build/evidence/raw artifact source，收口流程是备份 palace、删除 `wing=zterm` 的 stale metadata、重新安全 mine、再用唯一短语验证可检索。
+Tags: #mempalace #source-only-search #generated-artifacts #zterm

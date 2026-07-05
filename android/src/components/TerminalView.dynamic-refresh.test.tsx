@@ -102,6 +102,20 @@ function readRenderedLineNumbers(container: HTMLElement) {
     .filter((value) => Number.isFinite(value));
 }
 
+function readRenderedIndexedRows(container: HTMLElement) {
+  return Array.from(container.querySelectorAll('[data-terminal-row="true"]'))
+    .map((node) => {
+      const element = node as HTMLElement;
+      const absoluteIndex = Number.parseInt(element.dataset.terminalIndex || '', 10);
+      return {
+        absoluteIndex,
+        text: element.dataset.terminalRowText ?? (element.textContent || '').replace(/\s+$/u, ''),
+        isGap: element.dataset.terminalGap === 'true',
+      };
+    })
+    .filter((row) => Number.isFinite(row.absoluteIndex));
+}
+
 function scrollFromBottomIntoReading(scroller: HTMLDivElement, bottomScrollTop = 952) {
   scroller.scrollTop = bottomScrollTop;
   fireEvent.scroll(scroller);
@@ -195,6 +209,34 @@ function TerminalView({
       })}
     />
   );
+}
+
+function buildTuiFrameRows(frame: number, count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const slot = String(index).padStart(2, '0');
+    if (index === 0) {
+      return `frame-${String(frame).padStart(3, '0')}-head-0`;
+    }
+    if (index === 1) {
+      return `frame-${String(frame).padStart(3, '0')}-head-1`;
+    }
+    if (index >= count - 3) {
+      return `frame-${String(frame).padStart(3, '0')}-bottom-${slot}`;
+    }
+    return `frame-${String(frame).padStart(3, '0')}-body-${slot}`;
+  });
+}
+
+function expectRenderedRowsMatchSource(container: HTMLElement, sourceRows: string[], startIndex: number) {
+  const renderedRows = readRenderedIndexedRows(container).filter((row) => !row.isGap);
+  expect(renderedRows.length).toBeGreaterThan(0);
+  for (const row of renderedRows) {
+    const sourceOffset = row.absoluteIndex - startIndex;
+    if (sourceOffset < 0 || sourceOffset >= sourceRows.length) {
+      continue;
+    }
+    expect(row.text).toBe(sourceRows[sourceOffset]);
+  }
 }
 
 describe('TerminalView minimal mirror render', () => {
@@ -1228,6 +1270,147 @@ describe('TerminalView minimal mirror render', () => {
 
     await waitFor(() => expect(readRenderedRows(view.container)).toContain('fixed-bottom-new'));
     expect(readRenderedRows(view.container)).not.toContain('fixed-bottom-old');
+  });
+
+  it('black-box compares final TUI source rows with rendered DOM after rapid full-screen refreshes', async () => {
+    let sourceRows = buildTuiFrameRows(0, 24);
+    const startIndex = 400;
+
+    const renderSnapshot = (rows: string[], revision: number) => {
+      const buffer = createSessionBufferState({
+        lines: rows,
+        startIndex,
+        endIndex: startIndex + rows.length,
+        bufferHeadStartIndex: startIndex,
+        bufferTailEndIndex: startIndex + rows.length,
+        rows: 24,
+        cols: 80,
+        cacheLines: 500,
+        revision,
+      });
+      return toRenderBufferSnapshot({
+        initialBufferLines: buffer.lines,
+        bufferStartIndex: buffer.startIndex,
+        bufferEndIndex: buffer.endIndex,
+        bufferHeadStartIndex: buffer.bufferHeadStartIndex,
+        bufferTailEndIndex: buffer.bufferTailEndIndex,
+        bufferGapRanges: buffer.gapRanges,
+        revision: buffer.revision,
+      });
+    };
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={renderSnapshot(sourceRows, 1)}
+          active
+          showAbsoluteLineNumbers
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('frame-000-bottom-23');
+    });
+
+    for (let frame = 1; frame <= 18; frame += 1) {
+      sourceRows = buildTuiFrameRows(frame, 24);
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId="s1"
+            renderBufferSnapshot={renderSnapshot(sourceRows, frame + 1)}
+            active
+            showAbsoluteLineNumbers
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+    }
+
+    await waitFor(() => {
+      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('frame-018-bottom-23');
+    });
+    expectRenderedRowsMatchSource(view.container, sourceRows, startIndex);
+    const finalRows = readRenderedIndexedRows(view.container).map((row) => row.text);
+    expect(finalRows).toContain('frame-018-head-0');
+    expect(finalRows).toContain('frame-018-bottom-23');
+    expect(finalRows.some((row) => row.startsWith('frame-017-'))).toBe(false);
+  });
+
+  it('black-box compares large same-window source refreshes with rendered tail output', async () => {
+    let sourceRows = buildTuiFrameRows(0, 160);
+    const startIndex = 1000;
+
+    const renderSnapshot = (rows: string[], revision: number) => {
+      const buffer = createSessionBufferState({
+        lines: rows,
+        startIndex,
+        endIndex: startIndex + rows.length,
+        bufferHeadStartIndex: startIndex,
+        bufferTailEndIndex: startIndex + rows.length,
+        rows: 24,
+        cols: 80,
+        cacheLines: 500,
+        revision,
+      });
+      return toRenderBufferSnapshot({
+        initialBufferLines: buffer.lines,
+        bufferStartIndex: buffer.startIndex,
+        bufferEndIndex: buffer.endIndex,
+        bufferHeadStartIndex: buffer.bufferHeadStartIndex,
+        bufferTailEndIndex: buffer.bufferTailEndIndex,
+        bufferGapRanges: buffer.gapRanges,
+        revision: buffer.revision,
+      });
+    };
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={renderSnapshot(sourceRows, 1)}
+          active
+          showAbsoluteLineNumbers
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('frame-000-bottom-159');
+    });
+
+    for (let frame = 1; frame <= 12; frame += 1) {
+      sourceRows = buildTuiFrameRows(frame, 160);
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId="s1"
+            renderBufferSnapshot={renderSnapshot(sourceRows, frame + 1)}
+            active
+            showAbsoluteLineNumbers
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+    }
+
+    await waitFor(() => {
+      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('frame-012-bottom-159');
+    });
+    expectRenderedRowsMatchSource(view.container, sourceRows, startIndex);
+    expect(readRenderedIndexedRows(view.container).some((row) => row.text.startsWith('frame-011-'))).toBe(false);
   });
 
   it('forces a hidden reading tab back to follow when it becomes active again', async () => {

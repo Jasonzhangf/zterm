@@ -1488,3 +1488,16 @@ Need runtime debug to confirm:
 - 根因：close button 只有 `onClick`；row/drawer 外层同时有 touch/长按手势 owner，真机触摸路径可能不产生可依赖 click 或被父层手势链吃掉。
 - 修复：close button 增加自身 `onTouchStart/onTouchEnd/onTouchCancel`，touchEnd 直接调用 `onCloseSession` 并用 ref 去重后续 synthetic click；同时阻止冒泡和清长按 timer，避免触发 select/slot menu。
 - 回归：`TerminalSessionDrawer.test.tsx` 新增 close touch activation 用例，锁住 touch 能关闭、不会 select、后续 click 不重复关闭。
+
+# 2026-07-05 MemPalace generated-artifact search correction
+
+- Jason 纠正：zterm 搜索不能包含生成物；只做代码和文档/项目记忆搜索，否则 MemoryPalace 结果没有工程意义。
+- 处理：`scripts/mempalace-mine-zterm.sh` 改为安全语料唯一入口，使用 `find + grep` 扫描 corpus，不再依赖本机异常的 `rg`；rsync 开启 `--delete-excluded`，并用 forbidden regex + source allowlist 双重阻断 generated/build/evidence/release/cache/node_modules/html/log/apk/tgz/lock 文件。
+- 处理：根目录新增 `.ignore`，普通本地文本搜索同样排除生成物；`AGENTS.md` 和 `android/MEMORY.md` 写入 zterm source-only search 规则。
+- 当前验证：安全 mine 完成后发现 `wing=zterm` 仍残留旧 raw repo / 旧 corpus `source_file`；已先备份 palace 到 `/Users/fanzhang/.mempalace/backups/palace-pre-zterm-safe-corpus-prune-20260705T165013Z.tar.gz`，再删除 `wing=zterm && source_file !^ /Volumes/extension/code/memory/zterm-mempalace-corpus-safe/` 的旧索引（drawers 13910、closets 1131）。随后补入 Android native / Mac Electron 真实源码，但排除 Capacitor generated web bundle 与二进制资源；中断 mine 残留的 5 个 native public generated source 已备份到 `/Users/fanzhang/.mempalace/backups/palace-pre-zterm-native-public-prune-20260705T171121Z.tar.gz` 后删除（drawers 18、closets 5）。最终复核：zterm wing 801 个 distinct source 全部在 safe corpus 下，safe corpus 外 0，forbidden path 0；唯一短语搜索命中 `note.md` 与 `MEMORY.md`，不再命中生成物。
+
+# 2026-07-05 terminal buffer render source/DOM black-box gate
+
+- 处理：`terminal.buffer_render` 增加自动黑盒门禁，`TerminalView.dynamic-refresh.test.tsx` 将 source buffer rows 与 DOM visible rows 按 absolute row index 对比，覆盖 fast TUI top/status/bottom refresh 和大窗口 same-window repaint。
+- 处理：`session-context-buffer-runtime.test.ts` 增加白盒同窗口多行 body update 测试，证明 buffer truth 更新并调度 render commit；`docs/testing/terminal-refresh-buffer-truth-test-design.md` 记录 lifecycle、white-box、module black-box、project black-box 与缺口。
+- 已验证：目标 Android renderer/buffer tests、feature registry gates、tsc、terminal.buffer_render required gates 在本轮补丁后通过；最终提交前需重跑受 memory/docs 变更影响的快速 gate。
