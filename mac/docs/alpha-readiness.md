@@ -12,6 +12,7 @@ Evidence-backed completed areas:
 
 - Entrypoint: `App -> MacDesktopApp -> MacAppShell`; old `ShellWorkspace` production source removed.
 - Workspace: `MacWorkspaceStore` owns window/workspace/pane/tab identity and persists by renderer `windowId`.
+- QuickConnect: packaged `smoke:alpha-p0 -- --case=quick-connect-discovery` proved explicit remote session discovery through the real daemon `list-sessions` path, latest saved matching session preselection, no runtime creation during discovery, and remote runtime creation only after Save & connect.
 - Tab restore: packaged `smoke:alpha-p0 -- --case=header-restore` proved cold reopen restores the same `windowId`, active tab, and hidden tab; active runtime is eager-connected while hidden runtime is prepare-only.
 - Runtime: `MacRuntimeRegistry` owns `runtimeKey -> TerminalRuntimeController`; pane UI routes input/viewport/resize by runtime key.
 - Terminal header: packaged `smoke:alpha-p0 -- --case=header-restore` proved header status/session/size/reconnect/disconnect controls for a local tmux terminal. The same smoke proved disconnect changes `connected -> idle` and reconnect returns to `connected` on the active runtime without touching the hidden runtime.
@@ -31,6 +32,7 @@ Recorded evidence:
 - `mac/evidence/2026-07-04-file-browser-smoke/`
 - `mac/evidence/2026-07-04-legacy-cleanup-smoke/`
 - `mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/`
+- `mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3/`
 
 Committed refactor baseline:
 
@@ -41,7 +43,6 @@ Committed refactor baseline:
 
 P0 blockers before Jason alpha:
 
-- `T-A1` QuickConnect/session discovery flow: connect should discover sessions, preselect a useful session, and open terminal with one explicit action.
 - `T-A4` Buffer follow/reading verification: large output, scrollback reading mode, gap repair, return-to-follow, and session-truth-vs-render-output comparison need packaged live proof.
   - Current black-box gate status: `sequence` and `tui` passed in packaged app under `mac/evidence/2026-07-04-mac-alpha-p0-closeout/buffer-gate-all-fixed-lifecycle-1/`. Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof.
 - `T-A5` Disconnect/reconnect: daemon restart and network/session close must surface explicit error and recover through reconnect.
@@ -50,6 +51,7 @@ P0 blockers before Jason alpha:
 
 Closed P0 items:
 
+- `T-A1` QuickConnect/session discovery: packaged `quick-connect-discovery-final3` smoke used the real Mac Studio daemon route, discovered `zterm_mac_alpha_quick`, preselected the latest saved matching session, proved discovery did not create runtime, and created a connected remote runtime only after Save & connect. The dedicated tmux session was marker-cleaned, 9364/ZTerm processes were gone after close, and storage/evidence token fields were redacted.
 - `T-A2` Tab restore: packaged `header-restore-final2` smoke restored hidden + active tabs after app close/reopen under the same `windowId`, with hidden `ensureRuntime(connect:false)` and zero hidden `runtimeConnectCalls`.
 - `T-A3` Terminal header: packaged `header-restore-final2` smoke showed `connected`, `Local tmux · zterm_mac_alpha_active`, `80x24`, reconnect and disconnect controls; disconnect/reconnect changed active runtime state and did not connect the hidden runtime.
 - Evidence retention: generated `mac/evidence/**` artifacts are ignored by git; only `mac/evidence/README.md` is committed. Evidence paths may be referenced in docs, but artifacts are local verification output and must not be staged.
@@ -68,8 +70,8 @@ Alpha distance: medium.
 
 Engineering estimate from current state:
 
-- Minimal internal alpha: about 3-5 focused slices if scope is local tmux + basic remote open + restart recovery.
-- Practical Jason alpha: about 5-8 focused slices because terminal restore, reconnect, header controls, remote open, settings basics, and package handoff all need packaged smoke evidence.
+- Minimal internal alpha: about 3-4 focused slices if scope is local tmux + basic remote open + restart recovery.
+- Practical Jason alpha: about 4-7 focused slices because terminal follow/reading, reconnect, remote open, settings basics, and package handoff still need packaged smoke evidence.
 
 Do not call the Mac client alpha-ready until all P0 blockers above are closed with:
 
@@ -83,6 +85,7 @@ pnpm --dir mac run package
 Plus packaged smoke evidence for:
 
 - cold launch and open tab restore
+- QuickConnect remote session discovery/open
 - local tmux terminal input/output
 - terminal buffer black-box gate: `tmux capture-pane` / `pipe-pane` truth compared with packaged app rendered DOM rows, including a continuously refreshing bottom TUI case
 - remote daemon session open
@@ -94,8 +97,7 @@ Plus packaged smoke evidence for:
 
 ## Next Slice Order
 
-1. P0 QuickConnect/session discovery.
-2. P0 remote daemon open from server rail.
-3. P0 follow/reading/gap repair packaged smoke.
-4. P0 daemon/transport disconnect/reconnect recovery.
-5. P0 alpha package handoff.
+1. P0 remote daemon open from server rail.
+2. P0 follow/reading/gap repair packaged smoke.
+3. P0 daemon/transport disconnect/reconnect recovery.
+4. P0 alpha package handoff.

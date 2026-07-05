@@ -182,3 +182,11 @@
 - 白盒新增：`MacAppShell.layout.test.tsx` 锁 smoke diagnostics 只记录 active-only ensure；`MacRuntimeRegistry.test.ts` 锁 smoke diagnostics 的实际 connect/disconnect；`MacPaneWorkbench.test.tsx` 锁 error header 不包装成 connected。
 - Packaged smoke fresh evidence：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/summary.json`。结果：同一 `windowId` 冷重启恢复 hidden + active tabs；hidden ensure connect=0、hidden actual runtime connect=0；active actual runtime connect=2；Disconnect 后 header idle，Reconnect 后 connected。
 - 生命周期复核：9363 CDP/ZTerm/Electron helper 为空；`zterm_mac_alpha_active` / `zterm_mac_alpha_hidden` 临时 tmux session 已按 marker 精确清理；现有用户 tmux session 只读未写入。
+
+## 2026-07-05 Mac alpha P0 T-A1 QuickConnect closeout
+- 本片 owner：`mac.quick_connect`。`ConnectionLauncher` 负责 remote target input、显式 Discover sessions、session 预选和 save/open intent；禁止在 launcher 里创建 runtime 或调用 `openConnectionInWorkbench`。
+- 主线映射：`MAC-04-WorkspaceShell -> MAC-19-QuickConnectDiscovery -> MAC-20-QuickConnectOpen -> MAC-03-WorkspaceLoad`；call map 边为 `MAC-EDGE-0022/0023/0024`。
+- 实现要点：`ConnectionLauncher` 使用 test-injectable `sessionFetcher`，production 默认 `fetchTmuxSessions`；host/port/token 变化会清掉 stale discovered session，避免旧 session 被打开到新 endpoint。
+- 白盒：`ConnectionLauncher.test.tsx` 覆盖 discovery success + latest saved matching preselect、discovery error 不 open、remote target 改变清 stale selected session；`MacAppShell.layout.test.tsx` 覆盖 Discover 不 create runtime、Save & connect 才 ensure remote runtime；architecture truth gate 锁 QuickConnect branch。
+- Packaged smoke：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3/summary.json`。真实 daemon config route `127.0.0.1:3333`；dedicated tmux `zterm_mac_alpha_quick` owner `alpha-p0-quick-connect`；UI 通过 `Input.insertText` 输入 host/port/token；Discover 后 radio 预选 `zterm_mac_alpha_quick` 且 runtime calls=0；Save & connect 后 remote runtime connected。
+- 生命周期/安全：final evidence 中 `authToken` / `targetAuthToken` 已 redacted；`rg "wterm-4123456|targetAuthToken|authToken" quick-connect-discovery-final3` 无输出；9364/ZTerm process after close 为空；`zterm_mac_alpha_quick` 已按 marker 清理；用户 tmux session 只读列举未写入。

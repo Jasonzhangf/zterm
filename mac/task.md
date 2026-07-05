@@ -3,7 +3,7 @@
 ## Alpha readiness
 
 - [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
-- [ ] 关闭 P0 alpha blockers：`T-A1` / `T-A4` / `T-A5` / remote open / alpha package handoff
+- [ ] 关闭 P0 alpha blockers：`T-A4` / `T-A5` / remote open / alpha package handoff
 - [x] Evidence retention：`mac/evidence/**` 已加入 git ignore；只保留 `mac/evidence/README.md` 入仓，generated evidence 只作本地验证输出
 - [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
 
@@ -56,9 +56,12 @@
 
 ### P0 终端体验基础（Epic-004.A 核心连接 + 终端）
 
-- [ ] T-A1 QuickConnectSheet session 自动发现补全
-  - 连接成功后自动 fetchTmuxSessions → 预选最近连接的 session → 一键 open
-  - 验证：QuickConnectSheet 输入 host/token → 发现 → 选中 → 连接 → 终端渲染
+- [x] T-A1 QuickConnect session 自动发现补全
+  - Production owner 是 `ConnectionLauncher`：显式 Discover sessions → 预选最近 saved matching session → Save & connect open
+  - Discovery 本身不得创建 runtime；只有显式 Save & connect 才经 `MacAppShell.handleSaveDraft` / `openConnectionInWorkbench` 打开 remote runtime
+  - packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=quick-connect-discovery --port=9364 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3`
+  - 证据：真实 daemon `list-sessions` 返回 dedicated `zterm_mac_alpha_quick`；UI 预选该 saved matching session；Save & connect 后 remote runtime connected；`zterm_mac_alpha_quick` 按 marker 精确清理；9364/ZTerm 进程为空；storage/evidence token 已 redacted
+  - 验证：ConnectionLauncher 输入 host/token → Discover → 选中 → Save & connect → 远端终端渲染
 - [x] T-A2 Tab 恢复持久化（MacWorkspaceStore window-scoped localStorage 冷启动恢复）
   - 从 shared STORAGE_KEYS 读写，冷启动时恢复上次打开的 tab + 最后活跃 tab
   - 只允许 active tab eager connect，hidden tabs 仅恢复 shell 不建连

@@ -36,6 +36,15 @@ MAC-05-ServerDirectory
 -> MAC-05-ServerDirectory
 ```
 
+QuickConnect branch:
+
+```text
+MAC-04-WorkspaceShell
+-> MAC-19-QuickConnectDiscovery
+-> MAC-20-QuickConnectOpen
+-> MAC-03-WorkspaceLoad
+```
+
 File browser branch:
 
 ```text
@@ -79,6 +88,7 @@ MAC-08-RuntimeEnsure
 | Slice 3 runtime registry | `MacRuntimeRegistry` | implemented in code and white-box tests; packaged A/B tmux input/resize/switch/close isolation smoke passed |
 | Alpha P0 T-A2 cold restore | `MacWorkspaceStore` + `MacRuntimeRegistry` active-only eager connect | packaged `smoke:alpha-p0 -- --case=header-restore` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/` |
 | Alpha P0 T-A3 terminal header | `MacTerminalPane` + `MacRuntimeRegistry` controls | packaged `smoke:alpha-p0 -- --case=header-restore` passed; white-box locks error state is not wrapped as connected |
+| Alpha P0 T-A1 QuickConnect discovery | `ConnectionLauncher` + `MacAppShell.handleSaveDraft` | packaged `smoke:alpha-p0 -- --case=quick-connect-discovery` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3/`; discovery creates no runtime and explicit Save & connect opens remote runtime |
 | Slice 4 server directory | persistent rail projection | saved/open projection and explicit open-only UI implemented; remote live refresh wiring now targets projection-only status/live session state |
 | Slice 5 file browser | shared core + Mac UI + Electron fs adapter | implemented in unit/component tests; packaged fs browse/preview smoke passed |
 | Slice 6 Electron window manager | multi-window + windowId | implemented in `MacWindowManager`; packaged multi-window create + quit/reopen restore smoke passed |
@@ -185,6 +195,15 @@ Slice 5 hard checks now active:
 - remote live refresh helper returns a snapshot for one server from `fetchTmuxSessions` without mutating workspace/runtime state.
 - missing host/token and daemon errors are explicit refresh errors, not empty successful session lists.
 
+`mac.quick_connect`:
+
+- `ConnectionLauncher` accepts a test-injectable session fetcher and does not directly create workspace tabs.
+- remote discovery requires explicit user action and a host/token.
+- discovery success stores unique session names and preselects the latest saved matching session when possible.
+- discovery failure shows an explicit error and keeps the typed target editable.
+- Save & connect opens only the selected/typed target through `MacAppShell.handleSaveDraft`.
+- no terminal runtime is created until the explicit open command reaches workspace state.
+
 `mac.file_browser_core`:
 
 - normalizes local paths without consulting Electron. Implemented in `packages/shared/src/files/file-browser-core.test.ts`.
@@ -241,6 +260,14 @@ Runtime black-box:
 - Switching A idle / B active keeps A buffer.
 - Closing A disposes A runtime only.
 - `header-restore` packaged smoke seeds a window-scoped workspace with one active local tmux tab and one hidden local tmux tab, closes/reopens the packaged app, and proves the same `windowId`, active tab, hidden tab, header projection, active-only `ensureRuntime(connect:true)`, hidden `ensureRuntime(connect:false)`, active-only actual runtime connect, active-only disconnect, and reconnect-to-connected.
+
+QuickConnect black-box:
+
+- Open connection command displays remote host/port/token fields.
+- Discover calls the daemon `list-sessions` path and shows returned sessions.
+- Most recent saved matching session is preselected when present; otherwise first returned session is selected.
+- Save & connect opens the selected session and only then creates the runtime.
+- Packaged `quick-connect-discovery-final3` proves the real UI input path (`Input.insertText`), real daemon config route, dedicated marked tmux session `zterm_mac_alpha_quick`, redacted storage snapshots, and explicit lifecycle cleanup.
 
 Terminal buffer black-box:
 

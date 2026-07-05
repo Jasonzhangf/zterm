@@ -7,6 +7,7 @@ Close the Mac client P0 alpha loop so Jason can run a limited alpha against the 
 This is not a broad UI polish task. The goal is to make the critical terminal lifecycle usable and evidence-backed:
 
 - Open a remote daemon session from the server rail.
+- Discover remote daemon sessions from QuickConnect and open the selected session only after an explicit user action.
 - Restore open tabs on cold launch with active-only eager connect.
 - Show terminal status and reconnect/disconnect controls.
 - Prove follow/reading/gap repair with large output.
@@ -18,20 +19,22 @@ This is not a broad UI polish task. The goal is to make the critical terminal li
 The Mac client can be called P0-alpha-ready only when all items below are true:
 
 1. Server rail can open a real remote daemon session through the production packaged app.
-2. Cold launch restores open tabs and active tab; hidden tabs do not eager-connect.
-3. Terminal header shows session identity, runtime status, size, reconnect, and disconnect controls.
-4. Large-output terminal smoke proves follow mode, reading mode, gap repair, and return-to-follow.
-5. Terminal buffer black-box gate compares `tmux capture-pane` / `tmux pipe-pane` session truth with packaged app rendered DOM rows for both controlled sequence output and continuously refreshing bottom TUI output.
-6. Daemon restart or transport close surfaces explicit error and recovers through reconnect.
-7. `mac/docs/alpha-readiness.md`, `mac/task.md`, `mac/docs/function-map.md`, and `mac/docs/mainline-call-map.json` are updated to mark only verified work as anchored.
-8. Packaged smoke evidence exists under `mac/evidence/<date>-mac-alpha-p0-closeout/`.
-9. Evidence retention decision is recorded; untracked evidence is not deleted or moved without Jason approval.
+2. QuickConnect can discover remote daemon sessions, preselect a useful saved match, and open the selected session only after explicit Save & connect.
+3. Cold launch restores open tabs and active tab; hidden tabs do not eager-connect.
+4. Terminal header shows session identity, runtime status, size, reconnect, and disconnect controls.
+5. Large-output terminal smoke proves follow mode, reading mode, gap repair, and return-to-follow.
+6. Terminal buffer black-box gate compares `tmux capture-pane` / `tmux pipe-pane` session truth with packaged app rendered DOM rows for both controlled sequence output and continuously refreshing bottom TUI output.
+7. Daemon restart or transport close surfaces explicit error and recovers through reconnect.
+8. `mac/docs/alpha-readiness.md`, `mac/task.md`, `mac/docs/function-map.md`, and `mac/docs/mainline-call-map.json` are updated to mark only verified work as anchored.
+9. Packaged smoke evidence exists under `mac/evidence/<date>-mac-alpha-p0-closeout/`.
+10. Evidence retention decision is recorded; untracked evidence is not deleted or moved without Jason approval.
 
 ## 3. Scope
 
 ### In Scope
 
 - `mac.server_directory` explicit remote open path.
+- `mac.quick_connect` explicit remote session discovery and open path.
 - `mac.workspace_store` cold restore and open tab identity.
 - `mac.runtime_registry` reconnect/disconnect lifecycle as consumed by UI.
 - `mac.terminal_pane` header/status/control projection.
@@ -104,7 +107,31 @@ Likely files:
 - `mac/src/app/server-directory/MacServerDirectory.test.ts`
 - `mac/src/app/MacAppShell.layout.test.tsx`
 
-### 6.2 Cold Restore And Active-Only Eager Connect
+### 6.2 QuickConnect Session Discovery
+
+Owner:
+
+- `mac.quick_connect`
+- `mac.workspace_store`
+- `mac.runtime_registry`
+
+Expected work:
+
+- `ConnectionLauncher` discovers remote sessions only after explicit user action.
+- Discovery requires host/token and reports daemon errors explicitly.
+- Discovery preselects the most recently saved matching session when available.
+- Discovery itself must not create a terminal runtime.
+- Save & connect opens the selected or typed session through `MacAppShell.handleSaveDraft(...)` and `openConnectionInWorkbench(...)`.
+
+Likely files:
+
+- `mac/src/components/ConnectionLauncher.tsx`
+- `mac/src/components/ConnectionLauncher.test.tsx`
+- `mac/src/app/MacAppShell.tsx`
+- `mac/src/app/MacAppShell.layout.test.tsx`
+- `mac/scripts/alpha-p0-packaged-smoke.mjs`
+
+### 6.3 Cold Restore And Active-Only Eager Connect
 
 Owner:
 
@@ -127,7 +154,7 @@ Likely files:
 - `mac/src/app/workspace/workspace-store.test.ts`
 - `mac/src/app/MacAppShell.layout.test.tsx`
 
-### 6.3 Terminal Header Status And Controls
+### 6.4 Terminal Header Status And Controls
 
 Owner:
 
@@ -148,7 +175,7 @@ Likely files:
 - `mac/src/app/MacPaneWorkbench.test.tsx`
 - `mac/src/app/runtime/MacRuntimeRegistry.test.ts`
 
-### 6.4 Follow / Reading / Gap Repair
+### 6.5 Follow / Reading / Gap Repair
 
 Owner:
 
@@ -168,7 +195,7 @@ Likely files:
 - `mac/src/app/MacPaneWorkbench.tsx`
 - runtime and renderer tests already present in `mac/src/lib/*` and `packages/shared/src/terminal/*`
 
-### 6.5 Disconnect / Reconnect Recovery
+### 6.6 Disconnect / Reconnect Recovery
 
 Owner:
 

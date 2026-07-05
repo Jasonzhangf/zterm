@@ -38,6 +38,7 @@ const REQUIRED_FEATURE_IDS = [
   'mac.runtime_registry',
   'mac.local_tmux_provider',
   'mac.server_directory',
+  'mac.quick_connect',
   'mac.terminal_pane',
   'mac.file_browser_core',
   'mac.file_browser_ui',
@@ -54,6 +55,8 @@ const REQUIRED_NODE_IDS = [
   'MAC-05-ServerDirectory',
   'MAC-17-ServerLiveRefresh',
   'MAC-06-OpenTabIntent',
+  'MAC-19-QuickConnectDiscovery',
+  'MAC-20-QuickConnectOpen',
   'MAC-07-PaneTreeUpdate',
   'MAC-08-RuntimeEnsure',
   'MAC-18-LocalTmuxProvider',
@@ -76,6 +79,9 @@ const REQUIRED_EDGES: Array<[string, string]> = [
   ['MAC-05-ServerDirectory', 'MAC-17-ServerLiveRefresh'],
   ['MAC-17-ServerLiveRefresh', 'MAC-05-ServerDirectory'],
   ['MAC-06-OpenTabIntent', 'MAC-03-WorkspaceLoad'],
+  ['MAC-04-WorkspaceShell', 'MAC-19-QuickConnectDiscovery'],
+  ['MAC-19-QuickConnectDiscovery', 'MAC-20-QuickConnectOpen'],
+  ['MAC-20-QuickConnectOpen', 'MAC-03-WorkspaceLoad'],
   ['MAC-03-WorkspaceLoad', 'MAC-07-PaneTreeUpdate'],
   ['MAC-03-WorkspaceLoad', 'MAC-08-RuntimeEnsure'],
   ['MAC-08-RuntimeEnsure', 'MAC-18-LocalTmuxProvider'],
@@ -403,6 +409,38 @@ describe('Mac architecture truth', () => {
     expect(openWorkspaceEdge?.status).toBe('anchored');
     expect(serverOpenEdge?.verification_gates).toContain('mac/src/app/server-directory/MacServerDirectory.test.ts');
     expect(serverRefreshRequestEdge?.verification_gates).toContain('mac/src/app/MacAppShell.layout.test.tsx');
+  });
+
+  it('anchors QuickConnect discovery as explicit launcher-owned open flow', () => {
+    const functionMap = readMac(path.join('docs', 'function-map.md'));
+    const testDesign = readMac(path.join('docs', 'testing', 'mac-desktop-workspace-test-design.md'));
+    const launcherSource = readMac(path.join('src', 'components', 'ConnectionLauncher.tsx'));
+    const appShellSource = readMac(path.join('src', 'app', 'MacAppShell.tsx'));
+    const callMap = parseMainlineCallMap();
+    const lifecycle = callMap.lifecycles.find((item) => item.lifecycle_id === 'mac_desktop_mainline');
+    expect(lifecycle).toBeTruthy();
+    if (!lifecycle) return;
+
+    const discoveryNode = lifecycle.nodes.find((node) => node.id === 'MAC-19-QuickConnectDiscovery');
+    const openNode = lifecycle.nodes.find((node) => node.id === 'MAC-20-QuickConnectOpen');
+    const discoveryEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0022');
+    const openEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0023');
+    const workspaceEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0024');
+
+    expect(functionMap).toContain('`mac.quick_connect` | `ConnectionLauncher`');
+    expect(testDesign).toContain('MAC-19-QuickConnectDiscovery');
+    expect(launcherSource).toContain('sessionFetcher = fetchTmuxSessions');
+    expect(launcherSource).toContain('Discover sessions');
+    expect(launcherSource).not.toContain('openConnectionInWorkbench');
+    expect(launcherSource).not.toContain('createMacRuntimeRegistry');
+    expect(appShellSource).toContain('onSaveDraft={handleSaveDraft}');
+    expect(discoveryNode?.status).toBe('anchored');
+    expect(openNode?.status).toBe('anchored');
+    expect(discoveryEdge?.status).toBe('anchored');
+    expect(openEdge?.status).toBe('anchored');
+    expect(workspaceEdge?.status).toBe('anchored');
+    expect(discoveryEdge?.verification_gates).toContain('mac/src/components/ConnectionLauncher.test.tsx');
+    expect(workspaceEdge?.verification_gates).toContain('packaged QuickConnect/session discovery smoke');
   });
 
   it('anchors MacWindowManager as BrowserWindow and renderer windowId owner', () => {

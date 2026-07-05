@@ -5,6 +5,8 @@
  * Current cases:
  * - header-restore: packaged cold restore + active-only eager connect + terminal
  *   header disconnect/reconnect controls.
+ * - quick-connect-discovery: packaged QuickConnect discovery against the real
+ *   daemon list-sessions path, then explicit Save & connect remote open.
  *
  * This script uses only dedicated tmux sessions with a marker option and cleans
  * them up by explicit name at the end. It does not write to user sessions.
@@ -19,11 +21,15 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname, '..');
 const MAC_ROOT = resolve(new URL('..', import.meta.url).pathname);
 const DATE = new Date().toISOString().slice(0, 10);
 const DEFAULT_PORT = 9363;
+const SUPPORTED_CASES = new Set(['header-restore', 'quick-connect-discovery']);
 const SMOKE_OWNER = 'alpha-p0-header-restore';
+const QUICK_SMOKE_OWNER = 'alpha-p0-quick-connect';
 const SMOKE_OWNER_OPTION = '@zterm_mac_smoke_owner';
 const SMOKE_CASE_OPTION = '@zterm_mac_smoke_case';
 const ACTIVE_SESSION = 'zterm_mac_alpha_active';
 const HIDDEN_SESSION = 'zterm_mac_alpha_hidden';
+const QUICK_SESSION = 'zterm_mac_alpha_quick';
+const QUICK_READY_TEXT = 'ZTERM_ALPHA_QUICK_READY';
 const PANE_ID = 'pane-alpha-p0';
 const ACTIVE_TAB_ID = 'tab-alpha-active';
 const HIDDEN_TAB_ID = 'tab-alpha-hidden';
@@ -32,7 +38,8 @@ function parseArgs(argv) {
   const out = {
     caseName: 'header-restore',
     port: DEFAULT_PORT,
-    evidenceDir: join(MAC_ROOT, 'evidence', `${DATE}-mac-alpha-p0-closeout`, 'header-restore'),
+    evidenceDir: '',
+    evidenceProvided: false,
     appPath: join(MAC_ROOT, 'out', 'mac-arm64', 'ZTerm.app'),
     keepApp: false,
     cleanupSessions: true,
@@ -41,19 +48,26 @@ function parseArgs(argv) {
     if (arg === '--') continue;
     if (arg.startsWith('--case=')) out.caseName = arg.slice('--case='.length);
     else if (arg.startsWith('--port=')) out.port = Number.parseInt(arg.slice('--port='.length), 10);
-    else if (arg.startsWith('--evidence=')) out.evidenceDir = resolve(ROOT, arg.slice('--evidence='.length));
+    else if (arg.startsWith('--evidence=')) {
+      out.evidenceDir = resolve(ROOT, arg.slice('--evidence='.length));
+      out.evidenceProvided = true;
+    }
     else if (arg.startsWith('--app=')) out.appPath = resolve(ROOT, arg.slice('--app='.length));
     else if (arg === '--keep-app') out.keepApp = true;
     else if (arg === '--keep-sessions') out.cleanupSessions = false;
     else if (arg === '--cleanup-sessions') out.cleanupSessions = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
-  if (out.caseName !== 'header-restore') {
+  if (!SUPPORTED_CASES.has(out.caseName)) {
     throw new Error(`Unsupported --case=${out.caseName}`);
+  }
+  if (!out.evidenceProvided) {
+    out.evidenceDir = join(MAC_ROOT, 'evidence', `${DATE}-mac-alpha-p0-closeout`, out.caseName);
   }
   if (!Number.isFinite(out.port) || out.port <= 0) {
     throw new Error(`Invalid --port=${out.port}`);
   }
+  delete out.evidenceProvided;
   return out;
 }
 
@@ -99,38 +113,38 @@ function tmuxSessionOption(sessionName, optionName) {
   return runTmux(['show-option', '-qv', '-t', sessionName, optionName], { allowFailure: true }).trim();
 }
 
-function assertSmokeSession(sessionName) {
+function assertSmokeSession(sessionName, expectedOwner = SMOKE_OWNER) {
   const owner = tmuxSessionOption(sessionName, SMOKE_OWNER_OPTION);
   const caseName = tmuxSessionOption(sessionName, SMOKE_CASE_OPTION);
-  if (owner !== SMOKE_OWNER || caseName !== options.caseName) {
+  if (owner !== expectedOwner || caseName !== options.caseName) {
     throw new Error([
       `Refusing to touch tmux session ${sessionName}: it is not this smoke fixture.`,
-      `Expected ${SMOKE_OWNER_OPTION}=${SMOKE_OWNER} and ${SMOKE_CASE_OPTION}=${options.caseName}; got owner=${owner || '<unset>'}, case=${caseName || '<unset>'}.`,
+      `Expected ${SMOKE_OWNER_OPTION}=${expectedOwner} and ${SMOKE_CASE_OPTION}=${options.caseName}; got owner=${owner || '<unset>'}, case=${caseName || '<unset>'}.`,
     ].join('\n'));
   }
 }
 
-function markSmokeSession(sessionName) {
-  runTmux(['set-option', '-q', '-t', sessionName, SMOKE_OWNER_OPTION, SMOKE_OWNER]);
+function markSmokeSession(sessionName, owner = SMOKE_OWNER) {
+  runTmux(['set-option', '-q', '-t', sessionName, SMOKE_OWNER_OPTION, owner]);
   runTmux(['set-option', '-q', '-t', sessionName, SMOKE_CASE_OPTION, options.caseName]);
 }
 
-function ensureSmokeSession(sessionName, label) {
+function ensureSmokeSession(sessionName, label, owner = SMOKE_OWNER) {
   const command = `sh -lc ${shellQuote(`printf '${label}\\n'; while :; do sleep 3600; done`)}`;
   if (sessionExists(sessionName)) {
-    assertSmokeSession(sessionName);
+    assertSmokeSession(sessionName, owner);
     runTmux(['respawn-pane', '-k', '-t', `${sessionName}:0.0`, command]);
   } else {
     runTmux(['new-session', '-d', '-s', sessionName, command]);
   }
-  markSmokeSession(sessionName);
+  markSmokeSession(sessionName, owner);
   runTmux(['resize-pane', '-t', sessionName, '-x', '100', '-y', '30'], { allowFailure: true });
   runTmux(['clear-history', '-t', sessionName], { allowFailure: true });
 }
 
-function cleanupSmokeSession(sessionName) {
+function cleanupSmokeSession(sessionName, owner = SMOKE_OWNER) {
   if (!sessionExists(sessionName)) return;
-  assertSmokeSession(sessionName);
+  assertSmokeSession(sessionName, owner);
   runTmux(['kill-session', '-t', sessionName], { allowFailure: true });
 }
 
@@ -140,6 +154,81 @@ function listTmuxSessions() {
     '-F',
     '#{session_name} #{?@zterm_mac_smoke_owner,owner=#{@zterm_mac_smoke_owner},owner=-} #{?@zterm_mac_smoke_case,case=#{@zterm_mac_smoke_case},case=-} #{?@zterm_mac_gate_owner,gate=#{@zterm_mac_gate_owner},gate=-}',
   ], { allowFailure: true });
+}
+
+function maskToken(token) {
+  const value = String(token || '');
+  if (!value) return '';
+  if (value.length <= 4) return '****';
+  return `${value.slice(0, 2)}***${value.slice(-2)}`;
+}
+
+function readDaemonConfig() {
+  const configPath = resolve(process.env.HOME || '', '.zterm', 'config.json');
+  const raw = readFileSync(configPath, 'utf8');
+  const parsed = JSON.parse(raw);
+  const daemon = parsed?.mobile?.daemon;
+  const host = String(daemon?.host || '127.0.0.1').trim();
+  const port = Number.parseInt(String(daemon?.port || 3333), 10);
+  const authToken = String(daemon?.authToken || '').trim();
+  if (!authToken) {
+    throw new Error(`${configPath} mobile.daemon.authToken is required for QuickConnect packaged smoke`);
+  }
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new Error(`${configPath} mobile.daemon.port is invalid`);
+  }
+  return {
+    configPath,
+    bridgeHost: host === '0.0.0.0' ? '127.0.0.1' : host,
+    bridgePort: port,
+    authToken,
+    authTokenMasked: maskToken(authToken),
+  };
+}
+
+function requestTmuxSessions(target) {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const url = new URL(`ws://${target.bridgeHost}:${target.bridgePort}`);
+    url.searchParams.set('token', target.authToken);
+    const ws = new WebSocket(url.toString());
+    const timeout = setTimeout(() => {
+      try {
+        ws.close();
+      } catch {
+        // ignore close failure after timeout
+      }
+      rejectRequest(new Error(`Timed out reading daemon sessions from ${target.bridgeHost}:${target.bridgePort}`));
+    }, 8000);
+    const finish = (fn, value) => {
+      clearTimeout(timeout);
+      try {
+        ws.close();
+      } catch {
+        // ignore close failure after response
+      }
+      fn(value);
+    };
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'list-sessions' }));
+    });
+    ws.on('message', (raw) => {
+      try {
+        const message = JSON.parse(raw.toString());
+        if (message.type === 'sessions') {
+          finish(resolveRequest, message.payload?.sessions || []);
+          return;
+        }
+        if (message.type === 'error') {
+          finish(rejectRequest, new Error(message.payload?.message || 'Daemon list-sessions failed'));
+        }
+      } catch (error) {
+        finish(rejectRequest, error);
+      }
+    });
+    ws.on('error', (error) => {
+      finish(rejectRequest, error);
+    });
+  });
 }
 
 async function fetchJson(url) {
@@ -325,9 +414,94 @@ function buildNewDocumentScript({ seedWorkspace }) {
   })();`;
 }
 
+function buildQuickConnectNewDocumentScript({ target, sessionName }) {
+  const serverId = `bridge:${target.bridgeHost}::${target.bridgePort}`;
+  const oldSessionName = `${sessionName}-old`;
+  return `(() => {
+    const target = ${JSON.stringify({
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+    })};
+    const sessionName = ${JSON.stringify(sessionName)};
+    const oldSessionName = ${JSON.stringify(oldSessionName)};
+    const serverId = ${JSON.stringify(serverId)};
+    window.__ztermAlphaSmoke = {
+      runtimeEnsureCalls: [],
+      runtimeConnectCalls: [],
+      runtimeDisconnectCalls: [],
+      seedApplied: false,
+      windowId: null,
+    };
+    const windowId = new URLSearchParams(window.location.search).get('windowId') || 'browser-dev-window';
+    window.__ztermAlphaSmoke.windowId = windowId;
+    localStorage.removeItem('zterm:mac:workspace:v1:' + windowId);
+    localStorage.setItem('zterm:bridge-settings', JSON.stringify({
+      targetHost: target.bridgeHost,
+      targetPort: target.bridgePort,
+      targetAuthToken: target.authToken,
+      signalUrl: '',
+      turnServerUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      transportMode: 'auto',
+      terminalCacheLines: 3000,
+      terminalThemeId: 'default',
+      terminalWidthMode: 'mirror-fixed',
+      terminalSessionGroupLayoutMode: 'auto',
+      shortcutSmartSort: true,
+      servers: [{
+        id: serverId,
+        name: 'Alpha P0 daemon',
+        targetHost: target.bridgeHost,
+        targetPort: target.bridgePort,
+        authToken: target.authToken,
+      }],
+      defaultServerId: serverId,
+    }));
+    localStorage.setItem('zterm:hosts', JSON.stringify([
+      {
+        id: 'alpha-old',
+        createdAt: 1,
+        name: oldSessionName,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        sessionName: oldSessionName,
+        authToken: target.authToken,
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        lastConnected: 10
+      },
+      {
+        id: 'alpha-quick-saved',
+        createdAt: 2,
+        name: sessionName,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        sessionName,
+        authToken: target.authToken,
+        authType: 'password',
+        tags: [],
+        pinned: false,
+        lastConnected: 20
+      }
+    ]));
+    window.__ztermAlphaSmoke.seedApplied = true;
+  })();`;
+}
+
 async function installSmokeScriptAndReload(call, optionsForScript) {
   await call('Page.addScriptToEvaluateOnNewDocument', {
     source: buildNewDocumentScript(optionsForScript),
+  });
+  await call('Page.reload', { ignoreCache: true });
+  await sleep(1400);
+}
+
+async function installQuickConnectScriptAndReload(call, optionsForScript) {
+  await call('Page.addScriptToEvaluateOnNewDocument', {
+    source: buildQuickConnectNewDocumentScript(optionsForScript),
   });
   await call('Page.reload', { ignoreCache: true });
   await sleep(1400);
@@ -378,6 +552,19 @@ async function waitForState(call, label, predicate, timeoutMs = 12000) {
   let last = null;
   while (Date.now() - started < timeoutMs) {
     last = await readState(call);
+    if (predicate(last)) {
+      return last;
+    }
+    await sleep(350);
+  }
+  throw new Error(`${label} timed out. Last state:\n${JSON.stringify(last, null, 2)}`);
+}
+
+async function waitForQuickConnectState(call, label, predicate, timeoutMs = 12000) {
+  const started = Date.now();
+  let last = null;
+  while (Date.now() - started < timeoutMs) {
+    last = await readQuickConnectState(call);
     if (predicate(last)) {
       return last;
     }
@@ -453,6 +640,86 @@ async function clickButton(call, testId) {
   if (!result.ok) {
     throw new Error(`Failed to click ${testId}: ${JSON.stringify(result)}`);
   }
+}
+
+async function clickButtonByText(call, text) {
+  const result = await evalPage(call, `(() => {
+    const expected = ${JSON.stringify(text)};
+    const button = [...document.querySelectorAll('button')]
+      .find((node) => (node.innerText || node.textContent || '').includes(expected));
+    if (!button) return { ok: false, reason: 'missing', expected };
+    button.click();
+    return { ok: true };
+  })()`);
+  if (!result.ok) {
+    throw new Error(`Failed to click button containing ${text}: ${JSON.stringify(result)}`);
+  }
+}
+
+async function setInputByLabel(call, label, value) {
+  const selectorResult = await evalPage(call, `(() => {
+    const label = [...document.querySelectorAll('label')].find((node) =>
+      (node.innerText || node.textContent || '').includes(${JSON.stringify(label)})
+    );
+    const input = label?.querySelector('input');
+    if (!input) return { ok: false, reason: 'missing-input' };
+    input.setAttribute('data-alpha-smoke-input', ${JSON.stringify(label)});
+    input.focus();
+    input.select();
+    return { ok: true };
+  })()`);
+  if (!selectorResult.ok) {
+    throw new Error(`Failed to locate input ${label}: ${JSON.stringify(selectorResult)}`);
+  }
+  await call('Input.insertText', { text: String(value) });
+  await sleep(120);
+}
+
+async function readQuickConnectState(call) {
+  return evalPage(call, `(() => {
+    const redact = (value) => {
+      if (Array.isArray(value)) return value.map(redact);
+      if (!value || typeof value !== 'object') return value;
+      const out = {};
+      for (const [key, entry] of Object.entries(value)) {
+        out[key] = key === 'authToken' || key === 'targetAuthToken'
+          ? '<redacted>'
+          : redact(entry);
+      }
+      return out;
+    };
+    const root = document.querySelector('.mac-shell-root');
+    const meta = [...document.querySelectorAll('.mac-terminal-meta')].map((node) => node.innerText || node.textContent || '');
+    const radioInputs = [...document.querySelectorAll('input[type="radio"][name^="mac-quick-session-"]')].map((node) => ({
+      name: node.getAttribute('name') || '',
+      checked: Boolean(node.checked),
+      text: node.closest('label')?.innerText || node.closest('label')?.textContent || '',
+    }));
+    const tabs = [...document.querySelectorAll('[data-tab-id]')].map((node) => ({
+      id: node.getAttribute('data-tab-id'),
+      active: node.getAttribute('data-tab-active') === 'true',
+      text: node.innerText || node.textContent || '',
+    }));
+    const storage = {};
+    for (const key of ['zterm:hosts', 'zterm:bridge-settings']) {
+      try {
+        storage[key] = redact(JSON.parse(localStorage.getItem(key) || 'null'));
+      } catch {
+        storage[key] = localStorage.getItem(key);
+      }
+    }
+    const smoke = window.__ztermAlphaSmoke || null;
+    return {
+      url: location.href,
+      windowId: root?.getAttribute('data-window-id') || new URLSearchParams(location.search).get('windowId'),
+      bodyText: document.body.innerText || document.body.textContent || '',
+      meta,
+      radioInputs,
+      tabs,
+      storage,
+      smoke,
+    };
+  })()`);
 }
 
 async function captureScreenshot(call, name) {
@@ -608,20 +875,129 @@ async function runHeaderRestoreCase() {
   }
 }
 
+async function runQuickConnectDiscoveryCase() {
+  const daemon = readDaemonConfig();
+  const summary = {
+    caseName: options.caseName,
+    evidenceDir: options.evidenceDir,
+    port: options.port,
+    appPath: options.appPath,
+    daemon: {
+      configPath: daemon.configPath,
+      bridgeHost: daemon.bridgeHost,
+      bridgePort: daemon.bridgePort,
+      authTokenMasked: daemon.authTokenMasked,
+    },
+    sessionName: QUICK_SESSION,
+    lifecycle: {
+      tmuxBefore: listTmuxSessions(),
+      tmuxAfterCreate: '',
+      tmuxAfterCleanup: '',
+    },
+    daemonSessionsBeforeOpen: [],
+    beforeDiscover: null,
+    afterDiscover: null,
+    afterOpen: null,
+    screenshot: null,
+    resourcePid: null,
+  };
+
+  ensureSmokeSession(QUICK_SESSION, QUICK_READY_TEXT, QUICK_SMOKE_OWNER);
+  summary.lifecycle.tmuxAfterCreate = listTmuxSessions();
+  summary.daemonSessionsBeforeOpen = await requestTmuxSessions(daemon);
+  if (!summary.daemonSessionsBeforeOpen.includes(QUICK_SESSION)) {
+    throw new Error(`Daemon list-sessions did not include ${QUICK_SESSION}: ${JSON.stringify(summary.daemonSessionsBeforeOpen)}`);
+  }
+
+  try {
+    await startPackagedApp();
+    const pageSocket = await connectPage();
+    await installQuickConnectScriptAndReload(pageSocket.call, { target: daemon, sessionName: QUICK_SESSION });
+
+    await waitForState(pageSocket.call, 'initial QuickConnect shell', (state) =>
+      state.bodyText.includes('Open connection')
+      && state.bodyText.includes('No session'),
+    );
+    await clickButtonByText(pageSocket.call, 'Open connection');
+    summary.beforeDiscover = await waitForState(pageSocket.call, 'QuickConnect dialog open', (state) =>
+      state.bodyText.includes('Discover sessions')
+      && state.bodyText.includes('Bridge host'),
+    );
+
+    await setInputByLabel(pageSocket.call, 'Bridge host', daemon.bridgeHost);
+    await setInputByLabel(pageSocket.call, 'Bridge port', String(daemon.bridgePort));
+    await setInputByLabel(pageSocket.call, 'Auth token', daemon.authToken);
+    await clickButtonByText(pageSocket.call, 'Discover sessions');
+
+    summary.afterDiscover = await waitForQuickConnectState(pageSocket.call, 'QuickConnect discovery list', (state) =>
+      state.radioInputs.some((item) => item.name === `mac-quick-session-${QUICK_SESSION}`),
+    );
+    const quickRadio = summary.afterDiscover.radioInputs.find((item) => item.name === `mac-quick-session-${QUICK_SESSION}`);
+    if (!quickRadio?.checked) {
+      throw new Error(`QuickConnect did not preselect latest saved matching session: ${JSON.stringify(summary.afterDiscover.radioInputs, null, 2)}`);
+    }
+    if ((summary.afterDiscover.smoke?.runtimeEnsureCalls || []).length !== 0) {
+      throw new Error(`QuickConnect discovery created runtime before explicit open: ${JSON.stringify(summary.afterDiscover.smoke.runtimeEnsureCalls, null, 2)}`);
+    }
+    await clickButtonByText(pageSocket.call, 'Save & connect');
+    summary.afterOpen = await waitForQuickConnectState(pageSocket.call, 'QuickConnect remote connected', (state) =>
+      state.meta.join('\n').includes('connected')
+      && state.meta.join('\n').includes(QUICK_SESSION)
+      && state.smoke?.runtimeEnsureCalls?.some((item) => item.kind === 'remote' && item.sessionName === QUICK_SESSION && item.connect === true),
+    );
+    const remoteConnects = summary.afterOpen.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === QUICK_SESSION) || [];
+    if (remoteConnects.length < 1) {
+      throw new Error(`QuickConnect open did not create remote runtime connection: ${JSON.stringify(summary.afterOpen.smoke, null, 2)}`);
+    }
+    const savedHosts = summary.afterOpen.storage?.['zterm:hosts'];
+    if (!Array.isArray(savedHosts) || !savedHosts.some((host) => host.sessionName === QUICK_SESSION && host.bridgeHost === daemon.bridgeHost && host.bridgePort === daemon.bridgePort)) {
+      throw new Error(`QuickConnect did not save selected host target: ${JSON.stringify(savedHosts, null, 2)}`);
+    }
+    summary.screenshot = await captureScreenshot(pageSocket.call, 'quick-connect-discovery.png');
+    summary.resourcePid = captureResourceSample('quick-connect-before-close');
+    pageSocket.ws.close();
+    await closePackagedApp('quick-connect-final');
+    summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    return summary;
+  } finally {
+    await closePackagedApp('quick-connect-finally');
+    if (options.cleanupSessions) {
+      cleanupSmokeSession(QUICK_SESSION, QUICK_SMOKE_OWNER);
+      summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    }
+    writeFileSync(join(options.evidenceDir, 'quick-connect-discovery-summary.json'), JSON.stringify(summary, null, 2));
+  }
+}
+
 async function main() {
-  const summary = await runHeaderRestoreCase();
+  const summary = options.caseName === 'quick-connect-discovery'
+    ? await runQuickConnectDiscoveryCase()
+    : await runHeaderRestoreCase();
   writeFileSync(join(options.evidenceDir, 'summary.json'), JSON.stringify(summary, null, 2));
-  console.log(JSON.stringify({
-    ok: true,
-    caseName: summary.caseName,
-    evidenceDir: summary.evidenceDir,
-    firstWindowId: summary.firstOpen?.windowId,
-    reopenedWindowId: summary.coldReopen?.windowId,
-    activeEnsureConnects: summary.afterReconnect?.smoke?.runtimeEnsureCalls?.filter((item) => item.sessionName === ACTIVE_SESSION && item.connect === true).length,
-    hiddenEnsureConnects: summary.afterReconnect?.smoke?.runtimeEnsureCalls?.filter((item) => item.sessionName === HIDDEN_SESSION && item.connect === true).length,
-    activeRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === ACTIVE_SESSION).length,
-    hiddenRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === HIDDEN_SESSION).length,
-  }, null, 2));
+  if (options.caseName === 'quick-connect-discovery') {
+    console.log(JSON.stringify({
+      ok: true,
+      caseName: summary.caseName,
+      evidenceDir: summary.evidenceDir,
+      bridgeHost: summary.daemon?.bridgeHost,
+      bridgePort: summary.daemon?.bridgePort,
+      sessionName: summary.sessionName,
+      discovered: summary.afterDiscover?.radioInputs?.some((item) => item.name === `mac-quick-session-${summary.sessionName}`),
+      remoteRuntimeConnects: summary.afterOpen?.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === summary.sessionName).length,
+    }, null, 2));
+  } else {
+    console.log(JSON.stringify({
+      ok: true,
+      caseName: summary.caseName,
+      evidenceDir: summary.evidenceDir,
+      firstWindowId: summary.firstOpen?.windowId,
+      reopenedWindowId: summary.coldReopen?.windowId,
+      activeEnsureConnects: summary.afterReconnect?.smoke?.runtimeEnsureCalls?.filter((item) => item.sessionName === ACTIVE_SESSION && item.connect === true).length,
+      hiddenEnsureConnects: summary.afterReconnect?.smoke?.runtimeEnsureCalls?.filter((item) => item.sessionName === HIDDEN_SESSION && item.connect === true).length,
+      activeRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === ACTIVE_SESSION).length,
+      hiddenRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === HIDDEN_SESSION).length,
+    }, null, 2));
+  }
 }
 
 main().catch((error) => {

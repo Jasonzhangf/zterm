@@ -13,7 +13,7 @@
  * mac-2 接入 shared 后会转绿。
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MacAppShell } from './MacAppShell';
 import { openConnectionInWorkbench, splitActivePaneRight, createInitialWorkbenchState, type MacWorkbenchState } from './workbench';
@@ -95,6 +95,23 @@ vi.mock('./MacPaneWorkbench', () => ({
   },
 }));
 
+const { connectionLauncherSessionFetcherMock } = vi.hoisted(() => ({
+  connectionLauncherSessionFetcherMock: vi.fn(),
+}));
+
+vi.mock('../components/ConnectionLauncher', async () => {
+  const actual = await vi.importActual<typeof import('../components/ConnectionLauncher')>('../components/ConnectionLauncher');
+  return {
+    ...actual,
+    ConnectionLauncher: (props: any) => (
+      <actual.ConnectionLauncher
+        {...props}
+        sessionFetcher={connectionLauncherSessionFetcherMock}
+      />
+    ),
+  };
+});
+
 function makeHost(id: string, name: string): Host {
   return {
     id,
@@ -162,6 +179,7 @@ afterEach(() => {
   releaseRuntimeMock.mockClear();
   disposeRegistryMock.mockClear();
   fetchLiveSnapshotMock.mockReset();
+  connectionLauncherSessionFetcherMock.mockReset();
 });
 
 function renderShell(initialState: MacWorkbenchState) {
@@ -447,5 +465,48 @@ describe('MacAppShell layout (red baseline)', () => {
     expect(container.querySelector('[data-session-name="host-a"]')?.textContent).toContain('open');
     expect(container.querySelector('[data-session-name="remote-live-a"]')).toBeNull();
     expect(ensureRuntimeMock).not.toHaveBeenCalled();
+  });
+
+  it('discovers remote sessions in the launcher and opens only after explicit Save & connect', async () => {
+    connectionLauncherSessionFetcherMock.mockResolvedValue(['alpha', 'beta']);
+    const addHost = vi.fn((draft: EditableHost) => ({
+      id: 'saved-beta',
+      createdAt: Date.now(),
+      ...draft,
+    } as Host));
+    const { container, findByText } = render(
+      <MacAppShell
+        hosts={[{ ...makeHost('old-beta', 'beta'), lastConnected: 20 }]}
+        isLoaded={true}
+        bridgeSettings={makeBridgeSettings()}
+        setBridgeSettings={vi.fn() as any}
+        addHost={addHost as any}
+        updateHost={vi.fn()}
+        __initialWorkbench={createInitialWorkbenchState()}
+      />,
+    );
+
+    fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Open connection'),
+    )!);
+    ensureRuntimeMock.mockClear();
+
+    fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Discover sessions'),
+    )!);
+
+    await waitFor(() => {
+      expect(container.querySelector('input[name="mac-quick-session-beta"]')).toBeTruthy();
+    });
+    expect(ensureRuntimeMock).not.toHaveBeenCalled();
+
+    fireEvent.click(Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Save & connect'),
+    )!);
+
+    await waitFor(() => expect(ensureRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'remote',
+      runtimeKey: 'remote:saved-beta:beta',
+    }), { connect: true }));
   });
 });

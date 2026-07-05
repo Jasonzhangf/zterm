@@ -71,6 +71,20 @@
           "status": "anchored"
         },
         {
+          "id": "MAC-19-QuickConnectDiscovery",
+          "label": "QuickConnect session discovery",
+          "owner_feature": "mac.quick_connect",
+          "entrypoint": "ConnectionLauncher in mac/src/components/ConnectionLauncher.tsx",
+          "status": "anchored"
+        },
+        {
+          "id": "MAC-20-QuickConnectOpen",
+          "label": "QuickConnect open intent",
+          "owner_feature": "mac.quick_connect",
+          "entrypoint": "MacAppShell.handleSaveDraft(...) in mac/src/app/MacAppShell.tsx",
+          "status": "anchored"
+        },
+        {
           "id": "MAC-07-PaneTreeUpdate",
           "label": "Pane tree update",
           "owner_feature": "mac.workspace_store",
@@ -256,6 +270,42 @@
           "semantic_output": "workspace connection tab identity persisted in current transitional workbench state",
           "status": "anchored",
           "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "mac/src/app/workbench.test.ts"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0022",
+          "from": "MAC-04-WorkspaceShell",
+          "to": "MAC-19-QuickConnectDiscovery",
+          "owner_feature": "mac.quick_connect",
+          "caller": "MacAppShell Open connection command renders ConnectionLauncher in mac/src/app/MacAppShell.tsx",
+          "callee": "ConnectionLauncher session discovery controls in mac/src/components/ConnectionLauncher.tsx",
+          "semantic_input": "manual bridge host, port, token, and saved host history",
+          "semantic_output": "explicit remote discovery state with useful session preselection",
+          "status": "anchored",
+          "verification_gates": ["mac/src/components/ConnectionLauncher.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "packaged QuickConnect/session discovery smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0023",
+          "from": "MAC-19-QuickConnectDiscovery",
+          "to": "MAC-20-QuickConnectOpen",
+          "owner_feature": "mac.quick_connect",
+          "caller": "ConnectionLauncher explicit Save & connect command in mac/src/components/ConnectionLauncher.tsx",
+          "callee": "MacAppShell.handleSaveDraft(...) in mac/src/app/MacAppShell.tsx",
+          "semantic_input": "selected discovered session or typed session target",
+          "semantic_output": "save/open request emitted only after explicit user command",
+          "status": "anchored",
+          "verification_gates": ["mac/src/components/ConnectionLauncher.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "packaged QuickConnect/session discovery smoke"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0024",
+          "from": "MAC-20-QuickConnectOpen",
+          "to": "MAC-03-WorkspaceLoad",
+          "owner_feature": "mac.quick_connect",
+          "caller": "MacAppShell.handleSaveDraft(...) in mac/src/app/MacAppShell.tsx",
+          "callee": "openConnectionInWorkbench(...) in mac/src/app/workspace/workbench-model.ts",
+          "semantic_input": "validated editable host from QuickConnect open command",
+          "semantic_output": "active workspace tab identity for selected remote session",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "mac/src/app/workbench.test.ts", "packaged QuickConnect/session discovery smoke"]
         },
         {
           "edge_id": "MAC-EDGE-0008",

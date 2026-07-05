@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   DEFAULT_HOST_DRAFT,
+  fetchTmuxSessions,
   type BridgeSettings,
+  type BridgeTarget,
   type EditableHost,
   type Host,
 } from '@zterm/shared';
@@ -14,6 +16,7 @@ interface ConnectionLauncherProps {
   onOpenHost: (host: Host, append: boolean) => void;
   onOpenLocalTmuxSession: (sessionName: string, append: boolean) => void;
   onSaveDraft: (draft: EditableHost, editingHostId?: string, connectAfterSave?: boolean) => void;
+  sessionFetcher?: (target: BridgeTarget) => Promise<string[]>;
 }
 
 function buildDraftFromSettings(settings: BridgeSettings): EditableHost {
@@ -33,11 +36,16 @@ export function ConnectionLauncher({
   onOpenHost,
   onOpenLocalTmuxSession,
   onSaveDraft,
+  sessionFetcher = fetchTmuxSessions,
 }: ConnectionLauncherProps) {
   const [editingHostId, setEditingHostId] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<EditableHost>(() => buildDraftFromSettings(bridgeSettings));
   const [localTmuxSessions, setLocalTmuxSessions] = useState<string[]>([]);
   const [localTmuxError, setLocalTmuxError] = useState('');
+  const [remoteSessions, setRemoteSessions] = useState<string[]>([]);
+  const [selectedRemoteSession, setSelectedRemoteSession] = useState('');
+  const [remoteDiscoveryState, setRemoteDiscoveryState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [remoteDiscoveryError, setRemoteDiscoveryError] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -46,6 +54,10 @@ export function ConnectionLauncher({
     setEditingHostId(undefined);
     setDraft(buildDraftFromSettings(bridgeSettings));
     setLocalTmuxError('');
+    setRemoteSessions([]);
+    setSelectedRemoteSession('');
+    setRemoteDiscoveryState('idle');
+    setRemoteDiscoveryError('');
     void window.ztermMac.localTmux.listSessions()
       .then((sessions) => setLocalTmuxSessions([...sessions].sort((left, right) => left.localeCompare(right))))
       .catch((error) => {
@@ -58,6 +70,86 @@ export function ConnectionLauncher({
     () => [...hosts].sort((left, right) => (right.lastConnected || 0) - (left.lastConnected || 0)),
     [hosts],
   );
+
+  const clearRemoteDiscovery = () => {
+    setRemoteSessions([]);
+    setSelectedRemoteSession('');
+    setRemoteDiscoveryState('idle');
+    setRemoteDiscoveryError('');
+  };
+
+  const clearDiscoveredDraftSession = (current: EditableHost): EditableHost => {
+    const discoveredSession = selectedRemoteSession.trim();
+    if (!discoveredSession || current.sessionName.trim() !== discoveredSession) {
+      return current;
+    }
+    return {
+      ...current,
+      sessionName: '',
+      name: current.name.trim() === discoveredSession ? '' : current.name,
+    };
+  };
+
+  const discoverRemoteSessions = async () => {
+    const bridgeHost = draft.bridgeHost.trim();
+    const authToken = draft.authToken?.trim() || '';
+    if (!bridgeHost) {
+      setRemoteSessions([]);
+      setSelectedRemoteSession('');
+      setRemoteDiscoveryState('error');
+      setRemoteDiscoveryError('Bridge host is required to discover sessions');
+      return;
+    }
+    if (!authToken) {
+      setRemoteSessions([]);
+      setSelectedRemoteSession('');
+      setRemoteDiscoveryState('error');
+      setRemoteDiscoveryError('Auth token is required to discover sessions');
+      return;
+    }
+
+    setRemoteDiscoveryState('loading');
+    setRemoteDiscoveryError('');
+    try {
+      const fetched = await sessionFetcher({
+        bridgeHost,
+        bridgePort: Math.max(1, Math.floor(draft.bridgePort || DEFAULT_HOST_DRAFT.bridgePort)),
+        authToken,
+      });
+      const unique = Array.from(new Set(fetched.map((session) => session.trim()).filter(Boolean)))
+        .sort((left, right) => left.localeCompare(right));
+      const latestSaved = sortedHosts.find((host) =>
+        host.bridgeHost.trim() === bridgeHost
+        && host.bridgePort === Math.max(1, Math.floor(draft.bridgePort || DEFAULT_HOST_DRAFT.bridgePort))
+        && unique.includes(host.sessionName.trim()),
+      );
+      const selected = latestSaved?.sessionName.trim() || unique[0] || '';
+      setRemoteSessions(unique);
+      setSelectedRemoteSession(selected);
+      if (selected) {
+        setDraft((current) => ({
+          ...current,
+          sessionName: selected,
+          name: current.name?.trim() ? current.name : selected,
+        }));
+      }
+      setRemoteDiscoveryState('done');
+    } catch (error) {
+      setRemoteSessions([]);
+      setSelectedRemoteSession('');
+      setRemoteDiscoveryState('error');
+      setRemoteDiscoveryError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const openDraft = (connectAfterSave: boolean) => {
+    const selectedSession = selectedRemoteSession.trim() || draft.sessionName.trim();
+    onSaveDraft({
+      ...draft,
+      sessionName: selectedSession,
+      name: draft.name?.trim() || selectedSession || draft.bridgeHost.trim(),
+    }, editingHostId, connectAfterSave);
+  };
 
   if (!open) {
     return null;
@@ -151,7 +243,16 @@ export function ConnectionLauncher({
             </label>
             <label className="mac-field">
               <span>Bridge host</span>
-              <input value={draft.bridgeHost} onChange={(event) => setDraft((current) => ({ ...current, bridgeHost: event.target.value }))} />
+              <input
+                value={draft.bridgeHost}
+                onChange={(event) => {
+                  clearRemoteDiscovery();
+                  setDraft((current) => ({
+                    ...clearDiscoveredDraftSession(current),
+                    bridgeHost: event.target.value,
+                  }));
+                }}
+              />
             </label>
             <div className="mac-field-row">
               <label className="mac-field">
@@ -159,9 +260,10 @@ export function ConnectionLauncher({
                 <input
                   value={String(draft.bridgePort || '')}
                   onChange={(event) => {
+                    clearRemoteDiscovery();
                     const value = Number.parseInt(event.target.value || '0', 10);
                     setDraft((current) => ({
-                      ...current,
+                      ...clearDiscoveredDraftSession(current),
                       bridgePort: Number.isFinite(value) && value > 0 ? value : DEFAULT_HOST_DRAFT.bridgePort,
                     }));
                   }}
@@ -169,13 +271,66 @@ export function ConnectionLauncher({
               </label>
               <label className="mac-field">
                 <span>Session name</span>
-                <input value={draft.sessionName} onChange={(event) => setDraft((current) => ({ ...current, sessionName: event.target.value }))} />
+                <input
+                  value={draft.sessionName}
+                  onChange={(event) => {
+                    setSelectedRemoteSession('');
+                    setRemoteDiscoveryError('');
+                    setDraft((current) => ({ ...current, sessionName: event.target.value }));
+                  }}
+                />
               </label>
             </div>
             <label className="mac-field">
               <span>Auth token</span>
-              <input value={draft.authToken || ''} onChange={(event) => setDraft((current) => ({ ...current, authToken: event.target.value }))} />
+              <input
+                value={draft.authToken || ''}
+                onChange={(event) => {
+                  clearRemoteDiscovery();
+                  setDraft((current) => ({
+                    ...clearDiscoveredDraftSession(current),
+                    authToken: event.target.value,
+                  }));
+                }}
+              />
             </label>
+            <div className="mac-discovery-panel">
+              <button
+                className="mac-secondary-button"
+                type="button"
+                onClick={() => void discoverRemoteSessions()}
+                disabled={remoteDiscoveryState === 'loading'}
+              >
+                {remoteDiscoveryState === 'loading' ? 'Discovering…' : 'Discover sessions'}
+              </button>
+              {remoteDiscoveryError ? <div className="mac-empty-copy">{remoteDiscoveryError}</div> : null}
+              {remoteDiscoveryState === 'done' && remoteSessions.length === 0 ? (
+                <div className="mac-empty-copy">No remote tmux sessions returned.</div>
+              ) : null}
+              {remoteSessions.length > 0 ? (
+                <div className="mac-saved-list">
+                  {remoteSessions.map((sessionName) => (
+                    <label className="mac-saved-card" key={sessionName}>
+                      <input
+                        name={`mac-quick-session-${sessionName}`}
+                        type="radio"
+                        checked={selectedRemoteSession === sessionName}
+                        onChange={() => {
+                          setSelectedRemoteSession(sessionName);
+                          setDraft((current) => ({
+                            ...current,
+                            sessionName,
+                            name: current.name?.trim() ? current.name : sessionName,
+                          }));
+                        }}
+                      />
+                      <strong>{sessionName}</strong>
+                      <span>Remote tmux session</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <label className="mac-field">
               <span>Auto command</span>
               <input value={draft.autoCommand || ''} onChange={(event) => setDraft((current) => ({ ...current, autoCommand: event.target.value }))} />
@@ -193,10 +348,10 @@ export function ConnectionLauncher({
                   Reset
                 </button>
               ) : null}
-              <button className="mac-secondary-button" type="button" onClick={() => onSaveDraft(draft, editingHostId, false)}>
+              <button className="mac-secondary-button" type="button" onClick={() => openDraft(false)}>
                 Save
               </button>
-              <button className="mac-primary-button" type="button" onClick={() => onSaveDraft(draft, editingHostId, true)}>
+              <button className="mac-primary-button" type="button" onClick={() => openDraft(true)}>
                 Save & connect
               </button>
             </div>
