@@ -638,3 +638,9 @@ silently returns 0 when viewport metrics are stable.
 - `buildTerminalViewportDemandKey` 必须纳入非空 `missingRanges` 拓扑；同一 mode/end/rows 下可见 gap 改变仍必须重新上报，否则 buffer manager 会漏发 visible repair。
 - 无 visible gap 时 demand 不发送空 `missingRanges: []`，保持旧 payload 形状；有 visible gap 时才显式带 ranges。
 - 回归门禁：`pnpm --dir android exec vitest run src/components/TerminalView.dynamic-refresh.test.tsx src/contexts/session-context-buffer-runtime.test.ts --reporter dot` 与 `pnpm --dir packages/shared exec vitest run src/terminal/renderer.test.ts src/terminal/mac-terminal-view.test.tsx --reporter dot`。
+
+## 2026-07-05 Android cold-start adaptive width mode
+
+- `BridgeSettings.terminalWidthMode` 是启动排版和 connect payload 的唯一客户端真源；持久化值来自 `STORAGE_KEYS.BRIDGE_SETTINGS`，旧 `terminal-width-mode` localStorage key / `TerminalWidthModeManager` 分叉 owner 已物理删除并由 architecture gate 禁止复活。
+- 首装或旧配置缺 `terminalWidthMode` 时，默认 resolver 必须优先使用 `visualViewport.width` 判定手机首帧宽度；Android WebView / 折叠屏可能出现 `visualViewport.width` 窄但 `innerWidth/documentElement.clientWidth` 宽，不能用 `Math.max(...)` 把手机错判成 `mirror-fixed`。
+- 回归门禁：`pnpm --dir packages/shared exec vitest run src/react/use-bridge-settings-storage.test.tsx --reporter dot` 与 `pnpm --dir android exec vitest run src/App.first-paint.real-terminal.test.tsx src/lib/architecture-boundary-truth.test.ts --reporter dot` 必须覆盖未进入 Settings 前首帧 DOM 和 connect payload 都是 `adaptive-phone`。

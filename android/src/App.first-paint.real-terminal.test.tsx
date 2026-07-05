@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
 import { STORAGE_KEYS, type ServerMessage } from './lib/types';
 
 const fetchTmuxSessionsMock = vi.fn();
@@ -166,21 +165,6 @@ vi.mock('@capacitor/keyboard', () => ({
     hide: vi.fn(async () => undefined),
     show: vi.fn(async () => undefined),
   },
-}));
-
-vi.mock('./hooks/useBridgeSettingsStorage', () => ({
-  useBridgeSettingsStorage: () => ({
-    settings: {
-      servers: [],
-      targetHost: '127.0.0.1',
-      targetPort: 3333,
-      targetAuthToken: '',
-      terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
-      terminalThemeId: 'default',
-      terminalWidthMode: 'mirror-fixed',
-    },
-    setSettings: vi.fn(),
-  }),
 }));
 
 vi.mock('./hooks/useHostStorage', () => ({
@@ -434,6 +418,94 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
 
     await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+  });
+
+  it('cold start terminal page reads persisted adaptive width mode before first terminal render and connect', async () => {
+    localStorage.setItem(STORAGE_KEYS.BRIDGE_SETTINGS, JSON.stringify({
+      targetHost: '127.0.0.1',
+      targetPort: 3333,
+      targetAuthToken: '',
+      terminalWidthMode: 'adaptive-phone',
+      terminalCacheLines: 1000,
+      terminalThemeId: 'default',
+      shortcutSmartSort: true,
+      servers: [],
+    }));
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    const view = render(<App />);
+
+    await waitFor(() => expect(view.container.querySelector('[data-width-mode="adaptive-phone"]')).toBeTruthy());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+
+    await waitFor(() => {
+      const connectMessage = readSentMessages(ws).find((message) => message.type === 'connect');
+      expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
+    });
+  });
+
+  it('cold start terminal page uses adaptive width mode from visual viewport before Settings has opened', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 980,
+    });
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 980,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 393,
+        height: 852,
+        offsetTop: 0,
+        offsetLeft: 0,
+        scale: 1,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-1');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    const view = render(<App />);
+
+    await waitFor(() => expect(view.container.querySelector('[data-width-mode="adaptive-phone"]')).toBeTruthy());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+
+    await waitFor(() => {
+      const connectMessage = readSentMessages(ws).find((message) => message.type === 'connect');
+      expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
+    });
   });
 
   it('switching to another restored tab explicitly opens a second daemon transport after the cold-start active tab resumed', async () => {

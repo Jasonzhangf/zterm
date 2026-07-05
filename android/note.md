@@ -1474,3 +1474,10 @@ Need runtime debug to confirm:
 - 修复：Android follow/reading viewport demand 现在携带 shared core 计算出的 visible `missingRanges`；shared demand key 纳入 missingRanges 拓扑，避免同 viewport 下可见 gap 改变被去重吞掉。无 gap 时仍保持旧 payload 形状，不发送空 `missingRanges: []`。
 - 回归：`TerminalView.dynamic-refresh.test.tsx` 增加自动黑盒断言，证明 visible reading/follow gap 会通过 `onViewportChange` 上报 `missingRanges`，并同步渲染 gap marker。
 - 验证：shared renderer/Mac tests 25 PASS；Android targeted renderer/buffer tests 86 PASS；Android prebuild terminal regression core 576+96 PASS；relay local smoke PASS；web build PASS；Gradle debug build PASS，APK `0.1.3.2011` 已发布到 update channel。
+
+# 2026-07-05 Android cold-start adaptive width mode
+
+- 架构映射：本轮属于 Client Render Width / BridgeSettings persistence truth；唯一 owner 是 `packages/shared/src/react/use-bridge-settings-storage.ts`，Android App 只消费 `BridgeSettings.terminalWidthMode` 并传给 TerminalPage/SessionContext。
+- 根因：无 `zterm:bridge-settings.terminalWidthMode` 或旧配置缺字段时，默认 resolver 用 `Math.max(innerWidth, documentElement.clientWidth, visualViewport.width)`；Android WebView/折叠屏可能首帧 `visualViewport.width=393` 但 layout viewport 为 `980`，导致进入 terminal 前被错判为 `mirror-fixed`，打开 Settings 后再写入/刷新才变成 adaptive。
+- 修复：默认 resolver 改为优先使用 `visualViewport.width`，再依次使用 `innerWidth`、`documentElement.clientWidth`；持久化 `BRIDGE_SETTINGS.terminalWidthMode` 仍最高优先级。删除旧 `src/lib/device/TerminalWidthModeManager.ts` 和旧 `terminal-width-mode` localStorage 分叉真源。
+- 回归：shared storage 测试覆盖 persisted adaptive、窄 viewport、WebView visual narrow/layout wide、wide viewport；App first-paint 测试覆盖未打开 Settings 时首帧 DOM `data-width-mode=adaptive-phone` 且 connect payload `widthMode=adaptive-phone`；架构 gate 防旧分叉 owner 复活。

@@ -7,14 +7,10 @@ function resolveInitialTerminalWidthMode() {
     return DEFAULT_BRIDGE_SETTINGS.terminalWidthMode;
   }
   const visualViewportWidth = Math.round(window.visualViewport?.width || 0);
-  const layoutWidth = Math.round(
-    Math.max(
-      window.innerWidth || 0,
-      window.document?.documentElement?.clientWidth || 0,
-      visualViewportWidth,
-    ),
-  );
-  return layoutWidth > 0 && layoutWidth <= 700 ? 'adaptive-phone' : 'mirror-fixed';
+  const innerWidth = Math.round(window.innerWidth || 0);
+  const documentClientWidth = Math.round(window.document?.documentElement?.clientWidth || 0);
+  const width = visualViewportWidth || innerWidth || documentClientWidth;
+  return width > 0 && width <= 700 ? 'adaptive-phone' : 'mirror-fixed';
 }
 
 function buildDetectedDefaultBridgeSettings(): BridgeSettings {

@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
@@ -90,6 +90,12 @@ describe('architecture boundary truth gate', () => {
 
     expect(runtimeTypesSource).toContain('widthMode?: TerminalWidthMode');
     expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(session: TerminalSession, payload: \{ cols\?: number; widthMode\?:/);
+  });
+
+  it('keeps terminal width mode storage owned by bridge settings only', () => {
+    expect(existsSync(join(root, 'src/lib/device/TerminalWidthModeManager.ts'))).toBe(false);
+    expect(read('src/lib/terminal-width-mode-manager.ts')).not.toContain('localStorage');
+    expect(read('../packages/shared/src/react/use-bridge-settings-storage.ts')).toContain('STORAGE_KEYS.BRIDGE_SETTINGS');
   });
 
   it('keeps daemon attach correlation fields out of daemon-owned token state', () => {

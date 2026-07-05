@@ -66,4 +66,56 @@ describe('useBridgeSettingsStorage', () => {
 
     expect(screen.getByTestId('width-mode').textContent).toBe('adaptive-phone');
   });
+
+  it('uses visual viewport as first-launch width truth when Android WebView layout viewport is wide', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 980,
+    });
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 980,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 393,
+      },
+    });
+
+    function Harness() {
+      const { settings } = useBridgeSettingsStorage();
+      return <div data-testid="width-mode">{settings.terminalWidthMode}</div>;
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByTestId('width-mode').textContent).toBe('adaptive-phone');
+  });
+
+  it('keeps mirror-fixed as the first-launch default when the visual viewport is wide', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1180,
+    });
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 1180,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 1180,
+      },
+    });
+
+    function Harness() {
+      const { settings } = useBridgeSettingsStorage();
+      return <div data-testid="width-mode">{settings.terminalWidthMode}</div>;
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByTestId('width-mode').textContent).toBe('mirror-fixed');
+  });
 });
