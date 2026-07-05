@@ -29,6 +29,21 @@ The Mac client can be called P0-alpha-ready only when all items below are true:
 9. Packaged smoke evidence exists under `mac/evidence/<date>-mac-alpha-p0-closeout/`.
 10. Evidence retention decision is recorded; untracked evidence is not deleted or moved without Jason approval.
 
+## 2.1 Current Verified Progress
+
+Verified and closed by 2026-07-05:
+
+- `T-A1` QuickConnect/session discovery: packaged `quick-connect-discovery-final3` smoke.
+- `T-A2` cold restore active-only eager connect and `T-A3` terminal header controls: packaged `header-restore-final2` smoke.
+- Remote server rail open: packaged `server-rail-remote-open-final2` smoke proved Refresh is projection-only with zero runtime creation, then explicit rail session click opens a connected remote runtime and renders dedicated session output.
+- Evidence retention: generated `mac/evidence/**` artifacts are ignored by git; evidence paths are referenced as local verification output only.
+
+Remaining P0 closeout work:
+
+- `T-A4` large-output follow/reading/gap/return-follow packaged proof.
+- `T-A5` daemon/transport disconnect/reconnect packaged proof.
+- Alpha package handoff.
+
 ## 3. Scope
 
 ### In Scope
@@ -310,7 +325,7 @@ Add targeted shared tests if `packages/shared` terminal/file/workspace code chan
 - Do not delete or move current `mac/evidence/2026-07-04-*` without Jason approval.
 - Do not use `pkill`, `killall`, `kill $(...)`, or broad `xargs kill`.
 - Do not claim packaged readiness from unit tests.
-- Do not claim remote open readiness from read-only server refresh.
+- Do not claim remote open readiness from read-only server refresh alone; remote open readiness requires packaged `server-rail-remote-open` proof.
 - Do not leave direct connect calls in pane UI if the runtime registry should own them.
 - Do not revive `ShellWorkspace`.
 

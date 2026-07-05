@@ -5,6 +5,8 @@
  * Current cases:
  * - header-restore: packaged cold restore + active-only eager connect + terminal
  *   header disconnect/reconnect controls.
+ * - server-rail-remote-open: packaged server rail live refresh stays read-only,
+ *   then explicit rail session click opens a real remote runtime.
  * - quick-connect-discovery: packaged QuickConnect discovery against the real
  *   daemon list-sessions path, then explicit Save & connect remote open.
  *
@@ -21,13 +23,16 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname, '..');
 const MAC_ROOT = resolve(new URL('..', import.meta.url).pathname);
 const DATE = new Date().toISOString().slice(0, 10);
 const DEFAULT_PORT = 9363;
-const SUPPORTED_CASES = new Set(['header-restore', 'quick-connect-discovery']);
+const SUPPORTED_CASES = new Set(['header-restore', 'server-rail-remote-open', 'quick-connect-discovery']);
 const SMOKE_OWNER = 'alpha-p0-header-restore';
+const SERVER_OPEN_SMOKE_OWNER = 'alpha-p0-server-rail-open';
 const QUICK_SMOKE_OWNER = 'alpha-p0-quick-connect';
 const SMOKE_OWNER_OPTION = '@zterm_mac_smoke_owner';
 const SMOKE_CASE_OPTION = '@zterm_mac_smoke_case';
 const ACTIVE_SESSION = 'zterm_mac_alpha_active';
 const HIDDEN_SESSION = 'zterm_mac_alpha_hidden';
+const SERVER_OPEN_SESSION = 'zterm_mac_alpha_remote_open';
+const SERVER_OPEN_READY_TEXT = 'ZTERM_ALPHA_REMOTE_OPEN_READY';
 const QUICK_SESSION = 'zterm_mac_alpha_quick';
 const QUICK_READY_TEXT = 'ZTERM_ALPHA_QUICK_READY';
 const PANE_ID = 'pane-alpha-p0';
@@ -491,6 +496,54 @@ function buildQuickConnectNewDocumentScript({ target, sessionName }) {
   })();`;
 }
 
+function buildServerRailOpenNewDocumentScript({ target, sessionName }) {
+  const serverId = `${target.bridgeHost}:${target.bridgePort}`.toLowerCase();
+  return `(() => {
+    const target = ${JSON.stringify({
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+    })};
+    const sessionName = ${JSON.stringify(sessionName)};
+    const serverId = ${JSON.stringify(serverId)};
+    window.__ztermAlphaSmoke = {
+      runtimeEnsureCalls: [],
+      runtimeConnectCalls: [],
+      runtimeDisconnectCalls: [],
+      seedApplied: false,
+      windowId: null,
+    };
+    const windowId = new URLSearchParams(window.location.search).get('windowId') || 'browser-dev-window';
+    window.__ztermAlphaSmoke.windowId = windowId;
+    localStorage.removeItem('zterm:mac:workspace:v1:' + windowId);
+    localStorage.setItem('zterm:bridge-settings', JSON.stringify({
+      targetHost: target.bridgeHost,
+      targetPort: target.bridgePort,
+      targetAuthToken: target.authToken,
+      signalUrl: '',
+      turnServerUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      transportMode: 'auto',
+      terminalCacheLines: 3000,
+      terminalThemeId: 'default',
+      terminalWidthMode: 'mirror-fixed',
+      terminalSessionGroupLayoutMode: 'auto',
+      shortcutSmartSort: true,
+      servers: [{
+        id: serverId,
+        name: 'Alpha P0 daemon',
+        targetHost: target.bridgeHost,
+        targetPort: target.bridgePort,
+        authToken: target.authToken,
+      }],
+      defaultServerId: serverId,
+    }));
+    localStorage.setItem('zterm:hosts', JSON.stringify([]));
+    window.__ztermAlphaSmoke.seedApplied = true;
+  })();`;
+}
+
 async function installSmokeScriptAndReload(call, optionsForScript) {
   await call('Page.addScriptToEvaluateOnNewDocument', {
     source: buildNewDocumentScript(optionsForScript),
@@ -502,6 +555,14 @@ async function installSmokeScriptAndReload(call, optionsForScript) {
 async function installQuickConnectScriptAndReload(call, optionsForScript) {
   await call('Page.addScriptToEvaluateOnNewDocument', {
     source: buildQuickConnectNewDocumentScript(optionsForScript),
+  });
+  await call('Page.reload', { ignoreCache: true });
+  await sleep(1400);
+}
+
+async function installServerRailOpenScriptAndReload(call, optionsForScript) {
+  await call('Page.addScriptToEvaluateOnNewDocument', {
+    source: buildServerRailOpenNewDocumentScript(optionsForScript),
   });
   await call('Page.reload', { ignoreCache: true });
   await sleep(1400);
@@ -720,6 +781,73 @@ async function readQuickConnectState(call) {
       smoke,
     };
   })()`);
+}
+
+async function readServerRailOpenState(call) {
+  return evalPage(call, `(() => {
+    const redact = (value) => {
+      if (Array.isArray(value)) return value.map(redact);
+      if (!value || typeof value !== 'object') return value;
+      const out = {};
+      for (const [key, entry] of Object.entries(value)) {
+        out[key] = key === 'authToken' || key === 'targetAuthToken'
+          ? '<redacted>'
+          : redact(entry);
+      }
+      return out;
+    };
+    const root = document.querySelector('.mac-shell-root');
+    const meta = [...document.querySelectorAll('.mac-terminal-meta')].map((node) => node.innerText || node.textContent || '');
+    const rows = [...document.querySelectorAll('[data-terminal-row-text]')].map((node) =>
+      node.getAttribute('data-terminal-row-text') || node.innerText || node.textContent || ''
+    );
+    const serverGroups = [...document.querySelectorAll('.mac-server-group')].map((node) => ({
+      serverId: node.getAttribute('data-server-id') || '',
+      text: node.innerText || node.textContent || '',
+      sessions: [...node.querySelectorAll('.mac-server-session-row')].map((row) => ({
+        sessionName: row.getAttribute('data-session-name') || '',
+        text: row.innerText || row.textContent || '',
+      })),
+    }));
+    const tabs = [...document.querySelectorAll('[data-tab-id]')].map((node) => ({
+      id: node.getAttribute('data-tab-id'),
+      active: node.getAttribute('data-tab-active') === 'true',
+      text: node.innerText || node.textContent || '',
+    }));
+    const storage = {};
+    for (const key of ['zterm:hosts', 'zterm:bridge-settings']) {
+      try {
+        storage[key] = redact(JSON.parse(localStorage.getItem(key) || 'null'));
+      } catch {
+        storage[key] = localStorage.getItem(key);
+      }
+    }
+    const smoke = window.__ztermAlphaSmoke || null;
+    return {
+      url: location.href,
+      windowId: root?.getAttribute('data-window-id') || new URLSearchParams(location.search).get('windowId'),
+      bodyText: document.body.innerText || document.body.textContent || '',
+      meta,
+      rows,
+      serverGroups,
+      tabs,
+      storage,
+      smoke,
+    };
+  })()`);
+}
+
+async function waitForServerRailOpenState(call, label, predicate, timeoutMs = 12000) {
+  const started = Date.now();
+  let last = null;
+  while (Date.now() - started < timeoutMs) {
+    last = await readServerRailOpenState(call);
+    if (predicate(last)) {
+      return last;
+    }
+    await sleep(350);
+  }
+  throw new Error(`${label} timed out. Last state:\n${JSON.stringify(last, null, 2)}`);
 }
 
 async function captureScreenshot(call, name) {
@@ -969,10 +1097,126 @@ async function runQuickConnectDiscoveryCase() {
   }
 }
 
+async function clickServerRailSession(call, sessionName) {
+  const result = await evalPage(call, `(() => {
+    const row = [...document.querySelectorAll('.mac-server-session-row')]
+      .find((node) => node.getAttribute('data-session-name') === ${JSON.stringify(sessionName)});
+    const button = row?.querySelector('.mac-server-session-button');
+    if (!button) return { ok: false, reason: 'missing-session-button', sessionName: ${JSON.stringify(sessionName)} };
+    button.click();
+    return { ok: true };
+  })()`);
+  if (!result.ok) {
+    throw new Error(`Failed to click server rail session ${sessionName}: ${JSON.stringify(result)}`);
+  }
+}
+
+async function runServerRailRemoteOpenCase() {
+  const daemon = readDaemonConfig();
+  const summary = {
+    caseName: options.caseName,
+    evidenceDir: options.evidenceDir,
+    port: options.port,
+    appPath: options.appPath,
+    daemon: {
+      configPath: daemon.configPath,
+      bridgeHost: daemon.bridgeHost,
+      bridgePort: daemon.bridgePort,
+      authTokenMasked: daemon.authTokenMasked,
+    },
+    sessionName: SERVER_OPEN_SESSION,
+    lifecycle: {
+      tmuxBefore: listTmuxSessions(),
+      tmuxAfterCreate: '',
+      tmuxAfterCleanup: '',
+    },
+    daemonSessionsBeforeRefresh: [],
+    initialShell: null,
+    afterRefresh: null,
+    afterOpen: null,
+    screenshot: null,
+    resourcePid: null,
+  };
+
+  ensureSmokeSession(SERVER_OPEN_SESSION, SERVER_OPEN_READY_TEXT, SERVER_OPEN_SMOKE_OWNER);
+  summary.lifecycle.tmuxAfterCreate = listTmuxSessions();
+  summary.daemonSessionsBeforeRefresh = await requestTmuxSessions(daemon);
+  if (!summary.daemonSessionsBeforeRefresh.includes(SERVER_OPEN_SESSION)) {
+    throw new Error(`Daemon list-sessions did not include ${SERVER_OPEN_SESSION}: ${JSON.stringify(summary.daemonSessionsBeforeRefresh)}`);
+  }
+
+  try {
+    await startPackagedApp();
+    const pageSocket = await connectPage();
+    await installServerRailOpenScriptAndReload(pageSocket.call, { target: daemon, sessionName: SERVER_OPEN_SESSION });
+
+    summary.initialShell = await waitForServerRailOpenState(pageSocket.call, 'server rail initial shell', (state) =>
+      state.bodyText.toLowerCase().includes('servers')
+      && state.bodyText.includes('No session')
+      && state.serverGroups.some((group) => group.text.includes('Alpha P0 daemon')),
+    );
+    if ((summary.initialShell.smoke?.runtimeEnsureCalls || []).length !== 0) {
+      throw new Error(`Server rail initial projection created runtime before refresh/open: ${JSON.stringify(summary.initialShell.smoke, null, 2)}`);
+    }
+
+    await clickButtonByText(pageSocket.call, 'Refresh');
+    summary.afterRefresh = await waitForServerRailOpenState(pageSocket.call, 'server rail live refresh', (state) =>
+      state.serverGroups.some((group) => group.sessions.some((session) => session.sessionName === SERVER_OPEN_SESSION))
+      && state.bodyText.includes('Live'),
+    );
+    const refreshedSession = summary.afterRefresh.serverGroups
+      .flatMap((group) => group.sessions)
+      .find((session) => session.sessionName === SERVER_OPEN_SESSION);
+    if (!refreshedSession?.text.includes('live')) {
+      throw new Error(`Server rail refresh did not project ${SERVER_OPEN_SESSION} as live: ${JSON.stringify(summary.afterRefresh.serverGroups, null, 2)}`);
+    }
+    if ((summary.afterRefresh.smoke?.runtimeEnsureCalls || []).length !== 0) {
+      throw new Error(`Server rail refresh created runtime before explicit open: ${JSON.stringify(summary.afterRefresh.smoke.runtimeEnsureCalls, null, 2)}`);
+    }
+    if (!summary.afterRefresh.bodyText.includes('No session')) {
+      throw new Error('Server rail refresh changed terminal stage before explicit open');
+    }
+
+    await clickServerRailSession(pageSocket.call, SERVER_OPEN_SESSION);
+    summary.afterOpen = await waitForServerRailOpenState(pageSocket.call, 'server rail remote open connected', (state) =>
+      state.meta.join('\n').includes('connected')
+      && state.meta.join('\n').includes(SERVER_OPEN_SESSION)
+      && state.rows.some((row) => row.includes(SERVER_OPEN_READY_TEXT))
+      && state.smoke?.runtimeEnsureCalls?.some((item) => item.kind === 'remote' && item.sessionName === SERVER_OPEN_SESSION && item.connect === true),
+    );
+    const remoteConnects = summary.afterOpen.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === SERVER_OPEN_SESSION) || [];
+    if (remoteConnects.length < 1) {
+      throw new Error(`Server rail open did not create a remote runtime connection: ${JSON.stringify(summary.afterOpen.smoke, null, 2)}`);
+    }
+    const openSession = summary.afterOpen.serverGroups
+      .flatMap((group) => group.sessions)
+      .find((session) => session.sessionName === SERVER_OPEN_SESSION);
+    if (!openSession?.text.includes('open')) {
+      throw new Error(`Server rail open did not mark session open: ${JSON.stringify(summary.afterOpen.serverGroups, null, 2)}`);
+    }
+
+    summary.screenshot = await captureScreenshot(pageSocket.call, 'server-rail-remote-open.png');
+    summary.resourcePid = captureResourceSample('server-rail-remote-open-before-close');
+    pageSocket.ws.close();
+    await closePackagedApp('server-rail-open-final');
+    summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    return summary;
+  } finally {
+    await closePackagedApp('server-rail-open-finally');
+    if (options.cleanupSessions) {
+      cleanupSmokeSession(SERVER_OPEN_SESSION, SERVER_OPEN_SMOKE_OWNER);
+      summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    }
+    writeFileSync(join(options.evidenceDir, 'server-rail-remote-open-summary.json'), JSON.stringify(summary, null, 2));
+  }
+}
+
 async function main() {
   const summary = options.caseName === 'quick-connect-discovery'
     ? await runQuickConnectDiscoveryCase()
-    : await runHeaderRestoreCase();
+    : options.caseName === 'server-rail-remote-open'
+      ? await runServerRailRemoteOpenCase()
+      : await runHeaderRestoreCase();
   writeFileSync(join(options.evidenceDir, 'summary.json'), JSON.stringify(summary, null, 2));
   if (options.caseName === 'quick-connect-discovery') {
     console.log(JSON.stringify({
@@ -984,6 +1228,19 @@ async function main() {
       sessionName: summary.sessionName,
       discovered: summary.afterDiscover?.radioInputs?.some((item) => item.name === `mac-quick-session-${summary.sessionName}`),
       remoteRuntimeConnects: summary.afterOpen?.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === summary.sessionName).length,
+    }, null, 2));
+  } else if (options.caseName === 'server-rail-remote-open') {
+    console.log(JSON.stringify({
+      ok: true,
+      caseName: summary.caseName,
+      evidenceDir: summary.evidenceDir,
+      bridgeHost: summary.daemon?.bridgeHost,
+      bridgePort: summary.daemon?.bridgePort,
+      sessionName: summary.sessionName,
+      liveProjected: summary.afterRefresh?.serverGroups?.some((group) => group.sessions.some((session) => session.sessionName === summary.sessionName)),
+      refreshRuntimeCalls: summary.afterRefresh?.smoke?.runtimeEnsureCalls?.length,
+      remoteRuntimeConnects: summary.afterOpen?.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === summary.sessionName).length,
+      renderedReadyText: summary.afterOpen?.rows?.some((row) => row.includes(SERVER_OPEN_READY_TEXT)),
     }, null, 2));
   } else {
     console.log(JSON.stringify({

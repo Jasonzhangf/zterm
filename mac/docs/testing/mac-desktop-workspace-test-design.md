@@ -230,6 +230,7 @@ Slice 5 hard checks now active:
 - File browser open intent does not call terminal runtime connect/disconnect. Implemented in `mac/src/app/file-browser/MacFileBrowserPanel.test.tsx` and `mac/src/app/MacAppShell.layout.test.tsx`.
 - Server rail projection does not call workspace open/close actions; `MacAppShell` opens a tab only from explicit rail click. Implemented in `MacAppShell.layout.test.tsx`.
 - Server rail refresh click calls only the live refresh helper, projects returned sessions, and does not call `addHost`, `setBridgeSettings`, `ensureRuntime`, or workspace open. Implemented in `MacAppShell.layout.test.tsx`.
+- Server rail remote open is a two-step proof: Refresh projects a live daemon session with zero runtime calls, then an explicit session click creates the remote runtime and connected terminal. White-box implemented in `MacAppShell.layout.test.tsx`; packaged proof uses `pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open`.
 - Server rail refresh failure displays status/error while keeping saved/open sessions visible. Implemented in `MacAppShell.layout.test.tsx`.
 - `MacDesktopApp` passes URL `windowId` to `MacAppShell`. Implemented in `MacDesktopApp.test.tsx`.
 - `MacAppShell` saves workspace identity by `windowId` and does not write legacy shell workspace storage. Implemented in `MacAppShell.layout.test.tsx`.
@@ -245,7 +246,7 @@ Renderer/app black-box:
 - Switching tabs does not clear previous render projection.
 - Server rail shows saved servers and live sessions.
 - Opening a session from server rail creates a tab only on explicit click.
-- Refreshing a server rail group lists real daemon tmux sessions but does not create a tab until explicit open.
+- Refreshing a server rail group lists real daemon tmux sessions but does not create a tab until explicit open. Packaged smoke case: `server-rail-remote-open`.
 - File browser opens from command/toolbar and lists a fixture directory. Implemented in component tests; packaged smoke passed.
 - Text file preview displays content. Implemented in component tests; packaged smoke passed.
 - Binary file preview is disabled. Implemented in component tests; packaged smoke passed.
@@ -321,7 +322,7 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 | Runtime registry | registry positive/negative tests | local tmux A/B isolation; alpha `header-restore` active-only smoke | type-check/build plus runtime smoke plus `blackbox:terminal-buffer` when terminal buffer/render behavior is claimed |
 | Terminal header/status | pane header tests, runtime registry reconnect/disconnect tests | header status and control transitions | package plus `pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore` |
 | Local tmux provider | architecture truth gate forbids visible-tail-omitting capture; local transport tests | session truth vs app rows through dedicated tmux sessions | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
-| Server directory | projection tests, refresh success/error negative tests | explicit open-only app test; read-only remote daemon refresh smoke when route is available | type-check/build |
+| Server directory | projection tests, refresh success/error negative tests | explicit open-only app test; read-only remote daemon refresh smoke; packaged `server-rail-remote-open` proves refresh no-runtime then click connected | type-check/build/package |
 | File browser shared core | core unit tests, import gate | fixture directory browse/preview | package smoke if Electron fs changes |
 | Electron window manager | window manager tests | multi-window renderer smoke | package + packaged smoke |
 | Legacy cleanup | architecture scan | replacement path black-box tests | full Mac tests/type-check/build; package if runtime/window changed |

@@ -3,7 +3,7 @@
 ## Alpha readiness
 
 - [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
-- [ ] 关闭 P0 alpha blockers：`T-A4` / `T-A5` / remote open / alpha package handoff
+- [ ] 关闭 P0 alpha blockers：`T-A4` / `T-A5` / alpha package handoff
 - [x] Evidence retention：`mac/evidence/**` 已加入 git ignore；只保留 `mac/evidence/README.md` 入仓，generated evidence 只作本地验证输出
 - [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
 
@@ -74,6 +74,11 @@
   - packaged smoke：`header-restore-final2` 证明 header 显示 `connected` / `Local tmux · zterm_mac_alpha_active` / `80x24` / Reconnect / Disconnect；点击 Disconnect 后 active runtime `connected -> idle`，点击 Reconnect 后恢复 `connected`
   - 白盒：`MacPaneWorkbench.test.tsx` 覆盖 controls 只调用 `MacRuntimeRegistry`，并锁 error 状态不包装成 connected
   - 验证：连接前后 header 状态切换��确
+- [x] P0 Remote server rail open
+  - Production owner 是 `MacServerDirectory` + `MacAppShell` thin orchestration：Refresh 只做 live projection；session button explicit click 才经 `resolveMacServerDirectoryOpenIntent` / `openConnectionInWorkbench` 打开 remote runtime
+  - packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open --port=9365 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/server-rail-remote-open-final2`
+  - 证据：真实 daemon `list-sessions` 返回 dedicated `zterm_mac_alpha_remote_open`；Refresh 后 rail live sessions 更新且 `runtimeEnsureCalls=0`；点击 rail session 后 remote runtime connected once；DOM rows 渲染 `ZTERM_ALPHA_REMOTE_OPEN_READY`；9365/ZTerm 进程为空；dedicated tmux session 已 marker 清理；storage/evidence token 已 redacted
+  - 验证：server rail Refresh → live session 出现 → explicit click → 远端终端渲染
 - [ ] T-A4 Buffer follow/reading 状态机验证
   - terminal-runtime 已有 follow/reading + missingRanges，需验证 renderer 端完整消费
   - 用户上滑进 reading、滚回底恢复 follow

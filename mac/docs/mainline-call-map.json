@@ -233,7 +233,11 @@
           "semantic_input": "selected server/session from server rail projection",
           "semantic_output": "explicit open-tab intent only after user click",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+          "verification_gates": [
+            "mac/src/app/server-directory/MacServerDirectory.test.ts",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0018",
@@ -269,7 +273,11 @@
           "semantic_input": "explicit server directory open intent",
           "semantic_output": "workspace connection tab identity persisted in current transitional workbench state",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "mac/src/app/workbench.test.ts"]
+          "verification_gates": [
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "mac/src/app/workbench.test.ts",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0022",

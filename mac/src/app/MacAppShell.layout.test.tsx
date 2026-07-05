@@ -438,6 +438,48 @@ describe('MacAppShell layout (red baseline)', () => {
     expect(ensureRuntimeMock).not.toHaveBeenCalled();
   });
 
+  it('opens a live server rail session only after refresh plus explicit click', async () => {
+    const serverId = buildBridgeServerPresetIdentityId('127.0.0.1', 3333);
+    fetchLiveSnapshotMock.mockResolvedValue({
+      serverId,
+      sessionNames: ['remote-live-a'],
+    });
+    const { container, findByText } = render(
+      <MacAppShell
+        hosts={[]}
+        isLoaded={true}
+        bridgeSettings={makeBridgeSettings()}
+        setBridgeSettings={vi.fn() as any}
+        addHost={vi.fn() as any}
+        updateHost={vi.fn()}
+        __initialWorkbench={createInitialWorkbenchState()}
+      />,
+    );
+
+    const refreshButton = container.querySelector(`[data-testid="mac-server-refresh-${serverId}"]`) as HTMLButtonElement | null;
+    expect(refreshButton).toBeTruthy();
+    fireEvent.click(refreshButton!);
+
+    const liveSession = await findByText('remote-live-a');
+    expect(liveSession).toBeTruthy();
+    expect(ensureRuntimeMock).not.toHaveBeenCalled();
+
+    fireEvent.click(Array.from(container.querySelectorAll('.mac-server-session-button')).find((button) =>
+      button.textContent?.includes('remote-live-a'),
+    )!);
+
+    await waitFor(() => expect(ensureRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'remote',
+      runtimeKey: 'remote:127.0.0.1:3333:remote-live-a',
+      target: expect.objectContaining({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'remote-live-a',
+        authToken: 'token-a',
+      }),
+    }), { connect: true }));
+  });
+
   it('shows server refresh errors without clearing saved open sessions or converting failure to empty success', async () => {
     const serverId = buildBridgeServerPresetIdentityId('127.0.0.1', 3333);
     fetchLiveSnapshotMock.mockRejectedValue(new Error('daemon refused list-sessions'));

@@ -228,6 +228,7 @@ Jason，已完成本轮自闭环：
 - Packaged runtime A/B input isolation smoke 优先用本轮专用 tmux session + `tmux pipe-pane -o <log>` 作为输入 oracle；`capture-pane` 对 detached `cat` fixture 可能不稳定，不能单独证明 app input 到达或串线。完成后用 `tmux pipe-pane -t <session>` 关闭观测管道，避免后台持续写日志。
 - Runtime split/tab smoke 中，resize 必须同时看 DOM pane width 和 workspace record pane size；只看拖拽动作或 divider 存在不算 resize 闭环。关闭 active pane 后必须证明 renderer root 仍 mounted、workspace `activePaneId` 指向现存 pane、剩余 runtime 还能输入。
 - Server rail remote refresh smoke 是 read-only daemon observation：只能发 `list-sessions`/Refresh，允许用现有用户 sessions 做列表观测，但禁止写 input、create、kill、rename。证据必须同时证明 refresh 后 live sessions 进入 rail、workspace pane/tab 数不变、terminal stage 未自动打开 session、错误时显示 error 且 saved/open sessions 保留。
+- Server rail remote open packaged smoke 必须分两阶段证明：Refresh 后只更新 live projection 且 `runtimeEnsureCalls=0`，explicit rail session click 后才创建 remote runtime 并渲染 dedicated marked session 输出。只能使用本轮 dedicated marked session，evidence/storage 里的 `authToken` / `targetAuthToken` 必须 redacted，结束时复核 debug port、ZTerm/Electron helper、tmux session 已精确清理。
 - Legacy workspace cleanup closeout 不能只扫入口 import。必须同时证明旧 all-in-one source 文件物理不存在、生产源码无 `ShellWorkspace` 引用、architecture truth gate 锁 `MAC-16-LegacyRemoval`、packaged DOM 无 `.shell-workspace-root` / forbidden root。历史 `zterm:mac:shell-workspace:v1` localStorage 残留只说明用户数据未清理，不可当作 fallback 存在或已读取的证据。
 
 ## 七、单 session 操作铁律（2026-06-02 新增）

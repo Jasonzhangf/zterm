@@ -223,6 +223,7 @@ describe('Mac architecture truth', () => {
     const readiness = readMac(path.join('docs', 'alpha-readiness.md'));
     const functionMap = readMac(path.join('docs', 'function-map.md'));
     const testDesign = readMac(path.join('docs', 'testing', 'mac-desktop-workspace-test-design.md'));
+    const alphaSmoke = readMac(path.join('scripts', 'alpha-p0-packaged-smoke.mjs'));
     const packageJson = JSON.parse(readMac('package.json')) as { scripts?: Record<string, string> };
 
     expect(architecture).toContain('mac/docs/alpha-readiness.md');
@@ -230,7 +231,11 @@ describe('Mac architecture truth', () => {
     expect(skill).toContain('状态 / Alpha 汇报对账门禁');
     expect(readiness).toContain('Current verdict: not alpha-ready yet.');
     expect(readiness).toContain('P0 blockers before Jason alpha');
-    expect(readiness).toContain('Remote terminal path');
+    expect(readiness).toContain('Remote server rail open');
+    expect(readiness).toContain('server-rail-remote-open-final2');
+    expect(readiness).toContain('Remaining T-A4 work is large-output reading mode, gap repair, and return-to-follow packaged proof');
+    expect(readiness).toContain('T-A5');
+    expect(readiness).toContain('Alpha package handoff');
     expect(readiness).toContain('Evidence retention');
     expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
     expect(packageJson.scripts?.['blackbox:terminal-buffer']).toBe('node scripts/terminal-buffer-blackbox-gate.mjs');
@@ -246,6 +251,9 @@ describe('Mac architecture truth', () => {
     expect(functionMap).toContain('smoke:alpha-p0');
     expect(testDesign).toContain('Terminal buffer black-box');
     expect(testDesign).toContain('header-restore');
+    expect(testDesign).toContain('server-rail-remote-open');
+    expect(alphaSmoke).toContain("server-rail-remote-open");
+    expect(alphaSmoke).toContain("runServerRailRemoteOpenCase");
   });
 
   it('anchors MacWorkspaceStore before workspace integration slices', () => {
@@ -408,6 +416,12 @@ describe('Mac architecture truth', () => {
     expect(serverRefreshProjectEdge?.status).toBe('anchored');
     expect(openWorkspaceEdge?.status).toBe('anchored');
     expect(serverOpenEdge?.verification_gates).toContain('mac/src/app/server-directory/MacServerDirectory.test.ts');
+    expect(serverOpenEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open',
+    );
+    expect(openWorkspaceEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=server-rail-remote-open',
+    );
     expect(serverRefreshRequestEdge?.verification_gates).toContain('mac/src/app/MacAppShell.layout.test.tsx');
   });
 

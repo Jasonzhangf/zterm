@@ -190,3 +190,10 @@
 - 白盒：`ConnectionLauncher.test.tsx` 覆盖 discovery success + latest saved matching preselect、discovery error 不 open、remote target 改变清 stale selected session；`MacAppShell.layout.test.tsx` 覆盖 Discover 不 create runtime、Save & connect 才 ensure remote runtime；architecture truth gate 锁 QuickConnect branch。
 - Packaged smoke：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3/summary.json`。真实 daemon config route `127.0.0.1:3333`；dedicated tmux `zterm_mac_alpha_quick` owner `alpha-p0-quick-connect`；UI 通过 `Input.insertText` 输入 host/port/token；Discover 后 radio 预选 `zterm_mac_alpha_quick` 且 runtime calls=0；Save & connect 后 remote runtime connected。
 - 生命周期/安全：final evidence 中 `authToken` / `targetAuthToken` 已 redacted；`rg "wterm-4123456|targetAuthToken|authToken" quick-connect-discovery-final3` 无输出；9364/ZTerm process after close 为空；`zterm_mac_alpha_quick` 已按 marker 清理；用户 tmux session 只读列举未写入。
+
+## 2026-07-05 Mac alpha P0 remote server rail open closeout
+- 本片 owner：`mac.server_directory` + `MacAppShell` thin orchestration。Refresh 仍只允许 live projection/status/error，不得创建 runtime；explicit rail session click 才能 open workspace tab/runtime。
+- 主线映射：`MAC-05-ServerDirectory -> MAC-17-ServerLiveRefresh -> MAC-05-ServerDirectory` 做 read-only refresh；`MAC-05-ServerDirectory -> MAC-06-OpenTabIntent -> MAC-03-WorkspaceLoad -> MAC-08-RuntimeEnsure` 做 explicit open。
+- 白盒：`MacAppShell.layout.test.tsx` 新增 refresh 后 `ensureRuntime` 未调用、点击 live session 后 remote runtime `connect:true`；`mac-architecture-truth.test.ts` 锁 `server-rail-remote-open` smoke 和 mainline gate。
+- Packaged smoke：`mac/evidence/2026-07-05-mac-alpha-p0-closeout/server-rail-remote-open-final2/summary.json`。真实 daemon `list-sessions` 返回 dedicated `zterm_mac_alpha_remote_open`；Refresh 后 rail project live 且 `runtimeEnsureCalls=0`；点击后 remote runtime connected once，DOM rows 渲染 `ZTERM_ALPHA_REMOTE_OPEN_READY`。
+- 生命周期/安全：final evidence 中 token 字段已 redacted；`rg "wterm-4123456|targetAuthToken|authToken" server-rail-remote-open-final2` 无输出；9365/ZTerm process after close 为空；`zterm_mac_alpha_remote_open` 已按 marker 精确清理；用户 tmux session 只读未写入。
