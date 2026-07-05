@@ -64,6 +64,20 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
   let unsubscribe: (() => void) | null = null;
   let serverMessageHandler: ((message: BridgeServerMessage) => void) | undefined;
 
+  const recordAlphaP0LocalTmuxClient = (sessionName: string) => {
+    const smoke = (globalThis as any).__ztermAlphaSmoke;
+    if (!smoke || typeof smoke !== 'object') {
+      return;
+    }
+    const clients = Array.isArray(smoke.localTmuxClients) ? smoke.localTmuxClients : [];
+    clients.push({
+      at: Date.now(),
+      clientId,
+      sessionName,
+    });
+    smoke.localTmuxClients = clients;
+  };
+
   const emit = () => {
     listeners.forEach((listener) => listener());
   };
@@ -115,6 +129,7 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
     connect: (target, handlers) => {
       close();
       serverMessageHandler = handlers?.onServerMessage;
+      recordAlphaP0LocalTmuxClient(target.sessionName);
       setState({
         status: 'connecting',
         error: '',
@@ -146,8 +161,8 @@ export function createLocalTmuxTransportController(): LocalTmuxTransportControll
           case 'closed':
             setState((current) => ({
               ...current,
-              status: 'idle',
-              error: message.payload.reason || '',
+              status: 'error',
+              error: message.payload.reason || 'Local tmux transport closed',
             }));
             break;
           case 'error':

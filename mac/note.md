@@ -204,3 +204,11 @@
 - 白盒：shared renderer/gap/MacTerminalView 33/33 PASS；Mac runtime/registry/pane/layout targeted 47/47 PASS；type-check/build/package PASS。
 - Packaged gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all --port=9366 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final` PASS。sequence pipe/tmux/app tail `_001.._080` 一致；TUI current screen max lag 1、final exact；large-reading 进入 reading、append 后 scroll/rows 稳定、scroll-to-bottom 回 follow、app/tmux append tail 一致、runtime viewport diagnostics 记录 reading demand。
 - 生命周期：9366 packaged app close 后 process 文件为空；固定 gate session 保留为复用池：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`，均需 marker 校验后复用或 cleanup。
+
+## 2026-07-05 Mac alpha P0 T-A5 disconnect/reconnect closeout
+- 本片 owner：`mac.runtime_registry` + transport owners。`MacTerminalPane` 只发 Reconnect intent；`MacRuntimeRegistry.reconnectRuntime(runtimeKey)` 使用 stored target 重新 connect 指定 runtime；`bridge-transport` / `local-tmux-transport` 负责把 unexpected close 投影为 explicit error。
+- 修复：unexpected WebSocket close 和 local tmux closed event 不再静默变 idle；manual disconnect 仍走 idle。新增 smoke-only local tmux clientId diagnostics 与 `forceCloseForSmoke(clientId)`，main handler 只在 `--zterm-alpha-smoke` 下允许，用于 packaged 黑盒诱发真实 transport owner close/error。
+- Docs/map：补 `MAC-CALL-RUNTIME-004`、`MAC-CALL-LOCAL-TMUX-004`、`MAC-21-ReconnectRecovery`、`MAC-22-LocalTmuxSmokeClose`、`MAC-EDGE-0025/0026/0027`，test design 加入 T-A5 白盒/黑盒和 packaged gate。
+- 白盒：`mac-architecture-truth` + bridge/local transport + runtime registry targeted 41/41 PASS。覆盖 unexpected close -> error、manual disconnect -> idle、target-only reconnect、missing target reconnect false。
+- Packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect --port=9367 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/disconnect-reconnect-final2` PASS。证据证明 active local tmux transport close 后 header/runtime error，点击官方 Reconnect 后 connected；active runtime connect count `2`，hidden runtime connect count `0`，`windowIdStable=true`。
+- 生命周期：9367 packaged app close 后 ZTerm/CDP process 文件为空；`zterm_mac_alpha_reconnect*` 临时 tmux session 已按 marker 清理；固定 gate session 只保留 `zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`。

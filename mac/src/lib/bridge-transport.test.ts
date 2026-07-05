@@ -207,4 +207,64 @@ describe('Mac bridge transport connection', () => {
       activeTarget: { name: 'second' },
     });
   });
+
+  it('projects an unexpected live websocket close as explicit error for reconnect recovery', () => {
+    const controller = createBridgeTransportController();
+    controller.connect(makeHost());
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    const sessionOpen = readSent(ws).at(-1);
+    ws.triggerMessage({
+      type: 'session-ticket',
+      payload: {
+        openRequestId: sessionOpen.payload.openRequestId,
+        sessionTransportToken: 'ticket-1',
+        sessionName: 'zterm_mirror_lab',
+      },
+    } as BridgeServerMessage);
+    ws.triggerMessage({
+      type: 'connected',
+      payload: { sessionId: 'daemon-session-1' },
+    } as BridgeServerMessage);
+
+    ws.close(1006, 'daemon transport closed');
+
+    expect(controller.getState()).toMatchObject({
+      status: 'error',
+      connectedSessionId: 'daemon-session-1',
+      error: 'daemon transport closed',
+    });
+    expect(controller.getScheduleState()).toMatchObject({
+      loading: false,
+      error: 'daemon transport closed',
+    });
+  });
+
+  it('keeps manual disconnect as idle instead of reporting a transport error', () => {
+    const controller = createBridgeTransportController();
+    controller.connect(makeHost());
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    const sessionOpen = readSent(ws).at(-1);
+    ws.triggerMessage({
+      type: 'session-ticket',
+      payload: {
+        openRequestId: sessionOpen.payload.openRequestId,
+        sessionTransportToken: 'ticket-1',
+        sessionName: 'zterm_mirror_lab',
+      },
+    } as BridgeServerMessage);
+    ws.triggerMessage({
+      type: 'connected',
+      payload: { sessionId: 'daemon-session-1' },
+    } as BridgeServerMessage);
+
+    controller.disconnect();
+
+    expect(controller.getState()).toMatchObject({
+      status: 'idle',
+      connectedSessionId: '',
+      error: '',
+    });
+  });
 });

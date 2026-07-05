@@ -27,6 +27,7 @@ const __dirname = path.dirname(__filename);
 type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 
 const localTmuxManager = new LocalTmuxManager();
+const alphaSmokeMode = process.argv.includes('--zterm-alpha-smoke');
 const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
 let screenshotHelperServer: ScreenshotHelperServerController | null = null;
 let screenshotHelperWindow: BrowserWindow | null = null;
@@ -147,6 +148,12 @@ app.whenReady().then(async () => {
     localTmuxManager.connect(payload.clientId, payload.sessionName, payload.cols, payload.rows, payload.mode || 'active'));
   ipcMain.handle('zterm:local-tmux:disconnect', (_event, payload: { clientId: string }) =>
     localTmuxManager.disconnect(payload.clientId));
+  ipcMain.handle('zterm:local-tmux:force-close-for-smoke', (_event, payload: { clientId: string }) => {
+    if (!alphaSmokeMode) {
+      throw new Error('Local tmux smoke force-close is unavailable outside alpha smoke mode');
+    }
+    return localTmuxManager.forceCloseForSmoke(payload.clientId);
+  });
   ipcMain.handle('zterm:local-tmux:input', (_event, payload: { clientId: string; data: string }) =>
     localTmuxManager.sendInput(payload.clientId, payload.data));
   ipcMain.handle('zterm:local-tmux:set-activity-mode', (_event, payload: { clientId: string; mode: 'active' | 'idle' }) =>

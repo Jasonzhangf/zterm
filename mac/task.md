@@ -3,7 +3,7 @@
 ## Alpha readiness
 
 - [x] 建立 `mac/docs/alpha-readiness.md`，把 Mac alpha 状态、已验证 baseline、P0/P1 缺口和必跑 packaged smoke 固化为可审计真源
-- [ ] 关闭 P0 alpha blockers：`T-A5` / alpha package handoff
+- [ ] 关闭 P0 alpha blockers：alpha package handoff
 - [x] Evidence retention：`mac/evidence/**` 已加入 git ignore；只保留 `mac/evidence/README.md` 入仓，generated evidence 只作本地验证输出
 - [ ] 每次回答 Mac 状态或 alpha 距离前，先按 `.agents/skills/zterm-mac-dev/SKILL.md` 的状态对账门禁回扫 git、MEMORY、task、function map、test design 和 evidence
 
@@ -90,9 +90,12 @@
   - 修复：shared renderer 从 projection gap truth 生成 visible `missingRanges` 并透传到 runtime；Mac terminal canvas 增加 flex 高度约束，packaged 下 scroll 容器不再随内容无限长
   - 生命周期：固定 gate session `zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large` 使用 marker 复用；9366 packaged app 退出后无 CDP owner
   - 验证：输入命令产生大量输出 → 上滑进 reading → 新输出不抢滚 → 滚回底恢复 follow
-- [ ] T-A5 断线自动重连
-  - 断线后进入 error 状态 → 用户点击重连 或 自动退回到 idle → 可手动重新连接
-  - 验证：daemon restart → Mac 客户端收到 closed → 显示 error → 点击重连 → 恢复
+- [x] T-A5 断线自动重连
+  - transport owner close 后进入 error 状态；用户点击 Reconnect 后恢复 connected
+  - `bridge-transport` 和 `local-tmux-transport` 白盒锁 unexpected close -> error，manual disconnect -> idle
+  - packaged smoke：`pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect --port=9367 --evidence=mac/evidence/2026-07-05-mac-alpha-p0-closeout/disconnect-reconnect-final2`
+  - 证据：`errorProjected=true`，active runtime connect 2 次，hidden runtime connect 0 次，`windowIdStable=true`，packaged close 后 9367/ZTerm 进程为空，临时 tmux session 按 marker 精确清理
+  - 实现边界：smoke-only `forceCloseForSmoke` 仅在 `--zterm-alpha-smoke` 下可用，生产路径不能调用
 
 ### P1 文件传输与截图（Epic-004.B 传输能力）
 

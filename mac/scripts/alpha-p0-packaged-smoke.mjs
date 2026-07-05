@@ -9,6 +9,8 @@
  *   then explicit rail session click opens a real remote runtime.
  * - quick-connect-discovery: packaged QuickConnect discovery against the real
  *   daemon list-sessions path, then explicit Save & connect remote open.
+ * - disconnect-reconnect: packaged local transport error projection and
+ *   reconnect recovery through the terminal header control.
  *
  * This script uses only dedicated tmux sessions with a marker option and cleans
  * them up by explicit name at the end. It does not write to user sessions.
@@ -23,10 +25,11 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname, '..');
 const MAC_ROOT = resolve(new URL('..', import.meta.url).pathname);
 const DATE = new Date().toISOString().slice(0, 10);
 const DEFAULT_PORT = 9363;
-const SUPPORTED_CASES = new Set(['header-restore', 'server-rail-remote-open', 'quick-connect-discovery']);
+const SUPPORTED_CASES = new Set(['header-restore', 'server-rail-remote-open', 'quick-connect-discovery', 'disconnect-reconnect']);
 const SMOKE_OWNER = 'alpha-p0-header-restore';
 const SERVER_OPEN_SMOKE_OWNER = 'alpha-p0-server-rail-open';
 const QUICK_SMOKE_OWNER = 'alpha-p0-quick-connect';
+const RECONNECT_SMOKE_OWNER = 'alpha-p0-disconnect-reconnect';
 const SMOKE_OWNER_OPTION = '@zterm_mac_smoke_owner';
 const SMOKE_CASE_OPTION = '@zterm_mac_smoke_case';
 const ACTIVE_SESSION = 'zterm_mac_alpha_active';
@@ -35,6 +38,10 @@ const SERVER_OPEN_SESSION = 'zterm_mac_alpha_remote_open';
 const SERVER_OPEN_READY_TEXT = 'ZTERM_ALPHA_REMOTE_OPEN_READY';
 const QUICK_SESSION = 'zterm_mac_alpha_quick';
 const QUICK_READY_TEXT = 'ZTERM_ALPHA_QUICK_READY';
+const RECONNECT_SESSION = 'zterm_mac_alpha_reconnect';
+const RECONNECT_HIDDEN_SESSION = 'zterm_mac_alpha_reconnect_hidden';
+const RECONNECT_READY_TEXT = 'ZTERM_ALPHA_RECONNECT_READY';
+const RECONNECT_HIDDEN_READY_TEXT = 'ZTERM_ALPHA_RECONNECT_HIDDEN_READY';
 const PANE_ID = 'pane-alpha-p0';
 const ACTIVE_TAB_ID = 'tab-alpha-active';
 const HIDDEN_TAB_ID = 'tab-alpha-hidden';
@@ -149,6 +156,11 @@ function ensureSmokeSession(sessionName, label, owner = SMOKE_OWNER) {
 
 function cleanupSmokeSession(sessionName, owner = SMOKE_OWNER) {
   if (!sessionExists(sessionName)) return;
+  assertSmokeSession(sessionName, owner);
+  runTmux(['kill-session', '-t', sessionName], { allowFailure: true });
+}
+
+function forceKillSmokeSession(sessionName, owner = SMOKE_OWNER) {
   assertSmokeSession(sessionName, owner);
   runTmux(['kill-session', '-t', sessionName], { allowFailure: true });
 }
@@ -544,6 +556,55 @@ function buildServerRailOpenNewDocumentScript({ target, sessionName }) {
   })();`;
 }
 
+function buildDisconnectReconnectNewDocumentScript() {
+  return `(() => {
+    const activeSession = ${JSON.stringify(RECONNECT_SESSION)};
+    const hiddenSession = ${JSON.stringify(RECONNECT_HIDDEN_SESSION)};
+    const paneId = ${JSON.stringify(PANE_ID)};
+    const activeTabId = ${JSON.stringify(ACTIVE_TAB_ID)};
+    const hiddenTabId = ${JSON.stringify(HIDDEN_TAB_ID)};
+    window.__ztermAlphaSmoke = {
+      runtimeEnsureCalls: [],
+      runtimeConnectCalls: [],
+      runtimeDisconnectCalls: [],
+      seedApplied: false,
+      windowId: null,
+    };
+    const windowId = new URLSearchParams(window.location.search).get('windowId') || 'browser-dev-window';
+    window.__ztermAlphaSmoke.windowId = windowId;
+    const record = {
+      workspaceId: 'workspace:' + windowId,
+      windowId,
+      paneTree: { kind: 'row', paneIds: [paneId] },
+      panes: [{
+        id: paneId,
+        size: 1,
+        tabs: [
+          {
+            id: hiddenTabId,
+            kind: 'local-tmux',
+            title: hiddenSession,
+            localSessionName: hiddenSession,
+            runtimeKey: 'local-tmux:' + hiddenSession,
+          },
+          {
+            id: activeTabId,
+            kind: 'local-tmux',
+            title: activeSession,
+            localSessionName: activeSession,
+            runtimeKey: 'local-tmux:' + activeSession,
+          },
+        ],
+        activeTabId,
+      }],
+      activePaneId: paneId,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem('zterm:mac:workspace:v1:' + windowId, JSON.stringify(record));
+    window.__ztermAlphaSmoke.seedApplied = true;
+  })();`;
+}
+
 async function installSmokeScriptAndReload(call, optionsForScript) {
   await call('Page.addScriptToEvaluateOnNewDocument', {
     source: buildNewDocumentScript(optionsForScript),
@@ -568,6 +629,14 @@ async function installServerRailOpenScriptAndReload(call, optionsForScript) {
   await sleep(1400);
 }
 
+async function installDisconnectReconnectScriptAndReload(call) {
+  await call('Page.addScriptToEvaluateOnNewDocument', {
+    source: buildDisconnectReconnectNewDocumentScript(),
+  });
+  await call('Page.reload', { ignoreCache: true });
+  await sleep(1400);
+}
+
 async function readState(call) {
   return evalPage(call, `(() => {
     const root = document.querySelector('.mac-shell-root');
@@ -584,6 +653,28 @@ async function readState(call) {
       disabled: Boolean(node.disabled),
     }));
     const storageKeys = Object.keys(localStorage).filter((key) => key.startsWith('zterm:mac:workspace:v1:')).sort();
+    const workspaceRecords = {};
+    for (const key of storageKeys) {
+      try {
+        const record = JSON.parse(localStorage.getItem(key) || 'null');
+        workspaceRecords[key] = record ? {
+          windowId: record.windowId,
+          activePaneId: record.activePaneId,
+          paneIds: Array.isArray(record.panes) ? record.panes.map((pane) => pane.id) : [],
+          tabs: Array.isArray(record.panes)
+            ? record.panes.flatMap((pane) => (pane.tabs || []).map((tab) => ({
+              paneId: pane.id,
+              tabId: tab.id,
+              runtimeKey: tab.runtimeKey,
+              localSessionName: tab.localSessionName,
+              active: pane.activeTabId === tab.id,
+            })))
+            : [],
+        } : null;
+      } catch {
+        workspaceRecords[key] = 'unparseable';
+      }
+    }
     const smoke = window.__ztermAlphaSmoke || null;
     const scroll = (() => {
       const node = document.querySelector('[data-mac-terminal-scroll="true"]');
@@ -602,6 +693,7 @@ async function readState(call) {
       tabs,
       buttons,
       storageKeys,
+      workspaceRecords,
       smoke,
       scroll,
     };
@@ -874,6 +966,7 @@ async function startPackagedApp() {
     '--args',
     `--remote-debugging-port=${options.port}`,
     `--user-data-dir=${userDataDir}`,
+    '--zterm-alpha-smoke',
   ], { cwd: ROOT, encoding: 'utf8' });
   if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || 'open packaged app failed');
@@ -1211,11 +1304,130 @@ async function runServerRailRemoteOpenCase() {
   }
 }
 
+async function runDisconnectReconnectCase() {
+  const summary = {
+    caseName: options.caseName,
+    evidenceDir: options.evidenceDir,
+    port: options.port,
+    appPath: options.appPath,
+    activeSession: RECONNECT_SESSION,
+    hiddenSession: RECONNECT_HIDDEN_SESSION,
+    lifecycle: {
+      tmuxBefore: listTmuxSessions(),
+      tmuxAfterCreate: '',
+      tmuxAfterForcedClose: '',
+      tmuxAfterRecreate: '',
+      tmuxAfterCleanup: '',
+    },
+    firstConnected: null,
+    afterTransportError: null,
+    afterReconnect: null,
+    screenshot: null,
+    resourcePid: null,
+  };
+
+  ensureSmokeSession(RECONNECT_SESSION, RECONNECT_READY_TEXT, RECONNECT_SMOKE_OWNER);
+  ensureSmokeSession(RECONNECT_HIDDEN_SESSION, RECONNECT_HIDDEN_READY_TEXT, RECONNECT_SMOKE_OWNER);
+  summary.lifecycle.tmuxAfterCreate = listTmuxSessions();
+
+  try {
+    await startPackagedApp();
+    const pageSocket = await connectPage();
+    await installDisconnectReconnectScriptAndReload(pageSocket.call);
+
+    summary.firstConnected = await waitForState(pageSocket.call, 'disconnect-reconnect initial connected', (state) =>
+      state.meta.join('\n').includes(`Local tmux · ${RECONNECT_SESSION}`)
+      && state.meta.join('\n').includes('connected')
+      && state.tabs.some((tab) => tab.id === ACTIVE_TAB_ID && tab.active)
+      && state.tabs.some((tab) => tab.id === HIDDEN_TAB_ID && !tab.active)
+      && state.smoke?.runtimeConnectCalls?.some((item) => item.sessionName === RECONNECT_SESSION),
+    );
+    const firstWindowId = summary.firstConnected.windowId;
+    const firstStorageKeys = summary.firstConnected.storageKeys;
+    const hiddenConnectsBefore = (summary.firstConnected.smoke?.runtimeConnectCalls || [])
+      .filter((item) => item.sessionName === RECONNECT_HIDDEN_SESSION);
+    if (hiddenConnectsBefore.length !== 0) {
+      throw new Error(`initial connect touched hidden reconnect runtime: ${JSON.stringify(summary.firstConnected.smoke, null, 2)}`);
+    }
+
+    const activeClientId = summary.firstConnected.smoke?.localTmuxClients
+      ?.find((item) => item.sessionName === RECONNECT_SESSION)?.clientId;
+    if (!activeClientId) {
+      throw new Error(`missing active local tmux client id: ${JSON.stringify(summary.firstConnected.smoke, null, 2)}`);
+    }
+    const forceClose = await evalPage(pageSocket.call, `(() => {
+      const fn = window.ztermMac?.localTmux?.forceCloseForSmoke;
+      if (typeof fn !== 'function') return { ok: false, reason: 'missing-force-close-for-smoke' };
+      return Promise.resolve(fn(${JSON.stringify(activeClientId)})).then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, reason: error instanceof Error ? error.message : String(error) }),
+      );
+    })()`);
+    if (!forceClose.ok) {
+      throw new Error(`failed to force close local tmux transport: ${JSON.stringify(forceClose)}`);
+    }
+    summary.lifecycle.tmuxAfterForcedClose = listTmuxSessions();
+    summary.afterTransportError = await waitForState(pageSocket.call, 'local transport close projects error', (state) =>
+      state.meta.join('\n').includes(`Local tmux · ${RECONNECT_SESSION}`)
+      && state.meta.join('\n').includes('error')
+      && state.bodyText.includes('local tmux transport closed for smoke'),
+      15000,
+    );
+    if (summary.afterTransportError.windowId !== firstWindowId) {
+      throw new Error(`windowId changed after transport error: ${firstWindowId} -> ${summary.afterTransportError.windowId}`);
+    }
+    if (JSON.stringify(summary.afterTransportError.storageKeys) !== JSON.stringify(firstStorageKeys)) {
+      throw new Error(`workspace storage keys changed after transport error: ${JSON.stringify(summary.afterTransportError.storageKeys)}`);
+    }
+
+    summary.lifecycle.tmuxAfterRecreate = listTmuxSessions();
+    await clickButton(pageSocket.call, `mac-terminal-reconnect-${PANE_ID}`);
+    summary.afterReconnect = await waitForState(pageSocket.call, 'local transport reconnect recovers', (state) =>
+      state.meta.join('\n').includes(`Local tmux · ${RECONNECT_SESSION}`)
+      && state.meta.join('\n').includes('connected')
+      && state.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === RECONNECT_SESSION).length >= 2,
+      15000,
+    );
+    if (summary.afterReconnect.windowId !== firstWindowId) {
+      throw new Error(`windowId changed after reconnect: ${firstWindowId} -> ${summary.afterReconnect.windowId}`);
+    }
+    const hiddenConnectsAfter = (summary.afterReconnect.smoke?.runtimeConnectCalls || [])
+      .filter((item) => item.sessionName === RECONNECT_HIDDEN_SESSION);
+    if (hiddenConnectsAfter.length !== 0) {
+      throw new Error(`reconnect touched hidden runtime: ${JSON.stringify(summary.afterReconnect.smoke, null, 2)}`);
+    }
+    const activeEnsureConnects = (summary.afterReconnect.smoke?.runtimeEnsureCalls || [])
+      .filter((item) => item.sessionName === RECONNECT_SESSION && item.connect === true);
+    const hiddenEnsureConnects = (summary.afterReconnect.smoke?.runtimeEnsureCalls || [])
+      .filter((item) => item.sessionName === RECONNECT_HIDDEN_SESSION && item.connect === true);
+    if (activeEnsureConnects.length < 1 || hiddenEnsureConnects.length !== 0) {
+      throw new Error(`reconnect ensure calls were not target-scoped: ${JSON.stringify(summary.afterReconnect.smoke, null, 2)}`);
+    }
+
+    summary.screenshot = await captureScreenshot(pageSocket.call, 'disconnect-reconnect.png');
+    summary.resourcePid = captureResourceSample('disconnect-reconnect-before-close');
+    pageSocket.ws.close();
+    await closePackagedApp('disconnect-reconnect-final');
+    summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    return summary;
+  } finally {
+    await closePackagedApp('disconnect-reconnect-finally');
+    if (options.cleanupSessions) {
+      cleanupSmokeSession(RECONNECT_SESSION, RECONNECT_SMOKE_OWNER);
+      cleanupSmokeSession(RECONNECT_HIDDEN_SESSION, RECONNECT_SMOKE_OWNER);
+      summary.lifecycle.tmuxAfterCleanup = listTmuxSessions();
+    }
+    writeFileSync(join(options.evidenceDir, 'disconnect-reconnect-summary.json'), JSON.stringify(summary, null, 2));
+  }
+}
+
 async function main() {
   const summary = options.caseName === 'quick-connect-discovery'
     ? await runQuickConnectDiscoveryCase()
     : options.caseName === 'server-rail-remote-open'
       ? await runServerRailRemoteOpenCase()
+      : options.caseName === 'disconnect-reconnect'
+        ? await runDisconnectReconnectCase()
       : await runHeaderRestoreCase();
   writeFileSync(join(options.evidenceDir, 'summary.json'), JSON.stringify(summary, null, 2));
   if (options.caseName === 'quick-connect-discovery') {
@@ -1241,6 +1453,18 @@ async function main() {
       refreshRuntimeCalls: summary.afterRefresh?.smoke?.runtimeEnsureCalls?.length,
       remoteRuntimeConnects: summary.afterOpen?.smoke?.runtimeConnectCalls?.filter((item) => item.kind === 'remote' && item.sessionName === summary.sessionName).length,
       renderedReadyText: summary.afterOpen?.rows?.some((row) => row.includes(SERVER_OPEN_READY_TEXT)),
+    }, null, 2));
+  } else if (options.caseName === 'disconnect-reconnect') {
+    console.log(JSON.stringify({
+      ok: true,
+      caseName: summary.caseName,
+      evidenceDir: summary.evidenceDir,
+      activeSession: summary.activeSession,
+      hiddenSession: summary.hiddenSession,
+      errorProjected: summary.afterTransportError?.meta?.join('\n').includes('error'),
+      activeRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === summary.activeSession).length,
+      hiddenRuntimeConnects: summary.afterReconnect?.smoke?.runtimeConnectCalls?.filter((item) => item.sessionName === summary.hiddenSession).length,
+      windowIdStable: summary.firstConnected?.windowId === summary.afterReconnect?.windowId,
     }, null, 2));
   } else {
     console.log(JSON.stringify({

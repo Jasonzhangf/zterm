@@ -19,6 +19,7 @@ declare global {
         listSessions: () => Promise<string[]>;
         connect: (payload: { clientId: string; sessionName: string; cols: number; rows: number; mode?: 'active' | 'idle' }) => Promise<void>;
         disconnect: (clientId: string) => Promise<void>;
+        forceCloseForSmoke?: (clientId: string) => Promise<void>;
         sendInput: (clientId: string, data: string) => Promise<void>;
         setActivityMode: (clientId: string, mode: 'active' | 'idle') => Promise<void>;
         resize: (clientId: string, cols: number, rows: number) => Promise<void>;

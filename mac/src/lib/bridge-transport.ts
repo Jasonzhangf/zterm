@@ -309,10 +309,11 @@ export function createBridgeTransportController(): BridgeTransportController {
             return;
           }
           clearHeartbeat();
+          const closeReason = reason || 'Bridge connection closed';
           setScheduleState((current) => ({
             ...current,
             loading: false,
-            error: reason || current.error,
+            error: closeReason,
           }));
           setState((current) => {
             if (current.status === 'error') {
@@ -320,8 +321,8 @@ export function createBridgeTransportController(): BridgeTransportController {
             }
             return {
               ...current,
-              status: current.connectedSessionId ? 'idle' : 'error',
-              error: reason || current.error,
+              status: 'error',
+              error: closeReason,
             };
           });
         },

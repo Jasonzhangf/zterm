@@ -120,6 +120,13 @@
           "status": "anchored"
         },
         {
+          "id": "MAC-21-ReconnectRecovery",
+          "label": "Reconnect recovery",
+          "owner_feature": "mac.runtime_registry",
+          "entrypoint": "MacRuntimeRegistry.reconnectRuntime(...) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "status": "anchored"
+        },
+        {
           "id": "MAC-11-Renderer",
           "label": "Shared terminal renderer",
           "owner_feature": "mac.terminal_pane",
@@ -160,6 +167,13 @@
           "owner_feature": "mac.legacy_cleanup",
           "entrypoint": "mac/src/lib/mac-architecture-truth.test.ts",
           "status": "anchored"
+        },
+        {
+          "id": "MAC-22-LocalTmuxSmokeClose",
+          "label": "Local tmux smoke close",
+          "owner_feature": "mac.local_tmux_provider",
+          "entrypoint": "LocalTmuxManager.forceCloseForSmoke(clientId) in mac/electron/local-tmux.ts",
+          "status": "anchored smoke-only"
         }
       ],
       "edges": [
@@ -386,6 +400,42 @@
           "semantic_output": "terminal pane projection props, header status/session/size controls, and runtime-scoped input/viewport/resize/reconnect/disconnect callbacks",
           "status": "anchored",
           "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0025",
+          "from": "MAC-10-TerminalProjection",
+          "to": "MAC-21-ReconnectRecovery",
+          "owner_feature": "mac.runtime_registry",
+          "caller": "MacTerminalPane Reconnect button in mac/src/app/MacPaneWorkbench.tsx",
+          "callee": "MacRuntimeRegistry.reconnectRuntime(runtimeKey) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "semantic_input": "explicit reconnect click for the pane's assigned runtimeKey",
+          "semantic_output": "target-scoped reconnect request using the stored runtime target",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0026",
+          "from": "MAC-21-ReconnectRecovery",
+          "to": "MAC-08-RuntimeEnsure",
+          "owner_feature": "mac.runtime_registry",
+          "caller": "MacRuntimeRegistry.reconnectRuntime(runtimeKey) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "callee": "connectEntry(...) in mac/src/app/runtime/MacRuntimeRegistry.ts",
+          "semantic_input": "stored runtime target for the requested key after explicit error or disconnect state",
+          "semantic_output": "new local or remote runtime connect for that target only; unrelated runtime entries are not recreated",
+          "status": "anchored",
+          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
+        },
+        {
+          "edge_id": "MAC-EDGE-0027",
+          "from": "MAC-18-LocalTmuxProvider",
+          "to": "MAC-22-LocalTmuxSmokeClose",
+          "owner_feature": "mac.local_tmux_provider",
+          "caller": "window.ztermMac.localTmux.forceCloseForSmoke(clientId) in mac/electron/preload.cts / mac/electron/preload.ts",
+          "callee": "LocalTmuxManager.forceCloseForSmoke(clientId) in mac/electron/local-tmux.ts",
+          "semantic_input": "alpha-smoke-only forced close request for one recorded local tmux clientId",
+          "semantic_output": "transport owner emits local tmux closed event, allowing runtime to project explicit error before official reconnect",
+          "status": "anchored smoke-only",
+          "verification_gates": ["mac/src/lib/local-tmux-transport.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
         },
         {
           "edge_id": "MAC-EDGE-0012",

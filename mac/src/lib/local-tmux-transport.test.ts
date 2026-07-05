@@ -212,4 +212,33 @@ describe('Mac local tmux transport connection', () => {
       connectedSessionId: '',
     });
   });
+
+  it('projects an unexpected local tmux closed event as explicit error', () => {
+    const harness = installLocalTmuxApi();
+    const controller = createLocalTmuxTransportController();
+
+    controller.connect({ sessionName: 'zterm_mirror_lab' });
+    const clientId = localTmuxApi.connect.mock.calls[0]![0].clientId;
+    harness.emit({
+      clientId,
+      message: {
+        type: 'connected',
+        payload: { sessionId: 'local:zterm_mirror_lab' },
+      } as BridgeServerMessage,
+    });
+
+    harness.emit({
+      clientId,
+      message: {
+        type: 'closed',
+        payload: { reason: 'local tmux transport closed' },
+      } as BridgeServerMessage,
+    });
+
+    expect(controller.getState()).toMatchObject({
+      status: 'error',
+      connectedSessionId: 'local:zterm_mirror_lab',
+      error: 'local tmux transport closed',
+    });
+  });
 });

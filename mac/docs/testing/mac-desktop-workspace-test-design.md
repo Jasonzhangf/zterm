@@ -89,6 +89,7 @@ MAC-08-RuntimeEnsure
 | Alpha P0 T-A2 cold restore | `MacWorkspaceStore` + `MacRuntimeRegistry` active-only eager connect | packaged `smoke:alpha-p0 -- --case=header-restore` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/header-restore-final2/` |
 | Alpha P0 T-A3 terminal header | `MacTerminalPane` + `MacRuntimeRegistry` controls | packaged `smoke:alpha-p0 -- --case=header-restore` passed; white-box locks error state is not wrapped as connected |
 | Alpha P0 T-A1 QuickConnect discovery | `ConnectionLauncher` + `MacAppShell.handleSaveDraft` | packaged `smoke:alpha-p0 -- --case=quick-connect-discovery` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/quick-connect-discovery-final3/`; discovery creates no runtime and explicit Save & connect opens remote runtime |
+| Alpha P0 T-A5 disconnect/reconnect | `MacRuntimeRegistry` + transport owners | packaged `smoke:alpha-p0 -- --case=disconnect-reconnect` passed under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/disconnect-reconnect-final2/`; transport-owner close projects explicit error, official Reconnect restores active runtime, hidden runtime remains disconnected |
 | Slice 4 server directory | persistent rail projection | saved/open projection and explicit open-only UI implemented; remote live refresh wiring now targets projection-only status/live session state |
 | Slice 5 file browser | shared core + Mac UI + Electron fs adapter | implemented in unit/component tests; packaged fs browse/preview smoke passed |
 | Slice 6 Electron window manager | multi-window + windowId | implemented in `MacWindowManager`; packaged multi-window create + quit/reopen restore smoke passed |
@@ -165,6 +166,8 @@ Slice 5 hard checks now active:
 - closing last tab for a runtime disposes only that runtime. Implemented as `releaseRuntime`.
 - stale event from runtime A cannot update runtime B projection. Implemented.
 - input, viewport, and resize route only to the assigned runtime key. Implemented.
+- reconnect uses the stored target only for the requested runtime key and leaves siblings untouched. Implemented.
+- reconnect without a prepared target returns false instead of silently succeeding. Implemented.
 
 `mac.local_tmux_provider`:
 
@@ -174,6 +177,8 @@ Slice 5 hard checks now active:
 - alternate screen capture uses bounded visible current screen truth with `capture-pane -e -p -S -<paneRows>`, so full-history scrollback cannot become the live TUI refresh payload.
 - packaged sequence gate proves app-rendered tail contains the same controlled numbered output as tmux truth.
 - packaged TUI gate proves continuously refreshing bottom content advances in app rendered rows within bounded lag.
+- unexpected local tmux `closed` events project explicit runtime error, while manual disconnect remains idle. Implemented in `mac/src/lib/local-tmux-transport.test.ts`.
+- smoke-only `forceCloseForSmoke` is only enabled under `--zterm-alpha-smoke` and is used to prove transport-owner close/error before reconnect in packaged smoke.
 
 `mac.window_lifecycle`:
 
@@ -261,6 +266,7 @@ Runtime black-box:
 - Switching A idle / B active keeps A buffer.
 - Closing A disposes A runtime only.
 - `header-restore` packaged smoke seeds a window-scoped workspace with one active local tmux tab and one hidden local tmux tab, closes/reopens the packaged app, and proves the same `windowId`, active tab, hidden tab, header projection, active-only `ensureRuntime(connect:true)`, hidden `ensureRuntime(connect:false)`, active-only actual runtime connect, active-only disconnect, and reconnect-to-connected.
+- `disconnect-reconnect` packaged smoke seeds active and hidden local tmux tabs, records the active local clientId through smoke diagnostics, forces a transport-owner close under `--zterm-alpha-smoke`, proves explicit `error`, clicks the official Reconnect control, proves active runtime returns to `connected`, hidden runtime connect count stays `0`, active runtime connect count is `2`, and `windowId` remains stable.
 
 QuickConnect black-box:
 
@@ -322,7 +328,8 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 | Workspace pure model | workspace unit tests | renderer split shell test | type-check/build |
 | Runtime registry | registry positive/negative tests | local tmux A/B isolation; alpha `header-restore` active-only smoke | type-check/build plus runtime smoke plus `blackbox:terminal-buffer` when terminal buffer/render behavior is claimed |
 | Terminal header/status | pane header tests, runtime registry reconnect/disconnect tests | header status and control transitions | package plus `pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore` |
-| Local tmux provider | architecture truth gate forbids visible-tail-omitting capture; local transport tests | session truth vs app rows through dedicated tmux sessions | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all` |
+| Disconnect/reconnect | registry target-only reconnect tests; bridge/local unexpected close -> error tests; manual disconnect -> idle tests | active transport-owner close -> error -> official reconnect -> connected; hidden runtime untouched | package plus `pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect` |
+| Local tmux provider | architecture truth gate forbids visible-tail-omitting capture; local transport tests; smoke-only forced close boundary | session truth vs app rows through dedicated tmux sessions; reconnect smoke uses local transport-owner close | package plus `pnpm --dir mac run blackbox:terminal-buffer -- --case=all`; `pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect` |
 | Server directory | projection tests, refresh success/error negative tests | explicit open-only app test; read-only remote daemon refresh smoke; packaged `server-rail-remote-open` proves refresh no-runtime then click connected | type-check/build/package |
 | File browser shared core | core unit tests, import gate | fixture directory browse/preview | package smoke if Electron fs changes |
 | Electron window manager | window manager tests | multi-window renderer smoke | package + packaged smoke |
@@ -333,6 +340,7 @@ mac/evidence/<date>-mac-desktop-workspace-refactor/
 
 - Runtime registry now has packaged A/B tmux evidence for input/echo isolation, resize, switch, close, and B after-close input under `mac/evidence/2026-07-04-runtime-live-isolation-smoke/`.
 - Terminal buffer correctness now has packaged black-box evidence under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/buffer-gate-all-t-a4-final/` showing `sequence`, `tui`, and `large-reading` passing under the alpha closeout evidence directory.
+- Disconnect/reconnect now has packaged evidence under `mac/evidence/2026-07-05-mac-alpha-p0-closeout/disconnect-reconnect-final2/` showing explicit transport error projection, official reconnect recovery, active runtime connect count `2`, hidden runtime connect count `0`, stable `windowId`, and clean post-close process/session lifecycle.
 - Legacy `ShellWorkspace` all-in-one source is removed. Schedule modal, remote screenshot, file transfer, QuickConnect, Details, and Terminal primitives are retained only as standalone future owner inputs, not as fallback workspace semantics.
 - `MacWorkspaceStore` pure model exists and `MacDesktopApp` / `MacAppShell` now bootstrap renderer state from `windowId`; packaged multi-window restore smoke passed.
 - `MacServerDirectory` projects saved servers/sessions, explicit refresh status/errors, and live daemon snapshots; read-only real-daemon refresh smoke must still be run for each routed endpoint before claiming remote live coverage.

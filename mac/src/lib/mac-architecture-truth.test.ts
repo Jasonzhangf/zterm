@@ -203,7 +203,7 @@ describe('Mac architecture truth', () => {
       expect(edge.callee.trim().length).toBeGreaterThan(0);
       expect(edge.semantic_input.trim().length).toBeGreaterThan(0);
       expect(edge.semantic_output.trim().length).toBeGreaterThan(0);
-      expect(['anchored', 'binding pending']).toContain(edge.status);
+      expect(['anchored', 'binding pending', 'anchored smoke-only']).toContain(edge.status);
       expect(edge.verification_gates.length).toBeGreaterThan(0);
     }
   });
@@ -237,6 +237,8 @@ describe('Mac architecture truth', () => {
     expect(readiness).toContain('buffer-gate-all-t-a4-final');
     expect(readiness).toContain('large-reading');
     expect(readiness).toContain('T-A5');
+    expect(readiness).toContain('disconnect-reconnect-final2');
+    expect(readiness).toContain('transport-owner close surfaces explicit `error`');
     expect(readiness).toContain('Alpha package handoff');
     expect(readiness).toContain('Evidence retention');
     expect(readiness).toContain('Do not call the Mac client alpha-ready until all P0 blockers above are closed');
@@ -254,8 +256,14 @@ describe('Mac architecture truth', () => {
     expect(testDesign).toContain('Terminal buffer black-box');
     expect(testDesign).toContain('header-restore');
     expect(testDesign).toContain('server-rail-remote-open');
+    expect(testDesign).toContain('disconnect-reconnect');
+    expect(testDesign).toContain('active runtime connect count is `2`');
     expect(alphaSmoke).toContain("server-rail-remote-open");
     expect(alphaSmoke).toContain("runServerRailRemoteOpenCase");
+    expect(alphaSmoke).toContain("disconnect-reconnect");
+    expect(alphaSmoke).toContain("runDisconnectReconnectCase");
+    expect(functionMap).toContain('MAC-CALL-RUNTIME-004');
+    expect(functionMap).toContain('MAC-CALL-LOCAL-TMUX-004');
   });
 
   it('anchors MacWorkspaceStore before workspace integration slices', () => {
@@ -320,6 +328,9 @@ describe('Mac architecture truth', () => {
     const runtimeEnsureEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0009');
     const runtimeActivityEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0010');
     const terminalProjectionEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0011');
+    const reconnectNode = lifecycle.nodes.find((node) => node.id === 'MAC-21-ReconnectRecovery');
+    const reconnectIntentEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0025');
+    const reconnectConnectEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0026');
 
     expect(registrySource).toContain('export interface MacRuntimeRegistry');
     expect(registrySource).toContain('export function createMacRuntimeRegistry');
@@ -334,11 +345,15 @@ describe('Mac architecture truth', () => {
     expect(paneWorkbenchSource).not.toContain('.connectRemote');
     expect(paneWorkbenchSource).not.toContain('.connectLocalTmux');
     expect(functionMap).toContain('`mac.runtime_registry` | `MacRuntimeRegistry`, `createMacRuntimeRegistry`, `useMacRuntimeState`');
+    expect(functionMap).toContain('MAC-CALL-RUNTIME-004');
     expect(runtimeEnsureNode?.status).toBe('anchored');
     expect(runtimeActivityNode?.status).toBe('anchored');
+    expect(reconnectNode?.status).toBe('anchored');
     expect(runtimeEnsureEdge?.status).toBe('anchored');
     expect(runtimeActivityEdge?.status).toBe('anchored');
     expect(terminalProjectionEdge?.status).toBe('anchored');
+    expect(reconnectIntentEdge?.status).toBe('anchored');
+    expect(reconnectConnectEdge?.status).toBe('anchored');
     expect(runtimeEnsureEdge?.verification_gates).toContain('mac/src/app/runtime/MacRuntimeRegistry.test.ts');
     expect(runtimeEnsureEdge?.verification_gates).toContain(
       'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
@@ -348,6 +363,12 @@ describe('Mac architecture truth', () => {
     );
     expect(terminalProjectionEdge?.verification_gates).toContain(
       'pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore',
+    );
+    expect(reconnectIntentEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect',
+    );
+    expect(reconnectConnectEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect',
     );
   });
 
@@ -363,9 +384,13 @@ describe('Mac architecture truth', () => {
     const localTmuxNode = lifecycle.nodes.find((node) => node.id === 'MAC-18-LocalTmuxProvider');
     const localTmuxRequestEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0020');
     const localTmuxReturnEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0021');
+    const localTmuxSmokeCloseNode = lifecycle.nodes.find((node) => node.id === 'MAC-22-LocalTmuxSmokeClose');
+    const localTmuxSmokeCloseEdge = lifecycle.edges.find((edge) => edge.edge_id === 'MAC-EDGE-0027');
 
-    expect(functionMap).toContain('`mac.local_tmux_provider` | `LocalTmuxManager`, `readSessionCapture`, `captureToBufferPayload`');
+    expect(functionMap).toContain('`mac.local_tmux_provider` | `LocalTmuxManager`, `readSessionCapture`, `captureToBufferPayload`, `forceCloseForSmoke`');
+    expect(functionMap).toContain('MAC-CALL-LOCAL-TMUX-004');
     expect(localTmuxSource).toContain('#{alternate_on}');
+    expect(localTmuxSource).toContain('forceCloseForSmoke');
     expect(localTmuxSource).toContain("options?.visibleOnly || alternateOn ? `-${paneRows}` : `-${historySize}`");
     expect(localTmuxSource).toContain("['capture-pane', '-e', '-p', '-t', target, '-S', captureStart]");
     expect(localTmuxSource).not.toContain("'-E', '-1'");
@@ -375,8 +400,13 @@ describe('Mac architecture truth', () => {
     expect(localTmuxNode?.status).toBe('anchored');
     expect(localTmuxRequestEdge?.status).toBe('anchored');
     expect(localTmuxReturnEdge?.status).toBe('anchored');
+    expect(localTmuxSmokeCloseNode?.status).toBe('anchored smoke-only');
+    expect(localTmuxSmokeCloseEdge?.status).toBe('anchored smoke-only');
     expect(localTmuxRequestEdge?.verification_gates).toContain('mac/src/lib/local-tmux-transport.test.ts');
     expect(localTmuxReturnEdge?.verification_gates).toContain('pnpm --dir mac run blackbox:terminal-buffer -- --case=all');
+    expect(localTmuxSmokeCloseEdge?.verification_gates).toContain(
+      'pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect',
+    );
   });
 
   it('anchors MacServerDirectory as projection-only server rail owner', () => {

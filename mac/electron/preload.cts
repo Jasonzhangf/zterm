@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('ztermMac', {
     listSessions: () => ipcRenderer.invoke('zterm:local-tmux:list-sessions'),
     connect: (payload: LocalTmuxConnectPayload) => ipcRenderer.invoke('zterm:local-tmux:connect', payload),
     disconnect: (clientId: string) => ipcRenderer.invoke('zterm:local-tmux:disconnect', { clientId }),
+    forceCloseForSmoke: (clientId: string) => ipcRenderer.invoke('zterm:local-tmux:force-close-for-smoke', { clientId }),
     sendInput: (clientId: string, data: string) => ipcRenderer.invoke('zterm:local-tmux:input', { clientId, data }),
     setActivityMode: (clientId: string, mode: 'active' | 'idle') => ipcRenderer.invoke('zterm:local-tmux:set-activity-mode', { clientId, mode }),
     resize: (clientId: string, cols: number, rows: number) => ipcRenderer.invoke('zterm:local-tmux:resize', { clientId, cols, rows }),

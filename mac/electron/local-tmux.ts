@@ -780,6 +780,18 @@ export class LocalTmuxManager {
     this.emit(clientId, { type: 'closed', payload: { reason: 'local tmux disconnected' } });
   }
 
+  async forceCloseForSmoke(clientId: string) {
+    const current = this.clients.get(clientId);
+    if (!current) {
+      throw new Error(`Local tmux client not found for smoke close: ${clientId}`);
+    }
+    current.disposed = true;
+    current.refreshQueued = false;
+    this.clearClientTimer(current);
+    this.clients.delete(clientId);
+    this.emit(clientId, { type: 'closed', payload: { reason: 'local tmux transport closed for smoke' } });
+  }
+
   async sendInput(clientId: string, input: string) {
     const client = this.clients.get(clientId);
     if (!client || !input) {

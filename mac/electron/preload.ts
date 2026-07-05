@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('ztermMac', {
       ipcRenderer.invoke('zterm:local-tmux:connect', payload) as Promise<void>,
     disconnect: (clientId: string) =>
       ipcRenderer.invoke('zterm:local-tmux:disconnect', { clientId }) as Promise<void>,
+    forceCloseForSmoke: (clientId: string) =>
+      ipcRenderer.invoke('zterm:local-tmux:force-close-for-smoke', { clientId }) as Promise<void>,
     sendInput: (clientId: string, data: string) =>
       ipcRenderer.invoke('zterm:local-tmux:input', { clientId, data }) as Promise<void>,
     setActivityMode: (clientId: string, mode: 'active' | 'idle') =>
