@@ -1515,3 +1515,26 @@ Need runtime debug to confirm:
   - `pnpm --dir android run test:feature-registry -- --reporter dot`：4 files / 31 tests PASS。
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`：PASS。
 - 缺口：本轮未跑 L5 真机/APK；只能宣称 owner/unit/integration/type/feature gate 已过，不能宣称真实 Android UI 现场完全闭环。
+
+## 2026-07-07 Android bottom prompt duplicate refresh investigation
+
+- 现场问题：Android 底部 TUI/input prompt 区域出现局部刷新重复，几行 prompt/status/input 被持续刷到上方。
+- 架构映射：属于 `terminal.buffer_render`，先查 source buffer -> local buffer -> renderer DOM；禁止用 QuickBar/IME/daemon UI shell 做补偿。当前 owner 候选：`TerminalView` DOM 投影、`session-render-gate`、`session-render-buffer-store`、shared `terminal-buffer` 合并。
+- 新增 gate：`TerminalView.dynamic-refresh.test.tsx` 增加 strict source/DOM helper，锁 DOM row absolute index 唯一、DOM 文本按 source absolute index 精确一致；新增 prompt/status/input 高频同窗口刷新测试，源里 prompt 只出现一次时 DOM 也只能出现一次，且不能残留上一帧。
+- 已验证：`pnpm --dir android exec vitest run src/components/TerminalView.dynamic-refresh.test.tsx --reporter dot` PASS（64 tests）。`pnpm --dir android exec tsx scripts/daemon-mirror-lab.ts --case=top-live --keep-daemon` PASS，tmux oracle 与 daemon payload compare ok。
+- 当前缺口：`adb devices -l` 无设备，不能做真机 WebView DOM/截图/运行时日志闭环；现有证据只证明 pure TerminalView 同窗口 repaint 与 daemon top-live oracle 不复现，不能宣称截图现场已修复。
+
+## 2026-07-07 Android bottom prompt duplicate root fix
+
+- 现场进一步证据：tmux `rcc` 源只出现一个 prompt/input，但 daemon head 曾出现 `latestEndIndex/availableEndIndex` 从 1220 回退到 1188；这会让 Android local buffer tail anchor 倒退，旧底部 prompt/status/input 行被当成新窗口内容刷到上方。
+- 根因 owner：Daemon Truth Block 的 `terminal-mirror-capture.ts` 使用 single-capture-authoritative 直接发布；tmux `history_size + paneRows` 在 alternate screen / TUI 刷新时可能小于当前 mirror tail。Client buffer 也会接受 forward-revision payload 的 `availableEndIndex` 回退。
+- 修复：daemon capture 改为同一次 sync 内连续两帧一致或匹配当前 mirror 才发布；同一 mirror 的 totalAvailableLines 以当前 mirror end 做单调下界，TUI/alternate screen 新内容发布到当前 tail anchor，不允许 tail 倒退。shared client buffer 拒绝无显式 reset 的 authoritative tail regression。
+- 已验证：owner gate `terminal-mirror-capture / terminal-mirror-runtime / terminal-buffer / TerminalView.dynamic-refresh` 4 files / 115 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS；真实 `pnpm --dir android run daemon:mirror:close-loop` PASS，覆盖 codex-live、top-live、vim-live、initial-sync、local/external input、daemon restart、schedule-fire，并自动 replay/source compare。
+- 当前缺口：还未在真机 WebView 上安装新 APK 后复现验证；可以宣称 L1/L2 闭环通过，不能宣称 L5 真机现场最终闭环。
+
+## 2026-07-07 File Sync markdown preview selection
+
+- 现场问题：文件同步里远端 `USER.md` 能预览但无法选中下载。根因是旧交互把 markdown 文件行点击定义为预览，且复选框没有独立事件，点击复选框会冒泡到行点击并被预览吞掉。
+- 架构映射：属于 File Sync UI projection / `FileTransferSheet` 交互 owner；daemon file list/download 真源不变。
+- 修复：复选框改成独立 button，点击时 `stopPropagation()` 并只切换 selection；文件名/行点击仍保留 markdown 预览或目录进入。远程/本地列表都统一该选择入口。
+- 已验证：`pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot` PASS（15 tests）；`test:feature-registry` PASS（31 tests）；`tsc --noEmit` PASS；`git diff --check` PASS。

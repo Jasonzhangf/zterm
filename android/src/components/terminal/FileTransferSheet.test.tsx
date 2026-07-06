@@ -550,7 +550,7 @@ describe("FileTransferSheet", () => {
     ).toContain("文件同步通道未就绪");
   });
 
-  it("clicking a remote markdown file opens an in-sheet preview request instead of selecting it for transfer", async () => {
+  it("clicking a remote markdown file name opens an in-sheet preview request", async () => {
     const sendJson = vi.fn();
     const handlerRef: { current: ((msg: any) => void) | null } = {
       current: null,
@@ -594,5 +594,48 @@ describe("FileTransferSheet", () => {
     expect(
       screen.getByTestId("file-transfer-md-preview").textContent,
     ).toContain("加载预览中");
+  });
+
+  it("clicking a remote markdown checkbox selects it for download without opening preview", async () => {
+    const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = {
+      current: null,
+    };
+    const onFileTransferMessage = vi.fn((nextHandler: (msg: any) => void) => {
+      handlerRef.current = nextHandler;
+      return () => {};
+    });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={onFileTransferMessage}
+      />,
+    );
+
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
+    handlerRef.current?.({
+      type: "file-list-response",
+      payload: {
+        requestId: sendJson.mock.calls[0][0].payload.requestId,
+        path: "/remote/home",
+        parentPath: "/remote",
+        entries: [{ name: "USER.md", type: "file", size: 13_900, modified: 1 }],
+      },
+    });
+
+    await waitFor(() => expect(screen.getByText("USER.md")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "选择远程 USER.md" }));
+
+    expect(screen.queryByTestId("file-transfer-md-preview")).toBeNull();
+    expect(
+      sendJson.mock.calls.some((call) =>
+        call[0]?.payload?.requestId?.startsWith("fpv-"),
+      ),
+    ).toBe(false);
+    expect(screen.getByText("下载 1 项")).toBeTruthy();
   });
 });
