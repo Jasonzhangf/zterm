@@ -225,7 +225,7 @@ describe('terminal mirror capture runtime', () => {
     expect(result.snapshot).toEqual(stableSnapshot);
   });
 
-  it('publishes a changed snapshot immediately in live mode instead of waiting for a second identical tick', async () => {
+  it('publishes a changed snapshot after consecutive tmux captures agree in the same live sync', async () => {
     const runTmux = vi.fn((args: string[]) => {
       if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
         return { ok: true as const, stdout: '%1\t0\t2\t80\t0\t0\n' };
@@ -274,7 +274,63 @@ describe('terminal mirror capture runtime', () => {
     const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
 
     expect(changed).toBe(true);
+    expect(runTmux.mock.calls.filter(([args]) => args[0] === 'capture-pane')).toHaveLength(2);
     expect(mirror.bufferLines).toEqual([row('line-1'), row('line-2')]);
+    expect(mirror.pendingStableCaptureSnapshot).toBeNull();
+  });
+
+  it('reanchors a stable capture to the current mirror tail when tmux reports a smaller alternate-screen window', async () => {
+    const runTmux = vi.fn((args: string[]) => {
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%1\t8\t2\t80\t0\t0\n' };
+      }
+      if (args[0] === 'display-message' && args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+        return { ok: true as const, stdout: '0 1 1 0\n' };
+      }
+      if (args[0] === 'capture-pane') {
+        return { ok: true as const, stdout: 'old-tail-8\nold-tail-9\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: () => 20,
+      runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
+      logTimePrefix: () => '2026-07-07 12:00:00',
+    });
+
+    const mirror: SessionMirror = {
+      key: 'demo',
+      sessionName: 'demo',
+      scratchBridge: null,
+      lifecycle: 'ready',
+      cols: 80,
+      rows: 2,
+      cursorKeysApp: false,
+      revision: 9,
+      lastScrollbackCount: 10,
+      bufferStartIndex: 1218,
+      bufferLines: [row('new-tail-1218'), row('new-tail-1219')],
+      cursor: null,
+      lastFlushStartedAt: 0,
+      lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      flushInFlight: false,
+      flushPromise: null,
+      pendingStableCaptureSnapshot: null,
+      liveSyncTimer: null,
+      consecutiveFailures: 0,
+      subscribers: new Set(),
+    };
+
+    const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
+
+    expect(changed).toBe(true);
+    expect(runTmux.mock.calls.filter(([args]) => args[0] === 'capture-pane')).toHaveLength(2);
+    expect(mirror.bufferStartIndex).toBe(1218);
+    expect(mirror.bufferLines).toEqual([row('old-tail-8'), row('old-tail-9')]);
     expect(mirror.pendingStableCaptureSnapshot).toBeNull();
   });
 

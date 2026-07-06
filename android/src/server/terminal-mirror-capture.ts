@@ -83,6 +83,10 @@ function getMirrorAvailableEndIndex(mirror: SessionMirror) {
   return mirror.bufferStartIndex + mirror.bufferLines.length;
 }
 
+function getSnapshotAvailableEndIndex(snapshot: Pick<ResolvedMirrorCaptureSnapshot, 'bufferStartIndex' | 'bufferLines'>) {
+  return snapshot.bufferStartIndex + snapshot.bufferLines.length;
+}
+
 function cursorStatesEqual(
   left: TerminalCursorState | null | undefined,
   right: TerminalCursorState | null | undefined,
@@ -132,13 +136,13 @@ function currentMirrorMatchesSnapshot(
       bufferStartIndex: mirror.bufferStartIndex,
       bufferLines: mirror.bufferLines,
       cursor: mirror.cursor,
-	      capturedLineCount: mirror.bufferLines.length,
-	      canonicalLineCount: mirror.bufferLines.length,
-	      totalAvailableLines: getMirrorAvailableEndIndex(mirror),
-	      visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - mirror.rows),
-	      captureDurationMs: mirror.lastCaptureDurationMs || 0,
-	      canonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
-	    },
+      capturedLineCount: mirror.bufferLines.length,
+      canonicalLineCount: mirror.bufferLines.length,
+      totalAvailableLines: getMirrorAvailableEndIndex(mirror),
+      visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex(mirror) - mirror.rows),
+      captureDurationMs: mirror.lastCaptureDurationMs || 0,
+      canonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+    },
     snapshot,
   );
 }
@@ -154,6 +158,19 @@ function applyMirrorCaptureSnapshot(
   mirror.bufferStartIndex = snapshot.bufferStartIndex;
   mirror.bufferLines = snapshot.bufferLines;
   mirror.cursor = snapshot.cursor;
+}
+
+function assertMirrorCaptureDoesNotRegressTail(
+  mirror: SessionMirror,
+  snapshot: ResolvedMirrorCaptureSnapshot,
+) {
+  const currentEndIndex = getMirrorAvailableEndIndex(mirror);
+  const nextEndIndex = getSnapshotAvailableEndIndex(snapshot);
+  if (currentEndIndex > 0 && nextEndIndex < currentEndIndex) {
+    throw new Error(
+      `tmux capture regressed authoritative tail for ${mirror.sessionName}: currentEnd=${currentEndIndex} nextEnd=${nextEndIndex}`,
+    );
+  }
 }
 
 export async function resolveStableMirrorCaptureSnapshot(options: {
@@ -376,12 +393,13 @@ export function createTerminalMirrorCaptureRuntime(
     const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);
     const canonicalizeDoneAt = Date.now();
 
-    const totalAvailableLines = resolveCanonicalAvailableLineCount({
+    const tmuxAvailableLines = resolveCanonicalAvailableLineCount({
       paneRows: metrics.paneRows,
       tmuxAvailableLineCountHint: metrics.tmuxAvailableLineCountHint,
       capturedLineCount: capturedLines.length,
       scratchLineCount: nextBufferLines.length,
     });
+    const totalAvailableLines = Math.max(tmuxAvailableLines, getMirrorAvailableEndIndex(mirror));
     const computedStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
     const authoritativeWindow = resolveAuthoritativeMirrorCaptureWindow({
       nextLines: nextBufferLines,
@@ -422,6 +440,13 @@ export function createTerminalMirrorCaptureRuntime(
   async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
     if (deps.wezTermBackend) {
       const snapshot = await deps.wezTermBackend.readSnapshot(mirror.sessionName);
+      const nextEndIndex = snapshot.bufferStartIndex + snapshot.bufferLines.length;
+      const currentEndIndex = getMirrorAvailableEndIndex(mirror);
+      if (currentEndIndex > 0 && nextEndIndex < currentEndIndex) {
+        throw new Error(
+          `tmux capture regressed authoritative tail for ${mirror.sessionName}: currentEnd=${currentEndIndex} nextEnd=${nextEndIndex}`,
+        );
+      }
       applyMirrorCaptureSnapshot(mirror, {
         rows: snapshot.rows,
         cols: snapshot.cols,
@@ -442,26 +467,31 @@ export function createTerminalMirrorCaptureRuntime(
       mirror.pendingStableCaptureSnapshot = null;
       return true;
     }
-    const snapshot = await captureTmuxMirrorSnapshot(mirror);
-    const currentMirrorMatched = currentMirrorMatchesSnapshot(mirror, snapshot);
+    const stable = await resolveStableMirrorCaptureSnapshot({
+      readSnapshot: () => captureTmuxMirrorSnapshot(mirror),
+      currentMirror: mirror,
+    });
+    const snapshot = stable.snapshot;
+    const currentMirrorMatched = stable.stabilizedAgainst === 'current-mirror';
 
     if (currentMirrorMatched) {
       mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
       mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
       mirror.pendingStableCaptureSnapshot = null;
       console.log(
-        `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=1 stabilizeMode=current-mirror`,
+        `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=${stable.attempts} stabilizeMode=current-mirror`,
       );
       return true;
     }
 
+    assertMirrorCaptureDoesNotRegressTail(mirror, snapshot);
     applyMirrorCaptureSnapshot(mirror, snapshot);
     mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
     mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
     mirror.pendingStableCaptureSnapshot = null;
 
     console.log(
-      `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=1 stabilizeMode=single-capture-authoritative`,
+      `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=${stable.attempts} stabilizeMode=${stable.stabilizedAgainst}`,
     );
 
     return true;

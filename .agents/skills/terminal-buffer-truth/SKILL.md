@@ -160,6 +160,8 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - 若 tmux 正在中间刷新，writer 必须执行 **连续一致才发布**：只有连续两次 canonical snapshot 一致，或已与当前 mirror 一致，才允许写 mirror；不稳定必须显式报错
   - 不允许基于 **内容 overlap / repeated text** 推断新的 absolute anchor
   - mirror absolute window 只能来自 tmux authoritative available window；内容相似性最多用于 debug，不得进入写侧真相
+  - 同一 live mirror 的 `availableEndIndex/latestEndIndex` 必须单调；tmux `history_size + paneRows` 在 alternate screen / TUI 刷新时可能变小，writer 只能用当前 mirror end 作为 absolute tail 下界重新锚定稳定新帧，禁止发布 tail 回退
+  - client buffer 收到 forward-revision `availableEndIndex` 小于本地 `bufferTailEndIndex` 时必须拒绝该 payload；只有显式 restart/reset 主线可以重置 absolute tail
 - `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
 - **请求不得触发 tmux capture / canonical rebuild / planner**
 - 正常 live 主链只允许：
