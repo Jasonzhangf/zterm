@@ -354,6 +354,64 @@ describe('session-context-socket-message-runtime connected truth', () => {
     expect(ws.onclose).not.toBeNull();
   });
 
+  it('treats plain closed messages as retryable transport failures, not terminal session close truth', () => {
+    const onFailure = vi.fn();
+    const onClosed = vi.fn();
+    const ws = {
+      onopen: vi.fn(),
+      onmessage: vi.fn(),
+      onerror: vi.fn(),
+      onclose: vi.fn(),
+    } as any;
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure,
+        onClosed,
+      },
+      msg: {
+        type: 'closed',
+        payload: {
+          reason: 'websocket closed',
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [makeSession()],
+            activeSessionId: 'session-1',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(onClosed).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('websocket closed', true);
+    expect(ws.onopen).not.toBeNull();
+    expect(ws.onmessage).not.toBeNull();
+    expect(ws.onerror).not.toBeNull();
+    expect(ws.onclose).not.toBeNull();
+  });
+
   it('routes schedule-error into schedule state without terminal transport failure', () => {
     const onFailure = vi.fn();
     const setScheduleStateForSession = vi.fn();

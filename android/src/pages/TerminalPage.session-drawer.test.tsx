@@ -303,6 +303,72 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
+  it('routes remote-only drawer close to remote tmux session close instead of local open-tab close', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onCloseSession = vi.fn();
+    const onCloseDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1', 'remote-beta'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
+        onRefreshDrawerHostSessions={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    const resolvedSwipeSurface = swipeSurface!;
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchMove(resolvedSwipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByText('remote-beta')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:remote-beta'));
+
+    expect(onCloseSession).not.toHaveBeenCalled();
+    expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
+      {
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['tmux-s1', 'remote-beta'],
+      },
+      'remote-beta',
+    );
+  });
+
   it('shows only daemon catalog sessions and hides stale opened tabs from the drawer', async () => {
     const sessions = [makeSession('live'), makeSession('stale')];
     sessions[0]!.daemonHostId = 'daemon-a';

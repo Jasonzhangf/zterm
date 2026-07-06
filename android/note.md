@@ -1501,3 +1501,17 @@ Need runtime debug to confirm:
 - 处理：`terminal.buffer_render` 增加自动黑盒门禁，`TerminalView.dynamic-refresh.test.tsx` 将 source buffer rows 与 DOM visible rows 按 absolute row index 对比，覆盖 fast TUI top/status/bottom refresh 和大窗口 same-window repaint。
 - 处理：`session-context-buffer-runtime.test.ts` 增加白盒同窗口多行 body update 测试，证明 buffer truth 更新并调度 render commit；`docs/testing/terminal-refresh-buffer-truth-test-design.md` 记录 lifecycle、white-box、module black-box、project black-box 与缺口。
 - 已验证：目标 Android renderer/buffer tests、feature registry gates、tsc、terminal.buffer_render required gates 在本轮补丁后通过；最终提交前需重跑受 memory/docs 变更影响的快速 gate。
+## 2026-07-06 drawer remote close / websocket retry closeout
+
+- 架构映射：
+  - 抽屉关闭属于 `terminal.session_drawer` + session-open owner 分发；`TerminalPage` 只识别 remote-only drawer row 并转发 intent，`useSessionOpenActions` 执行 `killTmuxSession -> fetchTmuxSessions -> handleRemoteSessionsRefreshed`。
+  - WebSocket 断开重试属于 `terminal.transport_lifecycle`；普通 server `closed` 消息是 retryable transport failure，不是 terminal session close truth。终态关闭仍只由 `tmux_session_killed` 锁住。
+- 修复：
+  - remote-only drawer `×` 不再调用 local open-tab `onCloseSession(remote:...)`，改走 `onCloseDrawerRemoteSession(target, sessionName)`。
+  - `SessionContext` 收到 plain `closed` 后走 `onFailure(reason, true)`，由 existing reconnect owner 调度重试，避免落入 closed/disconnected 卡死。
+- 已验证：
+  - `pnpm --dir android exec vitest run src/pages/TerminalPage.session-drawer.test.tsx src/contexts/session-context-socket-message-runtime.test.ts src/contexts/session-context-transport-runtime.test.ts src/contexts/session-context-transport-open-runtime.test.ts --reporter dot`：4 files / 33 tests PASS。
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx -t "reconnects after a plain websocket closed message" --reporter dot`：1 targeted test PASS。
+  - `pnpm --dir android run test:feature-registry -- --reporter dot`：4 files / 31 tests PASS。
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`：PASS。
+- 缺口：本轮未跑 L5 真机/APK；只能宣称 owner/unit/integration/type/feature gate 已过，不能宣称真实 Android UI 现场完全闭环。

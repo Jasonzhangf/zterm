@@ -320,6 +320,8 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - inactive tab 不主动高频拉 head/range
   - 但**不是**关闭 session
   - 也**不是**关闭 transport
+- server 普通 `closed` / websocket detach 只表示 transport failure，必须进入 retryable reconnect owner；terminal 终态关闭只认显式业务真相，例如 `tmux_session_killed`。禁止把普通 `closed` 映射成本地 tab/session closed，否则 WebSocket 断开会卡死不重试。
+- drawer 中 remote-only session 是 daemon catalog truth，不是本地 open-tab truth；关闭必须走 tmux control owner（`killTmuxSession` 后刷新 catalog），禁止把 `remote:*` id 交给 local open-tab close。
 - reconnect / resume / foreground/background / tab active 都是**客户端逻辑**
   - daemon 不能持有这些状态机
   - daemon 只暴露稳定 mirror read/write 接口和基础 transport 接入能力

@@ -23,7 +23,7 @@ import {
 } from '../lib/session-picker';
 import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
-import { createTmuxSession, fetchTmuxSessions } from '../lib/tmux-sessions';
+import { createTmuxSession, fetchTmuxSessions, killTmuxSession } from '../lib/tmux-sessions';
 import type { Host, PersistedOpenTab, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { loadSavedTabList } from '../lib/saved-tab-loader';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
@@ -93,6 +93,7 @@ export interface SessionOpenActionsResult {
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => void;
+  handleCloseGroupSession: (group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
   handleOpenServerGroups: (groups: Array<{
     name: string;
     bridgeHost: string;
@@ -476,6 +477,23 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     });
   }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth, setSessionGroupSelection]);
 
+  const handleCloseGroupSession = useCallback(async (
+    group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] },
+    sessionName: string,
+  ) => {
+    const target = normalizeBridgeTarget({
+      bridgeHost: group.bridgeHost,
+      bridgePort: group.bridgePort,
+      daemonHostId: group.daemonHostId,
+      relayHostId: group.daemonHostId,
+      authToken: group.authToken,
+      relayEndpointCandidates: group.relayEndpointCandidates || [],
+    });
+    await killTmuxSession(target, bridgeSettingsRef.current, sessionName);
+    const sessionNames = await fetchTmuxSessions(target, bridgeSettingsRef.current);
+    handleRemoteSessionsRefreshed(target, sessionNames);
+  }, [bridgeSettingsRef, handleRemoteSessionsRefreshed]);
+
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
     const draft = buildCleanDraft(target);
@@ -758,6 +776,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
     handleOpenGroupSession,
+    handleCloseGroupSession,
     handleOpenServerGroups,
     handleEditServerGroup,
     handleSaveServerGroupSelection,

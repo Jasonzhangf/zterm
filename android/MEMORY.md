@@ -657,3 +657,8 @@ silently returns 0 when viewport metrics are stable.
 - Android native / Mac Electron 属于真实源码，应进入安全语料；但 Capacitor generated web bundle `android/native/android/app/src/main/assets/public/`、`capacitor.config.json`、`capacitor.plugins.json` 和图片/媒体资源不属于代码/文档搜索语料。
 - 本地文本搜索默认尊重根目录 `.ignore`；若 MemPalace 结果出现 generated/build/evidence/raw artifact source，收口流程是备份 palace、删除 `wing=zterm` 的 stale metadata、重新安全 mine、再用唯一短语验证可检索。
 Tags: #mempalace #source-only-search #generated-artifacts #zterm
+## 2026-07-06 drawer remote close and websocket retry truth
+
+- Terminal drawer remote-only rows are daemon catalog sessions, not local open tabs. Their close intent must route through session-open owner `killTmuxSession -> fetchTmuxSessions -> handleRemoteSessionsRefreshed`; `TerminalPage` may only project the remote target and dispatch the close intent. Calling local `onCloseSession(remote:...)` is a no-op because no local runtime session owns that id.
+- In SessionContext, plain server `closed` messages are retryable transport failures and must flow through `onFailure(reason, true)` into reconnect ownership. Terminal close truth remains `tmux_session_killed`; do not map ordinary WebSocket detach/closed facts to local tab/session closed state.
+- Regression gates: drawer close must cover remote-only close not calling local open-tab close; transport retry must cover plain `closed` becoming reconnect while `tmux_session_killed` remains terminal closed.

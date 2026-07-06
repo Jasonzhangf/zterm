@@ -512,6 +512,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
     handleOpenGroupSession,
+    handleCloseGroupSession,
     handleOpenServerGroups,
     handleEditServerGroup,
     handleSaveServerGroupSelection,
@@ -691,6 +692,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
             onOpenDrawerRemoteSession={handleOpenGroupSession}
+            onCloseDrawerRemoteSession={handleCloseGroupSession}
             onRefreshDrawerHostSessions={handleRefreshDrawerHostSessions}
             relayDevices={relayDevices}
             sessionPickerDebugMode={pickerMode}

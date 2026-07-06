@@ -225,11 +225,7 @@ export function handleSocketServerMessageRuntime(options: {
       params.onFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
       break;
     case 'closed':
-      params.ws.onopen = null;
-      params.ws.onmessage = null;
-      params.ws.onerror = null;
-      params.ws.onclose = null;
-      params.onClosed(msg.payload.reason || 'socket closed');
+      params.onFailure(msg.payload.reason || 'socket closed', true);
       break;
     case 'sessions':
       break;

@@ -216,6 +216,14 @@ interface TerminalPageProps {
     authToken?: string;
     sessionNames: string[];
   }, sessionName: string) => void;
+  onCloseDrawerRemoteSession?: (target: {
+    name: string;
+    bridgeHost: string;
+    bridgePort: number;
+    daemonHostId?: string;
+    authToken?: string;
+    sessionNames: string[];
+  }, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   sessionPickerDebugMode?: string | null;
@@ -957,6 +965,7 @@ function TerminalPageComponent({
   onOpenConnections,
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
+  onCloseDrawerRemoteSession,
   onRefreshDrawerHostSessions,
   relayDevices = [],
   sessionPickerDebugMode = null,
@@ -2552,8 +2561,13 @@ function TerminalPageComponent({
   }, [handleSwitchSessionFromChrome, resolveSessionGroupSlot]);
 
   const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
-    onCloseSession(sessionId, 'session-drawer-close-button');
-  }, [onCloseSession]);
+    const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
+    if (remoteTarget) {
+      void onCloseDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+      return;
+    }
+    onCloseSession(sessionId, 'terminal-session-drawer-close-button');
+  }, [drawerRemoteSessions.targets, onCloseDrawerRemoteSession, onCloseSession]);
 
   const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
     if (paneId) {
@@ -2978,6 +2992,7 @@ function terminalPagePropsEqual(
     && prev.onOpenConnections === next.onOpenConnections
     && prev.onOpenQuickTabPicker === next.onOpenQuickTabPicker
     && prev.onOpenDrawerRemoteSession === next.onOpenDrawerRemoteSession
+    && prev.onCloseDrawerRemoteSession === next.onCloseDrawerRemoteSession
     && prev.onRefreshDrawerHostSessions === next.onRefreshDrawerHostSessions
     && prev.sessionGroups === next.sessionGroups
     && prev.onResize === next.onResize
