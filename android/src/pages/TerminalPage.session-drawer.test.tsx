@@ -58,8 +58,10 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
 }));
 
 vi.mock('../components/TerminalView', () => ({
-  TerminalView: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`terminal-view-${sessionId}`}>terminal:{sessionId}</div>
+  TerminalView: ({ sessionId, active }: { sessionId: string; active?: boolean }) => (
+    <div data-testid={`terminal-view-${sessionId}`} data-active={active ? 'true' : 'false'}>
+      terminal:{sessionId}
+    </div>
   ),
 }));
 
@@ -194,6 +196,82 @@ describe('TerminalPage portrait session drawer', () => {
 
     fireEvent.click(await screen.findByTestId(`terminal-session-drawer-select-${targetSessionId}`));
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
+  });
+
+  it('does not switch the session-group center before runtime active catches up after drawer selection', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    sessions[1]!.daemonHostId = 'daemon-a';
+    const sessionGroups = [{
+      id: 'daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['tmux-s1', 'tmux-s2'],
+      lastOpenedAt: 1,
+    }];
+    const onSwitchSession = vi.fn();
+    const view = render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={sessionGroups}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-s2'));
+
+    expect(onSwitchSession).toHaveBeenCalledWith('s2');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('true');
+    expect(screen.queryByTestId('terminal-view-s2')).toBeNull();
+
+    view.rerender(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={sessionGroups}
+        activeSession={sessions[1]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onLoadSavedTabList={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-view-s2').getAttribute('data-active')).toBe('true'));
+    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
   it('routes drawer plus action to the quick tab picker', () => {

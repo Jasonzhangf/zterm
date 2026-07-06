@@ -1041,6 +1041,11 @@ function TerminalPageComponent({
     bottom: null,
   }));
   const [sessionGroupFocusSlot, setSessionGroupFocusSlot] = useState<TerminalSessionGroupSlotName>('center');
+  const [pendingSessionGroupActivation, setPendingSessionGroupActivation] = useState<{
+    sessionId: string;
+    focusSlot: TerminalSessionGroupSlotName;
+    replaceSlot: TerminalSessionGroupSlotName | null;
+  } | null>(null);
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
@@ -1475,6 +1480,21 @@ function TerminalPageComponent({
   useEffect(() => {
     activeSessionIdRef.current = interactiveSession?.id || null;
   }, [interactiveSession?.id]);
+
+  useEffect(() => {
+    if (!pendingSessionGroupActivation || uiSessionId !== pendingSessionGroupActivation.sessionId) {
+      return;
+    }
+    if (pendingSessionGroupActivation.replaceSlot) {
+      setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
+        current,
+        pendingSessionGroupActivation.sessionId,
+        pendingSessionGroupActivation.replaceSlot!,
+      ));
+    }
+    setSessionGroupFocusSlot(pendingSessionGroupActivation.focusSlot);
+    setPendingSessionGroupActivation(null);
+  }, [pendingSessionGroupActivation, uiSessionId]);
 
   useEffect(() => {
     if (!portraitSessionDrawerEnabled && sessionDrawerOpen) {
@@ -2526,16 +2546,25 @@ function TerminalPageComponent({
       setSessionDrawerOpen(false);
       return;
     }
-    handleSwitchSessionFromChrome(sessionId);
-    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
-      current,
+    setPendingSessionGroupActivation({
       sessionId,
-      sessionGroupFocusSlot,
-    ));
+      focusSlot: sessionGroupFocusSlot,
+      replaceSlot: sessionGroupFocusSlot,
+    });
+    handleSwitchSessionFromChrome(sessionId);
     setSessionDrawerOpen(false);
   }, [drawerRemoteSessions.targets, handleSwitchSessionFromChrome, onOpenDrawerRemoteSession, sessionGroupFocusSlot]);
 
   const handleAssignSessionGroupSlot = useCallback((sessionId: string, slot: TerminalSessionGroupSlotName) => {
+    if (slot === 'center') {
+      setPendingSessionGroupActivation({
+        sessionId,
+        focusSlot: 'center',
+        replaceSlot: 'center',
+      });
+      handleSwitchSessionFromChrome(sessionId);
+      return;
+    }
     setSessionGroupSlotIds((current) => {
       const next: TerminalSessionGroupSlotIds = {
         top: current.top === sessionId ? null : current.top,
@@ -2545,17 +2574,17 @@ function TerminalPageComponent({
       next[slot] = sessionId;
       return next;
     });
-    if (slot === 'center') {
-      setSessionGroupFocusSlot('center');
-      handleSwitchSessionFromChrome(sessionId);
-    }
   }, [handleSwitchSessionFromChrome]);
 
   const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
     void sourceSlot;
     const fixedSlot = resolveSessionGroupSlot(sessionId);
     if (fixedSlot) {
-      setSessionGroupFocusSlot(fixedSlot);
+      setPendingSessionGroupActivation({
+        sessionId,
+        focusSlot: fixedSlot,
+        replaceSlot: null,
+      });
     }
     handleSwitchSessionFromChrome(sessionId);
   }, [handleSwitchSessionFromChrome, resolveSessionGroupSlot]);
