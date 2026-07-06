@@ -200,10 +200,12 @@ const fileCheckboxStyle = (checked: boolean) => ({
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
+  padding: 0,
   flexShrink: 0,
   color: "#000",
   fontSize: "12px",
   fontWeight: 800,
+  cursor: "pointer",
 });
 
 const pathBreadcrumbStyle = {
@@ -856,11 +858,17 @@ export function FileTransferSheet({
                     }
                   }}
                 >
-                  <div
+                  <button
+                    type="button"
+                    aria-label={`选择远程 ${entry.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleRemote(entry.name);
+                    }}
                     style={fileCheckboxStyle(selectedRemote.has(entry.name))}
                   >
                     {selectedRemote.has(entry.name) ? "✓" : ""}
-                  </div>
+                  </button>
                   <span style={{ fontSize: "16px", flexShrink: 0 }}>
                     {entry.type === "directory" ? "📁" : "📄"}
                   </span>
@@ -1107,9 +1115,17 @@ export function FileTransferSheet({
                   }
                 }}
               >
-                <div style={fileCheckboxStyle(selectedLocal.has(entry.name))}>
+                <button
+                  type="button"
+                  aria-label={`选择本地 ${entry.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleLocal(entry.name);
+                  }}
+                  style={fileCheckboxStyle(selectedLocal.has(entry.name))}
+                >
                   {selectedLocal.has(entry.name) ? "✓" : ""}
-                </div>
+                </button>
                 <span style={{ fontSize: "16px", flexShrink: 0 }}>
                   {entry.type === "directory" ? "📁" : "📄"}
                 </span>

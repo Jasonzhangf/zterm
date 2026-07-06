@@ -1531,3 +1531,10 @@ Need runtime debug to confirm:
 - 修复：daemon capture 改为同一次 sync 内连续两帧一致或匹配当前 mirror 才发布；同一 mirror 的 totalAvailableLines 以当前 mirror end 做单调下界，TUI/alternate screen 新内容发布到当前 tail anchor，不允许 tail 倒退。shared client buffer 拒绝无显式 reset 的 authoritative tail regression。
 - 已验证：owner gate `terminal-mirror-capture / terminal-mirror-runtime / terminal-buffer / TerminalView.dynamic-refresh` 4 files / 115 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS；真实 `pnpm --dir android run daemon:mirror:close-loop` PASS，覆盖 codex-live、top-live、vim-live、initial-sync、local/external input、daemon restart、schedule-fire，并自动 replay/source compare。
 - 当前缺口：还未在真机 WebView 上安装新 APK 后复现验证；可以宣称 L1/L2 闭环通过，不能宣称 L5 真机现场最终闭环。
+
+## 2026-07-07 File Sync markdown preview selection
+
+- 现场问题：文件同步里远端 `USER.md` 能预览但无法选中下载。根因是旧交互把 markdown 文件行点击定义为预览，且复选框没有独立事件，点击复选框会冒泡到行点击并被预览吞掉。
+- 架构映射：属于 File Sync UI projection / `FileTransferSheet` 交互 owner；daemon file list/download 真源不变。
+- 修复：复选框改成独立 button，点击时 `stopPropagation()` 并只切换 selection；文件名/行点击仍保留 markdown 预览或目录进入。远程/本地列表都统一该选择入口。
+- 已验证：`pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot` PASS（15 tests）；`test:feature-registry` PASS（31 tests）；`tsc --noEmit` PASS；`git diff --check` PASS。
