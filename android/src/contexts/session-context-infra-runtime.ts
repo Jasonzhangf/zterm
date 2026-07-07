@@ -29,7 +29,7 @@ import {
   createSessionContextTransportAccessors,
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import { hasSessionLocalWindow, type SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
@@ -168,7 +168,7 @@ export function shouldAcceptSessionLiveBufferRuntime(options: {
   if (!session) {
     return false;
   }
-  return !hasSessionLocalWindow(session, options.readSessionBufferSnapshot(options.sessionId));
+  return true;
 }
 
 export function hasPendingSessionTransportOpenRuntime(options: {

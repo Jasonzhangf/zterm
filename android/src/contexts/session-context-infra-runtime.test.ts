@@ -105,7 +105,7 @@ describe('applySessionActionRuntime', () => {
     expect(isSessionTransportActiveRuntime({ sessionId: 'missing', stateRef })).toBe(false);
   });
 
-  it('drops daemon live buffer for inactive sessions that already have a local window', () => {
+  it('accepts daemon live buffer for inactive runtime sessions so cached tabs stay fresh', () => {
     const state: SessionManagerState = {
       ...initialSessionManagerState,
       sessions: [buildSession('s1'), buildSession('s2')],
@@ -128,27 +128,6 @@ describe('applySessionActionRuntime', () => {
         rows: 24,
         cacheLines: 1000,
         revision: 3,
-      }),
-    })).toBe(false);
-  });
-
-  it('keeps bootstrap live buffer acceptance for inactive sessions without a local window yet', () => {
-    const state: SessionManagerState = {
-      ...initialSessionManagerState,
-      sessions: [buildSession('s1'), buildSession('s2')],
-      activeSessionId: 's1',
-      liveSessionIds: ['s1'],
-      liveSessionIdsExplicit: true,
-    };
-    const stateRef = { current: state };
-
-    expect(shouldAcceptSessionLiveBufferRuntime({
-      sessionId: 's2',
-      stateRef,
-      readSessionBufferSnapshot: () => createSessionBufferState({
-        cols: 80,
-        rows: 24,
-        cacheLines: 1000,
       }),
     })).toBe(true);
   });
