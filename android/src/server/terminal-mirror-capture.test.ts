@@ -354,10 +354,46 @@ describe('terminal mirror capture runtime', () => {
         rows: 24,
         cols: 80,
         cursorKeysApp: false,
-        lastScrollbackCount: 0,
-        bufferStartIndex: 100,
+        lastScrollbackCount: 1,
+        bufferStartIndex: 101,
         bufferLines: [row('b')],
         cursor: null,
+        capturedLineCount: 1,
+        canonicalLineCount: 1,
+        totalAvailableLines: 102,
+        visibleTopIndex: 101,
+      })
+      .mockResolvedValueOnce({
+        rows: 24,
+        cols: 80,
+        cursorKeysApp: false,
+        lastScrollbackCount: 2,
+        bufferStartIndex: 102,
+        bufferLines: [row('c')],
+        cursor: null,
+        capturedLineCount: 1,
+        canonicalLineCount: 1,
+        totalAvailableLines: 103,
+        visibleTopIndex: 102,
+      });
+
+    await expect(resolveStableMirrorCaptureSnapshot({
+      readSnapshot,
+      maxAttempts: 3,
+    })).rejects.toThrow('tmux capture remained unstable after 3 attempts');
+  });
+
+  it('publishes the latest volatile frame when tmux keeps changing content on the same authoritative anchor', async () => {
+    const readSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: 24,
+        cols: 80,
+        cursorKeysApp: false,
+        lastScrollbackCount: 0,
+        bufferStartIndex: 100,
+        bufferLines: [row('prompt frame 1')],
+        cursor: { rowIndex: 100, col: 3, visible: true },
         capturedLineCount: 1,
         canonicalLineCount: 1,
         totalAvailableLines: 101,
@@ -369,17 +405,35 @@ describe('terminal mirror capture runtime', () => {
         cursorKeysApp: false,
         lastScrollbackCount: 0,
         bufferStartIndex: 100,
-        bufferLines: [row('c')],
-        cursor: null,
+        bufferLines: [row('prompt frame 2')],
+        cursor: { rowIndex: 100, col: 4, visible: true },
+        capturedLineCount: 1,
+        canonicalLineCount: 1,
+        totalAvailableLines: 101,
+        visibleTopIndex: 100,
+      })
+      .mockResolvedValueOnce({
+        rows: 24,
+        cols: 80,
+        cursorKeysApp: false,
+        lastScrollbackCount: 0,
+        bufferStartIndex: 100,
+        bufferLines: [row('prompt frame 3')],
+        cursor: { rowIndex: 100, col: 5, visible: true },
         capturedLineCount: 1,
         canonicalLineCount: 1,
         totalAvailableLines: 101,
         visibleTopIndex: 100,
       });
 
-    await expect(resolveStableMirrorCaptureSnapshot({
+    const result = await resolveStableMirrorCaptureSnapshot({
       readSnapshot,
       maxAttempts: 3,
-    })).rejects.toThrow('tmux capture remained unstable after 3 attempts');
+    });
+
+    expect(readSnapshot).toHaveBeenCalledTimes(3);
+    expect(result.stabilizedAgainst).toBe('volatile-same-anchor');
+    expect(result.snapshot.bufferLines).toEqual([row('prompt frame 3')]);
+    expect(result.snapshot.cursor).toEqual({ rowIndex: 100, col: 5, visible: true });
   });
 });
