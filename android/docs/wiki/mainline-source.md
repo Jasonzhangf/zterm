@@ -10,6 +10,15 @@ flowchart TD
   Capacitor --> Vite["vite.config.ts"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
+  App --> SessionContext["src/contexts/SessionContext.tsx"]
+  SessionContext --> SessionLifecycle["src/contexts/session-context-session-orchestration-runtime.ts"]
+  SessionLifecycle --> ActivityFreshness["src/contexts/session-context-activity-runtime.ts"]
+  ActivityFreshness --> SessionRuntime["src/contexts/session-context-session-runtime.ts"]
+  SessionLifecycle --> SessionRuntime
+  SessionRuntime --> TransportReusePlan["src/contexts/session-transport-open-helpers.ts"]
+  SessionContext --> TransportOrchestration["src/contexts/session-context-transport-orchestration-runtime.ts"]
+  TransportOrchestration --> TransportOpen["src/contexts/session-context-transport-open-runtime.ts"]
+  TransportOpen --> TransportReusePlan
   App --> Connections["src/pages/ConnectionsPage.tsx"]
   App --> TerminalPage["src/pages/TerminalPage.tsx"]
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
@@ -68,6 +77,7 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
+| Client transport lifecycle | `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-transport-open-helpers.ts` |
 | Terminal renderer | `src/components/TerminalView.tsx`, `src/lib/session-render-buffer-store.ts`, `src/lib/session-render-gate.ts` |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
 | Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |

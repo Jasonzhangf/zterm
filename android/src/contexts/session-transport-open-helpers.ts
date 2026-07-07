@@ -31,6 +31,24 @@ export type ActiveSessionRefreshPlan =
 
 export type SessionTransportOpenDebugScope = 'connect' | 'reconnect';
 export type SessionTransportOpenFailureStage = 'handshake' | 'live';
+export type SessionTransportReuseSource = 'connect' | 'reconnect' | 'open-intent';
+
+export interface SessionTransportReusePlanOptions {
+  currentTargetKey: string | null;
+  requestedTargetKey: string | null;
+  wsReadyState: number | null;
+  pendingTransportOpen: boolean;
+  pendingTransportOpenStale?: boolean;
+  manualClosed?: boolean;
+  forceReplaceTransport?: boolean;
+  source: SessionTransportReuseSource;
+}
+
+export type SessionTransportReusePlan =
+  | { action: 'reuse-open'; reason: 'open-same-target' }
+  | { action: 'wait-existing-open'; reason: 'connecting-same-target' | 'pending-open' }
+  | { action: 'skip'; reason: 'manual-closed' }
+  | { action: 'rebuild'; reason: 'missing-target' | 'target-mismatch' | 'stale-pending-open' | 'force-replace' | 'closed' | 'missing-socket' };
 
 export interface TransportOpenConnectedEffectPlan {
   debugEvent: 'session.ws.connected' | 'session.ws.reconnect.connected';
@@ -48,6 +66,54 @@ export interface TransportOpenLiveFailureEffectPlan {
 export type ReconnectHandshakeFailurePlan =
   | { action: 'terminal-error' }
   | { action: 'retry-reconnect'; nextAttempt: number };
+
+export function buildSessionTransportReusePlan(
+  options: SessionTransportReusePlanOptions,
+): SessionTransportReusePlan {
+  if (options.manualClosed) {
+    return { action: 'skip', reason: 'manual-closed' };
+  }
+
+  if (!options.requestedTargetKey || !options.currentTargetKey) {
+    if (options.pendingTransportOpen && !options.pendingTransportOpenStale) {
+      return { action: 'wait-existing-open', reason: 'pending-open' };
+    }
+    return { action: 'rebuild', reason: 'missing-target' };
+  }
+
+  if (options.currentTargetKey !== options.requestedTargetKey) {
+    return { action: 'rebuild', reason: 'target-mismatch' };
+  }
+
+  if (options.pendingTransportOpen && options.pendingTransportOpenStale) {
+    return { action: 'rebuild', reason: 'stale-pending-open' };
+  }
+
+  if (options.forceReplaceTransport) {
+    return { action: 'rebuild', reason: 'force-replace' };
+  }
+
+  if (options.wsReadyState === WebSocket.OPEN) {
+    return { action: 'reuse-open', reason: 'open-same-target' };
+  }
+
+  if (options.wsReadyState === WebSocket.CONNECTING) {
+    return { action: 'wait-existing-open', reason: 'connecting-same-target' };
+  }
+
+  if (options.pendingTransportOpen) {
+    return { action: 'wait-existing-open', reason: 'pending-open' };
+  }
+
+  if (
+    options.wsReadyState === WebSocket.CLOSING
+    || options.wsReadyState === WebSocket.CLOSED
+  ) {
+    return { action: 'rebuild', reason: 'closed' };
+  }
+
+  return { action: 'rebuild', reason: 'missing-socket' };
+}
 
 export interface PendingSessionTransportOpenIntent {
   sessionId: string;

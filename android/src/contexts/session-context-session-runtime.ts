@@ -1,4 +1,5 @@
 import { getResolvedSessionName } from '../lib/connection-target';
+import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -10,6 +11,7 @@ import {
   buildSessionReconnectingFailureUpdates,
   buildSessionScheduleLoadingState,
   buildSessionTransportPrimeState,
+  buildSessionTransportReusePlan,
 } from './session-transport-open-helpers';
 import {
   findReusableManagedSession,
@@ -50,6 +52,10 @@ interface SessionReconnectRuntime {
   connecting: boolean;
 }
 
+export interface ReconnectSessionRuntimeOptions {
+  forceReplaceTransport?: boolean;
+}
+
 function clearReconnectRuntimeEntry(
   reconnectRuntimes: Map<string, SessionReconnectRuntime>,
   sessionId: string,
@@ -71,6 +77,10 @@ export function connectSessionRuntime(options: {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTargetKey: (sessionId: string) => string | null;
+  hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   setScheduleStateForSession: (
     sessionId: string,
@@ -79,6 +89,28 @@ export function connectSessionRuntime(options: {
   queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
 }) {
   const primeState = buildSessionTransportPrimeState(options.host, 'connect');
+  const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.sessionId);
+  const reusePlan = buildSessionTransportReusePlan({
+    currentTargetKey: options.readSessionTargetKey(options.sessionId),
+    requestedTargetKey: buildTransportTargetKey(primeState.transportHost),
+    wsReadyState: options.readSessionTransportSocket(options.sessionId)?.readyState ?? null,
+    pendingTransportOpen,
+    pendingTransportOpenStale: pendingTransportOpen
+      ? options.isPendingSessionTransportOpenStale(options.sessionId)
+      : false,
+    source: 'connect',
+  });
+  if (reusePlan.action === 'reuse-open') {
+    options.clearReconnectForSession(options.sessionId);
+    options.refs.manualCloseRef.current.delete(options.sessionId);
+    options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
+    options.writeSessionTransportToken(options.sessionId, null);
+    return;
+  }
+  if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {
+    return;
+  }
+
   options.clearReconnectForSession(options.sessionId);
   options.cleanupSocket(options.sessionId, false);
   options.refs.manualCloseRef.current.delete(options.sessionId);
@@ -316,6 +348,7 @@ export function renameSessionRuntime(options: {
 
 export function reconnectSessionRuntime(options: {
   sessionId: string;
+  reconnectOptions?: ReconnectSessionRuntimeOptions;
   refs: {
     stateRef: MutableRefObject<SessionLikeState>;
     manualCloseRef: MutableRefObject<Set<string>>;
@@ -324,6 +357,9 @@ export function reconnectSessionRuntime(options: {
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTargetKey: (sessionId: string) => string | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  hasPendingSessionTransportOpen: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
@@ -369,6 +405,35 @@ export function reconnectSessionRuntime(options: {
   });
 
   const primeState = buildSessionTransportPrimeState(host, 'reconnect');
+  const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.sessionId);
+  const reusePlan = buildSessionTransportReusePlan({
+    currentTargetKey: targetKey,
+    requestedTargetKey: buildTransportTargetKey(primeState.transportHost),
+    wsReadyState: options.readSessionTransportSocket(options.sessionId)?.readyState ?? null,
+    pendingTransportOpen,
+    pendingTransportOpenStale: pendingTransportOpen
+      ? options.isPendingSessionTransportOpenStale(options.sessionId)
+      : false,
+    forceReplaceTransport: options.reconnectOptions?.forceReplaceTransport,
+    source: 'reconnect',
+  });
+  options.runtimeDebug('session.reconnect.reuse-plan', {
+    sessionId: options.sessionId,
+    action: reusePlan.action,
+    reason: reusePlan.reason,
+    targetKey,
+    forceReplaceTransport: Boolean(options.reconnectOptions?.forceReplaceTransport),
+  });
+  if (reusePlan.action === 'reuse-open') {
+    options.clearReconnectForSession(options.sessionId);
+    options.refs.manualCloseRef.current.delete(options.sessionId);
+    options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
+    return;
+  }
+  if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {
+    return;
+  }
+
   options.cleanupSocket(options.sessionId, false);
   options.refs.manualCloseRef.current.delete(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
@@ -385,7 +450,7 @@ export function reconnectAllSessionsRuntime(options: {
   activeSessionId: string | null;
   runtimeDebug: RuntimeDebugFn;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
-  reconnectSession: (sessionId: string) => void;
+  reconnectSession: (sessionId: string, options?: ReconnectSessionRuntimeOptions) => void;
 }) {
   options.runtimeDebug('session.reconnect.all', {
     activeSessionId: options.activeSessionId,

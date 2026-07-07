@@ -253,6 +253,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
     openSessionTransportByIntentRuntime({
       intent,
       readSessionTransportToken: options.readSessionTransportToken,
+      readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTargetKey: options.readSessionTargetKey,
       cleanupSocket,
       buildTraversalSocketForHost: options.buildTraversalSocketForHost,
       runtimeDebug: options.runtimeDebug,

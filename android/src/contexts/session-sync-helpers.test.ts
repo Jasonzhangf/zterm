@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import {
   buildActiveSessionRefreshPlan,
+  buildSessionTransportReusePlan,
   buildReconnectHandshakeFailurePlan,
   buildTransportOpenConnectedEffectPlan,
   buildTransportOpenLiveFailureEffectPlan,
@@ -256,6 +257,116 @@ describe('session sync helper refresh planner', () => {
       transportStale: false,
       source: 'active-resume',
     })).toEqual({ action: 'reconnect' });
+  });
+});
+
+describe('session transport reuse planner', () => {
+  const targetKey = '127.0.0.1:3333:';
+
+  it('reuses an open same-target session transport for reconnect requests', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.OPEN,
+      pendingTransportOpen: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'reuse-open',
+      reason: 'open-same-target',
+    });
+  });
+
+  it('waits for an existing connecting same-target transport instead of queueing a duplicate open', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CONNECTING,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'wait-existing-open',
+      reason: 'connecting-same-target',
+    });
+  });
+
+  it('allows rebuild when the pending open is stale', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: null,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'stale-pending-open',
+    });
+  });
+
+  it('allows forced replacement after stale probe even when the same-target socket is still open', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.OPEN,
+      pendingTransportOpen: false,
+      forceReplaceTransport: true,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'force-replace',
+    });
+  });
+
+  it('allows rebuild for closed or missing session transports', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CLOSED,
+      pendingTransportOpen: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'closed',
+    });
+
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: null,
+      pendingTransportOpen: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'missing-socket',
+    });
+  });
+
+  it('does not reuse a socket from another target', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: '127.0.0.1:3333:',
+      requestedTargetKey: '100.66.1.82:3333:',
+      wsReadyState: WebSocket.OPEN,
+      pendingTransportOpen: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'target-mismatch',
+    });
+  });
+
+  it('keeps manual-close truth from becoming an implicit reconnect', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CLOSED,
+      pendingTransportOpen: false,
+      manualClosed: true,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'skip',
+      reason: 'manual-closed',
+    });
   });
 });
 

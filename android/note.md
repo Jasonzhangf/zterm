@@ -1,3 +1,15 @@
+# 2026-07-07 WebSocket reuse planning audit
+
+- Jason 当前确认 `0.1.3.2026` 版本体感可用，下一步只梳理 WebSocket 复用，不先写代码；禁止再做 inactive/background 持续刷新方案。
+- 架构真源：`terminal.transport_lifecycle`，function map owner 是 `src/contexts/session-context-transport-runtime.ts` 及 daemon transport runtime；client freshness 唯一 owner 仍是 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`。App / TerminalPage / drawer / header 只能传 intent。
+- Decision 文档已明确 reconnect 顺序：same session transport still alive -> reuse same session transport；session transport dead but control alive -> rebuild same session transport；control dead -> reconnect control + reattach + rebuild session transport。禁止 `cleanup old socket -> fresh ws -> fresh connect -> pretend same session`。
+- 当前源码高风险重复重建点：`connectSessionRuntime()` 和 `reconnectSessionRuntime()` 都会无条件 `cleanupSocket(sessionId, false)` 并推进 open/reconnect；`openSessionTransportByIntentRuntime()` 也会在拿到 ticket 后 cleanup 再建 session socket。现有 `buildActiveSessionRefreshPlan()` 对 OPEN socket 会 request-head/probe，不直接 reconnect，但显式 reconnect/connect 入口缺少同 target OPEN/CONNECTING 复用 guard。
+- 计划方向：新增/收口一个纯 transport reuse plan helper，所有 connect/reconnect/open-intent 前先判定 same session + same target + OPEN/CONNECTING/pending open；OPEN 只 request head/保持 socket，不 cleanup；CONNECTING/fresh pending open 只等待，不重复 queue；target mismatch 或 CLOSED/CLOSING 才允许 rebuild。测试先覆盖正反，再实现。
+- 已实现：新增 `buildSessionTransportReusePlan()`，接入 `connectSessionRuntime()` / `reconnectSessionRuntime()` / `openSessionTransportByIntentRuntime()`。same-target OPEN 复用，CONNECTING/fresh pending open 等待，closed/missing/target mismatch/stale pending 才 rebuild；stale-probe timeout 用内部 `forceReplaceTransport` 显式替换 OPEN stale socket。open-intent 等待 CONNECTING 时不再清 `sessionTransportToken`，避免破坏 in-flight handshake。
+- 已补 map：`terminal.transport_lifecycle` 的 feature registry、function map、mainline call map 增加 SessionContext/session runtime/transport reuse planner 绑定，UI 仍只传 intent。
+- 已验证：L1/L3 6 files / 236 tests PASS；L4 open-tab/App/transport 12 files / 150 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS；`./android/scripts/build-android-debug.sh` PASS 并发布 APK `0.1.3.2027`，sha256 `41390810cf2c0753bf1dd2b2a7bfad3a87fcaa23913f136a2bf86732dc2b695f`。
+- daemon 状态：`http://127.0.0.1:3333/health` 返回 `ok:true`，PID `858`，但 `sessions.total/attached/ready=0`、`mirrors.subscribers=0`；若手机无刷新，当前证据指向客户端未挂 session/subscriber，不是 daemon 进程 dead。
+
 # 2026-07-04 Loop governance L1 initialization
 
 - 架构映射：新增 `feature_id=project.loop_governance`，属于 cross-block governance / prevention gate，不改 terminal runtime、daemon、UI 业务主链；唯一 owner 是 `android/docs/loops/**`、`android/docs/testing/loop-governance-test-design.md`、`android/src/lib/loop-governance-truth.test.ts` 和 registry/function map/gate 绑定。

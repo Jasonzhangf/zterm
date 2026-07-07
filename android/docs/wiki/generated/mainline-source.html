@@ -10,7 +10,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 .source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
 </style></head><body>
 <h1>Mainline Source Wiki</h1>
-<svg class="wiki-graph" viewBox="0 0 2050 754" role="img" aria-label="Mainline graph">
+<svg class="wiki-graph" viewBox="0 0 3370 754" role="img" aria-label="Mainline graph">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
@@ -21,14 +21,23 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 990 62 C 1025 62, 1025 62, 1060 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 1320 62 C 1355 62, 1355 62, 1390 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 1650 62 C 1685 62, 1685 62, 1720 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 62 C 2015 62, 2015 62, 2050 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 2310 62 C 2345 62, 2345 62, 2380 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 2640 62 C 2675 62, 2675 62, 2710 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 2310 62 C 2510 62, 2510 62, 2710 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 2970 62 C 3005 62, 3005 62, 3040 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 62 C 2015 62, 2015 152, 2050 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 2310 152 C 2345 152, 2345 152, 2380 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 2640 152 C 2840 152, 2840 62, 3040 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 1650 62 C 1685 62, 1685 152, 1720 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 152, 70 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 242, 70 242" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 332, 70 332" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 422, 70 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 62 C 1685 62, 1685 242, 1720 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 242 C 2004 242, 2004 152, 70 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 242 C 2004 242, 2004 242, 70 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 242 C 2004 242, 2004 332, 70 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 242 C 2004 242, 2004 422, 70 422" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 422 C 354 422, 354 332, 70 332" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 512, 70 512" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 512 C 1025 512, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 242 C 2004 242, 2004 512, 70 512" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 512 C 1025 512, 1025 242, 1720 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 152 C 354 152, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 602 C 354 602, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
   <g class="node" data-node-id="Native">
@@ -51,13 +60,41 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="1390" y="34" width="260" height="56" rx="12" />
   <text x="1406" y="68">src/App.tsx</text>
 </g>
-<g class="node" data-node-id="Connections">
+<g class="node" data-node-id="SessionContext">
   <rect x="1720" y="34" width="260" height="56" rx="12" />
-  <text x="1736" y="68">src/pages/ConnectionsPage.tsx</text>
+  <text x="1736" y="68">src/contexts/SessionContext.tsx</text>
+</g>
+<g class="node" data-node-id="SessionLifecycle">
+  <rect x="2050" y="34" width="260" height="56" rx="12" />
+  <text x="2066" y="68">src/contexts/session-context-session-orchestration-runtime.ts</text>
+</g>
+<g class="node" data-node-id="ActivityFreshness">
+  <rect x="2380" y="34" width="260" height="56" rx="12" />
+  <text x="2396" y="68">src/contexts/session-context-activity-runtime.ts</text>
+</g>
+<g class="node" data-node-id="SessionRuntime">
+  <rect x="2710" y="34" width="260" height="56" rx="12" />
+  <text x="2726" y="68">src/contexts/session-context-session-runtime.ts</text>
+</g>
+<g class="node" data-node-id="TransportReusePlan">
+  <rect x="3040" y="34" width="260" height="56" rx="12" />
+  <text x="3056" y="68">src/contexts/session-transport-open-helpers.ts</text>
+</g>
+<g class="node" data-node-id="TransportOrchestration">
+  <rect x="2050" y="124" width="260" height="56" rx="12" />
+  <text x="2066" y="158">src/contexts/session-context-transport-orchestration-runtime.ts</text>
+</g>
+<g class="node" data-node-id="TransportOpen">
+  <rect x="2380" y="124" width="260" height="56" rx="12" />
+  <text x="2396" y="158">src/contexts/session-context-transport-open-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Connections">
+  <rect x="1720" y="124" width="260" height="56" rx="12" />
+  <text x="1736" y="158">src/pages/ConnectionsPage.tsx</text>
 </g>
 <g class="node" data-node-id="TerminalPage">
-  <rect x="1720" y="124" width="260" height="56" rx="12" />
-  <text x="1736" y="158">src/pages/TerminalPage.tsx</text>
+  <rect x="1720" y="214" width="260" height="56" rx="12" />
+  <text x="1736" y="248">src/pages/TerminalPage.tsx</text>
 </g>
 <g class="node" data-node-id="TerminalView">
   <rect x="70" y="124" width="260" height="56" rx="12" />
@@ -93,6 +130,15 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   Capacitor --&gt; Vite[&quot;vite.config.ts&quot;]
   Vite --&gt; Main[&quot;src/main.tsx&quot;]
   Main --&gt; App[&quot;src/App.tsx&quot;]
+  App --&gt; SessionContext[&quot;src/contexts/SessionContext.tsx&quot;]
+  SessionContext --&gt; SessionLifecycle[&quot;src/contexts/session-context-session-orchestration-runtime.ts&quot;]
+  SessionLifecycle --&gt; ActivityFreshness[&quot;src/contexts/session-context-activity-runtime.ts&quot;]
+  ActivityFreshness --&gt; SessionRuntime[&quot;src/contexts/session-context-session-runtime.ts&quot;]
+  SessionLifecycle --&gt; SessionRuntime
+  SessionRuntime --&gt; TransportReusePlan[&quot;src/contexts/session-transport-open-helpers.ts&quot;]
+  SessionContext --&gt; TransportOrchestration[&quot;src/contexts/session-context-transport-orchestration-runtime.ts&quot;]
+  TransportOrchestration --&gt; TransportOpen[&quot;src/contexts/session-context-transport-open-runtime.ts&quot;]
+  TransportOpen --&gt; TransportReusePlan
   App --&gt; Connections[&quot;src/pages/ConnectionsPage.tsx&quot;]
   App --&gt; TerminalPage[&quot;src/pages/TerminalPage.tsx&quot;]
   TerminalPage --&gt; TerminalView[&quot;src/components/TerminalView.tsx&quot;]

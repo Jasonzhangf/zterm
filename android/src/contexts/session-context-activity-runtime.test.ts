@@ -537,4 +537,33 @@ describe('probeOrReconnectStaleSessionTransportRuntime', () => {
       expect.objectContaining({ sessionId: 'session-1' }),
     );
   });
+
+  it('force-replaces the stale socket after a probe times out', () => {
+    const reconnectSession = vi.fn();
+    const requestSessionBufferHead = vi.fn();
+    const resetSessionTransportPullBookkeeping = vi.fn();
+    const runtimeDebug = vi.fn();
+    const now = Date.now();
+
+    const result = probeOrReconnectStaleSessionTransportRuntime({
+      sessionId: 'session-1',
+      ws: createSocket(WebSocket.OPEN),
+      reason: 'active-reentry',
+      refs: {
+        lastServerActivityAtRef: { current: new Map([['session-1', now - 10_000]]) },
+        staleTransportProbeAtRef: { current: new Map([['session-1', now - 5_000]]) },
+        stateRef: { current: { activeSessionId: 'session-1' } },
+      },
+      runtimeDebug,
+      resetSessionTransportPullBookkeeping,
+      requestSessionBufferHead,
+      reconnectSession,
+      activeTransportProbeWaitMs: 1500,
+    });
+
+    expect(result).toBe('reconnecting');
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(resetSessionTransportPullBookkeeping).not.toHaveBeenCalled();
+    expect(reconnectSession).toHaveBeenCalledWith('session-1', { forceReplaceTransport: true });
+  });
 });

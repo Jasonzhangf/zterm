@@ -6,6 +6,7 @@ import {
   closeSessionRuntime,
   connectSessionRuntime,
   createSessionRuntime,
+  type ReconnectSessionRuntimeOptions,
   reconnectAllSessionsRuntime,
   reconnectSessionRuntime,
   renameSessionRuntime,
@@ -116,6 +117,10 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       cleanupSocket: options.cleanupSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,
       writeSessionTransportToken: options.writeSessionTransportToken,
+      readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTargetKey: options.readSessionTargetKey,
+      hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
+      isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       updateSessionSync: options.updateSessionSync,
       setScheduleStateForSession: options.setScheduleStateForSession,
       queueConnectTransportOpenIntent: options.queueConnectTransportOpenIntent,
@@ -187,9 +192,10 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
-  const reconnectSession = (sessionId: string) => {
+  const reconnectSession = (sessionId: string, reconnectOptions?: ReconnectSessionRuntimeOptions) => {
     reconnectSessionRuntime({
       sessionId,
+      reconnectOptions,
       refs: {
         stateRef: options.refs.stateRef,
         manualCloseRef: options.refs.manualCloseRef,
@@ -198,6 +204,9 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       readSessionTransportHost: options.readSessionTransportHost,
       readSessionTargetKey: options.readSessionTargetKey,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
+      readSessionTransportSocket: options.readSessionTransportSocket,
+      hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
+      isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       runtimeDebug: options.runtimeDebug,
       cleanupSocket: options.cleanupSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,

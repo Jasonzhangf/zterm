@@ -1,4 +1,5 @@
 import { getResolvedSessionName } from '../lib/connection-target';
+import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import type { Host, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type {
@@ -14,6 +15,7 @@ import {
   buildSessionReconnectingFailureUpdates,
   buildSessionScheduleErrorState,
   buildSessionScheduleLoadingState,
+  buildSessionTransportReusePlan,
   buildTransportOpenConnectedEffectPlan,
   buildTransportOpenLiveFailureEffectPlan,
   createPendingSessionTransportOpenIntent,
@@ -105,6 +107,8 @@ export function cleanupSocketRuntime(options: {
 export function openSessionTransportByIntentRuntime(options: {
   intent: PendingSessionTransportOpenIntent;
   readSessionTransportToken: (sessionId: string) => string | null;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTargetKey: (sessionId: string) => string | null;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
@@ -127,6 +131,28 @@ export function openSessionTransportByIntentRuntime(options: {
   const sessionTransportToken = options.readSessionTransportToken(sessionId);
   if (!sessionTransportToken) {
     finalizeFailure('missing session transport token', true);
+    return;
+  }
+
+  const currentSocket = options.readSessionTransportSocket(sessionId);
+  const reusePlan = buildSessionTransportReusePlan({
+    currentTargetKey: options.readSessionTargetKey(sessionId),
+    requestedTargetKey: buildTransportTargetKey(host),
+    wsReadyState: currentSocket?.readyState ?? null,
+    pendingTransportOpen: false,
+    source: 'open-intent',
+  });
+  options.runtimeDebug(`session.ws.${debugScope}.reuse-plan`, {
+    sessionId,
+    action: reusePlan.action,
+    reason: reusePlan.reason,
+  });
+  if (reusePlan.action === 'reuse-open' && currentSocket) {
+    options.writeSessionTransportToken(sessionId, null);
+    onConnected(currentSocket);
+    return;
+  }
+  if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {
     return;
   }
 

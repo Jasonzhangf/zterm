@@ -32,7 +32,7 @@ export function probeOrReconnectStaleSessionTransportRuntime(options: {
   runtimeDebug: RuntimeDebugFn;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  reconnectSession: (sessionId: string) => void;
+  reconnectSession: (sessionId: string, options?: { forceReplaceTransport?: boolean }) => void;
   activeTransportProbeWaitMs: number;
 }) {
   const lastActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
@@ -96,7 +96,7 @@ export function probeOrReconnectStaleSessionTransportRuntime(options: {
     lastProbeAt,
     probeAgeMs,
   });
-  options.reconnectSession(options.sessionId);
+  options.reconnectSession(options.sessionId, { forceReplaceTransport: true });
   return 'reconnecting' as const;
 }
 
@@ -135,7 +135,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
-  reconnectSession: (sessionId: string) => void;
+  reconnectSession: (sessionId: string, options?: { forceReplaceTransport?: boolean }) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
   const transportRuntime = options.readSessionTransportRuntime(options.refreshOptions.sessionId);
