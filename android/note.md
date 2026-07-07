@@ -9,6 +9,7 @@
 - 已补 map：`terminal.transport_lifecycle` 的 feature registry、function map、mainline call map 增加 SessionContext/session runtime/transport reuse planner 绑定，UI 仍只传 intent。
 - 已验证：L1/L3 6 files / 236 tests PASS；L4 open-tab/App/transport 12 files / 150 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS；`./android/scripts/build-android-debug.sh` PASS 并发布 APK `0.1.3.2027`，sha256 `41390810cf2c0753bf1dd2b2a7bfad3a87fcaa23913f136a2bf86732dc2b695f`。
 - daemon 状态：`http://127.0.0.1:3333/health` 返回 `ok:true`，PID `858`，但 `sessions.total/attached/ready=0`、`mirrors.subscribers=0`；若手机无刷新，当前证据指向客户端未挂 session/subscriber，不是 daemon 进程 dead。
+- 收口审计补充：`useOpenTabRuntime.test.tsx` 单跑暴露未 mock 的 remote audit / Capacitor lifecycle 触发真实 Undici WebSocket；该测试不属于 remote audit 语义，已 mock `remote-tab-audit`、`@capacitor/app` 和 no-op `WebSocket`，避免 L4 gate 依赖外部 socket。
 
 # 2026-07-04 Loop governance L1 initialization
 

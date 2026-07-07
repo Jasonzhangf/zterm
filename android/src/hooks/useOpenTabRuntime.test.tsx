@@ -1,9 +1,41 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOpenTabRuntime } from './useOpenTabRuntime';
 import { STORAGE_KEYS } from '../lib/types';
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    addListener: vi.fn(() => Promise.resolve({ remove: vi.fn() })),
+  },
+}));
+
+vi.mock('../lib/remote-tab-audit', () => ({
+  auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+}));
+
+class NoopWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  readyState = NoopWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(readonly url: string) {}
+
+  send() {}
+
+  close() {
+    this.readyState = NoopWebSocket.CLOSED;
+    this.onclose?.();
+  }
+}
 
 function buildSession(id: string, state: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'error' = 'connected') {
   return {
@@ -67,7 +99,12 @@ function seedOpenTabs() {
 describe('useOpenTabRuntime explicit resume gating', () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.stubGlobal('WebSocket', NoopWebSocket);
     seedOpenTabs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('does not double-resume a target that already has a connecting runtime shell', () => {
