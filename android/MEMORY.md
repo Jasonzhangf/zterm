@@ -683,22 +683,9 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - `TerminalPageStageShell` must derive group-center `active`, `onInput`, `onResize`, and `onWidthModeChange` from `interactiveSession`, never from `sessionGroupViewport.slots.center` alone.
 - Regression gates: `TerminalPage.session-drawer.test.tsx` must cover drawer selection not switching center before runtime active catches up; `TerminalPageStageShell.pane-stage.test.tsx` must cover group center not receiving input ownership before runtime active catches up; `TerminalPage.android-ime.test.tsx` keeps post-switch IME input routed to the new active session.
 
-## 2026-07-07 QuickBar image send UX truth
-
-- QuickBar image send remains `onImagePaste(sessionId, file)` as the only transfer owner; multi-select is a UI-shell batch projection, not a new session/runtime truth.
-- Android image picker may expose multiple images, but QuickBar must cap one batch to 9 images and send them sequentially.
-- Sending images must surface an explicit in-app progress overlay/toast; browser `alert` is not an acceptable user-facing wait/error path for this feature.
-
 ## 2026-07-07 Inactive session live buffer freshness
 
 - Long-lived WebSocket topology only works if inactive runtime sessions still accept daemon-pushed `buffer-head` and `buffer-sync`. Inactive means lower/no active polling cadence; it must not mean dropping upstream live mirror pushes.
 - Dropping daemon pushes for inactive sessions with an existing local window causes stale cached buffers on filter/session switch. The screen may show old rows until a later head/sync succeeds; if the refresh path is blocked, the UI appears frozen while input can still send through the transport.
 - Client owner rule: `isSessionTransportActive` continues to decide active/live pull cadence, but `shouldAcceptSessionLiveBufferRuntime` must accept daemon live buffer for any existing runtime session. Missing runtime session still rejects payload.
 - Regression gates: `session-context-infra-runtime.test.ts` must prove inactive runtime sessions with cached local windows accept daemon live buffer; context buffer/transport/socket gates must keep explicit false accept-policy drops covered.
-
-## 2026-07-07 Daemon mirror volatile TUI capture truth
-
-- Supersedes the earlier same-day “complete consecutive snapshot equality” reading: requiring full canonical body equality before publish freezes continuously refreshing TUI. `top`, prompt/input/status rows, and progress UIs can keep the same absolute anchor while changing content or cursor every capture attempt.
-- Correct daemon mirror publish gate is stable anchor, not stable body only. The writer may publish when current mirror already matches, when two full snapshots match, or when capped attempts prove the same `rows/cols/bufferStartIndex/line count/available count/visible top` anchor while body/cursor keep changing; publish the latest volatile frame in that case.
-- This is not a single-capture fallback: anchor drift, geometry/count drift, and `availableEndIndex` regression remain explicit failures. Tail monotonic truth stays locked by `terminal-mirror-capture.test.ts`, `terminal-buffer.test.ts`, and `daemon:mirror:close-loop`.
-- Black-box gate for this class must include continuously refreshing TUI (`top-live` / `vim-live`) and require tmux oracle, daemon mirror, and client replay to match while `buffer-sync` continues arriving. The symptom “input works but screen does not refresh” maps first to daemon mirror publish failures before blaming WebSocket topology.

@@ -1,19 +1,5 @@
 # 2026-07-04 Loop governance L1 initialization
 
-# 2026-07-07 Android image multi-select + upload feedback
-
-- Jason 新要求：图片选择从单张改为多选，最多 9 张；发送图片时必须给用户明确等待态，不能继续用无状态等待 + 浏览器 `alert` 这种错误展示方式。
-- 架构映射：本轮只改 `terminal.quickbar` owner `src/components/terminal/TerminalQuickBar.tsx`；不改 `SessionContext` / daemon / file-transfer truth。图片仍沿既有 `onImagePaste(sessionId, file)` 真源逐张顺序发送，QuickBar 只负责编排和 UI 进度投影。
-- 已实现：图片 input 打开多选；选中的图片只保留前 9 张并顺序发送；发送期间显示 fixed progress overlay（当前张数/总张数 + 文件名 + spinner）；失败改为 quickbar toast，不再弹浏览器 `alert`。
-- 已验证：`TerminalQuickBar.test.tsx` 新增多选上限和 progress feedback 回归；QuickBar/FileTransferSheet/transfer-runtime 定向 73 tests PASS；`tsc --noEmit` PASS；`test:feature-registry` PASS；`build-android-debug.sh` PASS，生成 `0.1.3.2022`。
-
-# 2026-07-07 Android daemon mirror volatile TUI refresh freeze
-
-- Jason 现场反馈：今天代码仍有“界面不刷新/卡死，但输入还能发”的问题，要求 review 昨天和今天差异。对比 `59a3120..61252f9` 后，根因锁定在 `12e2861 fix(android): keep mirror tail monotonic`。
-- 具体根因：`resolveStableMirrorCaptureSnapshot()` 把“发布条件”收紧为整屏 canonical snapshot 连续两次完全一致；`top`、输入框、进度条等 TUI 在同一个 absolute anchor 上持续改内容/光标，永远等不到内容完全一致，导致 `tmux capture remained unstable` 连续失败。`terminal-mirror-runtime.ts` 在 10 次失败后把 mirror 标成 `failed`，于是 daemon 不再发布 `buffer-sync`；输入路径仍可走 transport，所以表现为“能输入但画面不动”。
-- 修复：`terminal-mirror-capture.ts` 保留 tail monotonic 和 anchor truth，不回退到单次 capture。新的发布条件是：当前 mirror 已匹配、连续完整 snapshot 一致，或 capped attempts 内 `rows/cols/start/end/available/canonical counts` 等 absolute anchor/geometry 持续一致但内容持续变化，则发布最后一帧 `volatile-same-anchor`。anchor 漂移或 tail 回退仍显式失败。
-- 回归：正向测 `volatile-same-anchor` 发布最新 frame；反向测 anchor 连续变化仍抛 `tmux capture remained unstable`。`daemon:mirror:close-loop` 已通过 `top-live` / `vim-live` / input / restart 等真实 tmux replay，证明 tmux oracle、daemon buffer、client replay 一致。
-
 # 2026-07-07 Android foreground reconnect audit
 
 - Jason 现场反馈：重连慢，后台恢复前台几乎百分百卡死。本轮按 `terminal.transport_lifecycle` 审计，owner 是 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`，未改 App/page/daemon/buffer/render。

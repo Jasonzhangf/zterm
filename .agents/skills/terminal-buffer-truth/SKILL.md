@@ -157,7 +157,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - mirror 写侧也不得再拆第二语义：
   - 不允许 `history capture + visible capture + concat`
   - 只允许 **single-capture -> canonicalize -> mirror store**
-  - 若 tmux 正在中间刷新，writer 必须执行 **稳定锚点才发布**：已与当前 mirror 一致、连续两次 canonical snapshot 一致，或 capped attempts 内 absolute anchor / geometry 持续一致但内容持续变化的 volatile TUI frame，才允许写 mirror；anchor 漂移或 tail 回退必须显式报错
+  - 若 tmux 正在中间刷新，writer 必须执行 **连续一致才发布**：只有连续两次 canonical snapshot 一致，或已与当前 mirror 一致，才允许写 mirror；不稳定必须显式报错
   - 不允许基于 **内容 overlap / repeated text** 推断新的 absolute anchor
   - mirror absolute window 只能来自 tmux authoritative available window；内容相似性最多用于 debug，不得进入写侧真相
   - 同一 live mirror 的 `availableEndIndex/latestEndIndex` 必须单调；tmux `history_size + paneRows` 在 alternate screen / TUI 刷新时可能变小，writer 只能用当前 mirror end 作为 absolute tail 下界重新锚定稳定新帧，禁止发布 tail 回退
