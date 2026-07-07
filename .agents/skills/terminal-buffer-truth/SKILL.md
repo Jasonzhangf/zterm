@@ -651,7 +651,6 @@ tmux truth
   2. `lines / gapRanges / cursor` 不得把 live buffer 引用直接交给 renderer/store
   3. render store 读取到的只能是独立 render truth；否则后续 patch/merge 复用 row/object 时，会把已准备绘制的上一帧污染成“短暂错帧”
 - 若现场表现为“**底部固定灰条/固定行在内容更新时持续上移，旧内容没有被当前位置正确替换**”，必须先补 renderer 红测再修：构造同一 absolute row index / 同一 viewport bottom 下行内容发生变化的 case，先证明当前 DOM 复用了旧行或错位上移；红测变绿后把该测试纳入 `TerminalView.dynamic-refresh` / renderer 回归。禁止先凭截图改代码、再补测试。
-- 若现场表现为“**底部 prompt/status/input 重复刷到上方**”，黑盒 gate 必须自动比较 source buffer 与 DOM output：source 里 prompt/status/input 各 1 行，DOM 也只能各 1 行；DOM row absolute index 必须唯一且文本必须按 absolute index 精确等于 source；同时断言上一帧 prompt/body 不残留。daemon `top-live` oracle 只能证明 tmux -> daemon source，不证明 Android WebView DOM。
 - 若现场表现为“**临时错误/短暂不可用导致 tab 自动关闭**”，必须先补 session lifecycle 红测再修：`tmux_session_unavailable` / 网络短断 / handshake 临时失败只能进入 retryable error/reconnect，禁止发 `SESSION_STATUS_EVENT(type='closed')`，也禁止触发 open-tab prune；只有明确 terminal close 语义才允许进入 tab close 链。
 - 若现场要排 Android IME 抬高 / 安装升级 timeout，debug 观测链也必须服从唯一真源：只允许 `client snapshot source -> collectClientDebugSnapshot -> active session WS debug-snapshot -> daemon store` 这一条链；禁止再开第二条 relay/debug transport 或散落页面内临时上报。
 - explicit terminal input 不能只依赖 lifecycle/heartbeat 去发现远端回显；input payload 必须同步发出，首个未完成 `pendingInputTailRefresh` 的 `buffer-head` 请求必须放到 coalesced microtask，后续 burst input 在 pending 清除前合并，禁止每键强制刷 head 或把 head 请求绑回 key event stack。

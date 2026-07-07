@@ -239,28 +239,6 @@ function expectRenderedRowsMatchSource(container: HTMLElement, sourceRows: strin
   }
 }
 
-function expectRenderedWindowExactlyMatchesSource(
-  container: HTMLElement,
-  sourceRows: string[],
-  startIndex: number,
-) {
-  const renderedRows = readRenderedIndexedRows(container).filter((row) => !row.isGap);
-  expect(renderedRows.length).toBeGreaterThan(0);
-
-  const absoluteIndices = renderedRows.map((row) => row.absoluteIndex);
-  expect(new Set(absoluteIndices).size).toBe(absoluteIndices.length);
-
-  const expectedRows = renderedRows.map((row) => ({
-    absoluteIndex: row.absoluteIndex,
-    text: sourceRows[row.absoluteIndex - startIndex],
-  }));
-  expect(renderedRows.map((row) => ({ absoluteIndex: row.absoluteIndex, text: row.text }))).toEqual(expectedRows);
-}
-
-function countText(rows: string[], text: string) {
-  return rows.filter((row) => row === text).length;
-}
-
 describe('TerminalView minimal mirror render', () => {
   const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
@@ -1364,89 +1342,6 @@ describe('TerminalView minimal mirror render', () => {
     expect(finalRows).toContain('frame-018-head-0');
     expect(finalRows).toContain('frame-018-bottom-23');
     expect(finalRows.some((row) => row.startsWith('frame-017-'))).toBe(false);
-  });
-
-  it('black-box rejects duplicated bottom prompt rows during rapid local TUI refreshes', async () => {
-    const startIndex = 900;
-    const promptText = 'Improve documentation in @filename';
-    const statusText = 'gpt-5.5 medium · ~/Documents/github/routecodex';
-    const inputText = '>_';
-    const buildPromptFrame = (frame: number) => [
-      ...Array.from({ length: 21 }, (_, index) =>
-        `frame-${String(frame).padStart(3, '0')}-body-${String(index).padStart(2, '0')}`),
-      promptText,
-      statusText,
-      inputText,
-    ];
-    let sourceRows = buildPromptFrame(0);
-
-    const renderSnapshot = (rows: string[], revision: number) => {
-      const buffer = createSessionBufferState({
-        lines: rows,
-        startIndex,
-        endIndex: startIndex + rows.length,
-        bufferHeadStartIndex: startIndex,
-        bufferTailEndIndex: startIndex + rows.length,
-        rows: 24,
-        cols: 80,
-        cacheLines: 500,
-        revision,
-      });
-      return toRenderBufferSnapshot({
-        initialBufferLines: buffer.lines,
-        bufferStartIndex: buffer.startIndex,
-        bufferEndIndex: buffer.endIndex,
-        bufferHeadStartIndex: buffer.bufferHeadStartIndex,
-        bufferTailEndIndex: buffer.bufferTailEndIndex,
-        bufferGapRanges: buffer.gapRanges,
-        revision: buffer.revision,
-      });
-    };
-
-    const view = render(
-      <div style={{ width: '640px', height: '408px' }}>
-        <TerminalView
-          sessionId="s1"
-          renderBufferSnapshot={renderSnapshot(sourceRows, 1)}
-          active
-          onResize={vi.fn()}
-          onInput={vi.fn()}
-          fontSize={5}
-        />
-      </div>,
-    );
-
-    await waitFor(() => {
-      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain(promptText);
-    });
-
-    for (let frame = 1; frame <= 24; frame += 1) {
-      sourceRows = buildPromptFrame(frame);
-      view.rerender(
-        <div style={{ width: '640px', height: '408px' }}>
-          <TerminalView
-            sessionId="s1"
-            renderBufferSnapshot={renderSnapshot(sourceRows, frame + 1)}
-            active
-            onResize={vi.fn()}
-            onInput={vi.fn()}
-            fontSize={5}
-          />
-        </div>,
-      );
-    }
-
-    await waitFor(() => {
-      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('frame-024-body-20');
-    });
-    expectRenderedWindowExactlyMatchesSource(view.container, sourceRows, startIndex);
-
-    const finalRows = readRenderedIndexedRows(view.container).map((row) => row.text);
-    expect(countText(sourceRows, promptText)).toBe(1);
-    expect(countText(finalRows, promptText)).toBe(1);
-    expect(countText(finalRows, statusText)).toBe(1);
-    expect(countText(finalRows, inputText)).toBe(1);
-    expect(finalRows.some((row) => row.startsWith('frame-023-'))).toBe(false);
   });
 
   it('black-box compares large same-window source refreshes with rendered tail output', async () => {

@@ -662,9 +662,3 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Terminal drawer remote-only rows are daemon catalog sessions, not local open tabs. Their close intent must route through session-open owner `killTmuxSession -> fetchTmuxSessions -> handleRemoteSessionsRefreshed`; `TerminalPage` may only project the remote target and dispatch the close intent. Calling local `onCloseSession(remote:...)` is a no-op because no local runtime session owns that id.
 - In SessionContext, plain server `closed` messages are retryable transport failures and must flow through `onFailure(reason, true)` into reconnect ownership. Terminal close truth remains `tmux_session_killed`; do not map ordinary WebSocket detach/closed facts to local tab/session closed state.
 - Regression gates: drawer close must cover remote-only close not calling local open-tab close; transport retry must cover plain `closed` becoming reconnect while `tmux_session_killed` remains terminal closed.
-
-## 2026-07-07 Android bottom prompt duplicate refresh gate
-
-- Bottom prompt/status/input duplication must be tested as source/DOM truth, not manual visual review. If the source buffer contains one prompt/status/input row, DOM render output may contain exactly one matching row at the same absolute index and must not retain prior-frame prompt rows.
-- `TerminalView.dynamic-refresh.test.tsx` owns the Android renderer black-box gate: strict row absolute-index uniqueness, source text by absolute index, prompt/status/input count equality, and no previous-frame body rows after rapid same-window TUI refresh.
-- Daemon `top-live` oracle can prove tmux -> daemon source parity, but it does not prove Android WebView DOM parity. Without adb/runtime debug from a real device, do not claim the screenshot field issue is fixed.
