@@ -13,8 +13,6 @@
 - 具体根因：`resolveStableMirrorCaptureSnapshot()` 把“发布条件”收紧为整屏 canonical snapshot 连续两次完全一致；`top`、输入框、进度条等 TUI 在同一个 absolute anchor 上持续改内容/光标，永远等不到内容完全一致，导致 `tmux capture remained unstable` 连续失败。`terminal-mirror-runtime.ts` 在 10 次失败后把 mirror 标成 `failed`，于是 daemon 不再发布 `buffer-sync`；输入路径仍可走 transport，所以表现为“能输入但画面不动”。
 - 修复：`terminal-mirror-capture.ts` 保留 tail monotonic 和 anchor truth，不回退到单次 capture。新的发布条件是：当前 mirror 已匹配、连续完整 snapshot 一致，或 capped attempts 内 `rows/cols/start/end/available/canonical counts` 等 absolute anchor/geometry 持续一致但内容持续变化，则发布最后一帧 `volatile-same-anchor`。anchor 漂移或 tail 回退仍显式失败。
 - 回归：正向测 `volatile-same-anchor` 发布最新 frame；反向测 anchor 连续变化仍抛 `tmux capture remained unstable`。`daemon:mirror:close-loop` 已通过 `top-live` / `vim-live` / input / restart 等真实 tmux replay，证明 tmux oracle、daemon buffer、client replay 一致。
-- Jason 纠正：真实问题是不切 session 时持续刷新页面刷着刷着死，短窗口 `top-live` 或切换测试不能证明偶发长跑。补 `tui-soak` 黑盒 gate：同一 session 持续清屏刷新，采样 frame number 必须持续递增，最长无 `buffer-sync` 不得超过阈值，退出后再做严格 tmux/client replay 对齐。60 秒手动 soak 已 PASS（60 samples / 0 failed，最后 oracleFrame=731 daemonFrame=730）。
-- 补 Android renderer gate：同一个 `TerminalView` 不卸载不切 session，连续吃 render store 60 帧，DOM 必须持续推进到最新 frame。`TerminalView.dynamic-refresh.test.tsx` PASS（65 tests）。
 
 # 2026-07-07 Android foreground reconnect audit
 

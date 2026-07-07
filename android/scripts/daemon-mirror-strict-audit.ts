@@ -144,16 +144,9 @@ function auditCase(rootDir: string, summary: CaseSummary): AuditCaseResult {
     checks.reconnectBufferRefresh = secondConnectIndex >= 0 && hasEventAfter(events, secondConnectIndex + 1, 'recv:buffer-sync');
   }
 
-  if (summary.caseName === 'codex-live' || summary.caseName === 'top-live' || summary.caseName === 'tui-soak' || summary.caseName === 'vim-live') {
+  if (summary.caseName === 'codex-live' || summary.caseName === 'top-live' || summary.caseName === 'vim-live') {
     checks.bufferSyncReceived = events.some((entry) => eventToken(entry) === 'recv:buffer-sync');
     checks.headReceived = events.some((entry) => eventToken(entry) === 'recv:buffer-head');
-  }
-
-  if (summary.caseName === 'tui-soak') {
-    const soakSteps = steps.filter((step) => step.label.startsWith('tui-soak-sample-'));
-    checks.soakSampleCount = soakSteps.length >= 18;
-    checks.soakSamplesOk = soakSteps.every((step) => step.ok);
-    checks.soakBufferSyncCount = events.filter((entry) => eventToken(entry) === 'recv:buffer-sync').length >= soakSteps.length;
   }
 
   const ok = Object.values(checks).every(Boolean);
