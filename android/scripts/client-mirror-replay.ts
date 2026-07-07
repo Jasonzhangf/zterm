@@ -21,6 +21,11 @@ interface ReplayStepResult {
     paneCols: number;
     lines: string[];
   };
+  compare?: {
+    ok: boolean;
+    expected: string[];
+    actual: string[];
+  };
 }
 
 function deriveRenderRows(options: {
@@ -131,6 +136,16 @@ function replay(caseDir: string) {
   }
 
   const stepChecks = stepResults.map((step) => {
+    if (step.label.startsWith('tui-soak-sample-') && step.compare) {
+      return {
+        label: step.label,
+        ok: step.compare.ok,
+        mismatchIndex: step.compare.ok ? null : 0,
+        historyLength: step.historyLength,
+        expected: step.compare.expected,
+        actual: step.compare.actual,
+      };
+    }
     const stepRows = step.oracle?.paneRows || paneRows;
     const stepCols = step.oracle?.paneCols || paneCols;
     const stepExpected = step.oracle?.lines || [];

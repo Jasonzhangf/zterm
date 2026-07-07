@@ -22,6 +22,7 @@ const MANAGED_DAEMON_TEST_PORT = process.env.ZTERM_TEST_DAEMON_PORT?.trim() || '
 type CaseName =
   | 'codex-live'
   | 'top-live'
+  | 'tui-soak'
   | 'vim-live'
   | 'initial-sync'
   | 'local-input-echo'
@@ -594,6 +595,36 @@ function replayClientMirrorCompare(
   history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
 ): CompareResult {
   return replayHistoryMirrorCompare(oracle, history);
+}
+
+function renderHistoryTailLines(
+  history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>,
+  rows: number,
+  cols: number,
+) {
+  const buffer = replayBufferSyncHistory({
+    history,
+    rows,
+    cols,
+    cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+  });
+  const renderWindow = deriveRenderRows({
+    lines: buffer.lines,
+    startIndex: buffer.startIndex,
+    viewportEndIndex: buffer.bufferTailEndIndex,
+    viewportRows: rows,
+  });
+  return renderWindow.rows.map((entry) => cellsToLine(entry.row));
+}
+
+function extractSoakFrame(lines: string[]) {
+  for (const line of lines) {
+    const match = line.match(/ZTERM_SOAK_FRAME_(\d+)/u);
+    if (match) {
+      return Number.parseInt(match[1]!, 10);
+    }
+  }
+  return null;
 }
 
 function buildStepResult(
@@ -1467,6 +1498,169 @@ async function runTopLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator
   }
 }
 
+function resolveSoakConfig() {
+  return {
+    samples: Math.max(3, Number.parseInt(process.env.ZTERM_MIRROR_SOAK_SAMPLES || '18', 10) || 18),
+    sampleIntervalMs: Math.max(250, Number.parseInt(process.env.ZTERM_MIRROR_SOAK_INTERVAL_MS || '1000', 10) || 1000),
+    perSampleTimeoutMs: Math.max(1000, Number.parseInt(process.env.ZTERM_MIRROR_SOAK_TIMEOUT_MS || '3000', 10) || 3000),
+  };
+}
+
+async function waitForNextBufferSync(
+  probe: DaemonProbe,
+  fromHistoryLength: number,
+  timeoutMs: number,
+) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    if (probe.history.length > fromHistoryLength) {
+      return probe.history[probe.history.length - 1]?.payload || probe.payload;
+    }
+    await probe.waitForPayload('tui-soak polling payload', undefined, 250).catch(() => null);
+    if (probe.history.length > fromHistoryLength) {
+      return probe.history[probe.history.length - 1]?.payload || probe.payload;
+    }
+    await sleep(80);
+  }
+  throw new Error(`no new buffer-sync for ${timeoutMs}ms during same-session TUI soak`);
+}
+
+function buildSoakSampleStep(options: {
+  label: string;
+  oracle: OracleSnapshot;
+  daemonPayload: TerminalBufferPayload | null;
+  history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>;
+  previousFrame: number | null;
+  maxFrameLag: number;
+}) {
+  const actual = renderHistoryTailLines(
+    options.history,
+    options.oracle.paneRows,
+    options.oracle.paneCols,
+  );
+  const expectedFrame = extractSoakFrame(options.oracle.lines);
+  const actualFrame = extractSoakFrame(actual);
+  const frameAdvanced = actualFrame !== null && (
+    options.previousFrame === null || actualFrame > options.previousFrame
+  );
+  const lagOk = (
+    expectedFrame !== null
+    && actualFrame !== null
+    && expectedFrame >= actualFrame
+    && expectedFrame - actualFrame <= options.maxFrameLag
+  );
+  const ok = frameAdvanced && lagOk;
+  return {
+    label: options.label,
+    ok,
+    reason: ok
+      ? undefined
+      : `same-session TUI soak stalled or lagged: expectedFrame=${expectedFrame ?? 'n/a'} actualFrame=${actualFrame ?? 'n/a'} previousFrame=${options.previousFrame ?? 'n/a'}`,
+    oracle: options.oracle,
+    daemonPayload: options.daemonPayload,
+    compare: {
+      ok,
+      mismatchIndex: ok ? null : 0,
+      expected: [`oracleFrame=${expectedFrame ?? 'n/a'}`],
+      actual: [`daemonFrame=${actualFrame ?? 'n/a'}`, `previousFrame=${options.previousFrame ?? 'n/a'}`],
+    },
+    clientMirrorCompare: {
+      ok,
+      mismatchIndex: ok ? null : 0,
+      expected: [`oracleFrame=${expectedFrame ?? 'n/a'}`],
+      actual: [`daemonFrame=${actualFrame ?? 'n/a'}`, `previousFrame=${options.previousFrame ?? 'n/a'}`],
+    },
+    historyLength: options.history.length,
+  } satisfies CaseStepResult;
+}
+
+async function runTuiSoakCase(probe: DaemonProbe, operator: AttachedTmuxOperator): Promise<CaseResult> {
+  const steps: CaseStepResult[] = [];
+  const config = resolveSoakConfig();
+  const maxFrameLag = Math.max(2, Math.ceil(config.perSampleTimeoutMs / 80));
+  try {
+    await operator.attach();
+    await sleep(250);
+
+    operator.write(
+      "i=0; while :; do printf '\\033[H\\033[2JZTERM_SOAK_FRAME_%06d\\n' \"$i\"; seq 1 22 | sed \"s/^/soak-row-/\"; i=$((i+1)); sleep 0.08; done\r",
+    );
+    await probe.waitForMarker('ZTERM_SOAK_FRAME_', WAIT_TIMEOUT_MS);
+    let lastHistoryLength = probe.history.length;
+    let lastObservedFrame: number | null = extractSoakFrame(renderHistoryTailLines(
+      probe.history,
+      LAB_ROWS,
+      LAB_COLS,
+    ));
+
+    for (let sampleIndex = 1; sampleIndex <= config.samples; sampleIndex += 1) {
+      await sleep(config.sampleIntervalMs);
+      const nextPayload = await waitForNextBufferSync(
+        probe,
+        lastHistoryLength,
+        config.perSampleTimeoutMs,
+      );
+      lastHistoryLength = probe.history.length;
+      const oracle = await waitForOracle(
+        `tui-soak sample ${sampleIndex} visible frame`,
+        (snapshot) => snapshot.lines.some((line) => line.includes('ZTERM_SOAK_FRAME_')),
+        config.perSampleTimeoutMs,
+      );
+      steps.push(
+        buildSoakSampleStep({
+          label: `tui-soak-sample-${String(sampleIndex).padStart(2, '0')}`,
+          oracle,
+          daemonPayload: nextPayload,
+          history: probe.history,
+          previousFrame: lastObservedFrame,
+          maxFrameLag,
+        }),
+      );
+      lastObservedFrame = extractSoakFrame(renderHistoryTailLines(
+        probe.history,
+        oracle.paneRows,
+        oracle.paneCols,
+      ));
+      if (!steps[steps.length - 1]?.ok) {
+        operator.write('\u0003');
+        return finalizeCase('tui-soak', steps);
+      }
+    }
+
+    operator.write('\u0003');
+    await waitForOracle('tui-soak shell return', (oracle) => !oracle.alternateOn && oracle.paneCommand === 'zsh');
+    operator.write("printf '__tui_soak_exit_ok__\\n'\r");
+    const exitPayload = await probe.waitForMarker('__tui_soak_exit_ok__');
+    const exitOracle = await waitForOracle(
+      'tui-soak exit marker',
+      (oracle) => !oracle.alternateOn && oracle.lines.some((line) => line.includes('__tui_soak_exit_ok__')),
+    );
+    steps.push(
+      buildStepResult(
+        'tui-soak-exit-shell-return',
+        exitOracle,
+        exitPayload,
+        probe.history,
+        'daemon did not return to shell truth after same-session TUI soak',
+      ),
+    );
+
+    return finalizeCase('tui-soak', steps);
+  } catch (error) {
+    operator.write('\u0003');
+    steps.push(
+      buildStepResult(
+        'tui-soak-runtime',
+        captureOracleSnapshot(),
+        probe.payload,
+        probe.history,
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
+    return finalizeCase('tui-soak', steps);
+  }
+}
+
 async function runCodexLiveCase(probe: DaemonProbe, operator: AttachedTmuxOperator): Promise<CaseResult> {
   const steps: CaseStepResult[] = [];
   try {
@@ -1814,6 +2008,9 @@ async function runCase(caseName: CaseName, daemonController: LabDaemonController
       case 'top-live':
         result = await runTopLiveCase(probe, operator);
         break;
+      case 'tui-soak':
+        result = await runTuiSoakCase(probe, operator);
+        break;
       case 'vim-live':
         result = await runVimLiveCase(probe, operator);
         break;
@@ -1855,7 +2052,7 @@ async function main() {
   const caseArg = process.argv.find((arg) => arg.startsWith('--case='))?.split('=', 2)[1] || 'all';
   const managedDaemon = process.argv.includes('--managed-daemon');
   const requestedCases: CaseName[] = caseArg === 'all'
-    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire']
+    ? ['codex-live', 'top-live', 'tui-soak', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire']
     : [caseArg as CaseName];
 
   const daemonController = managedDaemon ? new LabDaemonController() : null;
@@ -1866,7 +2063,7 @@ async function main() {
     }
 
     for (const caseName of requestedCases) {
-      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire'].includes(caseName)) {
+      if (!['codex-live', 'top-live', 'tui-soak', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire'].includes(caseName)) {
         throw new Error(`unsupported case: ${caseName}`);
       }
       const result = await runCase(caseName, daemonController);

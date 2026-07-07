@@ -539,6 +539,92 @@ describe('TerminalView minimal mirror render', () => {
     });
   });
 
+  it('keeps a single active TerminalView painting continuous same-session TUI frames without remounting', async () => {
+    const renderStore = createSessionRenderBufferStore();
+    const initialRows = buildTuiFrameRows(0, 24);
+    const initialBuffer = createSessionBufferState({
+      lines: initialRows,
+      startIndex: 0,
+      endIndex: 24,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 24,
+      rows: 24,
+      cols: 80,
+      cacheLines: 500,
+      revision: 1,
+    });
+    renderStore.setBuffer('s1', toRenderBufferSnapshot({
+      initialBufferLines: initialBuffer.lines,
+      bufferStartIndex: 0,
+      bufferEndIndex: 24,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 24,
+      bufferGapRanges: [],
+      revision: 1,
+    }));
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId="s1"
+          sessionBufferStore={renderStore}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedRows(view.container)).toContain('frame-000-head-0');
+    });
+
+    for (let frame = 1; frame <= 60; frame += 1) {
+      const sourceRows = buildTuiFrameRows(frame, 24);
+      const startIndex = frame * 24;
+      const buffer = createSessionBufferState({
+        lines: sourceRows,
+        startIndex,
+        endIndex: startIndex + sourceRows.length,
+        bufferHeadStartIndex: startIndex,
+        bufferTailEndIndex: startIndex + sourceRows.length,
+        rows: 24,
+        cols: 80,
+        cacheLines: 500,
+        revision: frame + 1,
+      });
+      await act(async () => {
+        renderStore.setBuffer('s1', toRenderBufferSnapshot({
+          initialBufferLines: buffer.lines,
+          bufferStartIndex: buffer.startIndex,
+          bufferEndIndex: buffer.endIndex,
+          bufferHeadStartIndex: buffer.bufferHeadStartIndex,
+          bufferTailEndIndex: buffer.bufferTailEndIndex,
+          bufferGapRanges: buffer.gapRanges,
+          revision: frame + 1,
+        }));
+      });
+
+      if (frame % 20 === 0) {
+        await waitFor(() => {
+          const rows = readRenderedRows(view.container);
+          expect(rows).toContain(`frame-${String(frame).padStart(3, '0')}-head-0`);
+          expect(rows).not.toContain(`frame-${String(frame - 20).padStart(3, '0')}-head-0`);
+        });
+      }
+    }
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('frame-060-head-0');
+      expect(rows).toContain('frame-060-bottom-23');
+      expect(rows).not.toContain('frame-000-head-0');
+      expect(rows).not.toContain('frame-020-head-0');
+    });
+    expectRenderedWindowExactlyMatchesSource(view.container, buildTuiFrameRows(60, 24), 60 * 24);
+  }, 15000);
+
   it('does not rebind dom input listeners when live buffer updates only change cursor key mode', async () => {
     const addEventListenerSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'addEventListener');
     const removeEventListenerSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'removeEventListener');
