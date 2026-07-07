@@ -139,4 +139,36 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     expect(resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
     expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
   });
+
+  it('keeps persisted active tab truth on explicit switch even when runtime active session has not caught up yet', () => {
+    const switchSession = vi.fn();
+
+    const { result } = renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'explicit-resume',
+      sessions: [buildSession('s1', 'connected'), buildSession('s2', 'connecting')],
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's2'),
+      closeSession: vi.fn(),
+      switchSession,
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => false),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState: vi.fn(),
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    act(() => {
+      result.current.handleSwitchSession('s2');
+    });
+
+    expect(result.current.openTabState.activeSessionId).toBe('s2');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+  });
 });

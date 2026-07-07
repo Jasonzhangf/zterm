@@ -139,4 +139,98 @@ describe('useOpenTabRestoreRuntimeSync cold restore transport truth', () => {
       expect.objectContaining({ switchRuntime: 'restore-sync', markExplicitTruth: true }),
     );
   });
+
+  it('re-materializes missing persisted tabs from OPEN_TABS even when another runtime session already exists', async () => {
+    const applyOpenTabState = vi.fn((nextState, options) => ({
+      tabs: nextState.tabs,
+      activeSessionId: nextState.activeSessionId ?? options?.preserveActiveSessionId ?? null,
+    }));
+    const createSession = vi.fn((host, options) => {
+      expect(host).toEqual(expect.objectContaining({
+        id: 'host-2',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab_2',
+      }));
+      expect(options).toEqual(expect.objectContaining({
+        activate: false,
+        connect: false,
+        sessionId: 'session-2',
+      }));
+      return 'session-2';
+    });
+    const pendingMaterializedOpenTabSessionIdsRef = createRef(new Set<string>());
+
+    renderHook(() => useOpenTabRestoreRuntimeSync({
+      bridgeSettings: { servers: [], targetHost: '127.0.0.1', targetPort: 3333, targetAuthToken: '' } as any,
+      hosts: [
+        {
+          id: 'host-1',
+          bridgeHost: '127.0.0.1',
+          bridgePort: 3333,
+          sessionName: 'zterm_mirror_lab',
+          createdAt: 1,
+        },
+        {
+          id: 'host-2',
+          bridgeHost: '127.0.0.1',
+          bridgePort: 3333,
+          sessionName: 'zterm_mirror_lab_2',
+          createdAt: 2,
+        },
+      ] as any,
+      hostsLoaded: true,
+      runtimeActiveSessionId: 'session-1',
+      createSession,
+      runtimeSessionStructure: [{
+        id: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'local-test-1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'zterm_mirror_lab',
+        authToken: undefined,
+        autoCommand: undefined,
+        customName: undefined,
+        createdAt: 1,
+      }],
+      openTabStateRef: createRef({
+        tabs: [
+          {
+            sessionId: 'session-1',
+            hostId: 'host-1',
+            connectionName: 'local-test-1',
+            bridgeHost: '127.0.0.1',
+            bridgePort: 3333,
+            sessionName: 'zterm_mirror_lab',
+            createdAt: 1,
+          },
+          {
+            sessionId: 'session-2',
+            hostId: 'host-2',
+            connectionName: 'local-test-2',
+            bridgeHost: '127.0.0.1',
+            bridgePort: 3333,
+            sessionName: 'zterm_mirror_lab_2',
+            createdAt: 2,
+          },
+        ],
+        activeSessionId: 'session-2',
+      }),
+      restoredTabsHandledRef: createRef(true),
+      hasPersistedOpenTabsTruthRef: createRef(true),
+      closedOpenTabSessionIdsRef: createRef(new Set<string>()),
+      closedOpenTabReuseKeysRef: createRef(new Set<string>()),
+      pendingMaterializedOpenTabSessionIdsRef,
+      restoreSwitchReason: 'explicit-resume',
+      applyOpenTabState,
+    }));
+
+    await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    expect(pendingMaterializedOpenTabSessionIdsRef.current.has('session-2')).toBe(true);
+    expect(applyOpenTabState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ activeSessionId: 'session-2' }),
+      expect.objectContaining({ switchRuntime: 'explicit-resume', markExplicitTruth: true }),
+    );
+  });
 });

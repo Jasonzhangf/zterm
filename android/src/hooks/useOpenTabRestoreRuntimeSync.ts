@@ -87,6 +87,59 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
     let cancelled = false;
 
     const run = async () => {
+      const restoreMissingRuntimeTabs = (
+        tabsToMaterialize: PersistedOpenTab[],
+        nextTabs: PersistedOpenTab[],
+        activeSessionId: string | null,
+        markExplicitTruth: boolean,
+      ) => {
+        const restoredSessionIdByOriginalId = new Map<string, string>();
+        for (const tab of tabsToMaterialize) {
+          const createdSessionId = createSession(
+            resolveHostForPersistedOpenTab({
+              tab,
+              hosts,
+            }),
+            buildOpenTabSessionCreateOptions('cold-restore', {
+              customName: tab.customName,
+              createdAt: tab.createdAt,
+              sessionId: tab.sessionId,
+            }),
+          );
+          const restoredSessionId =
+            typeof createdSessionId === 'string' && createdSessionId.trim().length > 0
+              ? createdSessionId
+              : tab.sessionId;
+          pendingMaterializedOpenTabSessionIdsRef.current.add(restoredSessionId);
+          restoredSessionIdByOriginalId.set(tab.sessionId, restoredSessionId);
+        }
+
+        const restoredRuntimeState = normalizeOpenTabIntentState(
+          nextTabs.map((tab) => {
+            const restoredSessionId = restoredSessionIdByOriginalId.get(tab.sessionId);
+            if (!restoredSessionId || restoredSessionId === tab.sessionId) {
+              return tab;
+            }
+            return {
+              ...tab,
+              sessionId: restoredSessionId,
+            };
+          }),
+          restoredSessionIdByOriginalId.get(activeSessionId || '') || activeSessionId,
+        );
+        applyOpenTabState(
+          restoredRuntimeState,
+          restoredRuntimeState.activeSessionId
+            ? {
+                switchRuntime: restoreSwitchReason,
+                markExplicitTruth,
+              }
+            : {
+                markExplicitTruth,
+              },
+        );
+      };
+
       let currentOpenTabState = openTabStateRef.current;
       let initialRemoteRestoreApplied = false;
       if (!restoredTabsHandledRef.current && currentOpenTabState.tabs.length > 0) {
@@ -112,6 +165,11 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
       }
 
       if (runtimeSessionStructure.length > 0) {
+        const runtimeSessionIds = new Set(runtimeSessionStructure.map((session) => session.id));
+        const missingActiveRuntimeTab = currentOpenTabState.tabs.find((tab) => (
+          tab.sessionId === currentOpenTabState.activeSessionId
+          && !runtimeSessionIds.has(tab.sessionId)
+        )) || null;
         const runtimeSyncDecision = deriveRuntimeOpenTabSyncDecision({
           currentState: currentOpenTabState,
           runtimeSessions: runtimeSessionStructure,
@@ -159,6 +217,16 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
           }, {
             switchRuntime: restoreSwitchReason,
           });
+          return;
+        }
+
+        if (missingActiveRuntimeTab) {
+          restoreMissingRuntimeTabs(
+            [missingActiveRuntimeTab],
+            currentOpenTabState.tabs,
+            currentOpenTabState.activeSessionId,
+            hasPersistedOpenTabsTruthRef.current,
+          );
         }
         return;
       }
@@ -197,48 +265,11 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
         return;
       }
 
-      const restoredRuntimeTabs: PersistedOpenTab[] = [];
-      for (const tab of remoteRestoreState.tabs) {
-        const createdSessionId = createSession(
-          resolveHostForPersistedOpenTab({
-            tab,
-            hosts,
-          }),
-          buildOpenTabSessionCreateOptions('cold-restore', {
-            customName: tab.customName,
-            createdAt: tab.createdAt,
-            sessionId: tab.sessionId,
-          }),
-        );
-        const restoredSessionId =
-          typeof createdSessionId === 'string' && createdSessionId.trim().length > 0
-            ? createdSessionId
-            : tab.sessionId;
-        pendingMaterializedOpenTabSessionIdsRef.current.add(restoredSessionId);
-        restoredRuntimeTabs.push(
-          restoredSessionId === tab.sessionId
-            ? tab
-            : {
-                ...tab,
-                sessionId: restoredSessionId,
-              },
-        );
-      }
-
-      const restoredRuntimeState = normalizeOpenTabIntentState(
-        restoredRuntimeTabs,
+      restoreMissingRuntimeTabs(
+        remoteRestoreState.tabs,
+        remoteRestoreState.tabs,
         remoteRestoreState.activeSessionId,
-      );
-      applyOpenTabState(
-        restoredRuntimeState,
-        restoredRuntimeState.activeSessionId
-          ? {
-              switchRuntime: restoreSwitchReason,
-              markExplicitTruth: restorePlan.tabs.length > 0,
-            }
-          : {
-              markExplicitTruth: restorePlan.tabs.length > 0,
-            },
+        restorePlan.tabs.length > 0,
       );
       return;
     };

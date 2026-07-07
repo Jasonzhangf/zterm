@@ -1,5 +1,17 @@
 # 2026-07-04 Loop governance L1 initialization
 
+# 2026-07-07 Android foreground reconnect audit
+
+- Jason 现场反馈：重连慢，后台恢复前台几乎百分百卡死。本轮按 `terminal.transport_lifecycle` 审计，owner 是 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`，未改 App/page/daemon/buffer/render。
+- 根因锁定：`staleReconnectInFlight` 只识别 `reconnectRuntime.connecting`，漏掉 `reconnectRuntime.timer !== null` 的 queued reconnect。后台/弱网后若处于 `sessionState=reconnecting + ws=null + reconnect timer + no fresh pending open intent`，foreground `active-resume` 会被粗粒度 `reconnectInFlight=true` 挡住，等指数退避，现场表现为前台恢复卡死很久。
+- 修复：foreground/explicit refresh 把 `connecting || timer !== null` 且 `ws !== OPEN` 且无 fresh pending open intent 识别为 stale reconnect bookkeeping，允许立即走唯一 owner 的 `reconnectSession()`；fresh pending transport-open 仍保持阻塞，避免重复建连。
+- 验证：`session-sync-helpers.test.ts` 增加 queued reconnect timer 正向红测和 fresh pending open 反向红测；`session-context-activity-runtime.test.ts` 增加 runtime 层 active-resume 正反。已跑 focused reconnect/input/session/ws tests、feature registry、tsc、diff check 全绿。
+
+- Jason 新现场：切 session 很容易死，重进后回到默认 session 而不是上一次目标 session。继续按 `terminal.open_tabs + terminal.transport_lifecycle` 审计。
+- 第二根因锁定：`useOpenTabRestoreRuntimeSync` 在“已有部分 runtime session”时只做 runtime sync/switch，不会把 `OPEN_TABS` 中缺失的 persisted tab 重新 materialize 成 local runtime shell。于是切换卡死后如果 runtime 只剩旧 default session，重进 restore 会偏向现存 runtime/default session，而不是 persisted `ACTIVE_SESSION`。
+- 修复：restore owner 新增“只补缺失 runtime tabs”的 cold-restore 分支。已有 runtime session 时，先保留 `OPEN_TABS + ACTIVE_SESSION` 作为显式真源，只对缺失 tab 调 `createSession(connect:false)` 补 local runtime shell，然后仍按 persisted active tab 做 `switchRuntime`；禁止把已有 runtime/default session 回写成新的 active truth。
+- 验证：`useOpenTabRestoreRuntimeSync.test.tsx` 新增“已有 default runtime 但缺 persisted target”回归；`useOpenTabRuntime.test.tsx` 新增“runtime active 未跟上时 persisted ACTIVE_SESSION 仍保持目标 tab”回归；`App.first-paint.test.tsx` 既有 persisted-active restore 用例保持通过。全链 focused tests + ws-refresh + feature registry + tsc + diff check 全绿。
+
 - 架构映射：新增 `feature_id=project.loop_governance`，属于 cross-block governance / prevention gate，不改 terminal runtime、daemon、UI 业务主链；唯一 owner 是 `android/docs/loops/**`、`android/docs/testing/loop-governance-test-design.md`、`android/src/lib/loop-governance-truth.test.ts` 和 registry/function map/gate 绑定。
 - 初始化结果：`zterm.daily-triage` 只启用 `L1 report-only`，允许 read/report/append run log，显式禁止 product code edits、daemon start/stop、stage/commit、push/merge。L2/L3 未启用，升级需 Jason 明确批准、maker/checker、run history、唯一 owner 和 required gates。
 - Mainline call ID：`docs/wiki/mainline-call-map.json` 每条 edge 增加 deterministic `edge_id=<lifecycle_id>:<from>-><to>`；loop manifest 的 `mainline_call_ids` 必须反查真实 edge，禁止编造调用边。
@@ -1546,3 +1558,10 @@ Need runtime debug to confirm:
 - 根因：session group viewport/center slot 在 `onSwitchSession` 推进 runtime active 前先更新，`TerminalStageShell` 又把 group center 固定当 active 渲染，导致 stage 投影先切到新 session，但输入/transport/render active truth 仍可能是旧 session。
 - 修复方向：drawer select / center slot assign / peek activation 只记录 pending session-group activation；等 `uiSessionId` 确认等于目标 session 后，才更新 slot replacement/focus。`TerminalStageShell` group center 的 `active/onInput/onResize/onWidthModeChange` 只由 `interactiveSession` 判定，不由 center projection 判定。
 - 已验证：`pnpm --dir android exec vitest run src/pages/TerminalPage.session-drawer.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx src/pages/TerminalPage.android-ime.test.tsx --reporter dot` PASS（71 tests）。
+
+## 2026-07-07 inactive session live buffer freshness
+
+- 现场问题：切换筛选/session 后会看到明显旧 buffer；有时 UI 不继续刷新但输入还能发。架构判断属于 `terminal.transport_lifecycle` + `terminal.buffer_render` 边界，不是 daemon owning client state 的问题。
+- 根因方向：client 已有 target control transport 与 per-session transport store，但 inactive session 的 daemon `buffer-head` / `buffer-sync` 推送在本地会被丢弃；因此长期 WebSocket 还活着也无法保持本地缓存最新，切回来只能先显示旧窗口。
+- 修复：`shouldAcceptSessionLiveBufferRuntime` 改为对已存在 runtime session 接受 daemon live buffer；active/live 仍只控制主动 head/range cadence，不再把“非 active”解释成“丢弃上游推送”。
+- 验证中：已通过 context buffer/transport/socket/infra owner gate；待跑 session switch/lifecycle、feature registry、tsc、APK build。

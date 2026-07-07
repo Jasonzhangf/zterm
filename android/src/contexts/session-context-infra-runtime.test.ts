@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session } from '../lib/types';
 import { initialSessionManagerState, reduceSessionAction, type SessionAction, type SessionManagerState } from './session-context-core';
-import { applySessionActionRuntime, isSessionTransportActiveRuntime } from './session-context-infra-runtime';
+import {
+  applySessionActionRuntime,
+  isSessionTransportActiveRuntime,
+  shouldAcceptSessionLiveBufferRuntime,
+} from './session-context-infra-runtime';
 
 function buildSession(id: string): Session {
   return {
@@ -99,5 +103,32 @@ describe('applySessionActionRuntime', () => {
     expect(isSessionTransportActiveRuntime({ sessionId: 's2', stateRef })).toBe(true);
     expect(isSessionTransportActiveRuntime({ sessionId: 's1', stateRef })).toBe(true);
     expect(isSessionTransportActiveRuntime({ sessionId: 'missing', stateRef })).toBe(false);
+  });
+
+  it('accepts daemon live buffer for inactive runtime sessions so cached tabs stay fresh', () => {
+    const state: SessionManagerState = {
+      ...initialSessionManagerState,
+      sessions: [buildSession('s1'), buildSession('s2')],
+      activeSessionId: 's1',
+      liveSessionIds: ['s1'],
+      liveSessionIdsExplicit: true,
+    };
+    const stateRef = { current: state };
+
+    expect(shouldAcceptSessionLiveBufferRuntime({
+      sessionId: 's2',
+      stateRef,
+      readSessionBufferSnapshot: () => createSessionBufferState({
+        lines: ['cached-old-line'],
+        startIndex: 10,
+        endIndex: 11,
+        bufferHeadStartIndex: 10,
+        bufferTailEndIndex: 11,
+        cols: 80,
+        rows: 24,
+        cacheLines: 1000,
+        revision: 3,
+      }),
+    })).toBe(true);
   });
 });
