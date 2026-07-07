@@ -493,11 +493,7 @@ const TerminalStageShell = ReactMemo(
                   backgroundColor: mobileTheme.colors.canvas,
                 }}
               >
-                {renderTerminal(
-                  sessionGroup.center,
-                  sessionGroup.center.id === interactiveSession?.id,
-                  `group-center:${sessionGroup.center.id}`,
-                )}
+                {renderTerminal(sessionGroup.center, true, `group-center:${sessionGroup.center.id}`)}
               </div>
               {renderSessionGroupPeek(sessionGroup.bottom, "bottom", sessionGroup.visible.bottom)}
             </div>
