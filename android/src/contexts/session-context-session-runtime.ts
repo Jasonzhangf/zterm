@@ -12,6 +12,7 @@ import {
   buildSessionScheduleLoadingState,
   buildSessionTransportPrimeState,
   buildSessionTransportReusePlan,
+  buildSessionTransportWaitUpdates,
 } from './session-transport-open-helpers';
 import {
   findReusableManagedSession,
@@ -431,6 +432,16 @@ export function reconnectSessionRuntime(options: {
     return;
   }
   if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {
+    if (reusePlan.action === 'wait-existing-open') {
+      options.updateSessionSync(
+        options.sessionId,
+        buildSessionTransportWaitUpdates(
+          reusePlan.reason === 'pending-open'
+            ? 'Waiting for existing websocket open'
+            : 'Waiting for existing websocket handshake',
+        ),
+      );
+    }
     return;
   }
 

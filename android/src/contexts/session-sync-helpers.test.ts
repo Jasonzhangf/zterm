@@ -240,7 +240,37 @@ describe('session sync helper refresh planner', () => {
       allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-reentry',
-    })).toEqual({ action: 'reconnect' });
+    })).toEqual({ action: 'reconnect', forceReplaceTransport: true });
+  });
+
+  it('keeps active tick from force-replacing a fresh pending transport open', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: true,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
+  });
+
+  it('force-replaces an over-budget active-resume pending transport open', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: true,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-resume',
+    })).toEqual({ action: 'reconnect', forceReplaceTransport: true });
   });
 
   it('does not let stale reconnect bookkeeping block explicit foreground resume', () => {

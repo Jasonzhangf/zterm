@@ -669,3 +669,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - OPEN same-target transport means reuse; CONNECTING or fresh pending open means wait and do not queue a duplicate open; closed/missing/target mismatch/stale pending means rebuild. Stale-probe timeout is the explicit owner for forced replacement of an OPEN-but-unresponsive transport via internal `forceReplaceTransport`.
 - `openSessionTransportByIntentRuntime()` must not clear `sessionTransportToken` while waiting for an existing CONNECTING same-target socket, because that token belongs to the in-flight handshake.
 - Regression gates: `session-sync-helpers.test.ts`, `session-context-session-runtime.test.ts`, `session-context-activity-runtime.test.ts`, and `SessionContext.ws-refresh.test.tsx` must cover positive reuse and negative rebuild. APK `0.1.3.2027` was built after these gates with sha256 `41390810cf2c0753bf1dd2b2a7bfad3a87fcaa23913f136a2bf86732dc2b695f`; real Android device behavior still requires installed-device validation before claiming L5 closure.
+
+## 2026-07-07 Active resume pending-open wait budget
+
+- 若现场表现为“当前进程切 session/恢复前台长时间等，杀掉重启马上连上”，优先判定旧 `CONNECTING` socket 或 pending open intent 卡住了客户端 transport owner；不要先把问题下沉到 daemon。
+- active resume / active reentry / explicit resume 只允许短等 pending open（当前 1200ms）；超过预算必须在 `ensureActiveSessionFreshRuntime -> reconnectSession(..., { forceReplaceTransport:true })` 强制替换旧 in-flight transport。普通首连和 active tick 不走短预算抢占，避免重复开 socket。
+- UI 状态必须来自 SessionContext 真实状态：pending open 未超过预算且处于 reconnect runtime 时写 `state=reconnecting` + `lastError=Waiting for existing websocket open`；健康首连 `connecting` 不得被改成 reconnecting。
+- Regression gates: `session-sync-helpers.test.ts` 锁 planner 正/反向；`session-context-activity-runtime.test.ts` 锁短预算和状态投影；`session-context-session-runtime.test.ts` 锁 reconnect wait 状态；`SessionContext.ws-refresh.test.tsx` 锁健康 connecting/open 复用不被污染。APK `0.1.3.2028` 已构建，sha256 `0982c5a38b7e7db95ae4961fd3c8219b4a1f5bc5aaa4feb8c0aed3a49250e397`；仍需真机安装验证 L5。

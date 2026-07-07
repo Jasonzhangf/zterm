@@ -1551,3 +1551,23 @@ Need runtime debug to confirm:
 - 架构映射：属于 File Sync UI projection / `FileTransferSheet` 交互 owner；daemon file list/download 真源不变。
 - 修复：复选框改成独立 button，点击时 `stopPropagation()` 并只切换 selection；文件名/行点击仍保留 markdown 预览或目录进入。远程/本地列表都统一该选择入口。
 - 已验证：`pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx --reporter dot` PASS（15 tests）；`test:feature-registry` PASS（31 tests）；`tsc --noEmit` PASS；`git diff --check` PASS。
+
+## 2026-07-07 session switch websocket slow reconnect analysis
+
+- 现场问题：切换 session 后断掉的链接长时间不恢复，UI toast 显示 `ws connect timeout`。本轮只做分析，未改代码。
+- daemon health 证据：本机 `127.0.0.1:3333/health` 正常，PID `858`，sessions `2/2 ready`，mirrors `4/4 ready`，不是 daemon dead。
+- 当前 Android client 真实语义：`explicit-resume -> switchSession -> ensureActiveSessionFresh -> reconnectSession/open intent`。`buildSessionTransportReusePlan()` 只复用同 session、同 target、`readyState=OPEN` 的 session socket；`CONNECTING` 或 fresh pending open 会 `wait-existing-open`，不会抢占重建，也没有一个全局 daemon WebSocket 在多个 session 间复用。
+- 慢点链路：pending open stale 阈值 5s；control/session handshake timeout 4s；TraversalSocket 单个 WS candidate timeout 1.8s，失败后内部可继续 candidate/reconnect；reconnect bucket 后续指数退避最高 30s。截图里的 `ws connect timeout` 更像 TraversalSocket/control/session open 链路超时，而非 daemon mirror 死。
+- 高风险根因候选：
+  1. session 切换命中同 target 的 `CONNECTING` / pending open 时，复用策略选择等待，导致 UI 卡在旧 open 超时窗口。
+  2. control socket 是 target-level，但 session socket 仍是 per-session；现实现并未实现“daemon 启动时一个长期全局 WebSocket，session 切换只复用同一物理连接”。
+  3. `online` 事件在 App lifecycle 直接调用 `reconnectSession(activeSessionId)`，随后又走 foreground/audit；这条路径可能与唯一 `active-resume` owner 重叠，应后续收口到同一个 transport owner。
+- 下一步若修复：先补 runtime debug/测试，锁 `explicit-resume` 对 fresh pending/CONNECTING/closed/stale connecting 的决策；再决定是否把 target-level long-lived transport 做成唯一 owner，移除重复 reconnect 入口。
+
+## 2026-07-07 active resume pending websocket wait budget
+
+- 架构映射：本轮属于 `terminal.transport_lifecycle`；唯一 owner 是 `SessionContext -> ensureActiveSessionFreshRuntime / buildActiveSessionRefreshPlan / reconnectSessionRuntime`，不改 daemon、renderer、TerminalView，也不实现全局唯一 WebSocket。
+- 修复：active resume / active reentry / explicit resume 对 pending open 使用 1200ms 短等待预算；超过预算后走 `reconnectSession(sessionId, { forceReplaceTransport: true })`，避免旧 CONNECTING/pending open 长时间挡住恢复。active tick 与普通首连仍不抢占，防止重复开 socket。
+- 状态投影：pending open 未超过预算且处于 reconnect runtime 时，SessionContext 写入 `state=reconnecting` 与 `lastError=Waiting for existing websocket open`，现有 TerminalPage banner 会显示真实等待状态；健康首连 `connecting` 不被改成 reconnecting。
+- 已验证：transport planner/runtime L1 96 tests PASS；SessionContext ws refresh + transport runtime 135 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS。
+- 当前缺口：尚未完成标准 debug APK 构建与 Jason 真机安装验证；仍不能宣称 L5 现场闭环。

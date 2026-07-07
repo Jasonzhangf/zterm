@@ -27,7 +27,7 @@ export type ActiveSessionRefreshPlan =
   | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' }
   | { action: 'probe-stale-transport'; probeReason: 'active-tick' | 'active-reentry' | 'explicit-resume' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
-  | { action: 'reconnect' };
+  | { action: 'reconnect'; forceReplaceTransport?: boolean };
 
 export type SessionTransportOpenDebugScope = 'connect' | 'reconnect';
 export type SessionTransportOpenFailureStage = 'handshake' | 'live';
@@ -342,6 +342,15 @@ export function buildSessionReconnectAttemptProgressUpdates(
   };
 }
 
+export function buildSessionTransportWaitUpdates(
+  message: string,
+): Pick<Session, 'state' | 'lastError'> {
+  return {
+    state: 'reconnecting',
+    lastError: message,
+  };
+}
+
 export function buildSessionConnectingLabelUpdates(
   sessionName: string,
 ): Pick<Session, 'state' | 'sessionName'> {
@@ -515,6 +524,15 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
 
   if (hasBlockingPendingTransportOpen) {
     return { action: 'skip', reason: 'transport-open-pending' };
+  }
+
+  if (
+    options.pendingTransportOpen
+    && options.pendingTransportOpenStale
+    && options.source !== 'active-tick'
+    && options.allowReconnectIfUnavailable
+  ) {
+    return { action: 'reconnect', forceReplaceTransport: true };
   }
 
   if (

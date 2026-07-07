@@ -101,7 +101,7 @@ interface SessionLifecycleRuntimeOptions {
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
-  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string, staleAfterMs?: number) => boolean;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
 }
 
@@ -274,6 +274,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       isSessionTransportActivityStale: options.isSessionTransportActivityStale,
       runtimeDebug: options.runtimeDebug,
+      updateSessionSync: options.updateSessionSync,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       probeOrReconnectStaleSessionTransport,
       resetSessionTransportPullBookkeeping: options.resetSessionTransportPullBookkeeping,

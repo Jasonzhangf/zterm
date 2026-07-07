@@ -196,10 +196,11 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
-  const isPendingSessionTransportOpenStale = (sessionId: string) => {
+  const isPendingSessionTransportOpenStale = (sessionId: string, staleAfterMs?: number) => {
     return isPendingSessionTransportOpenStaleRuntime({
       sessionId,
       pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
+      staleAfterMs,
     });
   };
 

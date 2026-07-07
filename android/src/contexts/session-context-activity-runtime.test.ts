@@ -502,6 +502,112 @@ describe('session-context-activity-runtime', () => {
 
     expect(refs.pendingResumeTailRefreshRef.current.has('session-2')).toBe(true);
   });
+
+  it('shows waiting state while active resume is still inside the pending open budget', () => {
+    const reconnectSession = vi.fn();
+    const updateSessionSync = vi.fn();
+    const isPendingSessionTransportOpenStale = vi.fn(() => false);
+
+    const refreshed = ensureActiveSessionFreshRuntime({
+      refreshOptions: {
+        sessionId: 'session-2',
+        source: 'active-resume',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [buildSession('session-2', 'connecting')],
+            activeSessionId: 'session-2',
+            liveSessionIds: ['session-2'],
+          },
+        },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        lastActiveReentryAtRef: { current: new Map<string, number>() },
+        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+        connectedBaselineBurstGuardRef: { current: new Set<string>() },
+        lastServerActivityAtRef: { current: new Map<string, number>() },
+        lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map([['session-2', { connecting: true, timer: null }]]) },
+      },
+      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
+      readSessionTransportSocket: () => createSocket(WebSocket.CONNECTING),
+      isReconnectInFlight: () => true,
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale,
+      isSessionTransportActivityStale: () => false,
+      runtimeDebug: vi.fn(),
+      updateSessionSync,
+      readSessionBufferSnapshot: () => ({ revision: 0, startIndex: 0, endIndex: 0 }),
+      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
+      resetSessionTransportPullBookkeeping: vi.fn(),
+      requestSessionBufferHead: vi.fn(() => true),
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      reconnectSession,
+    });
+
+    expect(refreshed).toBe(false);
+    expect(isPendingSessionTransportOpenStale).toHaveBeenCalledWith('session-2', 1200);
+    expect(updateSessionSync).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({
+        state: 'reconnecting',
+        lastError: 'Waiting for existing websocket open',
+      }),
+    );
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('force-replaces an active resume pending open after the active wait budget', () => {
+    const reconnectSession = vi.fn();
+    const isPendingSessionTransportOpenStale = vi.fn(() => true);
+
+    const refreshed = ensureActiveSessionFreshRuntime({
+      refreshOptions: {
+        sessionId: 'session-2',
+        source: 'active-resume',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [buildSession('session-2', 'connecting')],
+            activeSessionId: 'session-2',
+            liveSessionIds: ['session-2'],
+          },
+        },
+        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        lastActiveReentryAtRef: { current: new Map<string, number>() },
+        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+        connectedBaselineBurstGuardRef: { current: new Set<string>() },
+        lastServerActivityAtRef: { current: new Map<string, number>() },
+        lastHeadRequestAtRef: { current: new Map<string, number>() },
+        reconnectRuntimesRef: { current: new Map([['session-2', { connecting: true, timer: null }]]) },
+      },
+      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
+      readSessionTransportSocket: () => createSocket(WebSocket.CONNECTING),
+      isReconnectInFlight: () => true,
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale,
+      isSessionTransportActivityStale: () => false,
+      runtimeDebug: vi.fn(),
+      updateSessionSync: vi.fn(),
+      readSessionBufferSnapshot: () => ({ revision: 0, startIndex: 0, endIndex: 0 }),
+      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
+      resetSessionTransportPullBookkeeping: vi.fn(),
+      requestSessionBufferHead: vi.fn(() => true),
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      reconnectSession,
+    });
+
+    expect(refreshed).toBe(true);
+    expect(isPendingSessionTransportOpenStale).toHaveBeenCalledWith('session-2', 1200);
+    expect(reconnectSession).toHaveBeenCalledWith('session-2', { forceReplaceTransport: true });
+  });
 });
 
 describe('probeOrReconnectStaleSessionTransportRuntime', () => {

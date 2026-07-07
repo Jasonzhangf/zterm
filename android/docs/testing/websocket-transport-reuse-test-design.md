@@ -40,6 +40,7 @@ Positive reuse:
 - Same target + `WebSocket.OPEN` + connect source returns `reuse-open`.
 - Same target + `WebSocket.OPEN` + reconnect source returns `reuse-open`.
 - Same target + `WebSocket.CONNECTING` + fresh pending open returns `wait-existing-open`.
+- Explicit/foreground active resume with an over-budget pending open returns `reconnect` with `forceReplaceTransport`.
 
 Positive rebuild:
 - Same target + `WebSocket.CLOSED` returns `rebuild-closed`.
@@ -51,6 +52,8 @@ Positive rebuild:
 Negative:
 - Manual close returns `skip-manual-closed` and must not queue reconnect.
 - Stale `session.state` labels such as `reconnecting` must not force rebuild when socket truth is `OPEN`.
+- Fresh initial connect pending open still waits and does not create a duplicate socket.
+- Active tick still skips blocking pending opens; only explicit resume / active resume / active reentry may force-replace after the short active wait budget.
 
 ## L1 Runtime Cases
 
@@ -62,6 +65,8 @@ Negative:
 `reconnectSessionRuntime()`:
 - Given same target and `OPEN` socket, it must not call `cleanupSocket` or `scheduleReconnect`.
 - Given same target and `CONNECTING` plus fresh pending open, it must not call `cleanupSocket` or `scheduleReconnect`.
+- Given same target and `CONNECTING` plus fresh pending open, it must update visible session state to `reconnecting` with a waiting message.
+- Given active resume marks a pending open as stale under the active wait budget, `ensureActiveSessionFreshRuntime()` must call `reconnectSession(sessionId, { forceReplaceTransport: true })`.
 - Given closed/missing socket, it still schedules immediate reconnect.
 - Given manual close, it must skip reconnect.
 

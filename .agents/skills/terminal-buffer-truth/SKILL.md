@@ -610,6 +610,7 @@ tmux truth
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
 - foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
+- foreground resume / tab re-entry 时，若 active session 仍卡在同一 `CONNECTING` socket 或 pending open intent，不能沿用通用 5s+ handshake 等待。active resume / active reentry / explicit resume 只能短等（当前 1200ms），超过预算由 SessionContext transport owner force-replace；普通首连和 active tick 不得用这条短预算抢占，避免重复开 socket。UI 状态必须来自 SessionContext 的真实 `state/lastError`，不能在页面层伪造等待提示。
 - 任何 `buffer-head-request` / `buffer-sync-request` 若允许调用方显式传 `ws`，都必须先校验：**该 ws 仍是当前 session 的 active transport socket**；旧 superseded socket 只能被物理关闭或忽略，绝不能继续拿来发 head/range 请求污染当前 transport 真相。
 - transport 生命周期门禁不只覆盖 `onopen/onmessage/onerror/onclose`；凡是“旧 ws 回调里继续触发 request/head/probe”的路径，也必须有同样的 active-socket gate，否则 stale transport 仍会在写侧继续推进错误状态。
 - 若 tmux capture / mirror canonicalize 链路可能收到 extended-color ANSI（`38:2::r:g:b` / `48:2::r:g:b` / `38:5:n` / `48:5:n`）的 colon 语法，进入 parser 前必须先规范化到当前唯一支持的 semicolon 语法；否则颜色会退回 default sentinel，现场表现就是红/绿背景丢失或发灰。

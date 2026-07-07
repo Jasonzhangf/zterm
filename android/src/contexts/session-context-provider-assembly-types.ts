@@ -48,7 +48,7 @@ export interface SessionProviderCoreAssembliesResult {
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
-  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string, staleAfterMs?: number) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   resolveSessionCacheLines: (rows?: number | null) => number;
   scheduleSessionRenderCommit: (sessionId: string) => void;

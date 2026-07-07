@@ -1,6 +1,7 @@
 import type { Session } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import {
+  buildSessionTransportWaitUpdates,
   buildActiveSessionRefreshPlan,
 } from './session-transport-open-helpers';
 
@@ -19,6 +20,8 @@ interface SessionTransportRuntimeLike {
 interface SessionTargetRuntimeLike {
   sessionIds: string[];
 }
+
+export const ACTIVE_SESSION_PENDING_OPEN_STALE_MS = 1200;
 
 export function probeOrReconnectStaleSessionTransportRuntime(options: {
   sessionId: string;
@@ -123,9 +126,10 @@ export function ensureActiveSessionFreshRuntime(options: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
-  isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  isPendingSessionTransportOpenStale: (sessionId: string, staleAfterMs?: number) => boolean;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
+  updateSessionSync?: (id: string, updates: Partial<Session>) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number; startIndex: number; endIndex: number };
   probeOrReconnectStaleSessionTransport: (
     sessionId: string,
@@ -151,8 +155,18 @@ export function ensureActiveSessionFreshRuntime(options: {
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
+  const activePendingOpenStaleAfterMs = (
+    options.refreshOptions.source === 'active-resume'
+    || options.refreshOptions.source === 'active-reentry'
+    || options.refreshOptions.source === 'explicit-resume'
+  )
+    ? ACTIVE_SESSION_PENDING_OPEN_STALE_MS
+    : undefined;
   const pendingTransportOpenStale = pendingTransportOpen
-    ? options.isPendingSessionTransportOpenStale(options.refreshOptions.sessionId)
+    ? options.isPendingSessionTransportOpenStale(
+        options.refreshOptions.sessionId,
+        activePendingOpenStaleAfterMs,
+      )
     : false;
   const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.refreshOptions.sessionId) || null;
   const staleReconnectInFlight = Boolean(
@@ -177,6 +191,15 @@ export function ensureActiveSessionFreshRuntime(options: {
   });
 
   if (refreshPlan.action === 'skip') {
+    if (
+      refreshPlan.reason === 'transport-open-pending'
+      && (sessionState === 'reconnecting' || reconnectInFlight)
+    ) {
+      options.updateSessionSync?.(
+        options.refreshOptions.sessionId,
+        buildSessionTransportWaitUpdates('Waiting for existing websocket open'),
+      );
+    }
     options.runtimeDebug(`session.transport.${options.refreshOptions.source}.skip`, {
       sessionId: options.refreshOptions.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -192,6 +215,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
       pendingTransportOpenStale,
+      activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
       staleReconnectInFlight,
       reason: refreshPlan.reason,
     });
@@ -213,6 +237,9 @@ export function ensureActiveSessionFreshRuntime(options: {
     localEndIndex: localBuffer.endIndex ?? null,
     transportStale,
     staleReconnectInFlight,
+    pendingTransportOpen,
+    pendingTransportOpenStale,
+    activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
     plan: refreshPlan.action,
@@ -290,7 +317,11 @@ export function ensureActiveSessionFreshRuntime(options: {
   }
 
   if (refreshPlan.action === 'reconnect') {
-    options.reconnectSession(options.refreshOptions.sessionId);
+    if (refreshPlan.forceReplaceTransport) {
+      options.reconnectSession(options.refreshOptions.sessionId, { forceReplaceTransport: true });
+    } else {
+      options.reconnectSession(options.refreshOptions.sessionId);
+    }
     return true;
   }
 
