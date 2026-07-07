@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { mobileTheme } from "../../lib/mobile-ui";
@@ -118,12 +118,6 @@ interface TerminalQuickBarProps {
   onShortcutUse?: (shortcutId: string) => void;
 }
 
-interface ImageUploadBatchState {
-  total: number;
-  completed: number;
-  activeFileName: string;
-}
-
 function TerminalQuickBarComponent({
   activeSessionId,
   quickActions,
@@ -207,8 +201,6 @@ function TerminalQuickBarComponent({
     null,
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [imageUploadBatch, setImageUploadBatch] =
-    useState<ImageUploadBatchState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const doubleTapRef = useRef<{ id: string; timer: number } | null>(null);
   const suppressKeyboardClickRef = useRef(false);
@@ -771,62 +763,6 @@ function TerminalQuickBarComponent({
       void Keyboard.hide().catch(() => {});
     }
   }, [keyboardVisible]);
-
-  const handleImageInputChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const selectedFiles = Array.from(event.target.files || []);
-      event.currentTarget.value = "";
-      if (selectedFiles.length === 0) {
-        return;
-      }
-      const imageFiles = selectedFiles.filter((file) =>
-        (file.type || "").startsWith("image/"),
-      );
-      if (imageFiles.length === 0) {
-        showToast("未选择可发送的图片");
-        return;
-      }
-      const targetSessionId = activeSessionId || null;
-      if (!targetSessionId) {
-        showToast("当前没有可用的目标 session");
-        return;
-      }
-      const uploadFiles = imageFiles.slice(0, 9);
-      if (imageFiles.length > 9) {
-        showToast("一次最多发送 9 张图片");
-      }
-      setImageUploadBatch({
-        total: uploadFiles.length,
-        completed: 0,
-        activeFileName: uploadFiles[0]?.name || "",
-      });
-      try {
-        for (let index = 0; index < uploadFiles.length; index += 1) {
-          const file = uploadFiles[index]!;
-          setImageUploadBatch({
-            total: uploadFiles.length,
-            completed: index,
-            activeFileName: file.name,
-          });
-          await onImagePaste?.(targetSessionId, file);
-        }
-        setImageUploadBatch(null);
-        showToast(
-          uploadFiles.length === 1
-            ? "图片已发送"
-            : `已发送 ${uploadFiles.length} 张图片`,
-        );
-      } catch (error) {
-        setImageUploadBatch(null);
-        showToast(
-          error instanceof Error
-            ? `图片发送失败：${error.message}`
-            : "图片发送失败",
-        );
-      }
-    },
-    [activeSessionId, onImagePaste, showToast],
-  );
 
   const handleFilePickerButtonClick = useCallback(() => {
     const input = fileInputRef.current;
@@ -1789,7 +1725,6 @@ function TerminalQuickBarComponent({
         ref={imageInputRef}
         type="file"
         accept="image/*"
-        multiple
         tabIndex={-1}
         aria-hidden="true"
         style={{
@@ -1805,7 +1740,23 @@ function TerminalQuickBarComponent({
           opacity: 0,
           pointerEvents: "none",
         }}
-        onChange={handleImageInputChange}
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          event.currentTarget.value = "";
+          if (!file) {
+            return;
+          }
+          const targetSessionId = activeSessionId || null;
+          if (!targetSessionId) {
+            alert("当前没有可用的目标 session");
+            return;
+          }
+          try {
+            await onImagePaste?.(targetSessionId, file);
+          } catch (error) {
+            alert(error instanceof Error ? error.message : "传图片失败");
+          }
+        }}
       />
       <input
         ref={fileInputRef}
@@ -3751,70 +3702,6 @@ function TerminalQuickBarComponent({
           {toastMessage}
         </div>
       )}
-      {imageUploadBatch ? (
-        <div
-          data-testid="terminal-quickbar-image-upload-progress"
-          style={{
-            position: "fixed",
-            left: "50%",
-            bottom: `calc(${FLOATING_BUBBLE_MARGIN + FLOATING_BUBBLE_SIZE + 20}px + env(safe-area-inset-bottom, 0px))`,
-            transform: "translateX(-50%)",
-            zIndex: 205,
-            minWidth: "220px",
-            maxWidth: "min(86vw, 320px)",
-            padding: "12px 14px",
-            borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.1)",
-            background:
-              "linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(10, 14, 24, 0.96))",
-            color: "#fff",
-            boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
-            pointerEvents: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-          }}
-        >
-          <div
-            aria-hidden="true"
-            style={{
-              width: "18px",
-              height: "18px",
-              borderRadius: "999px",
-              border: "2px solid rgba(255,255,255,0.22)",
-              borderTopColor: mobileTheme.colors.accent,
-              animation: "terminal-quickbar-spin 0.9s linear infinite",
-              flexShrink: 0,
-            }}
-          />
-          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div
-              style={{
-                fontSize: "13px",
-                fontWeight: 800,
-                color: "#f4f8ff",
-                whiteSpace: "nowrap",
-              }}
-            >
-              发送图片 {Math.min(imageUploadBatch.completed + 1, imageUploadBatch.total)}/{imageUploadBatch.total}
-            </div>
-            <div
-              style={{
-                fontSize: "12px",
-                color: "rgba(220,232,255,0.78)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {imageUploadBatch.activeFileName}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <style>
-        {`@keyframes terminal-quickbar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
-      </style>
     </div>
   );
 }

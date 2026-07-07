@@ -705,7 +705,6 @@ describe("TerminalQuickBar", () => {
     const fileInput = inputs.find((input) => input.accept !== "image/*");
     expect(imageInput).toBeTruthy();
     expect(fileInput).toBeTruthy();
-    expect(imageInput?.multiple).toBe(true);
     const imageInputClickSpy = vi.spyOn(imageInput!, "click");
     const fileInputClickSpy = vi.spyOn(fileInput!, "click");
 
@@ -741,58 +740,6 @@ describe("TerminalQuickBar", () => {
     expect(onImagePaste.mock.calls[0][1].name).toBe("photo.png");
     expect(onFileAttach).toHaveBeenCalledWith("session-1", expect.any(File));
     expect(onFileAttach.mock.calls[0][1].name).toBe("archive.zip");
-  });
-
-  it("uploads multiple images sequentially, caps the batch at 9, and shows progress feedback", async () => {
-    const onImagePaste = vi.fn<
-      [string, File],
-      Promise<void>
-    >(async () => {
-      await Promise.resolve();
-    });
-    renderQuickBar({ onImagePaste });
-
-    const imageInput = Array.from(
-      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
-    ).find((input) => input.accept === "image/*");
-    expect(imageInput).toBeTruthy();
-
-    const files = Array.from({ length: 10 }, (_, index) =>
-      new File([`image-${index}`], `photo-${index + 1}.png`, {
-        type: "image/png",
-      }),
-    );
-
-    await act(async () => {
-      fireEvent.change(imageInput!, {
-        target: {
-          files,
-        },
-      });
-      await Promise.resolve();
-    });
-
-    await waitFor(() => {
-      expect(onImagePaste).toHaveBeenCalledTimes(9);
-    });
-
-    expect(onImagePaste).toHaveBeenCalledTimes(9);
-    const uploadedNames = onImagePaste.mock.calls.map(
-      (call) => (call[1] as File | undefined)?.name,
-    );
-    expect(uploadedNames).toEqual([
-      "photo-1.png",
-      "photo-2.png",
-      "photo-3.png",
-      "photo-4.png",
-      "photo-5.png",
-      "photo-6.png",
-      "photo-7.png",
-      "photo-8.png",
-      "photo-9.png",
-    ]);
-    expect(screen.queryByTestId("terminal-quickbar-image-upload-progress")).toBeNull();
-    expect(screen.getByText("已发送 9 张图片")).toBeTruthy();
   });
 
   it("keeps native image and file picker clicks synchronous before keyboard hide resolves", async () => {
