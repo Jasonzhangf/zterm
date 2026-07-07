@@ -814,7 +814,7 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(cellsToLine(next.lines[next.lines.length - 1]!)).toBe('line-75');
   });
 
-  it('rejects a forward-revision payload that would regress the local authoritative tail without an explicit reset', () => {
+  it('clamps the local window back inside daemon authoritative tail bounds when a stale local tail is ahead of daemon head', () => {
     const current = createSessionBufferState({
       lines: Array.from({ length: 1033 }, (_, offset) => `line-${63661 + offset}`),
       startIndex: 63661,
@@ -841,10 +841,11 @@ describe('terminal-buffer canonical mirror patching', () => {
       DEFAULT_TERMINAL_CACHE_LINES,
     );
 
-    expect(next).toBe(current);
-    expect(next.bufferTailEndIndex).toBe(64694);
-    expect(next.startIndex).toBe(63694);
-    expect(next.endIndex).toBe(64694);
-    expect(cellsToLine(next.lines[next.lines.length - 1]!)).toBe('line-64693');
+    expect(next.bufferHeadStartIndex).toBe(50511);
+    expect(next.bufferTailEndIndex).toBe(51511);
+    expect(next.startIndex).toBeGreaterThanOrEqual(50511);
+    expect(next.endIndex).toBeLessThanOrEqual(51511);
+    expect(next.endIndex).toBe(51511);
+    expect(cellsToLine(next.lines[next.lines.length - 1]!)).toBe('tail-51510');
   });
 });

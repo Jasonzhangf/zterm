@@ -580,16 +580,6 @@ export function applyBufferSyncToSessionBuffer(
   if (current && revision < current.revision) {
     return current;
   }
-  if (
-    current
-    && Number.isFinite(payload.availableEndIndex)
-    && Math.max(0, Math.floor(payload.availableEndIndex!)) < Math.max(0, Math.floor(current.bufferTailEndIndex || 0))
-  ) {
-    console.error(
-      `[terminal-buffer] rejected buffer-sync with regressed authoritative tail: currentEnd=${Math.max(0, Math.floor(current.bufferTailEndIndex || 0))} nextEnd=${Math.max(0, Math.floor(payload.availableEndIndex!))} revision=${revision}`,
-    );
-    return current;
-  }
 
   const sparseWindow = payloadToSparseWindow(payload);
   if (!sparseWindow.ok) {
