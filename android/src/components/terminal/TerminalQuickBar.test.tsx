@@ -40,6 +40,27 @@ class ResizeObserverMock {
   unobserve() {}
 }
 
+function stubElementHeight(element: HTMLElement, height: number) {
+  Object.defineProperty(element, "offsetHeight", {
+    configurable: true,
+    value: height,
+  });
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      x: 0,
+      y: 0,
+      width: 390,
+      height,
+      top: 0,
+      right: 390,
+      bottom: height,
+      left: 0,
+      toJSON: () => ({}),
+    }),
+  });
+}
+
 function stubVisualViewport(overrides?: Partial<VisualViewport>) {
   const addEventListener = vi.fn();
   const removeEventListener = vi.fn();
@@ -366,6 +387,27 @@ describe("TerminalQuickBar", () => {
     const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
     const style = shellRows.getAttribute("style") || "";
     expect(style).not.toContain("padding-bottom: 240px");
+  });
+
+  it("reports the real shell height while keyboard lift is applied outside the quickbar", async () => {
+    const onMeasuredHeightChange = vi.fn();
+    renderQuickBar({
+      keyboardVisible: true,
+      keyboardInsetPx: 320,
+      onMeasuredHeightChange,
+    });
+
+    const root = screen
+      .getByTestId("terminal-quickbar-shell-rows")
+      .parentElement as HTMLElement;
+    expect(root).not.toBeNull();
+    stubElementHeight(root, 184);
+
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      expect(onMeasuredHeightChange).toHaveBeenLastCalledWith(184);
+    });
   });
 
   it("renders two shell rows in landscape with tools merged into the second row", async () => {

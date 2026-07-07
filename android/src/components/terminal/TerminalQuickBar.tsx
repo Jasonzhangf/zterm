@@ -1691,8 +1691,9 @@ function TerminalQuickBarComponent({
           host.getBoundingClientRect().height || host.offsetHeight || 0,
         ),
       );
-      const measuredKeyboardInsetPx = Math.max(0, Math.round(keyboardInsetPx || 0));
-      onMeasuredHeightChange?.(Math.max(0, measuredPx - measuredKeyboardInsetPx));
+      // Keyboard lift is applied by TerminalQuickBarShell outside this component.
+      // Report only this quickbar chrome height so the stage can reserve it once.
+      onMeasuredHeightChange?.(measuredPx);
     };
 
     syncHeight();

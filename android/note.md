@@ -1571,3 +1571,10 @@ Need runtime debug to confirm:
 - 状态投影：pending open 未超过预算且处于 reconnect runtime 时，SessionContext 写入 `state=reconnecting` 与 `lastError=Waiting for existing websocket open`，现有 TerminalPage banner 会显示真实等待状态；健康首连 `connecting` 不被改成 reconnecting。
 - 已验证：transport planner/runtime L1 96 tests PASS；SessionContext ws refresh + transport runtime 135 tests PASS；`test:feature-registry` 31 tests PASS；`tsc --noEmit` PASS；`git diff --check` PASS。
 - 当前缺口：尚未完成标准 debug APK 构建与 Jason 真机安装验证；仍不能宣称 L5 现场闭环。
+
+## 2026-07-07 Android IME quickbar bottom alignment
+
+- 现场问题：系统 IME 弹出时底部偶发不对齐，截图表现为 terminal 内容/QuickBar 与键盘边界关系不稳定。
+- 架构映射：本轮属于 UI shell 的 `terminal.keyboard_ime` + QuickBar shell measurement；唯一修改点候选是 `src/components/terminal/TerminalQuickBar.tsx` 的 measured shell height 上报。禁止改 daemon、buffer manager、TerminalView renderer、tmux rows/cols。
+- 测试设计：先在 `TerminalQuickBar.test.tsx` 加红测，证明 `keyboardInsetPx > 0` 时 `onMeasuredHeightChange` 必须上报 QuickBar DOM shell rows 的真实高度，不得把同一份 IME lift 从测量高度里再减一次；再跑 `TerminalPage.android-ime` 验证 stage bottom = measured quickbar height + safe offset + IME lift。
+- 根因候选：`TerminalQuickBar` 当前用 `measuredPx - keyboardInsetPx` 上报 shell 高度；但 QuickBar 根节点自身没有吃 keyboard padding，IME lift 已由外层 `TerminalQuickBarShell.bottom` 消费。键盘高度大于 QuickBar 高度时会把 `quickBarHeight` 压到 0，导致 stage 不再为 QuickBar 预留空间。

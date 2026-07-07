@@ -446,6 +446,7 @@ UI 只负责容器位置与裁切：
   - 固定六键区宽度必须能完整容纳 `状态 / 键盘` 文案，不能裁切、顶出或超界
 - 只有 QuickBar 内显式 editor / input / button 等交互控件允许接管焦点；普通 shell 容器点击必须被阻断在 UI shell 层
 - 若 `keyboardInsetPx > 0`，QuickBar 必须作为**整体容器**抬升到键盘上方；同一份 keyboard inset 只能消费一次：`terminal stage.bottom = quickBarHeight + keyboardLift`，`quickbar shell.bottom = keyboardLift`，禁止再用 QuickBar 内部 `padding/margin` 对同一份 inset 二次抬升
+- QuickBar 的 `onMeasuredHeightChange` 必须上报自身真实 chrome 高度，不得再扣 `keyboardInsetPx`；IME lift 已由外层 shell bottom 消费。若测量阶段扣 inset，`quickBarHeight` 会在键盘弹出时归零，导致 stage 丢失快捷栏预留。
 - remote screenshot 也属于 UI shell / session control 闭环：
   - UI 必须能区分 `capturing -> transferring -> preview-ready`
   - `capturing` / `transferring` 都必须有**显式失败边界**；不允许无限 spinner

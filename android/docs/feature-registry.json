@@ -70,7 +70,8 @@
       "owners": [
         "src/pages/terminal-keyboard-lift.ts",
         "src/pages/TerminalPage.tsx",
-        "src/pages/TerminalPageStageShell.tsx"
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx"
       ],
       "allowed_paths": [
         "src/pages/terminal-keyboard-lift.ts",
@@ -80,6 +81,8 @@
         "src/pages/TerminalPage.android-ime.test.tsx",
         "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
         "src/plugins/ImeAnchorPlugin.ts"
       ],
       "forbidden_paths": [
@@ -90,11 +93,13 @@
         "src/pages/terminal-keyboard-lift.test.ts",
         "src/pages/TerminalPage.android-ime.test.tsx",
         "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
-        "src/pages/TerminalPageStageShell.pane-stage.test.tsx"
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx"
       ],
       "truth_sources": [
         "docs/architecture.md",
-        "docs/feature-gates.md"
+        "docs/feature-gates.md",
+        "docs/testing/terminal-keyboard-ime-test-design.md"
       ]
     },
     {
