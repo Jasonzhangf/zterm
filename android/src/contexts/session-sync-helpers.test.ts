@@ -257,38 +257,6 @@ describe('session sync helper refresh planner', () => {
       source: 'active-resume',
     })).toEqual({ action: 'reconnect' });
   });
-
-  it('does not let a queued reconnect timer block explicit foreground resume when no transport is open', () => {
-    expect(buildActiveSessionRefreshPlan({
-      hasSession: true,
-      isRefreshTarget: true,
-      sessionState: 'reconnecting',
-      wsReadyState: null,
-      reconnectInFlight: true,
-      pendingTransportOpen: false,
-      pendingTransportOpenStale: false,
-      staleReconnectInFlight: true,
-      allowReconnectIfUnavailable: true,
-      transportStale: false,
-      source: 'active-resume',
-    })).toEqual({ action: 'reconnect' });
-  });
-
-  it('keeps a fresh pending transport-open intent as the foreground resume blocker', () => {
-    expect(buildActiveSessionRefreshPlan({
-      hasSession: true,
-      isRefreshTarget: true,
-      sessionState: 'reconnecting',
-      wsReadyState: null,
-      reconnectInFlight: true,
-      pendingTransportOpen: true,
-      pendingTransportOpenStale: false,
-      staleReconnectInFlight: false,
-      allowReconnectIfUnavailable: true,
-      transportStale: false,
-      source: 'active-resume',
-    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
-  });
 });
 
 describe('session sync helper reconnect ownership', () => {

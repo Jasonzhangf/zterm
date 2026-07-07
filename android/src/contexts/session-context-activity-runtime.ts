@@ -155,12 +155,10 @@ export function ensureActiveSessionFreshRuntime(options: {
     ? options.isPendingSessionTransportOpenStale(options.refreshOptions.sessionId)
     : false;
   const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.refreshOptions.sessionId) || null;
-  const hasFreshPendingTransportOpen = pendingTransportOpen && !pendingTransportOpenStale;
   const staleReconnectInFlight = Boolean(
-    reconnectRuntime
-    && (reconnectRuntime.connecting || reconnectRuntime.timer !== null)
+    reconnectRuntime?.connecting
     && ws?.readyState !== WebSocket.OPEN
-    && !hasFreshPendingTransportOpen,
+    && !pendingTransportOpen,
   );
 
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
