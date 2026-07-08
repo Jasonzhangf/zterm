@@ -169,6 +169,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - foreground/active refresh 不得在 App 层长出第二套 transport reopen 语义
 - 2026-05-13 新冻结：`adaptive-phone` 当前若通过 tmux `resize-window -x` 收窄宽度，tmux 会自动切 `window-size=manual`，并把**高度也冻结**在进入 manual 时的值；所以“我们没写 rows 但 session 还是很矮”依然是**代码问题**，不是天然说明只有历史遗留。要验证这点，必须跑真实 tmux PTY 回归，而不是只看源码里有没有 `-y`。
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
+- active transport freshness 不能等长 heartbeat timeout；active tab 若几秒内没有 server activity，`SessionContext` 必须先发 `buffer-head-request` probe，短等无响应后才由 transport owner 强制替换 socket。UI 不得自行判断 timeout / 直接重连。
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source

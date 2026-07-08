@@ -1,3 +1,10 @@
+# 2026-07-08 Active transport proactive stale probe
+
+- Jason 现场截图显示 `ws connect timeout` 仍会长期停滞；用户明确要求不要只等长 timeout，而要主动知道问题并主动尝试。
+- 架构映射：本 slice 属于 `terminal.transport_lifecycle`；唯一 owner 是 `SessionContext -> ensureActiveSessionFresh / probeOrReconnectStaleSessionTransport`。UI 只展示状态，不判断 timeout；daemon 不持有客户端 freshness。
+- 根因：active transport stale 判定沿用 `CLIENT_PING_INTERVAL_MS + 5000 = 35s`，heartbeat timeout 是 70s；即使 active tab 已无服务端活动，也会长时间停在旧 open transport / timeout banner。
+- 修复方向：active tab 2.5s 无服务端活动即发 `buffer-head-request` probe；probe 等待窗口默认 1.2s，无响应才 `reconnectSession(...forceReplaceTransport)`。健康连接收到 `buffer-head` 后视为 recovered，不替换 socket。
+
 # 2026-07-07 WebSocket reuse planning audit
 
 - Jason 当前确认 `0.1.3.2026` 版本体感可用，下一步只梳理 WebSocket 复用，不先写代码；禁止再做 inactive/background 持续刷新方案。

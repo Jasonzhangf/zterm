@@ -26,7 +26,7 @@ function resolveActiveTransportProbeWaitMs(resolveCadence: (sessionId?: string |
   const cadence = resolveCadence();
   if (cadence.headTickMs >= 120) { return 500; }
   if (cadence.headTickMs >= 66) { return 900; }
-  return 1500;
+  return 1200;
 }
 const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   cols: 80,

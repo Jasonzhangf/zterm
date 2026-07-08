@@ -684,3 +684,9 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Daemon tmux capture 发布规则：当前 mirror 已匹配可立即发布；否则必须等连续两次 canonical snapshot 一致才发布。半帧不能进入 mirror truth，否则 sparse changed-ranges 会把旧行作为未覆盖 truth 留在客户端。
 - 同一 mirror 的 `totalAvailableLines` 必须以当前 mirror end 为单调下界；alternate-screen/TUI 只返回短可见窗口时，新内容应锚在当前 absolute tail，禁止把 `availableEndIndex` 从旧 tail 拉回 pane height。
 - Regression gates: `terminal-mirror-capture.test.ts` 必须覆盖 transient half-frame 不发布和 tail anchor monotonic；`daemon:mirror:close-loop` 必须覆盖 top/vim/codex replay/source compare。APK `0.1.3.2030` 已构建，sha256 `14c4c413c04dd56062ee7c918774504106ba7b25e82e79a9a935beb486ef9c08`；仍需 Jason 真机复测 L5。
+
+## 2026-07-08 Active transport proactive stale probe
+
+- Active terminal transport freshness 不能等 30s ping / 70s pong timeout 才恢复；active tab 若 2.5s 没有 server activity，必须由 `SessionContext` 发 `buffer-head-request` probe。
+- Probe 是唯一主动诊断链路：收到 `buffer-head/buffer-sync/pong/connected` 等 server activity 即 recovered；超过 active probe wait（默认 1.2s）仍无活动，才 `forceReplaceTransport`。禁止 UI 自己判断 timeout 或直接重建 socket。
+- Regression gate: `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-context-activity-runtime.test.ts --reporter dot` must cover proactive probe, healthy probe recovery, and forced reconnect after silent probe.

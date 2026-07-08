@@ -6077,7 +6077,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
       ws2.sent.length = 0;
 
-      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      now = new Date('2026-04-27T00:00:02.600Z').getTime();
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => {
@@ -6087,6 +6087,66 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(ws2.readyState).toBe(MockWebSocket.OPEN);
       expect(MockWebSocket.instances).toHaveLength(2);
       expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('keeps the stale-open active transport when its explicit probe receives server activity', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
+      ws1.triggerOpen();
+      ws2.triggerOpen();
+      ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+      ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+      ws2.sent.length = 0;
+      now = new Date('2026-04-27T00:00:02.600Z').getTime();
+      fireEvent.click(screen.getByText('switch-second'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+
+      now = new Date('2026-04-27T00:00:02.700Z').getTime();
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: {
+          sessionId: 'session-2',
+          revision: 2,
+          latestEndIndex: 122,
+          availableStartIndex: 0,
+          availableEndIndex: 122,
+        },
+      });
+
+      fireEvent.click(screen.getByText('switch-first'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+
+      now = new Date('2026-04-27T00:00:03.900Z').getTime();
+      fireEvent.click(screen.getByText('switch-second'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      });
+      expect(ws2.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();
     }
@@ -6113,7 +6173,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
 
       ws2.sent.length = 0;
-      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      now = new Date('2026-04-27T00:00:02.600Z').getTime();
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => {
@@ -6126,7 +6186,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('switch-first'));
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
 
-      now = new Date('2026-04-27T00:00:45.000Z').getTime();
+      now = new Date('2026-04-27T00:00:03.900Z').getTime();
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => {
@@ -6164,7 +6224,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
       ws2.sent.length = 0;
 
-      now = new Date('2026-04-27T00:00:40.000Z').getTime();
+      now = new Date('2026-04-27T00:00:02.600Z').getTime();
       await new Promise((resolve) => setTimeout(resolve, 80));
 
       expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
@@ -6172,7 +6232,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(ws2.readyState).toBe(MockWebSocket.OPEN);
       expect(MockWebSocket.instances).toHaveLength(2);
 
-      now = new Date('2026-04-27T00:00:40.200Z').getTime();
+      now = new Date('2026-04-27T00:00:02.800Z').getTime();
       await new Promise((resolve) => setTimeout(resolve, 80));
 
       expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
