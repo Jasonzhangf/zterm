@@ -677,3 +677,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - active resume / active reentry / explicit resume 只允许短等 pending open（当前 1200ms）；超过预算必须在 `ensureActiveSessionFreshRuntime -> reconnectSession(..., { forceReplaceTransport:true })` 强制替换旧 in-flight transport。普通首连和 active tick 不走短预算抢占，避免重复开 socket。
 - UI 状态必须来自 SessionContext 真实状态：pending open 未超过预算且处于 reconnect runtime 时写 `state=reconnecting` + `lastError=Waiting for existing websocket open`；健康首连 `connecting` 不得被改成 reconnecting。
 - Regression gates: `session-sync-helpers.test.ts` 锁 planner 正/反向；`session-context-activity-runtime.test.ts` 锁短预算和状态投影；`session-context-session-runtime.test.ts` 锁 reconnect wait 状态；`SessionContext.ws-refresh.test.tsx` 锁健康 connecting/open 复用不被污染。APK `0.1.3.2028` 已构建，sha256 `0982c5a38b7e7db95ae4961fd3c8219b4a1f5bc5aaa4feb8c0aed3a49250e397`；仍需真机安装验证 L5。
+
+## 2026-07-08 Daemon capture stability is the leak-row gate
+
+- Android 底部 TUI/input 行漏刷、旧 prompt 上移时，若 TerminalView source/DOM gate 与 client sparse buffer gate 都过，优先查 daemon `captureMirrorAuthoritativeBufferFromTmux()` 是否真的接入稳定化主线；只测试 `resolveStableMirrorCaptureSnapshot()` helper 不等于主线已使用。
+- Daemon tmux capture 发布规则：当前 mirror 已匹配可立即发布；否则必须等连续两次 canonical snapshot 一致才发布。半帧不能进入 mirror truth，否则 sparse changed-ranges 会把旧行作为未覆盖 truth 留在客户端。
+- 同一 mirror 的 `totalAvailableLines` 必须以当前 mirror end 为单调下界；alternate-screen/TUI 只返回短可见窗口时，新内容应锚在当前 absolute tail，禁止把 `availableEndIndex` 从旧 tail 拉回 pane height。
+- Regression gates: `terminal-mirror-capture.test.ts` 必须覆盖 transient half-frame 不发布和 tail anchor monotonic；`daemon:mirror:close-loop` 必须覆盖 top/vim/codex replay/source compare。APK `0.1.3.2030` 已构建，sha256 `14c4c413c04dd56062ee7c918774504106ba7b25e82e79a9a935beb486ef9c08`；仍需 Jason 真机复测 L5。

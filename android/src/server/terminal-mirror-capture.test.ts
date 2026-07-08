@@ -4,6 +4,7 @@ import {
   resolveAuthoritativeMirrorCaptureWindow,
   resolveStableMirrorCaptureSnapshot,
 } from './terminal-mirror-capture';
+import type { TerminalCell } from '../lib/types';
 import type { SessionMirror } from './terminal-runtime-types';
 
 function row(text: string) {
@@ -14,6 +15,41 @@ function row(text: string) {
     flags: 0,
     width: 1 as const,
   }));
+}
+
+function rowText(cells: TerminalCell[]) {
+  return cells
+    .map((cell) => (cell.char >= 32 ? String.fromCodePoint(cell.char) : ' '))
+    .join('')
+    .replace(/\s+$/u, '');
+}
+
+function makeReadyMirror(overrides?: Partial<SessionMirror>): SessionMirror {
+  return {
+    key: 'demo',
+    sessionName: 'demo',
+    scratchBridge: null,
+    lifecycle: 'ready',
+    cols: 80,
+    rows: 2,
+    cursorKeysApp: false,
+    revision: 1,
+    lastScrollbackCount: 0,
+    bufferStartIndex: 0,
+    bufferLines: [],
+    cursor: null,
+    lastFlushStartedAt: 0,
+    lastFlushCompletedAt: 0,
+    lastLiveActivityAt: 0,
+    lastHeadBroadcastAt: 0,
+    flushInFlight: false,
+    flushPromise: null,
+    pendingStableCaptureSnapshot: null,
+    liveSyncTimer: null,
+    consecutiveFailures: 0,
+    subscribers: new Set(),
+    ...overrides,
+  };
 }
 
 describe('terminal mirror capture runtime', () => {
@@ -225,7 +261,13 @@ describe('terminal mirror capture runtime', () => {
     expect(result.snapshot).toEqual(stableSnapshot);
   });
 
-  it('publishes a changed snapshot immediately in live mode instead of waiting for a second identical tick', async () => {
+  it('does not publish a transient TUI half-frame until the capture is stable', async () => {
+    let captureIndex = 0;
+    const frames = [
+      'transient-status\nold-input\n',
+      'stable-status\n\n',
+      'stable-status\n\n',
+    ];
     const runTmux = vi.fn((args: string[]) => {
       if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
         return { ok: true as const, stdout: '%1\t0\t2\t80\t0\t0\n' };
@@ -234,7 +276,7 @@ describe('terminal mirror capture runtime', () => {
         return { ok: true as const, stdout: '0 1 1 0\n' };
       }
       if (args[0] === 'capture-pane') {
-        return { ok: true as const, stdout: 'line-1\nline-2\n' };
+        return { ok: true as const, stdout: frames[Math.min(captureIndex++, frames.length - 1)]! };
       }
       throw new Error(`unexpected tmux args: ${args.join(' ')}`);
     });
@@ -246,36 +288,54 @@ describe('terminal mirror capture runtime', () => {
       logTimePrefix: () => '2026-05-06 21:22:00',
     });
 
-    const mirror: SessionMirror = {
-      key: 'demo',
-      sessionName: 'demo',
-      scratchBridge: null,
-      lifecycle: 'ready',
-      cols: 80,
+    const mirror = makeReadyMirror({
       rows: 2,
-      cursorKeysApp: false,
-      revision: 1,
-      lastScrollbackCount: 0,
-      bufferStartIndex: 0,
-      bufferLines: [row('old-1'), row('old-2')],
-      cursor: null,
-      lastFlushStartedAt: 0,
-      lastFlushCompletedAt: 0,
-      lastLiveActivityAt: 0,
-      lastHeadBroadcastAt: 0,
-      flushInFlight: false,
-      flushPromise: null,
-      pendingStableCaptureSnapshot: null,
-      liveSyncTimer: null,
-      consecutiveFailures: 0,
-      subscribers: new Set(),
-    };
+      bufferLines: [row('old-status'), row('old-input')],
+    });
 
     const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
 
     expect(changed).toBe(true);
-    expect(mirror.bufferLines).toEqual([row('line-1'), row('line-2')]);
+    expect(captureIndex).toBe(3);
+    expect(mirror.bufferLines.map(rowText)).toEqual(['stable-status', '']);
     expect(mirror.pendingStableCaptureSnapshot).toBeNull();
+  });
+
+  it('keeps the mirror tail anchor monotonic when alternate-screen capture reports only the visible pane', async () => {
+    let captureIndex = 0;
+    const runTmux = vi.fn((args: string[]) => {
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%1\t0\t3\t80\t1\t0\n' };
+      }
+      if (args[0] === 'display-message' && args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+        return { ok: true as const, stdout: '0 2 1 0\n' };
+      }
+      if (args[0] === 'capture-pane') {
+        captureIndex += 1;
+        return { ok: true as const, stdout: 'new-top\nnew-middle\nnew-bottom\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
+      logTimePrefix: () => '2026-07-08 00:00:00',
+    });
+
+    const mirror = makeReadyMirror({
+      rows: 3,
+      bufferStartIndex: 500,
+      bufferLines: [row('old-top'), row('old-middle'), row('old-bottom')],
+    });
+
+    const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
+
+    expect(changed).toBe(true);
+    expect(captureIndex).toBe(2);
+    expect(mirror.bufferStartIndex).toBe(500);
+    expect(mirror.bufferLines.map(rowText)).toEqual(['new-top', 'new-middle', 'new-bottom']);
   });
 
   it('fails explicitly when tmux capture never stabilizes within the capped attempts', async () => {

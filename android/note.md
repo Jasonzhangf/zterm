@@ -1578,3 +1578,12 @@ Need runtime debug to confirm:
 - 架构映射：本轮属于 UI shell 的 `terminal.keyboard_ime` + QuickBar shell measurement；唯一修改点候选是 `src/components/terminal/TerminalQuickBar.tsx` 的 measured shell height 上报。禁止改 daemon、buffer manager、TerminalView renderer、tmux rows/cols。
 - 测试设计：先在 `TerminalQuickBar.test.tsx` 加红测，证明 `keyboardInsetPx > 0` 时 `onMeasuredHeightChange` 必须上报 QuickBar DOM shell rows 的真实高度，不得把同一份 IME lift 从测量高度里再减一次；再跑 `TerminalPage.android-ime` 验证 stage bottom = measured quickbar height + safe offset + IME lift。
 - 根因候选：`TerminalQuickBar` 当前用 `measuredPx - keyboardInsetPx` 上报 shell 高度；但 QuickBar 根节点自身没有吃 keyboard padding，IME lift 已由外层 `TerminalQuickBarShell.bottom` 消费。键盘高度大于 QuickBar 高度时会把 `quickBarHeight` 压到 0，导致 stage 不再为 QuickBar 预留空间。
+
+## 2026-07-08 Android TUI leak-row daemon capture closeout
+
+- 现场问题：Android 仍出现底部 TUI/input prompt 行漏刷、旧行残留上移。架构归属 `terminal.buffer_render` 的 daemon mirror 写侧；不碰 QuickBar/IME/UI shell。
+- 红测先失败：`terminal-mirror-capture.test.ts` 证明当前 `captureMirrorAuthoritativeBufferFromTmux()` 只做 single-capture 直接发布；已有 `resolveStableMirrorCaptureSnapshot()` helper 只被 helper 测试覆盖，未接入真实主线。另一个红测证明 alternate-screen/TUI 可见窗口会把 mirror tail 从 `500-503` 拉回 `0-3`。
+- 修复：daemon capture 主线接入 `resolveStableMirrorCaptureSnapshot()`；只有当前 mirror 已匹配或连续两次 snapshot 一致才发布。`totalAvailableLines` 以当前 mirror end 为单调下界，防止短 alternate-screen capture 让 absolute tail 回退。
+- 验证：capture 红测转绿，显示 `stabilizeAttempts=3` 与 `total=503 buffer=500-503`；daemon runtime / buffer contract / client sparse buffer / TerminalView source-DOM 6 files / 143 tests PASS；feature-registry 31 PASS；tsc PASS；`daemon:mirror:close-loop` 8 cases PASS，top/vim/codex replay/source compare ok。
+- APK：标准 `./scripts/build-android-debug.sh` PASS，发布 `0.1.3.2030` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`，sha256 `14c4c413c04dd56062ee7c918774504106ba7b25e82e79a9a935beb486ef9c08`。
+- 本机 daemon：已执行 `daemon:install-global` + `zterm-daemon restart`，health `127.0.0.1:3333` OK，新 pid `26206`；`~/.zterm/daemon-runtime/server.cjs` 已确认包含 `resolveStableMirrorCaptureSnapshot` 主线和 `totalAvailableLines = Math.max(resolvedAvailableLineCount, getMirrorAvailableEndIndex2(mirror))`。
