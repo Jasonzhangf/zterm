@@ -270,12 +270,21 @@ export function createTerminalMessageRuntime(
           break;
         }
         try {
-          deps.controlRuntimeDeps.handleAdaptiveResize?.(session, {
+          const resizeResult = deps.controlRuntimeDeps.handleAdaptiveResize?.(session, {
             cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
               ? message.payload.cols
               : undefined,
             widthMode: message.payload?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
           });
+          if (resizeResult && !resizeResult.ok) {
+            deps.sendMessage(session, {
+              type: 'error',
+              payload: {
+                message: resizeResult.message,
+                code: resizeResult.code,
+              },
+            });
+          }
         } catch (error) {
           deps.sendTransportMessage(connection.transport, {
             type: 'error',

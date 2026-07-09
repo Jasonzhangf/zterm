@@ -66,7 +66,6 @@ interface TerminalRuntimeDeps {
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   runTmux: (args: string[]) => { ok: true; stdout: string };
-  supportsWindowSizeManagement?: boolean;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   logTimePrefix: () => string;
 }
@@ -85,7 +84,7 @@ export interface TerminalRuntime {
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
-    options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
+    options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
@@ -95,7 +94,10 @@ export interface TerminalRuntime {
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
-  handleAdaptiveResize: (session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) => void;
+  handleAdaptiveResize: (
+    session: TerminalSession,
+    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+  ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
 }
 
@@ -275,8 +277,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     waitMs: deps.waitMs,
     logTimePrefix: deps.logTimePrefix,
     runTmux: deps.runTmux,
-    supportsWindowSizeManagement: deps.supportsWindowSizeManagement,
-    closeLogicalTerminalSession: closeSession,
+    closeTransportSubscriber: closeSession,
     getSessionMirror,
   });
 

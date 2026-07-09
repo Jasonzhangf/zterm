@@ -104,10 +104,10 @@ describe('server transport/session lifecycle truth gates', () => {
     const detachBlock = extractBlock(source, "deps.detachSessionTransportOnly(session, 'websocket closed'", 220);
     expect(closeBlock).toContain("if (session)");
     expect(closeBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
-    expect(closeBlock).not.toContain("closeLogicalTerminalSession(session, 'websocket closed', false)");
+    expect(closeBlock).not.toContain("closeTransportSubscriber(session, 'websocket closed', false)");
     expect(errorBlock).toContain("if (session)");
     expect(errorBlock).toContain("deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`");
-    expect(errorBlock).not.toContain("closeLogicalTerminalSession(session, `websocket error: ${error.message}`, false)");
+    expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
   });
 
@@ -117,10 +117,10 @@ describe('server transport/session lifecycle truth gates', () => {
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
     expect(rtcCloseBlock).toContain('if (session)');
     expect(rtcCloseBlock).toContain('deps.detachSessionTransportOnly(session, reason');
-    expect(rtcCloseBlock).not.toContain('closeLogicalTerminalSession(session, reason, false)');
+    expect(rtcCloseBlock).not.toContain('closeTransportSubscriber(session, reason, false)');
     expect(rtcErrorBlock).toContain('if (session)');
     expect(rtcErrorBlock).toContain('deps.detachSessionTransportOnly(session, `rtc error: ${message}`');
-    expect(rtcErrorBlock).not.toContain('closeLogicalTerminalSession(session, `rtc error: ${message}`, false)');
+    expect(rtcErrorBlock).not.toContain('closeTransportSubscriber(session, `rtc error: ${message}`, false)');
   });
 
   it('keeps mirror truth alive when session transport detaches or session closes', () => {
@@ -147,8 +147,10 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(runtimeTypesSource).not.toContain('adaptiveCols:');
     expect(mirrorRuntimeSource).not.toContain('session.widthMode');
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
-    expect(mirrorRuntimeSource).not.toContain("runTmux(['resize-window'");
     expect(mirrorRuntimeSource).not.toContain("runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']");
+    expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
+    expect(mirrorRuntimeSource).not.toContain("runTmux(['resize-window'");
+    expect(mirrorRuntimeSource).not.toContain("deps.runTmux(['resize-window'");
   });
 
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
@@ -160,11 +162,11 @@ describe('server transport/session lifecycle truth gates', () => {
     const destroyBlock = extractBlock(source, 'terminalRuntime.destroyMirror', 220);
 
     expect(killBlock).toContain("destroyMirror(mirror, 'tmux session killed', {");
-    expect(killBlock).toContain("closeLogicalSessions: false");
+    expect(killBlock).toContain("closeTransportSubscribers: false");
     expect(killBlock).toContain("releaseCode: 'tmux_session_killed'");
     expect(source).toContain('createTerminalDaemonRuntime');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
-    expect(shutdownBlock).toContain('closeLogicalSessions: true');
+    expect(shutdownBlock).toContain('closeTransportSubscribers: true');
     expect(shutdownBlock).toContain('notifyClientClose: true');
     expect(destroyBlock).toContain('terminalRuntime.destroyMirror');
     expect(destroyBlock).not.toContain("sendMessage(client, { type: 'closed'");

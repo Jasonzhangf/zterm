@@ -5,7 +5,7 @@ import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 
 export interface DestroyMirrorOptions {
-  closeLogicalSessions?: boolean;
+  closeTransportSubscribers?: boolean;
   notifyClientClose?: boolean;
   releaseCode?: string;
 }
@@ -183,7 +183,7 @@ export function createTerminalDaemonRuntime(
 
     for (const mirror of [...deps.mirrors.values()]) {
       deps.destroyMirror(mirror, reason, {
-        closeLogicalSessions: true,
+        closeTransportSubscribers: true,
         notifyClientClose: true,
       });
     }

@@ -42,11 +42,14 @@ export interface TerminalMessageControlRuntimeDeps {
   ) => TerminalSession;
   getMirrorKey: (sessionName: string) => string;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
-  handleAdaptiveResize?: (session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) => void;
+  handleAdaptiveResize?: (
+    session: TerminalSession,
+    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+  ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
-    options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
+    options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
 }
 
@@ -308,7 +311,7 @@ export function handleTmuxControlMessageRuntime(
         const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
         if (mirror) {
           deps.destroyMirror(mirror, 'tmux session killed', {
-            closeLogicalSessions: false,
+            closeTransportSubscribers: false,
             releaseCode: 'tmux_session_killed',
           });
         }

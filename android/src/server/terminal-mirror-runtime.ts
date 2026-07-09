@@ -70,8 +70,7 @@ export interface TerminalMirrorRuntimeDeps {
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
-  supportsWindowSizeManagement?: boolean;
-  closeLogicalTerminalSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
+  closeTransportSubscriber: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
 
@@ -80,7 +79,7 @@ export interface TerminalMirrorRuntime {
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
-    options?: { closeLogicalSessions?: boolean; notifyClientClose?: boolean; releaseCode?: string },
+    options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
@@ -99,10 +98,9 @@ export interface TerminalMirrorRuntime {
   handleAdaptiveResize: (
     session: TerminalSession,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
-  ) => void;
+  ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
-  supportsWindowSizeManagement?: boolean;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
@@ -252,7 +250,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: SessionMirror,
     reason: string,
     options?: {
-      closeLogicalSessions?: boolean;
+      closeTransportSubscribers?: boolean;
       notifyClientClose?: boolean;
       releaseCode?: string;
     },
@@ -268,14 +266,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     mirror.lifecycle = 'destroyed';
 
-    if (options?.closeLogicalSessions) {
+    if (options?.closeTransportSubscribers) {
       const subscriberIds = Array.from(mirror.subscribers);
       for (const sessionId of subscriberIds) {
         const client = sessions.get(sessionId);
         if (!client) {
           continue;
         }
-        deps.closeLogicalTerminalSession(client, reason, Boolean(options.notifyClientClose));
+        deps.closeTransportSubscriber(client, reason, Boolean(options.notifyClientClose));
       }
     } else {
       releaseMirrorForSubscribers(mirror, reason, options?.releaseCode || 'tmux_session_unavailable');
@@ -494,7 +492,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
             mirror,
             `Tmux session unavailable: ${error instanceof Error ? error.message : String(error)}`,
             {
-              closeLogicalSessions: false,
+              closeTransportSubscribers: false,
               releaseCode: 'tmux_session_unavailable',
             },
           );
@@ -603,7 +601,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           mirror,
           `Tmux session unavailable: ${error instanceof Error ? error.message : String(error)}`,
           {
-            closeLogicalSessions: false,
+            closeTransportSubscribers: false,
             releaseCode: 'tmux_session_unavailable',
           },
         );
@@ -663,16 +661,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         }
       })();
     const requestedGeometry = deps.resolveAttachGeometry({
-      requestedGeometry:
-        typeof payload.cols === 'number'
-        && Number.isFinite(payload.cols)
-          ? {
-              cols: payload.cols,
-              rows: existingMirror?.rows
-                || existingTmuxGeometry?.rows
-                || deps.defaultViewport.rows,
-            }
-          : null,
+      requestedGeometry: null,
       currentMirrorGeometry: existingMirror
         ? { cols: existingMirror.cols, rows: existingMirror.rows }
         : null,
@@ -721,13 +710,20 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     await startMirror(mirror, { cols: requestedCols, rows: requestedRows, autoCommand: payload.autoCommand });
   }
 
-  function handleAdaptiveResize(session: TerminalSession, payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' }) {
+  function handleAdaptiveResize(
+    session: TerminalSession,
+    _payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+  ): { ok: true } | { ok: false; code: 'session_not_ready'; message: string } {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
-      return;
+      return {
+        ok: false,
+        code: 'session_not_ready',
+        message: 'resize requires an attached mirror',
+      };
     }
-    void payload;
     scheduleMirrorLiveSync(mirror, 0);
+    return { ok: true };
   }
 
   async function handleInput(

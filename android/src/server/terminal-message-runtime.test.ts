@@ -376,6 +376,37 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
+  it('surfaces resize session_not_ready failures instead of silently accepting them', async () => {
+    const { runtime, sessions, sendMessage, handleAdaptiveResize } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+    handleAdaptiveResize.mockReturnValueOnce({
+      ok: false,
+      code: 'session_not_ready',
+      message: 'resize requires an attached mirror',
+    });
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'resize',
+      payload: {
+        cols: 72,
+        widthMode: 'adaptive-phone',
+      },
+    })));
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        type: 'error',
+        payload: {
+          message: 'resize requires an attached mirror',
+          code: 'session_not_ready',
+        },
+      }),
+    );
+  });
+
   it('writes string input payloads to the attached session', async () => {
     const { runtime, sessions, handleInput, sendMessage, daemonRuntimeDebug } = createRuntime();
     const session = createSession();

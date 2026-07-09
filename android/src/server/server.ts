@@ -193,7 +193,6 @@ const terminalRuntime = createTerminalRuntime({
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
-  supportsWindowSizeManagement: TERMINAL_BACKEND_KIND === 'tmux',
   daemonRuntimeDebug,
   logTimePrefix,
 });

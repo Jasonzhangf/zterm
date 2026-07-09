@@ -81,7 +81,7 @@ function createRuntime() {
     waitMs: async () => {},
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
-    closeLogicalTerminalSession: vi.fn(),
+    closeTransportSubscriber: vi.fn(),
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
 
@@ -286,7 +286,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-13 00:30:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
     });
 
@@ -427,7 +427,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('does not keep per-subscriber adaptive width policy across subscribers', async () => {
+  it('treats adaptive attach width as wire compatibility without changing tmux mirror width', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const firstSession = createSession('session-1');
     const secondSession = createSession('session-2');
@@ -452,6 +452,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror?.subscribers).toEqual(new Set(['session-1', 'session-2']));
     expect(mirror?.cols).toBe(120);
     expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
+    expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
   it('accepts width-mode attach payload as wire compatibility without storing client policy', async () => {
@@ -466,10 +467,75 @@ describe('terminal mirror runtime lifecycle truth', () => {
     } as any);
 
     const mirror = mirrors.get('demo');
-    expect(mirror?.cols).toBe(88);
+    expect(mirror?.cols).toBe(120);
     expect(mirror?.rows).toBe(40);
     expect(session).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
+  });
+
+  it('treats adaptive resize frames as compatibility pings without changing tmux width or mirror truth', async () => {
+    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror?.cols).toBe(120);
+
+    const result = runtime.handleAdaptiveResize(session, {
+      cols: 72,
+      widthMode: 'adaptive-phone',
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '72']);
+    expect(mirror?.cols).toBe(120);
+    expect(mirror?.baselineCols).toBe(120);
+  });
+
+  it('keeps mirror-fixed resize frames from changing tmux width', async () => {
+    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    const result = runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '60']);
+    expect(mirrors.get('demo')?.cols).toBe(120);
+  });
+
+  it('reports resize as session_not_ready when no mirror is attached', () => {
+    const { runtime } = createRuntime();
+    const session = createSession('session-1');
+
+    const result = runtime.handleAdaptiveResize(session, {
+      cols: 72,
+      widthMode: 'adaptive-phone',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'session_not_ready',
+      message: 'resize requires an attached mirror',
+    });
   });
 
   it('keeps existing mirror geometry when a later subscriber sends different client cols', async () => {
@@ -487,7 +553,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       widthMode: 'adaptive-phone',
     });
     const mirror = mirrors.get('demo');
-    expect(mirror?.cols).toBe(90);
+    expect(mirror?.cols).toBe(120);
 
     await runtime.attachTmux(fixedSession, {
       sessionName: 'demo',
@@ -496,7 +562,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       widthMode: 'mirror-fixed',
     });
 
-    expect(mirror?.cols).toBe(90);
+    expect(mirror?.cols).toBe(120);
     expect(fixedSession).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
@@ -629,7 +695,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-03 00:00:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
     });
 
@@ -713,7 +779,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-11 00:00:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });
 
@@ -809,7 +875,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-13 00:31:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
     });
 
@@ -924,7 +990,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
     waitMs: async () => {},
     logTimePrefix: () => '2026-05-06 00:00:00',
     runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-    closeLogicalTerminalSession: vi.fn(),
+    closeTransportSubscriber: vi.fn(),
     getSessionMirror: () => mirror,
   });
 
@@ -1005,7 +1071,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });
 
@@ -1084,7 +1150,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
-      closeLogicalTerminalSession: vi.fn(),
+      closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });
 
