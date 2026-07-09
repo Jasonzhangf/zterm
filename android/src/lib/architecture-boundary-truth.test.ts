@@ -93,12 +93,12 @@ describe('architecture boundary truth gate', () => {
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
     expect(mirrorRuntimeSource).not.toMatch(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"][\s\S]*['"]latest['"]/);
     expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
-    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometry');
+    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometryToSession');
     expect(mirrorRuntimeSource).toContain('function updateAdaptiveWidthLease');
     expect(mirrorRuntimeSource).toContain('function reconcileAdaptiveWidthLeases');
     expect(mirrorRuntimeSource).toContain('function releaseAdaptiveWidthLease');
-    const adaptiveLeaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometry', 900);
-    expect(adaptiveLeaseResizeBlock).toContain("const args = ['resize-window', '-t', mirror.sessionName");
+    const adaptiveLeaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometryToSession', 900);
+    expect(adaptiveLeaseResizeBlock).toContain("const args = ['resize-window', '-t', sessionName");
     expect(adaptiveLeaseResizeBlock).toContain('deps.runTmux(args)');
     const mirrorRuntimeWithoutAllowedAdaptiveResize = mirrorRuntimeSource.replace(adaptiveLeaseResizeBlock, '');
     expect(mirrorRuntimeWithoutAllowedAdaptiveResize).not.toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);

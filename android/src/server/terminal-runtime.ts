@@ -101,6 +101,7 @@ export interface TerminalRuntime {
     subscriber: TerminalTransportSubscriber,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
+  restorePersistedAdaptiveWidthBaselines: (sessionNames: string[]) => number;
   refreshAdaptiveWidthLeaseHeartbeat: (subscriber: TerminalTransportSubscriber) => void;
   handleInput: (subscriber: TerminalTransportSubscriber, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
 }
@@ -312,6 +313,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     startMirror: mirrorRuntime.startMirror,
     attachTmux: mirrorRuntime.attachTmux,
     handleAdaptiveResize: mirrorRuntime.handleAdaptiveResize,
+    restorePersistedAdaptiveWidthBaselines: mirrorRuntime.restorePersistedAdaptiveWidthBaselines,
     refreshAdaptiveWidthLeaseHeartbeat: mirrorRuntime.refreshAdaptiveWidthLeaseHeartbeat,
     handleInput: mirrorRuntime.handleInput,
   };

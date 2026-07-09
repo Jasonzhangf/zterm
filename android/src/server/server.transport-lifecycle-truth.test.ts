@@ -150,9 +150,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
     expect(mirrorRuntimeSource).not.toContain("runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']");
     expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
-    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometry');
-    const leaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometry', 900);
-    expect(leaseResizeBlock).toContain("const args = ['resize-window', '-t', mirror.sessionName");
+    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometryToSession');
+    const leaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometryToSession', 900);
+    expect(leaseResizeBlock).toContain("const args = ['resize-window', '-t', sessionName");
     expect(leaseResizeBlock).toContain('deps.runTmux(args)');
     const mirrorRuntimeOutsideLeaseOwner = mirrorRuntimeSource.replace(leaseResizeBlock, '');
     expect(mirrorRuntimeOutsideLeaseOwner).not.toContain("runTmux(['resize-window'");

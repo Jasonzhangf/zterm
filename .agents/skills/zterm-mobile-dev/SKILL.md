@@ -159,6 +159,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 折叠屏竖屏 / 紧凑横屏底部快捷栏避让也必须归 `terminal-keyboard-lift.ts` helper；TerminalPage 只能消费 `terminalBottomChromeLiftPx` 并同时加到 stage reserve 与 QuickBar shell bottom。foldable portrait 必须同时满足宽屏和 `height >= width`，compact landscape 必须限制 `height <= 480`；禁止让桌面样宽屏或 stale orientation 获得 mobile bottom lift。
 - foreground 恢复不要无差别重连所有 session；默认先恢复 active session，其余只补非健康 session，避免 hidden tabs 被一起拉起放大带宽
 - foreground reconnect 若对同 host 多 session 走串行 bucket，必须把 active session 排在第一位；reconnect 成功后要立刻补一条 tail refresh request，但 **hidden->active / foreground refresh 不要无脑 bootstrap 整个 tail**：本地尾窗连续时只发带本地 revision/window 的 follow request，只有尾窗缺口或空 buffer 才 bootstrap；同时补一发 `ping` 做短超时 watchdog，避免“切回 tab 还是旧画面却迟迟不重连”
+- foreground / explicit resume 的 `forceHead` 不能被 active-reentry 去重 guard 吃掉：`lastActiveReentryAtRef`、`connectedBaselineBurstGuardRef` 只能抑制 passive `active-reentry` 重复 head；`explicit-resume + forceHead` 必须在同一 OPEN WebSocket 上发送 `buffer-head-request`，否则会出现“连接还在但后台返回/网络波动后界面不刷新”。
 - 2026-05-13 新冻结：open-tab runtime switch 必须永远拆成两条语义：
   - `restore-sync` = 只恢复 local shell / active runtime，不开 transport
   - `explicit-resume` = 用户显式激活后才允许 `resumeActiveSessionTransport`
@@ -181,8 +182,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android / Mac 若都要支持 terminal 主题，preset 与颜色算法必须下沉到 shared 纯模块，平台 TerminalView 只消费同一份 preset，避免 ANSI 映射再次分叉
 - 若 Settings UI 把主题卡片标成“正在使用/Active”，点击卡片就必须立即写入真实持久化存储；不能只停留在本页 draft，否则用户切出去再回来会恢复默认主题，属于典型假状态
 - `BridgeSettings` 里的 `terminalWidthMode` 是启动排版唯一真源；storage hook 首次 render 必须同步读取 localStorage 并 normalize，禁止先返回默认 `mirror-fixed` 再等 effect 修正，否则 restore/connect 首帧会按错误宽度模式连接。
+- Settings 保存 `terminalWidthMode` 时必须以 Settings draft `next` 为真源写回 `BridgeSettings`；禁止用旧 `current` 计算后只取 `.terminalWidthMode`，否则用户从 fixed 点 adaptive 后保存仍会被旧 fixed 覆盖。
 - 首装或旧配置缺 `terminalWidthMode` 时，默认模式判定必须优先用 `visualViewport.width`；Android WebView / 折叠屏可能首帧 visual viewport 窄但 layout viewport 宽，禁止用 `Math.max(innerWidth, documentElement.clientWidth, visualViewport.width)` 把手机错判成 `mirror-fixed`。
 - 旧 `terminal-width-mode` localStorage key / `TerminalWidthModeManager` 属于分叉真源；不得恢复。宽度模式只允许经 `STORAGE_KEYS.BRIDGE_SETTINGS -> BridgeSettings.terminalWidthMode -> TerminalPage/SessionContext`。
+- Session runtime 里的 `requestedTerminalGeometry` 只允许保存 measured cols 事实，不允许把历史 `widthMode` 反过来覆盖当前 `BridgeSettings.terminalWidthMode`。connect/reconnect/open payload 的 width policy 必须以当前 BridgeSettings 为准；否则用户从 fixed 切到 adaptive 后，旧 session geometry 会继续发 `mirror-fixed`。
+- adaptive width 问题不能只查 Android APK：`APK latest`、`latest.json`、`~/.zterm/daemon-runtime/server.cjs` 含新代码，都不证明运行中的 Mac daemon 已加载新 runtime。涉及 daemon-side adaptive/mirror/scheduler 修复时，必须看 `/health` 的 `pid/uptimeSec` 是否是更新后的进程，并跑真实 WebSocket + tmux probe：发送 `connect/resize widthMode=adaptive-phone cols=N` 后，用 tmux `#{window_width}x#{window_height}` 验证实际列数变化。若 daemon uptime 早于 runtime 更新，先做 service-scoped `zterm-daemon restart`，禁止把手机端继续改成补偿路径。
+- `adaptive-phone` 没有 active 客户端时必须恢复 tmux 宽度。恢复优先级：daemon 持有的 lease baseline -> persisted tmux option `@zterm_adaptive_width_baseline` -> 无 baseline 但 attached tmux client 比 window 宽时恢复到 attached client geometry。旧 daemon 可能已经清掉 option 但留下 55 列窄 window；这种 orphaned narrow window 必须由 daemon adaptive width lease owner 在启动/lease 归零时修复，不能让客户端再发 width 补偿。
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
 
 ### 2.11 Drawer / sheet 交互收口
@@ -949,7 +954,7 @@ android/
 
 ### 模式: foreground 恢复 owner 只能在 SessionContext lifecycle
 - **触发信号**: 现场出现“回到前台 timeout、不重连、杀进程才恢复”，且 App 侧只是在切 `appForegroundActive`
-- **动作**: App 只提供 foreground truth；真正的 transport 恢复必须由 `SessionContext lifecycle` 在 false->true 时唯一触发 `active-resume`
+- **动作**: App 只提供 foreground truth；真正的 transport 恢复必须由 `SessionContext lifecycle` 在 false->true 时唯一触发 `explicit-resume`，和冷启动恢复共用同一 transport owner
 - **反模式**: 指望 active tick 被动兜底，或在 App/page 层再长一套 reconnect fallback
 
 ### 模式: stale reconnect bookkeeping 必须允许重启 reconnect

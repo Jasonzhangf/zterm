@@ -238,6 +238,7 @@ const {
 
 // Ensure tmux server is running with standardized socket path
 terminalControlRuntime.ensureTmuxServerRunning();
+terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
 const terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,

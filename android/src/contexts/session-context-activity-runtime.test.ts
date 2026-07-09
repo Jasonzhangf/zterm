@@ -1,675 +1,192 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  ensureActiveSessionFreshRuntime,
-  probeOrReconnectStaleSessionTransportRuntime,
-} from './session-context-activity-runtime';
+import { ensureActiveSessionFreshRuntime } from './session-context-activity-runtime';
 
-function buildSession(id: string, state: 'connected' | 'connecting' | 'reconnecting' | 'closed' = 'connected') {
-  return {
-    id,
-    state,
-    daemonHeadRevision: 1,
-    daemonHeadEndIndex: 120,
-  } as any;
+function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSessionFreshRuntime>[0]> = {}) {
+  const stateRef = {
+    current: {
+      sessions: [{
+        id: 'session-1',
+        state: 'connected',
+      } as any],
+      activeSessionId: 'session-1',
+      liveSessionIds: [],
+    },
+  };
+  const options: Parameters<typeof ensureActiveSessionFreshRuntime>[0] = {
+    refreshOptions: {
+      sessionId: 'session-1',
+      source: 'active-reentry',
+      allowReconnectIfUnavailable: true,
+    },
+    refs: {
+      stateRef,
+      pendingResumeTailRefreshRef: { current: new Set<string>() },
+      lastActiveReentryAtRef: { current: new Map<string, number>() },
+      lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+      connectedBaselineBurstGuardRef: { current: new Set<string>() },
+      lastServerActivityAtRef: { current: new Map<string, number>() },
+      lastHeadRequestAtRef: { current: new Map<string, number>() },
+      reconnectRuntimesRef: { current: new Map<string, { connecting: boolean; timer: number | null }>() },
+    },
+    readSessionTransportRuntime: () => ({ targetKey: '127.0.0.1:3333:' }),
+    readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+    readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+    isReconnectInFlight: () => false,
+    hasPendingSessionTransportOpen: () => false,
+    isPendingSessionTransportOpenStale: () => false,
+    isSessionTransportActivityStale: () => false,
+    runtimeDebug: vi.fn(),
+    updateSessionSync: vi.fn(),
+    readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 0, endIndex: 24 }),
+    resetSessionTransportPullBookkeeping: vi.fn(),
+    requestSessionBufferHead: vi.fn(() => true),
+    resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1000 }),
+    reconnectSession: vi.fn(),
+    ...overrides,
+  };
+  return options;
 }
 
-function createSocket(readyState: number) {
-  return {
-    readyState,
-    getDiagnostics: () => ({}),
-  } as any;
-}
-
-describe('session-context-activity-runtime', () => {
-  it('treats explicit foreground resume target as refreshable even before runtime active session catches up', () => {
+describe('ensureActiveSessionFreshRuntime', () => {
+  it('requests head on the existing open socket for active reentry', () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-resume',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1'), buildSession('session-2')],
-            activeSessionId: 'session-1',
-            liveSessionIds: [],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed' as const),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refreshed).toBe(true);
-    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', expect.anything(), { force: true });
-  });
-
-  it('does not broaden active tick ownership when runtime active session still points elsewhere', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-tick',
-        allowReconnectIfUnavailable: false,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1'), buildSession('session-2')],
-            activeSessionId: 'session-1',
-            liveSessionIds: [],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed' as const),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refreshed).toBe(false);
-    expect(requestSessionBufferHead).not.toHaveBeenCalled();
-  });
-
-  it('treats active reentry as refreshable even before runtime active session catches up', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-reentry',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1'), buildSession('session-2')],
-            activeSessionId: 'session-1',
-            liveSessionIds: [],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed' as const),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refreshed).toBe(true);
-    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', expect.anything(), { force: true });
-  });
-
-  it('does not auto reconnect a closed active session on active reentry', () => {
     const reconnectSession = vi.fn();
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-1',
-        source: 'active-reentry',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1', 'closed')],
-            activeSessionId: 'session-1',
-            liveSessionIds: ['session-1'],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => null,
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead: vi.fn(() => true),
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+    const resetSessionTransportPullBookkeeping = vi.fn();
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
       reconnectSession,
+      resetSessionTransportPullBookkeeping,
     });
 
-    expect(refreshed).toBe(false);
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(resetSessionTransportPullBookkeeping).toHaveBeenCalledWith('session-1', 'active-reentry');
+    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('allows explicit resume to reconnect a closed active session', () => {
+  it('does not let active reentry guards suppress an explicit resume forced head request', () => {
+    const now = 2000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
-    const refreshed = ensureActiveSessionFreshRuntime({
+    const refs = createBaseOptions().refs;
+    refs.lastActiveReentryAtRef.current.set('session-1', now - 100);
+    refs.connectedBaselineBurstGuardRef.current.add('session-1');
+    const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
         forceHead: true,
+        markResumeTail: true,
         allowReconnectIfUnavailable: true,
       },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1', 'closed')],
-            activeSessionId: 'session-1',
-            liveSessionIds: ['session-1'],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-1' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => null,
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead: vi.fn(() => true),
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
+      refs,
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
       reconnectSession,
     });
 
-    expect(refreshed).toBe(true);
-    expect(reconnectSession).toHaveBeenCalledWith('session-1');
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: true });
+      expect(refs.pendingResumeTailRefreshRef.current.has('session-1')).toBe(true);
+      expect(refs.connectedBaselineBurstGuardRef.current.has('session-1')).toBe(true);
+      expect(reconnectSession).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
-  it('requests head for a visible live pane during active tick even when it is not the interactive active session', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-tick',
-        allowReconnectIfUnavailable: false,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-1'), buildSession('session-2')],
-            activeSessionId: 'session-1',
-            liveSessionIds: ['session-2'],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map() },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
+  it('waits for a connecting same-session socket instead of reconnecting', () => {
+    const reconnectSession = vi.fn();
+    const requestSessionBufferHead = vi.fn();
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => ({ readyState: WebSocket.CONNECTING } as any),
+      reconnectSession,
       requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
     });
 
-    expect(refreshed).toBe(true);
-    expect(requestSessionBufferHead).toHaveBeenCalledWith(
-      'session-2',
-      expect.objectContaining({ readyState: WebSocket.OPEN }),
-      expect.objectContaining({ force: undefined }),
-    );
-  });
-
-  it('skips duplicate forced resume head immediately after connected baseline head', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-    const refs = {
-      stateRef: {
-        current: {
-          sessions: [buildSession('session-1'), buildSession('session-2')],
-          activeSessionId: 'session-2',
-          liveSessionIds: ['session-2'],
-        },
-      },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastActiveReentryAtRef: { current: new Map<string, number>() },
-      lastConnectedBaselineAtRef: { current: new Map<string, number>([['session-2', Date.now()]]) },
-      connectedBaselineBurstGuardRef: { current: new Set<string>(['session-2']) },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastHeadRequestAtRef: { current: new Map<string, number>() },
-      reconnectRuntimesRef: { current: new Map() },
-    };
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-resume',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs,
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refreshed).toBe(true);
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(refs.connectedBaselineBurstGuardRef.current.has('session-2')).toBe(false);
+    expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('does not mark resume tail for stable connected active reentry', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-    const refs = {
-      stateRef: {
-        current: {
-          sessions: [buildSession('session-2')],
-          activeSessionId: 'session-2',
-          liveSessionIds: ['session-2'],
-        },
-      },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastActiveReentryAtRef: { current: new Map<string, number>() },
-      lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-      connectedBaselineBurstGuardRef: { current: new Set<string>() },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastHeadRequestAtRef: { current: new Map<string, number>() },
-      reconnectRuntimesRef: { current: new Map() },
-    };
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-reentry',
-        forceHead: true,
-        markResumeTail: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs,
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refreshed).toBe(true);
-    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-2', expect.anything(), { force: true });
-    expect(refs.pendingResumeTailRefreshRef.current.has('session-2')).toBe(false);
-  });
-
-  it('skips duplicate forced active reentry head inside the same cadence window', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-    const refs = {
-      stateRef: {
-        current: {
-          sessions: [buildSession('session-2')],
-          activeSessionId: 'session-2',
-          liveSessionIds: ['session-2'],
-        },
-      },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastActiveReentryAtRef: { current: new Map<string, number>() },
-      lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-      connectedBaselineBurstGuardRef: { current: new Set<string>() },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastHeadRequestAtRef: { current: new Map<string, number>() },
-      reconnectRuntimesRef: { current: new Map() },
-    };
-    const commonOptions = {
-      refs,
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 1, startIndex: 96, endIndex: 120 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed' as const),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    };
-
-    const first = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-reentry',
-        forceHead: true,
-        markResumeTail: true,
-        allowReconnectIfUnavailable: true,
-      },
-      ...commonOptions,
-    });
-    const second = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-reentry',
-        forceHead: true,
-        markResumeTail: true,
-        allowReconnectIfUnavailable: true,
-      },
-      ...commonOptions,
-    });
-
-    expect(first).toBe(true);
-    expect(second).toBe(true);
-    expect(requestSessionBufferHead).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps resume tail mark when active reentry has no local buffer window', () => {
-    const requestSessionBufferHead = vi.fn(() => true);
-    const refs = {
-      stateRef: {
-        current: {
-          sessions: [buildSession('session-2')],
-          activeSessionId: 'session-2',
-          liveSessionIds: ['session-2'],
-        },
-      },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastActiveReentryAtRef: { current: new Map<string, number>() },
-      lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-      connectedBaselineBurstGuardRef: { current: new Set<string>() },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastHeadRequestAtRef: { current: new Map<string, number>() },
-      reconnectRuntimesRef: { current: new Map() },
-    };
-
-    ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-reentry',
-        forceHead: true,
-        markResumeTail: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs,
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.OPEN),
-      isReconnectInFlight: () => false,
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 0, startIndex: 0, endIndex: 0 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead,
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession: vi.fn(),
-    });
-
-    expect(refs.pendingResumeTailRefreshRef.current.has('session-2')).toBe(true);
-  });
-
-  it('shows waiting state while active resume is still inside the pending open budget', () => {
+  it('waits for pending transport open even when pending bookkeeping is stale', () => {
     const reconnectSession = vi.fn();
     const updateSessionSync = vi.fn();
-    const isPendingSessionTransportOpenStale = vi.fn(() => false);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-resume',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
-      refs: {
-        stateRef: {
-          current: {
-            sessions: [buildSession('session-2', 'connecting')],
-            activeSessionId: 'session-2',
-            liveSessionIds: ['session-2'],
-          },
-        },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map([['session-2', { connecting: true, timer: null }]]) },
-      },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.CONNECTING),
-      isReconnectInFlight: () => true,
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => null,
       hasPendingSessionTransportOpen: () => true,
-      isPendingSessionTransportOpenStale,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
+      isPendingSessionTransportOpenStale: () => true,
+      reconnectSession,
       updateSessionSync,
-      readSessionBufferSnapshot: () => ({ revision: 0, startIndex: 0, endIndex: 0 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead: vi.fn(() => true),
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession,
-    });
-
-    expect(refreshed).toBe(false);
-    expect(isPendingSessionTransportOpenStale).toHaveBeenCalledWith('session-2', 1200);
-    expect(updateSessionSync).toHaveBeenCalledWith(
-      'session-2',
-      expect.objectContaining({
-        state: 'reconnecting',
-        lastError: 'Waiting for existing websocket open',
-      }),
-    );
-    expect(reconnectSession).not.toHaveBeenCalled();
-  });
-
-  it('force-replaces an active resume pending open after the active wait budget', () => {
-    const reconnectSession = vi.fn();
-    const isPendingSessionTransportOpenStale = vi.fn(() => true);
-
-    const refreshed = ensureActiveSessionFreshRuntime({
-      refreshOptions: {
-        sessionId: 'session-2',
-        source: 'active-resume',
-        forceHead: true,
-        allowReconnectIfUnavailable: true,
-      },
       refs: {
+        ...createBaseOptions().refs,
         stateRef: {
           current: {
-            sessions: [buildSession('session-2', 'connecting')],
-            activeSessionId: 'session-2',
-            liveSessionIds: ['session-2'],
+            sessions: [{ id: 'session-1', state: 'reconnecting' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
           },
         },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
-        lastActiveReentryAtRef: { current: new Map<string, number>() },
-        lastConnectedBaselineAtRef: { current: new Map<string, number>() },
-        connectedBaselineBurstGuardRef: { current: new Set<string>() },
-        lastServerActivityAtRef: { current: new Map<string, number>() },
-        lastHeadRequestAtRef: { current: new Map<string, number>() },
-        reconnectRuntimesRef: { current: new Map([['session-2', { connecting: true, timer: null }]]) },
       },
-      readSessionTransportRuntime: () => ({ targetKey: 'target-2' }),
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-2'] }),
-      readSessionTransportSocket: () => createSocket(WebSocket.CONNECTING),
-      isReconnectInFlight: () => true,
-      hasPendingSessionTransportOpen: () => true,
-      isPendingSessionTransportOpenStale,
-      isSessionTransportActivityStale: () => false,
-      runtimeDebug: vi.fn(),
-      updateSessionSync: vi.fn(),
-      readSessionBufferSnapshot: () => ({ revision: 0, startIndex: 0, endIndex: 0 }),
-      probeOrReconnectStaleSessionTransport: vi.fn(() => 'probed'),
-      resetSessionTransportPullBookkeeping: vi.fn(),
-      requestSessionBufferHead: vi.fn(() => true),
-      resolveTerminalRefreshCadence: () => ({ headTickMs: 33, headStalePingMs: 200, pullRequestStaleMs: 1500 }),
-      reconnectSession,
     });
 
-    expect(refreshed).toBe(true);
-    expect(isPendingSessionTransportOpenStale).toHaveBeenCalledWith('session-2', 1200);
-    expect(reconnectSession).toHaveBeenCalledWith('session-2', { forceReplaceTransport: true });
-  });
-});
-
-describe('probeOrReconnectStaleSessionTransportRuntime', () => {
-  it('stops waiting once probe has an activity anchor newer than the probe timestamp', () => {
-    const reconnectSession = vi.fn();
-    const requestSessionBufferHead = vi.fn();
-    const resetSessionTransportPullBookkeeping = vi.fn();
-    const runtimeDebug = vi.fn();
-    const now = Date.now();
-
-    const result = probeOrReconnectStaleSessionTransportRuntime({
-      sessionId: 'session-1',
-      ws: createSocket(WebSocket.OPEN),
-      reason: 'active-reentry',
-      refs: {
-        lastServerActivityAtRef: { current: new Map([['session-1', now]]) },
-        staleTransportProbeAtRef: { current: new Map([['session-1', now - 10]]) },
-        stateRef: { current: { activeSessionId: 'session-1' } },
-      },
-      runtimeDebug,
-      resetSessionTransportPullBookkeeping,
-      requestSessionBufferHead,
-      reconnectSession,
-      activeTransportProbeWaitMs: 1500,
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      state: 'reconnecting',
+      lastError: 'Waiting for existing websocket open',
     });
-
-    expect(result).toBe('recovered');
-    expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(resetSessionTransportPullBookkeeping).not.toHaveBeenCalled();
     expect(reconnectSession).not.toHaveBeenCalled();
-    expect(runtimeDebug).toHaveBeenCalledWith(
-      'session.transport.active-reentry.probe-skipped-fresh-activity',
-      expect.objectContaining({ sessionId: 'session-1' }),
-    );
   });
 
-  it('force-replaces the stale socket after a probe times out', () => {
+  it('does not reconnect closed sessions from passive active reentry', () => {
     const reconnectSession = vi.fn();
-    const requestSessionBufferHead = vi.fn();
-    const resetSessionTransportPullBookkeeping = vi.fn();
-    const runtimeDebug = vi.fn();
-    const now = Date.now();
-
-    const result = probeOrReconnectStaleSessionTransportRuntime({
-      sessionId: 'session-1',
-      ws: createSocket(WebSocket.OPEN),
-      reason: 'active-reentry',
-      refs: {
-        lastServerActivityAtRef: { current: new Map([['session-1', now - 10_000]]) },
-        staleTransportProbeAtRef: { current: new Map([['session-1', now - 5_000]]) },
-        stateRef: { current: { activeSessionId: 'session-1' } },
-      },
-      runtimeDebug,
-      resetSessionTransportPullBookkeeping,
-      requestSessionBufferHead,
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => null,
       reconnectSession,
-      activeTransportProbeWaitMs: 1500,
+      refs: {
+        ...createBaseOptions().refs,
+        stateRef: {
+          current: {
+            sessions: [{ id: 'session-1', state: 'closed' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
+          },
+        },
+      },
     });
 
-    expect(result).toBe('reconnecting');
-    expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(resetSessionTransportPullBookkeeping).not.toHaveBeenCalled();
-    expect(reconnectSession).toHaveBeenCalledWith('session-1', { forceReplaceTransport: true });
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('allows explicit resume to reconnect a closed session through the unique reconnect owner', () => {
+    const reconnectSession = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      readSessionTransportSocket: () => null,
+      reconnectSession,
+      refs: {
+        ...createBaseOptions().refs,
+        stateRef: {
+          current: {
+            sessions: [{ id: 'session-1', state: 'closed' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
+          },
+        },
+      },
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 });

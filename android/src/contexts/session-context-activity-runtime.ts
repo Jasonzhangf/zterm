@@ -23,90 +23,10 @@ interface SessionTargetRuntimeLike {
 
 export const ACTIVE_SESSION_PENDING_OPEN_STALE_MS = 1200;
 
-export function probeOrReconnectStaleSessionTransportRuntime(options: {
-  sessionId: string;
-  ws: BridgeTransportSocket;
-  reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input';
-  refs: {
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
-    stateRef: MutableRefObject<{ activeSessionId: string | null }>;
-  };
-  runtimeDebug: RuntimeDebugFn;
-  resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
-  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  reconnectSession: (sessionId: string, options?: { forceReplaceTransport?: boolean }) => void;
-  activeTransportProbeWaitMs: number;
-}) {
-  const lastActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
-  const lastProbeAt = options.refs.staleTransportProbeAtRef.current.get(options.sessionId) || 0;
-
-  // P3: active-reentry / explicit-resume should skip the probe path when we have
-  // very recent server activity. This avoids an extra probe -> wait -> reconnect
-  // window on healthy tab switches.
-  const freshActivityMs = lastActivityAt > 0 ? Math.max(0, Date.now() - lastActivityAt) : Number.POSITIVE_INFINITY;
-  const RECENT_ACTIVITY_SKIP_PROBE_MS = 1000; // < 2x typical headStalePingMs (500ms)
-  if (
-    (options.reason === 'active-reentry' || options.reason === 'explicit-resume')
-    && freshActivityMs < RECENT_ACTIVITY_SKIP_PROBE_MS
-  ) {
-    options.runtimeDebug(`session.transport.${options.reason}.probe-skipped-fresh-activity`, {
-      sessionId: options.sessionId,
-      activeSessionId: options.refs.stateRef.current.activeSessionId,
-      lastServerActivityAt: lastActivityAt,
-      freshActivityMs,
-    });
-    return 'recovered' as const;
-  }
-
-  if (lastProbeAt > 0 && lastActivityAt > lastProbeAt) {
-    options.runtimeDebug(`session.transport.${options.reason}.probe-recovered`, {
-      sessionId: options.sessionId,
-      activeSessionId: options.refs.stateRef.current.activeSessionId,
-      lastServerActivityAt: lastActivityAt,
-      lastProbeAt,
-    });
-    return 'recovered' as const;
-  }
-  if (lastProbeAt <= 0) {
-    options.runtimeDebug(`session.transport.${options.reason}.probe`, {
-      sessionId: options.sessionId,
-      activeSessionId: options.refs.stateRef.current.activeSessionId,
-      lastServerActivityAt: lastActivityAt,
-    });
-    options.resetSessionTransportPullBookkeeping(options.sessionId, `${options.reason}-probe`);
-    options.refs.staleTransportProbeAtRef.current.set(options.sessionId, Date.now());
-    options.requestSessionBufferHead(options.sessionId, options.ws, { force: true });
-    return 'probed' as const;
-  }
-
-  const probeAgeMs = Math.max(0, Date.now() - lastProbeAt);
-  if (probeAgeMs < options.activeTransportProbeWaitMs) {
-    options.runtimeDebug(`session.transport.${options.reason}.probe-wait`, {
-      sessionId: options.sessionId,
-      activeSessionId: options.refs.stateRef.current.activeSessionId,
-      lastServerActivityAt: lastActivityAt,
-      lastProbeAt,
-      probeAgeMs,
-    });
-    return 'waiting' as const;
-  }
-
-  options.runtimeDebug(`session.transport.${options.reason}.reconnect-after-probe`, {
-    sessionId: options.sessionId,
-    activeSessionId: options.refs.stateRef.current.activeSessionId,
-    lastServerActivityAt: lastActivityAt,
-    lastProbeAt,
-    probeAgeMs,
-  });
-  options.reconnectSession(options.sessionId, { forceReplaceTransport: true });
-  return 'reconnecting' as const;
-}
-
 export function ensureActiveSessionFreshRuntime(options: {
   refreshOptions: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -131,15 +51,10 @@ export function ensureActiveSessionFreshRuntime(options: {
   runtimeDebug: RuntimeDebugFn;
   updateSessionSync?: (id: string, updates: Partial<Session>) => void;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number; startIndex: number; endIndex: number };
-  probeOrReconnectStaleSessionTransport: (
-    sessionId: string,
-    ws: BridgeTransportSocket,
-    reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input',
-  ) => 'probed' | 'waiting' | 'recovered' | 'reconnecting';
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
-  reconnectSession: (sessionId: string, options?: { forceReplaceTransport?: boolean }) => void;
+  reconnectSession: (sessionId: string) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
   const transportRuntime = options.readSessionTransportRuntime(options.refreshOptions.sessionId);
@@ -148,16 +63,14 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isActive = options.refs.stateRef.current.activeSessionId === options.refreshOptions.sessionId;
   const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
-  const isExplicitForegroundResumeTarget = options.refreshOptions.source === 'active-resume';
   const isExplicitResumeTarget = options.refreshOptions.source === 'explicit-resume';
   const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
-  const isRefreshTarget = isExplicitForegroundResumeTarget || isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
+  const isRefreshTarget = isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
   const activePendingOpenStaleAfterMs = (
-    options.refreshOptions.source === 'active-resume'
-    || options.refreshOptions.source === 'active-reentry'
+    options.refreshOptions.source === 'active-reentry'
     || options.refreshOptions.source === 'explicit-resume'
   )
     ? ACTIVE_SESSION_PENDING_OPEN_STALE_MS
@@ -168,13 +81,6 @@ export function ensureActiveSessionFreshRuntime(options: {
         activePendingOpenStaleAfterMs,
       )
     : false;
-  const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.refreshOptions.sessionId) || null;
-  const staleReconnectInFlight = Boolean(
-    reconnectRuntime?.connecting
-    && ws?.readyState !== WebSocket.OPEN
-    && !pendingTransportOpen,
-  );
-
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
   const refreshPlan = buildActiveSessionRefreshPlan({
     hasSession: Boolean(session),
@@ -182,7 +88,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     sessionState,
     wsReadyState: ws?.readyState ?? null,
     reconnectInFlight,
-    staleReconnectInFlight,
     pendingTransportOpen,
     pendingTransportOpenStale,
     allowReconnectIfUnavailable: options.refreshOptions.allowReconnectIfUnavailable,
@@ -206,7 +111,6 @@ export function ensureActiveSessionFreshRuntime(options: {
       hasSession: Boolean(session),
       isActive,
       isLive,
-      isExplicitForegroundResumeTarget,
       isExplicitResumeTarget,
       isActiveReentryTarget,
       isRefreshTarget,
@@ -216,7 +120,6 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
       pendingTransportOpenStale,
       activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
-      staleReconnectInFlight,
       reason: refreshPlan.reason,
     });
     return false;
@@ -228,7 +131,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     activeSessionId: options.refs.stateRef.current.activeSessionId,
     isActive,
     isLive,
-    isExplicitForegroundResumeTarget,
     isExplicitResumeTarget,
     isActiveReentryTarget,
     isRefreshTarget,
@@ -236,7 +138,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     localStartIndex: localBuffer.startIndex ?? null,
     localEndIndex: localBuffer.endIndex ?? null,
     transportStale,
-    staleReconnectInFlight,
     pendingTransportOpen,
     pendingTransportOpenStale,
     activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
@@ -244,18 +145,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
     plan: refreshPlan.action,
   });
-
-  if (refreshPlan.action === 'probe-stale-transport') {
-    if (ws) {
-      options.probeOrReconnectStaleSessionTransport(
-        options.refreshOptions.sessionId,
-        ws,
-        refreshPlan.probeReason,
-      );
-      return true;
-    }
-    return false;
-  }
 
   if (refreshPlan.action === 'request-head') {
     if (refreshPlan.resetPullBookkeeping) {
@@ -270,11 +159,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     const lastActiveReentryAt = options.refs.lastActiveReentryAtRef.current.get(options.refreshOptions.sessionId) || 0;
     const shouldForceHeadRequest = Boolean(options.refreshOptions.forceHead);
     const shouldSkipImmediateForcedResumeHead = (
-      (
-        options.refreshOptions.source === 'active-resume'
-        || options.refreshOptions.source === 'explicit-resume'
-        || options.refreshOptions.source === 'active-reentry'
-      )
+      options.refreshOptions.source === 'active-reentry'
       && shouldForceHeadRequest
       && ws?.readyState === WebSocket.OPEN
       && (
@@ -286,7 +171,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     if (options.refreshOptions.markResumeTail) {
       // active-reentry stable: if the session is already connected with a non-empty
       // local buffer, no tail-refresh is needed. The daemon push already keeps the
-      // tail in sync; a fresh resume-tail here would just trigger a full cache pull
+      // tail in sync; a fresh resume-tail here would just trigger duplicate visible-window pull
       // that races the input path.
       const skipResumeTailForStableReentry = (
         options.refreshOptions.source === 'active-reentry'
@@ -317,11 +202,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   }
 
   if (refreshPlan.action === 'reconnect') {
-    if (refreshPlan.forceReplaceTransport) {
-      options.reconnectSession(options.refreshOptions.sessionId, { forceReplaceTransport: true });
-    } else {
-      options.reconnectSession(options.refreshOptions.sessionId);
-    }
+    options.reconnectSession(options.refreshOptions.sessionId);
     return true;
   }
 

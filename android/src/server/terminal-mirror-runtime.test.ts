@@ -24,7 +24,15 @@ function createSession(id = 'session-1'): TerminalSession {
   };
 }
 
-function createRuntime() {
+function createRuntime(overrides: {
+  readTmuxPaneMetrics?: () => {
+    paneId: string;
+    tmuxAvailableLineCountHint: number;
+    paneRows: number;
+    paneCols: number;
+    alternateOn: boolean;
+  };
+} = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const assertTmuxSessionExists = vi.fn();
@@ -62,13 +70,13 @@ function createRuntime() {
     normalizeTerminalRows: (rows?: number) => rows || 40,
     resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
       requestedGeometry || currentMirrorGeometry || existingTmuxGeometry || previousSessionGeometry,
-    readTmuxPaneMetrics: () => ({
+    readTmuxPaneMetrics: overrides.readTmuxPaneMetrics || (() => ({
       paneId: '%1',
       tmuxAvailableLineCountHint: 0,
       paneRows: 40,
       paneCols: 120,
       alternateOn: false,
-    }),
+    })),
     assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     mirrorBufferChanged: () => [],
@@ -474,6 +482,39 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
+  it('persists adaptive baseline in tmux before applying lease width', async () => {
+    const { runtime, sessions, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 88,
+      widthMode: 'adaptive-phone',
+    } as any);
+
+    expect(runTmux).toHaveBeenCalledWith([
+      'set-window-option',
+      '-t',
+      'demo',
+      '@zterm_adaptive_width_baseline',
+      '120x40',
+    ]);
+    expect(runTmux).toHaveBeenCalledWith([
+      'set-window-option',
+      '-t',
+      'demo',
+      '@zterm_adaptive_width_applied',
+      '88',
+    ]);
+    const tmuxCalls = runTmux.mock.calls as unknown as Array<[string[]]>;
+    const baselineCall = tmuxCalls.findIndex(([args]) => args[0] === 'set-window-option'
+      && args.includes('@zterm_adaptive_width_baseline'));
+    const resizeCall = tmuxCalls.findIndex(([args]) => args[0] === 'resize-window');
+    expect(baselineCall).toBeGreaterThanOrEqual(0);
+    expect(resizeCall).toBeGreaterThan(baselineCall);
+  });
+
   it('updates adaptive resize lease and applies tmux width', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const session = createSession('session-1');
@@ -579,6 +620,81 @@ describe('terminal mirror runtime lifecycle truth', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('restores persisted adaptive baseline on daemon start when no subscribers reconnect', () => {
+    const { runtime, runTmux } = createRuntime();
+    runTmux.mockImplementation((args?: string[]) => {
+      if (args?.[0] === 'show-window-options' && args.includes('@zterm_adaptive_width_baseline')) {
+        return { ok: true as const, stdout: '120x40\n' };
+      }
+      return { ok: true as const, stdout: '' };
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(1);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
+    expect(runTmux).toHaveBeenCalledWith([
+      'set-window-option',
+      '-u',
+      '-t',
+      'demo',
+      '@zterm_adaptive_width_baseline',
+    ]);
+    expect(runTmux).toHaveBeenCalledWith([
+      'set-window-option',
+      '-u',
+      '-t',
+      'demo',
+      '@zterm_adaptive_width_applied',
+    ]);
+  });
+
+  it('restores orphaned narrow tmux window to the attached client size when no persisted baseline exists', () => {
+    const { runtime, runTmux } = createRuntime({
+      readTmuxPaneMetrics: () => ({
+        paneId: '%1',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 55,
+        paneCols: 55,
+        alternateOn: false,
+      }),
+    });
+    runTmux.mockImplementation((args?: string[]) => {
+      if (args?.[0] === 'display-message') {
+        return { ok: true as const, stdout: '115x56\n' };
+      }
+      return { ok: true as const, stdout: '' };
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(1);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '115', '-y', '56']);
+  });
+
+  it('does not resize startup sessions without baseline when the tmux window already matches the attached client', () => {
+    const { runtime, runTmux } = createRuntime({
+      readTmuxPaneMetrics: () => ({
+        paneId: '%1',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 56,
+        paneCols: 115,
+        alternateOn: false,
+      }),
+    });
+    runTmux.mockImplementation((args?: string[]) => {
+      if (args?.[0] === 'display-message') {
+        return { ok: true as const, stdout: '115x56\n' };
+      }
+      return { ok: true as const, stdout: '' };
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(0);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '115', '-y', '56']);
   });
 
   it('reports resize as session_not_ready when no mirror is attached', () => {

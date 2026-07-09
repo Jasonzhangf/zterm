@@ -7,13 +7,12 @@ import { Filesystem } from '@capacitor/filesystem';
 import {
   SessionProvider,
   shouldReconnectActivatedSession,
-  shouldReconnectQueuedActiveInput,
   useSession,
 } from './SessionContext';
 import { useSessionBufferSnapshot } from '../lib/session-buffer-store';
 import { useSessionRenderBufferSnapshot } from '../lib/session-render-buffer-store';
 import { useSessionHeadSnapshot } from '../lib/session-head-store';
-import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } from '../lib/types';
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
 import { defaultTraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
@@ -190,7 +189,7 @@ function readSentMessages(ws: MockWebSocket) {
     .map((item) => JSON.parse(item));
 }
 
-async function forceSingleSessionReconnectAfterStaleProbe(
+async function resumeSingleSessionAcrossStaleActivity(
   ws: MockWebSocket,
   setNow: (isoTimestamp: string) => void,
 ) {
@@ -206,7 +205,11 @@ async function forceSingleSessionReconnectAfterStaleProbe(
 
   setNow('2026-04-27T00:00:45.000Z');
   fireEvent.click(screen.getByText('resume-active'));
-  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+  await waitFor(() => {
+    expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+  });
+  expect(MockWebSocket.instances).toHaveLength(1);
+  expect(ws.readyState).toBe(MockWebSocket.OPEN);
 }
 
 const host: Host = {
@@ -350,6 +353,9 @@ function SessionHarness() {
       </button>
       <button type="button" onClick={() => sendTerminalResize('session-1', 91, undefined, 'adaptive-phone')}>
         resize-adaptive
+      </button>
+      <button type="button" onClick={() => sendTerminalResize('session-1', undefined, undefined, 'mirror-fixed')}>
+        resize-fixed
       </button>
       <button
         type="button"
@@ -893,20 +899,6 @@ describe('SessionContext websocket dynamic refresh', () => {
     })).toBe(false);
   });
 
-  it('keeps ensuring reconnect for active queued input whenever the transport is still dead', () => {
-    expect(shouldReconnectQueuedActiveInput({
-      isActiveTarget: true,
-      wsReadyState: MockWebSocket.CLOSED,
-      reconnectInFlight: false,
-    })).toBe(true);
-
-    expect(shouldReconnectQueuedActiveInput({
-      isActiveTarget: true,
-      wsReadyState: MockWebSocket.CLOSED,
-      reconnectInFlight: true,
-    })).toBe(false);
-  });
-
   beforeEach(() => {
     cleanup();
     // Reset mock instances BEFORE stubbing to ensure clean slate for THIS test file.
@@ -1047,7 +1039,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await act(async () => {
         await Promise.resolve();
       });
-      // After the per-session debounce, the global RAF batch still needs one frame to flush.
+      // The render gate has no per-session debounce; only the RAF batch needs one frame to flush.
       await vi.advanceTimersByTimeAsync(16);
       await act(async () => {
         await Promise.resolve();
@@ -1268,6 +1260,34 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
+  it('keeps a stale pending session websocket on foreground resume instead of creating another websocket', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      const view = render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive={false}>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const staleSessionSocket = MockWebSocket.instances[0]!;
+      expect(staleSessionSocket.readyState).toBe(MockWebSocket.CONNECTING);
+
+      nowSpy.mockReturnValue(7000);
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(staleSessionSocket.readyState).toBe(MockWebSocket.CONNECTING);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('does not create a second websocket when explicit reconnect is requested while the socket is still open', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -1358,7 +1378,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(followRequest).toMatchObject({
         type: 'buffer-sync-request',
         payload: {
-          requestStartIndex: Math.max(0, 240 - resolveTerminalRequestWindowLines(24)),
+          requestStartIndex: 216,
           requestEndIndex: 240,
         },
       });
@@ -1400,7 +1420,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('does not double-request head when connected baseline is immediately followed by explicit active resume', async () => {
+  it('forces explicit active resume head even when connected baseline just requested head', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
     try {
       render(
@@ -1422,7 +1442,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws);
-        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(2);
+        expect(sentMessages.filter((item) => item.type === 'connect')).toHaveLength(1);
       });
     } finally {
       nowSpy.mockRestore();
@@ -1737,7 +1758,7 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
 
-  it('does not double-request head when tab switch is immediately followed by explicit foreground resume on the same active tab', async () => {
+  it('forces explicit foreground resume head after tab switch on the same active socket', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
     try {
       render(
@@ -1763,7 +1784,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const sentMessages = readSentMessages(ws2);
-        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
+        expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(2);
+        expect(sentMessages.some((item) => item.type === 'connect')).toBe(false);
       });
       expect(readSentMessages(ws2).some((item) => item.type === 'buffer-sync-request')).toBe(false);
     } finally {
@@ -1947,7 +1969,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('issues immediate active-resume head refresh when app foreground truth flips back to active', async () => {
+  it('issues immediate explicit resume head refresh when app foreground truth flips back to active', async () => {
     vi.useFakeTimers();
     try {
       const view = render(
@@ -2399,7 +2421,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         .map((item) => JSON.parse(item));
       const requests = sentMessages.filter((item) => item.type === 'buffer-sync-request');
       expect(requests).toHaveLength(2);
-      expect(requests[0]?.payload?.missingRanges).toEqual([{ startIndex: 8, endIndex: 80 }]);
+      expect(requests[0]?.payload?.missingRanges).toEqual([{ startIndex: 56, endIndex: 80 }]);
       expect(requests[1]?.payload?.missingRanges).toBeUndefined();
     });
   });
@@ -2740,7 +2762,7 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
 
-  it('does not let pong-only traffic keep a stalled active transport healthy forever', async () => {
+  it('does not rebuild an open active transport only because traffic is pong-only', async () => {
     vi.useFakeTimers();
     const nowSpy = vi.spyOn(Date, 'now');
     let now = 1000;
@@ -2799,7 +2821,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
 
       expect(MockWebSocket.controlInstances.length).toBeGreaterThanOrEqual(1);
-      expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(ws1.readyState).toBe(MockWebSocket.OPEN);
     } finally {
       nowSpy.mockRestore();
       vi.useRealTimers();
@@ -3044,13 +3067,13 @@ describe('SessionContext websocket dynamic refresh', () => {
       const sentMessages = readSentMessages(ws);
       const readingRepair = sentMessages.find(
         (item) => item.type === 'buffer-sync-request'
-          && item.payload?.requestStartIndex === 8
+          && item.payload?.requestStartIndex === 56
           && item.payload?.requestEndIndex === 80,
       );
       expect(readingRepair).toBeDefined();
       const firstMissingRange = readingRepair?.payload?.missingRanges?.[0];
       expect(firstMissingRange?.endIndex).toBe(80);
-      expect([8, 56]).toContain(firstMissingRange?.startIndex);
+      expect(firstMissingRange?.startIndex).toBe(56);
     });
 
     ws.sent.length = 0;
@@ -3172,13 +3195,13 @@ describe('SessionContext websocket dynamic refresh', () => {
       const sentMessages = readSentMessages(ws);
       const readingRepair = sentMessages.find(
         (item) => item.type === 'buffer-sync-request'
-          && item.payload?.requestStartIndex === 8
+          && item.payload?.requestStartIndex === 56
           && item.payload?.requestEndIndex === 80,
       );
       expect(readingRepair).toBeDefined();
       const firstMissingRange = readingRepair?.payload?.missingRanges?.[0];
       expect(firstMissingRange?.endIndex).toBe(80);
-      expect([8, 56]).toContain(firstMissingRange?.startIndex);
+      expect(firstMissingRange?.startIndex).toBe(56);
     });
   });
 
@@ -3745,7 +3768,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('does not eagerly close the current open transport before the replacement reconnect transport starts', async () => {
+  it('keeps the current open transport during repeated resume after stale activity', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -3768,111 +3791,82 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
 
-      await forceSingleSessionReconnectAfterStaleProbe(ws, (timestamp) => {
+      await resumeSingleSessionAcrossStaleActivity(ws, (timestamp) => {
         now = new Date(timestamp).getTime();
       });
 
       expect(ws.readyState).toBe(MockWebSocket.OPEN);
-      expect(screen.getByTestId('session-state').textContent).toBe('reconnecting');
-    } finally {
-      nowSpy.mockRestore();
-    }
-  });
-
-  it('closes the superseded open transport after the replacement reconnect transport has connected', async () => {
-    const nowSpy = vi.spyOn(Date, 'now');
-    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
-    nowSpy.mockImplementation(() => now);
-    try {
-      render(
-        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
-          <SessionHarness />
-        </SessionProvider>,
-      );
-
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-      const ws = MockWebSocket.instances[0]!;
-      ws.triggerOpen();
-      ws.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
-
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
-
-      await forceSingleSessionReconnectAfterStaleProbe(ws, (timestamp) => {
-        now = new Date(timestamp).getTime();
-      });
-
-      const reconnectWs = MockWebSocket.instances[1]!;
-      expect(ws.readyState).toBe(MockWebSocket.OPEN);
-
-      reconnectWs.triggerOpen();
-      reconnectWs.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
-
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
-      expect(ws.readyState).toBe(MockWebSocket.CLOSED);
-      expect(reconnectWs.readyState).toBe(MockWebSocket.OPEN);
-    } finally {
-      nowSpy.mockRestore();
-    }
-  });
-
-  it('ignores late close and late error from the superseded transport after reconnect has already established the replacement socket', async () => {
-    const nowSpy = vi.spyOn(Date, 'now');
-    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
-    nowSpy.mockImplementation(() => now);
-    try {
-      render(
-        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
-          <SessionHarness />
-        </SessionProvider>,
-      );
-
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-      const ws = MockWebSocket.instances[0]!;
-      ws.triggerOpen();
-      ws.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
-
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
-
-      await forceSingleSessionReconnectAfterStaleProbe(ws, (timestamp) => {
-        now = new Date(timestamp).getTime();
-      });
-
-      const reconnectWs = MockWebSocket.instances[1]!;
-      reconnectWs.triggerOpen();
-      reconnectWs.triggerMessage({
-        type: 'connected',
-        payload: {
-          sessionId: 'session-1',
-        },
-      });
-
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
-      expect(ws.readyState).toBe(MockWebSocket.CLOSED);
-      expect(reconnectWs.readyState).toBe(MockWebSocket.OPEN);
-
-      ws.triggerError();
-      ws.close();
-
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
       expect(screen.getByTestId('session-state').textContent).toBe('connected');
-      expect(reconnectWs.readyState).toBe(MockWebSocket.OPEN);
-      expect(MockWebSocket.instances).toHaveLength(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not create a superseded transport after repeated resume on the same open socket', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+      await resumeSingleSessionAcrossStaleActivity(ws, (timestamp) => {
+        now = new Date(timestamp).getTime();
+      });
+
+      expect(ws.readyState).toBe(MockWebSocket.OPEN);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('keeps repeated resume on an open socket from creating late superseded transport events', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = new Date('2026-04-27T00:00:00.000Z').getTime();
+    nowSpy.mockImplementation(() => now);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
+
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+
+      await resumeSingleSessionAcrossStaleActivity(ws, (timestamp) => {
+        now = new Date(timestamp).getTime();
+      });
+
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(screen.getByTestId('session-state').textContent).toBe('connected');
+      expect(ws.readyState).toBe(MockWebSocket.OPEN);
     } finally {
       nowSpy.mockRestore();
     }
@@ -3962,6 +3956,58 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(connectMessage?.payload?.widthMode).toBe('mirror-fixed');
       expect(connectMessage?.payload?.cols).toBeUndefined();
       expect(connectMessage?.payload?.rows).toBeUndefined();
+    });
+  });
+
+  it('uses current bridge width mode instead of stale session geometry on reconnect', async () => {
+    function WidthModeHarness() {
+      const [terminalWidthMode, setTerminalWidthMode] = useState<'adaptive-phone' | 'mirror-fixed'>('mirror-fixed');
+      return (
+        <div>
+          <button type="button" onClick={() => setTerminalWidthMode('adaptive-phone')}>
+            set-adaptive
+          </button>
+          <SessionProvider
+            wsUrl="ws://127.0.0.1:3333/ws"
+            bridgeSettings={{ terminalWidthMode } as any}
+          >
+            <SessionHarness />
+          </SessionProvider>
+        </div>
+      );
+    }
+
+    render(<WidthModeHarness />);
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+
+    await waitFor(() => {
+      const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
+      expect(connectMessage?.payload?.widthMode).toBe('mirror-fixed');
+    });
+
+    fireEvent.click(screen.getByText('resize-fixed'));
+    await waitFor(() => {
+      const resizeMessage = readSentMessages(ws).find((item) => item.type === 'resize');
+      expect(resizeMessage?.payload?.widthMode).toBe('mirror-fixed');
+      expect(resizeMessage?.payload?.cols).toBeUndefined();
+    });
+
+    fireEvent.click(screen.getByText('set-adaptive'));
+
+    ws.readyState = MockWebSocket.CLOSED;
+    fireEvent.click(screen.getByText('reconnect-session'));
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    const reconnectWs = MockWebSocket.instances[1]!;
+    reconnectWs.triggerOpen();
+
+    await waitFor(() => {
+      const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
+      expect(reconnectMessage?.payload?.widthMode).toBe('adaptive-phone');
+      expect(reconnectMessage?.payload?.rows).toBeUndefined();
     });
   });
 
@@ -4706,7 +4752,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(tailRefresh).toMatchObject({
       type: 'buffer-sync-request',
       payload: {
-        requestStartIndex: 168,
+        requestStartIndex: 216,
         requestEndIndex: 240,
       },
     });
@@ -4761,7 +4807,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(tailRefresh).toMatchObject({
         type: 'buffer-sync-request',
         payload: {
-          requestStartIndex: 168,
+          requestStartIndex: 216,
           requestEndIndex: 240,
         },
       });
@@ -4770,11 +4816,11 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws.triggerMessage({
       type: 'buffer-sync',
       payload: indexedPayload({
-        startIndex: 168,
+        startIndex: 216,
         endIndex: 240,
         revision: 4,
-        lines: Array.from({ length: 72 }, (_, offset) => {
-          const index = 168 + offset;
+        lines: Array.from({ length: 24 }, (_, offset) => {
+          const index = 216 + offset;
           return [index, index === 220 ? 'ROW-220-UPDATED' : `row-${String(index).padStart(3, '0')}`] as const;
         }),
       }),
@@ -4944,7 +4990,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(screen.getByTestId('stale-visible-session-end-index').textContent).toBe('64694');
   });
 
-  it('jumps directly to the latest three-screen tail when daemon head is far ahead of the local buffer', async () => {
+  it('jumps directly to the latest visible tail when daemon head is far ahead of the local buffer', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <FarBehindFollowHarness />
@@ -4981,7 +5027,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(tailRefresh).toMatchObject({
         type: 'buffer-sync-request',
         payload: {
-          requestStartIndex: 428,
+          requestStartIndex: 476,
           requestEndIndex: 500,
         },
       });
@@ -5074,7 +5120,7 @@ describe('SessionContext websocket dynamic refresh', () => {
           knownRevision: 4206,
           localStartIndex: 171108,
           localEndIndex: 171108,
-          requestStartIndex: 172042,
+          requestStartIndex: 172108,
           requestEndIndex: 172141,
         },
       });
@@ -5210,7 +5256,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('repairs visible gaps when the renderer-visible window still has gaps even if daemon head truth is unchanged', async () => {
+  it('does not pull body when daemon head truth is unchanged and renderer has not declared a new visible demand', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <NearHeadGapFollowHarness />
@@ -5243,7 +5289,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 80));
     const sentMessages = readSentMessages(ws);
-    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+    expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
   });
 
   it('refreshes the current follow tail window when daemon revision changes even if endIndex is unchanged', async () => {
@@ -5423,7 +5469,7 @@ describe('SessionContext websocket dynamic refresh', () => {
           knownRevision: 71688,
           localStartIndex: 186512,
           localEndIndex: 187512,
-          requestStartIndex: 187512,
+          requestStartIndex: 187531,
           requestEndIndex: 187555,
         }),
       });
@@ -5462,7 +5508,7 @@ describe('SessionContext websocket dynamic refresh', () => {
           knownRevision: 71736,
           localStartIndex: 186512,
           localEndIndex: 187512,
-          requestStartIndex: 187512,
+          requestStartIndex: 187553,
           requestEndIndex: 187577,
         }),
       });
@@ -5675,7 +5721,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('widens re-entry same-end refresh to the full visible tail window instead of only patching the bottom rows', async () => {
+  it('refreshes only the visible tail window on re-entry same-end revision advance', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -5728,7 +5774,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(sentMessages).toContainEqual({
         type: 'buffer-sync-request',
         payload: expect.objectContaining({
-          requestStartIndex: 8,
+          requestStartIndex: 56,
           requestEndIndex: 80,
         }),
       });
@@ -6152,7 +6198,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('reconnects only after a stale-open active transport stays silent after an explicit probe', async () => {
+  it('keeps a stale-open transport on tab reentry and only requests head', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -6191,10 +6237,10 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('active-session').textContent).toBe('session-2');
-        expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
       });
       expect(ws2.readyState).toBe(MockWebSocket.OPEN);
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(3));
+      expect(MockWebSocket.instances).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();
     }
@@ -6353,7 +6399,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(sentMessages).toContainEqual({
         type: 'buffer-sync-request',
         payload: expect.objectContaining({
-          requestStartIndex: 38,
+          requestStartIndex: 86,
           requestEndIndex: 110,
         }),
       });
@@ -6366,7 +6412,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(sentMessages).toContainEqual({
         type: 'buffer-sync-request',
         payload: expect.objectContaining({
-          requestStartIndex: 24,
+          requestStartIndex: 72,
           requestEndIndex: 96,
         }),
       });
@@ -6449,7 +6495,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('does not widen input-driven same-end refresh to a full cache pull when only the current tail screen needs repaint', async () => {
+  it('does not widen input-driven same-end refresh beyond the visible window when only the current tail screen needs repaint', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -6874,7 +6920,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(readSentMessages(controlWs).filter((item) => item.type === 'session-open').length).toBeGreaterThanOrEqual(4);
   });
 
-  it('does not let shared control-socket traffic keep a sibling same-target session falsely fresh', async () => {
+  it('does not let shared control-socket traffic trigger reconnect for a sibling same-target session on reentry', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -6917,9 +6963,9 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('active-session').textContent).toBe('session-2');
-        expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting');
+        expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
       });
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(3));
+      expect(MockWebSocket.instances).toHaveLength(2);
     } finally {
       nowSpy.mockRestore();
     }

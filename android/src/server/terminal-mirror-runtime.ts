@@ -99,6 +99,7 @@ export interface TerminalMirrorRuntime {
     session: TerminalSession,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
+  restorePersistedAdaptiveWidthBaselines: (sessionNames: string[]) => number;
   refreshAdaptiveWidthLeaseHeartbeat: (session: TerminalSession) => void;
   releaseAdaptiveWidthLease: (session: TerminalSession, reason: string) => void;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
@@ -108,6 +109,8 @@ export interface TerminalMirrorRuntime {
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
+const ADAPTIVE_WIDTH_BASELINE_OPTION = '@zterm_adaptive_width_baseline';
+const ADAPTIVE_WIDTH_APPLIED_OPTION = '@zterm_adaptive_width_applied';
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -570,21 +573,96 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
-  function applyTmuxWindowGeometry(
-    mirror: SessionMirror,
+  function parsePersistedAdaptiveWidthBaseline(value: string | null): TerminalGeometry | null {
+    return parseTerminalGeometry(value);
+  }
+
+  function parseTerminalGeometry(value: string | null): TerminalGeometry | null {
+    const match = value?.trim().match(/^(\d+)x(\d+)$/);
+    if (!match) {
+      return null;
+    }
+    return {
+      cols: deps.normalizeTerminalCols(Number(match[1])),
+      rows: deps.normalizeTerminalRows(Number(match[2])),
+    };
+  }
+
+  function readPersistedAdaptiveWidthBaseline(sessionName: string): TerminalGeometry | null {
+    try {
+      const result = deps.runTmux(['show-window-options', '-v', '-t', sessionName, ADAPTIVE_WIDTH_BASELINE_OPTION]);
+      return parsePersistedAdaptiveWidthBaseline(result.stdout);
+    } catch {
+      return null;
+    }
+  }
+
+  function readAttachedTmuxClientGeometry(sessionName: string): TerminalGeometry | null {
+    try {
+      const result = deps.runTmux(['display-message', '-p', '-t', sessionName, '#{client_width}x#{client_height}']);
+      return parseTerminalGeometry(result.stdout);
+    } catch {
+      return null;
+    }
+  }
+
+  function writePersistedAdaptiveWidthBaseline(sessionName: string, geometry: TerminalGeometry) {
+    deps.runTmux([
+      'set-window-option',
+      '-t',
+      sessionName,
+      ADAPTIVE_WIDTH_BASELINE_OPTION,
+      `${deps.normalizeTerminalCols(geometry.cols)}x${deps.normalizeTerminalRows(geometry.rows)}`,
+    ]);
+  }
+
+  function writePersistedAdaptiveWidthApplied(sessionName: string, cols: number) {
+    deps.runTmux([
+      'set-window-option',
+      '-t',
+      sessionName,
+      ADAPTIVE_WIDTH_APPLIED_OPTION,
+      String(deps.normalizeTerminalCols(cols)),
+    ]);
+  }
+
+  function clearPersistedAdaptiveWidthLease(sessionName: string) {
+    for (const option of [ADAPTIVE_WIDTH_BASELINE_OPTION, ADAPTIVE_WIDTH_APPLIED_OPTION]) {
+      try {
+        deps.runTmux(['set-window-option', '-u', '-t', sessionName, option]);
+      } catch (error) {
+        console.warn(
+          `[${deps.logTimePrefix()}] adaptive width lease failed to clear ${option} for ${sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+
+  function applyTmuxWindowGeometryToSession(
+    sessionName: string,
     geometry: { cols: number; rows?: number },
     reason: string,
   ) {
-    const args = ['resize-window', '-t', mirror.sessionName, '-x', String(deps.normalizeTerminalCols(geometry.cols))];
+    const args = ['resize-window', '-t', sessionName, '-x', String(deps.normalizeTerminalCols(geometry.cols))];
     if (typeof geometry.rows === 'number' && Number.isFinite(geometry.rows) && geometry.rows > 0) {
       args.push('-y', String(deps.normalizeTerminalRows(geometry.rows)));
     }
     deps.runTmux(args);
     console.log(
-      `[${deps.logTimePrefix()}] adaptive width lease ${reason}: session=${mirror.sessionName} cols=${geometry.cols}${
+      `[${deps.logTimePrefix()}] adaptive width lease ${reason}: session=${sessionName} cols=${geometry.cols}${
         geometry.rows ? ` rows=${geometry.rows}` : ''
       }`,
     );
+  }
+
+  function applyTmuxWindowGeometry(
+    mirror: SessionMirror,
+    geometry: { cols: number; rows?: number },
+    reason: string,
+  ) {
+    applyTmuxWindowGeometryToSession(mirror.sessionName, geometry, reason);
   }
 
   function resolveActiveAdaptiveWidthLeases(mirror: SessionMirror, now = Date.now()) {
@@ -634,13 +712,16 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       clearTimeout(mirror.adaptiveWidthLeaseTimer);
       mirror.adaptiveWidthLeaseTimer = null;
     }
-    const baseline = mirror.adaptiveWidthBaselineGeometry;
+    const baseline = mirror.adaptiveWidthBaselineGeometry
+      || readPersistedAdaptiveWidthBaseline(mirror.sessionName)
+      || resolveOrphanedAdaptiveWidthRestoreGeometry(mirror.sessionName);
     mirror.adaptiveWidthAppliedCols = null;
     mirror.adaptiveWidthBaselineGeometry = null;
     if (!baseline) {
       return;
     }
     applyTmuxWindowGeometry(mirror, baseline, `restore:${reason}`);
+    clearPersistedAdaptiveWidthLease(mirror.sessionName);
     mirror.cols = baseline.cols;
     mirror.rows = baseline.rows;
     writeMirrorBaselineGeometry(mirror, baseline);
@@ -670,14 +751,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     const targetCols = leases[0].cols;
     if (!mirror.adaptiveWidthBaselineGeometry) {
-      mirror.adaptiveWidthBaselineGeometry = readCurrentTmuxGeometry(mirror.sessionName) || {
+      mirror.adaptiveWidthBaselineGeometry = readPersistedAdaptiveWidthBaseline(mirror.sessionName)
+        || readCurrentTmuxGeometry(mirror.sessionName) || {
         cols: resolveMirrorBaselineCols(mirror),
         rows: resolveMirrorBaselineRows(mirror),
       };
+      writePersistedAdaptiveWidthBaseline(mirror.sessionName, mirror.adaptiveWidthBaselineGeometry);
     }
 
     if (mirror.adaptiveWidthAppliedCols !== targetCols) {
       applyTmuxWindowGeometry(mirror, { cols: targetCols }, `apply:${reason}`);
+      writePersistedAdaptiveWidthApplied(mirror.sessionName, targetCols);
       mirror.adaptiveWidthAppliedCols = targetCols;
       mirror.cols = targetCols;
       writeMirrorBaselineGeometry(mirror, {
@@ -705,6 +789,41 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     session.adaptiveWidthCols = cols;
     session.adaptiveWidthHeartbeatAt = Date.now();
     reconcileAdaptiveWidthLeases(mirror, reason);
+  }
+
+  function resolveOrphanedAdaptiveWidthRestoreGeometry(sessionName: string) {
+    const current = readCurrentTmuxGeometry(sessionName);
+    const attachedClient = readAttachedTmuxClientGeometry(sessionName);
+    if (!current || !attachedClient) {
+      return null;
+    }
+    if (current.cols >= attachedClient.cols) {
+      return null;
+    }
+    return attachedClient;
+  }
+
+  function restorePersistedAdaptiveWidthBaselines(sessionNames: string[]) {
+    let restored = 0;
+    for (const sessionName of sessionNames) {
+      const baseline = readPersistedAdaptiveWidthBaseline(sessionName)
+        || resolveOrphanedAdaptiveWidthRestoreGeometry(sessionName);
+      if (!baseline) {
+        continue;
+      }
+      applyTmuxWindowGeometryToSession(sessionName, baseline, 'restore:daemon-start-no-subscriber');
+      clearPersistedAdaptiveWidthLease(sessionName);
+      const mirror = mirrors.get(deps.getMirrorKey(sessionName));
+      if (mirror) {
+        mirror.adaptiveWidthBaselineGeometry = null;
+        mirror.adaptiveWidthAppliedCols = null;
+        mirror.cols = baseline.cols;
+        mirror.rows = baseline.rows;
+        writeMirrorBaselineGeometry(mirror, baseline);
+      }
+      restored += 1;
+    }
+    return restored;
   }
 
   async function startMirror(
@@ -967,6 +1086,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     startMirror,
     attachTmux,
     handleAdaptiveResize,
+    restorePersistedAdaptiveWidthBaselines,
     refreshAdaptiveWidthLeaseHeartbeat,
     releaseAdaptiveWidthLease,
     handleInput,

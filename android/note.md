@@ -5,6 +5,15 @@
 - 根因：active transport stale 判定沿用 `CLIENT_PING_INTERVAL_MS + 5000 = 35s`，heartbeat timeout 是 70s；即使 active tab 已无服务端活动，也会长时间停在旧 open transport / timeout banner。
 - 修复方向：active tab 2.5s 无服务端活动即发 `buffer-head-request` probe；probe 等待窗口默认 1.2s，无响应才 `reconnectSession(...forceReplaceTransport)`。健康连接收到 `buffer-head` 后视为 recovered，不替换 socket。
 
+# 2026-07-08 Same-revision stale buffer-sync guard
+
+- Jason 现场描述刷新时旧错误页面和新页面交替出现，并怀疑刷新过程假设 buffer 干净或循环 buffer 未清空。
+- 架构映射：属于 `terminal.buffer_render` / Client Mirror Buffer；唯一 owner 是 `src/contexts/session-context-buffer-runtime.ts`，测试 owner 是 `session-context-buffer-runtime.test.ts` 与 `terminal-refresh-buffer-truth-test-design.md`。禁止 TerminalPage/UI shell 清空 DOM 或本地 buffer。
+- 红测证实：当前实现会接受同 revision、同 absolute window 的迟到旧 payload，并把已有非 gap 行从 `new-*` 覆盖回 `old-*`，可解释新旧画面交替。
+- 修复方向：`buffer-sync apply` 前检测 same-revision payload 是否会改写本地已有 non-gap absolute rows；若冲突且 payload 窗口不命中本地 gap，显式 `session.buffer.sync.stale-same-revision-drop` 并拒绝 apply。same-revision gap repair 仍允许填洞。
+- Jason 进一步补充是“旧 buffer 内容刷出来又被新内容覆盖，高频反复”。补充红测锁定 `incomingRevision < localRevision` 旧 body：不能 repaint，必须记录 `session.buffer.sync.stale-lower-revision-drop` 并请求当前 tail；否则低 revision 旧包虽然可能不 commit，也会静默不可观测。
+- 验证：buffer/runtime/render gates 109 PASS；feature registry 31 PASS；tsc PASS；`daemon:mirror:close-loop` 8 cases PASS，覆盖 codex/top/vim/initial/local input/external input/daemon restart/schedule，并且 replay/source compare OK。标准 debug APK build PASS，发布 `0.1.3.2032`，sha256 `a8f5717c08825324ecde536890f0d1819a4a7b259963048638ffa355b13b8114`。本机 `adb devices -l` 只有 offline emulator，未完成真机安装态复测。
+
 # 2026-07-07 WebSocket reuse planning audit
 
 - Jason 当前确认 `0.1.3.2026` 版本体感可用，下一步只梳理 WebSocket 复用，不先写代码；禁止再做 inactive/background 持续刷新方案。
@@ -1594,3 +1603,196 @@ Need runtime debug to confirm:
 - 验证：capture 红测转绿，显示 `stabilizeAttempts=3` 与 `total=503 buffer=500-503`；daemon runtime / buffer contract / client sparse buffer / TerminalView source-DOM 6 files / 143 tests PASS；feature-registry 31 PASS；tsc PASS；`daemon:mirror:close-loop` 8 cases PASS，top/vim/codex replay/source compare ok。
 - APK：标准 `./scripts/build-android-debug.sh` PASS，发布 `0.1.3.2030` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`，sha256 `14c4c413c04dd56062ee7c918774504106ba7b25e82e79a9a935beb486ef9c08`。
 - 本机 daemon：已执行 `daemon:install-global` + `zterm-daemon restart`，health `127.0.0.1:3333` OK，新 pid `26206`；`~/.zterm/daemon-runtime/server.cjs` 已确认包含 `resolveStableMirrorCaptureSnapshot` 主线和 `totalAvailableLines = Math.max(resolvedAvailableLineCount, getMirrorAvailableEndIndex2(mirror))`。
+
+## 2026-07-08 Adaptive width mode stale geometry root fix
+
+- 现场问题：手机 Settings 已设 `adaptive-phone` 时，session reconnect 仍按 `mirror-fixed` 发给 daemon。
+- 架构映射：属于 `terminal.transport_lifecycle` 的 client width policy 传递；唯一 owner 是 `SessionContext` 的 transport geometry reader / wire payload builder。禁止改 daemon 或 TerminalView 做事后补偿。
+- 根因：`SessionContext` 的 `readRequestedTerminalGeometry()` 优先返回 session runtime 里旧的 `requestedTerminalGeometry`；只要该 session 曾写过 `{ widthMode:'mirror-fixed' }`，后续 Settings 改成 adaptive 后 reconnect 仍会读旧 mode。
+- 修复：`session-context-provider-core-assemblies.ts` 读取 geometry 时只把 session runtime 当 measured cols 来源，width policy 永远以当前 `BridgeSettings.terminalWidthMode` 为准；fixed 下不携带 cols/rows，adaptive 下只保留合法 cols。
+- 回归：`SessionContext.ws-refresh.test.tsx` 增加 red case，证明 fixed stale geometry -> settings adaptive -> reconnect 的 connect payload 必须为 `adaptive-phone`。
+
+## 2026-07-08 render store revision monotonic gate after 2032 field failure
+
+- 现场问题：Jason 确认 APK `0.1.3.2032` 仍有旧 buffer / 新 buffer 高频交替，说明 lower-revision / same-revision stale payload guard 不足以闭环。
+- 架构映射：属于 `terminal.buffer_render` / Client Rendering And Buffer Block；唯一修改点是 `src/lib/session-render-buffer-store.ts` 和对应 gate。禁止 TerminalPage / QuickBar / UI shell 清 DOM 或 daemon 接管 renderer 状态。
+- 排查结果：`session-render-gate` flush 时读取 liveBufferStore 最新 snapshot；TerminalView DOM key 是 absolute row index，VisibleRow memo 比较 row ref/plainText。未发现按数组 offset 错写 sparse diff 或 DOM key 复用旧行的直接证据。
+- 修复：render store 新增 per-session body revision 单调门禁。已发布 `revision=N` 后，`revision<N` 的 snapshot 拒绝发布并记录 `session.render-store.revision-regression-drop`；显式 `deleteSession()` 后允许低 revision 新链路重新开始。
+- 回归：`session-render-buffer-store.test.ts` 新增正/反测试，锁 lower revision 不能覆盖新行、explicit delete 后可 reset。`terminal.buffer_render` owner gate 9 files / 150 tests PASS。
+- 项目级验证：`test:feature-registry` 31 PASS，`tsc --noEmit` PASS，`git diff --check` PASS，`daemon:mirror:close-loop` 8 cases PASS。
+- APK：`./scripts/build-android-debug.sh` PASS，版本 `0.1.3.2033`，sha256 `15e6e69ba70ed532c61ef7e301e9a994738315901978fe80fae22569dc57cef4`，已发布到 `android/update-dist` 与 `~/.zterm/updates`。`adb devices -l` 无 online 设备，本机不能完成 L5 真机 UI 复测。
+- 缺口：这只排除本地 render 发布回退。若真机仍出现高 revision 旧内容，需要继续用 `session.buffer.apply.inspect`、`session.render-gate.flush.inspect` 和新 `session.render-store.revision-regression-drop` 区分 daemon payload 源污染 vs WebView compositor/DOM 显示问题。
+
+## 2026-07-08 refresh slow + status bar overlap follow-up
+
+- 现场问题：Jason 反馈 2033 刷新很慢；截图还显示 Android 状态栏图标覆盖 terminal 顶部文字/返回按钮。
+- 慢刷根因：daemon mirror capture 为防半帧要求连续两次 canonical snapshot 内容完全一致；动态 TUI 每次 capture 都可能变化，导致多次重采样甚至 `tmux capture remained unstable`，随后 live sync failure backoff，体感刷新慢。
+- 修复：`resolveStableMirrorCaptureSnapshot()` 改为“结构稳定才发布”：连续两次 snapshot 的 rows/cols/cursorKeys/scrollback/window line count/available line count/visibleTop 稳定即可发布第二次最新内容；若当前 mirror 完整一致仍一次通过。`stabilizedAgainst='consecutive-window'` 表示内容可变但窗口稳定。
+- 状态栏根因：`resolveTerminalHeaderTopInsetPx(true)` 硬返回 16px，折叠屏/高状态栏设备实际 safe-area top 更大，导致 header/terminal 首行进状态栏。
+- 修复：Android top inset 读取 CSS `env(safe-area-inset-top)`，最低 16px；仍不读取 `visualViewport.offsetTop`，避免 IME 弹起时 top inset 二次叠加。
+- 验证：`terminal-keyboard-lift.test.ts`、`TerminalPage.android-ime.test.tsx`、`TerminalHeader.test.tsx`、`terminal-mirror-capture.test.ts` PASS；相关完整 gate 12 files / 223 tests PASS。
+- 最终验证：`test:feature-registry` 31 PASS；Android `tsc --noEmit` PASS；`git diff --check` PASS；`daemon:mirror:close-loop` 8 cases PASS（codex-live/top-live/vim-live/initial-sync/local-input/external-input/daemon-restart/schedule-fire，replay + strict audit OK）；Mac client `pnpm --dir mac test -- --reporter dot` 22 files / 146 tests PASS；Mac type-check PASS；标准 `./scripts/build-android-debug.sh` PASS，发布 APK `0.1.3.2034`，sha256 `b168e63472326eb716331ee4a8ea5d06da1d88841533196d4bf2593f3a9f3030`。本机 `adb devices -l` 无 online 设备，L5 Android 真机 UI 复测仍缺。
+
+## 2026-07-08 old bridge settings adaptive width mode fix
+
+- 现场问题：Jason 截图反馈 2034 仍像 fixed，不按 `adaptive-phone`，同时位置/刷新仍异常。
+- 架构映射：属于 Client Render Width / BridgeSettings persistence truth；唯一 owner 是 `packages/shared/src/react/use-bridge-settings-storage.ts`。禁止在 daemon / TerminalView / TerminalPage 用后置 resize 补偿当前 settings 真源错误。
+- 根因：旧 `BRIDGE_SETTINGS` 存在但缺 `terminalWidthMode` 时，`readStoredBridgeSettings()` 直接 `normalizeBridgeSettings(JSON.parse(stored))`；normalize 对缺失或未知 mode 使用 `DEFAULT_BRIDGE_SETTINGS.terminalWidthMode = mirror-fixed`，绕过 `visualViewport.width` 设备检测。
+- 修复：shared storage 读取旧配置时先注入检测到的 `terminalWidthMode`，再 normalize；已有显式 `adaptive-phone` / `mirror-fixed` 不覆盖。调试浮窗增加 `WM` 字段，下一轮截图能直接确认当前 app 看到的宽度模式。
+- 验证：shared storage 5 tests PASS；App first-paint + SessionContext reconnect + TerminalPage IME/lift gates 194 tests PASS；Android `tsc --noEmit` PASS；feature registry 31 PASS；`git diff --check` PASS；`daemon:mirror:close-loop` 8 cases PASS；standard debug build PASS。APK `0.1.3.2035`，sha256 `a9702c34b7bc5372c1e317bc4e6d2fb81d979c59994e88c1453d6c982a578a86`。本机 ADB 只有 offline emulator，仍缺真机 L5 UI 复测。
+
+## 2026-07-08 WebSocket quiet-time must not expire long session transport
+
+- 现场判断：同一 tmux session 的 per-session WebSocket 在 daemon 未重启、tmux target 未变、物理 socket 未 close/error/send failure 时不应“过期”。此前 `lastServerActivityAt` stale -> probe -> `forceReplaceTransport` 和 heartbeat pong timeout close 都是错误失效真相。
+- 修复：`buildActiveSessionRefreshPlan()` 对 `WebSocket.OPEN` 一律 request-head，不再返回 stale probe；input 发送成功后不再触发 stale probe；client app heartbeat pong overdue 只继续 ping，不 finalize/close；daemon ws heartbeat missed pong 只记录并继续 ping，不 close；Mac `bridge-transport` pong overdue 也只继续 ping，不 close。
+- 同步：`architecture.md`、transport lifecycle decision、terminal checklist/matrix、websocket reuse test design、`terminal-buffer-truth` skill 均改成 quiet-time observational rule；旧 2026-05-27 audit 仍是历史背景，不再是当前真源。
+- 验证：transport/heartbeat/SessionContext targeted gates 8 files / 253 tests PASS；Android `tsc --noEmit` PASS；feature registry 31 PASS；`git diff --check` PASS；Mac client tests 22 files / 147 tests PASS；Mac type-check PASS；`daemon:mirror:close-loop` 8 cases PASS（codex/top/vim/initial/local input/external input/daemon restart/schedule）。
+- 复测构建：标准 `./scripts/build-android-debug.sh` PASS，版本 `0.1.3.2037`，versionCode `1032037`，sha256 `ccf406236e33c5ee5a15e68a0b2e712e6ff1633d0251fbf293e71207dd37416a`；`android/update-dist/latest.json`、`android/update-dist/zterm-latest-debug.apk`、`android/release-dist/zterm-latest-debug.apk`、`/Users/fanzhang/.zterm/updates/zterm-0.1.3.2037.apk` 已对齐。`adb devices -l` 无在线设备，Android L5 真机现场复测仍需 Jason 安装后验证。
+
+## 2026-07-08 visible-window body pull for bottom status refresh
+
+- 现场问题：用户确认“WebSocket OPEN 不等于拉 buffer”，隐藏区域不能因连接存在而主动拉取；随后底部频繁更新状态栏几乎不更新，说明同位置刷新判断和可见窗口拉取边界混乱。
+- 架构映射：属于 Client Mirror Buffer / SessionContext buffer runtime；唯一 owner 是 `session-context-buffer-runtime.ts`、`session-buffer-planner-helpers.ts` 和 shared `buffer-sync-request-planner.ts`。daemon 只回 head/range，不拥有 viewport/follow/reading 策略；renderer 只声明 visible range。
+- 修复：没有 renderer visible range 时，`buffer-head` 只更新 head/cursor metadata，不触发 body pull；有 visible range 时，tail/reading/request/catch-up 的 body pull 都严格限制在当前 visible window。1000 行只作为本地 sparse retention，不再是拉取目标；旧“三屏请求窗口”语义从 skill/architecture/decision 中移除。
+- 底部状态栏刷新：`daemonRevision > localRevision` 且 end 相同仍触发当前 visible tail window 刷新，锁住 `top`/状态栏这类同一行原地更新；但不会扩大到隐藏历史或 full cache。
+- 验证：Android targeted gates 3 files / 228 tests PASS；shared terminal planner/renderer 3 files / 50 tests PASS；Android typecheck PASS；feature registry 31 PASS；`git diff --check` PASS；Mac client tests 22 files / 147 tests PASS；Mac type-check PASS；`daemon:mirror:close-loop` 8 cases PASS。
+- 复测构建：标准 `./scripts/build-android-debug.sh` PASS，版本 `0.1.3.2038`，versionCode `1032038`，sha256 `bde818c79cdff64d64275298923e644b30925b7541e044d22e2a1967c5e02adb`；`android/update-dist/latest.json`、`android/update-dist/zterm-latest-debug.apk`、`android/release-dist/zterm-latest-debug.apk`、`/Users/fanzhang/.zterm/updates/zterm-0.1.3.2038.apk` 已对齐。`adb devices -l` 只有 `emulator-5554 offline`，本机无法完成 Android L5 真机 UI 复测。
+
+## 2026-07-08 daemon subscribed mirror cadence fix
+
+- 现场问题：2038 状态栏仍经常不刷新且刷新率低。visible-only body pull 已修，但 daemon mirror 在“最近无 live activity”后退到 idle 120ms，下一次原地状态栏更新必须等下一轮 idle capture 才能被发现。
+- 架构映射：属于 Daemon Truth Block / mirror scheduler；唯一 owner 是 `terminal-performance-scheduler.ts` 和 `terminal-mirror-runtime.ts`。daemon 仍不读取 client active/visible/follow/reading，只用物理事实：ready subscriber、transport ready/backpressure、failure、capture cost。
+- 修复：ready subscriber 存在且无 failure/backpressure/over-budget capture 时保持 active/fast cadence；`lastLiveActivityAt` 不再决定 ready mirror 是否 idle。per-subscriber helper 只把 `ready=true` transport 计为健康 subscriber，closed transport 走 no-subscriber slow path。
+- 验证：server scheduler/mirror targeted gates 4 files / 35 tests PASS；Android `tsc --noEmit` PASS；feature registry 31 PASS；`git diff --check` PASS；`daemon:mirror:close-loop` 8 cases PASS，top-live replay strict audit OK。
+- 收口：Mac client 22 files / 147 tests PASS，Mac type-check PASS；MemPalace safe corpus re-mine 后可搜到 `Daemon subscribed mirror cadence truth status bar`；standard debug build PASS，APK `0.1.3.2039` / versionCode `1032039` / sha256 `1c2303435e82b61c1bec61aa0ffe9f0e474c47f4c658d38336b76a521a57d5ca` 已发布到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`。`adb devices -l` 无在线设备，Android L5 真机 UI 刷新复测仍缺。
+- 进一步发现：`~/.zterm/daemon-runtime/server.cjs` 在构建后仍残留旧 `RECENT_PROGRESS_MS/recentlyActive`，说明只升级 APK 不能修 daemon-side cadence。已执行 `pnpm --dir android run daemon:install-global && zterm-daemon restart`；新 runtime 只命中 `subscribed-good-transport-low-capture-cost`，无旧 idle gate；`curl http://127.0.0.1:3333/health` 返回 `ok=true`、pid `40791`、`wsUrl=ws://127.0.0.1:3333`。
+
+## 2026-07-08 adaptive width mode still entering as fixed
+
+- 现场问题：最新版本进入 terminal 后横向排版仍按 fixed，不读 adaptive。
+- 架构映射：属于 Client Render Width / Session Transport payload；唯一 owner 是 BridgeSettings -> App width-mode handler -> TerminalPage/TerminalStageShell/TerminalView -> SessionContext payload builder。禁止 daemon 保存 widthMode，也禁止 TerminalView/daemon 后置补偿 fixed。
+- 根因 1：`TerminalPage` props 缺省仍是 `mirror-fixed`，任何入口/测试/初始化缺 prop 时会直接固定化。
+- 根因 2：active terminal/header 发出的 `onTerminalWidthModeChange` 只调用 `sendTerminalResize()`，没有同步更新 BridgeSettings；即使当次 resize 是 adaptive，下一次进入或 reconnect 仍可能从 stale settings 走 fixed。
+- 根因 3：`TerminalPageStageShell` 用 `terminalWidthMode !== "mirror-fixed"` 禁用 tab swipe；当前没有独立 horizontal pan owner 时，这会让 fixed 模式进入无交互出口，和架构规则冲突。
+- 修复：TerminalPage 默认改 `adaptive-phone`；App 包装 width-mode handler，先写 BridgeSettings 再发送 resize；StageShell 不再用 width mode 禁用 tab swipe。
+- 验证：Android width/layout/transport gates 7 files / 285 tests PASS；shared settings/renderer 2 files / 22 tests PASS；Android type-check PASS；feature registry 31 PASS；`git diff --check` PASS。
+- 构建：standard debug build PASS，prebuild terminal contracts 48 files / 592 tests PASS，common flows 96 tests PASS，relay smoke OK。发布 APK `0.1.3.2040` / versionCode `1032040` / sha256 `baf0b43e3e797ee48179c5008f9efd273fbbde696220f6ec5e1247ec0738c7e1` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`。`adb devices -l` 无在线设备，Android L5 真机 width-mode 复测仍缺。
+
+## 2026-07-09 bottom-row refresh risk lock + adaptive default closeout
+
+- 下方刷新风险：新增 `TerminalView.dynamic-refresh.test.tsx` 回归，真实 `BaseTerminalView + session-render-buffer-store` 场景先渲染 session A bottom rows，切到 session B，发布 A 的 late revision，再模拟 IME 高度变化对应的 `ResizeObserver` layout refresh；断言 B DOM 只含 B bottom rows，不含 A/late-A rows；切回 A 后只显示 A 最新 rows。
+- 验证下方刷新：`TerminalView.dynamic-refresh.test.tsx` 64 tests PASS；`session-render-buffer-store.test.ts` + `TerminalPage.tab-isolation.test.tsx` + `TerminalPage.android-ime.test.tsx` 63 tests PASS；Android typecheck PASS；feature registry/architecture/wiki/loop 31 tests PASS；`git diff --check` PASS。
+- 继续问题：Jason 反馈 2040 最新版设置仍看起来固定宽度。复查发现上一轮只修了 storage hook / TerminalPage / App handler，但 shared `DEFAULT_BRIDGE_SETTINGS`、`normalizeBridgeSettings()`、Android `normalizeTerminalWidthMode()` 和 Settings 选项顺序仍以 `mirror-fixed` 为默认/首选；任何绕过 storage hook 或 draft normalize 的路径都能复活 fixed。
+- 修复：`packages/shared/src/connection/bridge-settings.ts` 默认 `terminalWidthMode` 改为 `adaptive-phone`，unknown/missing normalize 改为 adaptive；`android/src/lib/terminal-width-mode-manager.ts` unknown normalize 改为 adaptive，并把 Settings 选项顺序改为 Adaptive Phone 在前。
+- 验证宽度链路：Android targeted gates 8 files / 292 tests PASS；shared storage 5 tests PASS；Android `tsc --noEmit` PASS；feature registry/architecture/wiki/loop 31 tests PASS；`git diff --check` PASS。
+- 构建：`android/scripts/build-android-debug.sh` PASS；prebuild terminal contracts 48 files / 593 tests PASS；common flows 96 tests PASS；relay smoke OK；发布 APK `0.1.3.2041` / versionCode `1032041` / sha256 `86f2a8427b18ec1e8fee73151c4fc4f32f2b7b1cf7461c9d28ae3d5d5c5122b5` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`。`adb devices -l` 只有 `emulator-5554 offline`，Android L5 真机 UI 复测仍缺。
+
+## 2026-07-09 foreground resume stale CONNECTING transport replacement
+
+- 现场问题：Android App 进后台再回前台后显示 `连接已断开，正在重连 / WS connect timeout`，与“daemon 未重启时同一 tmux session 不应因前后台切换重建失败”的 transport lifecycle 规则冲突。
+- 架构映射：属于 `terminal.transport_lifecycle` / SessionContext transport owner；唯一修改点是 `session-transport-open-helpers.ts`、`session-context-activity-runtime.ts`、`session-context-session-runtime.ts` 和 provider lifecycle 接线。禁止改 daemon、TerminalPage 或 renderer 做补偿。
+- 红测发现：原补丁只处理 `pending-open` stale；真实 L3 foreground case 里 `session-ticket` 已到达并删除 pending intent，但 session WebSocket 仍卡在 `CONNECTING`，planner 因 `pendingTransportOpen=false` 且 `wsReadyState=CONNECTING` 返回 skip，导致旧 socket 一直等通用 handshake timeout。
+- 修复：active resume / active reentry / explicit resume 读取 socket prime 时记录的 `lastPongAtRef` 作为 CONNECTING 起点；超过 1200ms active wait budget 且仍 `CONNECTING` 时返回 `reconnect(forceReplaceTransport:true)`。`reconnectSessionRuntime()` 对 `stale-pending-open` 和 `force-replace` 都物理关闭旧 session socket，并清 stale pending/control socket 后再排新 reconnect。
+- 回归：`session-sync-helpers.test.ts` 增加 over-budget CONNECTING 正向和 fresh CONNECTING 反向；`SessionContext.ws-refresh.test.tsx` 增加后台 -> 前台 stale CONNECTING 集成红测，断言旧 socket close、新 socket 只创建一个。
+- 验证：transport/lifecycle target gates 5 files / 243 tests PASS；Android `tsc --noEmit` PASS；feature registry/architecture/wiki/loop 31 tests PASS；`git diff --check` PASS。
+- 构建：`android/scripts/build-android-debug.sh` PASS；prebuild terminal contracts 48 files / 594 tests PASS，common flows 96 tests PASS，relay smoke OK；发布 APK `0.1.3.2042` / versionCode `1032042` / sha256 `c93a72ce9a7fc476806c98d0d422870702e5399d4ec96c0a128138920104a9f3` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`。`adb devices -l` 无在线设备，Android L5 前后台实机复测仍缺。
+
+## 2026-07-09 correction: foreground / online must not rebuild session WebSocket
+
+- Jason 纠正：每个 session 的 WebSocket 是 client-owned long transport truth；网络 online、前后台恢复、切 tab、沉默、missed pong 都不是重连依据。已有 OPEN ws 必须直接用协议消息向 daemon 查询 head/session 状态；CONNECTING/pending ws 也不得因 active wait budget 自动创建第二条 ws。
+- 架构映射：仍是 `terminal.transport_lifecycle`；唯一 owner 是 `SessionContext` transport lifecycle + `useOpenTabLifecycleEffects` 的前后台事件桥。App / TerminalPage / daemon / renderer 不得拥有 reconnect 判断。
+- 修复方向：`useOpenTabLifecycleEffects` 移除 `reconnectSession` 能力，`online` 只调用 `resumeActiveSessionTransport(activeSessionId)`；`buildActiveSessionRefreshPlan()` 对 stale pending open / over-budget CONNECTING 返回 `transport-open-pending`，不再 `forceReplaceTransport`。
+- 回归：`App.dynamic-refresh.test.tsx` 锁 online 只 probe active，不调用 reconnect；`session-sync-helpers.test.ts` / `session-context-activity-runtime.test.ts` 锁 stale pending/CONNECTING 不替换；`SessionContext.ws-refresh.test.tsx` 锁 foreground stale CONNECTING 不创建第二条 ws。
+
+## 2026-07-09 reconnect bookkeeping is not websocket failure truth
+
+- 继续审计发现：`buildActiveSessionRefreshPlan()` 仍把 `staleReconnectInFlight` 映射为 `reconnect`，会让 foreground/active resume 因本地 reconnect bookkeeping 创建第二条 ws。
+- 修复：移除 `staleReconnectInFlight` 和 `connectingTransportStale` planner 输入；任何 `WebSocket.CONNECTING` 在非 active tick 恢复路径都返回 `skip/transport-open-pending`；stale reconnect bookkeeping 不再进入 planner。
+- 回归：`session-sync-helpers.test.ts` 新增 stale reconnect bookkeeping 反向锁；targeted transport gate 5 files / 313 tests PASS。
+- 最终验证：Android typecheck PASS；feature registry/architecture/wiki/loop 31 tests PASS；`git diff --check` PASS；Mac client 22 files / 147 tests PASS；Mac type-check PASS；`daemon:mirror:close-loop` 8 cases PASS；MemPalace safe mine 后可搜到 `reconnect bookkeeping is not websocket failure truth`。
+- 构建：`android/scripts/build-android-debug.sh` PASS；prebuild terminal contracts 48 files / 596 tests PASS，common flows 96 tests PASS，relay smoke OK；发布 APK `0.1.3.2044` / versionCode `1032044` / sha256 `2f04d8e6a4e98281dfa06985774532ff81c6db0ec9c691c2026ec434a5eab688` 到 `android/update-dist`、`android/release-dist`、`~/.zterm/updates`。`adb devices -l` 只有 `emulator-5554 offline`，Android L5 真机 UI 复测仍缺。
+
+## 2026-07-09 adaptive width Settings save stale-current bug
+
+- 现场问题：Jason 安装最新版本后仍反馈 terminal 未使用 adaptive。复查 daemon runtime 已含 `handleAdaptiveResize/applyAdaptiveColsToTmuxMirror`，Settings/TerminalPage 默认也已是 `adaptive-phone`。
+- 根因：`App.tsx` 的 Settings `onSave(next)` 写回 `terminalWidthMode` 时调用 `updateBridgeSettingsTerminalWidthMode(current, next.terminalWidthMode).terminalWidthMode`。如果旧 `current` 是 `mirror-fixed`，保存 adaptive 的 draft 仍可能被旧 current 覆盖回 fixed。
+- 修复：Settings 保存以 draft `next` 为真源：`updateBridgeSettingsTerminalWidthMode(next, next.terminalWidthMode)`；新增 App 层红测模拟 terminal -> connections -> settings save，并把 updater 套在旧 fixed current 上，断言结果是 adaptive。
+- 已验证：`App.dynamic-refresh.test.tsx` + Settings/width manager/bridge settings 105 tests PASS；width handshake/layout targeted gates 182 tests PASS；Android typecheck PASS；feature registry/architecture/wiki/loop 31 tests PASS；`git diff --check` PASS。
+
+## 2026-07-09 adaptive width daemon stale process
+
+- 现场继续问题：Jason 确认写入 adaptive 并升级 APK 后仍“完全没有区别”。
+- 架构判断：不再停在 Settings 保存层；问题属于 Client Render Width + Daemon adaptive resize 入参链路。daemon 不保存 widthMode，但必须对一次性 `connect/resize widthMode=adaptive-phone cols=N` 执行 tmux `resize-window -x N`。
+- 真实复现：在 daemon `pid=40791`、`uptimeSec≈14h` 时，新建 `zterm-adaptive-probe-*` tmux session；WebSocket 发送 `session-open`、`connect widthMode=adaptive-phone cols=47`、`resize cols=53`。daemon 回 `buffer-sync.cols=80`，tmux 仍 `80x24`。
+- 关键发现：`~/.zterm/daemon-runtime/server.cjs` 文件包含 adaptive 代码，但运行中的 daemon 进程未重启，仍是旧内存代码。APK 升级不会热加载 Mac daemon runtime。
+- 处理：执行 service-scoped `zterm-daemon restart`，新 daemon `pid=17512`、`uptimeSec=3`。
+- 复测：同一 WebSocket/tmux probe 后，`connect cols=47` 返回 `buffer-sync.cols=47`；随后 `resize cols=53` 后 tmux 实际为 `53x24`。临时 probe tmux session 已按明确名称删除。
+
+## 2026-07-09 foreground resume / stale buffer chain audit
+
+- 现场问题：杀掉 App 冷启动秒连，但后台回前台卡住 timeout；刷新过程中偶发旧 buffer 闪回。
+- 架构映射：属于 `terminal.transport_lifecycle` + client buffer apply gate。唯一 owner 是 `SessionContext lifecycle / activity planner / socket message runtime`；App 只能提供 foreground truth，renderer 只消费 buffer，daemon 不参与 client foreground 状态。
+- 根因链路 1：冷启动 / persisted terminal restore 走 `explicit-resume/open`，后台 false->true 走独立 `active-resume`。旧分支遇到 closed/unavailable 时与 explicit resume 不一致，导致后台恢复不走冷启动同一 reconnect/open owner。
+- 根因链路 2：`buffer-sync` 有 inactive/live drop，`buffer-head` 没有同级 gate；旧/非 live session 的 head frame 仍可能推进 local head / connected baseline，形成旧 buffer 闪回。
+- 修复：foreground false->true 改为触发 `explicit-resume`；从 `android/src` 物理移除 `active-resume` source；`buffer-head` 在 handle 前复用 live buffer gate，inactive 时直接 drop 并记录 debug。
+- 回归：`session-context-lifecycle.test.tsx`、`session-sync-helpers.test.ts`、`session-context-activity-runtime.test.ts`、`session-context-socket-message-runtime.test.ts`、`SessionContext.ws-refresh.test.tsx` 共 223 tests PASS；Android `tsc --noEmit` PASS。
+
+## 2026-07-09 terminal background / old-buffer flash audit
+
+- 现场问题：Jason 对比截图显示 zterm Android 背景颜色和真实终端不同；输入刷新时会先出现一帧旧 buffer，再被新 buffer 覆盖。
+- 架构映射：属于 `terminal.buffer_render` / Client Rendering And Buffer Block。唯一 owner 是 shared cell/row renderer 与 Android `session-render-gate`；daemon payload、UI shell、transport 不应补偿背景或刷新时序。
+- 根因 1：`resolveTerminalCellColors()` 把默认背景 sentinel `bg=256` 映射为 `transparent`；row/cell wrap/gap 也未强制 paint terminal theme background，导致外层容器背景替代 terminal 默认背景。
+- 根因 2：`session-render-gate` 在 buffer truth 后又按 `renderCommitMs` 做 per-session debounce，再进 RAF；延迟 commit 可能发布已过期的 scheduled frame，形成旧 buffer 闪烁。
+- 修复：默认 bg、row 背景、cell wrap、gap marker/fill 全部使用 `theme.background`；render gate 移除 `resolveRenderCommitMs/renderCommitMs`，只做 RAF coalescing，RAF flush 时读取当前 live buffer。
+- 已验证：`pnpm --dir android exec vitest run src/lib/session-render-gate.test.ts src/components/TerminalView.theme.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/lib/mobile-config.test.ts src/lib/session-runtime-cadence.test.ts --reporter dot` 97 tests PASS；`pnpm --dir packages/shared exec vitest run src/terminal/renderer.test.ts --reporter dot` 17 tests PASS。
+- 完整验证：`SessionContext.ws-refresh.test.tsx` 130 PASS；Android `tsc --noEmit` PASS；feature registry/architecture/wiki/loop 34 PASS；`git diff --check` PASS；standard debug build PASS，prebuild terminal contracts 595 PASS，common flows 96 PASS，relay smoke OK。发布并安装 APK `0.1.3.2047` / versionCode `1032047` / sha256 `eb832f5a205f1ed6db0a934936af31b73c4629512025aee0c78b5faed43ddac6`，设备 `100.104.163.65:5555` dumpsys 确认为 2047，`am start` 后 topResumedActivity 是 `com.zterm.android/.MainActivity`。
+- 已知缺口：本轮未在真机上自动复现截图中的具体彩色终端页面；已完成 APK 安装与前台 smoke，仍需要 Jason 用同一页面截图确认视觉背景与旧 buffer flash。
+
+## 2026-07-09 2047 installed but background unchanged: active theme preset root cause
+
+- Jason 现场确认 `0.1.3.2047` 已安装但视觉没有变化。CDP 直连 WebView 后证据：`terminalThemeId=classic-dark`，active `.wterm` computed background 是 `rgb(0, 0, 0)`，默认行/cell computed background 也是黑；显式 TUI input row 仍有 `rgb(49, 52, 57)` 背景，说明 renderer 能渲染 inline payload 背景。
+- 根因修正：2047 修掉了 `bg=256 -> transparent` 的 renderer bug，但 active preset `classic-dark.background` 本身就是 `#000000`，所以用户可见背景不会变。继续改 Android 页面/daemon/transport 是错路。
+- 修复：`packages/shared/src/terminal/theme.ts` 将 `classic-dark.background` 改为 `#1e1e1e`；`TerminalView.theme.test.tsx` 增加 Classic Dark default bg 红测，断言 scroller/default cells 是 `#1e1e1e`。
+- 验证：`TerminalView.theme.test.tsx` 12 PASS；shared renderer 17 PASS；Android typecheck PASS；feature registry 34 PASS；`android/scripts/build-android-debug.sh` PASS，prebuild terminal contracts 595 PASS、common flows 96 PASS、relay smoke OK。
+- APK：构建并发布 `0.1.3.2048` / versionCode `1032048` / sha256 `1943c85a393575a30b6d2b858333f435045e48c78ef51911e410f888b317457e` 到 `android/update-dist` 和 `~/.zterm/updates`，四个 version/latest alias sha 一致。
+- 真机闭环：`adb install -r` 到 `100.104.163.65:5555` 成功；dumpsys 显示 `versionCode=1032048`、`lastUpdateTime=2026-07-09 16:05:44`。CDP live DOM 显示同一 `terminalThemeId=classic-dark` 下 active `.wterm` background 变成 `rgb(30, 30, 30)`；最近默认行/cell 为 `rgb(30, 30, 30)`；显式 TUI input row cell 仍为 `rgb(49, 52, 57)`，证明 preset 真源变化已进入真实 WebView。
+- 未完成：`scripts/mempalace-mine-zterm.sh` 被 MemoryPalace stale lock 阻塞，报 PID `15913` 持锁但 `ps -p 15913` 已无进程；本轮未删除全局 lock，避免破坏索引状态。
+
+## 2026-07-09 daemon ownership / decoupling audit
+
+- 审计边界：daemon 只允许拥有 tmux truth、mirror store、物理 transport/subscriber、daemon 自身 file/schedule/screenshot/relay 业务事实；不得拥有 client lifecycle、active/foreground/background、viewport、renderer、width policy。
+- 已确认相对合规：`TerminalSession` 未保存 `widthMode/adaptiveCols/clientSessionId/foreground/follow/reading/renderBottomIndex`；WebSocket close/error 走 transport detach，不直接 destroy mirror；daemon truth targeted tests 5 files / 33 tests PASS。
+- 违规 1：daemon 仍把 transport-bound subscriber 建模为 `TerminalSession/sessions/boundSessionId`，并暴露 `closeLogicalSessions/closeLogicalTerminalSession` API。当前行为多为物理 transport 清理，但命名和 API 语义会持续复活“daemon 管 logical client session”的错误设计。
+- 违规 2：`terminal-mirror-runtime.ts` 仍存在 `applyAdaptiveColsToTmuxMirror()`，`connect/resize widthMode=adaptive-phone` 会执行 `tmux resize-window -x` 并改 `mirror.cols/baselineCols`。这与当前规则“daemon 不长期保存也不执行 client width policy；mirror-fixed/adaptive 是 client render width mode”冲突。
+- 违规 3：`handleAdaptiveResize()` 在没有 mirror 时直接 `return`，message 层不检查结果，属于 resize 请求静默失败。
+- 违规 4：`terminal-transport-runtime.ts` 的 send helper 在 transport 不 open 时直接 return；broadcast 可允许显式 drop，但 required protocol response 必须返回失败或抛错，不能静默。
+- 违规 5：`terminal-message-runtime.ts` 仍是 500 行级 god dispatcher，一个 switch 同时处理 schedule、tmux、buffer、debug、file、screenshot、input；唯一 owner 不够硬，协议分发层仍承担 feature-specific 判断。
+- 违规 6：file upload 直接接受 client payload 的 `targetDir` 并 `mkdirSync/writeFileSync`，没有统一 path resolver/allowlist，daemon 文件 owner 没有收口路径权威。
+- 违规 7：HTTP debug projection 暴露 `clientSessions`，debug 可以存在，但命名应改为 `transportSubscribers/subscriberDebug`，并加 gate 保证 debug 投影不参与 runtime 决策。
+- gate 缺口：现有 `server.transport-lifecycle-truth.test.ts` 仍断言 `resize-window` 和 `closeLogicalSessions` 存在，说明 gate 只锁旧边界，未锁 Jason 当前明确的强边界。下一步应先更新 gate，再做无行为/有行为整改。
+
+## 2026-07-09 daemon client-width ownership removal slice
+
+- 架构映射：属于 Daemon Truth Block；处理方式是物理移除 daemon 执行 client width policy，并把 logical session API 分离成 transport subscriber 语义。允许路径是 `src/server/terminal-mirror-runtime.ts`、`terminal-runtime.ts`、`terminal-message-runtime.ts`、`terminal-message-control-runtime.ts`、`terminal-daemon-runtime.ts` 和对应 truth tests；禁止路径是 UI/renderer 补偿。
+- 修复：移除 `applyAdaptiveColsToTmuxMirror()` 和 `supportsWindowSizeManagement` 注入；attach/resize 的 `widthMode/cols` 只保留 wire compatibility，不再执行 `tmux resize-window -x`，不再用手机 cols 改 `mirror.cols/baselineCols`。mirror geometry 改为来自 existing mirror、tmux pane metrics 或 daemon default。
+- 修复：`closeLogicalSessions/closeLogicalTerminalSession` 改为 `closeTransportSubscribers/closeTransportSubscriber`，消除 daemon API 拥有 logical client session 的错误 contract。行为仍是 shutdown/tmux kill 时释放物理 subscriber/transport。
+- 修复：`handleAdaptiveResize()` 返回显式 `{ ok:true } | { ok:false, code:'session_not_ready' }`；message runtime 对失败返回 `error`，不再静默接受 resize。
+- Gate：`server.transport-lifecycle-truth.test.ts` 反向禁止 `applyAdaptiveColsToTmuxMirror` 和 daemon `resize-window`；`terminal-mirror-runtime.test.ts` 覆盖 adaptive attach/resize 不改 tmux/mirror truth、无 mirror 显式失败；`terminal-message-runtime.test.ts` 覆盖 resize failure 投影。
+- 验证：targeted server/daemon gates 8 files / 72 tests PASS；Android `tsc --noEmit` PASS；`rg` 源码扫描无 `closeLogical*` / `applyAdaptiveColsToTmuxMirror` / daemon `resize-window` 残留（除测试反向断言和独立 tmux 语义测试）；真实 `daemon:mirror:close-loop` 8 cases PASS，包括 top/vim/local-input/external-input/daemon-restart/schedule。
+- 未完成：`TerminalSession/sessions/boundSessionId` 仍是命名/模型债；send helper 静默 drop、file upload targetDir、message god dispatcher、HTTP debug `clientSessions` 仍待后续切片处理。
+
+## 2026-07-09 explicit resume same-socket head probe
+
+- 现场问题：新版本不再报连接不上，但后台返回或网络波动后界面不刷新，说明 transport 复用方向有效，但 resume 后没有重新拉取 head/body。
+- 架构映射：属于 `terminal.transport_lifecycle` 与 `terminal.buffer_render` 交界；唯一 owner 是 `SessionContext -> ensureActiveSessionFreshRuntime()` 和 buffer manager。daemon 不参与 foreground/active 判断，UI 不补刷新策略。
+- 根因：`explicit-resume + forceHead` 会被 `lastActiveReentryAtRef` 或 `connectedBaselineBurstGuardRef` 抑制。foreground resume 正是需要同一 OPEN WebSocket 上发 `buffer-head-request` 的路径，被 guard 吃掉后表现为“连接还在但不刷新”。
+- 修复：`shouldSkipImmediateForcedResumeHead` 只允许作用于 `active-reentry`，不得作用于 `explicit-resume`。foreground/explicit resume 可在同一 socket 上重复发 head probe，但不得新建 WebSocket。
+- 回归：`session-context-activity-runtime.test.ts` 锁 explicit resume 命中两个 guard 时仍发送 forced head；`SessionContext.ws-refresh.test.tsx` 锁 connected baseline 后 explicit resume / tab switch 后 explicit resume 都会在同一 socket 再发 head，且不产生额外 connect。
+
+## 2026-07-09 orphaned adaptive tmux narrow-window restore
+
+- 现场问题：daemon `/health` 显示 `subscribers=0`，但全局 tmux window 仍停在 `55x*`；`@zterm_adaptive_width_baseline` / `@zterm_adaptive_width_applied` 均为空。说明旧窄窗已失去 persisted baseline，单纯恢复 option 覆盖不到。
+- 架构映射：属于 Daemon Truth Block 的 adaptive width lease owner；处理方式是补齐无 active adaptive client 的恢复语义。禁止客户端/UI 补偿宽度，禁止 daemon 持有 foreground/active 状态。
+- 修复：`restorePersistedAdaptiveWidthBaselines()` 现在先用 persisted baseline；若没有 baseline，但 tmux window 比 attached tmux client 窄，则按 attached client 尺寸恢复。这覆盖旧版本未写 baseline option 但留下窄 window 的遗留状态。
+- 同步修复：lease 归零时若内存 baseline 为空，也会尝试 persisted baseline 或 orphaned attached-client restore，避免最后一个 adaptive holder 消失后无 baseline 直接 return。
+- 真实验证：安装全局 daemon 并 `zterm-daemon restart` 后，新进程 `pid=76055`；`freehand/onestop/predict/rcc/rcc2/rcc3/server/zterm` 从 `55x*` 恢复到对应 attached client 尺寸，如 `freehand 115x56`、`onestop 110x54`、`zterm 92x52`，且 baseline/applied option 为空。`daemon:mirror:close-loop` 8 case PASS。

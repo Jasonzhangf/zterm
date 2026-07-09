@@ -812,3 +812,15 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - If the narrowest holder disappears, daemon recomputes from remaining leases. If the last holder disconnects, switches to `mirror-fixed`, or misses heartbeat past the lease TTL, daemon restores the tmux geometry captured before the first adaptive lease.
 - `mirror-fixed` must not register a lease and must not change tmux width. `resize-window` is allowed only inside the adaptive width lease owner, never scattered in attach/control/UI/renderer code.
 - Regression gates: `terminal-mirror-runtime.test.ts` covers narrowest wins, holder disappearance re-sort, last lease TTL restore, and fixed release restore; `terminal-runtime.detached-session.test.ts` covers transport detach restoring baseline only when the subscriber held an adaptive lease.
+
+## 2026-07-09 Explicit resume head probe truth
+
+- Foreground false->true and explicit resume must always issue a forced `buffer-head-request` on the existing `OPEN` session WebSocket. A cached/open WebSocket only proves the protocol path exists; it does not prove daemon head/body has been pulled after background or network fluctuation.
+- `lastActiveReentryAtRef` and `connectedBaselineBurstGuardRef` may suppress only passive `active-reentry` duplicate head probes. They must not suppress `explicit-resume + forceHead`, or the app can remain connected but visually frozen until another user event triggers refresh.
+- Regression gates: `session-context-activity-runtime.test.ts` covers explicit resume with both guards set still sending forced head; `SessionContext.ws-refresh.test.tsx` covers connected baseline and tab-switch resume sending a second same-socket head without any extra `connect`.
+
+## 2026-07-09 Orphaned adaptive width restore truth
+
+- No active adaptive client means tmux must be restored out of adaptive width, even if an older daemon left no `@zterm_adaptive_width_baseline` option behind. Persisted baseline is preferred; if absent and the tmux window is narrower than its attached tmux client, restore to the attached client geometry.
+- This recovery belongs only in the daemon adaptive width lease owner. Client/UI must not compensate by sending extra width changes, and daemon must not infer foreground/active state.
+- Regression gates: `terminal-mirror-runtime.test.ts` covers orphaned narrow window startup restore to attached client size and the negative case where matching window/client geometry does not resize. Real validation: global daemon install + `zterm-daemon restart` restored existing 55-column sessions to attached client widths, then `daemon:mirror:close-loop` passed all 8 cases.
