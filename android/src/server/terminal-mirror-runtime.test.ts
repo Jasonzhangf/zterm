@@ -344,7 +344,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('falls back to idle cadence after initial forced revision ages out without new live activity', async () => {
+  it('keeps subscribed mirror capture on active cadence after initial forced revision ages out without new live activity', async () => {
     vi.useFakeTimers();
     try {
       const {
@@ -373,9 +373,6 @@ describe('terminal mirror runtime lifecycle truth', () => {
       const callsBeforeIdleWindow = captureMirrorAuthoritativeBufferFromTmux.mock.calls.length;
 
       await vi.advanceTimersByTimeAsync(33);
-      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length - callsBeforeIdleWindow).toBeLessThanOrEqual(1);
-
-      await vi.advanceTimersByTimeAsync(120);
       expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length).toBeGreaterThan(callsBeforeIdleWindow);
     } finally {
       vi.useRealTimers();
@@ -427,7 +424,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('treats adaptive attach width as wire compatibility without changing tmux mirror width', async () => {
+  it('aggregates adaptive attach leases by narrowest active subscriber and applies tmux width', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const firstSession = createSession('session-1');
     const secondSession = createSession('session-2');
@@ -450,12 +447,15 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     const mirror = mirrors.get('demo');
     expect(mirror?.subscribers).toEqual(new Set(['session-1', 'session-2']));
-    expect(mirror?.cols).toBe(120);
-    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
+    expect(mirror?.cols).toBe(80);
+    expect(firstSession.adaptiveWidthCols).toBe(120);
+    expect(secondSession.adaptiveWidthCols).toBe(80);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
-  it('accepts width-mode attach payload as wire compatibility without storing client policy', async () => {
+  it('stores adaptive width only as a transport subscriber lease', async () => {
     const { runtime, sessions, mirrors } = createRuntime();
     const session = createSession('session-1');
     sessions.set(session.id, session);
@@ -467,13 +467,14 @@ describe('terminal mirror runtime lifecycle truth', () => {
     } as any);
 
     const mirror = mirrors.get('demo');
-    expect(mirror?.cols).toBe(120);
+    expect(mirror?.cols).toBe(88);
     expect(mirror?.rows).toBe(40);
+    expect(session.adaptiveWidthCols).toBe(88);
     expect(session).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
-  it('treats adaptive resize frames as compatibility pings without changing tmux width or mirror truth', async () => {
+  it('updates adaptive resize lease and applies tmux width', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const session = createSession('session-1');
     sessions.set(session.id, session);
@@ -487,6 +488,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     const mirror = mirrors.get('demo');
     expect(mirror?.cols).toBe(120);
+    runTmux.mockClear();
 
     const result = runtime.handleAdaptiveResize(session, {
       cols: 72,
@@ -494,12 +496,12 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '72']);
-    expect(mirror?.cols).toBe(120);
-    expect(mirror?.baselineCols).toBe(120);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '72']);
+    expect(mirror?.cols).toBe(72);
+    expect(session.adaptiveWidthCols).toBe(72);
   });
 
-  it('keeps mirror-fixed resize frames from changing tmux width', async () => {
+  it('restores baseline geometry when an adaptive subscriber switches to mirror-fixed', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const session = createSession('session-1');
     sessions.set(session.id, session);
@@ -518,8 +520,65 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
     expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '60']);
     expect(mirrors.get('demo')?.cols).toBe(120);
+    expect(session.adaptiveWidthCols).toBeNull();
+  });
+
+  it('re-sorts adaptive leases when the narrowest subscriber disappears', async () => {
+    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const wideSession = createSession('session-wide');
+    const narrowSession = createSession('session-narrow');
+    narrowSession.transportId = 'transport-narrow';
+    sessions.set(wideSession.id, wideSession);
+    sessions.set(narrowSession.id, narrowSession);
+
+    await runtime.attachTmux(wideSession, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    await runtime.attachTmux(narrowSession, {
+      sessionName: 'demo',
+      cols: 60,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    runtime.releaseAdaptiveWidthLease(narrowSession, 'test-disappear');
+
+    expect(mirrors.get('demo')?.cols).toBe(100);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '100']);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
+  });
+
+  it('restores baseline when the last adaptive lease heartbeat expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, sessions, mirrors, runTmux } = createRuntime();
+      const session = createSession('session-1');
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        sessionName: 'demo',
+        cols: 70,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      });
+      expect(mirrors.get('demo')?.cols).toBe(70);
+      runTmux.mockClear();
+
+      await vi.advanceTimersByTimeAsync(65001);
+
+      expect(mirrors.get('demo')?.cols).toBe(120);
+      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
+      expect(session.adaptiveWidthCols).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports resize as session_not_ready when no mirror is attached', () => {
@@ -553,7 +612,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       widthMode: 'adaptive-phone',
     });
     const mirror = mirrors.get('demo');
-    expect(mirror?.cols).toBe(120);
+    expect(mirror?.cols).toBe(90);
 
     await runtime.attachTmux(fixedSession, {
       sessionName: 'demo',
@@ -562,7 +621,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       widthMode: 'mirror-fixed',
     });
 
-    expect(mirror?.cols).toBe(120);
+    expect(mirror?.cols).toBe(90);
     expect(fixedSession).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });

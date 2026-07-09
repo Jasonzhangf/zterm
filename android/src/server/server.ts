@@ -32,7 +32,7 @@ import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
 import {
   createTerminalRuntime,
-  type TerminalSession,
+  type TerminalTransportSubscriber,
   type SessionMirror,
 } from './terminal-runtime';
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
@@ -100,7 +100,7 @@ const MEMORY_GUARD_INTERVAL_MS = 30_000;
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
-const sessions = new Map<string, TerminalSession>();
+const sessions = new Map<string, TerminalTransportSubscriber>();
 const connections = new Map<string, DaemonTransportConnection>();
 const mirrors = new Map<string, SessionMirror>();
 const scheduleStore = loadScheduleStore();
@@ -109,7 +109,7 @@ const daemonRuntimeDebugStore = createRuntimeDebugStore();
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
-let terminalTransportRuntimeSendMessage: (session: TerminalSession, message: ServerMessage) => void;
+let terminalTransportRuntimeSendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
 const terminalDebugRuntime = createTerminalDebugRuntime({
   daemonRuntimeDebugEnabled: DAEMON_RUNTIME_DEBUG,
   maxClientDebugBatchLogEntries: MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES,
@@ -202,7 +202,7 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   wtermHomeDir: WTERM_HOME_DIR,
   platform: process.platform,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
-  getSessionMirror: terminalRuntime.getSessionMirror,
+  getSessionMirror: terminalRuntime.getSubscriberMirror,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   writeToTmuxSession: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
@@ -296,11 +296,11 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   sendTransportMessage,
   sendMessage,
   normalizeBufferSyncRequestPayload,
-  getSessionMirror: terminalRuntime.getSessionMirror,
+  getSessionMirror: terminalRuntime.getSubscriberMirror,
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
   handleInput: terminalRuntime.handleInput,
-  closeSession: terminalRuntime.closeSession,
+  closeSession: terminalRuntime.closeTransportSubscriber,
   terminalFileTransferRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,
@@ -319,10 +319,10 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     renameTmuxSession,
     runTmux,
     sanitizeSessionName,
-    createTransportBoundSession: (connection) =>
-      terminalRuntime.createTransportBoundSession(connection as DaemonTransportConnection),
-    bindConnectionToSession: (connection, session) =>
-      terminalRuntime.bindConnectionToSession(connection as DaemonTransportConnection, session),
+    createTransportSubscriber: (connection) =>
+      terminalRuntime.createTransportSubscriber(connection as DaemonTransportConnection),
+    bindConnectionToSubscriber: (connection, subscriber) =>
+      terminalRuntime.bindConnectionToSubscriber(connection as DaemonTransportConnection, subscriber),
     getMirrorKey,
     attachTmux: terminalRuntime.attachTmux,
     handleAdaptiveResize: terminalRuntime.handleAdaptiveResize,
@@ -399,7 +399,8 @@ const terminalBridgeRuntime = createTerminalBridgeRuntime({
   createWebSocketSessionTransport,
   createRtcSessionTransport,
   createTransportConnection,
-  detachSessionTransportOnly: terminalRuntime.detachSessionTransportOnly,
+  detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
+  refreshAdaptiveWidthLeaseHeartbeat: terminalRuntime.refreshAdaptiveWidthLeaseHeartbeat,
   handleMessage: (connection, rawData, isBinary) =>
     terminalMessageRuntime.handleMessage(connection as DaemonTransportConnection, rawData, isBinary),
 });

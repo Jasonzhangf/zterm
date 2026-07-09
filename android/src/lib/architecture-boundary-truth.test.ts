@@ -14,6 +14,12 @@ function stripComments(source: string) {
     .replace(/^\s*\/\/.*$/gm, '');
 }
 
+function extractBlock(source: string, anchor: string, length = 900) {
+  const start = source.indexOf(anchor);
+  expect(start, `missing block anchor: ${anchor}`).toBeGreaterThanOrEqual(0);
+  return source.slice(start, start + length);
+}
+
 describe('architecture boundary truth gate', () => {
   it('keeps this architecture gate wired into the feature-registry command', () => {
     const packageJson = read('package.json');
@@ -77,19 +83,28 @@ describe('architecture boundary truth gate', () => {
     expect(source).toContain('UNSCOPED_HOST_GROUP_KEY');
   });
 
-  it('keeps daemon client width policy as wire compatibility only, not daemon-owned state', () => {
+  it('keeps daemon width ownership limited to the adaptive subscriber lease owner', () => {
     const runtimeTypesSource = stripComments(read('src/server/terminal-runtime-types.ts'));
     const mirrorRuntimeSource = stripComments(read('src/server/terminal-mirror-runtime.ts'));
 
-    expect(runtimeTypesSource).not.toMatch(/interface\s+TerminalSession[\s\S]*\bwidthMode\s*:/);
+    expect(runtimeTypesSource).not.toMatch(/interface\s+TerminalTransportSubscriber[\s\S]*\bwidthMode\s*:/);
     expect(runtimeTypesSource).not.toMatch(/interface\s+SessionMirror[\s\S]*\badaptiveCols\s*:/);
     expect(mirrorRuntimeSource).not.toContain('session.widthMode');
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
-    expect(mirrorRuntimeSource).not.toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
     expect(mirrorRuntimeSource).not.toMatch(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"][\s\S]*['"]latest['"]/);
+    expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
+    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometry');
+    expect(mirrorRuntimeSource).toContain('function updateAdaptiveWidthLease');
+    expect(mirrorRuntimeSource).toContain('function reconcileAdaptiveWidthLeases');
+    expect(mirrorRuntimeSource).toContain('function releaseAdaptiveWidthLease');
+    const adaptiveLeaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometry', 900);
+    expect(adaptiveLeaseResizeBlock).toContain("const args = ['resize-window', '-t', mirror.sessionName");
+    expect(adaptiveLeaseResizeBlock).toContain('deps.runTmux(args)');
+    const mirrorRuntimeWithoutAllowedAdaptiveResize = mirrorRuntimeSource.replace(adaptiveLeaseResizeBlock, '');
+    expect(mirrorRuntimeWithoutAllowedAdaptiveResize).not.toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
 
     expect(runtimeTypesSource).toContain('widthMode?: TerminalWidthMode');
-    expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(session: TerminalSession, payload: \{ cols\?: number; widthMode\?:/);
+    expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(\s*session: TerminalSession,\s*payload: \{ cols\?: number; widthMode\?:/);
   });
 
   it('keeps terminal width mode storage owned by bridge settings only', () => {
@@ -108,5 +123,53 @@ describe('architecture boundary truth gate', () => {
     expect(attachTokenSource).toContain('const sessionTransportAttachTokens = new Set<string>()');
     expect(messageControlSource).toContain('openRequestId: payload.openRequestId');
     expect(messageControlSource).toContain('sessionTransportToken');
+  });
+
+  it('keeps session websocket reconnect decisions centralized in the transport lifecycle owner', () => {
+    const inputRuntimeSource = stripComments(read('src/contexts/session-context-input-runtime.ts'));
+    const activityRuntimeSource = stripComments(read('src/contexts/session-context-activity-runtime.ts'));
+    const sessionRuntimeSource = stripComments(read('src/contexts/session-context-session-runtime.ts'));
+    const transportPlannerSource = stripComments(read('src/contexts/session-transport-open-helpers.ts'));
+    const orchestrationSource = stripComments(read('src/contexts/session-context-session-orchestration-runtime.ts'));
+
+    expect(existsSync(join(root, 'src/lib/transport/TransportManager.ts'))).toBe(false);
+    expect(existsSync(join(root, 'src/lib/session/SessionConnector.ts'))).toBe(false);
+    expect(existsSync(join(root, 'src/lib/session/SessionStore.ts'))).toBe(false);
+
+    expect(inputRuntimeSource).not.toContain('reconnectSession');
+    expect(inputRuntimeSource).not.toContain('probeOrReconnect');
+    expect(inputRuntimeSource).not.toContain('shouldReconnectQueuedActiveInput');
+    expect(inputRuntimeSource).not.toMatch(/cleanupSocket\s*\(/);
+
+    expect(activityRuntimeSource).not.toContain('probeOrReconnect');
+    expect(activityRuntimeSource).not.toContain('forceReplaceTransport');
+    expect(activityRuntimeSource).not.toContain('active-resume');
+    expect(orchestrationSource).not.toContain('probeOrReconnect');
+    expect(orchestrationSource).not.toContain('active-resume');
+
+    expect(sessionRuntimeSource).not.toContain('forceReplaceTransport');
+    expect(transportPlannerSource).not.toContain('forceReplaceTransport');
+    expect(transportPlannerSource).not.toContain('shouldReconnectQueuedActiveInput');
+    expect(transportPlannerSource).not.toContain('active-resume');
+    expect(transportPlannerSource).not.toContain("'stale-pending-open'");
+    expect(transportPlannerSource).not.toContain("'force-replace'");
+    expect(transportPlannerSource).toContain("reason: 'pending-open'");
+  });
+
+  it('keeps traversal sockets from owning a second default reconnect state machine', () => {
+    const source = stripComments(read('src/lib/traversal/socket.ts'));
+
+    expect(source).toContain('this.autoReconnect = options?.autoReconnect === true');
+    expect(source).not.toContain('this.autoReconnect = options?.autoReconnect !== false');
+  });
+
+  it('keeps the mainline call map free of force-replace lifecycle semantics', () => {
+    const callMap = read('docs/wiki/mainline-call-map.json');
+
+    expect(callMap).not.toContain('force replace');
+    expect(callMap).not.toContain('force replacement');
+    expect(callMap).not.toContain('stale probe timeout');
+    expect(callMap).toContain('same-socket head request');
+    expect(callMap).toContain('explicit unavailable reconnect intent');
   });
 });

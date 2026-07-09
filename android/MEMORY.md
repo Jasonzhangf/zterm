@@ -8,6 +8,12 @@
 
 ## Key Decisions
 
+- [2026-07-08] daemon mirror capture 的稳定化不能要求动态 TUI 内容逐字连续一致；`top/htop/vim` 这类每次 capture 都会变化，若要求内容完全一致，会在 4 次重采样后显式失败并触发 live sync failure backoff，用户体感就是刷新很慢。正确门禁是“结构稳定才发布”：连续两次 canonical snapshot 的 absolute window / geometry / available line count 稳定，或已与当前 mirror 完整一致，就发布第二次最新内容；tail anchor 和窗口仍单调，内容不要求相同。回归 gate：`terminal-mirror-capture.test.ts` 覆盖 dynamic TUI frame 只采两次、`stabilizedAgainst='consecutive-window'`。
+- [2026-07-08] Android terminal header top inset 不能硬编码 16px。折叠屏/高状态栏设备上系统状态栏会覆盖 terminal header 和首行内容。`resolveTerminalHeaderTopInsetPx(true)` 必须读取 CSS `env(safe-area-inset-top)` 的真实像素值，并以 16px 为最小值；仍禁止使用 `visualViewport.offsetTop` 作为 Android top inset，避免 IME 弹出时 top inset 二次叠加。回归 gate：`terminal-keyboard-lift.test.ts` + `TerminalPage.android-ime.test.tsx` + `TerminalHeader.test.tsx`。
+- [2026-07-08] 慢刷新 + 状态栏遮挡修复发布为 APK `0.1.3.2034`，sha256 `b168e63472326eb716331ee4a8ea5d06da1d88841533196d4bf2593f3a9f3030`。已验证：动态 TUI capture owner gate、Android IME/header gate、`terminal.buffer_render` 相关完整 gate 223 tests、feature registry 31 tests、Android type-check、daemon/tmux close-loop 8 cases replay + strict audit、Mac client 146 tests + type-check、standard debug build/update manifest sha 对齐。缺口：本机无 online ADB 设备，不能宣称 Android L5 真机 UI 已闭环。
+- [2026-07-08] 旧 `BRIDGE_SETTINGS` 缺 `terminalWidthMode` 时不能交给 `normalizeBridgeSettings()` 默认成 `mirror-fixed`。这会让已安装用户即使在手机窄 viewport 上也继续 fixed，表现为“不按 adaptive”。`useBridgeSettingsStorage` 必须在读取旧配置时用 `visualViewport.width -> innerWidth -> documentElement.clientWidth` 检测默认宽度模式并注入，再 normalize；只有显式 `adaptive-phone` / `mirror-fixed` 可保留原值。APK `0.1.3.2035` 已发布，sha256 `a9702c34b7bc5372c1e317bc4e6d2fb81d979c59994e88c1453d6c982a578a86`；调试浮窗增加 `WM` 字段用于截图确认当前宽度模式。回归 gate：`packages/shared/src/react/use-bridge-settings-storage.test.tsx` 旧配置缺 mode + narrow visual viewport 必须首帧 adaptive；`App.first-paint.real-terminal.test.tsx` 和 `SessionContext.ws-refresh.test.tsx` 继续锁 DOM/connect/reconnect payload。
+- [2026-07-08] `terminal.buffer_render` 的 renderer 发布边界必须单调：同一 session 已发布 `revision=N` 的 render body 后，任何 `revision<N` 的 render snapshot 都必须拒绝发布并记录 `session.render-store.revision-regression-drop`；只有显式 `deleteSession()` / 重建 session 才能 reset render truth 并接受低 revision。这个门禁只防止本地 render store 把旧 snapshot 发布到新画面之后；若真机仍出现高 revision 旧内容交替，下一步必须查 daemon mirror / buffer-sync payload 源 truth 或 WebView compositing，禁止清 DOM / 清 buffer 掩盖。APK `0.1.3.2033` 已构建并发布到 update channel，sha256 `15e6e69ba70ed532c61ef7e301e9a994738315901978fe80fae22569dc57cef4`；本机 ADB 无 online 设备，L5 真机 UI 仍需 Jason 复测。
+- [2026-07-08] client buffer manager 不允许迟到旧 `buffer-sync` 覆盖当前本地 absolute-index truth。`incomingRevision < localRevision` 必须显式 drop、记录 `session.buffer.sync.stale-lower-revision-drop` 并请求当前 tail；同 revision payload 若会改写已有非 gap 行，必须记录 `session.buffer.sync.stale-same-revision-drop` 并 drop；只有命中本地 gap 的 same-revision payload 才允许作为 gap repair 合并。刷新时出现旧/新页面交替，优先查 stale lower/same revision payload，不要用清空 buffer/DOM 作为 workaround。APK `0.1.3.2032` 已构建，sha256 `a8f5717c08825324ecde536890f0d1819a4a7b259963048638ffa355b13b8114`；本机无 online Android 设备，仍需 Jason 真机复测 L5。
 - [2026-07-04] zterm recurring loop 初始化已收口为 `project.loop_governance`，当前唯一启用模式是 `zterm.daily-triage` 的 `L1 report-only`：只读项目真源、报告、追加 run log；禁止 product code edits、daemon start/stop、stage/commit、push/merge。真源文件是 `android/docs/loops/LOOP.md`、`STATE.md`、`loop-constraints.md`、`loop-budget.md`、`loop-run-log.md`、`loop-manifest.json` 和 `docs/testing/loop-governance-test-design.md`。L2/L3 未启用，必须等 L1 run history、唯一 owner/gates、maker/checker 和 Jason 明确批准。
 - [2026-07-04] `docs/wiki/mainline-call-map.json` 的每条 edge 必须有 deterministic `edge_id=<lifecycle_id>:<from>-><to>`；loop manifest 的 `mainline_call_ids` 只能引用真实 edge。`src/lib/loop-governance-truth.test.ts` 已接入 `test:feature-registry`，锁住 loop manifest、L1 禁动作、kill switch、report required fields、mainline call ID、测试设计和 L2/L3 disabled。
 - [2026-07-02] 每次开发 / 修复 / 重构必须先读 `android/docs/architecture.md` 与 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`，把方法映射到功能块、唯一 owner、allowed/forbidden paths、移除/分离/兼容保留决策和必跑 gate 后，才允许读代码并修改实现。禁止靠 grep 命中点直接 patch。
@@ -667,9 +673,9 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 ## 2026-07-07 Android WebSocket transport reuse truth
 
 - `terminal.transport_lifecycle` must reuse a same-session, same-target usable session WebSocket. `connectSessionRuntime()`, `reconnectSessionRuntime()`, and `openSessionTransportByIntentRuntime()` must route through `buildSessionTransportReusePlan()` before cleanup/rebuild.
-- OPEN same-target transport means reuse; CONNECTING or fresh pending open means wait and do not queue a duplicate open; closed/missing/target mismatch/stale pending means rebuild. Stale-probe timeout is the explicit owner for forced replacement of an OPEN-but-unresponsive transport via internal `forceReplaceTransport`.
+- OPEN same-target transport means reuse and must not expire from quiet time, missed pong, stale `lastServerActivityAt`, or pong-only traffic. CONNECTING or fresh pending open means wait and do not queue a duplicate open; closed/missing/target mismatch/stale pending means rebuild. Active resume/tick on an OPEN transport may only request head or ping on the same socket; it must not force replacement unless the transport physically closes/errors, send throws, daemon is unreachable, user explicitly closes, or tmux/session target truth changes.
 - `openSessionTransportByIntentRuntime()` must not clear `sessionTransportToken` while waiting for an existing CONNECTING same-target socket, because that token belongs to the in-flight handshake.
-- Regression gates: `session-sync-helpers.test.ts`, `session-context-session-runtime.test.ts`, `session-context-activity-runtime.test.ts`, and `SessionContext.ws-refresh.test.tsx` must cover positive reuse and negative rebuild. APK `0.1.3.2027` was built after these gates with sha256 `41390810cf2c0753bf1dd2b2a7bfad3a87fcaa23913f136a2bf86732dc2b695f`; real Android device behavior still requires installed-device validation before claiming L5 closure.
+- Regression gates: `session-sync-helpers.test.ts`, `session-context-session-runtime.test.ts`, `session-context-activity-runtime.test.ts`, `session-context-socket-runtime.test.ts`, `session-context-input-runtime.test.ts`, `server.daemon-runtime-truth.test.ts`, `server.transport-lifecycle-truth.test.ts`, and `SessionContext.ws-refresh.test.tsx` must cover positive reuse, heartbeat-as-observation, stale activity not rebuilding, and negative closed/missing rebuild. APK/device behavior still requires installed-device validation before claiming L5 closure.
 
 ## 2026-07-07 Active resume pending-open wait budget
 
@@ -685,8 +691,124 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - 同一 mirror 的 `totalAvailableLines` 必须以当前 mirror end 为单调下界；alternate-screen/TUI 只返回短可见窗口时，新内容应锚在当前 absolute tail，禁止把 `availableEndIndex` 从旧 tail 拉回 pane height。
 - Regression gates: `terminal-mirror-capture.test.ts` 必须覆盖 transient half-frame 不发布和 tail anchor monotonic；`daemon:mirror:close-loop` 必须覆盖 top/vim/codex replay/source compare。APK `0.1.3.2030` 已构建，sha256 `14c4c413c04dd56062ee7c918774504106ba7b25e82e79a9a935beb486ef9c08`；仍需 Jason 真机复测 L5。
 
-## 2026-07-08 Active transport proactive stale probe
+## 2026-07-08 Active transport quiet-time reuse correction
 
-- Active terminal transport freshness 不能等 30s ping / 70s pong timeout 才恢复；active tab 若 2.5s 没有 server activity，必须由 `SessionContext` 发 `buffer-head-request` probe。
-- Probe 是唯一主动诊断链路：收到 `buffer-head/buffer-sync/pong/connected` 等 server activity 即 recovered；超过 active probe wait（默认 1.2s）仍无活动，才 `forceReplaceTransport`。禁止 UI 自己判断 timeout 或直接重建 socket。
-- Regression gate: `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-context-activity-runtime.test.ts --reporter dot` must cover proactive probe, healthy probe recovery, and forced reconnect after silent probe.
+- Active terminal transport freshness cannot be inferred from quiet time. A same-session, same-target `WebSocket.OPEN` must stay alive across foreground resume, active reentry, active tick, input, missed pong, and pong-only traffic.
+- Proactive diagnosis is limited to same-socket `buffer-head-request` / app ping observation. `lastServerActivityAt` and missing pong are not failure truth and must not call `forceReplaceTransport`.
+- Daemon heartbeat is observational: missed ws pong logs and sends another protocol ping; it must not close an open session transport for heartbeat timeout. Client app heartbeat follows the same rule.
+- Mac `bridge-transport` follows the same rule: heartbeat sends ping on the existing daemon WebSocket and does not close merely because pong is overdue.
+- Regression gate: `pnpm --dir android exec vitest run src/contexts/session-context-socket-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-sync-helpers.test.ts src/contexts/session-context-activity-runtime.test.ts src/contexts/session-context-activity-runtime.tab-switch-no-probe.test.ts src/contexts/session-context-input-runtime.test.ts src/server/server.daemon-runtime-truth.test.ts src/server/server.transport-lifecycle-truth.test.ts --reporter dot` must cover quiet OPEN transport reuse, missed-pong non-close, input non-probe, and closed/missing rebuild.
+- APK `0.1.3.2037` was built after the quiet-time reuse correction; sha256 `ccf406236e33c5ee5a15e68a0b2e712e6ff1633d0251fbf293e71207dd37416a`. Local evidence covers L0-L3 plus packaged build, but `adb devices -l` had no online device, so Android L5 UI/device re-entry validation remains open until installed on a real device.
+
+## 2026-07-08 Adaptive width mode stale geometry truth
+
+- `BridgeSettings.terminalWidthMode` 是 connect/open/reconnect payload 的当前宽度策略真源；session runtime 的 `requestedTerminalGeometry` 只允许贡献 measured cols，不允许用历史 `widthMode` 覆盖当前 Settings。
+- 反模式：用户先用 `mirror-fixed` 连接，session runtime 写入 `{ widthMode:'mirror-fixed' }`，随后 Settings 切 `adaptive-phone`，reconnect 仍读旧 geometry 发 fixed。这个 bug 不应靠 TerminalView 后续 resize/signal 补救，因为 connect payload 已经错了。
+- Owner fix: `session-context-provider-core-assemblies.ts` 的 geometry reader 必须把当前 `BridgeSettings.terminalWidthMode` 注入 wire geometry；fixed 不带 cols/rows，adaptive 只保留合法 cols。
+- Regression gate: `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` 必须覆盖 stale fixed geometry -> settings adaptive -> reconnect payload adaptive。
+
+## 2026-07-08 Visible-window terminal body pull truth
+
+- `WebSocket.OPEN` only proves transport availability; it must not imply body buffer pulling. Client body pulls require renderer-declared visible range or an explicit visible missing-range override.
+- Client Mirror Buffer request windows are scoped to the current visible window. The 1000-line local sparse buffer is retention only, not a pull target; do not reintroduce three-screen/full-cache body prefetch for Android terminal refresh.
+- Same-end revision advance is the required bottom/status-line refresh signal: if daemon revision advances while local end index is already at the visible tail, request the current visible tail window so in-place TUI/status updates repaint.
+- Reading repair only requests gaps inside the declared visible range. Hidden history gaps must stay sparse until they become visible.
+- Regression gates: `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` and `pnpm --dir packages/shared exec vitest run src/terminal/buffer-sync-request-planner.test.ts src/terminal/buffer-sync-planner.test.ts src/terminal/renderer.test.ts --reporter dot`.
+
+## 2026-07-08 Daemon subscribed mirror cadence truth
+
+- A ready mirror with at least one ready subscriber must stay on active capture cadence even if recent captures found no body changes. Do not use `lastLiveActivityAt` / “recent content change” as the gate for active polling.
+- Idle/slow mirror cadence is allowed only from daemon-owned physical facts: zero ready subscribers, sync failure/backoff, transport backpressure, flush in flight, or capture/canonicalize cost over budget.
+- This fixes TUI/status bars that update in place after a quiet period: if the daemon waits for a prior observed change before returning to active polling, the next update is discovered late and the status bar appears low-rate.
+- Regression gates: `pnpm --dir android exec vitest run src/server/terminal-performance-scheduler.test.ts src/server/terminal-mirror-runtime.test.ts src/server/terminal-mirror-runtime.per-subscriber-cadence.test.ts src/server/terminal-transport-runtime.test.ts --reporter dot` and `pnpm --dir android run daemon:mirror:close-loop`.
+- APK `0.1.3.2039` contains the subscribed mirror cadence fix; sha256 `1c2303435e82b61c1bec61aa0ffe9f0e474c47f4c658d38336b76a521a57d5ca`. Verified L0-L3 plus packaged build: server cadence 35 tests, Android type-check, feature registry 31 tests, daemon/tmux close-loop 8 cases with top-live buffer-sync/replay/strict audit, Mac client 147 tests + type-check, and standard debug build/update manifest sha alignment. `adb devices -l` had no online device, so Android L5 real-device UI refresh validation remains open.
+- Because this fix is daemon-side, APK upgrade alone is insufficient if the Mac daemon runtime is stale. After 2039 build, `pnpm --dir android run daemon:install-global && zterm-daemon restart` installed current `~/.zterm/daemon-runtime/server.cjs`; runtime scan found `subscribed-good-transport-low-capture-cost` and no old `RECENT_PROGRESS_MS/recentlyActive` path. Health check returned `ok=true`, pid `40791`, `wsUrl=ws://127.0.0.1:3333`.
+
+## 2026-07-08 Adaptive width mode UI truth
+
+- `adaptive-phone` width policy must be owned by BridgeSettings and propagated to renderer + connect/resize payload. `TerminalPage` must not default missing `terminalWidthMode` to `mirror-fixed`; missing prop defaults to `adaptive-phone` to avoid fixed behavior before settings hydrate.
+- Width-mode intent from active terminal/header must update BridgeSettings as well as send the immediate resize signal. Sending resize only leaves global truth stale, so the next entry/reconnect can still behave fixed.
+- Shell tab swipe must not be disabled solely because `terminalWidthMode === mirror-fixed`; until a dedicated horizontal pan owner exists, fixed mode still needs the existing tab-swipe escape path.
+- Regression gates: `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/App.first-paint.real-terminal.test.tsx src/hooks/useTerminalShellActions.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx --reporter dot` and `pnpm --dir packages/shared exec vitest run src/react/use-bridge-settings-storage.test.tsx src/terminal/renderer.test.ts --reporter dot`.
+- APK `0.1.3.2040` contains the adaptive width UI truth fix; sha256 `baf0b43e3e797ee48179c5008f9efd273fbbde696220f6ec5e1247ec0738c7e1`. Verified Android targeted width/layout/transport gates 285 tests, shared settings/renderer 22 tests, Android type-check, feature registry 31 tests, `git diff --check`, standard debug build, terminal contracts 592 tests, common flows 96 tests, relay smoke, and update manifest sha alignment. `adb devices -l` had no online device, so Android L5 real-device width-mode validation remains open.
+
+## 2026-07-09 Adaptive width mode default truth
+
+- `adaptive-phone` must be the default width policy at every settings normalization layer, not only at `useBridgeSettingsStorage()` first-render detection. `DEFAULT_BRIDGE_SETTINGS.terminalWidthMode`, `normalizeBridgeSettings()` for unknown/missing values, Android `normalizeTerminalWidthMode()`, and Settings option order must all prefer `adaptive-phone`.
+- Prior anti-pattern: storage hook detected narrow Android viewports correctly, but shared `DEFAULT_BRIDGE_SETTINGS` and normalize helpers still defaulted unknown/missing mode to `mirror-fixed`; any path that normalized an incomplete draft/settings object could revive fixed behavior even after Settings showed the latest app version.
+- Regression gates: `pnpm --dir android exec vitest run src/lib/bridge-settings.test.ts src/lib/terminal-width-mode-manager.test.ts src/App.dynamic-refresh.test.tsx src/App.first-paint.real-terminal.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx src/hooks/useTerminalShellActions.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/pages/TerminalPage.tab-isolation.test.tsx --reporter dot` and `pnpm --dir packages/shared exec vitest run src/react/use-bridge-settings-storage.test.tsx --reporter dot`.
+- APK `0.1.3.2041` contains the adaptive default closeout; sha256 `86f2a8427b18ec1e8fee73151c4fc4f32f2b7b1cf7461c9d28ae3d5d5c5122b5`. Verified targeted width gates 292 tests, shared storage 5 tests, Android typecheck, feature registry 31 tests, `git diff --check`, standard debug build, terminal contracts 593 tests, common flows 96 tests, relay smoke, and update manifest sha alignment. `adb devices -l` had only `emulator-5554 offline`, so Android L5 real-device UI validation remains open.
+
+## 2026-07-09 Bottom-row session/IME render isolation gate
+
+- `TerminalView` body DOM must remain scoped by `sessionId` during session switches and IME/layout refresh. A late publish from an inactive session must not repaint the active session's bottom rows, and a `ResizeObserver`/IME height change must only realign layout for the current session buffer.
+- Regression gate: `TerminalView.dynamic-refresh.test.tsx` uses real `BaseTerminalView + createSessionRenderBufferStore()` to render A, switch to B, publish late A, trigger layout refresh, assert B DOM excludes A/late-A rows, then switch back and assert A shows only its latest rows.
+- This is an L1/L4 gate. It does not replace Android L5 real-device visual validation for WebView compositor behavior.
+
+## 2026-07-09 Foreground resume stale CONNECTING transport truth
+
+- Active resume / active reentry / explicit resume must apply the short active wait budget to both transport-open phases: control `pending-open` before `session-ticket`, and session WebSocket `CONNECTING` after `session-ticket` has cleared the pending intent.
+- If the second phase remains `CONNECTING` beyond the active wait budget, `ensureActiveSessionFreshRuntime()` must call `reconnectSession(sessionId, { forceReplaceTransport:true })`; otherwise foreground resume can sit on an old session socket until the long generic handshake timeout.
+- Force replacement for stale pending-open or over-budget CONNECTING transport must physically close the old session socket. Leaving it as a live superseded CONNECTING socket is not clean enough for foreground recovery.
+- Regression gates: `session-sync-helpers.test.ts` covers over-budget vs fresh CONNECTING planner decisions; `session-context-session-runtime.test.ts` covers stale pending/control cleanup and physical socket close; `SessionContext.ws-refresh.test.tsx` covers background -> foreground stale CONNECTING replacement with exactly one new session socket.
+
+## 2026-07-09 Superseding correction: session WebSocket reuse truth
+
+- Supersedes the immediately previous `Foreground resume stale CONNECTING transport truth`: foreground resume / tab re-entry / network online / quiet time / missed pong must not create a replacement session WebSocket while the existing same-session same-target socket is `OPEN` or `CONNECTING`.
+- An `OPEN` session WebSocket is the protocol path for recovery: ask daemon for current `buffer-head`, ping, and session state on the same socket. Do not rebuild to learn what the current state is.
+- A `CONNECTING` or pending session WebSocket is still the current client transport attempt. Active resume may show a waiting state, but must not create a second session WebSocket solely because a short wait budget elapsed.
+- `reconnectRuntime.connecting` / stale reconnect bookkeeping is not socket failure truth. Foreground resume, tab re-entry, and network online must not turn it into `reconnect`; they may only wait/project state unless the socket physically closes/errors or the user explicitly reconnects.
+- Rebuild is allowed only for physical socket `close/error`, explicit user reconnect/open, target mismatch, or missing/closed socket in an explicit open/resume path. Network `online` is not reconnect truth; it only triggers same-socket protocol probing.
+- Regression gates: `App.dynamic-refresh.test.tsx` proves online calls `resumeActiveSessionTransport` and not `reconnectSession`; `session-sync-helpers.test.ts` and `session-context-activity-runtime.test.ts` prove stale pending/CONNECTING plans wait instead of force-replacing; `SessionContext.ws-refresh.test.tsx` proves foreground stale CONNECTING keeps one socket.
+
+## 2026-07-09 Adaptive width Settings save truth
+
+- If Settings shows/chooses `adaptive-phone` but subsequent terminal entry still behaves fixed, check the App Settings save owner before daemon/render code. The bug can be that `onSave(next)` computes `terminalWidthMode` from stale `current` settings and writes `mirror-fixed` back over the draft.
+- App Settings save must write `terminalWidthMode` from the Settings draft `next`; `current` is only previous storage state and must not override the user's new width-mode intent.
+- Regression gate: `App.dynamic-refresh.test.tsx` covers terminal -> connections -> settings save from old `mirror-fixed`, then applies the `setBridgeSettings` updater to stale current and expects `adaptive-phone`.
+
+## 2026-07-09 Adaptive width daemon process truth
+
+- `APK latest` and `~/.zterm/daemon-runtime/server.cjs` containing adaptive code do not prove the running Mac daemon process has loaded that code. If daemon `health.uptimeSec` predates the runtime update, the process is still executing old in-memory code.
+- Adaptive width is a two-sided feature: Android must persist/send `BridgeSettings.terminalWidthMode=adaptive-phone`, and the Mac daemon must run a process version that handles `connect/resize widthMode=adaptive-phone cols=N` by applying `tmux resize-window -x N`.
+- Verified failure mode: before daemon restart, a real WebSocket probe sent `connect cols=47` and `resize cols=53`, but daemon returned `buffer-sync.cols=80` and tmux stayed `80x24`. After service-scoped `zterm-daemon restart`, the same probe returned `buffer-sync.cols=47`, and tmux became `53x24` after resize.
+- Required validation for daemon-side adaptive/mirror/scheduler changes: check `/health` pid/uptime after install, then run a real WebSocket + tmux probe that reads tmux `#{window_width}x#{window_height}`. Do not use APK version, runtime file scan, or source tests as proof that the daemon process is current.
+
+## 2026-07-09 Superseding correction: daemon must not own client width policy
+
+- Supersedes the prior `Adaptive width daemon process truth`: daemon must not implement phone adaptive width by applying `tmux resize-window -x`. `adaptive-phone` / `mirror-fixed` belongs to client renderer/layout policy; daemon only owns tmux truth, mirror store, physical transport/subscriber facts, and daemon-owned business facts.
+- Attach/resize wire may still carry `widthMode/cols` for compatibility, but daemon must not store it in `TerminalSession` / `SessionMirror`, must not update `mirror.cols/baselineCols` from it, and must not run `resize-window` from client viewport intent.
+- `tmux resize-window -x` switches tmux into manual window sizing and can freeze height, so using daemon resize to fix phone width is the architecture bug, not the solution. If adaptive/fixed behavior appears identical or height is wrong, first audit daemon/tmux width ownership resurrection before UI compensation.
+- Superseded gate note: this entry's over-broad "daemon must not resize tmux" conclusion is obsolete. Current gate forbids the old `applyAdaptiveColsToTmuxMirror` owner and any `resize-window` outside the adaptive width lease owner; see `2026-07-09 Superseding correction: adaptive width lease owner`.
+- Verified after correction: targeted server/daemon gates 8 files / 72 tests PASS, Android `tsc --noEmit` PASS, and `pnpm --dir android run daemon:mirror:close-loop` PASS for `codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `external-input-echo`, `daemon-restart-recover`, and `schedule-fire`.
+
+## 2026-07-09 Superseding correction: foreground resume equals explicit resume
+
+- Supersedes earlier `active-resume` entries: foreground false->true must not have a separate transport lifecycle branch. It must map to `explicit-resume` and share the same SessionContext transport owner as cold restore / explicit resume.
+- This fixes the split where killing and reopening the app used the explicit open/resume path and connected immediately, while returning from background used `active-resume` and could stay stuck in closed/unavailable/timeout state.
+- `active-resume` is no longer a source in `android/src`; keeping the name in code is a regression because it reintroduces two reconnect/open policies for the same user-visible resume action.
+- Buffer message apply must gate both `buffer-sync` and `buffer-head` before local head/buffer mutation. A non-active/non-live session head frame must not move local head truth or promote connected state; otherwise old session/old transport frames can flash stale buffer during refresh.
+- Regression gates: `session-context-lifecycle.test.tsx` locks foreground false->true -> `explicit-resume`; `session-sync-helpers.test.ts` locks pending/CONNECTING wait and explicit closed reconnect; `session-context-socket-message-runtime.test.ts` locks inactive `buffer-head` drop; `SessionContext.ws-refresh.test.tsx` locks foreground head refresh on the existing socket.
+
+## 2026-07-09 Terminal default background and render gate truth
+
+- Terminal default background sentinel `bg=256` is terminal theme background, not CSS `transparent`. Renderer row, cell wrapper, gap marker, and gap fill must all paint `theme.background`; otherwise default cells leak the outer app/container background and screenshots differ from true terminal rendering even when daemon payload is correct.
+- `session-render-gate` must not apply per-session/network cadence after body truth is already in the live buffer store. Render commit coalesces only to the next RAF and reads the latest live buffer once at flush time; old delayed scheduled commits are a valid cause of “old buffer flashes first, then current buffer covers it”.
+- `resolveTerminalRefreshCadence()` only owns producer/head/pull/read cadence. It must not expose `renderCommitMs`, because renderer commit timing is not a transport/network policy.
+- Regression gates: `session-render-gate.test.ts` locks latest-live-buffer-at-RAF and no old scheduled publish; `TerminalView.theme.test.tsx` locks default cells against theme background; shared `renderer.test.ts` locks gap background against theme background.
+- APK `0.1.3.2047` contains the terminal background and render-gate fix; sha256 `eb832f5a205f1ed6db0a934936af31b73c4629512025aee0c78b5faed43ddac6`. Verified Android targeted render/theme/cadence gates 97 tests, shared renderer 17 tests, `SessionContext.ws-refresh` 130 tests, Android typecheck, feature registry 34 tests, `git diff --check`, prebuild terminal contracts 595 tests, common flows 96 tests, relay smoke, standard debug build/update manifest sha alignment, and installed on device `100.104.163.65:5555` with `versionName=0.1.3.2047`.
+
+## 2026-07-09 Classic Dark preset background live truth
+
+- If the renderer already maps `bg=256` to `theme.background` but the real device still looks unchanged, inspect the live WebView theme truth before changing renderer again. In the 2047 device test, `localStorage['zterm:bridge-settings'].terminalThemeId` was `classic-dark`, `.wterm` computed background was `rgb(0, 0, 0)`, and `classic-dark.background` in shared preset was `#000000`; therefore the visible failure was the active theme preset, not APK install or daemon payload.
+- `classic-dark.background` is now the terminal surface `#1e1e1e`, so existing users with `terminalThemeId=classic-dark` get a visible non-black default background without migrating settings or adding Android UI compensation. Explicit payload backgrounds still win per cell.
+- Regression gate: `TerminalView.theme.test.tsx` locks Classic Dark default cells and `.wterm` scroller to `#1e1e1e`; shared renderer still validates row/gap background mapping.
+- APK `0.1.3.2048` contains the Classic Dark preset correction; sha256 `1943c85a393575a30b6d2b858333f435045e48c78ef51911e410f888b317457e`. Verified targeted theme 12 tests, shared renderer 17 tests, Android typecheck, feature registry 34 tests, standard debug build with terminal contracts 595 tests/common flows 96 tests/relay smoke, installed on device `100.104.163.65:5555` with `versionCode=1032048`, and live CDP proved active `.wterm` background plus default rows changed to `rgb(30, 30, 30)` while explicit TUI input row cells remained `rgb(49, 52, 57)`.
+
+## 2026-07-09 Superseding correction: adaptive width lease owner
+
+- Supersedes `daemon must not own client width policy`: current truth is daemon owns a narrow, explicit `adaptive-phone` width lease state machine, not arbitrary client UI state.
+- `adaptive-phone` connect/resize registers the physical transport subscriber's `{ cols, heartbeatAt }` lease. Multiple adaptive subscribers on the same tmux mirror are aggregated by narrowest `cols`.
+- If the narrowest holder disappears, daemon recomputes from remaining leases. If the last holder disconnects, switches to `mirror-fixed`, or misses heartbeat past the lease TTL, daemon restores the tmux geometry captured before the first adaptive lease.
+- `mirror-fixed` must not register a lease and must not change tmux width. `resize-window` is allowed only inside the adaptive width lease owner, never scattered in attach/control/UI/renderer code.
+- Regression gates: `terminal-mirror-runtime.test.ts` covers narrowest wins, holder disappearance re-sort, last lease TTL restore, and fixed release restore; `terminal-runtime.detached-session.test.ts` covers transport detach restoring baseline only when the subscriber held an adaptive lease.

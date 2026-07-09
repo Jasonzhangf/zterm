@@ -157,7 +157,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - mirror 写侧也不得再拆第二语义：
   - 不允许 `history capture + visible capture + concat`
   - 只允许 **single-capture -> canonicalize -> mirror store**
-  - 若 tmux 正在中间刷新，writer 必须执行 **连续一致才发布**：只有连续两次 canonical snapshot 一致，或已与当前 mirror 一致，才允许写 mirror；不稳定必须显式报错
+  - 若 tmux 正在中间刷新，writer 必须执行 **结构稳定才发布**：只有连续两次 canonical snapshot 的 absolute window / geometry 稳定，或已与当前 mirror 完整一致，才允许写 mirror；发布内容取第二次最新 snapshot。禁止要求动态 TUI 内容逐字完全一致，否则 `top/htop/vim` 持续变化会多次重采样并进入 failure backoff，表现为刷新很慢。
   - 不允许基于 **内容 overlap / repeated text** 推断新的 absolute anchor
   - mirror absolute window 只能来自 tmux authoritative available window；内容相似性最多用于 debug，不得进入写侧真相
 - `buffer-head-request` / `buffer-sync-request` 只是**读当前 mirror**
@@ -175,7 +175,13 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - subscriber transport count
   - daemon failure/backoff fact
   - 禁止消费 `active tab / foreground / follow / reading / visible range / viewport / pane layout`
-- daemon 不得长期保存 client width policy：`widthMode`、`adaptiveCols`、`terminalWidthMode`、`requestedAdaptiveCols` 只能作为兼容 wire 入参被读取，不能写入 `TerminalSession` / `SessionMirror`，也不能反向触发 tmux `resize-window` / `window-size latest` ownership。
+- 有健康 subscriber 的 ready mirror 必须保持 active capture cadence；不得因为最近 1.5s 没观察到 body change 就退到 idle cadence。idle 只属于无 subscriber、失败/backoff、transport backpressure 或 capture cost 过高等 daemon 物理事实；否则 TUI/status bar 的下一次原地更新会被 polling 先天限速。
+- daemon 不得长期保存 UI / renderer width policy；唯一例外是 **adaptive width lease owner**：
+  - `adaptive-phone` connect/resize 可注册当前 physical transport subscriber 的 `{ cols, heartbeatAt }` lease。
+  - 同一 tmux mirror 多个 adaptive lease 按最窄 `cols` 写入 tmux。
+  - 持有 lease 的 transport close/detach 后必须立即重新排序；最后一个 lease 消失必须恢复进入 adaptive 前的 tmux geometry。
+  - lease 心跳过期必须清掉该 lease 并重新排序/恢复。
+  - 除该 owner 外，`widthMode`、`terminalWidthMode`、`requestedAdaptiveCols` 不得写入 daemon 业务真相，不得散落触发 `resize-window`。
 - 好网 fast lane 与弱网 slow lane 必须由红测锁定；性能 trace 只记录 timestamp/duration/bytes/line count/id/kind 这类 metadata，禁止记录真实 terminal payload 内容。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**
@@ -259,6 +265,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - **同 revision 的迟到旧 payload 不得把本地窗口重新锚回更老的位置**
   - 它只允许 patch 当前 1000 行窗口内的 absolute-index truth
   - 不允许因为晚到的 prepend / reading repair 响应，把 follow 中已经稳定的 tail window 拖回去
+- 迟到旧 payload 不得覆盖当前本地 truth：`incomingRevision < localRevision` 必须显式 drop、记录 debug、请求当前 tail；同 revision payload 若会改写当前本地已有 **non-gap absolute-index 行**，也必须显式 drop。只有同 revision 且命中本地 gap 的 payload 才能作为 gap repair 合并。禁止用“先清空 buffer/DOM 再刷新”掩盖旧 payload 污染。
 
 ### 2.1.1 本地 buffer 不变量
 
@@ -273,21 +280,21 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 每次 tick：
 1. 先问 head
 2. 比较本地尾部与 daemon head
-3. 若本地为空、失真，或离 head **超过 3 屏**：
-   - 直接请求 **head 往回 3 屏**
+3. 若本地为空、失真，或离 head 超过当前 visible window：
+   - 直接请求 **当前 visible window**
    - 移动本地 sliding window 到最新尾部
    - **中间缺口不补**
 4. 若离 head 不远：
    - 只补 diff
 
 补充冻结：
-- **三屏请求窗口** 和 **1000 行本地缓存上限** 是两个独立真相，禁止再用同一个 `cacheLines` 语义混写两者
+- **visible-window body pull** 和 **1000 行本地缓存上限** 是两个独立真相，禁止再用同一个 `cacheLines` 语义混写两者；1000 行只表示本地保留上限，不是拉取目标
 
 ### 2.3 reading 路径
 - reading 不改变 buffer manager 的 head-first 主循环
 - buffer manager 不持有 `follow / reading / renderBottomIndex`
 - 它只接收 renderer 声明的 **当前 visible range**
-- 若当前 visible range 三屏内不连续，buffer manager 才请求 gap
+- 若当前 visible range 内不连续，buffer manager 才请求 gap；隐藏区域不因已有 WebSocket 连接而主动拉取
 - **gap repair 属于 visible range repair，不属于 renderer state ownership**
 
 ### 2.4 禁止事项
@@ -310,7 +317,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 正确动作是拒绝这次 sparse body apply，清 tail-refresh debounce，并请求当前 authoritative tail window
   - 否则旧行会作为“未覆盖但保留”的本地 truth 永久存在，表现为大面积刷新时旧内容跟着 buffer 上移
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
-- session transport 的**活性真相**不能只看 `session.state === connected` 或 `WebSocket.readyState === OPEN`；active tab 恢复 / 重新进入时，若没有新的 head / range / pong 进展，就必须判定旧 transport 已失活并重建
+- session transport 的重建真相不能来自“安静时间”：`lastServerActivityAt` 过旧、缺 pong、缺 head、pong-only traffic 都不得让仍为 `WebSocket.OPEN` 的长连接过期。active tab 恢复 / 重新进入 / tick 只能在原 transport 上 request-head / ping 观测；只有物理 `close/error`、send 抛错、daemon 不可达、用户显式关闭、或 tmux/session target 事实变更，才允许重建。
 - transport topology 也必须冻结：
   - daemon 只认 **transport connection truth**
   - daemon 不认 `clientSessionId`、不认 control/session 两级客户端状态机
@@ -338,6 +345,10 @@ renderer 只看三件事：
 - daemon head metadata 只属于 buffer manager / planner 输入；renderer 不订阅 daemon head store，不用 daemon head 推进 follow demand
 - cursor metadata 可以被 renderer 读取
 - 但 head/cursor metadata 不得作为正文 repaint 触发源
+- render store 发布也必须单调：
+  - 同一 session 已发布 `revision=N` 的 render body 后，任何 `revision<N` 的 render snapshot 都必须拒绝发布并记录 `session.render-store.revision-regression-drop`
+  - render revision reset 只能来自显式 session truth reset（如 `deleteSession()` / 重建 session），不得由迟到旧 snapshot 隐式覆盖
+  - 该门禁只保护 renderer 发布边界；若高 revision payload 自身携带旧内容，仍必须回 daemon mirror / buffer-sync 源头追真源，禁止用清 DOM / 清 buffer 掩盖
 
 ### 3.1 block/shade glyph 真相
 - `U+2580..U+259F`（block / shade / quadrant）不能按普通文本 glyph 渲染；这类字符在 TUI/tmux 里经常承担“背景块/色块”语义。
@@ -386,7 +397,7 @@ renderer 还必须显式区分两种宽度模式：
 ### 3.2 reading
 - 用户上滚立即进入 reading
 - reading 时只改自己的 `renderBottomIndex`
-- 申请的是“reading head 往回 3 屏”的渲染窗口
+- 申请的是当前 visible range 的渲染窗口
 - buffer 更新只会让 renderer 重绘当前窗口，**不会自动滚动**
 - 即使当前窗口不连续，renderer 也只能把缺口画成 gap / blank marker；不能把已有 absolute-index 内容当成不存在
 - gap 行的显示规则也冻结为：
@@ -588,19 +599,17 @@ tmux truth
 - foreground resume 对 active tab 不能只补一发 `buffer-head-request`；若 daemon 仅 `revision` 前进而 `latestEndIndex` 不变，buffer manager 仍必须带一次性 same-end tail refresh demand，确保 `head -> sync -> body repaint` 闭环成立。
 - App foreground resume 的真相只能是：**先 probe/resume 当前 active transport，再决定是否 reconnect**；App 不得再按 UI `session.state` 先分叉，否则会把“label stale but transport alive”误杀成重连。
 - foreground/background 的 hidden gate 也必须只有一份真源；若 App 已统一消费 `visibilitychange / resume / appStateChange`，`SessionContext` active tick 不得再自行读取 `document.visibilityState` 做第二份停刷判定。
-- foreground false->true 不能只等 active tick；`SessionContext lifecycle` 必须拥有唯一 `active-resume` 入口，并立刻对 active session 做 `ensureActiveSessionFresh(active-resume)`，否则会重演“前台 UI 活了，但 transport 没恢复”的假连通。
+- foreground false->true 不能只等 active tick；`SessionContext lifecycle` 必须把 active session 送入唯一 `explicit-resume` 入口，和冷启动恢复共用同一 transport owner，否则会重演“杀进程秒连、后台回来卡死”的双路径分裂。
 - 若日志出现 `sessionState=reconnecting + ws=null + no pending open intent`，优先判定为 **stale reconnect bookkeeping**，不是“真的还在连”。foreground/explicit refresh 必须允许重新 reconnect；不能让粗粒度 `reconnectInFlight=true` 永久挡住恢复。
 - open-tab restore / runtime sync 允许为 persisted tabs **恢复 local runtime shell**：可 `createSession(connect:false)` 做 cold restore / sessionId remap，但**不得**自动打开 daemon session。真正的 daemon open 只能来自显式用户 open/import/resume 动作。
-- active re-entry / active tick / foreground resume 若遇到 `closed/error/unavailable` session，生命周期链只能 skip 或 probe 当前 live transport；**不得**自动 reconnect。只有显式 open / explicit resume 才允许重新打开 daemon session。
-- `adaptive-phone` 的 upstream geometry 真相只能是 **client-owned latest cols**；attach/reconnect 可带 cols，但**不得**带 runtime rows。daemon 只消费 cols，rows 继续取 tmux/mirror baseline。
-- `adaptive-phone` 的 upstream width owner 只能是 **daemon**：
-- `adaptive-phone` 做过 `resize-window -x` 之后，tmux 会把目标 window 置为 `window-size=manual`；当最后一个 adaptive subscriber 断开时，daemon 必须显式释放回 `window-size=latest` 并刷新 mirror baseline，否则 session 会永久卡在历史的 `80x24/56x24` 一类旧高度。
-  - 更关键：**只改 `-x` 并不等于“只改宽”**。真实 tmux 语义下，`resize-window -x` 一旦把 window-size 切到 `manual`，后续更高的 client attach 也不会再自动抬高 rows；高度会一起冻结在进入 manual 那一刻的值。
-  - 所以凡是用户现场看到“我们明明没写 rows，但 session 高度一直很矮”，优先判定为 **当前 adaptive width 实现通过 tmux manual 模式间接冻高**，不是单纯遗留脏数据。
-  - client 只能上报自己最新实测 `cols`
-  - daemon 只允许在所有活着的 `adaptive-phone` 连接里取 **最小 cols**
-  - 连接断开 / attach 迁移 / close 后必须立刻重算
-  - daemon upstream resize **永远禁止写 rows**；tmux 高度不属于这条链路
+- active re-entry / active tick 若遇到 `closed/error/unavailable` session，生命周期链只能 skip 或读取当前 live transport；**不得**自动 reconnect。foreground resume 不再是独立语义，必须映射成 `explicit-resume`，由唯一 reconnect/open owner 判定是否重新打开 daemon session。
+- `adaptive-phone` 是 daemon adaptive width lease，不是 renderer 后处理：
+  - client 只上报 measured cols 与 transport heartbeat。
+  - daemon 唯一 lease owner 聚合 active adaptive subscribers，取最窄 cols 执行 tmux width。
+  - 客户端退出、transport detach、心跳过期后必须释放 lease；无 lease 时恢复 baseline geometry。
+  - 红测必须覆盖最窄优先、holder 消失重排、最后 lease 过期恢复、非 adaptive 不动 tmux。
+- `mirror-fixed` 是 client render crop / pan policy：不得注册 adaptive width lease，不得改变 tmux width。
+- `resize-window -x` 只能出现在 adaptive width lease owner 中。看到“客户端退出后 tmux 仍窄”，优先检查 lease 是否释放/恢复、运行 daemon 是否已更新、是否还有旧 owner 直接 resize。
 - 若 App 首帧就已经持有现存 `sessions[]`，也必须立刻持久化 `OPEN_TABS / ACTIVE_SESSION`；不能因为“这次不是 restore 分支”就跳过首次回写，否则下次冷启动恢复会拿到陈旧 tab 真相。
 - 若现场是**输入区文本对了、但样式和 tmux 不同**，先不要怀疑 local echo。先用回环证明：terminal 可见内容是否只在 `buffer-sync` 后变化；若是，再直接比 **daemon payload 的 prompt/input row `char/fg/bg/flags`**。
 - “输入区 / 光标”专项必须至少有一条**红灯门禁**：daemon cursor paint 不得给普通 prompt cell 注入 synthetic reverse style；若这里错，后续任何 IME/renderer 修修补补都会继续假修。
@@ -610,8 +619,10 @@ tmux truth
 - Android / Mac renderer 的 visible-gap repair demand 必须共用 shared `buildTerminalViewportDemandWithRepair`；平台 view 只传入 local buffer window + gap ranges，不得复制 missingRanges 计算。demand key 必须纳入非空 `missingRanges`，无 gap 时不发送空数组以保持旧 payload 形状。
 - Android terminal header 的顶部 inset 必须由 **UI shell 提供单一像素真相**；Header 自己不得再额外叠 `env(safe-area-inset-top)` 做第二份 safe-area 计算。
 - terminal 冷启动 / 恢复 tab 时，**最后 active tab 真相只能来自 `ACTIVE_SESSION`**；`ACTIVE_PAGE.focusSessionId` 只描述页面焦点，不得反向覆盖已恢复的 active session。
-- foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先 probe 并复用现有 transport，只有 probe 超时/close/error 后才允许 reconnect。
-- foreground resume / tab re-entry 时，若 active session 仍卡在同一 `CONNECTING` socket 或 pending open intent，不能沿用通用 5s+ handshake 等待。active resume / active reentry / explicit resume 只能短等（当前 1200ms），超过预算由 SessionContext transport owner force-replace；普通首连和 active tick 不得用这条短预算抢占，避免重复开 socket。UI 状态必须来自 SessionContext 的真实 `state/lastError`，不能在页面层伪造等待提示。
+- foreground resume / tab re-entry 时，若 active session 的 `ws.readyState === OPEN`，**不得仅因后台静默一段时间就直接重连**；必须先用同一条 ws 做 `buffer-head-request` / ping / 必要的 session 状态查询。只有 socket 物理 `close/error`、用户显式 reconnect、或当前 session 已无可用 ws 且属于 `explicit-resume/open`，才允许新建 ws。
+- foreground resume / tab re-entry / network online 时，若 active session 仍卡在同一 `CONNECTING` socket 或 pending open intent，**不得因等待预算超时自动 force-replace**。继续等待同一条 pending ws，并把等待状态显式投影到 SessionContext；不能创建第二条 session ws。网络通断事件不是 reconnect 依据，只是触发现有 ws 的协议探测。
+- `reconnectRuntime.connecting` / stale reconnect bookkeeping 只是 client 本地编排观测，不是 transport failure truth；foreground resume / tab re-entry / online 不得因为它返回 `reconnect` 或创建第二条 ws，只能显式显示等待或在 socket 物理 close/error 后进入真正 open/reconnect owner。
+- `force-replace` API 不属于 lifecycle/probe/input/foreground/online 恢复路径；禁止把 stale activity、missed pong、pong-only、foreground resume、tab re-entry、online 事件映射成 `cleanup old socket -> fresh connect`。物理 close/error 进入唯一 reconnect/open owner，不能由 UI 或 buffer 层清理 live socket。
 - 任何 `buffer-head-request` / `buffer-sync-request` 若允许调用方显式传 `ws`，都必须先校验：**该 ws 仍是当前 session 的 active transport socket**；旧 superseded socket 只能被物理关闭或忽略，绝不能继续拿来发 head/range 请求污染当前 transport 真相。
 - transport 生命周期门禁不只覆盖 `onopen/onmessage/onerror/onclose`；凡是“旧 ws 回调里继续触发 request/head/probe”的路径，也必须有同样的 active-socket gate，否则 stale transport 仍会在写侧继续推进错误状态。
 - 若 tmux capture / mirror canonicalize 链路可能收到 extended-color ANSI（`38:2::r:g:b` / `48:2::r:g:b` / `38:5:n` / `48:5:n`）的 colon 语法，进入 parser 前必须先规范化到当前唯一支持的 semicolon 语法；否则颜色会退回 default sentinel，现场表现就是红/绿背景丢失或发灰。
@@ -621,6 +632,9 @@ tmux truth
   3. 是否又让 inactive tab 关闭 session / transport
   4. 是否又让 daemon 因 ws close / grace timeout 回收 logical session
 - 若真机出现**大块灰条/花屏/光标样式乱飞**，优先查 **compact wire 的 default color sentinel** 是否和 `TerminalCell` 真相一致；当前 app/runtime 里的默认前景/背景是 `256/256`，不能在 compact encode/decode 里偷偷改成 ANSI `15/0`。
+- 若真机出现**terminal 默认背景和真实终端背景不一致**，优先查 renderer default bg sentinel：`bg=256` 必须绘制为 `theme.background`，不能映射为 `transparent`。row / cell wrap / gap fill 也必须主动 paint terminal theme background，禁止让外层容器或页面背景替代 terminal 背景。
+- 若 `bg=256 -> theme.background` 修复后真机仍“无变化”，下一步必须用 WebView DevTools 读取 live `localStorage['zterm:bridge-settings'].terminalThemeId`、`.wterm` computed background、最近可见 row/cell computed background。若 active preset 自身的 `theme.background` 是纯黑，继续改 renderer 是错路；应修 shared theme preset 真源，并用 live DOM 证明 computed background 变化。
+- 若真机输入或刷新时**先闪一帧旧 buffer 再被新 buffer 覆盖**，优先查 render gate 是否在 buffer truth 之后又加了 per-session debounce。正确语义是 `buffer-sync apply -> schedule RAF -> RAF 时读取当前 live buffer 一次`；render gate 只做 frame coalescing，不能再消费 network/transport cadence，也不能保存会晚发布的旧 scheduled snapshot。
 - 若真机出现**光标颜色不对 / 光标像普通反显文本 / 光标样式污染邻格**，先查 **Android client 是否越权改了 cursor 样式**；renderer 只能回显 payload，不能再造第二套 cursor 视觉语义。
 - 若现场看起来像“正文解析错了”，先把 **terminal body** 与 **IME/editor overlay** 分开审；底部灰条/编辑条不属于 daemon buffer truth，不能直接当成 compact wire 正文错误。
 - compact wire 的正文门禁必须覆盖 **ANSI + CJK + reverse + bg span + 中间空格**；只有 body parity 红灯以后，才允许改 contract/renderer，禁止凭截图先回退 codec。

@@ -21,14 +21,14 @@ function createTransport(): TerminalSessionTransport {
   };
 }
 
-function createConnection(boundSessionId: string | null = null): TerminalTransportConnection {
+function createConnection(boundSubscriberId: string | null = null): TerminalTransportConnection {
   return {
     transportId: 'transport-1',
     transport: createTransport(),
     closeTransport: vi.fn(),
     requestOrigin: 'http://127.0.0.1:3333',
-    role: boundSessionId ? 'session' : 'pending',
-    boundSessionId,
+    role: boundSubscriberId ? 'session' : 'pending',
+    boundSubscriberId,
   };
 }
 
@@ -37,7 +37,7 @@ function bindSessionToConnection(session: TerminalSession, connection: TerminalT
   session.transportId = connection.transportId;
   session.transport = connection.transport;
   session.closeTransport = connection.closeTransport;
-  connection.boundSessionId = session.id;
+  connection.boundSubscriberId = session.id;
   connection.role = 'session';
 }
 
@@ -120,8 +120,8 @@ function createRuntime(options?: {
       renameTmuxSession: vi.fn(() => 'demo'),
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
-      createTransportBoundSession: vi.fn(),
-      bindConnectionToSession: vi.fn(),
+      createTransportSubscriber: vi.fn(),
+      bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
       attachTmux: vi.fn(async () => {}),
       handleAdaptiveResize,

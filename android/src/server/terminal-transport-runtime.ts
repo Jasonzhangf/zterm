@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import type { ServerMessage } from '../lib/types';
 import type {
+  TerminalTransportSubscriber,
   TerminalSession,
   TerminalSessionTransport,
   TerminalTransportConnection,
@@ -26,7 +27,7 @@ export interface TerminalTransportBackpressureSnapshot {
 }
 
 export interface TerminalTransportRuntimeDeps {
-  sessions: Map<string, TerminalSession>;
+  sessions: Map<string, TerminalTransportSubscriber>;
   connections: Map<string, DaemonTransportConnection>;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
@@ -37,7 +38,7 @@ export interface TerminalTransportRuntime {
   createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
   sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
-  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
+  sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   createTransportConnection: (
     transport: TerminalSessionTransport,
@@ -204,7 +205,7 @@ export function createTerminalTransportRuntime(
       requestOrigin,
       wsAlive: true,
       role: 'pending',
-      boundSessionId: null,
+      boundSubscriberId: null,
     };
     deps.connections.set(connection.id, connection);
     return connection;

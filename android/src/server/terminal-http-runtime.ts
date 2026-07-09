@@ -2,7 +2,7 @@ import { createReadStream, existsSync, readFileSync } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
 import type { RuntimeDebugStore } from './runtime-debug-store';
-import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
+import type { TerminalTransportSubscriber, SessionMirror } from './terminal-runtime-types';
 
 export interface TerminalHttpRuntimeDeps {
   host: string;
@@ -13,7 +13,7 @@ export interface TerminalHttpRuntimeDeps {
   appUpdateVersionCode: number;
   appUpdateVersionName: string;
   appUpdateManifestUrl: string;
-  sessions: Map<string, TerminalSession>;
+  sessions: Map<string, TerminalTransportSubscriber>;
   mirrors: Map<string, SessionMirror>;
   clientRuntimeDebugStore: RuntimeDebugStore;
   daemonRuntimeDebugStore: RuntimeDebugStore;
@@ -114,7 +114,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
   function buildRuntimeHealthSnapshot(request: IncomingMessage) {
     const requestHost = request.headers.host || `${deps.host}:${deps.port}`;
     const memoryUsage = process.memoryUsage();
-    const sessionEntries = Array.from(deps.sessions.values());
+    const subscriberEntries = Array.from(deps.sessions.values());
     const mirrorEntries = Array.from(deps.mirrors.values());
     return {
       ok: true,
@@ -131,9 +131,9 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         arrayBuffers: memoryUsage.arrayBuffers,
       },
       sessions: {
-        total: sessionEntries.length,
-        attached: sessionEntries.filter((session) => Boolean(session.transport)).length,
-        ready: sessionEntries.filter((session) => Boolean(session.transport?.connectedSent)).length,
+        total: subscriberEntries.length,
+        attached: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport)).length,
+        ready: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport?.connectedSent)).length,
       },
       mirrors: {
         total: mirrorEntries.length,
@@ -168,7 +168,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
   }
 
   function buildDebugRuntimeSnapshot(request: IncomingMessage) {
-    const sessionEntries = Array.from(deps.sessions.values());
+    const subscriberEntries = Array.from(deps.sessions.values());
     const mirrorEntries = Array.from(deps.mirrors.values());
     return {
       ok: true,
@@ -178,13 +178,13 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       clientDebug: deps.clientRuntimeDebugStore.getSummary(),
       daemonDebug: deps.daemonRuntimeDebugStore.getSummary(),
       clientDebugSnapshots: deps.clientRuntimeDebugStore.listSnapshots(),
-      clientSessions: sessionEntries.map((session) => ({
-        id: session.id,
-        sessionName: session.sessionName,
-        mirrorKey: session.mirrorKey,
-        transportId: session.transportId,
-        connectedSent: Boolean(session.transport?.connectedSent),
-        requestOrigin: session.transport?.requestOrigin || null,
+      transportSubscribers: subscriberEntries.map((subscriber) => ({
+        id: subscriber.id,
+        sessionName: subscriber.sessionName,
+        mirrorKey: subscriber.mirrorKey,
+        transportId: subscriber.transportId,
+        connectedSent: Boolean(subscriber.transport?.connectedSent),
+        requestOrigin: subscriber.transport?.requestOrigin || null,
       })),
       mirrors: mirrorEntries.map((mirror) => ({
         key: mirror.key,

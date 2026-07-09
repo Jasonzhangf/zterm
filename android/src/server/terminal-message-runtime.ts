@@ -11,6 +11,7 @@ import type {
   ServerMessage,
 } from '../lib/types';
 import type {
+  TerminalTransportSubscriber,
   TerminalSession,
   TerminalSessionTransport,
   SessionMirror,
@@ -27,7 +28,7 @@ import {
 import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
 
 export interface TerminalMessageRuntimeDeps {
-  sessions: Map<string, TerminalSession>;
+  sessions: Map<string, TerminalTransportSubscriber>;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   normalizeBufferSyncRequestPayload: (
@@ -47,11 +48,11 @@ export interface TerminalMessageRuntimeDeps {
 }
 
 export interface TerminalMessageRuntime {
-  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => TerminalSession | null;
+  handleSessionOpen: (connection: TerminalTransportConnection, payload: HostConfigMessage) => TerminalTransportSubscriber | null;
   handleSessionTransportConnect: (
     connection: TerminalTransportConnection,
     payload: HostConfigMessage,
-  ) => TerminalSession | null;
+  ) => TerminalTransportSubscriber | null;
   handleMessage: (connection: TerminalTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
@@ -63,10 +64,10 @@ export function createTerminalMessageRuntime(
   }
 
   function resolveCurrentSessionForInput(connection: TerminalTransportConnection): TerminalSession | null {
-    if (!connection.boundSessionId) {
+    if (!connection.boundSubscriberId) {
       return null;
     }
-    const current = deps.sessions.get(connection.boundSessionId) || null;
+    const current = deps.sessions.get(connection.boundSubscriberId) || null;
     if (!current) {
       return null;
     }
@@ -79,7 +80,7 @@ export function createTerminalMessageRuntime(
   function reportInputDrop(connection: TerminalTransportConnection, reason: 'session_required' | 'input_stale_transport', bytes: number) {
     debugInput('drop', {
       transportId: connection.transportId,
-      sessionId: connection.boundSessionId,
+      sessionId: connection.boundSubscriberId,
       reason,
       bytes,
       queueDepth: 0,
@@ -100,7 +101,7 @@ export function createTerminalMessageRuntime(
     if (bytes > MAX_INPUT_PAYLOAD_BYTES) {
       debugInput('drop', {
         transportId: connection.transportId,
-        sessionId: connection.boundSessionId,
+        sessionId: connection.boundSubscriberId,
         reason: 'input_too_large',
         bytes,
         queueDepth: 0,
@@ -117,7 +118,7 @@ export function createTerminalMessageRuntime(
     }
     debugInput('receive', {
       transportId: connection.transportId,
-      sessionId: connection.boundSessionId,
+      sessionId: connection.boundSubscriberId,
       bytes,
       queueDepth: 0,
     });
@@ -125,7 +126,7 @@ export function createTerminalMessageRuntime(
     if (!inputSession) {
       reportInputDrop(
         connection,
-        connection.boundSessionId && deps.sessions.has(connection.boundSessionId) ? 'input_stale_transport' : 'session_required',
+        connection.boundSubscriberId && deps.sessions.has(connection.boundSubscriberId) ? 'input_stale_transport' : 'session_required',
         bytes,
       );
       return;
@@ -171,7 +172,7 @@ export function createTerminalMessageRuntime(
   }
 
   async function handleMessage(connection: TerminalTransportConnection, rawData: RawData, isBinary = false) {
-    const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
+    const session = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
     if (isBinary) {
       if (!session) {
         deps.sendTransportMessage(connection.transport, {
@@ -201,7 +202,7 @@ export function createTerminalMessageRuntime(
     try {
       message = JSON.parse(text) as ClientMessage;
     } catch {
-      if (!connection.boundSessionId) {
+      if (!connection.boundSubscriberId) {
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: 'Plain text input requires an attached session transport', code: 'input_requires_session' },

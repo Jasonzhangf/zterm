@@ -6,6 +6,7 @@ import type {
   ServerMessage,
 } from '../lib/types';
 import type {
+  TerminalTransportSubscriber,
   TerminalSession,
   TerminalSessionTransport,
   SessionMirror,
@@ -14,7 +15,7 @@ import type {
 } from './terminal-runtime-types';
 
 export interface TerminalMessageControlRuntimeDeps {
-  sessions: Map<string, TerminalSession>;
+  sessions: Map<string, TerminalTransportSubscriber>;
   mirrors: Map<string, SessionMirror>;
   issueSessionTransportToken: () => string;
   consumeSessionTransportToken: (token: string) => boolean;
@@ -28,22 +29,22 @@ export interface TerminalMessageControlRuntimeDeps {
     markSessionMissing: (sessionName: string, reason: string) => void;
   };
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
-  sendMessage: (session: TerminalSession, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
+  sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
+  sendScheduleStateToSession: (session: TerminalTransportSubscriber, sessionName?: string) => void;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (sessionName?: string, cwd?: string) => string;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
-  createTransportBoundSession: (connection: TerminalTransportConnection) => TerminalSession;
-  bindConnectionToSession: (
+  createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
+  bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
-    session: TerminalSession,
-  ) => TerminalSession;
+    subscriber: TerminalTransportSubscriber,
+  ) => TerminalTransportSubscriber;
   getMirrorKey: (sessionName: string) => string;
-  attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
+  attachTmux: (session: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize?: (
-    session: TerminalSession,
+    session: TerminalTransportSubscriber,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
   destroyMirror: (
@@ -59,7 +60,7 @@ export function handleSessionOpenMessageRuntime(
   payload: HostConfigMessage,
 ) {
   connection.role = 'control';
-  connection.boundSessionId = null;
+  connection.boundSubscriberId = null;
   const sessionName = deps.sanitizeSessionName(payload.sessionName);
   const sessionTransportToken = deps.issueSessionTransportToken();
   console.log(
@@ -104,8 +105,8 @@ export function handleSessionTransportConnectRuntime(
   console.log(
     `[server] transport-attach-ok transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${deps.sanitizeSessionName(payload.sessionName)}`,
   );
-  const serverSession = deps.createTransportBoundSession(connection);
-  return deps.bindConnectionToSession(connection, serverSession);
+  const subscriber = deps.createTransportSubscriber(connection);
+  return deps.bindConnectionToSubscriber(connection, subscriber);
 }
 
 export function handleListSessionsMessageRuntime(
@@ -285,13 +286,13 @@ export function handleTmuxControlMessageRuntime(
           mirror.sessionName = nextKey;
           deps.mirrors.set(nextKey, mirror);
           for (const sessionId of mirror.subscribers) {
-            const client = deps.sessions.get(sessionId);
-            if (!client) {
+            const subscriber = deps.sessions.get(sessionId);
+            if (!subscriber) {
               continue;
             }
-            client.mirrorKey = nextKey;
-            client.sessionName = nextKey;
-            deps.sendMessage(client, { type: 'title', payload: nextKey });
+            subscriber.mirrorKey = nextKey;
+            subscriber.sessionName = nextKey;
+            deps.sendMessage(subscriber, { type: 'title', payload: nextKey });
           }
         }
         deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });

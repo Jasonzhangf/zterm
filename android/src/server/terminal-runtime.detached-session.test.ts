@@ -16,7 +16,7 @@ function createTransportConnection(id: string): TerminalTransportConnection {
     closeTransport: vi.fn(),
     requestOrigin: 'http://127.0.0.1:3333',
     role: 'pending',
-    boundSessionId: null,
+    boundSubscriberId: null,
   };
 }
 
@@ -102,7 +102,7 @@ describe('terminal runtime detached transport cleanup', () => {
   it('removes detached transport-bound sessions from runtime maps and mirror subscribers', () => {
     const { runtime, sessions, mirrors } = createDeps();
     const connection = createTransportConnection('transport-1');
-    const session = runtime.createTransportBoundSession(connection);
+    const session = runtime.createTransportSubscriber(connection);
     const mirror: SessionMirror = {
       key: 'demo',
       sessionName: 'demo',
@@ -135,7 +135,7 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(sessions.has(session.id)).toBe(true);
     expect(mirror.subscribers.has(session.id)).toBe(true);
 
-    runtime.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
+    runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
     expect(sessions.has(session.id)).toBe(false);
     expect(session.transport).toBeNull();
@@ -146,7 +146,7 @@ describe('terminal runtime detached transport cleanup', () => {
   it('detaches subscribers without mutating tmux width policy', () => {
     const { runtime, mirrors, runTmux, setPaneMetrics } = createDeps();
     const connection = createTransportConnection('transport-1');
-    const session = runtime.createTransportBoundSession(connection);
+    const session = runtime.createTransportSubscriber(connection);
     setPaneMetrics({
       paneCols: 99,
       paneRows: 56,
@@ -181,7 +181,7 @@ describe('terminal runtime detached transport cleanup', () => {
     session.sessionName = mirror.sessionName;
     session.mirrorKey = mirror.key;
 
-    runtime.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
+    runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
     expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-t', 'demo', 'window-size', 'latest']);
     expect(mirror.cols).toBe(56);
@@ -189,5 +189,51 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(mirror.baselineCols).toBe(56);
     expect(mirror.baselineRows).toBe(24);
     expect(mirror).not.toHaveProperty('adaptiveCols');
+  });
+
+  it('detaches adaptive subscribers and restores the pre-lease tmux geometry', () => {
+    const { runtime, mirrors, runTmux } = createDeps();
+    const connection = createTransportConnection('transport-1');
+    const session = runtime.createTransportSubscriber(connection);
+    const mirror: SessionMirror = {
+      key: 'demo',
+      sessionName: 'demo',
+      scratchBridge: null,
+      lifecycle: 'ready',
+      cols: 55,
+      rows: 24,
+      baselineCols: 55,
+      baselineRows: 24,
+      adaptiveWidthBaselineGeometry: { cols: 120, rows: 40 },
+      adaptiveWidthAppliedCols: 55,
+      cursorKeysApp: false,
+      revision: 1,
+      lastScrollbackCount: 0,
+      bufferStartIndex: 0,
+      bufferLines: [],
+      cursor: null,
+      lastFlushStartedAt: 0,
+      lastFlushCompletedAt: 0,
+      lastLiveActivityAt: 0,
+      lastHeadBroadcastAt: 0,
+      flushInFlight: false,
+      flushPromise: null,
+      liveSyncTimer: null,
+      consecutiveFailures: 0,
+      subscribers: new Set([session.id]),
+    };
+
+    mirrors.set(mirror.key, mirror);
+    session.sessionName = mirror.sessionName;
+    session.mirrorKey = mirror.key;
+    session.adaptiveWidthCols = 55;
+    session.adaptiveWidthHeartbeatAt = Date.now();
+
+    runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
+
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
+    expect(mirror.cols).toBe(120);
+    expect(mirror.rows).toBe(40);
+    expect(session.adaptiveWidthCols).toBeNull();
   });
 });

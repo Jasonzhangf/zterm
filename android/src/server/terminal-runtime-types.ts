@@ -28,7 +28,7 @@ export interface TerminalTransportConnection {
   closeTransport: (reason: string) => void;
   requestOrigin: string;
   role: 'pending' | 'control' | 'session';
-  boundSessionId: string | null;
+  boundSubscriberId: string | null;
 }
 
 export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> {
@@ -37,16 +37,20 @@ export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> 
   chunks: Buffer[];
 }
 
-export interface TerminalSession {
+export interface TerminalTransportSubscriber {
   id: string;
   transportId: string;
   transport: TerminalSessionTransport | null;
   closeTransport?: (reason: string) => void;
   sessionName: string;
   mirrorKey: string | null;
+  adaptiveWidthCols?: number | null;
+  adaptiveWidthHeartbeatAt?: number;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
 }
+
+export type TerminalSession = TerminalTransportSubscriber;
 
 export interface SessionMirror {
   key: string;
@@ -86,6 +90,12 @@ export interface SessionMirror {
     totalAvailableLines: number;
     visibleTopIndex: number;
   } | null;
+  adaptiveWidthBaselineGeometry?: {
+    cols: number;
+    rows: number;
+  } | null;
+  adaptiveWidthAppliedCols?: number | null;
+  adaptiveWidthLeaseTimer?: ReturnType<typeof setTimeout> | null;
   liveSyncTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;
 }

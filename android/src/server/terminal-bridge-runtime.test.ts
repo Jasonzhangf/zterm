@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'http';
 import { WebSocketServer, type RawData } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
-import type { TerminalSession } from './terminal-runtime';
+import type { TerminalTransportSubscriber } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 
 class FakeWebSocket extends EventEmitter {
@@ -31,7 +31,7 @@ function createConnection(id = 'connection-1'): DaemonTransportConnection {
     transportId: `${id}-transport`,
     requestOrigin: 'http://127.0.0.1:3333',
     role: 'session',
-    boundSessionId: 'session-1',
+    boundSubscriberId: 'session-1',
     wsAlive: true,
     closeTransport: vi.fn(),
     transport: {
@@ -46,7 +46,7 @@ function createConnection(id = 'connection-1'): DaemonTransportConnection {
 }
 
 function createRuntime(handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>) {
-  const sessions = new Map<string, TerminalSession>();
+  const sessions = new Map<string, TerminalTransportSubscriber>();
   const connections = new Map<string, DaemonTransportConnection>();
   const wss = new WebSocketServer({ noServer: true });
   const connection = createConnection();
@@ -61,7 +61,8 @@ function createRuntime(handleMessage: (connection: DaemonTransportConnection, ra
     createWebSocketSessionTransport: () => connection.transport,
     createRtcSessionTransport: () => connection.transport,
     createTransportConnection: () => connection,
-    detachSessionTransportOnly: vi.fn(),
+    detachSubscriberTransportOnly: vi.fn(),
+    refreshAdaptiveWidthLeaseHeartbeat: vi.fn(),
     handleMessage,
   });
   return {

@@ -8,7 +8,7 @@ Scope: Android app architecture, terminal/session ownership, daemon truth, UI pr
 | Block | Current problem | Action | Reason |
 | --- | --- | --- | --- |
 | Terminal session lifecycle | `App.tsx` directly closed/created/switched sessions for force relay / auto mode | Separated in second repair slice | Session open/close/restore is a unique owner concern, not page orchestration |
-| Daemon mirror truth | daemon stored client `widthMode/adaptiveCols` in session/mirror truth | Removed from daemon state in third repair slice | daemon must not own client viewport policy or width identity |
+| Daemon mirror truth | daemon stored client `widthMode/adaptiveCols` in session/mirror truth | Superseded by adaptive width lease owner in sixth repair slice | daemon must not own client viewport policy; it may own a physical transport subscriber width lease for `adaptive-phone` and must restore baseline when leases disappear |
 | Open-tab persistence | storage read/write failures are normalized into empty/default state | Separated error path in first repair slice | explicit truth failure must not become silent empty truth |
 | Session drawer grouping | UI used `default` / `本机` sentinel for missing hostKey | Removed in fourth repair slice | UI component must consume resolved host identity, not invent it |
 | Open-tab intent fallback | `fallbackActiveSessionId` / `fallbackSessionIds` were used inside core intent logic | Renamed to explicit policy in first repair slice | fallback semantics in core truth should not be implicit |
@@ -54,10 +54,10 @@ Forbidden:
 - client viewport policy
 - client foreground/background or active tab truth
 - renderer follow/reading/renderBottomIndex truth
-- persistent client width policy in daemon state
+- persistent client width policy in daemon state outside the adaptive width lease owner
 
 Boundary rule:
-- daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth.
+- daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth. The only allowed exception is the `adaptive-phone` physical transport subscriber lease: active adaptive subscribers are aggregated by minimum cols, and the pre-lease tmux geometry must be restored when the final lease disappears.
 
 ### 3. Client Rendering And Buffer Block
 
@@ -148,7 +148,7 @@ Boundary rule:
 - Scan core truth modules for `fallback*` names in non-presentation code.
 - Scan `TerminalSessionDrawer` for `default` / `本机` host identity fallback.
 - Current gate owner: `src/lib/architecture-boundary-truth.test.ts`, wired into `pnpm --dir android run test:feature-registry`.
-- Width policy scan is compatibility-aware: `widthMode` may exist in attach/resize wire payload types, but must not become `TerminalSession` / `SessionMirror` owned state or tmux resize ownership.
+- Width policy scan is compatibility-aware: `widthMode` may exist in attach/resize wire payload types, but must not become `widthMode` / `adaptiveCols` long-lived state. `tmux resize-window` is allowed only inside the adaptive width lease owner, never in attach glue, message routing, UI state, or general mirror lifecycle code.
 
 2. Add owner-call maps.
 - Each feature must list one owner module, one allowed surface, one forbidden surface, and one test gate set.
@@ -175,7 +175,7 @@ Boundary rule:
 
 1. Update feature registry / function map if a boundary changes.
 2. Move lifecycle control out of `App.tsx`. Done for force relay / use auto in second repair slice; owner is `src/hooks/useSessionOpenActions.ts`, guarded by `src/lib/architecture-boundary-truth.test.ts`.
-3. Remove daemon client width state. Done in third repair slice; `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and tmux resize ownership from client width policy were physically removed.
+3. Remove daemon client width state. Third repair slice removed `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, and direct tmux resize ownership from client width policy. Sixth repair slice supersedes the "no daemon resize" part with a narrower rule: only the adaptive width lease owner may resize tmux while adaptive transport subscribers are alive, and it must restore the captured baseline when the final lease is gone.
 4. Replace silent persistence defaults with explicit failure handling. Done in first repair slice; `open-tab-persistence` now returns explicit failure/invalid states or `{ ok:false, error }`.
 5. Add boundary red tests and a scanner gate. In progress; current gate covers package gate wiring, open-tab fallback names, App/page/UI lifecycle ownership, remediation doc presence, drawer host identity fallback, daemon client width policy ownership, attach correlation ownership, registry/function-map feature id lockstep, registry/feature-gates verification-map coverage, wiki/mainline-call-map machine manifest alignment, and offline generated wiki HTML.
 
@@ -193,7 +193,7 @@ Boundary rule:
 ### 2026-07-02 third slice: daemon client width policy removal
 
 - Block: Daemon Truth Block.
-- Decision: Remove.
+- Decision: Remove. Superseded in part by the sixth slice below.
 - Removed from daemon truth: `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, adaptive-width reconcile state, and tmux `resize-window` / `window-size latest` ownership driven by client width policy.
 - Kept only as wire compatibility: attach / resize payload may still contain `widthMode`, but daemon treats it as non-persistent request metadata and does not store it as session or mirror truth.
 - Positive tests: `terminal-mirror-runtime.test.ts` proves attach payload remains accepted and resize still schedules mirror sync.
@@ -217,6 +217,19 @@ Boundary rule:
 - Compatibility boundary: wire payload fields such as `TerminalAttachPayload.widthMode` remain allowed, but `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, tmux resize ownership, daemon-owned `clientSessionId`, and attach token ownership by `openRequestId` are forbidden.
 - Positive tests: `test:feature-registry` proves the architecture gate itself is part of the standard registry gate.
 - Negative tests: scanner fails if page/UI layers grow direct `createSession/closeSession/switchSession`, drawer host fallback returns, daemon stores client width policy, or attach correlation fields become token owner state.
+
+### 2026-07-09 sixth slice: adaptive width lease owner
+
+- Block: Daemon Truth Block.
+- Decision: Separate / explicitly keep the physical lease owner.
+- Supersedes only the over-broad "daemon never resizes tmux for adaptive" conclusion from the third slice. The daemon still must not own client viewport policy, foreground/background, active tab, renderer visible range, or a logical client session.
+- Owner now: `src/server/terminal-mirror-runtime.ts` adaptive width lease functions.
+- Allowed state: `TerminalTransportSubscriber.adaptiveWidthCols` and `adaptiveWidthHeartbeatAt` as physical transport subscriber lease data; `SessionMirror.adaptiveWidthBaselineGeometry`, `adaptiveWidthAppliedCols`, and `adaptiveWidthLeaseTimer` as the mirror lease aggregate.
+- Allowed side effect: `tmux resize-window` only inside `applyTmuxWindowGeometry`, called by lease reconciliation/restore.
+- Required behavior: multiple adaptive subscribers aggregate by narrowest cols; switching a subscriber to `mirror-fixed`, transport detach/close, moving mirrors, or heartbeat expiry releases the lease and recomputes; when no adaptive lease remains, restore the pre-lease tmux geometry.
+- Forbidden behavior: storing `widthMode`, `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, `requestedAdaptiveCols`, `terminalWidthMode`, foreground/background, or active tab as daemon truth; running `resize-window` outside the lease owner; treating `mirror-fixed` as an adaptive lease.
+- Positive tests: `terminal-mirror-runtime.test.ts` covers min-cols aggregation, resize updates, fixed release/restore, holder disappearance re-sort, and heartbeat expiry restore.
+- Negative tests: `server.transport-lifecycle-truth.test.ts` and `architecture-boundary-truth.test.ts` forbid old logical client naming, old adaptive owner names, `window-size latest`, client width mode state, and `resize-window` outside `applyTmuxWindowGeometry`.
 
 ### 2026-07-02 sixth slice: registry/function-map lockstep gate
 

@@ -60,7 +60,8 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(attachTokenRuntimeSource).toContain('issueSessionTransportToken()');
     expect(attachTokenRuntimeSource).toContain('function consumeSessionTransportToken(token: string)');
     expect(attachTokenRuntimeSource).toContain('const sessionTransportAttachTokens = new Set<string>()');
-    expect(controlRuntimeSource).toContain('createTransportBoundSession');
+    expect(controlRuntimeSource).toContain('createTransportSubscriber');
+    expect(controlRuntimeSource).not.toContain('createTransportBoundSession');
   });
 
   it('keeps attach token runtime outside server.ts so daemon glue stays thinner', () => {
@@ -97,29 +98,29 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(source).not.toContain('grace timer handles cleanup');
   });
 
-  it('detaches bound websocket transports instead of closing bound sessions on ws close/error', () => {
+  it('detaches bound websocket transports instead of closing logical sessions on ws close/error', () => {
     const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
     const errorBlock = extractBlock(source, "ws.on('error'");
-    const detachBlock = extractBlock(source, "deps.detachSessionTransportOnly(session, 'websocket closed'", 220);
-    expect(closeBlock).toContain("if (session)");
-    expect(closeBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
+    const detachBlock = extractBlock(source, "deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'", 220);
+    expect(closeBlock).toContain("if (subscriber)");
+    expect(closeBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'");
     expect(closeBlock).not.toContain("closeTransportSubscriber(session, 'websocket closed', false)");
-    expect(errorBlock).toContain("if (session)");
-    expect(errorBlock).toContain("deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`");
+    expect(errorBlock).toContain("if (subscriber)");
+    expect(errorBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, `websocket error: ${error.message}`");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
-    expect(detachBlock).toContain("deps.detachSessionTransportOnly(session, 'websocket closed'");
+    expect(detachBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'");
   });
 
-  it('detaches bound rtc transports instead of closing bound sessions on rtc close/error', () => {
+  it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
     const source = readBridgeRuntimeSource();
     const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
-    expect(rtcCloseBlock).toContain('if (session)');
-    expect(rtcCloseBlock).toContain('deps.detachSessionTransportOnly(session, reason');
+    expect(rtcCloseBlock).toContain('if (subscriber)');
+    expect(rtcCloseBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason');
     expect(rtcCloseBlock).not.toContain('closeTransportSubscriber(session, reason, false)');
-    expect(rtcErrorBlock).toContain('if (session)');
-    expect(rtcErrorBlock).toContain('deps.detachSessionTransportOnly(session, `rtc error: ${message}`');
+    expect(rtcErrorBlock).toContain('if (subscriber)');
+    expect(rtcErrorBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, `rtc error: ${message}`');
     expect(rtcErrorBlock).not.toContain('closeTransportSubscriber(session, `rtc error: ${message}`, false)');
   });
 
@@ -129,7 +130,7 @@ describe('server transport/session lifecycle truth gates', () => {
     const wsCloseBlock = extractBlock(bridgeSource, "ws.on('close'");
     const rtcCloseBlock = extractBlock(bridgeSource, 'onClose: (_transportId, reason) =>');
 
-    expect(serverSource).toContain('terminalRuntime.closeSession');
+    expect(serverSource).toContain('terminalRuntime.closeTransportSubscriber');
     expect(wsCloseBlock).not.toContain('destroyMirror(');
     expect(rtcCloseBlock).not.toContain('destroyMirror(');
   });
@@ -149,8 +150,13 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
     expect(mirrorRuntimeSource).not.toContain("runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']");
     expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
-    expect(mirrorRuntimeSource).not.toContain("runTmux(['resize-window'");
-    expect(mirrorRuntimeSource).not.toContain("deps.runTmux(['resize-window'");
+    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometry');
+    const leaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometry', 900);
+    expect(leaseResizeBlock).toContain("const args = ['resize-window', '-t', mirror.sessionName");
+    expect(leaseResizeBlock).toContain('deps.runTmux(args)');
+    const mirrorRuntimeOutsideLeaseOwner = mirrorRuntimeSource.replace(leaseResizeBlock, '');
+    expect(mirrorRuntimeOutsideLeaseOwner).not.toContain("runTmux(['resize-window'");
+    expect(mirrorRuntimeOutsideLeaseOwner).not.toContain("deps.runTmux(['resize-window'");
   });
 
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
@@ -174,9 +180,35 @@ describe('server transport/session lifecycle truth gates', () => {
 
   it('reconnect path closes only the replaced old transport and binds the new transport as current truth', () => {
     const source = readServerSource();
-    const bindBlock = extractBlock(source, 'terminalRuntime.bindConnectionToSession', 240);
+    const bindBlock = extractBlock(source, 'terminalRuntime.bindConnectionToSubscriber', 240);
 
-    expect(bindBlock).toContain('terminalRuntime.bindConnectionToSession');
+    expect(bindBlock).toContain('terminalRuntime.bindConnectionToSubscriber');
+  });
+
+  it('does not keep logical/client session naming for daemon subscriber ownership', () => {
+    const serverSource = readServerSource();
+    const bridgeSource = readBridgeRuntimeSource();
+    const controlSource = readMessageControlRuntimeSource();
+    const messageSource = readMessageRuntimeSource();
+    const transportTypesSource = readTerminalRuntimeTypesSource();
+    const httpSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-http-runtime.ts'), 'utf8');
+
+    const source = [
+      serverSource,
+      bridgeSource,
+      controlSource,
+      messageSource,
+      transportTypesSource,
+      httpSource,
+    ].join('\n');
+
+    expect(source).not.toContain('boundSessionId');
+    expect(source).not.toContain('createTransportBoundSession');
+    expect(source).not.toContain('bindConnectionToSession');
+    expect(source).not.toContain('detachSessionTransportOnly');
+    expect(source).not.toContain('clientSessions');
+    expect(source).toContain('boundSubscriberId');
+    expect(source).toContain('transportSubscribers');
   });
 
   it('keeps tmux discovery and management on control transport semantics', () => {

@@ -2,12 +2,12 @@ import type { IncomingMessage } from 'http';
 import type { Socket } from 'net';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
-import type { TerminalSession } from './terminal-runtime';
+import type { TerminalTransportSubscriber } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 
 export interface TerminalBridgeRuntimeDeps {
   requiredAuthToken: string;
-  sessions: Map<string, TerminalSession>;
+  sessions: Map<string, TerminalTransportSubscriber>;
   connections: Map<string, DaemonTransportConnection>;
   wss: WebSocketServer;
   logTimePrefix: () => string;
@@ -19,7 +19,8 @@ export interface TerminalBridgeRuntimeDeps {
     transport: DaemonTransportConnection['transport'],
     requestOrigin: string,
   ) => DaemonTransportConnection;
-  detachSessionTransportOnly: (session: TerminalSession, reason: string, transportId?: string) => void;
+  detachSubscriberTransportOnly: (subscriber: TerminalTransportSubscriber, reason: string, transportId?: string) => void;
+  refreshAdaptiveWidthLeaseHeartbeat: (subscriber: TerminalTransportSubscriber) => void;
   handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
 }
 
@@ -119,6 +120,14 @@ export function createTerminalBridgeRuntime(
     settleConnectionChain(connectionMessageChains, connection.id, next);
   }
 
+  function refreshBoundAdaptiveLease(connection: DaemonTransportConnection) {
+    const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
+    if (!subscriber) {
+      return;
+    }
+    deps.refreshAdaptiveWidthLeaseHeartbeat(subscriber);
+  }
+
   const rtcBridgeServer = createRtcBridgeServer({
     onTransportOpen: (transport) => {
       const connection = deps.createTransportConnection(
@@ -129,21 +138,22 @@ export function createTerminalBridgeRuntime(
       return {
         onMessage: (_transportId, data, isBinary) => {
           connection.wsAlive = true;
+          refreshBoundAdaptiveLease(connection);
           enqueueConnectionMessage(connection, data, isBinary);
         },
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
-          const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-          if (session) {
-            deps.detachSessionTransportOnly(session, reason, connection.transportId);
+          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
+          if (subscriber) {
+            deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
           }
           deps.connections.delete(connection.id);
         },
         onError: (_transportId, message) => {
           console.error(`[${deps.logTimePrefix()}] rtc transport ${connection.id} error: ${message}`);
-          const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-          if (session) {
-            deps.detachSessionTransportOnly(session, `rtc error: ${message}`, connection.transportId);
+          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
+          if (subscriber) {
+            deps.detachSubscriberTransportOnly(subscriber, `rtc error: ${message}`, connection.transportId);
           }
           deps.connections.delete(connection.id);
         },
@@ -170,30 +180,32 @@ export function createTerminalBridgeRuntime(
 
     ws.on('pong', () => {
       connection.wsAlive = true;
+      refreshBoundAdaptiveLease(connection);
     });
 
     ws.on('message', (rawData, isBinary) => {
       connection.wsAlive = true;
+      refreshBoundAdaptiveLease(connection);
       enqueueConnectionMessage(connection, rawData, isBinary);
     });
 
     ws.on('close', (code, rawReason) => {
       const reason = Buffer.isBuffer(rawReason) ? rawReason.toString('utf8') : String(rawReason || '');
       console.log(
-        `[${deps.logTimePrefix()}] websocket transport ${connection.id} closed code=${code} reason=${reason || 'n/a'} role=${connection.role} bound=${connection.boundSessionId || 'none'}`,
+        `[${deps.logTimePrefix()}] websocket transport ${connection.id} closed code=${code} reason=${reason || 'n/a'} role=${connection.role} bound=${connection.boundSubscriberId || 'none'}`,
       );
-      const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session) {
-        deps.detachSessionTransportOnly(session, 'websocket closed', connection.transportId);
+      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
+      if (subscriber) {
+        deps.detachSubscriberTransportOnly(subscriber, 'websocket closed', connection.transportId);
       }
       deps.connections.delete(connection.id);
     });
 
     ws.on('error', (error) => {
       console.error(`[${deps.logTimePrefix()}] websocket transport ${connection.id} error: ${error.message}`);
-      const session = connection.boundSessionId ? deps.sessions.get(connection.boundSessionId) || null : null;
-      if (session) {
-        deps.detachSessionTransportOnly(session, `websocket error: ${error.message}`, connection.transportId);
+      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
+      if (subscriber) {
+        deps.detachSubscriberTransportOnly(subscriber, `websocket error: ${error.message}`, connection.transportId);
       }
       deps.connections.delete(connection.id);
     });

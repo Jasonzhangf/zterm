@@ -26,8 +26,9 @@
   - `bridge target = bridgeHost + bridgePort + authToken`
   - `client session` 是客户端稳定业务对象，不是 transport
   - daemon **不关心也不能关心任何客户端逻辑/状态机**
-  - daemon 不允许持有 `logical client session / clientSessionId owner / readyTransportId / active tab / foreground / background / viewport / width-mode / pane`
-  - 若协议兼容期仍存在相关字段，只允许作为一次性 attach 入参，不得在 daemon 内部成为长期状态真相
+  - daemon 不允许持有 `logical client session / clientSessionId owner / readyTransportId / active tab / foreground / background / viewport / pane`
+  - `adaptive-phone` 只允许进入 daemon 的唯一 adaptive width lease owner：按物理 transport subscriber lease 聚合最窄 cols，lease 断开或心跳过期必须恢复进入 adaptive 前的 tmux geometry
+  - 除 adaptive width lease owner 外，协议兼容字段只允许作为一次性 attach 入参，不得在 daemon 内部成为长期状态真相
   - active / inactive 只影响客户端取数频率，不影响客户端 session / transport 身份
   - foreground / background / tab switch 不得成为客户端 fresh recreate transport 的理由
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
@@ -53,6 +54,7 @@
 - `mirror-fixed` 下左右滑切 tab 仍由 shell interaction owner 负责；当前 mobile 端若没有独立 horizontal pan 手势链占用，swipe 必须保持可用，不得出现无交互出口的禁用态
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机
+- Server live mirror cadence 只允许由 daemon 物理事实决定：健康 subscriber 存在时保持 active capture cadence；无 subscriber、失败/backoff、transport backpressure、capture cost 过高才允许降速。daemon 不读取 client active/visible/follow 状态，也不得用“最近无内容变化”把 ready mirror 降到 idle。
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 - Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
 
@@ -333,7 +335,7 @@ daemon server
         ├─ 定时先问 head
         ├─ 比较 local sparse buffer 与 daemon head
         ├─ 结合 renderer 声明的 visible range 计算 gap / diff
-        ├─ 决定补 diff / 直接跳到最新三屏 / visible gap repair
+        ├─ 决定补 diff / 直接跳到当前 visible window / visible gap repair
         └─ 维护本地 1000 行 sparse sliding buffer + line/range patch
                 ↓
       renderer
@@ -361,7 +363,7 @@ daemon server
 - 任何 daemon 回复都必须带当前 head；但 daemon 不关心客户端为何请求这个区间
 - client buffer manager 是独立 worker，只关心 daemon 同步，不关心渲染模式
 - client buffer manager 每轮都先问 head，再结合当前 local sparse buffer 与 renderer 声明的 visible range 决定请求范围
-- 若本地为空、失真或离 head 超过三屏：直接请求最新三屏并移动本地窗口；中间不补
+- 若本地为空、失真或离 head 超过当前 visible window：直接请求当前 visible window 并移动本地窗口；中间不补
 - 若本地仍接近 head：只补 diff
 - renderer 当前窗口不连续时：只补 visible gap
 - 即使本地工作窗口判断错误，也只能重算 request plan / 缺口；**不能**把已有 absolute-index 本地 buffer truth 清空成空窗
@@ -404,7 +406,7 @@ daemon server
 - daemon 的 host / port / auth token 真源在 `~/.wterm/config.json -> mobile.daemon`
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
-- websocket 会话采用双向保活：client 负责 app-level `ping + pong timeout`，server 负责 ws protocol heartbeat；任一侧失联后都要自动 close 并进入 host 级串行指数回退重连
+- websocket 会话采用双向保活观测：client 负责 app-level `ping`，server 负责 ws protocol heartbeat；缺 pong / 长时间无业务消息只能记录并继续探测，不得把仍为 `OPEN` 的长连接判定为过期并主动 close/reconnect。只有物理 `close/error`、send 抛错、daemon 不可达、用户显式关闭、或 tmux/session target 事实变更，才允许进入重建。
 - daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 
 ## 当前实现与目标差距
