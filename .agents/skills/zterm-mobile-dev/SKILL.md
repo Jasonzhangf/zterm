@@ -164,10 +164,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - `restore-sync` = 只恢复 local shell / active runtime，不开 transport
   - `explicit-resume` = 用户显式激活后才允许 `resumeActiveSessionTransport`
   - 若 UI 只是把 active tab 切对了，就宣称 connected，这是假状态；transport freshness 真源只能留在 `SessionContext`
+- `createSession(connect:false)` 虽然不打开 WebSocket，但必须恢复 session transport host / target identity；否则前后台返回或 persisted tab resume 会出现 `targetKey=null -> missing-target -> reconnect`，把同一 daemon/session 错误重建成新 WebSocket。这个修复只能放在 `createSessionRuntime` / SessionContext transport owner，禁止在 App/TerminalPage 用 reconnect 补偿，也禁止让 reconnect planner 对 missing target 做宽松 fallback。
 - 相关回归至少保留三条：
   - cold restore 不自动打开 daemon transport
   - explicit tab switch 触发 `explicit-resume`
   - foreground/active refresh 不得在 App 层长出第二套 transport reopen 语义
+  - restored local shell 必须写入 transport identity；Home->返回后 `/debug/runtime.transportSubscribers[0].id` 不应变化，日志不得新增 `missing-target` / `transport-detached` / `rebuild`
 - 2026-05-13 新冻结：`adaptive-phone` 当前若通过 tmux `resize-window -x` 收窄宽度，tmux 会自动切 `window-size=manual`，并把**高度也冻结**在进入 manual 时的值；所以“我们没写 rows 但 session 还是很矮”依然是**代码问题**，不是天然说明只有历史遗留。要验证这点，必须跑真实 tmux PTY 回归，而不是只看源码里有没有 `-y`。
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
 - active transport freshness 不能等长 heartbeat timeout；active tab 若几秒内没有 server activity，`SessionContext` 必须先发 `buffer-head-request` probe，短等无响应后才由 transport owner 强制替换 socket。UI 不得自行判断 timeout / 直接重连。

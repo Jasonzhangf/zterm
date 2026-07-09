@@ -1796,3 +1796,12 @@ Need runtime debug to confirm:
 - 修复：`restorePersistedAdaptiveWidthBaselines()` 现在先用 persisted baseline；若没有 baseline，但 tmux window 比 attached tmux client 窄，则按 attached client 尺寸恢复。这覆盖旧版本未写 baseline option 但留下窄 window 的遗留状态。
 - 同步修复：lease 归零时若内存 baseline 为空，也会尝试 persisted baseline 或 orphaned attached-client restore，避免最后一个 adaptive holder 消失后无 baseline 直接 return。
 - 真实验证：安装全局 daemon 并 `zterm-daemon restart` 后，新进程 `pid=76055`；`freehand/onestop/predict/rcc/rcc2/rcc3/server/zterm` 从 `55x*` 恢复到对应 attached client 尺寸，如 `freehand 115x56`、`onestop 110x54`、`zterm 92x52`，且 baseline/applied option 为空。`daemon:mirror:close-loop` 8 case PASS。
+
+## 2026-07-09 foreground resume missing target restore
+
+- 现场问题：2051 修完 same-socket head probe 后，真机 Home->返回仍能看到 subscriber 从 `afd34...` 换成 `a55e...`；runtime 日志有 `session.transport.explicit-resume -> session.reconnect.reuse-plan reason=missing-target -> manual reconnect`。
+- 架构映射：属于 `terminal.transport_lifecycle`；唯一 owner 是 `createSessionRuntime` / `SessionContext` transport identity。UI 不补 reconnect，daemon 不持有 client state。
+- 根因：open-tab restore 的 `createSession(connect:false)` 只恢复 local runtime shell 和 Session 列表，没有写入 session transport runtime host/target identity。随后 explicit resume 看到 `targetKey=null`，把同一目标误判成 missing target 并重建 WebSocket。
+- 修复：`createSessionRuntime` 在新建或复用 local shell 时都调用 `writeSessionTransportHost(sessionId, host with resolvedSessionName)`；connect=false 不开 socket，但必须恢复 transport identity，供后续 explicit-resume 复用同 target。
+- 回归：`session-context-session-runtime.test.ts` 新增 closed local shell / existing shell 都写入 transport identity；targeted transport tests 224 PASS；Android typecheck PASS；standard build 2052 PASS。
+- 真机闭环：安装 APK `0.1.3.2052` 后，Home 4s 再返回，daemon `/debug/runtime` 中 subscriber 前后均为 `98fb9489-d10c-4c9c-9067-0787109cce77`，latest client scope 继续推进 `session.buffer.head`，最近 260 条日志 `missing-target/transport-detached/rebuild` 命中 0。

@@ -311,6 +311,7 @@ describe('active truth ownership gates', () => {
 
   it('createSessionRuntime reuses an existing managed session without mutating active truth directly', () => {
     const connectSession = vi.fn();
+    const writeSessionTransportHost = vi.fn();
 
     const existingSession: Session = {
       id: 'session-existing',
@@ -364,6 +365,7 @@ describe('active truth ownership gates', () => {
       resolveSessionCacheLines: vi.fn(() => 1000),
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
+      writeSessionTransportHost,
       readSessionTransportSocket: vi.fn(() => null),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
@@ -371,6 +373,67 @@ describe('active truth ownership gates', () => {
 
     expect(sessionId).toBe('session-existing');
     expect(connectSession).not.toHaveBeenCalled();
+    expect(writeSessionTransportHost).toHaveBeenCalledWith(
+      'session-existing',
+      expect.objectContaining({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+      }),
+    );
+  });
+
+  it('createSessionRuntime restores transport identity for a closed local shell without opening websocket', () => {
+    const connectSession = vi.fn();
+    const writeSessionTransportHost = vi.fn();
+
+    const sessionId = createSessionRuntime({
+      host: {
+        id: 'host-1',
+        createdAt: 1,
+        name: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      createOptions: {
+        connect: false,
+        sessionId: 'session-restored',
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [],
+            activeSessionId: null,
+          },
+        },
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(), setBuffer: vi.fn() } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn() } },
+      },
+      runtimeDebug: vi.fn(),
+      resolveSessionCacheLines: vi.fn(() => 1000),
+      createSessionSync: vi.fn(),
+      updateSessionSync: vi.fn(),
+      writeSessionTransportHost,
+      readSessionTransportSocket: vi.fn(() => null),
+      connectSession,
+      defaultViewport: { cols: 80, rows: 24 },
+    });
+
+    expect(sessionId).toBe('session-restored');
+    expect(connectSession).not.toHaveBeenCalled();
+    expect(writeSessionTransportHost).toHaveBeenCalledWith(
+      'session-restored',
+      expect.objectContaining({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+      }),
+    );
   });
 
   it('reopens transport when reusing a managed session whose label is connected but transport truth is missing', () => {
@@ -543,13 +606,16 @@ describe('session transport reuse runtime gates', () => {
     expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 
-  it('reconnectSessionRuntime force-replaces an open same-target socket after stale-probe timeout', () => {
+  it('reconnectSessionRuntime waits for a pending same-target socket instead of clearing stale pending state', () => {
     const cleanupSocket = vi.fn();
+    const cleanupControlSocket = vi.fn();
     const scheduleReconnect = vi.fn();
+    const pendingStore = new Map<string, any>([
+      ['session-1', { sessionId: 'session-1', createdAt: 1 }],
+    ]);
 
     reconnectSessionRuntime({
       sessionId: 'session-1',
-      reconnectOptions: { forceReplaceTransport: true },
       refs: {
         stateRef: {
           current: {
@@ -568,27 +634,27 @@ describe('session transport reuse runtime gates', () => {
           },
         },
         manualCloseRef: { current: new Set() },
+        pendingSessionTransportOpenIntentsRef: { current: pendingStore },
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
-      hasPendingSessionTransportOpen: () => false,
-      isPendingSessionTransportOpenStale: () => false,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.CONNECTING } as any),
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => true,
       runtimeDebug: vi.fn(),
       cleanupSocket,
+      cleanupControlSocket,
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
       scheduleReconnect,
     } as any);
 
-    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
-    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'manual reconnect', true, {
-      immediate: true,
-      resetAttempt: true,
-      force: true,
-    });
+    expect(pendingStore.has('session-1')).toBe(true);
+    expect(cleanupControlSocket).not.toHaveBeenCalled();
+    expect(cleanupSocket).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 
   it('reconnectSessionRuntime still rebuilds a closed same-target socket', () => {

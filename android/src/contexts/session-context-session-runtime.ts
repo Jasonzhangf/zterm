@@ -53,9 +53,7 @@ interface SessionReconnectRuntime {
   connecting: boolean;
 }
 
-export interface ReconnectSessionRuntimeOptions {
-  forceReplaceTransport?: boolean;
-}
+export type ReconnectSessionRuntimeOptions = Record<string, never>;
 
 function clearReconnectRuntimeEntry(
   reconnectRuntimes: Map<string, SessionReconnectRuntime>,
@@ -143,6 +141,7 @@ export function createSessionRuntime(options: {
   resolveSessionCacheLines: (rows?: number | null) => number;
   createSessionSync: (session: Session) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  writeSessionTransportHost?: (sessionId: string, host: Host) => unknown;
   readSessionTransportSocket: (sessionId: string) => { readyState: number } | null;
   connectSession: (sessionId: string, host: Host) => void;
   defaultViewport: {
@@ -160,6 +159,11 @@ export function createSessionRuntime(options: {
   const shouldConnect = options.createOptions?.connect !== false;
 
   if (existingSession) {
+    options.writeSessionTransportHost?.(existingSession.id, {
+      ...options.host,
+      sessionName: resolvedSessionName,
+    });
+
     if (
       options.host.id !== existingSession.hostId
       || options.host.name !== existingSession.connectionName
@@ -250,6 +254,10 @@ export function createSessionRuntime(options: {
       activeSessionId: options.refs.stateRef.current.activeSessionId,
     });
   options.createSessionSync(session);
+  options.writeSessionTransportHost?.(sessionId, {
+    ...options.host,
+    sessionName: resolvedSessionName,
+  });
   if (shouldConnect) {
     options.connectSession(sessionId, options.host);
   }
@@ -353,6 +361,7 @@ export function reconnectSessionRuntime(options: {
   refs: {
     stateRef: MutableRefObject<SessionLikeState>;
     manualCloseRef: MutableRefObject<Set<string>>;
+    pendingSessionTransportOpenIntentsRef?: MutableRefObject<Map<string, unknown>>;
   };
   clearReconnectForSession: (sessionId: string) => void;
   readSessionTransportHost: (sessionId: string) => Host | null;
@@ -363,6 +372,7 @@ export function reconnectSessionRuntime(options: {
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
+  cleanupControlSocket?: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   scheduleReconnect: (
@@ -415,7 +425,6 @@ export function reconnectSessionRuntime(options: {
     pendingTransportOpenStale: pendingTransportOpen
       ? options.isPendingSessionTransportOpenStale(options.sessionId)
       : false,
-    forceReplaceTransport: options.reconnectOptions?.forceReplaceTransport,
     source: 'reconnect',
   });
   options.runtimeDebug('session.reconnect.reuse-plan', {
@@ -423,7 +432,6 @@ export function reconnectSessionRuntime(options: {
     action: reusePlan.action,
     reason: reusePlan.reason,
     targetKey,
-    forceReplaceTransport: Boolean(options.reconnectOptions?.forceReplaceTransport),
   });
   if (reusePlan.action === 'reuse-open') {
     options.clearReconnectForSession(options.sessionId);

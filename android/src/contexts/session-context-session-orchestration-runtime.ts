@@ -13,7 +13,6 @@ import {
 } from './session-context-session-runtime';
 import {
   ensureActiveSessionFreshRuntime,
-  probeOrReconnectStaleSessionTransportRuntime,
 } from './session-context-activity-runtime';
 
 interface RuntimeDebugFn {
@@ -57,6 +56,7 @@ interface SessionLifecycleRuntimeOptions {
     }>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+    lastPongAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
   };
   runtimeDebug: RuntimeDebugFn;
@@ -141,6 +141,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       resolveSessionCacheLines: options.resolveSessionCacheLines,
       createSessionSync: options.createSessionSync,
       updateSessionSync: options.updateSessionSync,
+      writeSessionTransportHost: options.writeSessionTransportHost,
       readSessionTransportSocket: options.readSessionTransportSocket,
       connectSession,
       defaultViewport: options.defaultViewport,
@@ -199,6 +200,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       refs: {
         stateRef: options.refs.stateRef,
         manualCloseRef: options.refs.manualCloseRef,
+        pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
       },
       clearReconnectForSession: options.clearReconnectForSession,
       readSessionTransportHost: options.readSessionTransportHost,
@@ -209,6 +211,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       runtimeDebug: options.runtimeDebug,
       cleanupSocket: options.cleanupSocket,
+      cleanupControlSocket: options.cleanupControlSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,
       updateSessionSync: options.updateSessionSync,
       scheduleReconnect: options.scheduleReconnect,
@@ -225,31 +228,9 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
-  const probeOrReconnectStaleSessionTransport = (
-    sessionId: string,
-    ws: BridgeTransportSocket,
-    reason: 'explicit-resume' | 'active-reentry' | 'active-tick' | 'input',
-  ) => {
-    return probeOrReconnectStaleSessionTransportRuntime({
-      sessionId,
-      ws,
-      reason,
-      refs: {
-        lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
-        staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
-        stateRef: options.refs.stateRef,
-      },
-      runtimeDebug: options.runtimeDebug,
-      resetSessionTransportPullBookkeeping: options.resetSessionTransportPullBookkeeping,
-      requestSessionBufferHead: options.requestSessionBufferHead,
-      reconnectSession,
-      activeTransportProbeWaitMs: options.activeTransportProbeWaitMs,
-    });
-  };
-
   const ensureActiveSessionFresh = (refreshOptions: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -264,6 +245,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
         lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
+        staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
         reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
@@ -276,7 +258,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       runtimeDebug: options.runtimeDebug,
       updateSessionSync: options.updateSessionSync,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
-      probeOrReconnectStaleSessionTransport,
       resetSessionTransportPullBookkeeping: options.resetSessionTransportPullBookkeeping,
       requestSessionBufferHead: options.requestSessionBufferHead,
       resolveTerminalRefreshCadence: options.resolveTerminalRefreshCadence,
@@ -292,7 +273,6 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     renameSession,
     reconnectSession,
     reconnectAllSessions,
-    probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
   };
 }
