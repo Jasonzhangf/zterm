@@ -825,9 +825,22 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - This recovery belongs only in the daemon adaptive width lease owner. Client/UI must not compensate by sending extra width changes, and daemon must not infer foreground/active state.
 - Regression gates: `terminal-mirror-runtime.test.ts` covers orphaned narrow window startup restore to attached client size and the negative case where matching window/client geometry does not resize. Real validation: global daemon install + `zterm-daemon restart` restored existing 55-column sessions to attached client widths, then `daemon:mirror:close-loop` passed all 8 cases.
 
+## 2026-07-09 Adaptive width invalid cols crash truth
+
+- `adaptive-phone` connect/resize payload must include finite positive `cols` before it reaches the daemon adaptive width lease owner. A payload with `widthMode='adaptive-phone'` and missing/NaN cols is an invalid lease request, not a valid adaptive state.
+- Daemon adaptive lease owner must never let invalid client payload throw through to Node process death. It must release any existing lease for that subscriber, return/send explicit `adaptive_width_cols_invalid`, and keep the daemon process alive.
+- Client cold-start adaptive handshake must send a concrete startup cols value before TerminalView has measured real width; the current safe startup value is SessionContext default `80`, and the later renderer resize replaces it with measured cols.
+- Verified failure mode: installed daemon crashed repeatedly with `terminal cols must be a finite positive number` from `updateAdaptiveWidthLease()` after old Android sent `adaptive-phone` without cols. Fixed daemon stayed alive after a real WebSocket bad-payload probe returned `adaptive_width_cols_invalid`; Android `0.1.3.2050` sends cols on cold adaptive connect.
+
 ## 2026-07-09 Restore shell must restore transport identity
 
 - `createSession(connect:false)` is a local runtime shell restore, not a WebSocket open, but it must still restore the session transport host/target identity. Otherwise `explicit-resume` sees `targetKey=null`, emits `session.reconnect.reuse-plan reason=missing-target`, and rebuilds a WebSocket even though the persisted tab points to the same daemon/session.
 - The unique owner is `createSessionRuntime`: when creating or reusing a restored shell, write `writeSessionTransportHost(sessionId, host with resolvedSessionName)`. Do not fix this in App/TerminalPage, and do not loosen reconnect planner to accept missing target.
 - Regression gates: `session-context-session-runtime.test.ts` must cover both new closed local shell and reused existing shell writing transport identity while `connect:false` does not open a socket.
 - Real validation for this failure mode: install APK, verify runtime version, wait until connected, press Home, relaunch, and compare `/debug/runtime.transportSubscribers[0].id`. It must stay the same; logs must have no new `missing-target`, `transport-detached`, or `rebuild` for the active subscriber, and `session.buffer.head` / `session.buffer.applied` must continue.
+
+## 2026-07-09 Head probe timeout is not socket failure truth
+
+- A same-socket `buffer-head-request` timeout on an `OPEN` WebSocket is not transport failure truth. The activity freshness owner may clear the stale probe marker and send another head request on the same socket, but must not call `reconnectSession()` from the timeout itself.
+- Rebuild remains allowed only for physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in explicit open/resume. Quiet time, missed head response, stale activity, or local reconnect bookkeeping are not rebuild reasons.
+- Regression gate: `session-context-activity-runtime.test.ts` must cover expired head probe marker + `WebSocket.OPEN` still calling `requestSessionBufferHead` and not calling `reconnectSession`.

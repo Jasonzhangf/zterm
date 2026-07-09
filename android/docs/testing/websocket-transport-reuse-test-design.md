@@ -31,7 +31,7 @@ open-tab intent / foreground lifecycle / input
 -> SessionContext freshness or session primitive
 -> transport reuse planner
 -> reuse existing session WebSocket OR queue one rebuild
--> request head / reconnect / session-open
+-> request head / explicit resume session-open only when no usable socket exists
 ```
 
 ## L1 Pure Planner Cases
@@ -40,20 +40,27 @@ Positive reuse:
 - Same target + `WebSocket.OPEN` + connect source returns `reuse-open`.
 - Same target + `WebSocket.OPEN` + reconnect source returns `reuse-open`.
 - Same target + `WebSocket.CONNECTING` + fresh pending open returns `wait-existing-open`.
-- Explicit/foreground active resume with an over-budget pending open returns `reconnect` with `forceReplaceTransport`.
+- Foreground false->true is mapped to `explicit-resume`; it must share the cold-start/explicit resume transport owner instead of owning a separate `active-resume` branch.
+- Explicit resume with an over-budget pending open still returns `skip/transport-open-pending`; it must not create a second WebSocket.
+- Explicit resume with an over-budget `WebSocket.CONNECTING` session socket after the control intent has settled still returns `skip/transport-open-pending`; it must not create a second WebSocket.
+- Explicit resume with stale reconnect bookkeeping still returns skip/wait when a current pending/connecting socket exists; local `reconnectRuntime.connecting` is not transport failure truth and must not create a second WebSocket.
 
 Positive rebuild:
 - Same target + `WebSocket.CLOSED` returns `rebuild-closed`.
 - Same target + `WebSocket.CLOSING` returns `rebuild-closed`.
 - Missing socket returns `rebuild-missing`.
-- Same target + stale pending open returns `rebuild-stale-pending`.
+- Same target + stale pending open still returns `wait-existing-open`; stale bookkeeping is not socket failure truth.
 - Target mismatch returns `rebuild-target-mismatch`.
 
 Negative:
 - Manual close returns `skip-manual-closed` and must not queue reconnect.
 - Stale `session.state` labels such as `reconnecting` must not force rebuild when socket truth is `OPEN`.
+- Stale activity / missed pong / pong-only traffic must not force rebuild when socket truth is `OPEN`; they may only send ping or request head on the same transport.
+- Same-socket `buffer-head-request` timeout must not force rebuild when socket truth is still `OPEN`; it may clear the stale probe marker and send another head request on the same socket.
 - Fresh initial connect pending open still waits and does not create a duplicate socket.
-- Active tick still skips blocking pending opens; only explicit resume / active resume / active reentry may force-replace after the short active wait budget.
+- Fresh `WebSocket.CONNECTING` session socket after the control intent has settled still waits and does not create a duplicate socket before the active wait budget expires.
+- Active tick, explicit resume, and active reentry all must not force-replace a pending or `CONNECTING` socket solely because a wait budget elapsed.
+- Stale reconnect bookkeeping must not be treated as socket failure. The only allowed rebuild reasons are physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in an explicit open/resume path.
 
 ## L1 Runtime Cases
 
@@ -66,7 +73,11 @@ Negative:
 - Given same target and `OPEN` socket, it must not call `cleanupSocket` or `scheduleReconnect`.
 - Given same target and `CONNECTING` plus fresh pending open, it must not call `cleanupSocket` or `scheduleReconnect`.
 - Given same target and `CONNECTING` plus fresh pending open, it must update visible session state to `reconnecting` with a waiting message.
-- Given active resume marks a pending open as stale under the active wait budget, `ensureActiveSessionFreshRuntime()` must call `reconnectSession(sessionId, { forceReplaceTransport: true })`.
+- Given explicit resume marks a pending open as stale under the active wait budget, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
+- Given explicit resume sees an over-budget `WebSocket.CONNECTING` session socket after `session-ticket` cleared the pending open, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
+- Given explicit resume sees stale reconnect runtime bookkeeping but no current socket/pending open, `ensureActiveSessionFreshRuntime()` may call the unique reconnect owner; stale bookkeeping alone must not create a second socket while a current socket exists.
+- Force replacement is not a lifecycle/probe/input/foreground/online recovery API.
+- Given an `OPEN` socket with an expired head probe marker, `ensureActiveSessionFreshRuntime()` must request head again on the same socket and must not call `reconnectSession`.
 - Given closed/missing socket, it still schedules immediate reconnect.
 - Given manual close, it must skip reconnect.
 
@@ -79,6 +90,7 @@ Negative:
 
 `SessionContext.ws-refresh.test.tsx`:
 - Foreground false -> true with an already open active session keeps `MockWebSocket.instances.length` unchanged and sends a head request on the existing socket.
+- Foreground false -> true with a stale `CONNECTING` active session socket keeps `MockWebSocket.instances.length` unchanged and does not close the pending socket.
 - Switching back to an already connected session keeps that session's socket instance stable.
 - Clicking explicit reconnect while the session socket is still open does not create a second session WebSocket.
 - Sending input while the socket is open uses the existing socket even if the session label is stale.

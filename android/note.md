@@ -1805,3 +1805,10 @@ Need runtime debug to confirm:
 - 修复：`createSessionRuntime` 在新建或复用 local shell 时都调用 `writeSessionTransportHost(sessionId, host with resolvedSessionName)`；connect=false 不开 socket，但必须恢复 transport identity，供后续 explicit-resume 复用同 target。
 - 回归：`session-context-session-runtime.test.ts` 新增 closed local shell / existing shell 都写入 transport identity；targeted transport tests 224 PASS；Android typecheck PASS；standard build 2052 PASS。
 - 真机闭环：安装 APK `0.1.3.2052` 后，Home 4s 再返回，daemon `/debug/runtime` 中 subscriber 前后均为 `98fb9489-d10c-4c9c-9067-0787109cce77`，latest client scope 继续推进 `session.buffer.head`，最近 260 条日志 `missing-target/transport-detached/rebuild` 命中 0。
+
+## 2026-07-09 head probe timeout must stay same-socket
+
+- 架构映射：属于 `terminal.transport_lifecycle`；唯一 owner 是 `ensureActiveSessionFreshRuntime`。处理方式是物理移除 `OPEN` socket head probe timeout 后直接 `reconnectSession()` 的判断。
+- 根因：same-socket head probe 超时只证明 head response 没按预算回来，不证明 WebSocket 物理失败。旧逻辑会把 quiet / delayed response 升级成重建 WebSocket，和当前 reuse truth 冲突。
+- 修复：head probe timeout 只记录 debug、清 stale marker，然后继续在同一 `OPEN` socket 上发下一次 `buffer-head-request`。
+- 回归：`session-context-activity-runtime.test.ts` 改为断言过期 probe marker + `WebSocket.OPEN` 时仍调用 `requestSessionBufferHead`，且不调用 `reconnectSession`。

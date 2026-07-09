@@ -26,6 +26,7 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
       connectedBaselineBurstGuardRef: { current: new Set<string>() },
       lastServerActivityAtRef: { current: new Map<string, number>() },
       lastHeadRequestAtRef: { current: new Map<string, number>() },
+      staleTransportProbeAtRef: { current: new Map<string, number>() },
       reconnectRuntimesRef: { current: new Map<string, { connecting: boolean; timer: number | null }>() },
     },
     readSessionTransportRuntime: () => ({ targetKey: '127.0.0.1:3333:' }),
@@ -188,5 +189,79 @@ describe('ensureActiveSessionFreshRuntime', () => {
 
     expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('marks a same-socket head probe pending and clears no transport when the probe is fresh', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    const options = createBaseOptions({
+      refs,
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
+      reconnectSession,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
+      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+      expect(reconnectSession).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('keeps using the same open socket when a head probe gets no response', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(2500);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    const options = createBaseOptions({
+      refs,
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
+      reconnectSession,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(2500);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not reconnect while the same-socket head probe is still inside the response budget', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1500);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    const options = createBaseOptions({
+      refs,
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
+      reconnectSession,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

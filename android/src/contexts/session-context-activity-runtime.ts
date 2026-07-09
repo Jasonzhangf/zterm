@@ -39,6 +39,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
     reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;
   };
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
@@ -126,6 +127,15 @@ export function ensureActiveSessionFreshRuntime(options: {
   }
 
   const localBuffer = options.readSessionBufferSnapshot(options.refreshOptions.sessionId);
+  const now = Date.now();
+  const cadence = options.resolveTerminalRefreshCadence(options.refreshOptions.sessionId);
+  const pendingProbeStartedAt = options.refs.staleTransportProbeAtRef.current.get(options.refreshOptions.sessionId) || 0;
+  const pendingProbeAgeMs = pendingProbeStartedAt > 0 ? now - pendingProbeStartedAt : 0;
+  const staleProbeTimedOut = Boolean(
+    ws?.readyState === WebSocket.OPEN
+    && pendingProbeStartedAt > 0
+    && pendingProbeAgeMs >= Math.max(1, Math.floor(cadence.pullRequestStaleMs || cadence.headStalePingMs || cadence.headTickMs || 1000))
+  );
   options.runtimeDebug(`session.transport.${options.refreshOptions.source}`, {
     sessionId: options.refreshOptions.sessionId,
     activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -141,10 +151,25 @@ export function ensureActiveSessionFreshRuntime(options: {
     pendingTransportOpen,
     pendingTransportOpenStale,
     activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
+    pendingProbeStartedAt: pendingProbeStartedAt || null,
+    pendingProbeAgeMs,
+    staleProbeTimedOut,
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
     plan: refreshPlan.action,
   });
+
+  if (staleProbeTimedOut) {
+    options.runtimeDebug('session.transport.head-probe.timeout', {
+      sessionId: options.refreshOptions.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      source: options.refreshOptions.source,
+      pendingProbeStartedAt,
+      pendingProbeAgeMs,
+      wsReadyState: ws?.readyState ?? null,
+    });
+    options.refs.staleTransportProbeAtRef.current.delete(options.refreshOptions.sessionId);
+  }
 
   if (refreshPlan.action === 'request-head') {
     if (refreshPlan.resetPullBookkeeping) {
@@ -154,8 +179,6 @@ export function ensureActiveSessionFreshRuntime(options: {
       );
     }
 
-    const now = Date.now();
-    const cadence = options.resolveTerminalRefreshCadence(options.refreshOptions.sessionId);
     const lastActiveReentryAt = options.refs.lastActiveReentryAtRef.current.get(options.refreshOptions.sessionId) || 0;
     const shouldForceHeadRequest = Boolean(options.refreshOptions.forceHead);
     const shouldSkipImmediateForcedResumeHead = (
@@ -195,6 +218,9 @@ export function ensureActiveSessionFreshRuntime(options: {
       ws,
       { force: options.refreshOptions.forceHead },
     );
+    if (requested && !options.refs.staleTransportProbeAtRef.current.has(options.refreshOptions.sessionId)) {
+      options.refs.staleTransportProbeAtRef.current.set(options.refreshOptions.sessionId, now);
+    }
     if (requested && options.refreshOptions.source === 'active-reentry') {
       options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, now);
     }
