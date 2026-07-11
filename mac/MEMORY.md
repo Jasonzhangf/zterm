@@ -17,6 +17,7 @@
 
 ## Patterns
 
+- [2026-07-11] Mac compact vertical split visual pass: desktop split spacing belongs to shared `PaneStage`/`resolvePaneProfile` tokens, while Mac shell chrome belongs to `mac/src/styles.css`; do not tune pane gaps inside runtime, renderer, or buffer truth. For this class of visual change, minimum proof is targeted pane tests + type-check/build + render smoke proving `pane-stage-split` exists with expected frame/divider counts and computed spacing tokens. Current smoke entry `node mac/scripts/mac-e2e-smoke.mjs` now resolves the latest Vite bundle dynamically and proved split DOM `frameCount=2`, `dividerCount=1`, `stageGap=3px`, `dividerWidth=6px`.
 - 先证明 `.app` 能构建和启动，再谈共享 page/component 复用，能降低桌面壳不确定性
 - Electron 打包时 `main` 路径必须和 `tsc` 输出目录一致；Vite 的 `base` 需要设为 `./`，否则 file:// 打开时资源路径会失真，窗口会出现空白或 chrome-error 页面
 - shared layout 真源已落到 `packages/shared/`：先把 profile resolver 和 PaneStage 放到共享层，再让 Mac 页面槽位消费它，能避免 page-local breakpoint 回流成第二真源

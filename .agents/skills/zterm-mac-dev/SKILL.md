@@ -36,6 +36,7 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 - renderer 只消费 canonical buffer / render projection；禁止在 view 层继续造第二份 terminal 真相。
 - terminal 优先 terminal-first：少 chrome、少常驻面板、主空间给 terminal pane/tab/split。
 - 分屏默认是一行多列、垂直分屏；不要把上下堆叠当主方案。
+- Mac 分屏视觉压缩只改 shared `PaneStage` / `resolvePaneProfile` token 与 Mac shell chrome CSS；禁止在 runtime / renderer / buffer 层补外观。验证至少跑 pane targeted tests、type-check/build，并用渲染 smoke 证明 split DOM 与 spacing token（如 stage gap / divider width）已进入最新 bundle。
 - reading/backfill 里 `missingRanges` 必须从 view -> runtime -> transport 原样透传；任一层清空它，scroll prefetch 都会静默失效。
 - 若桌面端要接快捷按键组合语义，优先复用 shared composer 叶子模块；不要在 Mac renderer 再复制一套 `Ctrl + 字母` 编码/默认 label 规则。
 - 若桌面端接入 terminal 主题选择 UI，只要界面显示“Active/正在使用”，点击动作就必须立即持久化到 shared `BridgeSettings.terminalThemeId`；不能只改本页 draft，避免出现“看起来切了主题，切页后又回默认”的假激活。

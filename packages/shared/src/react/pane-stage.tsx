@@ -90,8 +90,8 @@ function PaneFrame<TTabId extends string>({
     flex: `${Math.max(0.01, slot.size)} 1 0%`,
     borderRadius: stageTokens.paneRadius,
     overflow: 'hidden',
-    outline: slot.isActive ? '2px solid rgba(83, 139, 255, 0.78)' : undefined,
-    outlineOffset: slot.isActive ? '-2px' : undefined,
+    outline: 'none',
+    backgroundColor: slot.isActive ? '#05070b' : '#252a31',
     cursor: profile.gesture.dragResizeEnabled && !slot.isActive ? 'pointer' : undefined,
   };
 
@@ -130,7 +130,7 @@ function PaneDivider<TTabId extends string>({
     alignSelf: 'stretch',
     position: 'relative',
     cursor: visible ? 'col-resize' : 'default',
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -154,10 +154,10 @@ function PaneDivider<TTabId extends string>({
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
-        width: '4px',
-        height: '28px',
-        borderRadius: '2px',
-        backgroundColor: 'rgba(255, 255, 255, 0.32)',
+        width: '1px',
+        height: '100%',
+        borderRadius: '999px',
+        backgroundColor: 'rgba(255, 255, 255, 0.18)',
         pointerEvents: 'none',
       }
     : { display: 'none' };
@@ -178,15 +178,37 @@ function PaneDivider<TTabId extends string>({
         const startX = event.clientX;
         const startRatio = sourceSlot.size;
         const targetRatio = targetSlot.size;
+        const pairRatio = startRatio + targetRatio;
+        const minPaneRatio = Math.min(0.1, pairRatio / 2);
         const stage = event.currentTarget.closest('[data-testid="pane-stage-split"]') as HTMLElement | null;
         const stageWidth = stage?.getBoundingClientRect().width ?? 0;
+        const frames = stage
+          ? Array.from(stage.querySelectorAll<HTMLElement>('[data-testid="pane-stage-frame"]'))
+          : [];
+        const sourceFrame = frames.find((frame) => frame.dataset.paneId === sourceSlot.id);
+        const targetFrame = frames.find((frame) => frame.dataset.paneId === targetSlot.id);
+        const applyLiveFlex = (nextSource: number, nextTarget: number) => {
+          if (!sourceFrame || !targetFrame) {
+            return;
+          }
+          sourceFrame.style.flex = `${Math.max(0.01, nextSource)} 1 0%`;
+          targetFrame.style.flex = `${Math.max(0.01, nextTarget)} 1 0%`;
+        };
+        const previousUserSelect = document.body.style.userSelect;
+        const previousCursor = document.body.style.cursor;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'col-resize';
+        if (typeof event.currentTarget.setPointerCapture === 'function') {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }
         const move = (e: PointerEvent) => {
           if (!stageWidth) {
             return;
           }
           const delta = (e.clientX - startX) / stageWidth;
-          const nextSource = Math.max(0.1, Math.min(0.9, startRatio + delta));
-          const nextTarget = Math.max(0.1, startRatio + targetRatio - nextSource);
+          const nextSource = Math.max(minPaneRatio, Math.min(pairRatio - minPaneRatio, startRatio + delta));
+          const nextTarget = pairRatio - nextSource;
+          applyLiveFlex(nextSource, nextTarget);
           onPaneRatioChange({
             sourcePaneId: sourceSlot.id,
             targetPaneId: targetSlot.id,
@@ -194,6 +216,8 @@ function PaneDivider<TTabId extends string>({
           });
         };
         const up = () => {
+          document.body.style.userSelect = previousUserSelect;
+          document.body.style.cursor = previousCursor;
           window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
         };

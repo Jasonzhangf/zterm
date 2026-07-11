@@ -219,3 +219,9 @@
 - 新增 `mac/docs/alpha-handoff.md`：写清 artifact path、build/open 边界、verified gates、evidence paths、user-data boundary、known limitations、internal alpha scope。
 - Readiness/task：P0 blocker `alpha package handoff` 已关闭；`alpha-readiness` 改为 ready for Jason internal alpha as unsigned local package，同时保留 public release not ready。
 - 验证：handoff 前一轮已跑 Mac full tests 22/22 files 146/146 tests、type-check、build、package、`node --check` 两个 smoke scripts、`git diff --check`。package 后 artifact 存在于 `mac/out/mac-arm64/ZTerm.app`。
+# 2026-07-11 Mac compact vertical split visual pass
+
+- Jason 参考截图希望 Mac 版分屏显示更接近 tmux 多 pane：中间间隔更窄、外观更紧凑、terminal 主区域优先。
+- 架构映射：本片只属于 `mac.terminal_pane` / shared `PaneStage` presentation token；不改 `MacRuntimeRegistry`、local tmux provider、buffer/render truth、server rail projection。
+- 唯一 owner：shared `packages/shared/src/react/pane-profile.ts` 输出 desktop split spacing/token；`packages/shared/src/react/pane-stage.tsx` 渲染 divider；`mac/src/styles.css` 只做 Mac shell chrome 外观。
+- 验证方向：白盒锁 desktop split token（outerMargin 0、paneGap 3px、paneRadius 7px、dividerHitPx 6）；静态 gate 跑 Mac targeted pane tests + type-check/build。视觉截图/packaged smoke 若未跑，不能宣称最终视觉闭环。

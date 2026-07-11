@@ -1,9 +1,14 @@
 // Mac e2e smoke: load vite-built bundle into jsdom, mount, verify pane stage + interact
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
-const BUNDLE = '/Volumes/extension/code/zterm/mac/dist/assets/index-Ds6ySt8O.js';
+const ASSETS_DIR = '/Volumes/extension/code/zterm/mac/dist/assets';
+const BUNDLE = join(
+  ASSETS_DIR,
+  readdirSync(ASSETS_DIR).find((name) => /^index-.*\.js$/.test(name)) || '',
+);
 const HTML = '/Volumes/extension/code/zterm/mac/dist/index.html';
 const PORT = 5184;
 
@@ -72,11 +77,15 @@ if (splitBtn && !splitBtn.disabled) {
   const stageAfter = win.document.querySelector('[data-testid="pane-stage-split"]');
   const frames = win.document.querySelectorAll('[data-testid="pane-stage-frame"]');
   const dividers = win.document.querySelectorAll('[data-testid="pane-stage-divider"]');
+  const computedStage = stageAfter ? win.getComputedStyle(stageAfter) : null;
+  const computedDivider = dividers[0] ? win.getComputedStyle(dividers[0]) : null;
   console.log('AFTER_SPLIT:', JSON.stringify({
     hasStageSplit: !!stageAfter,
     frameCount: frames.length,
     dividerCount: dividers.length,
     splitBtnNowDisabled: splitBtn.disabled,
+    stageGap: computedStage ? computedStage.gap : null,
+    dividerWidth: computedDivider ? computedDivider.width : null,
   }, null, 2));
 }
 
