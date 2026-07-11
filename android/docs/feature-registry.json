@@ -782,28 +782,53 @@
       "domain": "daemon-windows",
       "owners": [
         "src/server/wezterm-backend.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-control-runtime.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
         "scripts/wezterm-backend-remote-smoke.ts"
       ],
       "allowed_paths": [
         "src/server/wezterm-backend.ts",
         "src/server/wezterm-backend.test.ts",
+        "src/server/wezterm-backend-runtime.test.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
         "scripts/wezterm-backend-remote-smoke.ts",
         "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
         "docs/function-map.md",
         "docs/feature-gates.md",
         "docs/feature-registry.json",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/goals/windows-wezterm-backend-closeout-plan.md",
+        "../win/README.md",
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/task.md",
+        "../win/MEMORY.md",
         "note.md",
         "MEMORY.md"
       ],
       "forbidden_paths": [
         "src/server/server.ts",
         "src/server/terminal-mirror-runtime.ts",
-        "src/server/terminal-mirror-capture.ts",
-        "src/server/terminal-control-runtime.ts"
+        "src/server/terminal-mirror-capture.ts"
       ],
       "required_gates": [
         "src/server/wezterm-backend.test.ts",
-        "scripts/wezterm-backend-remote-smoke.ts"
+        "src/server/wezterm-backend-runtime.test.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-backend-remote-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
+        "tsconfig.json"
       ],
       "truth_sources": [
         "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",

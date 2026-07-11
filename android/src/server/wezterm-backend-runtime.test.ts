@@ -207,4 +207,34 @@ describe('wezterm backend runtime', () => {
     await expect(runtime.readSnapshot('missing')).rejects.toThrow('wezterm session not found: missing');
     expect(() => runtime.closeSession('missing')).toThrow('wezterm session not found: missing');
   });
+
+  it('throws when kill-pane returns but the pane is still listed', () => {
+    const runner = createRunner();
+    runner.run = vi.fn((args: string[]): string => {
+      const command = args.join(' ');
+      if (command === 'cli --prefer-mux list --format json') {
+        return JSON.stringify(runner.panes.map((pane) => ({
+          window_id: 1,
+          tab_id: 1,
+          pane_id: pane.paneId,
+          workspace: pane.workspace,
+          size: {
+            rows: Number(pane.size.split('x')[1]),
+            cols: Number(pane.size.split('x')[0]),
+          },
+          title: pane.title,
+          cwd: pane.cwd,
+        })));
+      }
+      if (args[0] === 'cli' && args[2] === 'kill-pane') {
+        return '';
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const runtime = createWezTermBackendRuntime({ runner });
+
+    expect(() => runtime.closeSession('existing')).toThrow(
+      'wezterm pane cleanup failed: existing pane 7 still listed',
+    );
+  });
 });

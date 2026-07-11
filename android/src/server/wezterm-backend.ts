@@ -506,6 +506,10 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
   function closeSession(sessionName: string) {
     const session = resolveSession(sessionName);
     options.runner.run(buildWezTermKillPaneArgs(session.paneId));
+    const paneStillExists = listPaneRecords().some((pane) => pane.paneId === session.paneId);
+    if (paneStillExists) {
+      throw new Error(`wezterm pane cleanup failed: ${session.sessionName} pane ${session.paneId} still listed`);
+    }
     sessionPaneIds.delete(session.sessionName);
     snapshotState.delete(session.sessionName);
   }

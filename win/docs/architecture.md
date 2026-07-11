@@ -1,0 +1,41 @@
+# zterm Windows Architecture
+
+## Ownership
+
+Windows is split into two layers:
+
+1. Daemon backend: `daemon.windows_wezterm_backend`
+   - Owner: `android/src/server/wezterm-backend.ts`
+   - Selects WezTerm as the Windows terminal backend.
+   - Treats WezTerm CLI output as input material only.
+   - Produces ZTerm-owned absolute mirror snapshots and buffer protocol data.
+
+2. Windows desktop shell: pending feature owner
+   - Owner surface: `win/`
+   - Owns window/menu/package/platform integration only.
+   - Reuses shared pane stage, app-layer workspace semantics, and terminal renderer.
+
+## Allowed Paths
+
+- Add Windows shell docs, package metadata, launcher, installer, and platform integration under `win/`.
+- Update shared desktop pane/shell components only when the same behavior is intentionally shared with Mac.
+- Update daemon backend only through `daemon.windows_wezterm_backend` owner paths.
+
+## Forbidden Paths
+
+- Do not copy `../wterm` runtime source into this repo.
+- Do not implement a second terminal renderer under `win/`.
+- Do not implement a second daemon mirror, buffer protocol, or terminal transport stack under `win/`.
+- Do not fall back to tmux when the Windows WezTerm backend fails; expose the error.
+
+## Validation Boundary
+
+Windows backend completion requires:
+
+- WezTerm backend and runtime unit tests.
+- Backend selection and no-fallback tests.
+- Mock daemon protocol smoke.
+- Real Windows WezTerm remote and input smoke.
+- Typecheck.
+
+Windows desktop shell completion will require separate packaged Windows app smoke after the shell exists.

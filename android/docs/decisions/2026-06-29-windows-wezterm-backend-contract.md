@@ -1,6 +1,6 @@
 # Windows WezTerm backend contract
 
-Status: initial adapter contract, not a production daemon backend.
+Status: closeout candidate for a production-selectable daemon backend. It is only complete when local, mock protocol, typecheck, and real Windows remote/input smoke gates pass in the current worktree.
 
 ## Decision
 
@@ -39,7 +39,8 @@ WezTerm exported pane text -> ZTerm adapter-owned absolute mirror -> buffer-sync
 - `requireWezTermInputContract()` documents the verified input subset and must stay explicit about limitations.
 - Production code may only route terminal input through WezTerm using `buildWezTermSendTextArgs(paneId)` and stdin payload bytes.
 - Ctrl+C is verified as raw ETX delivery to raw-mode/TUI programs, but not as a Windows console control event for child processes such as `cmd.exe /k ping -t ...`.
-- The initial adapter must not patch `server.ts`, `terminal-mirror-runtime.ts`, or tmux capture behavior.
+- The WezTerm backend must not patch tmux capture behavior. Server/runtime integration may select the backend, but mirror truth still comes from the WezTerm adapter-owned snapshot contract.
+- `kill-pane` success must be verified by a fresh pane list. If the pane is still listed, cleanup is an explicit failure and local session state must not be silently deleted.
 
 ## Verified Initial Probe
 
@@ -77,6 +78,9 @@ Observed limitation:
 ## Required Gates
 
 - `pnpm --dir android exec vitest run src/server/wezterm-backend.test.ts --reporter dot`
+- `pnpm --dir android exec vitest run src/server/wezterm-backend-runtime.test.ts --reporter dot`
+- `pnpm --dir android exec vitest run src/server/terminal-backend-selection.test.ts src/server/terminal-control-runtime.input-queue.test.ts --reporter dot`
+- `pnpm --dir android exec tsx scripts/wezterm-daemon-protocol-smoke.ts`
 - `pnpm --dir android exec tsx scripts/wezterm-backend-remote-smoke.ts`
 - `pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts`
 - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
